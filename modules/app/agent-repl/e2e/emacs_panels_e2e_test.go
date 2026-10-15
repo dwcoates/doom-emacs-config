@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -507,57 +508,56 @@ func TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout(t *testing.T) {
 }
 
 // TestEmacsOpenProgressLadderReachesRendered is scenario 19: the blessed
-// host-native progress ladder walks its stages and ends on a NON-terminal
-// phase.
+// host-native progress ladder raised by `SPC o c` walks its stages and ends
+// with the real panel on the frame, never on a terminal phase.
 //
-// A finished open drops its registry entry outright
-// (`agent-repl--open-progress-finish` remhashes it), so "gone" and "on a
-// non-terminal stage past `:requested`" are the two shapes of success; a
-// phase in `agent-repl--open-progress-terminal-phases` is the failure.
+// THE LADDER IS RAISED ONLY BY THE TOGGLE (`agent-repl--panels-show-or-open`
+// calls `agent-repl--open-progress-start`); `agent-repl-frontend-open-panel`
+// mounts the page without one, so a test that opened through it read the
+// registry as "gone" before any ladder ever existed. The ladder is therefore
+// recorded off its one publication, `agent-repl-open-progress-change-functions`,
+// from before the keypress: the trail must open on `:requested`, rest only on
+// ladder stages, and end "gone" -- `agent-repl--open-progress-finish`, which
+// runs once the real panel is displayed -- with no terminal phase anywhere.
 func TestEmacsOpenProgressLadderReachesRendered(t *testing.T) {
 	t.Parallel()
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
 	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
-	phaseForm := `(let ((entry (gethash ` + elispString(current) + ` agent-repl--open-progress)))
-                     (if entry (format "%s" (plist-get entry :phase)) "gone"))`
-
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-
-	raw := e.AwaitEvalFor(panelSettleBound, "the open-progress ladder to leave :requested",
-		phaseForm,
-		func(raw json.RawMessage) bool {
-			var phase string
-			if err := json.Unmarshal(raw, &phase); err != nil {
-				return false
-			}
-			return phase != ":requested"
-		})
-	var phase string
-	if err := json.Unmarshal(raw, &phase); err != nil {
-		t.Fatalf("decode the ladder phase: %v", err)
-	}
-
+	e.Eval(`(progn
+	          (defvar e2e-open-progress-trail nil)
+	          (setq e2e-open-progress-trail nil)
+	          (add-hook 'agent-repl-open-progress-change-functions
+	                    (lambda ()
+	                      (push (let ((entry (gethash ` + elispString(current) + ` agent-repl--open-progress)))
+	                              (if entry (format "%s" (plist-get entry :phase)) "gone"))
+	                            e2e-open-progress-trail)))
+	          t)`)
 	terminal := e.EvalStrings(`(mapcar (lambda (p) (format "%s" p)) agent-repl--open-progress-terminal-phases)`)
-	for _, bad := range terminal {
-		if phase == bad {
-			t.Fatalf("the open-progress ladder ended on the terminal phase %q", phase)
-		}
-	}
-	if phase == "gone" {
-		return
-	}
 	stages := e.EvalStrings(`(mapcar (lambda (entry) (format "%s" (car entry))) agent-repl--open-progress-stages)`)
-	onLadder := false
-	for _, stage := range stages {
-		if phase == stage {
-			onLadder = true
+
+	// Act.
+	e.Leader("o c")
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+	raw := e.AwaitEvalFor(panelSettleBound, "the open-progress ladder to end",
+		`(reverse e2e-open-progress-trail)`,
+		func(raw json.RawMessage) bool {
+			trail := decodeStrings(raw)
+			return len(trail) > 0 && (trail[len(trail)-1] == "gone" || slices.Contains(terminal, trail[len(trail)-1]))
+		})
+
+	// Assert.
+	trail := decodeStrings(raw)
+	if trail[0] != ":requested" {
+		t.Fatalf("the ladder's trail %q does not open on :requested; SPC o c raised no ladder", trail)
+	}
+	for _, phase := range trail[:len(trail)-1] {
+		if !slices.Contains(stages, phase) {
+			t.Fatalf("the ladder's trail %q passes %q, which is not a stage of %q", trail, phase, stages)
 		}
 	}
-	if !onLadder {
-		t.Fatalf("the ladder rests on %q, which is neither a stage of %q nor a terminal phase", phase, stages)
+	if last := trail[len(trail)-1]; last != "gone" {
+		t.Fatalf("the ladder's trail %q ends on the terminal phase %q, want the placeholder finished with the panel up", trail, last)
 	}
 }
