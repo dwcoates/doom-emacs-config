@@ -380,3 +380,51 @@ func TestTheBashRunReadBuildsNoAutomaticIndex(t *testing.T) {
 	// Assert
 	assertNoAutomaticIndex(t, "the bash-run read", plan)
 }
+
+func TestARunWrittenFromBothPlanesReplaysInFirstInsertOrder(t *testing.T) {
+	// Arrange: the shim's start and terminal interleave with the sidecar's
+	// tail, which is superseded after the terminal.
+	d, _ := newStore(t)
+	writeOK(t, d, bashEntry("w-start", "bash:run-1:start", "run-1", bashStart()))
+	writeOK(t, d, onFilePlane(bashEntry("w-t0", "bash:run-1:tail", "run-1", bashTail("chunk-0"))))
+	writeOK(t, d, bashEntry("w-term", "bash:run-1:terminal", "run-1", bashSuccess()))
+	writeOK(t, d, onFilePlane(bashEntry("w-t1", "bash:run-1:tail", "run-1", bashTail("chunk-0chunk-1"))))
+
+	// Act
+	replay, err := d.BashRun(ctx(), "run-1")
+
+	// Assert: start, the tail where it was first inserted (now its latest
+	// text), then the terminal.
+	if err != nil {
+		t.Fatalf("BashRun = %v, want nil", err)
+	}
+	if len(replay.Rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(replay.Rows))
+	}
+	frames := []*conversationv1.AgentBash{replay.Rows[0].Row.GetFrame(), replay.Rows[1].Row.GetFrame(), replay.Rows[2].Row.GetFrame()}
+	if frames[0].GetStart() == nil || frames[1].GetTail().GetText() != "chunk-0chunk-1" || frames[2].GetSuccess() == nil {
+		t.Fatalf("replay = %v, want start, the latest tail, then success", frames)
+	}
+}
+
+func TestAReplayDrawsTheSameTailTheLastWriteHandedTheLiveWatcher(t *testing.T) {
+	// Arrange: the live watcher sees exactly what each write returns.
+	d, _ := newStore(t)
+	writeOK(t, d, bashEntry("w-start", "bash:run-1:start", "run-1", bashStart()))
+	writeOK(t, d, onFilePlane(bashEntry("w-t0", "bash:run-1:tail", "run-1", bashTail("chunk-0"))))
+	live := writeOK(t, d, onFilePlane(bashEntry("w-t1", "bash:run-1:tail", "run-1", bashTail("chunk-0chunk-1"))))
+
+	// Act
+	replay, err := d.BashRun(ctx(), "run-1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BashRun = %v, want nil", err)
+	}
+	if len(live.BashRows) != 1 || len(replay.Rows) != 2 {
+		t.Fatalf("live rows = %d, replay rows = %d; want 1 and 2", len(live.BashRows), len(replay.Rows))
+	}
+	if !proto.Equal(live.BashRows[0].Row, replay.Rows[1].Row) {
+		t.Fatalf("replayed tail = %v, want the row the live watcher last saw %v", replay.Rows[1].Row, live.BashRows[0].Row)
+	}
+}

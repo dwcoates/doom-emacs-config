@@ -128,6 +128,24 @@ func TestLiveWorkNeverListsAWorkflowRunAmongTheDetached(t *testing.T) {
 	}
 }
 
+func TestLiveWorkListsNoWorkflowEvenAfterAWorkflowRunsOwnFrame(t *testing.T) {
+	// Arrange: the run's own workflow frame is written, and still nothing
+	// routes into the workflow table this wave.
+	d, _ := newStore(t)
+	writeOK(t, d, workflowRunEntry("w1", "u1", "run-wf"))
+
+	// Act
+	live, err := d.LiveWork(ctx(), "agent-main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	if got := len(live.GetLiveWorkflows()); got != 0 {
+		t.Fatalf("live_workflows = %d, want 0 this wave", got)
+	}
+}
+
 func TestLiveWorkAnswersAnIdleStoreWithEmptyLists(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
@@ -772,5 +790,26 @@ func TestCursorsServeAPreVersioningCursorWithNoConversion(t *testing.T) {
 	}
 	if cursors[0].GetConversion() != nil {
 		t.Fatalf("conversion = %v, want unset", cursors[0].GetConversion())
+	}
+}
+
+func TestLiveWorkEndsARunWhoseHandleIsItsOwnOriginUnit(t *testing.T) {
+	// Arrange: the run was detached FROM the unit whose id is also its handle,
+	// so one id names both.
+	const coincident = "work-and-run-coincide"
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w0", "u0", "agent-main", frameItem(detachedFrame("agent-main", detachedWork(coincident, coincident, causeRequestedArm())))))
+	writeOK(t, d, bashEntry("w1", "bash:"+coincident+":start", coincident, bashStart()))
+
+	// Act
+	writeOK(t, d, bashEntry("w2", "bash:"+coincident+":terminal", coincident, bashSuccess()))
+	live, err := d.LiveWork(ctx(), "agent-main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	if got := len(live.GetLiveDetached()); got != 0 {
+		t.Fatalf("live_detached = %d, want 0 once the one run concluded", got)
 	}
 }

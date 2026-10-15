@@ -263,6 +263,40 @@ func TestWriteFailureLeavesTheCursorUnchanged(t *testing.T) {
 	}
 }
 
+func TestASignalDuringAnUnansweredWriteLeavesTheCursorAtTheLastAck(t *testing.T) {
+	// Arrange: the store takes the batch and never answers it.
+	store := &fakeStore{writeWedged: true, entered: make(chan struct{})}
+	h := newHarness(t, store)
+	path := h.transcript(t, "sess-1", promptLine)
+	h.sc.options.PollInterval = time.Millisecond
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	tailer := h.sc.watchers[path].tailer
+	stop := make(chan os.Signal, 1)
+	returned := make(chan error, 1)
+	go func() { returned <- h.sc.Run(stop) }()
+	select {
+	case <-store.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the store was never asked to write, so nothing is in flight")
+	}
+
+	// Act.
+	stop <- syscall.SIGTERM
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of the signal")
+	}
+
+	// Assert: the batch was never answered, so the reader never took the
+	// position it offered.
+	if got := tailer.Offset(); got != 0 {
+		t.Fatalf("committed offset = %d, want 0: the batch that would have earned it was never answered", got)
+	}
+}
+
 func TestWriteFailureAbandonsTheRestOfThePass(t *testing.T) {
 	// Arrange: two files, one failing write.
 	store := &fakeStore{}
@@ -2131,6 +2165,27 @@ func TestTheWithheldRecordAnnouncesNoRow(t *testing.T) {
 	}
 	if _, ok := rec.Context["upsert_key"]; ok {
 		t.Fatalf("the withholding record announced a row: %v", rec.Context)
+	}
+}
+
+func TestTheWithheldRecordNamesTheFileItWasReadFrom(t *testing.T) {
+	// Arrange: a residue line is classified against its file, so the record
+	// that withholds it names that file.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+
+	// Act.
+	if _, err := h.sc.storeWrite("subject", &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{convert.UnknownEntry(residueAttribution(), "a_new_line_type", "type", map[string]any{})},
+		CursorAdvance: &storev1.CursorState{FileId: residueAttribution().FileID, Offset: 512},
+	}); err != nil {
+		t.Fatalf("storeWrite: %v", err)
+	}
+
+	// Assert.
+	rec := h.requireOnce(t, "residue-drop", "debug")
+	if got := ctxString(t, rec, "file_id"); got != residueAttribution().FileID {
+		t.Fatalf("the record's file_id = %q, want the file the line was read from (%q)", got, residueAttribution().FileID)
 	}
 }
 

@@ -508,6 +508,28 @@ func TestWriteBatchAdvancesTheCursorInTheSameTransaction(t *testing.T) {
 	}
 }
 
+func TestWriteBatchWithNoCursorAdvanceLeavesTheStandingCursor(t *testing.T) {
+	// Arrange: a file's cursor stands, then a stream-plane batch arrives,
+	// which names no file and so may move no cursor.
+	d, _ := newStore(t)
+	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
+		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 4096, Conversion: currentConversion()},
+	}, nil); err != nil {
+		t.Fatalf("seed the cursor: %v", err)
+	}
+
+	// Act.
+	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert.
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM cursor`); got != 1 {
+		t.Fatalf("cursor rows = %d, want the one standing cursor", got)
+	}
+	if got := scalar[int64](t, d, `SELECT offset FROM cursor WHERE file_id = '12:34'`); got != 4096 {
+		t.Fatalf("offset = %d, want the standing 4096", got)
+	}
+}
+
 func TestWriteBatchAcceptsACursorOnlyBatch(t *testing.T) {
 	// Arrange: a sidecar that read only unconvertible bytes still advances.
 	d, _ := newStore(t)

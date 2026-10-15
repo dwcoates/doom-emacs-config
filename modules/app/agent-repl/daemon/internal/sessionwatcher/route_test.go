@@ -3231,3 +3231,59 @@ func TestRouteCommandCatalogHandsOverTheWholeCatalog(t *testing.T) {
 		t.Fatalf("the table was handed %q, want merge-queue,compact,plugin:skill", e.detail)
 	}
 }
+
+// pushActivity is the agent's PushNotification call in its start state, which
+// is the one state that reaches the user.
+func pushActivity(activityID, message string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
+			State: &conversationv1.AgentPushNotification_Start{Start: &conversationv1.AgentPushNotificationStart{
+				Message:   message,
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1700000000000},
+			}},
+		}},
+	}
+}
+
+// TestAPushNotificationStartRaisesAnAgentAddressedNotification covers the one
+// fan-out of the agent addressing an absent user: the pushed message is the
+// notification's line.
+func TestAPushNotificationStartRaisesAnAgentAddressedNotification(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(pushActivity("act-1", "the build is green")))))
+
+	// Assert.
+	note := requireEvent(t, got, "lifecycle.OnNotification").note
+	if note.Kind != NotificationAgentAddressed || note.Text != "the build is green" {
+		t.Fatalf("notification = %+v, want agent_addressed carrying the pushed message", note)
+	}
+}
+
+// TestAPushNotificationsLaterStateRaisesNoSecondNotification covers the
+// vendor's report on a send already announced: re-raising it would mark the
+// workspace twice for one message.
+func TestAPushNotificationsLaterStateRaisesNoSecondNotification(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(pushActivity("act-1", "the build is green")))))
+	settled := &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "act-1"},
+		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
+			State: &conversationv1.AgentPushNotification_Success{Success: &conversationv1.AgentPushNotificationSuccess{}},
+		}},
+	}
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-2", activityUpdate(settled))))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnNotification"); ok {
+		t.Fatalf("a push notification's later state raised a notification: %v", names(got))
+	}
+}

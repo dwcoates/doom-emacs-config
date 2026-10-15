@@ -107,6 +107,31 @@ func TestListenRefusesToReplaceANonSocket(t *testing.T) {
 	}
 }
 
+func TestListenLeavesANonSocketAtThePathByteIdenticalAndSaysSoAtError(t *testing.T) {
+	// Arrange.
+	const contents = "this is somebody's file, not a socket"
+	path := shortSocketPath(t)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("stage file: %v", err)
+	}
+	sink := &syncBuffer{}
+
+	// Act.
+	ln, err := Listen(path, logging.New(sink, io.Discard, true))
+
+	// Assert.
+	if err == nil {
+		testclose.OrFail(t, ln)
+		t.Fatal("Listen over a regular file = nil error, want a refusal")
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != contents {
+		t.Fatalf("the file at the listen path = %q (%v), want it left byte-identical", got, readErr)
+	}
+	if _, ok := findRecord(t, sink, "store.listen", "error"); !ok {
+		t.Fatalf("records = %+v, want a store.listen error record", records(t, sink))
+	}
+}
+
 func TestListenRefusesASocketALiveStoreIsServing(t *testing.T) {
 	// Arrange: an ACCEPTING listener on the path. Unlinking it would leave the
 	// incumbent serving a socket no client can reach, with this process

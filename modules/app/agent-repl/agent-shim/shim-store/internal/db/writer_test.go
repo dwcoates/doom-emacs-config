@@ -621,3 +621,36 @@ func TestEveryTransactionEndsThroughEndTx(t *testing.T) {
 		t.Errorf("%d transaction begin sites but %d deferred endTx calls", begins, ends)
 	}
 }
+
+func TestConcurrentUpsertsOfOneKeyLeaveOneRow(t *testing.T) {
+	// Arrange: every writer supersedes the same row under its own write id.
+	const writers = 8
+	d, _ := newStore(t)
+	errs := make([]error, writers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Act: released from one barrier, so the upserts overlap.
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			entry := pageEntry(fmt.Sprintf("w%d", i), "the-one-key", "agent-1",
+				frameItem(activityFrame("agent-1", "act-1", prose())))
+			_, errs[i] = d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(entry), nil)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	// Assert.
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("writer %d: WriteBatch = %v, want success", i, err)
+		}
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'the-one-key'`); got != 1 {
+		t.Fatalf("rows under the key = %d, want exactly one", got)
+	}
+}

@@ -70,10 +70,7 @@ func TestAnUnrecordableEmacsInstanceRefusesTheStream(t *testing.T) {
 		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{
 			ElispBuild: "elisp-test", Focus: unfocusedEditor(), Instance: testEditorInstance()}},
 	}))
-	if err == nil {
-		stream.Receive()
-		err = stream.Err()
-	}
+	err = firstStreamErr(stream, err)
 
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInternal {

@@ -305,3 +305,19 @@ func TestAResetKeepsTheSection(t *testing.T) {
 		t.Fatalf("held items after a reset = %d, want the prompt still held", got)
 	}
 }
+
+// TestARootFeedWithNothingHeldOpensWithTheEmptySection pins that an empty held
+// section is a complete answer: the root feed of a workspace holding nothing
+// opens with it rather than leaving the section unstated.
+func TestARootFeedWithNothingHeldOpensWithTheEmptySection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	held, _ := h.rootPublications()
+
+	// Assert.
+	if held == nil || len(held.GetItems()) != 0 {
+		t.Fatalf("held section = %v, want the stated empty section", held)
+	}
+}

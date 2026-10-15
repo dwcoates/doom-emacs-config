@@ -45,6 +45,14 @@ type syncBuffer struct {
 	buf bytes.Buffer
 }
 
+// Reset drops everything recorded so far, so a test asserts only what its
+// own act wrote.
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -89,6 +97,24 @@ func findRecord(t *testing.T, sink *syncBuffer, operation, level string) (logRec
 		}
 	}
 	return logRecord{}, false
+}
+
+// oneNormalRecord answers the ONE record a refusal leaves at a level an
+// operator reads (info, warn or error), failing when there is not exactly one:
+// a refusal recorded twice, or by two layers, is the defect this guards.
+func oneNormalRecord(t *testing.T, sink *syncBuffer) logRecord {
+	t.Helper()
+	var normal []logRecord
+	for _, rec := range records(t, sink) {
+		switch rec.Level {
+		case "info", "warn", "error":
+			normal = append(normal, rec)
+		}
+	}
+	if len(normal) != 1 {
+		t.Fatalf("normal-level records = %+v, want exactly one", normal)
+	}
+	return normal[0]
 }
 
 // fakeStore is the storage layer as internal/server needs it: every answer is
@@ -1004,6 +1030,68 @@ func TestOutstandingTokensIsZeroAfterAOneTurnSessionsPageOnlyOpens(t *testing.T)
 	// Assert.
 	if got := h.server.tokens.outstanding(); got != 0 {
 		t.Fatalf("outstanding = %d, want 0", got)
+	}
+}
+
+func TestShutdownStatesTheOutstandingTokens(t *testing.T) {
+	// Arrange: two page-only opens mint no token, so the shutdown owes none.
+	sink := &syncBuffer{}
+	srv := New(newFakeStore(), logging.New(sink, io.Discard, true), 0)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := storev1connect.NewShimStoreClient(ts.Client(), ts.URL)
+	for i := 0; i < 2; i++ {
+		if _, err := client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+			Agent: agentID("a1"), PageOnly: true,
+		})); err != nil {
+			t.Fatalf("OpenAgentSession: %v", err)
+		}
+	}
+
+	// Act.
+	ctx, cancel := context.WithTimeout(context.Background(), openBound)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// Assert.
+	rec, ok := findRecord(t, sink, "store.shutdown", "info")
+	if !ok || !strings.Contains(rec.Message, "outstanding_tokens=0") {
+		t.Fatalf("store.shutdown record = %+v (%v), want it to state outstanding_tokens=0", rec, ok)
+	}
+}
+
+func TestAWatchStreamServesOverHTTP11(t *testing.T) {
+	// Arrange: the harness's plain client speaks HTTP/1.1, and a watch with a
+	// line to replay answers its first frame at once.
+	store := newFakeStore()
+	store.since = []LineWritten{line("a1", "p1", 1)}
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithTimeout(context.Background(), openBound)
+	defer cancel()
+
+	// Act.
+	stream, err := h.client.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{
+		Watch: &storev1.AgentSessionToken{Value: token},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WatchAgentSession over HTTP/1.1 = %v", err)
+	}
+	// THE CANCEL GOES FIRST: closing an HTTP/1.1 stream drains its body, which
+	// a standing watch never ends on its own.
+	defer func() {
+		cancel()
+		stream.Close() //nolint:errcheck // test teardown
+	}()
+	if !stream.Receive() {
+		t.Fatalf("Receive over HTTP/1.1 = false: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p1" {
+		t.Fatalf("first pointer = %q, want p1", got)
 	}
 }
 
@@ -2840,4 +2928,206 @@ func interactiveClass() *storev1.WriteClass {
 
 func bulkClass() *storev1.WriteClass {
 	return &storev1.WriteClass{WriteClass: &storev1.WriteClass_Bulk{Bulk: &storev1.WriteClassBulk{}}}
+}
+
+func TestARefusedWriteLeavesOneWarnRecordNamingItsCall(t *testing.T) {
+	// Arrange: an entry with no upsert_key is refused by the server itself.
+	h := newHarness(t, newFakeStore(), 0)
+	h.logs.Reset()
+
+	// Act.
+	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w-1", "")}},
+	})); err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+
+	// Assert.
+	rec := oneNormalRecord(t, h.logs)
+	if rec.Level != "warn" {
+		t.Fatalf("the refusal record is level %q, want warn", rec.Level)
+	}
+	for _, key := range []string{"rpc", "refusal_site", "producer"} {
+		if _, ok := rec.Context[key]; !ok {
+			t.Fatalf("the refusal record carries no %q: %v", key, rec.Context)
+		}
+	}
+}
+
+func TestARefusedCallsRequestIdReachesItsOneRecord(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	h.logs.Reset()
+	const requestID = "req-unit-refused-01"
+	req := connect.NewRequest(&storev1.OpenAgentSessionRequest{Agent: agentID("")})
+	req.Header().Set("X-Agent-Repl-Request-Id", requestID)
+
+	// Act.
+	resp, err := h.client.OpenAgentSession(context.Background(), req)
+
+	// Assert.
+	if err != nil || resp.Msg.GetFailure() == nil {
+		t.Fatalf("OpenAgentSession = %v, %v; want the refusal", resp, err)
+	}
+	if rec := oneNormalRecord(t, h.logs); rec.RequestID != requestID {
+		t.Fatalf("the refusal record's request_id = %q, want %q", rec.RequestID, requestID)
+	}
+}
+
+func TestAnUnusableWatchTokenIsRefusedInOneRecordCarryingItsHash(t *testing.T) {
+	tests := []struct {
+		name  string
+		token func(t *testing.T, h *harness, store *fakeStore) string
+	}{
+		{name: "a token this store never minted", token: func(*testing.T, *harness, *fakeStore) string {
+			return "0123456789abcdef0123456789abcdef"
+		}},
+		{name: "a token already consumed", token: func(t *testing.T, h *harness, store *fakeStore) string {
+			token := openSession(t, h, "a1")
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			startWatch(h, ctx, token)
+			<-store.sinceEntered
+			return token
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+			token := tc.token(t, h, store)
+			h.logs.Reset()
+
+			// Act.
+			err := startWatch(h, context.Background(), token).refusal(t)
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeNotFound {
+				t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+			}
+			rec := oneNormalRecord(t, h.logs)
+			if rec.Context["refusal_site"] != SiteUnknownWatchToken || rec.Context["refusal_kind"] != "invalid_request" {
+				t.Fatalf("refusal context = %v, want site %q kind invalid_request", rec.Context, SiteUnknownWatchToken)
+			}
+			if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
+				t.Fatalf("the refusal record carries no watch_token_hash: %v", rec.Context)
+			}
+		})
+	}
+}
+
+// storeTouched reports whether any read or write reached the fake store.
+func storeTouched(f *fakeStore) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.writes) != 0 || len(f.openedWith) != 0 || f.pageReadBy != "" || f.cursorsScope || f.liveAsked
+}
+
+func TestAServerOriginRefusalNeverReachesTheStore(t *testing.T) {
+	writeReq := func(req *storev1.WriteBatchRequest) func(h *harness) (bool, error) {
+		return func(h *harness) (bool, error) {
+			resp, err := h.client.WriteBatch(context.Background(), connect.NewRequest(req))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}
+	}
+	entries := func(e *storev1.StoreEntry) *storev1.WriteBatchRequest {
+		return &storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-shim:s1",
+			Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{e}}}
+	}
+	withPlane := func(plane *storev1.Plane) *storev1.StoreEntry {
+		e := validEntry("w-1", "u-1")
+		e.Plane = plane
+		return e
+	}
+	openReq := func(req *storev1.OpenAgentSessionRequest) func(h *harness) (bool, error) {
+		return func(h *harness) (bool, error) {
+			resp, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(req))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}
+	}
+	readReq := func(req *storev1.ReadAgentPageRequest) func(h *harness) (bool, error) {
+		return func(h *harness) (bool, error) {
+			resp, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(req))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}
+	}
+	after := &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{Value: "p"}}
+	empty := ""
+	tests := []struct {
+		name string
+		call func(h *harness) (bool, error)
+	}{
+		{name: "WriteBatch: missing write_id", call: writeReq(entries(validEntry("", "u-1")))},
+		{name: "WriteBatch: missing upsert_key", call: writeReq(entries(validEntry("w-1", "")))},
+		{name: "WriteBatch: missing plane arm", call: writeReq(entries(withPlane(&storev1.Plane{})))},
+		{name: "WriteBatch: missing plane message", call: writeReq(entries(withPlane(nil)))},
+		{name: "WriteBatch: missing entry arm", call: writeReq(entries(&storev1.StoreEntry{Plane: validEntry("w", "u").Plane, WriteId: "w-1", UpsertKey: "u-1"}))},
+		{name: "WriteBatch: empty producer", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(),
+			Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w-1", "u-1")}}})},
+		{name: "WriteBatch: no write class", call: writeReq(&storev1.WriteBatchRequest{Producer: "claude-shim:s1",
+			Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w-1", "u-1")}}})},
+		{name: "WriteBatch: missing batch", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-shim:s1"})},
+		{name: "WriteBatch: empty batch", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-shim:s1", Batch: &storev1.EntryBatch{}})},
+		{name: "WriteBatch: cursor advance naming no file", call: writeReq(&storev1.WriteBatchRequest{WriteClass: interactiveClass(), Producer: "claude-sidecar",
+			Batch: &storev1.EntryBatch{CursorAdvance: &storev1.CursorState{Path: "/t/a.jsonl", Offset: 4096}}})},
+		{name: "OpenAgentSession: missing agent", call: openReq(&storev1.OpenAgentSessionRequest{})},
+		{name: "OpenAgentSession: empty agent value", call: openReq(&storev1.OpenAgentSessionRequest{Agent: agentID("")})},
+		{name: "OpenAgentSession: empty known_through", call: openReq(&storev1.OpenAgentSessionRequest{Agent: agentID("main"),
+			Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: &storev1.StoreItemPointer{}}})},
+		{name: "ReadAgentPage: missing book", call: readReq(&storev1.ReadAgentPageRequest{Position: after})},
+		{name: "ReadAgentPage: empty book value", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID(""), Position: after})},
+		{name: "ReadAgentPage: unset position", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID("main")})},
+		{name: "ReadAgentPage: non-positive through", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID("main"),
+			Position: &storev1.ReadAgentPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 0}}})},
+		{name: "ReadAgentPage: empty after pointer", call: readReq(&storev1.ReadAgentPageRequest{Book: agentID("main"),
+			Position: &storev1.ReadAgentPageRequest_After{After: &storev1.StoreItemPointer{}}})},
+		{name: "GetSidecarCursors: empty file_id", call: func(h *harness) (bool, error) {
+			resp, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: &empty}))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}},
+		{name: "GetLiveWork: no session", call: func(h *harness) (bool, error) {
+			resp, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+			return err == nil && resp.Msg.GetFailure() != nil, err
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+			h.logs.Reset()
+
+			// Act.
+			failed, err := tc.call(h)
+
+			// Assert.
+			if err != nil || !failed {
+				t.Fatalf("answer = (failed=%v, %v), want a typed failure", failed, err)
+			}
+			if storeTouched(store) {
+				t.Fatal("a request refused by the server reached the store")
+			}
+			if rec := oneNormalRecord(t, h.logs); rec.Context["refusal_site"] == nil {
+				t.Fatalf("the refusal record names no site: %+v", rec)
+			}
+		})
+	}
+}
+
+func TestAnUnknownProcedureIsUnimplementedRatherThanAHang(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	wrong := connect.NewClient[storev1.GetLiveWorkRequest, storev1.GetLiveWorkResponse](
+		h.http, h.url+"/store.v1.ShimStore/NoSuchProcedure")
+
+	// Act.
+	_, err := wrong.CallUnary(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{Session: agentID("main")}))
+
+	// Assert.
+	if code := connect.CodeOf(err); code != connect.CodeUnimplemented {
+		t.Fatalf("code = %v (err %v), want %v", code, err, connect.CodeUnimplemented)
+	}
 }

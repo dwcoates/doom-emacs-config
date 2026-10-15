@@ -262,6 +262,31 @@ func TestSelfReloadSkipsASiblingWorktree(t *testing.T) {
 	}
 }
 
+func TestSelfReloadSkipsAnotherRepository(t *testing.T) {
+	// Arrange: the target sits at the daemon's checkout path, but git says it
+	// is another repository: the path alone never makes a landing the
+	// daemon's own.
+	h := newHarness(t)
+	h.ownCheckout()
+	h.git.sameRepo = false
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.rollout.mu.Lock()
+	defer h.rollout.mu.Unlock()
+	if h.rollout.fired != 0 {
+		t.Fatal("a merge into another repository triggered the self-reload")
+	}
+}
+
 // TestSelfReloadSkipsAFailedMerge covers the other guard: nothing landed, so
 // there is nothing to deploy.
 func TestSelfReloadSkipsAFailedMerge(t *testing.T) {

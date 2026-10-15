@@ -548,6 +548,34 @@ func TestOpenPermitsAnExplicitBinaryWhenVendorCallsAreForbidden(t *testing.T) {
 	}
 }
 
+func TestOpenWhoseVendorBinaryCannotStartFailsLoudlyAndOpensNothing(t *testing.T) {
+	// Arrange: an explicit vendor binary that does not exist.
+	t.Setenv(envc.EnvForbidVendorCalls, "1")
+	route := func(ids.WorkspaceID) (string, error) { return "/roots/default", nil }
+	log := dlog.NewTestLogger()
+	observer := newFakeObserver()
+	missing := filepath.Join(t.TempDir(), "no-such-claude")
+	m, err := login.New(envc.NewVendorGuard(envc.Load()), missing, route, log, observer)
+	if err != nil {
+		t.Fatalf("login.New() = %v", err)
+	}
+
+	// Act.
+	_, err = m.Open(context.Background(), "ws-a")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Open() = nil, want the spawn's failure")
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.login.open"})
+	if !ok || rec.Context["branch"] != "spawn-error" || rec.Context["vendor_bin"] != missing {
+		t.Fatalf("ERROR daemon.login.open = %+v (%v), want the spawn-error branch naming the binary", rec, ok)
+	}
+	if _, err := m.Watch(context.Background(), "ws-a"); err == nil {
+		t.Fatal("Watch() found a login standing after a failed spawn")
+	}
+}
+
 func TestOpenAfterTheChildExitedStartsAFreshLogin(t *testing.T) {
 	// Arrange: a second open must not join a corpse.
 	routes, _, _ := twoWorkspaces(t)

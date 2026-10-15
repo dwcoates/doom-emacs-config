@@ -197,10 +197,10 @@ type Logger struct {
 	// threshold is the process's live level, shared by every With copy so a
 	// level window that ends ends for all of them.
 	threshold *sharedlogging.Window
-	fields                Fields
-	state                 *sinkState
-	clock                 func() time.Time
-	pid                   func() int
+	fields    Fields
+	state     *sinkState
+	clock     func() time.Time
+	pid       func() int
 }
 
 type sinkState struct {

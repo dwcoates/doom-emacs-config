@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -31,6 +32,27 @@ func TestOpenLoginAnswersTheConfigDir(t *testing.T) {
 	}
 	if got := resp.Msg.GetSuccess().GetConfigDir(); got != "/accounts/one" {
 		t.Fatalf("config_dir = %q, want /accounts/one", got)
+	}
+}
+
+// TestOpenLoginWhoseSpawnFailsAnswersSpawnFailed pins the arm a failure that
+// is not a typed refusal reaches the caller as, carrying the failure's text.
+func TestOpenLoginWhoseSpawnFailsAnswersSpawnFailed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Login.openErr = errors.New("fork/exec /no/such/claude: no such file or directory")
+
+	// Act.
+	resp, err := h.Client.OpenLogin(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenLogin: %v", err)
+	}
+	if resp.Msg.GetError().GetSpawnFailed() == nil ||
+		!strings.Contains(resp.Msg.GetError().String(), "no such file or directory") {
+		t.Fatalf("result = %v, want spawn_failed carrying the spawn's failure", resp.Msg.GetResult())
 	}
 }
 
@@ -146,10 +168,7 @@ func TestWatchLoginTerminalRefusesWithNoLoginOpen(t *testing.T) {
 	// Act.
 	stream, err := h.Client.WatchLoginTerminal(ctx,
 		connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{Workspace: ref()}))
-	if err == nil {
-		stream.Receive()
-		err = stream.Err()
-	}
+	err = firstStreamErr(stream, err)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "WatchLoginTerminal closed the stream: no_login_open") {

@@ -906,6 +906,25 @@ func TestSetWorkspaceHiddenRefusesAMissingVisibility(t *testing.T) {
 	}
 }
 
+// TestRegisterRepositoryRefusesABlankPathAsMalformed pins a blank path as a
+// malformed request that reaches no verb, rather than a refusal arm.
+func TestRegisterRepositoryRefusesABlankPathAsMalformed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.RegisterRepository(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
+	}
+	if len(h.Verbs.registeredPaths) != 0 {
+		t.Fatalf("registered paths = %v, want none for a malformed request", h.Verbs.registeredPaths)
+	}
+}
+
 // ---- SetWorkspaceParent ----------------------------------------------------
 
 // parentWorkspaceID is the registered workspace a retarget names as the new

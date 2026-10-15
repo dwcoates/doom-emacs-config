@@ -115,6 +115,22 @@ func TestKillLeavesTheWorkspaceRecordInPlace(t *testing.T) {
 	}
 }
 
+func TestKillLeavesTheWorktreeAndBranchIntact(t *testing.T) {
+	// Arrange: Kill ends the session; only Nuke destroys the checkout.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.nuked) != 0 || len(f.git.removedClean) != 0 {
+		t.Fatalf("nuked %+v, removed %+v; want the worktree and branch left intact", f.git.nuked, f.git.removedClean)
+	}
+}
+
 func TestKillWithNoLiveSessionStillStopsTheShim(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

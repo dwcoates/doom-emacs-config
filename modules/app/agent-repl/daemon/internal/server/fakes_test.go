@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -299,6 +300,8 @@ type fakeVerbs struct {
 
 	createTask    wsm.Task
 	createTaskErr error
+	// taskChanges records every UpdateTask change the handler resolved.
+	taskChanges []wsm.TaskChange
 
 	selectErr error
 	// selectEntered, when set, is closed as Select begins; Select then waits
@@ -314,6 +317,11 @@ type fakeVerbs struct {
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
 	setHiddenErr error
+	// opens and selects count every Open and Select the handlers made: the
+	// two verbs that bring a workspace up.
+	opens, selects atomic.Int32
+	// registeredPaths records every RegisterRepository path the verb received.
+	registeredPaths []string
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
 	folds   []repositoryFold
@@ -471,6 +479,7 @@ func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string)
 // openStages records every stage the server's reporter relayed into the verb,
 // so a test can assert the rpc armed a reporter (or deliberately did not).
 func (f *fakeVerbs) Open(_ context.Context, _ ids.WorkspaceID, progress workspace.OpenProgress) error {
+	f.opens.Add(1)
 	f.openProgress = progress
 	for _, stage := range f.openStages {
 		if progress != nil {
@@ -524,6 +533,7 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 }
 
 func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID) error {
+	f.selects.Add(1)
 	if f.selectEntered != nil {
 		close(f.selectEntered)
 		<-ctx.Done()
@@ -542,6 +552,16 @@ type hiddenSet struct {
 func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool) error {
 	f.hiddenSets = append(f.hiddenSets, hiddenSet{ws: ws, hidden: hidden})
 	return f.setHiddenErr
+}
+
+func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {
+	f.registeredPaths = append(f.registeredPaths, path)
+	return workspace.RegisteredRepository{}, nil
+}
+
+func (f *fakeVerbs) UpdateTask(_ context.Context, _ ids.TaskID, change wsm.TaskChange) error {
+	f.taskChanges = append(f.taskChanges, change)
+	return nil
 }
 
 func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
@@ -1010,6 +1030,10 @@ type fakeFeed struct {
 	lastFeed  feedid.Feed
 	lastRead  feed.ReaderID
 	openCalls int
+	// openReads and nextReads are the readers OpenPage and NextPage were
+	// asked for, in order.
+	openReads []feed.ReaderID
+	nextReads []feed.ReaderID
 	// finals is the ordered selectable final-response set SelectFeedRow's
 	// response step walks; prompts is the ordered selectable rollback-prompt
 	// set its prompt step walks; markdown is each selectable row's copied
@@ -1186,10 +1210,12 @@ func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.
 	f.openCalls++
 	f.lastFeed = target
 	f.lastRead = reader
+	f.openReads = append(f.openReads, reader)
 	return f.page, f.token, f.held, f.openErr
 }
 
-func (f *fakeFeed) NextPage(context.Context, ids.WorkspaceID, feedid.Feed, feed.ReaderID) (*frontendv1.FeedPage, error) {
+func (f *fakeFeed) NextPage(_ context.Context, _ ids.WorkspaceID, _ feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, error) {
+	f.nextReads = append(f.nextReads, reader)
 	return f.nextPage, f.nextErr
 }
 
@@ -1327,6 +1353,9 @@ func (f *fakeTopbar) SetParticipants(ws ids.WorkspaceID, host, web bool) {
 
 // Participants is the recorded edges, in order.
 func (f *fakeTopbar) Participants() []participantEdge { return f.edges.all() }
+
+// AwaitEdge blocks for the next participant edge the topbar was told.
+func (f *fakeTopbar) AwaitEdge(t *testing.T) participantEdge { return f.edges.await(t) }
 
 type fakeSidebar struct {
 	sidebar.Resolver
