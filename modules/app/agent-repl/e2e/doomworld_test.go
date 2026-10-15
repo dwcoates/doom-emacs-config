@@ -415,30 +415,56 @@ type doomWorkspace struct {
 const registryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
 
 // register onboards a fresh repository NAME through the ordinary command,
-// the fake answering with ref ws-NAME, and returns it once Emacs's registry
-// holds it and its ref has attached.
+// the fake answering with ref ws-NAME, and returns it once it has landed.
 func (w *DoomWorld) register(t *testing.T, box sandbox, name string) doomWorkspace {
 	t.Helper()
-	e := w.Emacs
 	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
 	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
-	before := e.EvalStrings(registryNamesForm)
+	before := w.Emacs.EvalStrings(registryNamesForm)
 	w.registerAs(t, ws.ID, dir)
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
-	// THE ROSTER LANDS IT. Emacs holds a registration as a pending landing
-	// until the daemon's roster carries its row, which a real daemon pushes
-	// once it has registered the directory; the fake is told to, current.
+	w.Emacs.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
+	return w.land(t, ws, before)
+}
+
+// create makes a workspace through `agent-repl-create-workspace', answering
+// its prompts with their first candidate and "hello", the fake answering
+// with ref ws-NAME at a fresh directory, and returns it once it has landed.
+func (w *DoomWorld) create(t *testing.T, box sandbox, name string) doomWorkspace {
+	t.Helper()
+	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
+	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
+	before := w.Emacs.EvalStrings(registryNamesForm)
+	created, _ := json.Marshal(map[string]any{"success": map[string]any{"workspace": map[string]any{"id": ws.ID, "dir": dir}}})
+	w.Fake.Script("CreateWorkspace", created)
+	w.Emacs.Eval(`(cl-letf (((symbol-function 'completing-read)
+                              (lambda (_prompt candidates &rest _) (car (append candidates nil))))
+                             ((symbol-function 'read-string)
+                              (lambda (prompt &rest _) (if (string-prefix-p "Initial prompt" prompt) "hello" ""))))
+                     (call-interactively #'agent-repl-create-workspace)
+                     t)`)
+	return w.land(t, ws, before)
+}
+
+// land is the daemon's side of a workspace it just registered or created:
+// the roster carrying WS's row, current. Emacs holds the workspace as a
+// pending landing until then. It returns WS once Emacs's registry holds it
+// (BEFORE being the names it held until now), its ref has attached and Emacs
+// has followed the roster to it.
+func (w *DoomWorld) land(t *testing.T, ws doomWorkspace, before []string) doomWorkspace {
+	t.Helper()
+	e := w.Emacs
 	// Its name is the directory's until Emacs's own landing names it.
-	ws.Name = filepath.Base(dir)
+	ws.Name = filepath.Base(ws.Dir)
 	w.registered = append(w.registered, ws)
 	w.pushRoster(t, ws, w.registered...)
-	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace at "+dir+" to appear in Emacs's registry", registryNamesForm,
+	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace at "+ws.Dir+" to appear in Emacs's registry", registryNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > len(before) })
 	for _, n := range decodeStrings(raw) {
 		if !containsString(before, n) {
 			ws.Name = n
 		}
 	}
+	w.registered[len(w.registered)-1] = ws
 	e.AwaitEvalFor(emacsVerbBound, "the fake's ref to attach to "+ws.Name,
 		`(plist-get (agent-repl-host-ref `+elispString(ws.Name)+`) :id)`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == ws.ID })

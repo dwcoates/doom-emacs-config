@@ -114,3 +114,35 @@ func TestDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
 		t.Fatalf("`M-1' landed on %q, Doom's own startup perspective, not the drawn bar %v", current, order)
 	}
 }
+
+// TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft: registering a
+// second project while standing in a created workspace gives the new project
+// its own perspective, and the one being left keeps its perspective and its
+// tab -- Doom's `+workspaces-switch-to-project-h' recycles it unless the
+// module's policy is installed, which only a booted Doom can show.
+func TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
+	t.Parallel()
+	// Arrange: a registered workspace, then a created one the create selects.
+	box := requireSandbox(t)
+	w := NewDoomWorld(t, box)
+	e := w.Emacs
+	f := &emacsWorkspaceFixture{Emacs: e}
+	if got := e.EvalString(`(format "%s" +workspaces-on-switch-project-behavior)`); got != "t" {
+		t.Fatalf("+workspaces-on-switch-project-behavior is %q in the running Doom, want t: at any other value "+
+			"`+workspaces-switch-to-project-h` may RECYCLE the workspace being left", got)
+	}
+	w.register(t, box, "repo")
+	created := w.create(t, box, "repo-created")
+
+	// Act: a second project registered, which switches projects out of the
+	// created workspace.
+	second := w.register(t, box, "repo-second")
+
+	// Assert: the created workspace still has its perspective and its tab.
+	if tabs := f.tabNames(); !containsString(tabs, created.Name) || !containsString(tabs, second.Name) {
+		t.Fatalf("agent-repl--ws-tabline-names = %v, want both the created %q and the second %q", tabs, created.Name, second.Name)
+	}
+	if persps := e.EvalStrings(`(if (boundp 'persp-names-cache) persp-names-cache nil)`); !containsString(persps, created.Name) {
+		t.Fatalf("persp-names-cache = %v, want the created workspace %q still in it: Doom recycled the workspace being left", persps, created.Name)
+	}
+}
