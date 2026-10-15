@@ -12,10 +12,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -38,7 +36,7 @@ type BaselineInput struct {
 
 // Baseline merges the run's counters into each system's coverage.
 func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error) {
-	dirs, err := counterDirs(in.CoverRoot)
+	dirs, err := goprofile.CounterDirs(in.CoverRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -70,29 +68,6 @@ func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error)
 		}
 	}
 	return out, nil
-}
-
-// counterDirs is every directory under root holding a Go coverage meta file.
-func counterDirs(root string) ([]string, error) {
-	seen := map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasPrefix(d.Name(), "covmeta.") {
-			seen[filepath.Dir(path)] = true
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cover: walk %s: %w", root, err)
-	}
-	var dirs []string
-	for d := range seen {
-		dirs = append(dirs, d)
-	}
-	sort.Strings(dirs)
-	return dirs, nil
 }
 
 // goSystems sums a merged profile's statements per system: the module path

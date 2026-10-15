@@ -136,3 +136,40 @@ func TestNoOtherFileReadsAProfileItself(t *testing.T) {
 		t.Fatalf("read profiles with internal/goprofile instead: %v", found)
 	}
 }
+
+func TestCounterDirsFindsMetaFilesAtAnyDepth(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	for _, d := range []string{"a/000", "spawned/x/agent-repld", "empty"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{"a/000/covmeta.1", "a/000/covcounters.1.2", "spawned/x/agent-repld/covmeta.2", "empty/notes.txt"} {
+		if err := os.WriteFile(filepath.Join(root, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act
+	got, err := CounterDirs(root)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "a/000"), filepath.Join(root, "spawned/x/agent-repld")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterDirs = %v, want %v", got, want)
+	}
+}
+
+func TestCounterDirsSurfacesAnUnreadableRoot(t *testing.T) {
+	// Act
+	_, err := CounterDirs(filepath.Join(t.TempDir(), "gone"))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "goprofile: walk") {
+		t.Fatalf("err = %v", err)
+	}
+}

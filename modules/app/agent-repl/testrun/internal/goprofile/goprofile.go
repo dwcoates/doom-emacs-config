@@ -5,6 +5,8 @@ package goprofile
 
 import (
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -130,3 +132,27 @@ func (idx Index) Holding(file string, line, col int) []Block {
 }
 
 func span(b Block) int { return (b.Line1-b.Line0)*10000 + b.Col1 - b.Col0 }
+
+// CounterDirs is every directory under root, at any depth, holding a Go
+// coverage meta file: what `go tool covdata -i` takes for a run's counters.
+func CounterDirs(root string) ([]string, error) {
+	seen := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasPrefix(d.Name(), "covmeta.") {
+			seen[filepath.Dir(path)] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("goprofile: walk %s: %w", root, err)
+	}
+	var dirs []string
+	for d := range seen {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	return dirs, nil
+}
