@@ -51,13 +51,29 @@ export default defineConfig({
     // `test/webapp-layer/setup.ts` makes the same invariant hold one hook
     // earlier and leaves the mount's logger alone, so it is the whole setup
     // here.
-    setupFiles: ["./test/webapp-layer/setup.ts"],
+    //
+    // `test/setup-shared-integration.ts` is the per-FILE hygiene the
+    // un-isolated integration run uses (the real clock back, an empty page),
+    // which this layer needs for the same reason (`isolate: false` below).
+    setupFiles: ["./test/setup-shared-integration.ts", "./test/webapp-layer/setup.ts"],
     // `.layer.test.ts`, NOT every `*.test.ts` in the directory: the layer's
     // helpers live here too, and a unit test OF a helper (test/webapp-layer/
     // drive.test.ts) must run in the fast unit suite, where there is no daemon
     // to demand. The suffix is the same one the Go scenario-matrix check reads
     // the directory by (e2e/scenariomatrix_test.go, deriveWebappCoverage).
     include: ["test/webapp-layer/**/*.layer.test.ts"],
+    // ONE WARM WORKER FOR EVERY AREA (layer-server.mjs). Isolated, each area
+    // the warm driver ran stood a fresh worker up and re-evaluated the whole
+    // app's module graph inside its FIRST test's silence window, the one the
+    // Go side bounds (e2e/webapplayer_e2e_test.go WebappLayerSilence): in a
+    // full run at host load near 80 (2026-10-14), roster's tests took 4.6s of
+    // a 11.6s vitest run and its first silence was 14.9s, and subfeeds went
+    // past 20s before its first test finished. The driver's warm-up evaluates
+    // that graph once, before any bound runs; un-isolated, every area reuses
+    // it. Sharing is safe for the same reasons as the integration run's: each
+    // file starts from a clean page and the real clock
+    // (test/setup-shared-integration.ts) and stops the app it mounts.
+    isolate: false,
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,
     // NOT WIDENED FROM THE INTEGRATION PROJECT. 900ms is the measured bound

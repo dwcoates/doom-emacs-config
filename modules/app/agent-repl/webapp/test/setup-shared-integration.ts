@@ -1,10 +1,10 @@
 import { beforeAll, vi } from "vitest";
 
 /**
- * FILE HYGIENE FOR THE UN-ISOLATED INTEGRATION RUN.
+ * FILE HYGIENE FOR THE UN-ISOLATED INTEGRATION AND WEBAPP-LAYER RUNS.
  *
- * `vitest.integration.config.ts` sets `isolate: false`, so every file in a
- * worker shares one jsdom. An integration file mounts its app ONCE, in a
+ * `vitest.integration.config.ts` and `vitest.webapp-layer.config.ts` set
+ * `isolate: false`, so every file in a worker shares one jsdom. An integration file mounts its app ONCE, in a
  * `beforeAll`, and its scenarios look at that page, so the wipe the unit run
  * does before every test (test/setup-shared-worker.ts) would tear the page
  * down mid-file. Here the reset runs once per FILE instead, before that
