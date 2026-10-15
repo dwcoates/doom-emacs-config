@@ -5,8 +5,8 @@
  * SelectFeedRow and never pushes on its own; each test states the push.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
-import { FeedSelectionSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { selectionOf } from "../feed/harness.js";
 import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { WORKSPACE_ID, feedId, responseRow, userPromptRow } from "./fixtures";
@@ -32,12 +32,7 @@ async function withRows(...rows: FeedRow[]): Promise<void> {
 async function pushSelection(id?: string): Promise<void> {
   harness.fake.pushSelection(
     WORKSPACE_ID,
-    create(FeedSelectionSchema, {
-      selection:
-        id === undefined
-          ? { case: "none", value: { viewport: { case: "returnToTail", value: {} } } }
-          : { case: "bubble", value: { row: feedId(id) } },
-    }),
+    selectionOf(id === undefined ? { none: "returnToTail" } : { bubble: id }),
   );
   await harness.settle();
 }

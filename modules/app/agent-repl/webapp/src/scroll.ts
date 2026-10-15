@@ -73,9 +73,11 @@ export interface ScrollPosition {
  *   parks at its tail and follows, exactly as for `promptSent`. A re-push of a
  *   card already drawn, or its removal, moves nothing.
  * - `selectionMoved`: the reader stepped the feed selection (a final
- *   response or a prompt) by keybinding; the selected row is centered, and a
- *   dismissed selection returns to the tail. A selection that ended because
- *   its row left the viewport moves nothing (`selectionEnded`).
+ *   response or a prompt) by keybinding from Emacs; the selected row is
+ *   centered, and a dismissed selection returns to the tail. A selection that
+ *   ended because its row left the viewport moves nothing (`selectionEnded`),
+ *   and neither does one the reader's click made or ended (`selectionClicked`,
+ *   THE READER'S CLICK NEVER MOVES THE FEED below).
  * - `detachedWorkSelected`: the reader picked a detached-work item in the
  *   expanded footer; the feed CENTERS that item's card in its viewport
  *   (owner ruling, 2026-09-23), clamped at the feed's edges, and a card
@@ -84,14 +86,6 @@ export interface ScrollPosition {
  *   breadcrumb, a hook's gated-call link). Owner request, 2026-10-01: every
  *   jump expands the entry and centers it exactly as the detached-work
  *   selection does (`revealCenterDelta`), so the two share the one routine.
- * - `itemExpanded`: the reader expanded a feed item — a capped bubble, a tool
- *   card, a subagent's bubble, a compaction's summary; the feed puts that
- *   item's vertical MIDDLE on the viewport's vertical middle at once (owner
- *   request, 2026-09-30, widening the bubble-only ruling of 2026-09-29),
- *   clamped at the feed's edges, however tall the item is
- *   (`expandCenterDelta`).
- *   A standing follow is kept instead (owner ruling, 2026-10-14): the feed
- *   stays at its tail and goes on following until the reader scrolls away.
  * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
@@ -113,6 +107,16 @@ export interface ScrollPosition {
  * Every move is recorded at INFO as `scroll.feed-moved` with its cause: a move
  * the reader can see is one the shared log must show (`scroll.box-resized`
  * records the size changes that drive the follow and anchoring moves).
+ *
+ * THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15,
+ * superseding the expand-centering rulings of 2026-09-29, 2026-09-30 and
+ * 2026-10-14). Expanding or collapsing anything BY CLICKING IT (a response,
+ * thinking or prompt bubble, a tool card, a subagent's bubble) and pressing a
+ * merge bubble's control are no cause at all: the clicked row holds still
+ * where the reader sees it (`readerClicked`, `selectionClicked`). It is the
+ * click that holds the view, not the expansion: an entry a JUMP expands, or a
+ * selection STEPPED to from Emacs, is still centered (`entryJumped`,
+ * `selectionMoved`).
  */
 export const SCROLL_CAUSES = [
   "promptSent",
@@ -120,7 +124,6 @@ export const SCROLL_CAUSES = [
   "selectionMoved",
   "detachedWorkSelected",
   "entryJumped",
-  "itemExpanded",
   "initialPlacement",
   "replaceRestore",
   "workspaceSelected",
@@ -368,8 +371,14 @@ export class TailFollow {
   private selectionActive = false;
   /** Whether the held-off latch was last reported, so it is reported once per spell. */
   private heldOffReported = false;
-  /** Whether a press on a merge bubble's control holds the view, until the reader's next input. */
-  private pressHeld = false;
+  /** Whether the reader's click holds the view, until the reader's next input (`readerClicked`). */
+  private clickHeld = false;
+  /**
+   * The root row the reader's click holds still while `clickHeld` stands, or
+   * null when the click landed after every row (the held section, a pinned
+   * merge bubble), where the first row in view already holds everything still.
+   */
+  private clickedRow: Element | null = null;
   /** The row the anchoring holds, and its top in the box's content coordinates. */
   private anchor: { row: Element; at: number; starts: boolean } | null = null;
   /** Where the next anchor search starts: the last anchor, kept across a follow. */
@@ -461,9 +470,10 @@ export class TailFollow {
   }
 
   /**
-   * The reader stepped the reply selection: stop following, so streaming rows
-   * cannot pull them off the selection, and center the selected row when the
-   * feed has drawn it (GEOMETRY null: nothing to center on).
+   * The reader stepped the reply selection FROM EMACS: stop following, so
+   * streaming rows cannot pull them off the selection, and center the selected
+   * row when the feed has drawn it (GEOMETRY null: nothing to center on). A
+   * selection the reader's click made centers nothing (`selectionClicked`).
    */
   selectionMoved(geometry: CenterGeometry | null): void {
     this.selectionActive = true;
@@ -501,44 +511,66 @@ export class TailFollow {
   }
 
   /**
-   * THE READER PRESSED A CONTROL INSIDE A MERGE BUBBLE (owner request,
-   * 2026-10-14: a click on any of a merge bubble's controls never scrolls the
-   * feed). A tab, a run's view or any other control redraws the bubble's
-   * content, and the bubble is most often the feed's latest entry, so a
-   * standing follow would park the tail on the height change and carry the
-   * control the reader just pressed out from under them. So the follow ends
-   * and the latest-visible latch is held off until the reader's NEXT input
-   * (`onInput`): the anchoring keeps the content under them, and their own
-   * next scroll latches again as always. Moves nothing.
+   * THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15). The
+   * reader clicked TARGET: a bubble or a card they are expanding or collapsing
+   * by its own click, or a merge bubble's control (owner request, 2026-10-14),
+   * whose redraw changes the bubble's height. So the follow ends, the
+   * latest-visible latch is held off until the reader's NEXT input
+   * (`onInput`), and until then the anchoring holds TARGET's root row still
+   * (`takeAnchor`): its top stays where the reader sees it, and its own growth
+   * or shrinking runs downward from there, however long it takes to land (a
+   * sub-feed drawn later, a redraw). Moves nothing.
+   *
+   * This is the CLICK, not the expansion. A jump that expands an entry
+   * centers it (`entryJumped`), and a selection stepped from Emacs centers its
+   * row (`selectionMoved`).
    */
-  mergeControlPressed(): void {
+  readerClicked(target: Element): void {
+    this.holdUnderClick(target, "click");
+  }
+
+  /**
+   * The reader's CLICK selected a bubble (SELECTED true) or ended the
+   * selection by clicking the selected bubble (SELECTED false), as the
+   * daemon's push says (`FeedSelectionRowViewportHold`,
+   * `FeedSelectionNoneHold`). ROW is that bubble's row, or null when this feed
+   * has not drawn it. The view holds exactly as for any other click
+   * (`readerClicked`); a selection keeps the latest-visible latch off for as
+   * long as it stands, as a stepped one does.
+   */
+  selectionClicked(row: Element | null, selected: boolean): void {
+    this.selectionActive = selected;
+    this.heldOffReported = false;
+    this.holdUnderClick(row, selected ? "selection-click" : "deselection-click");
+  }
+
+  /** THE ONE CLICK HOLD behind `readerClicked` and `selectionClicked`. */
+  private holdUnderClick(target: Element | null, by: "click" | "selection-click" | "deselection-click"): void {
     this.release();
-    this.pressHeld = true;
+    this.clickHeld = true;
+    this.clickedRow = target === null ? null : this.rootRowOf(target);
     this.takeAnchor();
-    log.debug("a merge bubble control was pressed; the view holds until the reader's next input", {
-      operation: "scroll.merge-press-held",
-      context: { at: this.box.scrollTop },
+    log.debug("the reader clicked; the view holds until the reader's next input", {
+      operation: "scroll.click-held",
+      context: {
+        by,
+        at: this.box.scrollTop,
+        row: this.clickedRow === null ? "none" : rowName(this.clickedRow),
+      },
     });
   }
 
   /**
-   * The reader expanded a feed item. A standing follow is KEPT (owner ruling,
-   * 2026-10-14): expanding is not scrolling away, so only the reader's own
-   * scroll up ends the follow, and the follow keeps the tail in view as the
-   * expanded item and later content take height. Without a follow, put the
-   * item's vertical middle on the viewport's (`expandCenterDelta`).
+   * The root row TARGET sits in: the child of the rows' host that contains it,
+   * or null when TARGET lies outside every row (after them, or with no rows to
+   * read).
    */
-  itemExpanded(geometry: RevealGeometry): void {
-    this.sync();
-    if (this.following && this.cause !== null) {
-      log.debug("an item expanded under a standing follow; the follow keeps the tail", {
-        operation: "scroll.expand-kept-follow",
-        context: { cause: this.cause, at: this.box.scrollTop },
-      });
-      this.park(this.cause);
-      return;
-    }
-    this.centerReveal("itemExpanded", expandCenterDelta(geometry, this.box));
+  private rootRowOf(target: Element): Element | null {
+    if (this.rows === null) return null;
+    const host = this.rows.host;
+    let node: Element | null = target;
+    while (node !== null && node.parentElement !== host) node = node.parentElement;
+    return node;
   }
 
   /**
@@ -592,7 +624,8 @@ export class TailFollow {
    */
   onInput(): void {
     this.touched = true;
-    this.pressHeld = false;
+    this.clickHeld = false;
+    this.clickedRow = null;
   }
 
   /**
@@ -678,7 +711,7 @@ export class TailFollow {
    * view lands if the latest entry is then in sight.
    */
   private centerReveal(
-    cause: "detachedWorkSelected" | "entryJumped" | "itemExpanded",
+    cause: "detachedWorkSelected" | "entryJumped",
     delta: number,
   ): void {
     this.release();
@@ -771,11 +804,23 @@ export class TailFollow {
     });
   }
 
-  /** Take the anchor from the live layout: none while following, or with no rows to read. */
+  /**
+   * Take the anchor from the live layout: none while following, or with no
+   * rows to read. While the reader's click holds the view (`readerClicked`),
+   * the clicked row is the anchor for as long as it is drawn, wherever its top
+   * sits, so the row the reader clicked never moves under them.
+   */
   private takeAnchor(): void {
     this.anchor = null;
     if (this.rows === null || this.following) return;
     const viewTop = this.rows.viewportTop();
+    const clicked = this.clickHeld ? this.clickedRow : null;
+    const clickedEdges = clicked === null || clicked.parentElement !== this.rows.host ? null : this.rows.edges(clicked);
+    if (clicked !== null && clickedEdges !== null) {
+      this.anchorHint = clicked;
+      this.anchor = { row: clicked, at: clickedEdges.top - viewTop + this.box.scrollTop, starts: true };
+      return;
+    }
     const found = findAnchor(this.rows, this.anchorHint, viewTop);
     if (found === null) return;
     this.anchorHint = found.row;
@@ -826,7 +871,7 @@ export class TailFollow {
    * reader has scrolled back to the tail: `onTailReached`'s listener runs.
    */
   private latchIfLatestVisible(trigger: LatchTrigger): void {
-    if (this.following || this.pressHeld) return;
+    if (this.following || this.clickHeld) return;
     const latest = this.readLatest();
     const visible = latest !== null && latestEntryVisible(latest);
     if (!visible) {
@@ -1155,15 +1200,6 @@ export interface RevealGeometry {
 export function revealCenterDelta(g: RevealGeometry, box: ScrollPosition): number {
   const offset = g.nodeHeight > g.boxHeight ? g.nodeTop - g.boxTop : midpointOffset(g);
   return clampedDelta(box, offset);
-}
-
-/**
- * How far the box must move to put an EXPANDED item's vertical middle on the
- * viewport's vertical middle (owner request, 2026-09-30), whatever the item's
- * height, clamped at the feed's edges exactly as `revealCenterDelta` is.
- */
-export function expandCenterDelta(g: RevealGeometry, box: ScrollPosition): number {
-  return clampedDelta(box, midpointOffset(g));
 }
 
 /** How far NODE's vertical midpoint sits below the viewport's. */

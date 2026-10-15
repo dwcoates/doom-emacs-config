@@ -14,8 +14,11 @@
  *   - the click: a selectable bubble asks the daemon to select it, and a
  *     governed bubble that has not landed does nothing. A click on the
  *     SELECTED bubble asks the same; the daemon, the selection's one holder,
- *     answers it by deselecting with the viewport left where the reader has
- *     it (`none.stay`), so a deselecting click never scrolls the feed;
+ *     answers it by deselecting. THE READER'S CLICK NEVER MOVES THE FEED: the
+ *     daemon's push for a click says `hold` (a selection's
+ *     `FeedSelectionRowViewport.hold`, a deselection's `none.hold`), and
+ *     `applySelection` holds the clicked bubble still while it expands or
+ *     collapses. A selection stepped from Emacs says `center` instead;
  *   - the click's requests, sent through the one `SelectFeedRow` call the
  *     webapp makes (`selectFeedRow`, select-feed-row.ts).
  *

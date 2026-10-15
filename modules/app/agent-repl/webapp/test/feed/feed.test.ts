@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { pagePresence } from "../../src/presence.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
-import { announceItemExpanded } from "../../src/expand.js";
+import { announceReaderClick } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -2286,11 +2286,8 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
   });
 });
 
-describe("mountFeed: expanding a feed item centers it in the feed", () => {
-  /**
-   * The reader wheeled away from the tail, so no follow stands: a standing
-   * follow keeps the tail instead of centering (`TailFollow.itemExpanded`).
-   */
+describe("mountFeed: the reader's click never moves the feed", () => {
+  /** The reader wheeled away from the tail, so no follow stands. */
   function readerAwayFromTail(scroll: HTMLElement): void {
     scroll.dispatchEvent(new Event("wheel"));
     scroll.dispatchEvent(new Event("scroll"));
@@ -2324,171 +2321,88 @@ describe("mountFeed: expanding a feed item centers it in the feed", () => {
     return card;
   }
 
-  it("centers the row of a bubble a click expands", async () => {
-    // Arrange -- the row hangs 500..600 under a 300px viewport at 100.
+  /** A mounted feed whose scroll box is scripted at 100 of 2000 under a 300px viewport. */
+  async function scripted(opts: { away: boolean }) {
     const { feed, host } = mount();
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
+    if (opts.away) readerAwayFromTail(scroll);
+    return { feed, host, scroll };
+  }
+
+  it("moves nothing when a click expands a bubble", async () => {
+    // Arrange -- the row hangs 500..600, where centering would have moved to 500.
+    const { feed, host, scroll } = await scripted({ away: true });
     const box = bubbleIn(rowAt(host, 500));
     // Act
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // Assert -- its midpoint (550) onto the viewport's (150): 100 + 400.
-    expect(scroll.scrollTop).toBe(500);
+    // Assert
+    expect([box.classList.contains("expanded"), scroll.scrollTop]).toEqual([true, 100]);
     feed.dispose();
   });
 
-  it("keeps a standing follow at the tail instead of centering the item", async () => {
-    // Arrange -- the follow the first paint latched stands; the row hangs 500..600.
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
+  it("moves nothing when a click expands a bubble under a standing follow", async () => {
+    // Arrange -- the follow the first paint latched stands.
+    const { feed, host, scroll } = await scripted({ away: false });
     const box = bubbleIn(rowAt(host, 500));
     // Act
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // Assert -- parked at the tail (2000), not centered (500).
-    expect(scroll.scrollTop).toBe(2000);
+    // Assert -- not parked at the tail (2000).
+    expect(scroll.scrollTop).toBe(100);
     feed.dispose();
   });
 
-  it("centers the row of a tool card a click expands", async () => {
+  it("moves nothing when a click expands a tool card", async () => {
     // Arrange
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
+    const { feed, host, scroll } = await scripted({ away: true });
     const card = toolCardIn(rowAt(host, 500));
     // Act
     card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // Assert
-    expect(scroll.scrollTop).toBe(500);
+    expect([card.classList.contains("expanded"), scroll.scrollTop]).toEqual([true, 100]);
     feed.dispose();
   });
 
-  it("centers the row an item announces itself expanded in", async () => {
+  it("moves nothing when a click collapses a bubble", async () => {
     // Arrange
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
-    const inner = document.createElement("div");
-    rowAt(host, 500).append(inner);
-    // Act
-    announceItemExpanded(inner);
-    // Assert
-    expect(scroll.scrollTop).toBe(500);
-    feed.dispose();
-  });
-
-  it("centers the NEAREST row, so a nested item is centered as itself", async () => {
-    // Arrange -- an outer row at 0..1000 holding a nested row at 700..800.
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
-    const outer = rowAt(host, 0, "outer");
-    outer.getBoundingClientRect = domRect(0, 1000);
-    const nested = document.createElement("article");
-    nested.setAttribute("data-feed-row", "nested");
-    nested.getBoundingClientRect = domRect(700, 100);
-    outer.append(nested);
-    const inner = document.createElement("div");
-    nested.append(inner);
-    // Act
-    announceItemExpanded(inner);
-    // Assert -- the nested midpoint (750) onto 150: 100 + 600.
-    expect(scroll.scrollTop).toBe(700);
-    feed.dispose();
-  });
-
-  it("records the move under the itemExpanded cause", async () => {
-    // Arrange
-    const { feed, host } = mount();
-    await settle();
-    scriptFeedBox(host.parentElement as HTMLElement);
-    readerAwayFromTail(host.parentElement as HTMLElement);
-    const box = bubbleIn(rowAt(host, 500));
-    const capture = captureLogRecords("debug");
-    // Act
-    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // Assert
-    const record = await forwardedRecord(capture, "scroll.feed-moved");
-    expect((record.context as Record<string, unknown>).cause).toBe(
-      "itemExpanded",
-    );
-    feed.dispose();
-  });
-
-  it("does not move the feed when a click collapses the item", async () => {
-    // Arrange -- an expanded bubble, already centered.
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
+    const { feed, host, scroll } = await scripted({ away: true });
     const box = bubbleIn(rowAt(host, 500));
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     scroll.scrollTop = 250;
     // Act
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // Assert
-    expect(scroll.scrollTop).toBe(250);
+    expect([box.classList.contains("expanded"), scroll.scrollTop]).toEqual([false, 250]);
     feed.dispose();
   });
 
-  it("stops listening for announced expansions once disposed", async () => {
+  it("holds the view on an announced reader click", async () => {
     // Arrange
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
+    const { feed, host } = await scripted({ away: false });
+    const inner = document.createElement("div");
+    rowAt(host, 500).append(inner);
+    const capture = captureLogRecords("debug");
+    // Act
+    announceReaderClick(inner);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    expect(record.context).toMatchObject({ by: "click", at: 100 });
+    feed.dispose();
+  });
+
+  it("stops listening for reader clicks once disposed", async () => {
+    // Arrange
+    const { feed, host } = await scripted({ away: false });
     const inner = document.createElement("div");
     rowAt(host, 500).append(inner);
     feed.dispose();
+    const capture = captureLogRecords("debug");
     // Act
-    announceItemExpanded(inner);
+    announceReaderClick(inner);
     // Assert
-    expect(scroll.scrollTop).toBe(100);
-  });
-
-  it("reports and throws on an expanded item that hangs in no feed row", async () => {
-    // Arrange
-    const { feed, host } = mount();
     await settle();
-    const scroll = host.parentElement as HTMLElement;
-    scriptFeedBox(scroll);
-    readerAwayFromTail(scroll);
-    const card = document.createElement("div");
-    card.className = "tool-card tool-fold";
-    host.append(card);
-    const capture = captureLogRecords();
-    const thrown: unknown[] = [];
-    const onError = (e: ErrorEvent): void => {
-      thrown.push(e.error);
-      e.preventDefault();
-    };
-    window.addEventListener("error", onError);
-    // Act
-    card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    window.removeEventListener("error", onError);
-    // Assert -- the fault is logged with its context, thrown, and nothing moved.
-    const record = await forwardedRecord(capture, "feed.center-expanded-item");
-    expect([
-      record.context,
-      (thrown[0] as Error | undefined)?.message,
-      scroll.scrollTop,
-    ]).toEqual([
-      expect.objectContaining({ element: "tool-card tool-fold expanded" }),
-      "feed: an expanded feed item hangs in no feed row",
-      100,
-    ]);
-    feed.dispose();
+    expect(capture.sent.filter((r) => r.operation === "scroll.click-held")).toEqual([]);
   });
 });
 

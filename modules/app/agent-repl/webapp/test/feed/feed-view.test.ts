@@ -2054,6 +2054,11 @@ describe("createFeedController: the feed selection", () => {
         acts.push("selectionMoved");
         if (g !== null) shifts.push(centerDelta(g));
       },
+      selectionClicked: (row: Element | null, selected: boolean) => {
+        const id = row?.getAttribute("data-feed-row") ?? "none";
+        const marked = row?.hasAttribute(SELECTED_ROW_ATTRIBUTE) ?? false;
+        acts.push(`selectionClicked:${id}:${String(selected)}:${marked ? "marked" : "unmarked"}`);
+      },
     };
     return { box, tail, acts, shifts };
   }
@@ -2375,6 +2380,85 @@ describe("createFeedController: the feed selection", () => {
     controller.applySelection(selectionOf({ prompt: "p1" }));
     // Assert
     expect(acts).toEqual(["selectionMoved"]);
+  });
+
+  it("holds the feed under a clicked selection, centering nothing", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: "hold" }));
+    // Assert -- the hold is taken before the row is marked.
+    expect(acts).toEqual(["selectionClicked:r1:true:unmarked"]);
+  });
+
+  it("holds the feed under a click that moves the selection to another row", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.upsert(userPromptRow("p1", "hello"));
+    controller.applySelection(selectionOf({ response: "r1" }));
+    acts.length = 0;
+    // Act
+    controller.applySelection(selectionOf({ prompt: "p1", viewport: "hold" }));
+    // Assert
+    expect(acts).toEqual(["selectionClicked:p1:true:unmarked"]);
+  });
+
+  it("holds the feed under a click on the selected bubble that ends the selection", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ response: "r1", viewport: "hold" }));
+    acts.length = 0;
+    // Act
+    controller.applySelection(selectionOf({ none: "hold" }));
+    // Assert -- held on the row the click deselected, while it is still marked.
+    expect(acts).toEqual(["selectionClicked:r1:false:marked"]);
+  });
+
+  it("moves nothing when a clicked selection is restated", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ response: "r1", viewport: "hold" }));
+    acts.length = 0;
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: "hold" }));
+    // Assert
+    expect(acts).toEqual([]);
+  });
+
+  it("moves nothing when a deselecting click is restated with nothing selected", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ none: "hold" }));
+    // Assert
+    expect(acts).toEqual([]);
+  });
+
+  it("refuses a selected row with no viewport as a malformed view", () => {
+    // Arrange
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    const bare = create(FeedSelectionSchema, {
+      selection: { case: "response", value: { row: feedId("r1") } },
+    });
+    // Act / Assert
+    expect(() => controller.applySelection(bare)).toThrow(MalformedView);
+  });
+
+  it("refuses a selected row whose viewport names no arm as a malformed view", () => {
+    // Arrange
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    const bare = create(FeedSelectionSchema, {
+      selection: { case: "response", value: { row: feedId("r1"), viewport: {} } },
+    });
+    // Act / Assert
+    expect(() => controller.applySelection(bare)).toThrow(MalformedView);
   });
 
   it("stays where the reader is when the selection ends with stay", () => {
@@ -3873,15 +3957,7 @@ describe("createFeedController: selected and expanded are one state", () => {
 
   /** The daemon's selection of ID as a non-final bubble, or none. */
   const bubbleSelection = (id?: string) =>
-    create(FeedSelectionSchema, {
-      selection:
-        id === undefined
-          ? {
-              case: "none",
-              value: { viewport: { case: "returnToTail", value: {} } },
-            }
-          : { case: "bubble", value: { row: feedId(id) } },
-    });
+    selectionOf(id === undefined ? { none: "returnToTail" } : { bubble: id });
 
   it("stamps a root response row governed and, once the daemon says so, selectable", () => {
     // Arrange

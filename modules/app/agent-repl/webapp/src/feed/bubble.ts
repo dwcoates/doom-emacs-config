@@ -42,7 +42,7 @@ import { drawToolHead } from "./cards/tool-head.js";
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { createConnectHookElement } from "../connect-hook.js";
 import { log } from "../log.js";
-import { announceItemExpanded } from "../expand.js";
+import { announceReaderClick } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -277,12 +277,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   });
   // A PRESS ON A MERGE BUBBLE'S CONTROL NEVER SCROLLS THE FEED (owner request,
   // 2026-10-14): captured, so the view is held before the control redraws
-  // anything (`TailFollow.mergeControlPressed`).
+  // anything (`announceReaderClick`, `TailFollow.readerClicked`).
   if (opts.merge === true) {
     el.addEventListener(
       "click",
       (event) => {
-        if (isInteractiveTarget(event.target)) opts.scroll?.tail.mergeControlPressed();
+        if (isInteractiveTarget(event.target) && event.target instanceof Element) {
+          announceReaderClick(event.target);
+        }
       },
       { capture: true },
     );
@@ -476,12 +478,13 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    */
   function toggleFold(): void {
     clearRefusal();
-    // A COLLAPSE NEVER MOVES THE FEED (owner rule, 2026-09-23: the user owns
-    // the scroll). AN EXPANSION THE READER ASKED FOR CENTERS THE BUBBLE (owner
-    // request, 2026-09-30): once its sub-feed is drawn, the bubble announces
-    // itself expanded and the root feed puts its middle on the viewport's
-    // (`itemExpanded`). A jump that opens bubbles calls `expand` directly and
-    // announces nothing: it centers the entry it landed on itself.
+    // THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15): the
+    // click is announced before the fold changes anything, and the root feed
+    // holds this bubble's row still while it collapses, or while its sub-feed
+    // is drawn and grows it (`TailFollow.readerClicked`). A jump that opens
+    // bubbles calls `expand` directly and announces nothing: it centers the
+    // entry it landed on itself.
+    announceReaderClick(el);
     if (expanded) {
       collapse();
       tellReaderFold(true);
@@ -489,7 +492,6 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     }
     void expand().then((opened) => {
       if (!opened) return;
-      announceItemExpanded(el);
       tellReaderFold(false);
     });
   }

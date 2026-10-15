@@ -22,7 +22,6 @@ import {
   sectionTakesWheel,
   wheelDeltaPx,
   revealCenterDelta,
-  expandCenterDelta,
   revealGeometry,
   centerDelta,
   observeScrollBox,
@@ -393,7 +392,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the eleven causes the owner rules allow", () => {
+  it("names exactly the ten causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -401,7 +400,6 @@ describe("SCROLL_CAUSES", () => {
       "selectionMoved",
       "detachedWorkSelected",
       "entryJumped",
-      "itemExpanded",
       "initialPlacement",
       "replaceRestore",
       "workspaceSelected",
@@ -911,99 +909,11 @@ describe("TailFollow.entryJumped", () => {
   });
 });
 
-describe("TailFollow.itemExpanded", () => {
-  it("centers an expanded item below the fold in the viewport", () => {
-    // Arrange: a 200px bubble whose top is 250px down a 300px viewport.
-    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-    const a = armed(box);
-    // Act
-    a.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
-    // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
-    expect(box.scrollTop).toBe(300);
-  });
-
-  it("keeps a standing follow", () => {
-    // Arrange
-    const f = following();
-    // Act
-    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
-    // Assert
-    expect(f.tail.isFollowing()).toBe(true);
-  });
-
-  it("keeps a standing follow at the tail instead of centering the item", () => {
-    // Arrange: following at the tail; the expanded item grew the content to 1400.
-    const f = following();
-    f.box.scrollHeight = 1400;
-    // Act: centering would put the item's middle (150) on the viewport's (150).
-    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 100 });
-    // Assert: a plain box takes the park's write unclamped.
-    expect(f.box.scrollTop).toBe(1400);
-  });
-
-  it("goes on following content that arrives after the expansion", () => {
-    // Arrange
-    const f = following();
-    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
-    f.box.scrollHeight = 1500;
-    // Act
-    f.tail.follow();
-    // Assert: a plain box takes the park's write unclamped.
-    expect(f.box.scrollTop).toBe(1500);
-  });
-
-  it("lets the reader's own scroll up end the follow it kept", () => {
-    // Arrange
-    const f = following();
-    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
-    // Act
-    f.box.scrollTop = 650;
-    f.gesture();
-    // Assert
-    expect(f.tail.isFollowing()).toBe(false);
-  });
-
-  it("records the kept follow at DEBUG under its standing cause", async () => {
-    // Arrange
-    const f = following();
-    const capture = captureLogRecords("debug");
-    // Act
-    f.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
-    // Assert
-    const record = await forwardedRecord(capture, "scroll.expand-kept-follow");
-    expect(record.context).toMatchObject({ cause: "promptSent", at: 1000 });
-  });
-
-  it("puts a TALLER-than-viewport item's middle on the viewport's middle", () => {
-    // Arrange: a 600px item whose top is 50px down a 300px viewport.
-    const box = { scrollTop: 100, scrollHeight: 2000, clientHeight: 300 };
-    const a = armed(box);
-    // Act
-    a.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 600 });
-    // Assert: its midpoint (350) moves to the viewport's (150): 200px down,
-    // where a detached-work reveal would have aligned its top instead.
-    expect(box.scrollTop).toBe(300);
-  });
-
-  it("is recorded at DEBUG as itemExpanded", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
-    // Act
-    a.tail.itemExpanded({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
-    // Assert
-    expect(await moves(capture)).toEqual([
-      { cause: "itemExpanded", from: 100, to: 300, follow: false },
-    ]);
-  });
-});
-
 describe("TailFollow's centering reveals land where their arithmetic says", () => {
   type Delta = (g: RevealGeometry, box: { scrollTop: number; scrollHeight: number; clientHeight: number }) => number;
   const reveals: Array<[string, (tail: TailFollow, g: RevealGeometry) => void, Delta]> = [
     ["detachedWorkSelected", (tail, g) => tail.detachedWorkSelected(g), revealCenterDelta],
     ["entryJumped", (tail, g) => tail.entryJumped(g), revealCenterDelta],
-    ["itemExpanded", (tail, g) => tail.itemExpanded(g), expandCenterDelta],
   ];
   const geometries: RevealGeometry[] = [
     { boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 },
@@ -1485,29 +1395,30 @@ describe("TailFollow's latest-visible latch", () => {
     expect(record.level.case).toBe("error");
   });
 
-  describe("TailFollow.mergeControlPressed", () => {
-    /** A reader following at the tail, with the merge bubble as the latest entry. */
+  describe("TailFollow.readerClicked", () => {
+    /** A reader following at the tail, with the clicked entry as the latest. */
     function following(): ReturnType<typeof withLatest> {
       const l = withLatest(650);
       l.scroll();
       return l;
     }
+    const clicked = (): Element => document.createElement("div");
 
     it("ends a standing follow", () => {
       // Arrange
       const l = following();
       // Act
-      l.tail.mergeControlPressed();
+      l.tail.readerClicked(clicked());
       // Assert
       expect(l.tail.isFollowing()).toBe(false);
     });
 
-    it("moves nothing when the pressed control's redraw grows the latest entry", () => {
+    it("moves nothing when the clicked entry grows", () => {
       // Arrange
       const l = following();
       l.input();
-      l.tail.mergeControlPressed();
-      // Act -- the panel the press drew is 200px taller.
+      l.tail.readerClicked(clicked());
+      // Act -- the entry the click expanded is 200px taller.
       l.entry.height += 200;
       l.box.scrollHeight += 200;
       l.resize();
@@ -1518,7 +1429,7 @@ describe("TailFollow's latest-visible latch", () => {
     it("holds the latest-visible latch off through a scroll event with no reader input", () => {
       // Arrange
       const l = following();
-      l.tail.mergeControlPressed();
+      l.tail.readerClicked(clicked());
       // Act
       l.scroll();
       // Assert
@@ -1528,7 +1439,7 @@ describe("TailFollow's latest-visible latch", () => {
     it("lets the reader's next input latch the follow again", () => {
       // Arrange
       const l = following();
-      l.tail.mergeControlPressed();
+      l.tail.readerClicked(clicked());
       // Act
       l.gesture();
       // Assert
@@ -1540,10 +1451,63 @@ describe("TailFollow's latest-visible latch", () => {
       const l = following();
       const capture = captureLogRecords("debug");
       // Act
-      l.tail.mergeControlPressed();
+      l.tail.readerClicked(clicked());
       // Assert
-      const record = await forwardedRecord(capture, "scroll.merge-press-held");
-      expect([record.level.case, record.context]).toMatchObject(["debug", { at: 650 }]);
+      const record = await forwardedRecord(capture, "scroll.click-held");
+      expect([record.level.case, record.context]).toMatchObject(["debug", { by: "click", at: 650, row: "none" }]);
+    });
+  });
+
+  describe("TailFollow.selectionClicked", () => {
+    it("holds the follow off for as long as a clicked selection stands", () => {
+      // Arrange
+      const l = withLatest(650);
+      l.scroll();
+      l.tail.selectionClicked(null, true);
+      // Act -- the reader's next input would latch, but a selection stands.
+      l.gesture();
+      // Assert
+      expect(l.tail.isFollowing()).toBe(false);
+    });
+
+    it("lets the reader's next input latch once a click ended the selection", () => {
+      // Arrange
+      const l = withLatest(650);
+      l.scroll();
+      l.tail.selectionClicked(null, true);
+      l.tail.selectionClicked(null, false);
+      // Act
+      l.gesture();
+      // Assert
+      expect(l.tail.isFollowing()).toBe(true);
+    });
+
+    it("moves nothing when the clicked bubble expands", () => {
+      // Arrange
+      const l = withLatest(650);
+      l.scroll();
+      l.input();
+      l.tail.selectionClicked(null, true);
+      // Act
+      l.entry.height += 200;
+      l.box.scrollHeight += 200;
+      l.resize();
+      // Assert
+      expect(l.box.scrollTop).toBe(650);
+    });
+
+    it.each([
+      [true, "selection-click"],
+      [false, "deselection-click"],
+    ])("records a click that selected=%s as %s", async (selected, by) => {
+      // Arrange
+      const l = withLatest(650);
+      const capture = captureLogRecords("debug");
+      // Act
+      l.tail.selectionClicked(null, selected);
+      // Assert
+      const record = await forwardedRecord(capture, "scroll.click-held");
+      expect(record.context).toMatchObject({ by });
     });
   });
 });
@@ -2910,6 +2874,98 @@ function anchoredFeed(
   };
 }
 
+describe("TailFollow's click hold anchors on the clicked row", () => {
+  // Rows at content tops 0, 400, 800, 1200; the reader at 500 sees r1's tail
+  // and r2 from its top, so the first row in view is r2.
+  const rows = [400, 400, 400, 400];
+
+  /** The feed with the reader's click on an element inside row I. */
+  function clickedIn(i: number) {
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    const inner = document.createElement("span");
+    f.host.children[i].append(inner);
+    f.tail.readerClicked(inner);
+    return f;
+  }
+
+  it("holds a clicked row that starts above the viewport still while it grows", () => {
+    // Arrange
+    const f = clickedIn(1);
+    // Act
+    f.h[1] = 800;
+    f.resize();
+    // Assert -- anchored on r2, the view would have moved to 900.
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("holds a clicked row that starts above the viewport still while it shrinks", () => {
+    // Arrange
+    const f = clickedIn(1);
+    // Act
+    f.h[1] = 200;
+    f.resize();
+    // Assert -- anchored on r2, the view would have moved to 300.
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("keeps the clicked row still through a later growth until the reader's next input", () => {
+    // Arrange
+    const f = clickedIn(1);
+    f.h[1] = 600;
+    f.resize();
+    // Act -- the clicked row's sub-feed lands a frame later.
+    f.h[1] = 900;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("moves the view with a growth above the clicked row", () => {
+    // Arrange
+    const f = clickedIn(1);
+    // Act
+    f.h[0] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(700);
+  });
+
+  it("anchors on the first row in view again after the reader's next input", () => {
+    // Arrange
+    const f = clickedIn(1);
+    f.input();
+    f.scroll();
+    // Act
+    f.h[1] = 800;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(900);
+  });
+
+  it("anchors on the first row in view for a click outside every row", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 500);
+    f.scroll();
+    f.tail.readerClicked(document.createElement("div"));
+    // Act
+    f.h[1] = 800;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(900);
+  });
+
+  it("records the clicked row it holds", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    clickedIn(1);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    expect(record.context).toMatchObject({ by: "click", row: "r1" });
+  });
+});
+
 describe("TailFollow's scroll anchoring", () => {
   // Rows at content tops 0, 400, 800, 1200; the reader at 500 sees r1's tail
   // and r2 from its top, so r2 is the anchor.
@@ -3179,18 +3235,6 @@ describe("feedAnchorRows", () => {
     const top = feedAnchorRows(box, document.createElement("div")).viewportTop();
     // Assert
     expect(top).toBe(12);
-  });
-});
-
-describe("expandCenterDelta", () => {
-  const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-  it.each([
-    ["an item that fits", { boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 }, 200],
-    ["an item taller than the viewport", { boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 600 }, 200],
-    ["an item near the start, clamped at the top", { boxTop: 0, boxHeight: 300, nodeTop: -900, nodeHeight: 50 }, -100],
-    ["an item near the end, clamped at the last position", { boxTop: 0, boxHeight: 300, nodeTop: 900, nodeHeight: 50 }, 600],
-  ])("moves %s by its middle-to-middle offset", (_name, g, want) => {
-    expect(expandCenterDelta(g, box)).toBe(want);
   });
 });
 
