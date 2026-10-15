@@ -1,0 +1,8 @@
+{
+  "scenario": "!push-config-off",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

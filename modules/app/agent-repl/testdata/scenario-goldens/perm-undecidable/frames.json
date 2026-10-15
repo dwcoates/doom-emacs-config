@@ -1,0 +1,510 @@
+[
+  {
+    "upsertKey": "session:mcp_server:u2:echo",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:echo",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "echo",
+          "connected": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:broken",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:broken",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "broken",
+          "failed": {
+            "error": "failed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:needs-login",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:needs-login",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "needs-login",
+          "needsAuth": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:slow",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:slow",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "slow",
+          "pending": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:switched-off",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:switched-off",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "switched-off",
+          "disabled": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:fast_mode:u2",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2",
+      "discriminator": "session_update.fast_mode"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "fastMode": {
+          "off": {
+            "reason": "preference"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_1:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u6",
+      "blockIndex": 0,
+      "discriminator": "activity.thinking.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_1:0"
+            },
+            "thinking": {
+              "start": {}
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_1:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1800000000002,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u8",
+      "blockIndex": 0,
+      "discriminator": "activity.thinking.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_1:0"
+            },
+            "thinking": {
+              "success": {
+                "withheld": {}
+              }
+            },
+            "usage": {
+              "inputHits": {
+                "read": "21755"
+              },
+              "inputMisses": {
+                "written": "3224",
+                "unwritten": "10"
+              },
+              "outputTokens": "36"
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1000,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u12",
+      "blockIndex": 1,
+      "discriminator": "activity.bash.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "bash": {
+              "start": {
+                "command": {
+                  "line": "./unknown-binary --flag",
+                  "sandboxed": {}
+                },
+                "startedAt": {
+                  "atMs": "1000"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "permission:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u16",
+      "discriminator": "agent_update.permission.success.denied.by_policy"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "permission": {
+            "id": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "gatedCall": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "success": {
+              "denied": {
+                "undecidable": {
+                  "detail": "the classifier could not reach a verdict for this command"
+                }
+              }
+            }
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1000,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u17",
+      "discriminator": "activity.bash.failure"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "bash": {
+              "failure": {
+                "error": {
+                  "content": {
+                    "blocks": [
+                      {
+                        "text": {
+                          "text": "Error: the automatic decider could not decide"
+                        }
+                      }
+                    ]
+                  },
+                  "settledAt": {
+                    "atMs": "1000",
+                    "startedAt": {
+                      "atMs": "1000"
+                    }
+                  }
+                },
+                "command": {
+                  "line": "./unknown-binary --flag",
+                  "sandboxed": {}
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u19",
+      "blockIndex": 0,
+      "discriminator": "activity.response.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:0"
+            },
+            "response": {
+              "start": {}
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u20",
+      "blockIndex": 0,
+      "discriminator": "activity.response.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:0"
+            },
+            "response": {
+              "update": {
+                "newMarkdown": "Nothing could decide w"
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u21",
+      "blockIndex": 0,
+      "discriminator": "activity.response.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:0"
+            },
+            "response": {
+              "update": {
+                "newMarkdown": "hether to allow that."
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1800000000005,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u22",
+      "blockIndex": 0,
+      "discriminator": "activity.response.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:0"
+            },
+            "response": {
+              "success": {
+                "prose": {
+                  "markdown": "Nothing could decide whether to allow that."
+                },
+                "fromModel": {},
+                "settledAt": {
+                  "atMs": "1800000000005"
+                }
+              }
+            },
+            "usage": {
+              "inputHits": {
+                "read": "21755"
+              },
+              "inputMisses": {
+                "written": "3224",
+                "unwritten": "10"
+              },
+              "outputTokens": "36"
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "terminal:main-agent:u26",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u26",
+      "discriminator": "agent_frame.success.completed"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "success": {
+          "completed": {
+            "answer": {
+              "value": "msg_fake_g0000000_2:0"
+            }
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  }
+]

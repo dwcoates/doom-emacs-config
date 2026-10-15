@@ -1,0 +1,8 @@
+{
+  "scenario": "!glob",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

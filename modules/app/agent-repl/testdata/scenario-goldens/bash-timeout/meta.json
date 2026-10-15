@@ -1,0 +1,8 @@
+{
+  "scenario": "!bash-timeout",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

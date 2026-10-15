@@ -1,0 +1,8 @@
+{
+  "scenario": "!task-reject",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

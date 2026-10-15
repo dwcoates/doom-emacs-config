@@ -1,0 +1,8 @@
+{
+  "scenario": "!send-message-refused",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

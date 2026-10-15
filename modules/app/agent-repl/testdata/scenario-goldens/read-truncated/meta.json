@@ -1,0 +1,8 @@
+{
+  "scenario": "!read-truncated",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

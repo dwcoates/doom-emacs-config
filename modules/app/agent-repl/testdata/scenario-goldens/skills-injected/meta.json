@@ -1,0 +1,8 @@
+{
+  "scenario": "!skills-injected",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

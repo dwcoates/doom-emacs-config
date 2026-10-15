@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-turn-setup",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-hook-stopped",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

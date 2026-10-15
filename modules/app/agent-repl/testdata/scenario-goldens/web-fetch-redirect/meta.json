@@ -1,0 +1,8 @@
+{
+  "scenario": "!web-fetch-redirect",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

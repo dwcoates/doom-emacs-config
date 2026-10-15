@@ -1,0 +1,8 @@
+{
+  "scenario": "!grep-count",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

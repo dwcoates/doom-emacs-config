@@ -1,0 +1,8 @@
+{
+  "scenario": "!rate-limit",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "scenario": "!keepalive",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

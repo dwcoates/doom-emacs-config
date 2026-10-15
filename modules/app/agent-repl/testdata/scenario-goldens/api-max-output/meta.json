@@ -1,0 +1,8 @@
+{
+  "scenario": "!api-max-output",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

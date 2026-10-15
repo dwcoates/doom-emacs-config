@@ -1,0 +1,8 @@
+{
+  "scenario": "!artifact-list",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

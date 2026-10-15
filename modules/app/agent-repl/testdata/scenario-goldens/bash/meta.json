@@ -1,0 +1,8 @@
+{
+  "scenario": "!bash",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

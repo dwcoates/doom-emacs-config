@@ -1,0 +1,8 @@
+{
+  "scenario": "!bash-detach-fail",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

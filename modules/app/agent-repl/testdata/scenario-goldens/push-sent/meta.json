@@ -1,0 +1,8 @@
+{
+  "scenario": "!push-sent",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

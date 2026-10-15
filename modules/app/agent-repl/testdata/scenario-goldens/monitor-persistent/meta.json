@@ -1,0 +1,8 @@
+{
+  "scenario": "!monitor-persistent",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

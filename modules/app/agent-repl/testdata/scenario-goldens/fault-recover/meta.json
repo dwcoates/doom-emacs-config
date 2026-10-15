@@ -1,0 +1,8 @@
+{
+  "scenario": "!fault-recover",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "scenario": "!task-create",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

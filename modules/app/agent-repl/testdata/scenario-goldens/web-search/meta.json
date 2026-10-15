@@ -1,0 +1,8 @@
+{
+  "scenario": "!web-search",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

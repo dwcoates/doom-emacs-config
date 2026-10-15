@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-structured-output",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

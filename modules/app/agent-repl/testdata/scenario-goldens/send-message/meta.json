@@ -1,0 +1,8 @@
+{
+  "scenario": "!send-message",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

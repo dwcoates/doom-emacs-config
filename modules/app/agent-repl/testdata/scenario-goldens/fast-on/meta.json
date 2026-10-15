@@ -1,0 +1,8 @@
+{
+  "scenario": "!fast-on",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

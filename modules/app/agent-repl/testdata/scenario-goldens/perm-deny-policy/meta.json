@@ -1,0 +1,8 @@
+{
+  "scenario": "!perm-deny-policy",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

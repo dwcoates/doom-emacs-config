@@ -1,0 +1,8 @@
+{
+  "scenario": "!usage-opus-absent",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

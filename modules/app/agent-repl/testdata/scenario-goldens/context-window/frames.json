@@ -1,0 +1,177 @@
+[
+  {
+    "upsertKey": "session:mcp_server:u2:echo",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:echo",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "echo",
+          "connected": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:broken",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:broken",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "broken",
+          "failed": {
+            "error": "failed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:needs-login",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:needs-login",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "needs-login",
+          "needsAuth": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:slow",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:slow",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "slow",
+          "pending": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:switched-off",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:switched-off",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "switched-off",
+          "disabled": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:fast_mode:u2",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2",
+      "discriminator": "session_update.fast_mode"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "fastMode": {
+          "off": {
+            "reason": "preference"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "residue:u5",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u5",
+      "discriminator": "residue.vendor_specific.system/informational"
+    },
+    "item": {
+      "kind": "residue",
+      "residue": {
+        "vendorSpecific": {
+          "kind": "system/informational",
+          "raw": {
+            "session_id": "sess-fake-1",
+            "type": "system",
+            "subtype": "informational",
+            "content": "The conversation exceeds this model's context window. Compact or clear it to continue.",
+            "level": "warning",
+            "uuid": "u5"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "terminal:main-agent:u6",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u6",
+      "discriminator": "agent_frame.failure.promptTooLong"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "failure": {
+          "promptTooLong": {},
+          "errors": [
+            "the conversation exceeds the model's context window"
+          ]
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  }
+]

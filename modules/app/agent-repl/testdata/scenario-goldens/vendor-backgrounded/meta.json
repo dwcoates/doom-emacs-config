@@ -1,0 +1,8 @@
+{
+  "scenario": "!vendor-backgrounded",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

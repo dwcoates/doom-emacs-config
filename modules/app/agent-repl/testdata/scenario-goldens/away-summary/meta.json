@@ -1,0 +1,8 @@
+{
+  "scenario": "!away-summary",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

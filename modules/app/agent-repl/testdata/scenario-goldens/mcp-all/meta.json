@@ -1,0 +1,8 @@
+{
+  "scenario": "!mcp-all",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

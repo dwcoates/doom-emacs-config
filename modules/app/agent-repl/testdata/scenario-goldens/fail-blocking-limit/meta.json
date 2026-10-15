@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-blocking-limit",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

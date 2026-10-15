@@ -1,0 +1,8 @@
+{
+  "scenario": "!usage-window-unavailable",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

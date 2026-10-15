@@ -1,0 +1,8 @@
+{
+  "scenario": "!write-create",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

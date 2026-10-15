@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-model",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

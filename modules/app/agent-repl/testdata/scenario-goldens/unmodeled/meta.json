@@ -1,0 +1,8 @@
+{
+  "scenario": "!unmodeled",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "scenario": "!worktree-remove",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

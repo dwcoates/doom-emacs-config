@@ -1,0 +1,8 @@
+{
+  "scenario": "!usage-sampling-failure",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

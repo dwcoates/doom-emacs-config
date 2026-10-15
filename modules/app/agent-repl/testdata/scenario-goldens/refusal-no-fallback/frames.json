@@ -1,0 +1,192 @@
+[
+  {
+    "upsertKey": "session:mcp_server:u2:echo",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:echo",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "echo",
+          "connected": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:broken",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:broken",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "broken",
+          "failed": {
+            "error": "failed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:needs-login",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:needs-login",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "needs-login",
+          "needsAuth": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:slow",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:slow",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "slow",
+          "pending": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:switched-off",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:switched-off",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "switched-off",
+          "disabled": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:fast_mode:u2",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2",
+      "discriminator": "session_update.fast_mode"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "fastMode": {
+          "off": {
+            "reason": "preference"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:u5",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u5",
+      "discriminator": "activity.response.failure.refused"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "u5"
+            },
+            "response": {
+              "failure": {
+                "prose": {},
+                "reason": {
+                  "refused": {
+                    "explanation": {
+                      "text": "API integrators: you can reduce refusals for your users by configuring a fallback model."
+                    }
+                  }
+                },
+                "settledAt": {
+                  "atMs": "1000"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "terminal:main-agent:u7",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u7",
+      "discriminator": "agent_frame.failure.modelError"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "failure": {
+          "modelError": {},
+          "errors": [
+            "the model refused and no fallback is configured"
+          ]
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  }
+]

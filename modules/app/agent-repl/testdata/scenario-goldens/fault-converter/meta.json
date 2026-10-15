@@ -1,0 +1,8 @@
+{
+  "scenario": "!fault-converter",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

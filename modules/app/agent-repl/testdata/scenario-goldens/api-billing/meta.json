@@ -1,0 +1,8 @@
+{
+  "scenario": "!api-billing",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "scenario": "!artifact-publish",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "scenario": "!subagent",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

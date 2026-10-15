@@ -1,0 +1,8 @@
+{
+  "scenario": "!query-eof",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

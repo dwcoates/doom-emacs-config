@@ -1,0 +1,8 @@
+{
+  "scenario": "!rotate",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

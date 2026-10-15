@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-prompt-too-long",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

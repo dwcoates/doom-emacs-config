@@ -1,0 +1,8 @@
+{
+  "scenario": "!skill",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

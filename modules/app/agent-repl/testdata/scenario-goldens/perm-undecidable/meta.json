@@ -1,0 +1,8 @@
+{
+  "scenario": "!perm-undecidable",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

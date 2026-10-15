@@ -1,0 +1,877 @@
+[
+  {
+    "upsertKey": "session:mcp_server:u2:echo",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:echo",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "echo",
+          "connected": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:broken",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:broken",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "broken",
+          "failed": {
+            "error": "failed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:needs-login",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:needs-login",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "needs-login",
+          "needsAuth": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:slow",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:slow",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "slow",
+          "pending": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:mcp_server:u2:switched-off",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2:switched-off",
+      "discriminator": "session_update.mcp_server"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "mcpServer": {
+          "name": "switched-off",
+          "disabled": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "session:fast_mode:u2",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u2",
+      "discriminator": "session_update.fast_mode"
+    },
+    "item": {
+      "kind": "session_update",
+      "update": {
+        "fastMode": {
+          "off": {
+            "reason": "preference"
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_1:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u6",
+      "blockIndex": 0,
+      "discriminator": "activity.thinking.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_1:0"
+            },
+            "thinking": {
+              "start": {}
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_1:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1800000000002,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u8",
+      "blockIndex": 0,
+      "discriminator": "activity.thinking.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_1:0"
+            },
+            "thinking": {
+              "success": {
+                "withheld": {}
+              }
+            },
+            "usage": {
+              "inputHits": {
+                "read": "21755"
+              },
+              "inputMisses": {
+                "written": "3224",
+                "unwritten": "10"
+              },
+              "outputTokens": "36"
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1000,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u12",
+      "blockIndex": 1,
+      "discriminator": "activity.subagent.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "subagent": {
+              "start": {
+                "prompt": {
+                  "description": "Pointless background sweep",
+                  "text": "Do the sweep and report.",
+                  "subagentType": "general-purpose",
+                  "none": {}
+                },
+                "startedAt": {
+                  "atMs": "1000"
+                },
+                "createdAgentId": {
+                  "value": "toolu_fake_g0000000_1"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "detached:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u17",
+      "discriminator": "agent_frame.detached_work.detached.requested"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "agentId": {
+          "value": "main-agent"
+        },
+        "detachedWork": {
+          "work": {
+            "value": "toolu_fake_g0000000_1"
+          },
+          "detached": {
+            "detachedFromId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "requested": {}
+          },
+          "owner": {
+            "value": "main-agent"
+          },
+          "kind": {
+            "subagent": {
+              "agentId": {
+                "value": "toolu_fake_g0000000_1"
+              },
+              "commission": {
+                "description": "Pointless background sweep",
+                "text": "Do the sweep and report.",
+                "subagentType": "general-purpose",
+                "none": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u23",
+      "blockIndex": 0,
+      "discriminator": "activity.thinking.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:0"
+            },
+            "thinking": {
+              "start": {}
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:0",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1800000000006,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u25",
+      "blockIndex": 0,
+      "discriminator": "activity.thinking.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:0"
+            },
+            "thinking": {
+              "success": {
+                "withheld": {}
+              }
+            },
+            "usage": {
+              "inputHits": {
+                "read": "21755"
+              },
+              "inputMisses": {
+                "written": "3224",
+                "unwritten": "10"
+              },
+              "outputTokens": "36"
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u27",
+      "blockIndex": 1,
+      "discriminator": "activity.response.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:1"
+            },
+            "response": {
+              "start": {}
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u28",
+      "blockIndex": 1,
+      "discriminator": "activity.response.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:1"
+            },
+            "response": {
+              "update": {
+                "newMarkdown": "Dispatched the agent"
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u29",
+      "blockIndex": 1,
+      "discriminator": "activity.response.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:1"
+            },
+            "response": {
+              "update": {
+                "newMarkdown": " to the background."
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_2:1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1800000000007,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u30",
+      "blockIndex": 1,
+      "discriminator": "activity.response.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_2:1"
+            },
+            "response": {
+              "success": {
+                "prose": {
+                  "markdown": "Dispatched the agent to the background."
+                },
+                "fromModel": {},
+                "settledAt": {
+                  "atMs": "1800000000007"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "terminal:main-agent:u34",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u34",
+      "discriminator": "agent_frame.success.completed"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "success": {
+          "completed": {
+            "answer": {
+              "value": "msg_fake_g0000000_2:1"
+            }
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u35",
+      "discriminator": "activity.subagent.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "subagent": {
+              "update": {
+                "prompt": {
+                  "description": "Pointless background sweep",
+                  "text": "Do the sweep and report.",
+                  "subagentType": "general-purpose",
+                  "none": {}
+                },
+                "progress": {
+                  "durationMs": "500",
+                  "toolUseCount": 1,
+                  "totalTokens": "4200"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u36",
+      "discriminator": "activity.subagent.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "subagent": {
+              "update": {
+                "prompt": {
+                  "description": "Pointless background sweep",
+                  "text": "Do the sweep and report.",
+                  "subagentType": "general-purpose",
+                  "none": {}
+                },
+                "progress": {
+                  "durationMs": "1000",
+                  "toolUseCount": 2,
+                  "totalTokens": "8600"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_3:0",
+    "book": "toolu_fake_g0000000_1",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u38",
+      "blockIndex": 0,
+      "discriminator": "activity.response.start"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_3:0"
+            },
+            "response": {
+              "start": {}
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "toolu_fake_g0000000_1"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_3:0",
+    "book": "toolu_fake_g0000000_1",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u39",
+      "blockIndex": 0,
+      "discriminator": "activity.response.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_3:0"
+            },
+            "response": {
+              "update": {
+                "newMarkdown": "Sweep fi"
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "toolu_fake_g0000000_1"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_3:0",
+    "book": "toolu_fake_g0000000_1",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u40",
+      "blockIndex": 0,
+      "discriminator": "activity.response.update"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_3:0"
+            },
+            "response": {
+              "update": {
+                "newMarkdown": "nished."
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "toolu_fake_g0000000_1"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:msg_fake_g0000000_3:0",
+    "book": "toolu_fake_g0000000_1",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": {
+      "atMs": 1800000000009,
+      "ordinal": 0
+    },
+    "source": {
+      "vendorUuid": "u41",
+      "blockIndex": 0,
+      "discriminator": "activity.response.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "msg_fake_g0000000_3:0"
+            },
+            "response": {
+              "success": {
+                "prose": {
+                  "markdown": "Sweep finished."
+                },
+                "fromModel": {},
+                "settledAt": {
+                  "atMs": "1800000000009"
+                }
+              }
+            },
+            "usage": {
+              "inputHits": {
+                "read": "21755"
+              },
+              "inputMisses": {
+                "written": "3224",
+                "unwritten": "10"
+              },
+              "outputTokens": "36"
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "toolu_fake_g0000000_1"
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "detached:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u45",
+      "discriminator": "agent_frame.detached_work.detached.requested"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "agentId": {
+          "value": "main-agent"
+        },
+        "detachedWork": {
+          "work": {
+            "value": "toolu_fake_g0000000_1"
+          },
+          "detached": {
+            "detachedFromId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "requested": {}
+          },
+          "output": {
+            "path": "${GOLDEN_ROOT}/spools/${GOLDEN_ROOT_SLUG}-workspace/sess-fake-1/tasks/a1600000000000000.output",
+            "readable": {}
+          },
+          "owner": {
+            "value": "main-agent"
+          },
+          "kind": {
+            "subagent": {
+              "agentId": {
+                "value": "toolu_fake_g0000000_1"
+              },
+              "commission": {
+                "description": "Pointless background sweep",
+                "text": "Do the sweep and report.",
+                "subagentType": "general-purpose",
+                "none": {}
+              }
+            }
+          },
+          "concluded": {}
+        }
+      }
+    }
+  },
+  {
+    "upsertKey": "activity:toolu_fake_g0000000_1",
+    "book": "main-agent",
+    "keepalive": false,
+    "turn": "turn-1",
+    "recordPlace": null,
+    "source": {
+      "vendorUuid": "u45",
+      "discriminator": "activity.subagent.success"
+    },
+    "item": {
+      "kind": "frame",
+      "frame": {
+        "update": {
+          "activity": {
+            "activityId": {
+              "value": "toolu_fake_g0000000_1"
+            },
+            "subagent": {
+              "success": {
+                "prompt": {
+                  "description": "Pointless background sweep",
+                  "text": "Do the sweep and report.",
+                  "subagentType": "general-purpose",
+                  "none": {}
+                },
+                "report": {
+                  "prose": {
+                    "markdown": "Sweep finished."
+                  }
+                },
+                "totals": {
+                  "totalOnly": {
+                    "totalTokens": "11114"
+                  }
+                },
+                "settledAt": {
+                  "atMs": "1000",
+                  "startedAt": {
+                    "atMs": "1000"
+                  }
+                },
+                "createdAgentId": {
+                  "value": "toolu_fake_g0000000_1"
+                }
+              }
+            },
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+          }
+        },
+        "agentId": {
+          "value": "main-agent"
+        }
+      }
+    }
+  }
+]

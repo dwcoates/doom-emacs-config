@@ -1,0 +1,8 @@
+{
+  "scenario": "!fail-rapid-refill",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

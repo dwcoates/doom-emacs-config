@@ -1,0 +1,8 @@
+{
+  "scenario": "!ask-single",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

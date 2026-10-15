@@ -1,0 +1,8 @@
+{
+  "scenario": "!query-fail",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

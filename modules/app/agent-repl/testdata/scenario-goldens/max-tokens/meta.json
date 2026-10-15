@@ -1,0 +1,8 @@
+{
+  "scenario": "!max-tokens",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}

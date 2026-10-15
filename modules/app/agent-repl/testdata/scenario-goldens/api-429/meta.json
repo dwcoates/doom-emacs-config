@@ -1,0 +1,8 @@
+{
+  "scenario": "!api-429",
+  "seam": null,
+  "planes": [
+    "stream",
+    "file"
+  ]
+}
