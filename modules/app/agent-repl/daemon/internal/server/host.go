@@ -108,14 +108,7 @@ const (
 // hostStateTopic answers a workspace's host STATE topic, minting it on first
 // use exactly as hostNoticeTopic mints the notice one.
 func (s *server) hostStateTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.HostWorkspace] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.hostStateTopics[ws]
-	if !ok {
-		t = &publish.Topic[*agentreplv1.HostWorkspace]{}
-		s.hostStateTopics[ws] = t
-	}
-	return t
+	return perWorkspace(s, s.hostStateTopics, ws)
 }
 
 // PublishHostWorkspace composes one workspace's host view and publishes it.

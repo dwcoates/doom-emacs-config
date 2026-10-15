@@ -500,42 +500,35 @@ func (s *server) Close() error {
 	return nil
 }
 
+// perWorkspace answers the workspace's entry in m, minting a zero one on first
+// use. It is the one lazy accessor every per-workspace topic and event source
+// goes through, under the server's mu.
+func perWorkspace[V any](s *server, m map[ids.WorkspaceID]*V, ws ids.WorkspaceID) *V {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := m[ws]
+	if !ok {
+		v = new(V)
+		m[ws] = v
+	}
+	return v
+}
+
 // hostNoticeTopic answers a workspace's host notice topic, creating it on
 // first use.
 func (s *server) hostNoticeTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchHostWorkspaceResponse] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.hostNoticeTopics[ws]
-	if !ok {
-		t = &publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]{}
-		s.hostNoticeTopics[ws] = t
-	}
-	return t
+	return perWorkspace(s, s.hostNoticeTopics, ws)
 }
 
 // hostEventStream answers a workspace's host events, creating them on first
 // use.
 func (s *server) hostEventStream(ws ids.WorkspaceID) *publish.Events[*agentreplv1.WatchHostWorkspaceResponse] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.hostEvents[ws]
-	if !ok {
-		e = &publish.Events[*agentreplv1.WatchHostWorkspaceResponse]{}
-		s.hostEvents[ws] = e
-	}
-	return e
+	return perWorkspace(s, s.hostEvents, ws)
 }
 
 // webTopic answers a workspace's web push topic, creating it on first use.
 func (s *server) webTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchWebWorkspaceResponse] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.webTopics[ws]
-	if !ok {
-		t = &publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]{}
-		s.webTopics[ws] = t
-	}
-	return t
+	return perWorkspace(s, s.webTopics, ws)
 }
 
 // webStateTopic answers a workspace's web STATE topic, minting it on first use
@@ -543,14 +536,7 @@ func (s *server) webTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchW
 func (s *server) webStateTopic(
 	ws ids.WorkspaceID,
 ) *publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.webStateTopics[ws]
-	if !ok {
-		t = &publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]{}
-		s.webStateTopics[ws] = t
-	}
-	return t
+	return perWorkspace(s, s.webStateTopics, ws)
 }
 
 // hostRelay is the server's workspace.HostRelay face. It exists as its own
