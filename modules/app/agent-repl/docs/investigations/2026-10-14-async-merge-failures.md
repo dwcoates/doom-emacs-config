@@ -14,6 +14,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | requested, pending; a first request was refused `name_taken`, see entry 3 |
 | 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | requested, pending |
 | 5 | 2026-10-15 | `test-fixture-table-rules-2` (entry 2's two rule commits, rebuilt on master `3e33b5963d`) | `fixture-rules-retry` | requested, pending; a retry of entry 2 from a turn whose prompt is a normal transcript record |
+| 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | requested, pending |
 
 ## 1. `test-tier-rule` (landed)
 
