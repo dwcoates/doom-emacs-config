@@ -766,6 +766,19 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 	registryReadsAcrossThePromotion(t, 6)
 }
 
+// TestRegistryReadsAcrossTheSuccessorsPromotionAreServedTwo is the cut the
+// cross-product audit proposes: one workspace adopting and one reading
+// across the promotion are every party the assertions need, and more readers
+// only change the race's odds (the deterministic reproductions are wsm's
+// TestAReadThatTookTheHandleBeforeAPromotionStillReads and server's
+// TestAnAdoptionWhoseRegistryReadBreaksFailsRatherThanAnsweringUnknown). It
+// stands beside the six-workspace test until the redundancy prover rules
+// the original deletable, then replaces it.
+func TestRegistryReadsAcrossTheSuccessorsPromotionAreServedTwo(t *testing.T) {
+	t.Parallel()
+	registryReadsAcrossThePromotion(t, 2)
+}
+
 // registryReadsAcrossThePromotion drives WORKSPACES idle workspaces through a
 // successor's promotion, the first adopting while the rest read the registry.
 func registryReadsAcrossThePromotion(t *testing.T, workspaces int) {
