@@ -184,9 +184,11 @@ Two different measures, labelled each time they appear:
   - `wlRunVitest` has no callers. A second group-kill implementation polls with `time.Sleep`.
   - Every self-repo merge world waits for a full deploy after landing.
 
-## Proposed AGENTS.md rule
+## The AGENTS.md rule
 
-The combined draft, settled with test-tier-audit-integration and approved by the owner (`d06bf0f99e`), is on this branch in `modules/app/agent-repl/AGENTS.md`, right after "A system's integration tests run that system alone". It lands with the implementation.
+- The owner approved the combined tier rule ("A test lives at the cheapest tier that can prove it"). It was settled with test-tier-audit-integration.
+- The parent lands it in `modules/app/agent-repl/AGENTS.md` through the merge queue, as branch `test-tier-rule`.
+- This branch carries no copy of the rule. Once this report lands, a follow-up points the rule's Why bullet at this report's path.
 
 ## The scenario-matrix change (ruling 1, drafted for the implementation)
 
