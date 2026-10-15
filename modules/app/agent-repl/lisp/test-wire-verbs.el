@@ -3625,23 +3625,23 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                           "SELECT_FEED_ROW_DIRECTION_"))
                  #'string<))))
 
-(ert-deftest agent-repl-test-wire-verbs-select-feed-row-response-step-shape ()
-  "A response step carries the echoed ref and the step's direction."
+(ert-deftest agent-repl-test-wire-verbs-select-feed-row-turn-boundary-step-shape ()
+  "A turn-boundary step carries the echoed ref and the step's direction."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-select-feed-row-request
                      (list :workspace agent-repl-test-wire-verbs--ref
-                           :move '(:arm :response :value (:direction :older)))))
-                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"response\":{\"direction\":\"SELECT_FEED_ROW_DIRECTION_OLDER\"}}"))))
+                           :move '(:arm :turn-boundary :value (:direction :older)))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turnBoundary\":{\"direction\":\"SELECT_FEED_ROW_DIRECTION_OLDER\"}}"))))
 
-(ert-deftest agent-repl-test-wire-verbs-select-feed-row-prompt-step-shape ()
-  "A prompt step rides the `prompt' arm."
+(ert-deftest agent-repl-test-wire-verbs-select-feed-row-retired-step-arms-have-no-spelling ()
+  "The retired `response' and `prompt' step arms are refused before the wire."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize
-                    (agent-repl-wire-encode-select-feed-row-request
+    (dolist (arm '(:response :prompt))
+      (should-error (agent-repl-wire-encode-select-feed-row-request
                      (list :workspace agent-repl-test-wire-verbs--ref
-                           :move '(:arm :prompt :value (:direction :newer)))))
-                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"prompt\":{\"direction\":\"SELECT_FEED_ROW_DIRECTION_NEWER\"}}"))))
+                           :move (list :arm arm :value '(:direction :older))))
+                    :type 'agent-repl-wire-error))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-clear-shape ()
   "A clear carries the empty clear arm."
@@ -3671,7 +3671,7 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-select-feed-row-request
                    (list :workspace agent-repl-test-wire-verbs--ref
-                         :move '(:arm :prompt :value nil)))
+                         :move '(:arm :turn-boundary :value nil)))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-left-view-has-no-spelling ()
@@ -3684,13 +3684,13 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-move-arms-pinned ()
   "SelectFeedRowRequest's move oneof has exactly the arms the schema declares.
-Emacs spells three of them; `leftView' and `bubble' (a click) are the
+Emacs spells two of them; `leftView' and `bubble' (a click) are the
 webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_select_feed_row.pb.go"
                         "SelectFeedRowRequest")
                        #'string<)
-                 '("bubble" "clear" "leftView" "prompt" "response"))))
+                 '("bubble" "clear" "leftView" "turnBoundary"))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-bubble-has-no-spelling ()
   "The webapp's click move is never sent from Emacs, so it is refused."

@@ -190,6 +190,12 @@ so the absence is asserted rather than assumed."
                  agent-repl-create-worktree-workspace
                  agent-repl-workspace-merge-current-into-source
                  agent-repl-output-next-prompt
+                 ;; The kind-specific feed selection steps gave way to the
+                 ;; one turn-boundary walk (`M-s-j' / `M-s-k').
+                 agent-repl-response-select-prev
+                 agent-repl-response-select-next
+                 agent-repl-prompt-select-prev
+                 agent-repl-prompt-select-next
                  agent-repl-sidebar-nav-next
                  ;; The jump-chord INSTALLER died with client-authored
                  ;; ordering and stays dead: the numerals are a keymap of

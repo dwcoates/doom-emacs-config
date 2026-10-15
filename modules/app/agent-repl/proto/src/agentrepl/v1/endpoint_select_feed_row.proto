@@ -8,8 +8,8 @@
 // disagree. The result is pushed to the webapp on the feed watch and to
 // Emacs on the host workspace watch, and acked here.
 //
-// Emacs steps the selection (`C-p` / `C-n` through final responses, `C-S-p` /
-// `C-S-n` through prompts) and clears it (escape twice); the webapp selects the
+// Emacs steps the selection (`M-s-j` / `M-s-k` through the prompts and final
+// responses together) and clears it (escape twice); the webapp selects the
 // bubble the reader clicked, clears it (a click on the selected bubble or on
 // the feed's background) and ends it when the selected row has left the
 // viewport entirely.
@@ -24,8 +24,10 @@ import "frontend/v1/feed.proto";
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Which way a step moves along the selectable rows. With nothing selected,
-// OLDER starts at the newest row and NEWER at the oldest; from a row of the
-// other kind, both start at the newest. OLDER wraps past the oldest; NEWER
+// OLDER starts at the newest row and NEWER at the oldest; from a selected row
+// the step does not walk (a clicked bubble that is neither a prompt a
+// rollback can reach nor a final response), both start at the newest. OLDER
+// wraps past the oldest; NEWER
 // past the newest ends the selection (success `none`, pushed as
 // frontend.v1.FeedSelectionNoneReturnToTail), so the next NEWER rolls round
 // to the oldest.
@@ -44,14 +46,16 @@ message SelectFeedRowRequest {
   workspace.v1.WorkspaceRef workspace = 1;
   // What to do to the selection. Exactly one is set; an unset move is
   // refused as InvalidArgument.
+  reserved 2, 3;
+  reserved "response", "prompt";
   oneof move {
-    // Step through the final responses. A selected prompt is replaced by the
-    // newest final response.
-    SelectFeedRowStep response = 2;
-    // Step through the prompts a rollback can reach: the main agent's prompts
-    // of the current vendor conversation, after its last compaction or clear.
-    // A selected response is replaced by the newest such prompt.
-    SelectFeedRowStep prompt = 3;
+    // Step through the turn boundaries, in feed order: the prompts a rollback
+    // can reach (the main agent's prompts of the current vendor conversation,
+    // after its last compaction or clear) and the final responses, walked as
+    // ONE sequence. Each row is selected as its own kind, so a selected
+    // prompt arms the rollback keys and a selected final response is the one
+    // the next prompt replies to.
+    SelectFeedRowStep turn_boundary = 7;
     // The user dismissed the selection. The push returns the webapp to the
     // tail (frontend.v1.FeedSelectionNoneReturnToTail).
     SelectFeedRowClear clear = 4;
@@ -76,7 +80,7 @@ message SelectFeedRowBubble {
   frontend.v1.FeedId row = 1;
 }
 
-// One step along the selectable rows of one kind.
+// One step along the turn boundaries.
 message SelectFeedRowStep {
   // Which way to step.
   SelectFeedRowDirection direction = 1;
@@ -106,7 +110,7 @@ message SelectFeedRowSuccess {
   oneof outcome {
     // A row is selected.
     SelectFeedRowSuccessSelected selected = 1;
-    // A step found no row of its kind to select (no final response yet, or no
+    // A step found no turn boundary to select (no final response yet and no
     // prompt a rollback can reach); nothing is selected. The caller says so,
     // so the gesture is not silent.
     SelectFeedRowSuccessNothingSelectable nothing_selectable = 2;
@@ -120,7 +124,7 @@ message SelectFeedRowSuccessSelected {
   // The selection in force.
   frontend.v1.FeedSelection selection = 1;
 }
-// A step found nothing of its kind to select.
+// A step found no turn boundary to select.
 message SelectFeedRowSuccessNothingSelectable {}
 // Nothing is selected after the move.
 message SelectFeedRowSuccessNone {}

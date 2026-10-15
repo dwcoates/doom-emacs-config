@@ -999,7 +999,7 @@ tag inside the struct body rather than to the next line."
 (defmacro agent-repl-test--recording-popups (&rest body)
   "Run BODY with `agent-repl-popup-show' recorded rather than performed.
 Every buffer it is handed lands in `agent-repl-test--popups-shown', and it
-answers the selected window as a working popup does.  The popup itself is
+answers the selected window showing that buffer, as a working popup does.  The popup itself is
 popup.el's subject (test-popup.el); batch Emacs has no frame to show one
 in, so every other suite records at this boundary."
   (declare (indent 0))
@@ -1007,6 +1007,7 @@ in, so every other suite records at this boundary."
      (cl-letf (((symbol-function 'agent-repl-popup-show)
                 (lambda (buffer)
                   (push buffer agent-repl-test--popups-shown)
+                  (set-window-buffer (selected-window) buffer)
                   (selected-window))))
        ,@body)))
 

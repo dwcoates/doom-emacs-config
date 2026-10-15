@@ -13,7 +13,7 @@ import (
 // The feed resolver's read side for bubble selection (reply-to mode). The
 // resolver draws every row, so it owns which rows are SELECTABLE (stamped on the
 // row itself, FeedRow.selectable), what each selectable row SAYS, and the
-// ordered FINAL responses the composer's `C-p`/`C-n` walk. The SELECTION
+// ordered turn boundaries the composer's `M-s-j`/`M-s-k` walk. The SELECTION
 // CURSOR itself (which row is selected, and its pushes) is the server's: this
 // package answers only what can be selected and what it said.
 
@@ -130,6 +130,64 @@ func (r *resolver) FinalResponses(ws ids.WorkspaceID) []*frontendv1.FeedId {
 	}
 	out := make([]*frontendv1.FeedId, len(s.finalAnswers))
 	copy(out, s.finalAnswers)
+	return out
+}
+
+// TurnBoundaryKind is which end of a turn a TurnBoundary row is.
+type TurnBoundaryKind int
+
+const (
+	// TurnBoundaryPrompt is a prompt a rollback can reach: it opens a turn.
+	TurnBoundaryPrompt TurnBoundaryKind = iota
+	// TurnBoundaryResponse is a final response: it concludes a turn.
+	TurnBoundaryResponse
+)
+
+func (k TurnBoundaryKind) String() string {
+	if k == TurnBoundaryPrompt {
+		return "prompt"
+	}
+	return "response"
+}
+
+// TurnBoundary is one row the composer's turn-boundary step walks.
+type TurnBoundary struct {
+	// Row is the root-feed row.
+	Row *frontendv1.FeedId
+	// Kind is whether the row opens its turn or concludes it.
+	Kind TurnBoundaryKind
+}
+
+// TurnBoundaries answers the prompts a rollback can reach (RollbackPrompts)
+// and the final responses (FinalResponses) as ONE sequence, oldest first, in
+// the root feed's own drawn order, so the two kinds interleave exactly as the
+// reader sees them. A final response that is no longer drawn on the root feed
+// is not a row a reader can step to, so the walk leaves it out. Empty is
+// "nothing to step to", never an error.
+func (r *resolver) TurnBoundaries(ws ids.WorkspaceID) []TurnBoundary {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return nil
+	}
+	f, ok := s.feeds[r.feedKey(ws, feedid.Feed{Root: true})]
+	if !ok {
+		return nil
+	}
+	kinds := make(map[string]TurnBoundaryKind, len(s.finalAnswers))
+	for _, id := range s.finalAnswers {
+		kinds[id.GetValue()] = TurnBoundaryResponse
+	}
+	for _, prompt := range r.rollbackPrompts(s) {
+		kinds[prompt.row.GetValue()] = TurnBoundaryPrompt
+	}
+	var out []TurnBoundary
+	for _, id := range f.order {
+		if kind, ok := kinds[id]; ok {
+			out = append(out, TurnBoundary{Row: f.rows[id].GetId(), Kind: kind})
+		}
+	}
 	return out
 }
 

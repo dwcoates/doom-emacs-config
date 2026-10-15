@@ -49,8 +49,9 @@ response, and the other way round.
 
 | Key (input window) | What it does |
 | --- | --- |
-| `C-p` / `C-n` (command mode) | Select the previous / next final response. From no selection, `C-p` starts at the newest and `C-n` at the oldest. `C-p` wraps past the oldest. `C-n` past the newest clears the selection and returns the feed to the newest row. |
-| `C-S-p` / `C-S-n` | Select the previous / next prompt you can roll back to. From no selection, `C-S-p` starts at the newest and `C-S-n` at the oldest. `C-S-p` wraps past the oldest. `C-S-n` past the newest clears the selection and returns the feed to the newest row. |
+| `M-s-k` / `M-s-j` | Select the previous / next prompt or final response, moving up / down the feed. The walk covers the prompts you can roll back to and the final responses together, in feed order. From no selection, `M-s-k` starts at the newest and `M-s-j` at the oldest. `M-s-k` wraps past the oldest. `M-s-j` past the newest clears the selection and returns the feed to the newest row. |
+| `RET` | With a prompt selected, roll the conversation back to just before it, keeping files (as `C-c C-RET`). With any other bubble selected, send the input window as a reply to it. |
+| `C-s`, or `/` / `?` (command mode) | Search the selected bubble. It opens read-only in a popup, and the search runs there. |
 | `ESC` `ESC` (command mode) | Clear the selection. The first escape only warns. The feed returns to the newest row. |
 
 - Clicking the feed's background also clears the selection.
@@ -228,7 +229,7 @@ The expanded footer lists the running background agents, shells and monitors, on
 
 ## Replying to a response
 
-Select a final response with `C-p` / `C-n` and send a prompt with `RET`. The
+Select a final response with `M-s-k` / `M-s-j` and send a prompt with `RET`. The
 agent receives a copy of that response ahead of your prompt, so it knows what
 you are replying to. Sending ends the selection.
 
@@ -236,10 +237,10 @@ you are replying to. Sending ends the selection.
 
 | Key (input window) | With a prompt selected | With nothing selected |
 | --- | --- | --- |
+| `RET` | Roll the conversation back to just before the selected prompt, keeping files. | Send. |
 | `C-c C-RET` | Roll the conversation back to just before the selected prompt. | Roll back the latest prompt: this cancels it. |
 | `C-c M-RET` | The same, and also restore files to their state when that prompt was sent. | The same for the latest prompt, with files. |
 
-- `RET` still sends.
 - **`C-c C-k` pressed again, with no turn running, rolls back too.**
   - When nothing has answered the latest prompt in the feed yet, that prompt is rolled back at once, with no question, and its words land in the input window.
     - A prompt counts as answered once a response bubble or a purple-titled card has landed after the prompt.

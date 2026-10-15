@@ -286,6 +286,10 @@ type Resolver interface {
 	// its prompt selection over this set. Empty is "nothing to roll back to",
 	// never an error.
 	RollbackPrompts(ws ids.WorkspaceID) []*frontendv1.FeedId
+	// TurnBoundaries answers RollbackPrompts and FinalResponses as one
+	// sequence in root-feed order, oldest first, each row with its kind. The
+	// server walks the composer's turn-boundary step over this set.
+	TurnBoundaries(ws ids.WorkspaceID) []TurnBoundary
 	// RollbackTarget answers what rolling back to just before a prompt row
 	// drops — its turn and every later reachable turn — and the prompt as
 	// said; false when the row is not a prompt a rollback can reach.

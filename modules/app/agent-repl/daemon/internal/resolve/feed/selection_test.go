@@ -525,3 +525,91 @@ func TestSelectableMarkdownMissesAStreamingResponse(t *testing.T) {
 		t.Fatalf("a streaming response read as selectable")
 	}
 }
+
+// TestTurnBoundaries pins the composer's turn-boundary walk: rollback prompts
+// and final responses as one sequence in drawn root-feed order, each with its
+// kind.
+func TestTurnBoundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		draw func(h *harness)
+		want func(h *harness) []TurnBoundary
+	}{
+		{
+			name: "a workspace with no rows has no boundaries",
+			draw: func(*harness) {},
+			want: func(*harness) []TurnBoundary { return nil },
+		},
+		{
+			name: "prompts and final responses interleave in feed order",
+			draw: func(h *harness) {
+				h.deliverPromptAt("t1", "question t1", 1_000)
+				h.concludeAnswer("t1", "u-t1", "answer t1")
+				h.deliverPromptAt("t2", "question t2", 1_100)
+				h.concludeAnswer("t2", "u-t2", "answer t2")
+			},
+			want: func(h *harness) []TurnBoundary {
+				finals := h.resolver.FinalResponses(testWorkspace)
+				return []TurnBoundary{
+					{Row: promptRowID("t1"), Kind: TurnBoundaryPrompt},
+					{Row: finals[0], Kind: TurnBoundaryResponse},
+					{Row: promptRowID("t2"), Kind: TurnBoundaryPrompt},
+					{Row: finals[1], Kind: TurnBoundaryResponse},
+				}
+			},
+		},
+		{
+			name: "a turn with no final response yet contributes only its prompt",
+			draw: func(h *harness) {
+				h.deliverPromptAt("t1", "question t1", 1_000)
+				h.concludeAnswer("t1", "u-t1", "answer t1")
+				h.deliverPromptAt("t2", "question t2", 1_100)
+			},
+			want: func(h *harness) []TurnBoundary {
+				finals := h.resolver.FinalResponses(testWorkspace)
+				return []TurnBoundary{
+					{Row: promptRowID("t1"), Kind: TurnBoundaryPrompt},
+					{Row: finals[0], Kind: TurnBoundaryResponse},
+					{Row: promptRowID("t2"), Kind: TurnBoundaryPrompt},
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.draw(h)
+			want := tc.want(h)
+
+			// Act.
+			got := h.resolver.TurnBoundaries(testWorkspace)
+
+			// Assert.
+			if len(got) != len(want) {
+				t.Fatalf("TurnBoundaries() = %v, want %v", got, want)
+			}
+			for i := range want {
+				if got[i].Row.GetValue() != want[i].Row.GetValue() || got[i].Kind != want[i].Kind {
+					t.Fatalf("TurnBoundaries()[%d] = (%s, %v), want (%s, %v)",
+						i, got[i].Row.GetValue(), got[i].Kind, want[i].Row.GetValue(), want[i].Kind)
+				}
+			}
+		})
+	}
+}
+
+// TestTurnBoundariesForAnUnknownWorkspaceAreEmpty pins that a workspace the
+// resolver never saw answers no boundaries, never an error.
+func TestTurnBoundariesForAnUnknownWorkspaceAreEmpty(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	got := h.resolver.TurnBoundaries(ids.WorkspaceID("never-seen"))
+
+	// Assert.
+	if len(got) != 0 {
+		t.Fatalf("TurnBoundaries() = %v, want none", got)
+	}
+}

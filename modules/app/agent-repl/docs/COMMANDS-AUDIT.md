@@ -54,10 +54,10 @@ Findings are collected at the end, in "Audit findings".
 
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
-| `agent-repl-response-select-prev` | Select the previous final response, to reply to. | `C-p` (normal) | composer | missing |
-| `agent-repl-response-select-next` | Select the next final response, to reply to. | `C-n` (normal) | composer | missing |
-| `agent-repl-prompt-select-prev` | Select the previous prompt a rollback can reach. | `C-S-p` | composer | works |
-| `agent-repl-prompt-select-next` | Select the next prompt a rollback can reach. | `C-S-n` | composer | works |
+| `agent-repl-turn-boundary-select-prev` | Select the previous prompt or final response, moving up the feed. | `M-s-k` | composer | works |
+| `agent-repl-turn-boundary-select-next` | Select the next prompt or final response, moving down the feed. | `M-s-j` | composer | works |
+| `agent-repl-input-selection-return` | Roll back to the selected prompt, or reply to any other selected bubble. | `RET` (normal, insert) | composer with a selection | works |
+| `agent-repl-response-search-buffer` | Search the selected bubble's markdown with what `C-s` runs. | `C-s` (normal, insert) | composer with a selection | works |
 | `agent-repl-input-selection-escape` | Clear the feed selection (first press warns). | `<escape>` (normal) | composer | missing |
 | `agent-repl-response-search-forward` | Search the selected bubble's markdown forward. | `/` (normal) | composer with a selection | missing |
 | `agent-repl-response-search-backward` | Search the selected bubble's markdown backward. | `?` (normal) | composer with a selection | missing |

@@ -430,8 +430,8 @@ func (*FeedSelectionNoneStay) Descriptor() ([]byte, []int) {
 }
 
 // A selected final response: the next prompt sent is a reply to it, and the
-// daemon prepends a copy of it to that prompt. `C-p`/`C-n` in the composer
-// step through these.
+// daemon prepends a copy of it to that prompt. `M-s-j`/`M-s-k` in the
+// composer step through these together with the prompts a rollback can reach.
 type FeedSelectionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The selected final-response row, on the root feed.

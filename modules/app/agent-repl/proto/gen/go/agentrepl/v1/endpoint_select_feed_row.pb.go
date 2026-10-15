@@ -8,8 +8,8 @@
 // disagree. The result is pushed to the webapp on the feed watch and to
 // Emacs on the host workspace watch, and acked here.
 //
-// Emacs steps the selection (`C-p` / `C-n` through final responses, `C-S-p` /
-// `C-S-n` through prompts) and clears it (escape twice); the webapp selects the
+// Emacs steps the selection (`M-s-j` / `M-s-k` through the prompts and final
+// responses together) and clears it (escape twice); the webapp selects the
 // bubble the reader clicked, clears it (a click on the selected bubble or on
 // the feed's background) and ends it when the selected row has left the
 // viewport entirely.
@@ -40,8 +40,10 @@ const (
 )
 
 // Which way a step moves along the selectable rows. With nothing selected,
-// OLDER starts at the newest row and NEWER at the oldest; from a row of the
-// other kind, both start at the newest. OLDER wraps past the oldest; NEWER
+// OLDER starts at the newest row and NEWER at the oldest; from a selected row
+// the step does not walk (a clicked bubble that is neither a prompt a
+// rollback can reach nor a final response), both start at the newest. OLDER
+// wraps past the oldest; NEWER
 // past the newest ends the selection (success `none`, pushed as
 // frontend.v1.FeedSelectionNoneReturnToTail), so the next NEWER rolls round
 // to the oldest.
@@ -102,13 +104,9 @@ type SelectFeedRowRequest struct {
 	// The workspace whose selection to change — the daemon-minted ref, echoed
 	// verbatim like every per-workspace request.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// What to do to the selection. Exactly one is set; an unset move is
-	// refused as InvalidArgument.
-	//
 	// Types that are valid to be assigned to Move:
 	//
-	//	*SelectFeedRowRequest_Response
-	//	*SelectFeedRowRequest_Prompt
+	//	*SelectFeedRowRequest_TurnBoundary
 	//	*SelectFeedRowRequest_Clear
 	//	*SelectFeedRowRequest_LeftView
 	//	*SelectFeedRowRequest_Bubble
@@ -161,19 +159,10 @@ func (x *SelectFeedRowRequest) GetMove() isSelectFeedRowRequest_Move {
 	return nil
 }
 
-func (x *SelectFeedRowRequest) GetResponse() *SelectFeedRowStep {
+func (x *SelectFeedRowRequest) GetTurnBoundary() *SelectFeedRowStep {
 	if x != nil {
-		if x, ok := x.Move.(*SelectFeedRowRequest_Response); ok {
-			return x.Response
-		}
-	}
-	return nil
-}
-
-func (x *SelectFeedRowRequest) GetPrompt() *SelectFeedRowStep {
-	if x != nil {
-		if x, ok := x.Move.(*SelectFeedRowRequest_Prompt); ok {
-			return x.Prompt
+		if x, ok := x.Move.(*SelectFeedRowRequest_TurnBoundary); ok {
+			return x.TurnBoundary
 		}
 	}
 	return nil
@@ -210,17 +199,14 @@ type isSelectFeedRowRequest_Move interface {
 	isSelectFeedRowRequest_Move()
 }
 
-type SelectFeedRowRequest_Response struct {
-	// Step through the final responses. A selected prompt is replaced by the
-	// newest final response.
-	Response *SelectFeedRowStep `protobuf:"bytes,2,opt,name=response,proto3,oneof"`
-}
-
-type SelectFeedRowRequest_Prompt struct {
-	// Step through the prompts a rollback can reach: the main agent's prompts
-	// of the current vendor conversation, after its last compaction or clear.
-	// A selected response is replaced by the newest such prompt.
-	Prompt *SelectFeedRowStep `protobuf:"bytes,3,opt,name=prompt,proto3,oneof"`
+type SelectFeedRowRequest_TurnBoundary struct {
+	// Step through the turn boundaries, in feed order: the prompts a rollback
+	// can reach (the main agent's prompts of the current vendor conversation,
+	// after its last compaction or clear) and the final responses, walked as
+	// ONE sequence. Each row is selected as its own kind, so a selected
+	// prompt arms the rollback keys and a selected final response is the one
+	// the next prompt replies to.
+	TurnBoundary *SelectFeedRowStep `protobuf:"bytes,7,opt,name=turn_boundary,json=turnBoundary,proto3,oneof"`
 }
 
 type SelectFeedRowRequest_Clear struct {
@@ -247,9 +233,7 @@ type SelectFeedRowRequest_Bubble struct {
 	Bubble *SelectFeedRowBubble `protobuf:"bytes,6,opt,name=bubble,proto3,oneof"`
 }
 
-func (*SelectFeedRowRequest_Response) isSelectFeedRowRequest_Move() {}
-
-func (*SelectFeedRowRequest_Prompt) isSelectFeedRowRequest_Move() {}
+func (*SelectFeedRowRequest_TurnBoundary) isSelectFeedRowRequest_Move() {}
 
 func (*SelectFeedRowRequest_Clear) isSelectFeedRowRequest_Move() {}
 
@@ -303,7 +287,7 @@ func (x *SelectFeedRowBubble) GetRow() *v11.FeedId {
 	return nil
 }
 
-// One step along the selectable rows of one kind.
+// One step along the turn boundaries.
 type SelectFeedRowStep struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which way to step.
@@ -605,7 +589,7 @@ type SelectFeedRowSuccess_Selected struct {
 }
 
 type SelectFeedRowSuccess_NothingSelectable struct {
-	// A step found no row of its kind to select (no final response yet, or no
+	// A step found no turn boundary to select (no final response yet and no
 	// prompt a rollback can reach); nothing is selected. The caller says so,
 	// so the gesture is not silent.
 	NothingSelectable *SelectFeedRowSuccessNothingSelectable `protobuf:"bytes,2,opt,name=nothing_selectable,json=nothingSelectable,proto3,oneof"`
@@ -669,7 +653,7 @@ func (x *SelectFeedRowSuccessSelected) GetSelection() *v11.FeedSelection {
 	return nil
 }
 
-// A step found nothing of its kind to select.
+// A step found no turn boundary to select.
 type SelectFeedRowSuccessNothingSelectable struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1099,15 +1083,14 @@ var File_agentrepl_v1_endpoint_select_feed_row_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_select_feed_row_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_select_feed_row.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\x8d\x03\n" +
+	"+agentrepl/v1/endpoint_select_feed_row.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\xf9\x02\n" +
 	"\x14SelectFeedRowRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12=\n" +
-	"\bresponse\x18\x02 \x01(\v2\x1f.agentrepl.v1.SelectFeedRowStepH\x00R\bresponse\x129\n" +
-	"\x06prompt\x18\x03 \x01(\v2\x1f.agentrepl.v1.SelectFeedRowStepH\x00R\x06prompt\x128\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12F\n" +
+	"\rturn_boundary\x18\a \x01(\v2\x1f.agentrepl.v1.SelectFeedRowStepH\x00R\fturnBoundary\x128\n" +
 	"\x05clear\x18\x04 \x01(\v2 .agentrepl.v1.SelectFeedRowClearH\x00R\x05clear\x12B\n" +
 	"\tleft_view\x18\x05 \x01(\v2#.agentrepl.v1.SelectFeedRowLeftViewH\x00R\bleftView\x12;\n" +
 	"\x06bubble\x18\x06 \x01(\v2!.agentrepl.v1.SelectFeedRowBubbleH\x00R\x06bubbleB\x06\n" +
-	"\x04move\"<\n" +
+	"\x04moveJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\bresponseR\x06prompt\"<\n" +
 	"\x13SelectFeedRowBubble\x12%\n" +
 	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"W\n" +
 	"\x11SelectFeedRowStep\x12B\n" +
@@ -1186,31 +1169,30 @@ var file_agentrepl_v1_endpoint_select_feed_row_proto_goTypes = []any{
 }
 var file_agentrepl_v1_endpoint_select_feed_row_proto_depIdxs = []int32{
 	17, // 0: agentrepl.v1.SelectFeedRowRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	3,  // 1: agentrepl.v1.SelectFeedRowRequest.response:type_name -> agentrepl.v1.SelectFeedRowStep
-	3,  // 2: agentrepl.v1.SelectFeedRowRequest.prompt:type_name -> agentrepl.v1.SelectFeedRowStep
-	4,  // 3: agentrepl.v1.SelectFeedRowRequest.clear:type_name -> agentrepl.v1.SelectFeedRowClear
-	5,  // 4: agentrepl.v1.SelectFeedRowRequest.left_view:type_name -> agentrepl.v1.SelectFeedRowLeftView
-	2,  // 5: agentrepl.v1.SelectFeedRowRequest.bubble:type_name -> agentrepl.v1.SelectFeedRowBubble
-	18, // 6: agentrepl.v1.SelectFeedRowBubble.row:type_name -> frontend.v1.FeedId
-	0,  // 7: agentrepl.v1.SelectFeedRowStep.direction:type_name -> agentrepl.v1.SelectFeedRowDirection
-	18, // 8: agentrepl.v1.SelectFeedRowLeftView.row:type_name -> frontend.v1.FeedId
-	7,  // 9: agentrepl.v1.SelectFeedRowResponse.success:type_name -> agentrepl.v1.SelectFeedRowSuccess
-	11, // 10: agentrepl.v1.SelectFeedRowResponse.error:type_name -> agentrepl.v1.SelectFeedRowError
-	8,  // 11: agentrepl.v1.SelectFeedRowSuccess.selected:type_name -> agentrepl.v1.SelectFeedRowSuccessSelected
-	9,  // 12: agentrepl.v1.SelectFeedRowSuccess.nothing_selectable:type_name -> agentrepl.v1.SelectFeedRowSuccessNothingSelectable
-	10, // 13: agentrepl.v1.SelectFeedRowSuccess.none:type_name -> agentrepl.v1.SelectFeedRowSuccessNone
-	19, // 14: agentrepl.v1.SelectFeedRowSuccessSelected.selection:type_name -> frontend.v1.FeedSelection
-	13, // 15: agentrepl.v1.SelectFeedRowError.unknown_workspace:type_name -> agentrepl.v1.SelectFeedRowUnknownWorkspace
-	14, // 16: agentrepl.v1.SelectFeedRowError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectFeedRowWorkspaceRefMismatch
-	15, // 17: agentrepl.v1.SelectFeedRowError.transferring_away:type_name -> agentrepl.v1.SelectFeedRowTransferringAway
-	16, // 18: agentrepl.v1.SelectFeedRowError.not_yet_adopted:type_name -> agentrepl.v1.SelectFeedRowNotYetAdopted
-	12, // 19: agentrepl.v1.SelectFeedRowError.not_selectable:type_name -> agentrepl.v1.SelectFeedRowNotSelectable
-	18, // 20: agentrepl.v1.SelectFeedRowNotSelectable.row:type_name -> frontend.v1.FeedId
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	3,  // 1: agentrepl.v1.SelectFeedRowRequest.turn_boundary:type_name -> agentrepl.v1.SelectFeedRowStep
+	4,  // 2: agentrepl.v1.SelectFeedRowRequest.clear:type_name -> agentrepl.v1.SelectFeedRowClear
+	5,  // 3: agentrepl.v1.SelectFeedRowRequest.left_view:type_name -> agentrepl.v1.SelectFeedRowLeftView
+	2,  // 4: agentrepl.v1.SelectFeedRowRequest.bubble:type_name -> agentrepl.v1.SelectFeedRowBubble
+	18, // 5: agentrepl.v1.SelectFeedRowBubble.row:type_name -> frontend.v1.FeedId
+	0,  // 6: agentrepl.v1.SelectFeedRowStep.direction:type_name -> agentrepl.v1.SelectFeedRowDirection
+	18, // 7: agentrepl.v1.SelectFeedRowLeftView.row:type_name -> frontend.v1.FeedId
+	7,  // 8: agentrepl.v1.SelectFeedRowResponse.success:type_name -> agentrepl.v1.SelectFeedRowSuccess
+	11, // 9: agentrepl.v1.SelectFeedRowResponse.error:type_name -> agentrepl.v1.SelectFeedRowError
+	8,  // 10: agentrepl.v1.SelectFeedRowSuccess.selected:type_name -> agentrepl.v1.SelectFeedRowSuccessSelected
+	9,  // 11: agentrepl.v1.SelectFeedRowSuccess.nothing_selectable:type_name -> agentrepl.v1.SelectFeedRowSuccessNothingSelectable
+	10, // 12: agentrepl.v1.SelectFeedRowSuccess.none:type_name -> agentrepl.v1.SelectFeedRowSuccessNone
+	19, // 13: agentrepl.v1.SelectFeedRowSuccessSelected.selection:type_name -> frontend.v1.FeedSelection
+	13, // 14: agentrepl.v1.SelectFeedRowError.unknown_workspace:type_name -> agentrepl.v1.SelectFeedRowUnknownWorkspace
+	14, // 15: agentrepl.v1.SelectFeedRowError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectFeedRowWorkspaceRefMismatch
+	15, // 16: agentrepl.v1.SelectFeedRowError.transferring_away:type_name -> agentrepl.v1.SelectFeedRowTransferringAway
+	16, // 17: agentrepl.v1.SelectFeedRowError.not_yet_adopted:type_name -> agentrepl.v1.SelectFeedRowNotYetAdopted
+	12, // 18: agentrepl.v1.SelectFeedRowError.not_selectable:type_name -> agentrepl.v1.SelectFeedRowNotSelectable
+	18, // 19: agentrepl.v1.SelectFeedRowNotSelectable.row:type_name -> frontend.v1.FeedId
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_select_feed_row_proto_init() }
@@ -1219,8 +1201,7 @@ func file_agentrepl_v1_endpoint_select_feed_row_proto_init() {
 		return
 	}
 	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[0].OneofWrappers = []any{
-		(*SelectFeedRowRequest_Response)(nil),
-		(*SelectFeedRowRequest_Prompt)(nil),
+		(*SelectFeedRowRequest_TurnBoundary)(nil),
 		(*SelectFeedRowRequest_Clear)(nil),
 		(*SelectFeedRowRequest_LeftView)(nil),
 		(*SelectFeedRowRequest_Bubble)(nil),

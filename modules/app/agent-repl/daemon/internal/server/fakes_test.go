@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1031,9 +1033,9 @@ type fakeFeed struct {
 	// olderKeys are the oldest held rows' keys OlderPage was asked above, in
 	// order.
 	olderKeys []string
-	// finals is the ordered selectable final-response set SelectFeedRow's
-	// response step walks; prompts is the ordered selectable rollback-prompt
-	// set its prompt step walks; markdown is each selectable row's copied
+	// finals is the ordered selectable final-response set and prompts the
+	// ordered selectable rollback-prompt set, which TurnBoundaries merges for
+	// SelectFeedRow's turn-boundary step; markdown is each selectable row's copied
 	// markdown, keyed by FeedId value, for the reply-prefix path.
 	finals   []*frontendv1.FeedId
 	prompts  []*frontendv1.FeedId
@@ -1132,6 +1134,23 @@ func (f *fakeFeed) FinalResponses(ids.WorkspaceID) []*frontendv1.FeedId {
 
 func (f *fakeFeed) RollbackPrompts(ids.WorkspaceID) []*frontendv1.FeedId {
 	return f.prompts
+}
+
+// TurnBoundaries answers prompts and finals as one walk. The fake's feed order
+// is the rows' FeedId value order, so a test spells the interleaving it wants
+// in its row names.
+func (f *fakeFeed) TurnBoundaries(ids.WorkspaceID) []feed.TurnBoundary {
+	out := make([]feed.TurnBoundary, 0, len(f.prompts)+len(f.finals))
+	for _, row := range f.prompts {
+		out = append(out, feed.TurnBoundary{Row: row, Kind: feed.TurnBoundaryPrompt})
+	}
+	for _, row := range f.finals {
+		out = append(out, feed.TurnBoundary{Row: row, Kind: feed.TurnBoundaryResponse})
+	}
+	slices.SortStableFunc(out, func(a, b feed.TurnBoundary) int {
+		return strings.Compare(a.Row.GetValue(), b.Row.GetValue())
+	})
+	return out
 }
 
 func (f *fakeFeed) SetMergeFold(_ ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool {

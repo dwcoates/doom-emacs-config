@@ -186,10 +186,8 @@ func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connec
 		return err
 	}
 	switch move := req.GetMove().(type) {
-	case *agentreplv1.SelectFeedRowRequest_Response:
-		return validateSelectFeedRowStep("move.response", move.Response)
-	case *agentreplv1.SelectFeedRowRequest_Prompt:
-		return validateSelectFeedRowStep("move.prompt", move.Prompt)
+	case *agentreplv1.SelectFeedRowRequest_TurnBoundary:
+		return validateSelectFeedRowStep("move.turn_boundary", move.TurnBoundary)
 	case *agentreplv1.SelectFeedRowRequest_Clear:
 		return nil
 	case *agentreplv1.SelectFeedRowRequest_LeftView:

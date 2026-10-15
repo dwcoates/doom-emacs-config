@@ -90,7 +90,7 @@ func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 		Turn:        "turn-9",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("select the response: %v", err)
 	}
 	req := submitRequest()
@@ -151,13 +151,13 @@ func TestSubmitPromptQuotesASelectedResponseProvedInterimSinceItsSelection(t *te
 func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.Feed.finals = feedIDs("resp-older", "resp-gone")
+	h.Feed.finals = feedIDs("resp-1-older", "resp-2-gone")
 	// The resolver could read the row when it was selected, and no longer can.
 	h.Feed.unreadable = map[string]bool{}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("select the response: %v", err)
 	}
-	h.Feed.unreadable["resp-gone"] = true
+	h.Feed.unreadable["resp-2-gone"] = true
 
 	// Act.
 	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
@@ -172,15 +172,15 @@ func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 		t.Fatalf("the prompt was delivered despite the unresolvable reference: %v", h.Prompts.lastSaid)
 	}
 
-	// The selection is KEPT, not cleared: OLDER from the held resp-gone lands
-	// on resp-older, while OLDER from nothing would restart at the newest
-	// (resp-gone again).
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+	// The selection is KEPT, not cleared: OLDER from the held resp-2-gone lands
+	// on resp-1-older, while OLDER from nothing would restart at the newest
+	// (resp-2-gone again).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
-	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-older" {
-		t.Fatalf("selected response = %q, want resp-older (the held resp-gone kept)", got)
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-1-older" {
+		t.Fatalf("selected response = %q, want resp-1-older (the held resp-2-gone kept)", got)
 	}
 }
 
@@ -192,15 +192,15 @@ func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 func TestSubmitPromptEndsTheSelectionAfterConsumingTheReference(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.Feed.finals = feedIDs("resp-old", "resp-new")
-	h.Feed.markdown = map[string]string{"resp-new": "prior answer"}
+	h.Feed.finals = feedIDs("resp-1-old", "resp-2-new")
+	h.Feed.markdown = map[string]string{"resp-2-new": "prior answer"}
 	h.Prompts.outcome = prompthandler.Outcome{
 		Recognition: prompthandler.RecognizedNone,
 		Turn:        "turn-10",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
 	// Seed the selection at the most recent (NEWER from none).
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
 
@@ -211,12 +211,12 @@ func TestSubmitPromptEndsTheSelectionAfterConsumingTheReference(t *testing.T) {
 
 	// Assert: an OLDER now restarts at the most recent (ended), rather than
 	// stepping to the oldest (which a surviving selection would do).
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
-	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-new" {
-		t.Fatalf("selected = %q, want resp-new (an ended selection restarts at the most recent)", got)
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-2-new" {
+		t.Fatalf("selected = %q, want resp-2-new (an ended selection restarts at the most recent)", got)
 	}
 }
 
@@ -234,7 +234,7 @@ func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T)
 		Turn:        "turn-11",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("seed a prompt selection: %v", err)
 	}
 	req := submitRequest()
@@ -252,7 +252,7 @@ func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T)
 	}
 	// Assert: the prompt selection ended (OLDER restarts at the most recent
 	// rather than stepping older from it).
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older)))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
@@ -760,10 +760,10 @@ func TestSubmitPromptNamesASettledAskByItsArm(t *testing.T) {
 func TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.Feed.finals = feedIDs("resp-old", "resp-new")
-	h.Feed.markdown = map[string]string{"resp-new": "prior answer"}
+	h.Feed.finals = feedIDs("resp-1-old", "resp-2-new")
+	h.Feed.markdown = map[string]string{"resp-2-new": "prior answer"}
 	h.Prompts.outcome = prompthandler.Outcome{Recognition: prompthandler.RecognizedAskAnswer}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
 
@@ -774,11 +774,11 @@ func TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer(t *testing.T) {
 
 	// Assert: an OLDER from a surviving selection at the most recent steps to
 	// the oldest (from nothing it would restart at the most recent).
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
-	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-old" {
-		t.Fatalf("selected = %q, want resp-old (the selection survived and stepped older)", got)
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-1-old" {
+		t.Fatalf("selected = %q, want resp-1-old (the selection survived and stepped older)", got)
 	}
 }

@@ -168,10 +168,10 @@ func TestPlanRollbackChoosesTheSelectedPrompt(t *testing.T) {
 	h.Feed.rollbackTargetOK = true
 	h.Feed.rollbackTarget = feed.RollbackTarget{Turns: []ids.TurnID{"t1"}, Said: said("x")}
 	// Seed the newest (p2), then step OLDER onto p1: the selection held is p1.
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("seed the newest prompt: %v", err)
 	}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("step onto p1: %v", err)
 	}
 
@@ -566,11 +566,11 @@ func TestRollBackSuccessWithASelectedPromptEndsTheSelection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("seed the newest prompt: %v", err)
 	}
 	receiveSelection(t, stream)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("step onto p1: %v", err)
 	}
 	receiveSelection(t, stream)

@@ -515,7 +515,7 @@ func TestHostStreamReceivesTheSelectionByKind(t *testing.T) {
 	}
 
 	// Act.
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(newer))); err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	push := receiveHostEvent(t, stream)
@@ -542,7 +542,7 @@ func TestHostStreamReceivesAPromptSelection(t *testing.T) {
 	}
 
 	// Act.
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(newer))); err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	push := receiveHostEvent(t, stream)
@@ -561,7 +561,7 @@ func TestHostStreamReplaysTheSelectionInForceToALateSubscriber(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a", "b", "c")
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(newer))); err != nil {
 		t.Fatalf("seed a selection before any host stream opens: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

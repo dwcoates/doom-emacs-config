@@ -433,6 +433,16 @@ test runs next."
     (agent-repl-test--recording-popups
       (should (eq (agent-repl-popup-show (current-buffer)) (selected-window))))))
 
+(ert-deftest agent-repl-test-helpers-recording-popups-shows-the-buffer ()
+  "The window the recorded popup answers shows the buffer it was handed."
+  (let ((buffer (generate-new-buffer " *popup-shown*"))
+        (before (window-buffer (selected-window))))
+    (unwind-protect
+        (agent-repl-test--recording-popups
+          (should (eq (window-buffer (agent-repl-popup-show buffer)) buffer)))
+      (set-window-buffer (selected-window) before)
+      (kill-buffer buffer))))
+
 (ert-deftest agent-repl-test-helpers-recording-popups-starts-empty ()
   "Each use starts with nothing recorded, whatever an earlier use saw."
   (with-temp-buffer

@@ -325,7 +325,7 @@ func receiveSelection(
 }
 
 // TestWatchFeedPushesTheSelectionOnTheRootFeed pins that a SelectFeedRow
-// response step reaches the root feed's watch as a FeedSelection frame
+// turn-boundary step reaches the root feed's watch as a FeedSelection frame
 // carrying the selected row under the response arm.
 func TestWatchFeedPushesTheSelectionOnTheRootFeed(t *testing.T) {
 	// Arrange.
@@ -336,7 +336,7 @@ func TestWatchFeedPushesTheSelectionOnTheRootFeed(t *testing.T) {
 	stream := openRootWatch(t, h, ctx)
 
 	// Act.
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	sel := receiveSelection(t, stream)
@@ -357,7 +357,7 @@ func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
 	if got := receiveSelection(t, stream).GetResponse().GetRow().GetValue(); got != "c" {
