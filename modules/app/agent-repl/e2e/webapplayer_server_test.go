@@ -40,6 +40,15 @@ const wlResultPrefix = "WEBAPP-LAYER-RESULT "
 // WebappLayerSilence: the bound is on the silence between finished tests.
 const wlProgressPrefix = "WEBAPP-LAYER-PROGRESS "
 
+// wlCollectedPrefix marks the driver's line once vitest has collected the
+// requested area's file (COLLECTED_PREFIX in layer-server.mjs). It restarts the
+// run's WebappLayerSilence like a finished test does: collecting the file is
+// progress, and without the line the collect counted against the silence
+// before the first test. Under a full gate at a load where a driver's warm-up
+// took 30s, subfeeds' page made its first daemon call 19s into its run, and
+// the 20s bound fired before its first test could finish (2026-10-14).
+const wlCollectedPrefix = "WEBAPP-LAYER-COLLECTED"
+
 // wlReadyPrefix marks the driver's one line once its warm-up has run
 // (READY_PREFIX in layer-server.mjs). No area is sent before it, so no area's
 // WebappLayerTimeout carries vitest's cold transform and collect.
@@ -274,12 +283,22 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 	deadline := s.newTimer(s.silence)
 	defer deadline.Stop()
 	lastProgress, longestSilence, finished := started, time.Duration(0), 0
+	collected := "the file was never collected"
 	for {
 		select {
 		case line, ok := <-s.lines:
 			if !ok {
 				s.broken = fmt.Errorf("the layer driver exited during %s; last output:\n%s", file, strings.Join(tail, "\n"))
 				return s.broken
+			}
+			if line == wlCollectedPrefix {
+				collectedAfter := time.Since(started)
+				collected = fmt.Sprintf("the file was collected after %s", collectedAfter.Round(time.Millisecond))
+				t.Logf("e2e/webapp-layer: %s collected after %s", file, collectedAfter.Round(time.Millisecond))
+				longestSilence = max(longestSilence, time.Since(lastProgress))
+				lastProgress = time.Now()
+				deadline.Reset(s.silence)
+				continue
 			}
 			if strings.HasPrefix(line, wlProgressPrefix) {
 				finished++
@@ -310,7 +329,7 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 				tail = tail[len(tail)-wlTailLines:]
 			}
 		case <-deadline.C():
-			s.broken = errors.Join(fmt.Errorf("%s finished no test for %s (%d finished before); last output:\n%s", file, s.silence, finished, strings.Join(tail, "\n")), s.killGroup())
+			s.broken = errors.Join(fmt.Errorf("%s finished no test for %s (%d finished before), and %s; last output:\n%s", file, s.silence, finished, collected, strings.Join(tail, "\n")), s.killGroup())
 			return s.broken
 		}
 	}

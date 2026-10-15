@@ -162,3 +162,56 @@ func TestWlServerRunThatFinishesNoTestWithinTheBoundIsBroken(t *testing.T) {
 		t.Fatal("the driver was left usable after a run it gave up on")
 	}
 }
+
+func TestWlServerRunRestartsTheBoundOnceTheFileIsCollected(t *testing.T) {
+	// Arrange: the file collected, one finished test, then the answer.
+	s, lines, timer := wlFakeServer(t)
+	lines <- wlCollectedPrefix
+	lines <- wlProgressPrefix + "pass"
+	lines <- wlResultPrefix + `{"file":"a.layer.test.ts","ok":true,"tests":1}`
+
+	// Act
+	err := s.Run(t, "a.layer.test.ts", wlWorld{})
+
+	// Assert
+	if err != nil || s.broken != nil {
+		t.Fatalf("Run = %v (broken %v), want the run answered", err, s.broken)
+	}
+	if got := len(timer.resets); got != 2 {
+		t.Fatalf("the bound was restarted %d time(s), want once for the collect and once for the test", got)
+	}
+}
+
+func TestWlServerRunThatTimesOutNamesWhetherTheFileWasCollected(t *testing.T) {
+	cases := []struct {
+		name      string
+		collected bool
+		want      string
+	}{
+		{name: "never collected", want: "(0 finished before), and the file was never collected"},
+		{name: "collected", collected: true, want: "(0 finished before), and the file was collected after "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: silence, after the collect when the case has one.
+			s, lines, timer := wlFakeServer(t)
+			if tc.collected {
+				lines <- wlCollectedPrefix
+				go func() {
+					<-timer.resets
+					timer.c <- time.Now()
+				}()
+			} else {
+				timer.c <- time.Now()
+			}
+
+			// Act
+			err := s.Run(t, "a.layer.test.ts", wlWorld{})
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Run = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
