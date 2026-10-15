@@ -89,3 +89,20 @@ func TestVerifyMatrixRefusesAnUnknownCase(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestVerifyMatrixKeepsADeletedCaseReachingAnUnattributedMutant(t *testing.T) {
+	// Arrange: a timeout no test is named for, reached by a deleted case.
+	m := matrixFixture()
+	m.Mutants = []MutantResult{{Key: "mt", Status: "unattributed", CoveredBy: []string{"a.test.ts:del dear", "a.test.ts:keep"}}}
+
+	// Act
+	v, err := VerifyMatrix(m, []string{"a.test.ts:del dear"}, " > ")
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(v.PutBack, []PutBack{{Case: "a.test.ts:del dear", Mutant: "mt"}}) {
+		t.Fatalf("put back %v", v.PutBack)
+	}
+}

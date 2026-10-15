@@ -49,7 +49,10 @@ func VerifyMatrix(m *Measurement, deleted []string, sep string) (*Verification, 
 		}
 	}
 	for _, r := range m.Mutants {
-		var dKill []string
+		if r.Status == "dropped" || r.Status == "unreached" {
+			continue
+		}
+		var dKill, dReach []string
 		keptKills := false
 		reachedByD := false
 		for _, id := range r.KilledBy {
@@ -62,7 +65,14 @@ func VerifyMatrix(m *Measurement, deleted []string, sep string) (*Verification, 
 		for _, id := range r.CoveredBy {
 			if del[id] && !back[id] {
 				reachedByD = true
+				dReach = append(dReach, id)
 			}
+		}
+		// A mutant detected by a timeout or a runtime error names no
+		// killer, so no deleted case reaching it can be shown not to catch
+		// it: it counts as killed by each of them.
+		if r.Status == "unattributed" {
+			dKill = append(dKill, dReach...)
 		}
 		if len(dKill) > 0 {
 			reachedByD = true
