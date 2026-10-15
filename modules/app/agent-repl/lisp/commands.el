@@ -831,8 +831,37 @@ an entry without one is a violated invariant and fails hard."
                     (lambda (a b) (> (funcall instant a) (funcall instant b))))
               agent-repl--switch-recent-limit))
 
+(defun agent-repl--switch-update-ms (entry)
+  "Return ENTRY's update recency, epoch ms, for the switcher to rank by.
+The daemon's `RosterRowLastUpdated': the latest of the workspace's
+lifecycle instants and of its last status change.  A live local
+workspace no roster push carries yet is being registered right now, so
+nothing has been updated more recently: it ranks as `most-positive-fixnum'.
+A ROW WITHOUT THE INSTANT IS A VIOLATED INVARIANT -- the decoder refuses
+a row that does not state it -- and fails hard."
+  (let ((row (plist-get entry :row)))
+    (if (null row)
+        most-positive-fixnum
+      (or (agent-repl-roster-row-instant-ms row :last-updated)
+          (progn
+            (agent-repl--error '(:agent-repl-central "the workspace switcher reads the whole roster")
+                               "elisp.commands.switch-update-ms: name=%s has no update recency"
+                               (plist-get entry :name))
+            (error "agent-repl: switcher entry %s has no update recency"
+                   (plist-get entry :name)))))))
+
+(defun agent-repl--switch-by-recency (entries)
+  "Return ENTRIES most recently updated first (`agent-repl--switch-update-ms').
+THE SWITCHER'S ONE ORDER (owner request, 2026-10-14): whatever most
+recently happened to a workspace -- a turn resolving, an open, a close or
+kill, a status change -- brings it to the top, whichever section it sits
+in.  Ties keep ENTRIES' own order: `sort' is stable."
+  (sort (copy-sequence entries)
+        (lambda (a b) (> (agent-repl--switch-update-ms a)
+                         (agent-repl--switch-update-ms b)))))
+
 (defun agent-repl--switch-curated (entries)
-  "Return the ENTRIES `SPC p p' offers, in the order it offers them.
+  "Return the ENTRIES `SPC p p' offers.
 
 THE WORKSPACES THAT ARE CURRENT, AND THE RECENT ONES (owner request,
 2026-10-14): every open workspace, every hidden one, the
@@ -843,7 +872,10 @@ the daemon, an agent or a merge closed is left to `SPC p P', and so is
 one whose close predates that record: nothing says the user closed it.
 
 A live local workspace with no roster row yet is open by construction --
-a tab is standing for it here -- and is never dropped."
+a tab is standing for it here -- and is never dropped.
+
+The order they are offered in is `agent-repl--switch-by-recency''s, applied
+by the caller."
   (let (open hidden merged closed)
     (dolist (entry entries)
       (let ((row (plist-get entry :row)))
@@ -938,19 +970,25 @@ holds past its merge-base."
 (defun agent-repl--switch-table (alist now-ms)
   "Return the completion table offering ALIST's names with their columns.
 A function table, because that is how a table states its
-`affixation-function' (`agent-repl--switch-affixation')."
+`affixation-function' (`agent-repl--switch-affixation').  ALIST's order is
+the order offered (`agent-repl--switch-by-recency'), so the table also
+states identity sort functions: a completion UI that sorts on its own
+would otherwise undo it."
   (let ((names (mapcar #'car alist))
         (affixation (agent-repl--switch-affixation alist now-ms)))
     (lambda (string predicate action)
       (if (eq action 'metadata)
-          `(metadata (affixation-function . ,affixation))
+          `(metadata (affixation-function . ,affixation)
+                     (display-sort-function . identity)
+                     (cycle-sort-function . identity))
         (complete-with-action action names string predicate)))))
 
 (defun agent-repl--switch-to-known-workspace (&optional all)
   "Pick a workspace and stand on it, opening it first if it is not here.
 
 WHICH WORKSPACES ARE OFFERED: the current and recent ones
-\(`agent-repl--switch-curated'), or with ALL non-nil every known one.
+\(`agent-repl--switch-curated'), or with ALL non-nil every known one --
+either way most recently updated first (`agent-repl--switch-by-recency').
 Each line shows the workspace's status mark and its columns
 \(`agent-repl--switch-affixation').
 
@@ -977,7 +1015,8 @@ A CANDIDATE WITH NO REF CANNOT BE OPENED and says so: the ref is
 daemon-minted and there is no spelling of it Emacs could construct."
   (let* ((known (agent-repl--switch-candidates))
          (candidates (agent-repl--switch-display-alist
-                      (if all known (agent-repl--switch-curated known)))))
+                      (agent-repl--switch-by-recency
+                       (if all known (agent-repl--switch-curated known))))))
     (unless candidates
       (user-error "agent-repl: no known workspaces"))
     (let* ((choice (completing-read (if all "Switch to any workspace: "
@@ -1010,8 +1049,9 @@ daemon-minted and there is no spelling of it Emacs could construct."
 
 With no argument, completes over the open and hidden workspaces, the
 most recently merged and the ones the user most recently closed -- the
-daemon's roster is the source of what exists -- and stands on the chosen
-one, opening it first when it is closed or has no tab here.  See
+daemon's roster is the source of what exists -- most recently updated
+first, and stands on the chosen one, opening it first when it is closed
+or has no tab here.  See
 `agent-repl--switch-to-known-workspace'; `agent-repl-switch-to-any-workspace'
 offers every known workspace.
 
