@@ -763,9 +763,15 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 // false unknown_workspace).
 func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 	t.Parallel()
+	registryReadsAcrossThePromotion(t, 6)
+}
+
+// registryReadsAcrossThePromotion drives WORKSPACES idle workspaces through a
+// successor's promotion, the first adopting while the rest read the registry.
+func registryReadsAcrossThePromotion(t *testing.T, workspaces int) {
+	t.Helper()
 	// Arrange: several idle workspaces, each with its host and web streams
 	// open at the announcement, so each is an expected two-party rendezvous.
-	const workspaces = 6
 	selfRepo, d := drainSelfRepoDaemon(t)
 	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	fixtures := make([]*fixture, workspaces)
