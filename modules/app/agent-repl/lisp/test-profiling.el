@@ -230,5 +230,85 @@ shares a main thread with, by symbol."
     (agent-repl-profiling--page-started "{\"ok\":true}")
     (should-not logged)))
 
+;;;; ---- the switch tour ---------------------------------------------------
+
+(defmacro agent-repl-test-profiling--with-tour (&rest body)
+  "Run BODY with no tour running, no key queued, and timers and logs captured.
+Binds what `agent-repl-test-profiling--with-root' binds."
+  (declare (indent 0))
+  `(agent-repl-test-profiling--with-root
+     (let ((agent-repl-profiling--tour nil)
+           (unread-command-events nil))
+       ,@body)))
+
+(defun agent-repl-test-profiling--queued ()
+  "The keys queued so far, as `kbd' strings."
+  (mapcar (lambda (event) (key-description (vector event))) unread-command-events))
+
+(defun agent-repl-test-profiling--run-step (armed)
+  "Run the newest timer ARMED holds."
+  (let ((step (car armed)))
+    (apply (car step) (cdr step))))
+
+(ert-deftest agent-repl-test-profiling-tour-queues-the-first-key-at-once ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 2)
+    (should (equal (agent-repl-test-profiling--queued) '("s-}")))))
+
+(ert-deftest agent-repl-test-profiling-tour-answers-how-many-switches-it-runs ()
+  (agent-repl-test-profiling--with-tour
+    (should (equal (agent-repl-profiling-switch-tour 3) "touring 6 switches"))))
+
+(ert-deftest agent-repl-test-profiling-tour-spaces-each-key-by-its-interval ()
+  (agent-repl-test-profiling--with-tour
+    (let (seconds)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (secs _repeat _fn &rest _args) (push secs seconds) (timer-create))))
+        (agent-repl-profiling-switch-tour 1))
+      (should (equal seconds (list agent-repl-profiling-switch-tour-interval))))))
+
+(ert-deftest agent-repl-test-profiling-tour-switches-right-then-back-left ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 2)
+    (dotimes (_ 3) (agent-repl-test-profiling--run-step armed))
+    (should (equal (agent-repl-test-profiling--queued) '("s-}" "s-}" "s-{" "s-{")))))
+
+(ert-deftest agent-repl-test-profiling-tour-ends-after-its-last-key ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 1)
+    (dotimes (_ 2) (agent-repl-test-profiling--run-step armed))
+    (should (null agent-repl-profiling--tour))
+    (should (member '(info . "profiling.switch-tour-done switches=2") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-records-each-key-it-queues ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 1)
+    (should (member '(info . "profiling.switch-tour-key key=s-} remaining=1") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-refuses-a-count-that-is-not-positive ()
+  (agent-repl-test-profiling--with-tour
+    (should-error (agent-repl-profiling-switch-tour 0))
+    (should (null unread-command-events))
+    (should (null agent-repl-profiling--tour))
+    (should (member '(error . "profiling.switch-tour-refused: the count 0 is not a positive integer") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-refuses-a-second-tour-while-one-runs ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 2)
+    (should-error (agent-repl-profiling-switch-tour 1))
+    (should (equal (length (plist-get agent-repl-profiling--tour :keys)) 3))
+    (should (member '(error . "profiling.switch-tour-refused: a tour is already running, 3 keys left") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-cancel-stops-before-the-next-key ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 2)
+    (should (equal (agent-repl-profiling-switch-tour-cancel) "cancelled with 3 keys left"))
+    (should (null agent-repl-profiling--tour))
+    (should (member '(info . "profiling.switch-tour-cancelled keys-left=3") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-cancel-with-no-tour-says-so ()
+  (agent-repl-test-profiling--with-tour
+    (should (equal (agent-repl-profiling-switch-tour-cancel) "no tour running"))))
+
 (provide 'test-profiling)
 ;;; test-profiling.el ends here
