@@ -19,6 +19,11 @@
 #                         --git-common-dir, diff --cached --name-only,
 #                         config KEY VALUE, config --type=bool --get KEY,
 #                         status --porcelain,
+#   identity:             config --global KEY (the file $GIT_CONFIG_GLOBAL
+#                         names; unset exits 2), config --show-origin
+#                         --get-all KEY, var GIT_AUTHOR_IDENT |
+#                         GIT_COMMITTER_IDENT (GIT_<SIDE>_* env, then
+#                         <side>.*, then user.*, then $EMAIL),
 #                         ls-files -s, log -1 --format, show -s --format=%ct,
 #                         rev-list --count A..B, worktree list --porcelain
 #   linked worktrees:     worktree add [-q|--quiet] (-b BRANCH | --detach) PATH,
