@@ -87,13 +87,24 @@ message SendKeepaliveSkippedCacheLapsed {
   int64 lapsed_at_ms = 1;
 }
 
-// Not applied. THE ARM IS WHY.
+// No keep-alive went out, and not by the shim's judgment. THE ARM IS WHY.
 message SendKeepaliveError {
   oneof kind {
     // No session is open on this shim, so there is no cache to keep.
     SendKeepaliveNoSession no_session = 1;
+    // The keep-alive was judged sendable and its submission failed.
+    SendKeepaliveSubmitFailed submit_failed = 2;
   }
 }
 
-// No session is open on this shim.
+// No session is open on this shim, or its vendor query has ended, so nothing
+// can carry a keep-alive. DELIBERATELY EMPTY: the arm is the reason.
 message SendKeepaliveNoSession {}
+
+// The keep-alive's submission to the vendor failed. The shim also raises its
+// standing keep-alive fault (conversation.v1.SessionFault.keepalive_failed) on
+// the session stream, exactly as a failed scheduled beat does.
+message SendKeepaliveSubmitFailed {
+  // The submission's own failure, verbatim.
+  string detail = 1;
+}

@@ -334,6 +334,67 @@ export function setKeepaliveApplied(): shimv1.SetKeepaliveResponse {
   });
 }
 
+/** Why SendKeepalive sent no keep-alive: the shim's judgment, answered as a success. */
+export type SendKeepaliveSkipReason =
+  | { readonly kind: "busy"; readonly detail: string }
+  | { readonly kind: "detachedWorkLive"; readonly liveItems: number }
+  | { readonly kind: "cacheLapsed"; readonly lapsedAtMs: number };
+
+/** SendKeepalive's refusal: no session (or no vendor query) to carry a keep-alive. */
+export function sendKeepaliveNoSession(): shimv1.SendKeepaliveResponse {
+  return sendKeepaliveError({ case: "noSession", value: create(shimv1.SendKeepaliveNoSessionSchema, {}) });
+}
+
+/** SendKeepalive judged the keep-alive sendable, and its submission failed. */
+export function sendKeepaliveSubmitFailed(detail: string): shimv1.SendKeepaliveResponse {
+  return sendKeepaliveError({ case: "submitFailed", value: create(shimv1.SendKeepaliveSubmitFailedSchema, { detail }) });
+}
+
+function sendKeepaliveError(kind: shimv1.SendKeepaliveError["kind"]): shimv1.SendKeepaliveResponse {
+  return create(shimv1.SendKeepaliveResponseSchema, {
+    result: { case: "error", value: create(shimv1.SendKeepaliveErrorSchema, { kind }) },
+  });
+}
+
+/** SendKeepalive submitted the keep-alive. */
+export function sendKeepaliveSent(): shimv1.SendKeepaliveResponse {
+  return sendKeepaliveSuccess({ case: "sent", value: create(shimv1.SendKeepaliveSentSchema, {}) });
+}
+
+/** SendKeepalive sent no keep-alive, for REASON. */
+export function sendKeepaliveSkipped(reason: SendKeepaliveSkipReason): shimv1.SendKeepaliveResponse {
+  return sendKeepaliveSuccess({
+    case: "skipped",
+    value: create(shimv1.SendKeepaliveSkippedSchema, { reason: skipReasonArm(reason) }),
+  });
+}
+
+function skipReasonArm(reason: SendKeepaliveSkipReason): shimv1.SendKeepaliveSkipped["reason"] {
+  switch (reason.kind) {
+    case "busy":
+      return {
+        case: "mainAgentBusy",
+        value: create(shimv1.SendKeepaliveSkippedMainAgentBusySchema, { detail: reason.detail }),
+      };
+    case "detachedWorkLive":
+      return {
+        case: "detachedWorkLive",
+        value: create(shimv1.SendKeepaliveSkippedDetachedWorkLiveSchema, { liveItems: reason.liveItems }),
+      };
+    case "cacheLapsed":
+      return {
+        case: "cacheLapsed",
+        value: create(shimv1.SendKeepaliveSkippedCacheLapsedSchema, { lapsedAtMs: BigInt(reason.lapsedAtMs) }),
+      };
+  }
+}
+
+function sendKeepaliveSuccess(outcome: shimv1.SendKeepaliveSuccess["outcome"]): shimv1.SendKeepaliveResponse {
+  return create(shimv1.SendKeepaliveResponseSchema, {
+    result: { case: "success", value: create(shimv1.SendKeepaliveSuccessSchema, { outcome }) },
+  });
+}
+
 /** The ack the daemon waits for before standing the shim down. */
 export function hibernateAcked(): shimv1.HibernateResponse {
   return create(shimv1.HibernateResponseSchema, {

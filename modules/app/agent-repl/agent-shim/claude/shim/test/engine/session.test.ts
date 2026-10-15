@@ -5043,6 +5043,147 @@ describe("SetSessionPermissionMode", () => {
   });
 });
 
+describe("SendKeepalive", () => {
+  const request = (): shimv1.SendKeepaliveRequest => create(shimv1.SendKeepaliveRequestSchema, {});
+  const hold = (): shimv1.SetKeepaliveRequest =>
+    create(shimv1.SetKeepaliveRequestSchema, {
+      cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
+    });
+
+  /** The response's arm path, e.g. `success.sent` or `error.noSession`. */
+  function armOf(response: shimv1.SendKeepaliveResponse): string {
+    switch (response.result.case) {
+      case "success":
+        return response.result.value.outcome.case === "skipped"
+          ? `success.skipped.${String(response.result.value.outcome.value.reason.case)}`
+          : `success.${String(response.result.value.outcome.case)}`;
+      case "error":
+        return `error.${String(response.result.value.kind.case)}`;
+      default:
+        return "unset";
+    }
+  }
+
+  it("refuses when no session has been started", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await h.engine.sendKeepalive(request());
+
+    // Assert
+    expect(armOf(response)).toBe("error.noSession");
+  });
+
+  it("records the refusal when no session has been started", async () => {
+    // Arrange
+    const h = harness();
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.sendKeepalive(request());
+
+    // Assert
+    expect(logRecordsSince(before).map((record) => record.message)).toContain(
+      "refused SendKeepalive: no session is open",
+    );
+  });
+
+  it("submits a keep-alive on an idle session", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    const response = await h.engine.sendKeepalive(request());
+    await drainTurns();
+
+    // Assert
+    expect([armOf(response), sendKinds(sends)]).toEqual(["success.sent", ["keepalive"]]);
+  });
+
+  it("submits a keep-alive on a held session and leaves it held", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await h.engine.setKeepalive(hold());
+
+    // Act
+    const response = await h.engine.sendKeepalive(request());
+    await drainTurns();
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect([armOf(response), sendKinds(sends), h.scheduler.pendingTimeout()]).toEqual([
+      "success.sent",
+      ["keepalive"],
+      undefined,
+    ]);
+  });
+
+  it("skips while a keep-alive is already in flight, naming the main agent busy", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.sendKeepalive(request());
+
+    // Act
+    const response = await h.engine.sendKeepalive(request());
+
+    // Assert
+    expect(armOf(response)).toBe("success.skipped.mainAgentBusy");
+  });
+
+  it("records the skip with its reason", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.sendKeepalive(request());
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.sendKeepalive(request());
+
+    // Assert
+    const record = logRecordsSince(before).find((entry) => entry.message === "SendKeepalive sent no keep-alive");
+    expect(record?.context.kind).toBe("busy");
+  });
+
+  it("answers submit_failed when the keep-alive cannot be submitted", async () => {
+    // Arrange: a keep-alive already in the transcript, so the next one owes a
+    // rewind, and the rewind's replacement query cannot be created.
+    const h = harness({ createQueryFailsFrom: 1 });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    const response = await h.engine.sendKeepalive(request());
+
+    // Assert
+    expect(armOf(response)).toBe("error.submitFailed");
+  });
+
+  it("raises the keep-alive fault when the keep-alive cannot be submitted", async () => {
+    // Arrange
+    const h = harness({ createQueryFailsFrom: 1 });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    await h.engine.sendKeepalive(request());
+
+    // Assert
+    const update = h.engine.pushes.diagnostics().update;
+    const faults =
+      update.case === "diagnostics" && update.value.health.case === "unhealthy" ? update.value.health.value.faults : [];
+    expect(faults.map((fault) => fault.kind.case)).toContain("keepaliveFailed");
+  });
+});
+
 describe("SetKeepalive", () => {
   function hold(): shimv1.SetKeepaliveRequest {
     return create(shimv1.SetKeepaliveRequestSchema, {

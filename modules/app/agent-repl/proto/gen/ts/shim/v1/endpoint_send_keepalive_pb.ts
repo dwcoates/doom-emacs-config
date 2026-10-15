@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_send_keepalive.proto.
  */
 export const file_shim_v1_endpoint_send_keepalive: GenFile = /*@__PURE__*/
-  fileDesc("CiVzaGltL3YxL2VuZHBvaW50X3NlbmRfa2VlcGFsaXZlLnByb3RvEgdzaGltLnYxIhYKFFNlbmRLZWVwYWxpdmVSZXF1ZXN0IoEBChVTZW5kS2VlcGFsaXZlUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLnNoaW0udjEuU2VuZEtlZXBhbGl2ZUVycm9ySABCCAoGcmVzdWx0In8KFFNlbmRLZWVwYWxpdmVTdWNjZXNzEioKBHNlbnQYASABKAsyGi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTZW50SAASMAoHc2tpcHBlZBgCIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVNlbmRLZWVwYWxpdmVTZW50IvYBChRTZW5kS2VlcGFsaXZlU2tpcHBlZBJFCg9tYWluX2FnZW50X2J1c3kYASABKAsyKi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeUgAEksKEmRldGFjaGVkX3dvcmtfbGl2ZRgCIAEoCzItLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlSAASQAoMY2FjaGVfbGFwc2VkGAMgASgLMiguc2hpbS52MS5TZW5kS2VlcGFsaXZlU2tpcHBlZENhY2hlTGFwc2VkSABCCAoGcmVhc29uIjMKIVNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeRIOCgZkZXRhaWwYASABKAkiOgokU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlEhIKCmxpdmVfaXRlbXMYASABKA0iNwofU2VuZEtlZXBhbGl2ZVNraXBwZWRDYWNoZUxhcHNlZBIUCgxsYXBzZWRfYXRfbXMYASABKAMiUwoSU2VuZEtlZXBhbGl2ZUVycm9yEjUKCm5vX3Nlc3Npb24YASABKAsyHy5zaGltLnYxLlNlbmRLZWVwYWxpdmVOb1Nlc3Npb25IAEIGCgRraW5kIhgKFlNlbmRLZWVwYWxpdmVOb1Nlc3Npb25CIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM");
+  fileDesc("CiVzaGltL3YxL2VuZHBvaW50X3NlbmRfa2VlcGFsaXZlLnByb3RvEgdzaGltLnYxIhYKFFNlbmRLZWVwYWxpdmVSZXF1ZXN0IoEBChVTZW5kS2VlcGFsaXZlUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLnNoaW0udjEuU2VuZEtlZXBhbGl2ZUVycm9ySABCCAoGcmVzdWx0In8KFFNlbmRLZWVwYWxpdmVTdWNjZXNzEioKBHNlbnQYASABKAsyGi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTZW50SAASMAoHc2tpcHBlZBgCIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVNlbmRLZWVwYWxpdmVTZW50IvYBChRTZW5kS2VlcGFsaXZlU2tpcHBlZBJFCg9tYWluX2FnZW50X2J1c3kYASABKAsyKi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeUgAEksKEmRldGFjaGVkX3dvcmtfbGl2ZRgCIAEoCzItLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlSAASQAoMY2FjaGVfbGFwc2VkGAMgASgLMiguc2hpbS52MS5TZW5kS2VlcGFsaXZlU2tpcHBlZENhY2hlTGFwc2VkSABCCAoGcmVhc29uIjMKIVNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeRIOCgZkZXRhaWwYASABKAkiOgokU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlEhIKCmxpdmVfaXRlbXMYASABKA0iNwofU2VuZEtlZXBhbGl2ZVNraXBwZWRDYWNoZUxhcHNlZBIUCgxsYXBzZWRfYXRfbXMYASABKAMikAEKElNlbmRLZWVwYWxpdmVFcnJvchI1Cgpub19zZXNzaW9uGAEgASgLMh8uc2hpbS52MS5TZW5kS2VlcGFsaXZlTm9TZXNzaW9uSAASOwoNc3VibWl0X2ZhaWxlZBgCIAEoCzIiLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Ym1pdEZhaWxlZEgAQgYKBGtpbmQiGAoWU2VuZEtlZXBhbGl2ZU5vU2Vzc2lvbiIrChlTZW5kS2VlcGFsaXZlU3VibWl0RmFpbGVkEg4KBmRldGFpbBgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw");
 
 /**
  * DELIBERATELY EMPTY: the call is the request. The keep-alive targets the one
@@ -240,7 +240,7 @@ export const SendKeepaliveSkippedCacheLapsedSchema: GenMessage<SendKeepaliveSkip
   messageDesc(file_shim_v1_endpoint_send_keepalive, 7);
 
 /**
- * Not applied. THE ARM IS WHY.
+ * No keep-alive went out, and not by the shim's judgment. THE ARM IS WHY.
  *
  * @generated from message shim.v1.SendKeepaliveError
  */
@@ -256,6 +256,14 @@ export type SendKeepaliveError = Message<"shim.v1.SendKeepaliveError"> & {
      */
     value: SendKeepaliveNoSession;
     case: "noSession";
+  } | {
+    /**
+     * The keep-alive was judged sendable and its submission failed.
+     *
+     * @generated from field: shim.v1.SendKeepaliveSubmitFailed submit_failed = 2;
+     */
+    value: SendKeepaliveSubmitFailed;
+    case: "submitFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -267,7 +275,8 @@ export const SendKeepaliveErrorSchema: GenMessage<SendKeepaliveError> = /*@__PUR
   messageDesc(file_shim_v1_endpoint_send_keepalive, 8);
 
 /**
- * No session is open on this shim.
+ * No session is open on this shim, or its vendor query has ended, so nothing
+ * can carry a keep-alive. DELIBERATELY EMPTY: the arm is the reason.
  *
  * @generated from message shim.v1.SendKeepaliveNoSession
  */
@@ -280,4 +289,27 @@ export type SendKeepaliveNoSession = Message<"shim.v1.SendKeepaliveNoSession"> &
  */
 export const SendKeepaliveNoSessionSchema: GenMessage<SendKeepaliveNoSession> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_send_keepalive, 9);
+
+/**
+ * The keep-alive's submission to the vendor failed. The shim also raises its
+ * standing keep-alive fault (conversation.v1.SessionFault.keepalive_failed) on
+ * the session stream, exactly as a failed scheduled beat does.
+ *
+ * @generated from message shim.v1.SendKeepaliveSubmitFailed
+ */
+export type SendKeepaliveSubmitFailed = Message<"shim.v1.SendKeepaliveSubmitFailed"> & {
+  /**
+   * The submission's own failure, verbatim.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message shim.v1.SendKeepaliveSubmitFailed.
+ * Use `create(SendKeepaliveSubmitFailedSchema)` to create a new message.
+ */
+export const SendKeepaliveSubmitFailedSchema: GenMessage<SendKeepaliveSubmitFailed> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 10);
 
