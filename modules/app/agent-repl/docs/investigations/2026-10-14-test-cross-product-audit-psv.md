@@ -57,7 +57,9 @@ Three shapes of it, measured:
 - **The product outlived the design that needed it.** The sidebar's 5040-row
   agreement walk was written when the footer and the roster decided status
   independently. The roster now derives its arm from the footer's status, so
-  the walk reaches 44 distinct outcomes.
+  the walk reaches 44 distinct outcomes, and never reaches 8 of the roster's
+  arms at all (section 5). Enumeration bought breadth in the wrong
+  dimensions.
 
 Where real multi-dimension products exist, a covering set suffices for the
 same reason as the second shape. Hand-picked subsets with a stated reason
@@ -85,7 +87,7 @@ per chunk.
 
 | Table | Rows | Solo / CPU saved | History seconds saved |
 |---|---|---|---|
-| daemon unit `TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim` (section 5) | 5040 -> ~60-90 | 4.2 s solo wall, 5.6 CPU-s, down to ~0.1 s | ~19.7 of 20.0 |
+| daemon unit `TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim` (section 5); the cut ADDS rows reaching the 8 roster arms the walk never reaches | 5040 -> ~60-90 | 4.2 s solo wall, 5.6 CPU-s, down to ~0.1 s | ~19.7 of 20.0 |
 | daemon integration tables the tier audit keeps at integration: `adopted_turns_test.go` 6 -> 4, `stateroot_loss_test.go` 4 -> 2, `exit_streams_test.go` 8 -> 4, `drain_rollout_test.go:842` 6 workspaces -> 2 | 10 daemon starts | ~0.14 s solo per bare daemon start (test-shared-setup's figure), more with shims | ~10 |
 | webapp unit `main.test.ts` gate rows (needs 2 `vocab.test.ts` rows first) | 12 -> 2 boots | ~195 ms per warm boot, ~2 s | ~2 |
 | small in-process tables (section 7) | ~9 rows | negligible | negligible |
@@ -265,17 +267,26 @@ costliest unit test in the daemon.
   claim, and a footer rung drawing off the claim it resolved (the
   `status_claim` error records it checks). Both are reached by one row per
   outcome.
-- Proposal: one row per distinct outcome (44), plus a few rows reaching the
-  same outcome by a different fact (a fault through the link vs through the
-  turn), ~60-90 rows; ~19 s. Better still, a direct table over `projectArm`
-  per footer arm and sub-arm plus `idleArm` per branch, which the walk only
-  reaches indirectly.
-- Two side findings, not cross products: (a) the walk never reaches
-  `waiting`, `question`, `closing`, `cold_gate`, `daemon_impaired`,
-  `idle_async`, `clearing` or `compacting`, so those projections are pinned
-  only elsewhere; (b) `newSurfaces` reloads the vocabulary from disk per
-  subtest (`onestatus_test.go:50`), an Option C (shared setup) candidate:
-  the probe ran all 5040 combinations in 5.2 s without per-subtest machinery.
+- COVERAGE GAP, and the cut must close it. The walk never reaches eight
+  roster arms: `waiting`, `question`, `closing`, `cold_gate`,
+  `daemon_impaired`, `idle_async`, `clearing` and `compacting`. Their
+  projections are pinned only elsewhere, so the agreement this test exists to
+  hold is unchecked for them. 5040 rows cover 44 outcomes and miss 8 of the
+  ladder's arms: the product bought breadth in the wrong dimensions.
+- Proposal: choose the reduced set to CLOSE that gap, not merely to shrink
+  the walk:
+  - one row per distinct outcome the walk reaches today (44);
+  - a few rows reaching one outcome by a different fact (a fault through the
+    link vs through the turn);
+  - NEW rows, by new link or turn cases, reaching each of the eight missing
+    arms;
+  - ~60-90 rows in all; ~19 s saved.
+  Better still, a direct table over `projectArm` per footer arm and sub-arm
+  plus `idleArm` per branch, which the walk only reaches indirectly.
+- Side finding, not a cross product: `newSurfaces` reloads the vocabulary from
+  disk per subtest (`onestatus_test.go:50`), an Option C (shared setup)
+  candidate. The probe ran all 5040 combinations in 5.2 s without per-subtest
+  machinery.
 
 ## 6. Shim integration (a real shim process per row, ~0.35-0.7 s)
 
