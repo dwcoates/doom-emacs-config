@@ -74,7 +74,13 @@ func IsLandingDeployed(r LogRecord) bool {
 // AwaitLandingDeployed waits for the landing's deploy. A landing carrying work
 // always deploys, and a test that ends mid-build kills the build under the
 // deploy and reads the kill as a failed deploy.
+//
+// THE BOUND IS MergeChainTimeout, whatever the daemon's own wait bound: the
+// deploy is a chain of subprocesses (the build, then one install per
+// artifact), like the merge it follows. Bounded by one DefaultTimeout wait, a
+// landing's deploy under a full gate was still installing at +4.4s when the
+// wait cut it (2026-10-14).
 func (d *Daemon) AwaitLandingDeployed() {
 	d.t.Helper()
-	d.AwaitLogRecord(d.RunLogPath(), "the landing's deploy", IsLandingDeployed)
+	d.AwaitLogRecordWithin(d.RunLogPath(), "the landing's deploy", MergeChainTimeout, IsLandingDeployed)
 }

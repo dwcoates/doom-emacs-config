@@ -93,7 +93,7 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `context-injected-memory` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!memory` | single turn | 40 KB |
 | `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!skills-injected` | single turn | 56 KB |
 | `context-usage` | 2026-09-02 | `hook`, `thinking`, `read`, `response` → `success.completed` | `!context-usage-drift` | single turn | 96 KB |
-| `cron-create-list-delete` | 2026-09-01 | `hook`, `thinking`, `response`, `cron` → `success.completed` | `!cron` | single turn | 108 KB |
+| `cron-create-list-delete` | 2026-09-01 | `hook`, `thinking`, `response`, `cron` → `success.completed` | `!cron` (and `!cron-create`, its `CronCreate` act alone, left standing) | single turn | 108 KB |
 | `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | `!subagent` — REACHABLE-ONLY: no scenario backgrounds a subagent the way a real vendor-side detach would; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 92 KB |
 | `ctrl-b-detach-of-foreground-work` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `read` → `success.completed` | `!vendor-backgrounded` — REACHABLE-ONLY: parks a live foreground Bash call but nothing can make a real DetachForeground resolve it; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 108 KB |
 

@@ -131,6 +131,16 @@ describe("cron", () => {
   });
 });
 
+describe("cron-create", () => {
+  it("creates one job and deletes nothing", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!cron-create"]);
+
+    // Assert
+    expect(toolUses(driven).map((t) => t.name)).toEqual(["CronCreate"]);
+  });
+});
+
 describe("push notifications", () => {
   it("reports a sent notification with no disabled reason", async () => {
     // Arrange + Act

@@ -18,7 +18,9 @@
 // Each answer is ONE stdout line prefixed RESULT_PREFIX, carrying
 //   {"file", "ok", "tests", "failures": [...]}
 // and every test that finishes on the way prints one PROGRESS_PREFIX line, so
-// the Go side bounds the silence between tests, not an area's whole run.
+// the Go side bounds the silence between tests, not an area's whole run. The
+// file's collection prints one COLLECTED_PREFIX line, which restarts that
+// bound too.
 // Everything else vitest prints is ordinary output for the requesting area's
 // log. Runs are strictly one at a time: a request is read only after the
 // previous answer is written.
@@ -41,10 +43,18 @@ const READY_PREFIX = "WEBAPP-LAYER-READY ";
 // bound on the whole run fails areas that are still passing; a bound on the
 // silence between finished tests fails only one that stopped.
 const PROGRESS_PREFIX = "WEBAPP-LAYER-PROGRESS ";
+// COLLECTED_PREFIX marks the line printed once vitest has collected a run's
+// file. Collecting is progress too: under a full gate's load the collect ran
+// long enough that the silence bound fired before the first test could finish.
+const COLLECTED_PREFIX = "WEBAPP-LAYER-COLLECTED";
 const LAYER_DIR = resolve("test/webapp-layer");
 
-/** The reporter that prints PROGRESS_PREFIX for every finished test. */
+/** The reporter that prints PROGRESS_PREFIX for every finished test, and
+ * COLLECTED_PREFIX once a run's file is collected. */
 const progressReporter = {
+  onCollected() {
+    process.stdout.write(COLLECTED_PREFIX + "\n");
+  },
   onTaskUpdate(packs) {
     for (const [, result] of packs) {
       if (result?.state === "pass" || result?.state === "fail") {

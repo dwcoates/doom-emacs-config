@@ -429,16 +429,9 @@ func hostSelectionOf(state *selectionState) *agentreplv1.HostWorkspaceSelection 
 }
 
 // selectionTopic answers a workspace's selection topic, minting it on first
-// use exactly as hostTopic mints the host one.
+// use exactly as hostNoticeTopic mints the host one.
 func (s *server) selectionTopic(ws ids.WorkspaceID) *publish.Topic[*selectionState] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.selectionTopics[ws]
-	if !ok {
-		t = &publish.Topic[*selectionState]{}
-		s.selectionTopics[ws] = t
-	}
-	return t
+	return perWorkspace(s, s.selectionTopics, ws)
 }
 
 // indexOfFeedID answers the position of id in rows by FeedId value, or -1.

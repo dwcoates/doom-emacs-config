@@ -375,6 +375,9 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 			opts := harness.Opts{}
 			if tc.selfRepo {
 				opts.SelfRepo = repo.Dir
+				// A whole merge is a subprocess chain on one wait; see
+				// harness.MergeChainTimeout and mqSelfRepoWorld.
+				opts.Timeout = harness.MergeChainTimeout
 				// The self-repo method runs the merge TEST GATE, whose
 				// command line defaults to `bash bin/test-all.sh` in the
 				// merge target worktree (daemon/AGENTS.md's
@@ -988,8 +991,13 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("e2e marker: passed in 1s\n")
+	// A whole merge and the landing's deploy are each a chain of subprocesses
+	// on one wait, as in daemon/integration/merge_test.go; see
+	// harness.MergeChainTimeout. Under a full gate the landing's deploy was
+	// still installing at +4.4s when the 5s DefaultTimeout cut it (2026-10-14).
 	return NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		SelfRepo: repo.Dir,
+		Timeout:  harness.MergeChainTimeout,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 	}})
 }

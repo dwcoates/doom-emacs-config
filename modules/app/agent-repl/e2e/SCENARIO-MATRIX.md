@@ -104,7 +104,8 @@ Two further limits, stated rather than hidden:
 | `!context-tip` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextTipDrawsNoRow asserts the same only-prose-rows negative AND a second one — no footer salient line stands after the tip turn, so a GENERIC CLI tip never draws as “your context is filling”. | covered |
 | `!context-usage-drift` | grounded | accounting_e2e_test.go | — | — | Go: TestContextUsage asserts ContextPanelView.Header non-empty and differs across two reads, Categories non-empty. | covered |
 | `!context-window` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextWindowExceededIsDrawnAsTurnFailed asserts the named arm `FeedTurnEndedErrored.turn_failed`, the exact `stop_reason` `prompt_too_long`, a non-empty composed headline, and the specific negative that `request_too_large` (feed.proto's 413-only arm) was NOT drawn. | covered |
-| `!cron` | grounded | remainder_e2e_test.go | — | — | Go: TestCronCreateListDelete asserts turn Concluded and footer LiveWork.Crons chip Count positive. | covered |
+| `!cron` | grounded | remainder_e2e_test.go | — | — | Go: TestCronCreateListDelete asserts turn Concluded; the chip is asserted on `!cron-create`, because this turn's job stands only mid-turn and the footer stream is latest-only. | covered |
+| `!cron-create` | grounded | remainder_e2e_test.go | — | — | Go: TestCronCreateSetsTheFootersCronsChip asserts turn Concluded and footer LiveWork.Crons chip Count exactly 1 once the turn has ended. | covered |
 | `!edit` | grounded | filetools_e2e_test.go | feed-families.layer.test.ts | — | Go: TestEdit asserts a diff output form. Web: feed-families.layer asserts [data-diff-line] count>0. | covered |
 | `!fail-aborted-tools` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTurnAbortedWhileToolsRunning asserts the terminal is specifically FeedTurnEndedInterrupted and specifically NOT Errored, plus the fate of the in-flight work — exactly one settled response row carrying the partial answer. | covered |
 | `!fail-blocking-limit` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/BlockingLimit asserts TurnFailed.StopReason==blocking_limit, the exact headline "an account-level block stopped the run", the exact vendor message, and the surviving partial answer. | covered |
@@ -235,13 +236,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **154**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **155**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
 - Uncovered (no counted layer drives the scenario at all): **7**
-- Total canonical scenarios: 161
+- Total canonical scenarios: 162
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 153 scenarios referenced across 28 files
+- Go e2e (non-emacs): 154 scenarios referenced across 28 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 

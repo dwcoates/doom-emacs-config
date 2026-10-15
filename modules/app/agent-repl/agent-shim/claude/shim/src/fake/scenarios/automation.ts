@@ -191,6 +191,31 @@ const CRON = scenario({
   },
 });
 
+/**
+ * A job created and LEFT STANDING. `cron` deletes its job inside the same
+ * turn, so the footer's ⏱ chip is set only mid-turn, and the footer stream is
+ * latest-only: a reader may never be handed that view. A standing job leaves
+ * the chip set once the turn has ended, which a reader is always handed.
+ */
+const CRON_CREATE = scenario({
+  name: "cron-create",
+  prompt: "!cron-create",
+  emits: "a single `CronCreate` whose job stays standing after the turn",
+  writes: "the tool_use and tool_result lines for the call, the closing text line",
+  arms: "AgentCron.act=create with created",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "cron-create" }, "fake cron-create turn");
+    const create = ctx.toolUse("CronCreate", { cron: "0 9 * * 1", prompt: "weekly standup" });
+    ctx.toolResult(create, "Created job cron-1.", {
+      id: "cron-1",
+      humanSchedule: "every Monday at 9:00am",
+      recurring: true,
+      durable: true,
+    });
+    conclude(ctx, "Created a cron job.");
+  },
+});
+
 /** One push-notification scenario per declared outcome. */
 function pushScenario(
   name: string,
@@ -423,6 +448,7 @@ export const AUTOMATION_SCENARIOS = [
   WORKTREE_KEEP,
   WORKTREE_REMOVE,
   CRON,
+  CRON_CREATE,
   PUSH_SENT,
   PUSH_CONFIG_OFF,
   PUSH_USER_PRESENT,

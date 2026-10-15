@@ -151,8 +151,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
 
 	// The footer's participant pair must stand for the turn: without a host
-	// and a web stream open the strip reads `agent_repl_fault · severed`,
-	// which outranks the step, and the compacting step is never published.
+	// and a web stream open the strip reads `agent_repl_fault · severed`.
 	// Its views are drained, not read: the record below is the observation.
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
@@ -162,8 +161,15 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 	AwaitTurnEnded(t, w, ws, turn)
 	awaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
 
-	w.AwaitLogRecord(harness.WorkspaceLogPath(ws.GetDir(), "daemon"), "the footer's record of publishing the compacting step for "+prompt, func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.footer.substatus_changed" && r.Context["arm"] == "working" && r.Context["substatus"] == "compacting"
+	// THE SIGNAL REACHING THE FOOTER is the observation, not the compacting
+	// step being drawn. The shim's stream-plane `compacting` and the sidecar's
+	// file-plane cut race, and when the cut lands first the footer draws
+	// nothing for a compaction already over (daemon.footer.compacting_after_its_cut,
+	// pinned with the other order in resolve/footer/compaction_test.go). Under
+	// a full gate the cut won and this wait for the drawn step timed out
+	// (2026-10-14). The footer takes the signal in either order.
+	w.AwaitLogRecord(harness.WorkspaceLogPath(ws.GetDir(), "daemon"), "the footer taking the compacting signal for "+prompt, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "compacting"
 	})
 	return turn
 }

@@ -327,9 +327,10 @@ func (s *server) WatchHostWorkspace(
 	return nil
 }
 
-// serveHost serves the host stream's TWO topics onto one wire: the `host`
-// state and the four event arms. They are separate topics (see host.go) and
-// this is the one place they are merged, in publication order per topic.
+// serveHost serves the host stream's sources onto one wire: the `host` state,
+// the `selection` state, the `transferred` notice and the three event arms.
+// They are separate sources (see host.go) and this is the one place they are
+// merged, in publication order per source.
 func (s *server) serveHost(
 	ctx context.Context,
 	rpc string,
@@ -341,7 +342,8 @@ func (s *server) serveHost(
 	defer cancel()
 
 	states := s.hostStateTopic(ws).Subscribe(streamCtx)
-	events := s.hostTopic(ws).Subscribe(streamCtx)
+	notices := s.hostNoticeTopic(ws).Subscribe(streamCtx)
+	events := s.hostEventStream(ws).Subscribe(streamCtx)
 	// THE FEED'S SELECTION reaches Emacs from the one topic the webapp's root
 	// feed watch reads, mapped to the kind of row and its text (hostSelectionOf), so
 	// Emacs and the webapp see one sequence of selections. The topic replays
@@ -368,13 +370,23 @@ func (s *server) serveHost(
 			push = &agentreplv1.WatchHostWorkspaceResponse{
 				Push: &agentreplv1.WatchHostWorkspaceResponse_Host{Host: view},
 			}
+		case notice, ok := <-notices:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if notice == nil {
+				log.Error(rpc, "a publisher raised an empty notice; it was not sent", nil)
+				continue
+			}
+			push = notice
 		case event, ok := <-events:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
 				return nil
 			}
 			if event == nil {
-				log.Error(rpc, "a publisher raised an empty push; it was not sent", nil)
+				log.Error(rpc, "a publisher raised an empty event; it was not sent", nil)
 				continue
 			}
 			push = event
