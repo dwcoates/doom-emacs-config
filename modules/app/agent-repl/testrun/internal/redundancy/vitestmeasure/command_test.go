@@ -2,6 +2,7 @@ package vitestmeasure
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -46,5 +47,29 @@ func TestParseArgsRefuses(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseArgsResolvesThePackagesRealPath(t *testing.T) {
+	// Arrange: the webapp reached through a symlink, as /tmp is /private/tmp.
+	abs, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "webapp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "webapp")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	a, err := ParseArgs([]string{"-package", link, "-mutate", "src/a.ts", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil || a.Package != real {
+		t.Fatalf("package = %q, %v, want %q", a.Package, err, real)
 	}
 }

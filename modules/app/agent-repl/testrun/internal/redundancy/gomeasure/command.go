@@ -186,8 +186,9 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	}
 	a.PinCalls = redundancy.SplitList(pinCalls)
 	var err error
-	if a.Module, err = filepath.Abs(a.Module); err != nil {
-		return Args{}, fmt.Errorf("resolve -module: %w", err)
+	// The real path, as go list answers every package's directory.
+	if a.Module, err = redundancy.RealPath(a.Module); err != nil {
+		return Args{}, err
 	}
 	return a, nil
 }

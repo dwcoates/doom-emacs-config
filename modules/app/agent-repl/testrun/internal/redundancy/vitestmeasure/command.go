@@ -49,8 +49,11 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 		return Args{}, fmt.Errorf("-mutate is required")
 	}
 	var err error
-	if a.Package, err = filepath.Abs(a.Package); err != nil {
-		return Args{}, fmt.Errorf("resolve -package: %w", err)
+	// The real path: vitest instruments only files under its root, and a
+	// package reached through a symlink (/tmp is /private/tmp) left its root
+	// on the link and every source past it, so no test was covered.
+	if a.Package, err = redundancy.RealPath(a.Package); err != nil {
+		return Args{}, err
 	}
 	if a.System == "" {
 		a.System = filepath.Base(a.Package)

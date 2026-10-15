@@ -16,7 +16,7 @@ import (
 
 func TestParseArgsDefaults(t *testing.T) {
 	// Act
-	a, err := ParseArgs([]string{"-module", "/m", "-pkg", "./p", "-tests", "a_test.go, b_test.go", "-out", "/o"}, &bytes.Buffer{})
+	a, err := ParseArgs([]string{"-module", os.TempDir(), "-pkg", "./p", "-tests", "a_test.go, b_test.go", "-out", "/o"}, &bytes.Buffer{})
 
 	// Assert
 	if err != nil {
@@ -34,17 +34,17 @@ func TestParseArgsDefaults(t *testing.T) {
 }
 
 func TestParseArgsRefuses(t *testing.T) {
-	base := []string{"-module", "/m", "-pkg", "./p", "-tests", "a_test.go", "-out", "/o"}
+	base := []string{"-module", os.TempDir(), "-pkg", "./p", "-tests", "a_test.go", "-out", "/o"}
 	tests := []struct {
 		name string
 		argv []string
 		want string
 	}{
 		{name: "no -module", argv: []string{"-pkg", "./p", "-tests", "a_test.go", "-out", "/o"}, want: "-module is required"},
-		{name: "neither -pkg nor -suites", argv: []string{"-module", "/m", "-out", "/o"}, want: "exactly one of -pkg, -suites and -roster-suite"},
-		{name: "both -pkg and -suites", argv: []string{"-module", "/m", "-pkg", "./p", "-suites", "/s.json", "-out", "/o"}, want: "exactly one of -pkg, -suites and -roster-suite"},
-		{name: "-tests beside -suites", argv: []string{"-module", "/m", "-suites", "/s.json", "-tests", "a_test.go", "-out", "/o"}, want: "each suite says its own"},
-		{name: "an unreadable -suites", argv: []string{"-module", "/m", "-suites", "/gone.json", "-out", "/o"}, want: "read -suites /gone.json"},
+		{name: "neither -pkg nor -suites", argv: []string{"-module", os.TempDir(), "-out", "/o"}, want: "exactly one of -pkg, -suites and -roster-suite"},
+		{name: "both -pkg and -suites", argv: []string{"-module", os.TempDir(), "-pkg", "./p", "-suites", "/s.json", "-out", "/o"}, want: "exactly one of -pkg, -suites and -roster-suite"},
+		{name: "-tests beside -suites", argv: []string{"-module", os.TempDir(), "-suites", "/s.json", "-tests", "a_test.go", "-out", "/o"}, want: "each suite says its own"},
+		{name: "an unreadable -suites", argv: []string{"-module", os.TempDir(), "-suites", "/gone.json", "-out", "/o"}, want: "read -suites /gone.json"},
 		{name: "an unknown universe", argv: append(base, "-universe", "lines"), want: "unknown universe"},
 		{name: "a stray argument", argv: append(base, "extra"), want: "unexpected arguments: extra"},
 	}
@@ -140,7 +140,7 @@ func TestParseArgsReadsASuitesFile(t *testing.T) {
 	}
 
 	// Act
-	a, err := ParseArgs([]string{"-module", "/m", "-suites", path, "-mutate", "./internal/workspace", "-out", "/o"}, &bytes.Buffer{})
+	a, err := ParseArgs([]string{"-module", os.TempDir(), "-suites", path, "-mutate", "./internal/workspace", "-out", "/o"}, &bytes.Buffer{})
 
 	// Assert
 	if err != nil {
@@ -169,7 +169,7 @@ func TestParseArgsRefusesASuitesFile(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.body), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			argv := []string{"-module", "/m", "-suites", path, "-out", "/o"}
+			argv := []string{"-module", os.TempDir(), "-suites", path, "-out", "/o"}
 			if tt.mutate {
 				argv = append(argv, "-mutate", "a")
 			}
@@ -193,7 +193,7 @@ func TestParseArgsReadsADeletionSet(t *testing.T) {
 	}
 
 	// Act
-	a, err := ParseArgs([]string{"-module", "/m", "-pkg", "./p", "-out", "/o", "-delete", path, "-estimate"}, &bytes.Buffer{})
+	a, err := ParseArgs([]string{"-module", os.TempDir(), "-pkg", "./p", "-out", "/o", "-delete", path, "-estimate"}, &bytes.Buffer{})
 
 	// Assert
 	if err != nil {
@@ -218,7 +218,7 @@ func TestParseArgsRefusesADeletionSet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			argv := append([]string{"-module", "/m", "-pkg", "./p", "-out", "/o"}, tt.argv...)
+			argv := append([]string{"-module", os.TempDir(), "-pkg", "./p", "-out", "/o"}, tt.argv...)
 			if tt.argv == nil {
 				path := filepath.Join(t.TempDir(), "delete.txt")
 				if tt.body != nil {
@@ -329,7 +329,7 @@ func TestParseArgsRefusesSeveralRosterSuitesWithNoModule(t *testing.T) {
 
 func TestParseArgsHasTheParentsLoadGateByDefault(t *testing.T) {
 	// Act
-	a, err := ParseArgs([]string{"-module", "/m", "-pkg", "./p", "-out", "/o"}, &bytes.Buffer{})
+	a, err := ParseArgs([]string{"-module", os.TempDir(), "-pkg", "./p", "-out", "/o"}, &bytes.Buffer{})
 
 	// Assert
 	if err != nil {
@@ -365,5 +365,38 @@ func TestEveryDefaultPinCallIsAHarnessOrLoggerFunction(t *testing.T) {
 		if !regexp.MustCompile(`func (\([^)]*\) )?` + name + `\(`).MatchString(src.String()) {
 			t.Errorf("no dlog or harness function is named %s", name)
 		}
+	}
+}
+
+func TestParseArgsResolvesTheModulesRealPath(t *testing.T) {
+	// Arrange: a module reached through a symlink, as /tmp is /private/tmp.
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "module")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	a, err := ParseArgs([]string{"-module", link, "-pkg", "./p", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil || a.Module != real {
+		t.Fatalf("module = %q, %v, want %q", a.Module, err, real)
+	}
+}
+
+func TestParseArgsRefusesAMissingModule(t *testing.T) {
+	// Arrange
+	missing := filepath.Join(t.TempDir(), "gone")
+
+	// Act
+	_, err := ParseArgs([]string{"-module", missing, "-pkg", "./p", "-out", "/o"}, &bytes.Buffer{})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "resolve "+missing) {
+		t.Fatalf("err = %v, want the module named", err)
 	}
 }
