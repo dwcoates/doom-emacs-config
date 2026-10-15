@@ -95,6 +95,11 @@ func PrebuildDir(shared, sub string) (string, error) {
 // again, whichever suite it belongs to.
 const Programs = "AGENT_REPL_TEST_PROGRAMS"
 
+// ProgramsInstrumented says the programs directory was cover-built, so it may
+// serve a coverage run. Only `testrun redundancy` sets it, for the programs
+// directory it builds itself; a run's own programs are never instrumented.
+const ProgramsInstrumented = "AGENT_REPL_TEST_PROGRAMS_INSTRUMENTED"
+
 // Program answers the run's built program name: its path and true when the
 // run named a programs directory, or false when the process runs outside such
 // a run and builds the program itself. A run that names the directory without
@@ -104,7 +109,7 @@ func Program(getenv func(string) string, name string) (string, bool, error) {
 	if dir == "" {
 		return "", false, nil
 	}
-	if getenv(Coverage) != "" {
+	if getenv(Coverage) != "" && getenv(ProgramsInstrumented) == "" {
 		return "", false, fmt.Errorf("testenv: a run's programs are uninstrumented, so they cannot serve a coverage run (%s is set)", Coverage)
 	}
 	p := filepath.Join(dir, name)

@@ -21,14 +21,17 @@ func TestProgram(t *testing.T) {
 		env      string
 		program  string
 		coverage bool
-		wantOK   bool
-		wantErr  string
+		// instrumented marks the directory as cover-built.
+		instrumented bool
+		wantOK       bool
+		wantErr      string
 	}{
 		{name: "outside a run the process builds it itself", env: "", program: "shim-store", wantOK: false},
 		{name: "a run's program is read from its directory", env: dir, program: "shim-store", wantOK: true},
 		{name: "a run that holds no such program is a defect", env: dir, program: "agent-repld", wantErr: "holds no program agent-repld"},
 		{name: "a directory is not a program", env: dir, program: "a-dir", wantErr: "is a directory"},
 		{name: "a coverage run refuses uninstrumented programs", env: dir, program: "shim-store", coverage: true, wantErr: "cannot serve a coverage run"},
+		{name: "a coverage run reads an instrumented programs directory", env: dir, program: "shim-store", coverage: true, instrumented: true, wantOK: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,6 +42,8 @@ func TestProgram(t *testing.T) {
 					return tt.env
 				case k == Coverage && tt.coverage:
 					return "/cov"
+				case k == ProgramsInstrumented && tt.instrumented:
+					return "1"
 				}
 				return ""
 			}, tt.program)
