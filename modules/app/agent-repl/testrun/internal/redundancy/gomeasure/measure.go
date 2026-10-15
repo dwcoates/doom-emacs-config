@@ -1057,7 +1057,7 @@ func (m *measurer) killersIn(ctx context.Context, st *suiteState, mu gomut.Mutan
 		}
 		killed = append(killed, l)
 	}
-	confirmed, err := m.confirmHangs(ctx, st, mu, env, hung)
+	confirmed, err := m.confirmHangs(ctx, st, mu, env, hung, healthy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1067,33 +1067,17 @@ func (m *measurer) killersIn(ctx context.Context, st *suiteState, mu gomut.Mutan
 }
 
 // confirmHangs judges the leaves that hung alone at twice their healthy
-// latency. A mutant can merely SLOW a case (a fallback timer), and a slowed
-// case is not a kill. So one of them reruns at the hang bound, past every
-// real wait the measured tests allow themselves: still hung there, the
-// mutant stalls, and every leaf that hung under it is a kill; finished, each
-// hung leaf reruns at the hang bound and is a kill only if it fails or hangs
-// again.
-func (m *measurer) confirmHangs(ctx context.Context, st *suiteState, mu gomut.Mutant, env []string, hung []string) ([]string, error) {
+// latency. A mutant can merely SLOW a case (a fallback timer, or a loaded
+// host), and a slowed case is not a kill. So one of them reruns at the hang
+// bound, past every real wait the measured tests allow themselves: still
+// hung there, the mutant stalls, and every leaf that hung under it is a
+// kill. Finished, the rest rerun together (confirmRest), and each is a kill
+// only if it fails or runs the whole hang bound again.
+func (m *measurer) confirmHangs(ctx context.Context, st *suiteState, mu gomut.Mutant, env []string, hung []string, healthy map[string]time.Duration) ([]string, error) {
 	if len(hung) == 0 {
 		return nil, nil
 	}
-	lone := func(l string) (bool, error) {
-		res, r, err := m.runTests(ctx, st, st.mutBin, RunPattern(l), m.cfg.HangBound, nil, env...)
-		if err != nil {
-			return false, err
-		}
-		switch r.Outcomes[l] {
-		case Pass, Skip:
-			return false, nil
-		case Fail:
-			return true, nil
-		}
-		if res.Exit == 0 && !res.TimedOut && len(r.TimedOut) == 0 {
-			return false, fmt.Errorf("gomeasure: %s ran clean under %s yet reported no result:\n%s", l, mu.Key(), res.Text())
-		}
-		return true, nil
-	}
-	first, err := lone(hung[0])
+	first, err := m.confirmLone(ctx, st, mu, env, hung[0])
 	if err != nil {
 		return nil, err
 	}
@@ -1101,17 +1085,88 @@ func (m *measurer) confirmHangs(ctx context.Context, st *suiteState, mu gomut.Mu
 		m.hangs = append(m.hangs, fmt.Sprintf("%s: %d cases hung (confirmed on %s at %s): %s", mu.Key(), len(hung), hung[0], m.cfg.HangBound, strings.Join(hung, ", ")))
 		return hung, nil
 	}
+	killed, err := m.confirmRest(ctx, st, mu, env, hung[1:], healthy)
+	if err != nil {
+		return nil, err
+	}
+	m.hangs = append(m.hangs, fmt.Sprintf("%s: %d cases were only slowed (%s finished within %s); %d failed or hung when rerun", mu.Key(), len(hung), hung[0], m.cfg.HangBound, len(killed)))
+	return killed, nil
+}
+
+// confirmLone reruns one leaf alone at the hang bound: a kill if it fails or
+// runs out the bound.
+func (m *measurer) confirmLone(ctx context.Context, st *suiteState, mu gomut.Mutant, env []string, l string) (bool, error) {
+	res, r, err := m.runTests(ctx, st, st.mutBin, RunPattern(l), m.cfg.HangBound, nil, env...)
+	if err != nil {
+		return false, err
+	}
+	switch r.Outcomes[l] {
+	case Pass, Skip:
+		return false, nil
+	case Fail:
+		return true, nil
+	}
+	if res.Exit == 0 && !res.TimedOut && len(r.TimedOut) == 0 {
+		return false, fmt.Errorf("gomeasure: %s ran clean under %s yet reported no result:\n%s", l, mu.Key(), res.Text())
+	}
+	return true, nil
+}
+
+// confirmRest reruns hung leaves together, bounded by the hang bound plus
+// twice their healthy latencies: a merely slowed leaf costs its runtime, not
+// a bound of its own. A leaf that fails is a kill; one the timeout catches
+// running is a kill when it ran the whole hang bound, and otherwise reruns
+// alone; the leaves the process never reached run again together. A round
+// that settles nothing falls back to one leaf at a time.
+func (m *measurer) confirmRest(ctx context.Context, st *suiteState, mu gomut.Mutant, env []string, rest []string, healthy map[string]time.Duration) ([]string, error) {
 	var killed []string
-	for _, l := range hung[1:] {
-		k, err := lone(l)
+	for len(rest) > 0 {
+		var tops []string
+		bound := m.cfg.HangBound
+		for _, l := range rest {
+			if !slices.Contains(tops, Top(l)) {
+				tops = append(tops, Top(l))
+			}
+			bound += 2 * healthy[l]
+		}
+		_, r, err := m.runTests(ctx, st, st.mutBin, gotest.TopPattern(tops), bound, nil, env...)
 		if err != nil {
 			return nil, err
 		}
-		if k {
-			killed = append(killed, l)
+		var next []string
+		for _, l := range rest {
+			switch {
+			case r.Outcomes[l] == Fail:
+				killed = append(killed, l)
+			case r.Outcomes[l] == Pass || r.Outcomes[l] == Skip:
+			case slices.Contains(r.TimedOut, l) && r.Panicked-r.Started[l] >= m.cfg.HangBound:
+				killed = append(killed, l)
+			case slices.Contains(r.TimedOut, l):
+				k, err := m.confirmLone(ctx, st, mu, env, l)
+				if err != nil {
+					return nil, err
+				}
+				if k {
+					killed = append(killed, l)
+				}
+			default:
+				next = append(next, l)
+			}
 		}
+		if len(next) == len(rest) {
+			for _, l := range next {
+				k, err := m.confirmLone(ctx, st, mu, env, l)
+				if err != nil {
+					return nil, err
+				}
+				if k {
+					killed = append(killed, l)
+				}
+			}
+			break
+		}
+		rest = next
 	}
-	m.hangs = append(m.hangs, fmt.Sprintf("%s: %d cases were only slowed (%s finished within %s); %d failed when rerun", mu.Key(), len(hung), hung[0], m.cfg.HangBound, len(killed)))
 	return killed, nil
 }
 

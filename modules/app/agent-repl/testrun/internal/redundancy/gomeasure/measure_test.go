@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomut"
 	"agentrepl/testrun/internal/run"
@@ -504,7 +505,7 @@ func TestMeasureCountsACaseAMutantOnlySlowsAsNoKill(t *testing.T) {
 	if kills["TestA"] != nil || !reflect.DeepEqual(kills["TestB/y"], []string{"p.go:3:29:< -> <="}) {
 		t.Fatalf("kills = %v, want TestB/y's alone", kills)
 	}
-	if len(m.Hangs) != 1 || !strings.Contains(m.Hangs[0], "2 cases were only slowed (TestA finished within 3s); 1 failed when rerun") {
+	if len(m.Hangs) != 1 || !strings.Contains(m.Hangs[0], "2 cases were only slowed (TestA finished within 3s); 1 failed or hung when rerun") {
 		t.Fatalf("hangs = %v", m.Hangs)
 	}
 }
@@ -672,5 +673,48 @@ func TestMeasureRunsASpawningSuiteThroughItsOwnPrograms(t *testing.T) {
 		if c.ID == "./integ:TestI" && !reflect.DeepEqual(c.Blocks, []string{fakeBlock}) {
 			t.Errorf("TestI's blocks = %v, want its spawned system's", c.Blocks)
 		}
+	}
+}
+
+func TestConfirmRestKillsWhatRunsOutTheBoundAndRerunsWhatTheTimeoutCutShort(t *testing.T) {
+	// Arrange: under mutant 1 every lone run at the short bound hangs.
+	// Confirming, TestA (the first) finishes; TestB/x and TestB/y rerun
+	// together: TestB/x hangs the whole bound, so the group's timeout
+	// catches it; TestB/y, never reached, reruns and passes.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true, "TestB/x": true, "TestB/y": true}}
+	hangBound := cfg.HangBound.String()
+	f.mutantCmd = map[string]func(Cmd) Result{"1": func(c Cmd) Result {
+		p, timeout := argAfter(c.Args, "-test.run"), argAfter(c.Args, "-test.timeout")
+		switch {
+		case p == RunPattern("TestA") && timeout == hangBound:
+			return Result{Lines: passLines("TestA")}
+		case p == gotest.TopPattern([]string{"TestB"}) && timeout != hangBound:
+			return Result{Exit: 2, Lines: []Line{
+				{At: 0, Text: "=== RUN   TestB"}, {At: 0, Text: "=== RUN   TestB/x"},
+				{At: cfg.HangBound + time.Second, Text: "panic: test timed out after 4s"},
+				{At: cfg.HangBound + time.Second, Text: "\trunning tests:"},
+				{At: cfg.HangBound + time.Second, Text: "\t\tTestB/x (4s)"},
+			}}
+		case p == RunPattern("TestB/y") && timeout == hangBound:
+			return Result{Lines: passLines("TestB", "TestB/y")}
+		}
+		return Result{Exit: 2, TimedOut: true}
+	}, "2": func(c Cmd) Result { return Result{Lines: passLines(withParents(leavesOf(argAfter(c.Args, "-test.run")))...)} }}
+	log, _ := quietLog()
+
+	// Act
+	m, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	kills := map[string][]string{}
+	for _, c := range m.Cases {
+		kills[c.ID] = c.Kills
+	}
+	if !reflect.DeepEqual(kills["TestB/x"], []string{"p.go:3:29:< -> <="}) || kills["TestB/y"] != nil || kills["TestA"] != nil {
+		t.Fatalf("kills = %v, want TestB/x's alone", kills)
 	}
 }

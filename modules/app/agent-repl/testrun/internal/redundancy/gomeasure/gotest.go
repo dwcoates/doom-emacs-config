@@ -28,6 +28,10 @@ type Run struct {
 	Elapsed map[string]time.Duration
 	// TimedOut are the tests a `-test.timeout` panic says were running.
 	TimedOut []string
+	// Started is when each name's `=== RUN` line came; Panicked when the
+	// timeout panic did (zero without one).
+	Started  map[string]time.Duration
+	Panicked time.Duration
 }
 
 var (
@@ -37,8 +41,8 @@ var (
 
 // ParseRun reads a test binary's -test.v output.
 func ParseRun(lines []Line) Run {
-	r := Run{Ran: map[string]bool{}, Outcomes: map[string]Outcome{}, Elapsed: map[string]time.Duration{}}
-	started := map[string]time.Duration{}
+	r := Run{Ran: map[string]bool{}, Outcomes: map[string]Outcome{}, Elapsed: map[string]time.Duration{}, Started: map[string]time.Duration{}}
+	started := r.Started
 	var open []string
 	closeOpen := func(at time.Duration, keep func(string) bool) {
 		var still []string
@@ -67,6 +71,7 @@ func ParseRun(lines []Line) Run {
 			continue
 		}
 		if strings.HasPrefix(l.Text, "panic: test timed out after ") {
+			r.Panicked = l.At
 			for i+1 < len(lines) && strings.TrimSpace(lines[i+1].Text) != "running tests:" {
 				i++
 			}

@@ -134,3 +134,16 @@ func TestTopIsTheFirstLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRunStampsEachStartAndTheTimeoutPanic(t *testing.T) {
+	// Arrange
+	in := lines("=== RUN   TestH", "=== RUN   TestH/sub", "panic: test timed out after 1s", "\trunning tests:", "\t\tTestH/sub (1s)")
+
+	// Act
+	got := ParseRun(in)
+
+	// Assert
+	if got.Started["TestH/sub"] != time.Millisecond || got.Panicked != 2*time.Millisecond {
+		t.Fatalf("started %v, panicked %v", got.Started, got.Panicked)
+	}
+}
