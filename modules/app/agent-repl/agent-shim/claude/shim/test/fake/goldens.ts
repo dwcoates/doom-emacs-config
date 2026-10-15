@@ -158,8 +158,8 @@ function driveOptions(policy: Policy): DriveOptions {
 export interface GoldenOutput {
   /** frames.json's content. */
   readonly frames: string;
-  /** meta.json's content. */
-  readonly meta: string;
+  /** meta.json's fields this drive owns; `seam` is the e2e matrix's, never the drive's. */
+  readonly meta: { readonly scenario: string; readonly planes: readonly string[] };
   /** Every file the mock wrote, by its substituted path under the root. */
   readonly tree: ReadonlyMap<string, string>;
 }
@@ -178,7 +178,7 @@ export async function driveGolden(scenario: GoldenScenario): Promise<GoldenOutpu
   const substitute = substitution(rootOf(driven));
   return {
     frames: substitute(renderFrames(driven)),
-    meta: `${JSON.stringify({ scenario: scenario.prompt, seam: null, planes: ["stream", "file"] }, null, 2)}\n`,
+    meta: { scenario: scenario.prompt, planes: ["stream", "file"] },
     tree: readTree(rootOf(driven), substitute),
   };
 }
@@ -257,4 +257,13 @@ function renderItem(item: PersistEntry["item"]): unknown {
     case "shell_run_claim":
       return { kind: item.kind, claim: toJson(storev1.ShellRunClaimSchema, item.claim) };
   }
+}
+
+/**
+ * meta.json's content for a drive, KEEPING the seam a golden already states:
+ * the e2e matrix fills `seam`, and a rewrite of the drive's planes must not
+ * erase it.
+ */
+export function renderMeta(output: GoldenOutput, existingSeam: unknown): string {
+  return `${JSON.stringify({ scenario: output.meta.scenario, seam: existingSeam ?? null, planes: output.meta.planes }, null, 2)}\n`;
 }
