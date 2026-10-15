@@ -11,6 +11,8 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // ROLLED-BACK TURNS (agentrepl.v1.RollBack): turns the user rolled the
@@ -30,6 +32,7 @@ type RolledBackTurnStore interface {
 
 const (
 	opRollbackApply   = "daemon.feed.rollback_apply"
+	opRollbackHold    = "daemon.feed.rollback_hold"
 	opRollbackRestore = "daemon.feed.rollback_restore"
 )
 
@@ -213,8 +216,11 @@ func (r *resolver) RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error {
 	s := r.state(ws)
 	for _, turn := range turns {
 		s.rolledBack[turn] = true
+		delete(s.rollingBack, turn)
 		delete(s.promptSaid, turn)
 	}
+	// The rows withheld while the rollback ran belong to turns now gone.
+	s.withheld = slices.DeleteFunc(s.withheld, func(w withheldRow) bool { return s.rolledBack[w.turn] })
 	retired := 0
 	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, id string, row *frontendv1.FeedRow) {
 		if s.rolledBack[ids.TurnID(row.GetTurn().GetValue())] && r.retire(s, addr, id) {
@@ -236,6 +242,73 @@ func (r *resolver) RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error {
 	}
 	log.Info(opRollbackApply, "rolled-back turns were removed from the feed and recorded", fields)
 	return nil
+}
+
+// withheldRow is a row of a turn being rolled back, kept undrawn until the
+// rollback settles (HoldTurns).
+type withheldRow struct {
+	turn    ids.TurnID
+	at      placement
+	row     *frontendv1.FeedRow
+	durable bool
+}
+
+// HoldTurns withholds every row of TURNS that arrives from now on, because a
+// rollback is cutting them away. The shim interrupts a running turn before it
+// cuts, and the turn's interrupted ending reaches the feed before the cut is
+// answered; held, it is never drawn only to vanish when RollBackTurns lands.
+// Every hold ends in exactly one of RollBackTurns (the rows are dropped) or
+// ReleaseTurns (the rows are drawn).
+func (r *resolver) HoldTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	for _, turn := range turns {
+		s.rollingBack[turn] = true
+	}
+	r.logger(ws).Debug(opRollbackHold, "the rows of the turns being rolled back are withheld until the rollback settles",
+		dlog.Context{"turns": len(turns), "first": firstTurn(turns)})
+}
+
+// ReleaseTurns ends the hold on TURNS for a rollback that did not happen: the
+// rows withheld meanwhile are drawn, in the order they arrived.
+func (r *resolver) ReleaseTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	for _, turn := range turns {
+		delete(s.rollingBack, turn)
+	}
+	var replay []withheldRow
+	s.withheld = slices.DeleteFunc(s.withheld, func(w withheldRow) bool {
+		if s.rollingBack[w.turn] {
+			return false
+		}
+		replay = append(replay, w)
+		return true
+	})
+	for _, w := range replay {
+		r.upsert(s, w.at, w.row, w.durable)
+	}
+	r.logger(ws).Info(opRollbackHold, "the rollback did not happen; the rows withheld while it ran are drawn",
+		dlog.Context{"turns": len(turns), "first": firstTurn(turns), "drawn": len(replay)})
+}
+
+// withheldRollingBack reports whether ROW belongs to a turn being rolled back,
+// keeping a snapshot of it to draw should the rollback be refused.
+func (r *resolver) withheldRollingBack(s *wsState, f *feedState, at placement, row *frontendv1.FeedRow, durable bool) bool {
+	turn := ids.TurnID(row.GetTurn().GetValue())
+	if turn == "" || !s.rollingBack[turn] {
+		return false
+	}
+	snapshot, ok := proto.Clone(row).(*frontendv1.FeedRow)
+	if !ok {
+		panic(fmt.Sprintf("feed: a row of turn %s cloned to a non-row", turn))
+	}
+	s.withheld = append(s.withheld, withheldRow{turn: turn, at: at, row: snapshot, durable: durable})
+	r.logger(s.id).Debug(opRollbackHold, "a row of a turn being rolled back was withheld",
+		dlog.Context{"feed": f.key, "row": row.GetId().GetValue(), "turn": string(turn)})
+	return true
 }
 
 // keepDrawn answers the final answers still drawn on some feed.

@@ -168,6 +168,91 @@ func TestRollBackSuccessCallsFeedAndCountsFilesRestored(t *testing.T) {
 	}
 }
 
+// TestRollBackHoldsTheTurnsBeforeTheCutAndNeverReleasesOnSuccess covers the
+// hold: the dropped turns' rows are withheld from before the shim cuts, so
+// the interrupted ending of a running turn is never drawn, and a rollback
+// that lands ends the hold through RollBackTurns alone.
+func TestRollBackHoldsTheTurnsBeforeTheCutAndNeverReleasesOnSuccess(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turns := []ids.TurnID{"t1", "t2"}
+	heldAtCut := -1
+	f.shim.onRollBack = func() { heldAtCut = len(f.feed.heldTurns) }
+
+	// Act.
+	_, err := f.verbs.RollBack(context.Background(), "w1", RollbackRequest{Turns: turns})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if heldAtCut != 1 {
+		t.Fatalf("holds when the shim cut = %d, want 1: the turns are held before the cut", heldAtCut)
+	}
+	if len(f.feed.heldTurns) != 1 || len(f.feed.heldTurns[0]) != 2 || f.feed.heldTurns[0][1] != "t2" {
+		t.Fatalf("held turns = %+v, want exactly %v", f.feed.heldTurns, turns)
+	}
+	if len(f.feed.releasedTurns) != 0 {
+		t.Fatalf("released turns = %+v, want none: a landed rollback drops the withheld rows", f.feed.releasedTurns)
+	}
+}
+
+// TestRollBackRefusedReleasesTheHeldTurns covers both ways a rollback is
+// refused after the hold: the rows withheld meanwhile are drawn again.
+func TestRollBackRefusedReleasesTheHeldTurns(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+	}{
+		{name: "shim refusal", arrange: func(f *fixture) {
+			f.shim.rollBackErr = &ShimRefusal{Verb: "RollBackSession", Arm: ArmShimFirstPrompt, Detail: "first"}
+		}},
+		{name: "holds changed", arrange: func(f *fixture) { f.queue.rollBackErr = promptqueue.ErrHoldsChanged }},
+		{name: "transport failure", arrange: func(f *fixture) { f.shim.rollBackErr = errors.New("shim gone") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			tt.arrange(f)
+			turns := []ids.TurnID{"t1"}
+
+			// Act.
+			_, err := f.verbs.RollBack(context.Background(), "w1", RollbackRequest{Turns: turns})
+
+			// Assert.
+			if err == nil {
+				t.Fatal("RollBack answered no error for a refused rollback")
+			}
+			if len(f.feed.heldTurns) != 1 || len(f.feed.releasedTurns) != 1 || f.feed.releasedTurns[0][0] != "t1" {
+				t.Fatalf("held = %+v, released = %+v, want t1 held then released", f.feed.heldTurns, f.feed.releasedTurns)
+			}
+			if len(f.feed.rolledBackTurns) != 0 {
+				t.Fatalf("rolled back turns = %+v, want none", f.feed.rolledBackTurns)
+			}
+		})
+	}
+}
+
+// TestRollBackWithNoSessionHoldsNothing covers the gate before the hold: a
+// rollback refused for want of a session never withholds a row.
+func TestRollBackWithNoSessionHoldsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+
+	// Act.
+	_, _ = f.verbs.RollBack(context.Background(), "w1", RollbackRequest{Turns: []ids.TurnID{"t1"}})
+
+	// Assert.
+	if len(f.feed.heldTurns) != 0 || len(f.feed.releasedTurns) != 0 {
+		t.Fatalf("held = %+v, released = %+v, want neither", f.feed.heldTurns, f.feed.releasedTurns)
+	}
+}
+
 // hasRecord reports whether the fixture's captured log carries a record at
 // level under operation, which is how a synchronous verb's logging is
 // checked (RollBack runs on the caller's own goroutine, so there is nothing

@@ -1378,6 +1378,10 @@ type fakeFeed struct {
 	onReset func()
 	// rolledBackTurns records every RollBackTurns call's turns, in order.
 	rolledBackTurns [][]ids.TurnID
+	// heldTurns and releasedTurns record every HoldTurns and ReleaseTurns
+	// call's turns, in order.
+	heldTurns     [][]ids.TurnID
+	releasedTurns [][]ids.TurnID
 	// mainAgents is every main agent the feed was told, in order.
 	mainAgents []string
 	// freshBooks is every workspace whose session came up fresh, in order.
@@ -1414,6 +1418,16 @@ func (f *fakeFeed) SourceUp(ws ids.WorkspaceID) {
 func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
 	f.rolledBackTurns = append(f.rolledBackTurns, turns)
 	return nil
+}
+
+// HoldTurns records the hold.
+func (f *fakeFeed) HoldTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
+	f.heldTurns = append(f.heldTurns, turns)
+}
+
+// ReleaseTurns records the release.
+func (f *fakeFeed) ReleaseTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
+	f.releasedTurns = append(f.releasedTurns, turns)
 }
 
 // RetireRow records the retirement.
@@ -1924,6 +1938,9 @@ type fakeShim struct {
 	transcriptReads int
 	// rollBacks records every RollBackSession call, in order.
 	rollBacks []rolledBackSession
+	// onRollBack, when set, runs as RollBackSession is called, so a test can
+	// observe what was true at the moment of the cut.
+	onRollBack func()
 	// rollBackPaths is the restored-files paths RollBackSession answers with.
 	rollBackPaths []string
 	// rollBackErr fails every RollBackSession call.
@@ -1938,6 +1955,9 @@ type rolledBackSession struct {
 
 func (s *fakeShim) RollBackSession(_ context.Context, turns []ids.TurnID, restoreFiles bool) ([]string, error) {
 	s.rollBacks = append(s.rollBacks, rolledBackSession{Turns: turns, RestoreFiles: restoreFiles})
+	if s.onRollBack != nil {
+		s.onRollBack()
+	}
 	if s.rollBackErr != nil {
 		return nil, s.rollBackErr
 	}

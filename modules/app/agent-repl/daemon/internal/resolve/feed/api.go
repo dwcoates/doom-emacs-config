@@ -306,6 +306,13 @@ type Resolver interface {
 	// removal always happens; an error says only that recording it durably
 	// failed, already logged and raised.
 	RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error
+	// HoldTurns withholds every row of turns a rollback is cutting away while
+	// it runs (rollback.go), so a running turn's interrupted ending is never
+	// drawn only to vanish. Every hold ends in RollBackTurns or ReleaseTurns.
+	HoldTurns(ws ids.WorkspaceID, turns []ids.TurnID)
+	// ReleaseTurns ends a hold for a rollback that did not happen, drawing the
+	// rows withheld meanwhile in arrival order.
+	ReleaseTurns(ws ids.WorkspaceID, turns []ids.TurnID)
 	// OnSignedIn takes a completed sign-in for the workspace's account root
 	// (signin.go): the failure rows of every drawn turn whose ending offers
 	// the sign-in action leave the feed for good. The removal always happens;
