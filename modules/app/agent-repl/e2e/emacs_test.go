@@ -407,6 +407,8 @@ type Emacs struct {
 	// doomStageBound the same way.
 	phasesMu sync.Mutex
 	phases   []phase
+	// stopDaemon is EmacsOpts.StopDaemon: nil asks Emacs to stop its daemon.
+	stopDaemon func()
 }
 
 // phase is one measured boot step.
@@ -475,7 +477,21 @@ type EmacsOpts struct {
 	// inherited by the daemon, the shim, and everything below them. The
 	// build identity and the vendor-call prohibition ride here.
 	ExtraEnv []string
+	// StopDaemon, when set, is how teardown stops the daemon this Emacs is
+	// linked to, in place of asking Emacs to stop it: the Doom tier's fake
+	// daemon is the scenario's own, stops on its own control plane, and
+	// answers a StopDaemon without exiting. Teardown then awaits the
+	// daemon's exit exactly as it does a real one's.
+	StopDaemon func()
 }
+
+// emacsRoot is a scenario's Emacs HOME: its scratch root's `emacs`.
+func emacsRoot(box sandbox) string { return filepath.Join(box.Scratch(), "emacs") }
+
+// emacsStateDir is the agent-repl state root of the Emacs at ROOT, where its
+// daemon publishes daemon.addr: known before Emacs starts, so a daemon the
+// scenario starts itself can bind it first.
+func emacsStateDir(root string) string { return filepath.Join(root, "state") }
 
 // StartEmacs brings up one sandboxed Emacs with a real tty frame, loads the
 // module's own sources into it, and arms the heartbeat.
@@ -492,7 +508,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// caller goes through NewEmacsWorld.
 	requireEmacsSlot(t)
 
-	root := filepath.Join(box.Scratch(), "emacs")
+	root := emacsRoot(box)
 	// 0o700 before anything else creates it: this root is the Emacs HOME,
 	// and Emacs 30 refuses an init tree "accessible by others" -- Doom's
 	// early-init then aborts before any readiness stamp is written.
@@ -509,12 +525,13 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		ServerSocket:       filepath.Join(root, "server"),
 		EmacsDir:           filepath.Join(root, ".emacs.d"),
 		ReadyStamp:         filepath.Join(root, "doom-ready.json"),
-		StateDir:           filepath.Join(root, "state"),
+		StateDir:           emacsStateDir(root),
 		LogFile:            filepath.Join(root, "state", "logs", "doom-agent-repl.log"),
 		DefaultConfigDir:   filepath.Join(root, "account-default"),
 		MultiRepoConfigDir: filepath.Join(root, "account-multi"),
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
 		wedged:             make(chan struct{}),
+		stopDaemon:         opts.StopDaemon,
 	}
 	// The scratch root is unique per test (os.MkdirTemp), so an argv naming
 	// it belongs to this scenario and to nothing else.
@@ -1997,7 +2014,11 @@ func (e *Emacs) stop() {
 		// only where there is something to answer it.
 		switch e.daemonLinkState() {
 		case daemonLinkHeld:
-			e.askDaemonToStop()
+			if e.stopDaemon != nil {
+				e.stopDaemon()
+			} else {
+				e.askDaemonToStop()
+			}
 			stopAsked = true
 		case daemonStopping:
 			// THE SCENARIO STOPPED ITS OWN DAEMON, and that daemon's shutdown

@@ -104,6 +104,8 @@ type layout struct {
 	storeDir   string // .../modules/app/agent-repl/agent-shim/shim-store
 	lockDir    string // .../modules/app/agent-repl/agent-shim/shim-lock
 	sidecarDir string // .../modules/app/agent-repl/agent-shim/claude/shim-sidecar
+	// fakeDaemonDir is the Doom tier's fake daemon module.
+	fakeDaemonDir string // .../modules/app/agent-repl/lisp/testsupport/fakedaemon
 }
 
 var repo layout
@@ -120,11 +122,13 @@ func resolveLayout() (layout, error) {
 	l.storeDir = filepath.Join(l.repoDir, "agent-shim", "shim-store")
 	l.lockDir = filepath.Join(l.repoDir, "agent-shim", "shim-lock")
 	l.sidecarDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim-sidecar")
+	l.fakeDaemonDir = filepath.Join(l.repoDir, "lisp", "testsupport", "fakedaemon")
 	for name, dir := range map[string]string{
 		"daemon module":  l.daemonDir,
 		"shim source":    l.shimDir,
 		"store module":   l.storeDir,
 		"sidecar module": l.sidecarDir,
+		"fake daemon":    l.fakeDaemonDir,
 	} {
 		if _, err := os.Stat(dir); err != nil {
 			return layout{}, fmt.Errorf("%s not found at %s: %w", name, dir, err)
