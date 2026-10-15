@@ -45,6 +45,9 @@ import {
   NETWORK_RESUME_PROBE_INTERVAL_MS,
 } from "../../src/engine/network-resume.js";
 import { isNetworkResumePrompt, resumePromptTargets } from "../../src/engine/network-resume-prompt.js";
+import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE } from "../../src/engine/shim-prompt.js";
+import { VENDOR_ERROR_RETRY_INTERVAL_MS } from "../../src/engine/vendor-error-retry.js";
+import { isVendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
@@ -57,6 +60,8 @@ interface Harness {
   readonly scheduler: ManualScheduler;
   /** The network-resume loop's own scheduler, fired by hand. */
   readonly networkScheduler: ManualScheduler;
+  /** The vendor-error retry's own scheduler, fired by hand. */
+  readonly retryScheduler: ManualScheduler;
   /** The reachability probe the network-resume loop asks. */
   readonly probe: ScriptedProbe;
   readonly queries: { spec: QuerySpec; query: ScriptedQuery }[];
@@ -262,6 +267,7 @@ function harness(
   const fold = new RecordingFold();
   const scheduler = new ManualScheduler();
   const networkScheduler = new ManualScheduler();
+  const retryScheduler = new ManualScheduler();
   const probe = new ScriptedProbe();
   const queries: { spec: QuerySpec; query: ScriptedQuery }[] = [];
   const locks: string[] = [];
@@ -329,6 +335,7 @@ function harness(
     nowMs: options.clock ?? (() => options.nowMs ?? 1_000_100),
     probeApiReachable: probe.probe,
     networkResumeScheduler: networkScheduler,
+    vendorErrorRetryScheduler: retryScheduler,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
     ...(options.initTimeoutMs === undefined ? {} : { initTimeoutMs: options.initTimeoutMs }),
     ...(options.liveSignalTimeoutMs === undefined
@@ -375,6 +382,7 @@ function harness(
     fold,
     scheduler,
     networkScheduler,
+    retryScheduler,
     probe,
     queries,
     stateDir,
@@ -13771,6 +13779,23 @@ describe("a background agent a network outage cut off", () => {
     expect(sends.map((send) => send.uuid)).toEqual([h.minted.at(-1)]);
   });
 
+  it("delivers the resume through the one shim-prompt delivery, named as the network resume", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await cutOff(h);
+    const before = logSinkMark();
+
+    // Act
+    await beat(h);
+
+    // Assert
+    const submitted = logRecordsSince(before).filter(
+      (record) => record.message === "submitted the shim's own prompt; the main agent answers it in an adopted turn",
+    );
+    expect(submitted.map((record) => record.context["prompt"])).toEqual([NETWORK_RESUME_SOURCE.label]);
+  });
+
   it("sends the resume prompt under the uuid derived from its adopted turn's id", async () => {
     // Arrange
     const sends: SdkUserMessage[] = [];
@@ -15823,5 +15848,141 @@ describe("GetForkPoint and ForkSession", () => {
     // refused before the vendor is asked.
     expect(response.result.case === "failure" ? response.result.value.cause.case : "").toBe("unknownSession");
     expect(forks).toEqual([]);
+  });
+});
+
+describe("the vendor-error retry", () => {
+  const API_RETRY = {
+    type: "system",
+    subtype: "api_retry",
+    attempt: 10,
+    max_retries: 10,
+    retry_delay_ms: 500,
+    error_status: 529,
+    error: "overloaded",
+    uuid: "00000000-0000-4000-8000-0000000000e1",
+    session_id: "s",
+  } as unknown as SdkMessage;
+
+  const failure = (failed: conversationv1.AgentFailure["failure"]): conversationv1.AgentFrame["result"] => ({
+    case: "failure",
+    value: create(conversationv1.AgentFailureSchema, { failure: failed }),
+  });
+
+  const OVERLOADED = failure({
+    case: "apiRequestFailed",
+    value: create(conversationv1.ApiRequestFailedSchema, {
+      message: "API Error: overloaded",
+      kind: { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) },
+    }),
+  });
+
+  const BLOCKING_LIMIT = failure({
+    case: "blockingLimit",
+    value: create(conversationv1.AgentStoppedAtBlockingLimitSchema, {}),
+  });
+
+  /** A real turn whose records end in RESULT. */
+  async function failedTurn(
+    h: Harness,
+    turnId: string,
+    records: SdkMessage[],
+    result: conversationv1.AgentFrame["result"],
+  ): Promise<void> {
+    h.fold.resultFor = () => result;
+    await realTurn(h, turnId, records);
+    await drainTurns();
+  }
+
+  it("schedules a retry after a turn the vendor retried and gave up on", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+
+    // Assert
+    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
+  });
+
+  it("delivers the retry prompt to the vendor when the interval elapses", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+
+    // Act
+    h.retryScheduler.fireTimeout();
+    await drainTurns();
+
+    // Assert
+    expect(delivered.filter(isVendorErrorRetryPrompt)).toHaveLength(1);
+  });
+
+  it("delivers the retry through the one shim-prompt delivery, named as the vendor-error retry", async () => {
+    // Arrange
+    const h = harness({ drainPrompts: [] });
+    await started(h);
+    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+    const before = logSinkMark();
+
+    // Act
+    h.retryScheduler.fireTimeout();
+    await drainTurns();
+
+    // Assert
+    const submitted = logRecordsSince(before).filter(
+      (record) => record.message === "submitted the shim's own prompt; the main agent answers it in an adopted turn",
+    );
+    expect(submitted.map((record) => record.context["prompt"])).toEqual([VENDOR_ERROR_RETRY_SOURCE.label]);
+  });
+
+  it("yields to a prompt submitted before the retry is due", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+
+    // Act
+    await realPrompt(h, "turn-2");
+
+    // Assert
+    expect(h.retryScheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("does not count a keep-alive's vendor retry", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.fold.resultFor = () => OVERLOADED;
+
+    // Act
+    await keepaliveTurn(h, [API_RETRY]);
+    await drainTurns();
+
+    // Assert
+    expect(h.retryScheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("waits for the exhausted session window's reset after a usage limit", async () => {
+    // Arrange
+    const h = harness({ nowMs: 1_000_100 });
+    await started(h);
+    const resetsAtMs = 1_000_100 + 76 * 60_000;
+    const query = h.queries.at(-1)?.query;
+    if (query === undefined) throw new Error("no query was created");
+    query.accountUsage = {
+      ...query.accountUsage,
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: 100, resets_at: new Date(resetsAtMs).toISOString() } },
+    };
+
+    // Act
+    await failedTurn(h, "turn-1", [], BLOCKING_LIMIT);
+
+    // Assert
+    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(76 * 60_000);
   });
 });

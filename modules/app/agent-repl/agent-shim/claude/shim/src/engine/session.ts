@@ -182,6 +182,8 @@ import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
+import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
+import { VendorErrorRetry, type UsageReading } from "./vendor-error-retry.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
@@ -359,6 +361,8 @@ interface EngineDeps {
    */
   readonly networkResumeIntervalMs?: number;
   readonly networkResumeWindowMs?: number;
+  /** Injected so a suite drives the vendor-error retry without a clock. */
+  readonly vendorErrorRetryScheduler?: KeepaliveScheduler;
   /**
    * End the process, once the session has been stood down.
    *
@@ -755,6 +759,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     },
     ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
     ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
+  });
+  /**
+   * THE ONE VENDOR-ERROR RETRY STATE of this process
+   * (engine/vendor-error-retry.ts). Fed every non-keep-alive SDK message and
+   * every non-keep-alive turn's terminal; delivers through
+   * {@link deliverShimPrompt}; told when a StartTurn opens; stopped with the
+   * session.
+   */
+  const vendorErrorRetry = new VendorErrorRetry({
+    deliver: (prompt) => deliverShimPrompt(prompt, VENDOR_ERROR_RETRY_SOURCE),
+    readUsage: () => readUsageForRetry(),
+    nowMs: deps.nowMs,
+    scheduler: deps.vendorErrorRetryScheduler ?? REAL_SCHEDULER,
   });
 
   let identity: SessionIdentity | undefined;
@@ -2089,6 +2106,34 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     void accountUsageProbe.refresh();
   }
 
+  /** The latest account usage sample's own answer, and how many samples answered. */
+  let lastUsageReading: UsageReading | undefined;
+  let usageReadings = 0;
+
+  function noteUsageReading(reading: UsageReading): void {
+    lastUsageReading = reading;
+    usageReadings += 1;
+  }
+
+  /**
+   * THE ACCOUNT'S USAGE AFTER A USAGE-LIMIT FAILURE, for the vendor-error
+   * retry (engine/vendor-error-retry.ts). A probe queued behind every one
+   * already asked for (`run`, never coalesced), so the reading answers after
+   * the failure, never a sample taken before it.
+   */
+  async function readUsageForRetry(): Promise<UsageReading> {
+    const before = usageReadings;
+    try {
+      await accountUsageProbe.run();
+    } catch (err) {
+      return { kind: "unavailable", detail: err instanceof Error ? err.message : String(err) };
+    }
+    if (usageReadings === before || lastUsageReading === undefined) {
+      return { kind: "unavailable", detail: "no vendor query was up to sample the account's usage" };
+    }
+    return lastUsageReading;
+  }
+
   /**
    * A LIVE RATE-LIMIT EVENT MEANS THE ACCOUNT'S USAGE MOVED, so it asks for a
    * fresh sample. The event's own utilization is never the drawn figure: it
@@ -2111,10 +2156,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (active === undefined) return;
     const observedAtMs = BigInt(deps.nowMs());
     try {
-      pushes.push(
-        accountUsageUpdate(await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(), observedAtMs),
-      );
+      const usage = await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+      noteUsageReading({ kind: "sampled", usage });
+      pushes.push(accountUsageUpdate(usage, observedAtMs));
     } catch (err) {
+      noteUsageReading({ kind: "unavailable", detail: err instanceof Error ? err.message : String(err) });
       pushes.push(
         create(conversationv1.SessionUpdateSchema, {
           update: {
@@ -2263,6 +2309,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnErrorResult(message);
     noteDetachedWork(message, attribution, verdict.turn);
     networkResume.observe(message);
+    if (!attribution.keepalive) vendorErrorRetry.observe(message);
     const reach = networkReach(message);
     if (reach !== undefined) noteNetworkReach(reach);
     // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
@@ -2302,7 +2349,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the window closes only at the end of a turn that refused nothing.
     if (!converterDefectThisTurn) noteConverterHealthy();
     converterDefectThisTurn = false;
+    if (!attribution.keepalive) vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
     await endVendorTurn(verdict.turn);
+  }
+
+  /** The shim turn a vendor turn answers, or absence when it answers none of ours. */
+  function shimTurnOf(running: VendorTurn): string | undefined {
+    switch (running.kind) {
+      case "send":
+        return running.send.turnId;
+      case "vendor":
+        return adopted?.id.value;
+      case "unknown":
+      case "unstated":
+        return undefined;
+    }
   }
 
   /**
@@ -3560,6 +3621,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveScope.abandon(`the vendor query died: ${detail}`);
     cadence?.stop();
     networkResume.stop(`the vendor query died: ${detail}`);
+    vendorErrorRetry.stop(`the vendor query died: ${detail}`);
     // NO RECOVERY PATH, DELIBERATELY. Nothing in this process restarts a query
     // it lost, so this fault is meant to stand for the session's life -- and it
     // holds its own component so a probe that still answers cannot clear it.
@@ -5875,8 +5937,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /** Deliver the network-resume prompt as the main agent's next turn ({@link deliverShimPrompt}). */
+  async function deliverNetworkResume(text: string): Promise<ResumeDelivery> {
+    return deliverShimPrompt(text, NETWORK_RESUME_SOURCE);
+  }
+
   /**
-   * Deliver the network-resume prompt as the main agent's next turn.
+   * Deliver a prompt the SHIM authored as the main agent's next turn.
    *
    * ONLY ON AN IDLE MAIN AGENT: a turn in either slot (a keep-alive's
    * included) or a `StartTurn` being processed answers `busy`, and the loop
@@ -5893,46 +5960,46 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * does (engine/turn.ts), rather than being refused.
    *
    * THE KEEP-ALIVE ROLLBACK IS OWED FIRST, as it is before any real prompt:
-   * the resume must not build on keep-alive context.
+   * the prompt must not build on keep-alive context.
    */
-  async function deliverNetworkResume(text: string): Promise<ResumeDelivery> {
+  async function deliverShimPrompt(text: string, source: ShimPromptSource): Promise<ShimPromptDelivery> {
     if (standingDown) return { kind: "unavailable", detail: "the session is standing down" };
     if (identity === undefined || query === undefined || prompts === undefined) {
       return { kind: "unavailable", detail: "no vendor query is accepting prompts" };
     }
     const busy = mainAgentBusy();
     if (busy !== undefined) return { kind: "busy", detail: busy };
-    const resume = mintAdoptedTurn();
-    const uuid = promptUuid(resume.id.value);
+    const turn = mintAdoptedTurn();
+    const uuid = promptUuid(turn.id.value);
     await yieldObligation(textSaid(text), false, uuid);
     // THE ROLLBACK AWAITED. A `StartTurn` that arrived meanwhile owns the next
-    // turn; the resume waits for the next beat rather than riding into it.
+    // turn; the prompt waits for the next beat rather than riding into it.
     const busyAfter = mainAgentBusy();
     if (busyAfter !== undefined) return { kind: "busy", detail: busyAfter };
     const queue = prompts;
     if (queue === undefined) {
       return { kind: "unavailable", detail: "the keep-alive rollback left no vendor query accepting prompts" };
     }
-    setOpen(resume);
+    setOpen(turn);
     cadence?.pause();
-    writeAdoptedPrompt(resume, "the shim asked the main agent to resume network-killed agents", "network_resume");
+    writeAdoptedPrompt(turn, source.cause, source.firstMessage);
     try {
-      pushSend(queue, text, { uuid, turnId: resume.id.value, keepalive: false });
+      pushSend(queue, text, { uuid, turnId: turn.id.value, keepalive: false });
     } catch (err) {
       // THE TURN LEAVES THE SLOT WITH THE PUSH THAT FAILED: nothing will ever
       // end it, and a slot held by it would hold every StartTurn behind it.
-      releaseTurn(resume);
+      releaseTurn(turn);
       LOGGER.error(
-        { turn_id: resume.id.value, cause: err instanceof Error ? err.message : String(err) },
-        "the vendor refused the network-resume prompt; the adopted turn is released",
+        { turn_id: turn.id.value, prompt: source.label, cause: err instanceof Error ? err.message : String(err) },
+        "the vendor refused the shim's own prompt; the adopted turn is released",
       );
       throw err;
     }
     LOGGER.info(
-      { turn_id: resume.id.value, client_uuid: uuid, characters: text.length },
-      "submitted the network-resume prompt; the main agent continues the cut-off agents in an adopted turn",
+      { turn_id: turn.id.value, client_uuid: uuid, prompt: source.label, characters: text.length },
+      "submitted the shim's own prompt; the main agent answers it in an adopted turn",
     );
-    return { kind: "delivered" };
+    return { kind: "delivered", turnId: turn.id.value };
   }
 
   /** Why the main agent cannot take a prompt now, or absence when it is idle. */
@@ -5966,7 +6033,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveYieldBudgetMs: deps.keepaliveYieldBudgetMs ?? KEEPALIVE_YIELD_BUDGET_MS,
     submit,
     setOpenTurn: (turn) => {
-      if (!turn.keepalive) retireStopCommand("a real turn opened");
+      if (!turn.keepalive) {
+        retireStopCommand("a real turn opened");
+        vendorErrorRetry.promptSubmitted(turn.id.value);
+      }
       setOpen(turn);
       cadence?.pause();
     },
@@ -6669,6 +6739,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     cadence?.stop();
     networkResume.stop(reason);
+    vendorErrorRetry.stop(reason);
     if (accountUsageHandle !== undefined) {
       (deps.scheduler ?? REAL_SCHEDULER).clearInterval(accountUsageHandle);
       accountUsageHandle = undefined;

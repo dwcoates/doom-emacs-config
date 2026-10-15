@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-// @ts-expect-error -- a plain .mjs build helper with no type declarations
 import { bundleOptions } from "../build-options.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
