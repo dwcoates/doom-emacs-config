@@ -272,9 +272,9 @@ precedence, so every merged row states it."
 (defun agent-repl-roster-row-instant-ms (row field)
   "Return the epoch ms of ROW's durable instant FIELD, or nil.
 FIELD is the row key of one of the durable instants (`:last-selected',
-`:last-turn-ended', `:last-updated'), each decoded to `(:at-ms MS)' by the one instant
-decoder.  nil when ROW is nil or does not carry FIELD.  The one reader
-every durable-instant accessor goes through."
+`:last-turn-ended', `:last-updated'), each decoded to `(:at-ms MS)' by the
+one instant decoder.  nil when ROW is nil or does not carry FIELD.  The
+one reader every durable-instant accessor goes through."
   (plist-get (plist-get row field) :at-ms))
 
 (defun agent-repl-roster-row-commit-count (row)
