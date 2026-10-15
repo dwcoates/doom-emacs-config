@@ -1,9 +1,8 @@
 /**
- * SIDEBAR — the roster, its two groupings, and every workspace verb.
+ * SIDEBAR — the roster and every workspace verb.
  *
- * The roster is the ONE global stream, and both groupings arrive resolved as
- * siblings. Which one renders, every section's fold and every row's open
- * detail are the DAEMON'S view state, carried on the push so the sidebar looks
+ * The roster is the ONE global stream. Every section's fold and every row's
+ * open detail are the DAEMON'S view state, carried on the push so the sidebar looks
  * the same in every workspace's page (owner rulings, 2026-10-06): a gesture
  * paints its page at once and asks UpdateSidebarView, and the push reconciles.
  *
@@ -88,110 +87,8 @@ describe("arm coverage", () => {
   });
 });
 
-describe("the groupings", () => {
-  it("carries every grouping from one push", async () => {
-    // Arrange / Act: every one arrives resolved as siblings on the same view.
-    await withRoster({});
-    // Assert
-    expect(harness.$$("[data-grouping]").map((el) => el.dataset.grouping).sort()).toEqual([
-      "maturity",
-      "repository",
-      "task",
-    ]);
-  });
-
-  it("shows the maturity grouping when the daemon says every page shows it", async () => {
-    // Arrange / Act
-    await withRoster({ shown: "maturity" });
-    // Assert
-    expect(harness.$('[data-grouping="maturity"]')?.hidden).toBe(false);
-  });
-
-  it("asks the daemon to show the maturity grouping on its pick", async () => {
-    // Arrange
-    await withRoster({});
-    harness.fake.clearCalls();
-    // Act
-    await harness.click('[data-grouping-pick="maturity"]');
-    // Assert
-    const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
-    expect(request?.change.case === "showGrouping" ? request.change.value.grouping.case : "none").toBe("maturity");
-  });
-
-  it("draws the maturity stages' headers verbatim, in the daemon's order", async () => {
-    // Arrange / Act
-    await withRoster({ shown: "maturity" });
-    // Assert
-    expect(harness.$$('[data-grouping="maturity"] .maturity-section .sb-label').map((el) => el.textContent)).toEqual([
-      "Backlog",
-      "In Progress",
-      "Merging",
-    ]);
-  });
-
-  it("renders the repository grouping by default", async () => {
-    // Arrange / Act
-    await withRoster({});
-    // Assert
-    expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
-  });
-
-  it("hides the grouping the daemon does not show", async () => {
-    // Arrange / Act
-    await withRoster({});
-    // Assert
-    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(true);
-  });
-
-  it("shows the grouping the daemon says every page shows", async () => {
-    // Arrange / Act
-    await withRoster({ shown: "task" });
-    // Assert
-    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
-  });
-
-  it("switches which grouping renders at once on a pick", async () => {
-    // Arrange
-    await withRoster({});
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
-  });
-
-  it("asks the daemon to show the picked grouping in every page", async () => {
-    // Arrange
-    await withRoster({});
-    harness.fake.clearCalls();
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
-    expect(request?.change.case === "showGrouping" ? request.change.value.grouping.case : "none").toBe("task");
-  });
-
-  it("draws the repository section header verbatim", async () => {
-    // Arrange / Act
-    await withRoster({});
-    // Assert
-    expect(harness.$('[data-grouping="repository"]')?.textContent).toContain("doom");
-  });
-
-  it("draws the task section header verbatim", async () => {
-    // Arrange
-    await withRoster({});
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    expect(harness.$('[data-grouping="task"]')?.textContent).toContain("the overhaul");
-  });
-});
-
-/** A task section's fold triangle. */
-const TASK_FOLD = '[data-grouping="task"] .task-section [data-section-fold]';
-
 /** A repository section's fold triangle. */
-const REPOSITORY_FOLD = '[data-grouping="repository"] .repo-section [data-section-fold]';
+const REPOSITORY_FOLD = '.sb-pane .repo-section [data-section-fold]';
 
 /** The fold the one recorded UpdateSidebarView asked for, and of which section. */
 function askedFold(): { section: string | undefined; fold: string | undefined } {
@@ -199,79 +96,6 @@ function askedFold(): { section: string | undefined; fold: string | undefined } 
   if (request?.change.case !== "foldSection") return { section: undefined, fold: undefined };
   return { section: request.change.value.section.case, fold: request.change.value.fold.case };
 }
-
-/** The in-progress stage's fold triangle. */
-const IN_PROGRESS_FOLD = '[data-grouping="maturity"] [data-maturity-stage="inProgress"] [data-section-fold]';
-
-describe("maturity stage folds", () => {
-  it("asks the daemon to collapse a stage, naming the stage", async () => {
-    // Arrange
-    await withRoster({ shown: "maturity" });
-    harness.fake.clearCalls();
-    // Act
-    await harness.click(IN_PROGRESS_FOLD);
-    // Assert
-    const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
-    const section = request?.change.case === "foldSection" ? request.change.value.section : undefined;
-    expect([section?.case, section?.case === "maturity" ? section.value.stage.case : undefined, askedFold().fold]).toEqual([
-      "maturity",
-      "inProgress",
-      "collapse",
-    ]);
-  });
-
-  it("draws the fold the daemon pushes", async () => {
-    // Arrange
-    await withRoster({ shown: "maturity" });
-    // Act
-    harness.fake.setRoster(roster({ shown: "maturity", inProgressCollapsed: true }));
-    await harness.settle();
-    // Assert
-    expect(harness.$(IN_PROGRESS_FOLD)?.dataset.folded).toBe("true");
-  });
-});
-
-describe("task folds", () => {
-  it("folds a task section at once on click", async () => {
-    // Arrange
-    await withRoster({ shown: "task" });
-    // Act
-    await harness.click(TASK_FOLD);
-    // Assert
-    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
-  });
-
-  it("asks the daemon to fold the task section in every page", async () => {
-    // Arrange
-    await withRoster({ shown: "task" });
-    harness.fake.clearCalls();
-    // Act
-    await harness.click(TASK_FOLD);
-    // Assert
-    expect(askedFold()).toEqual({ section: "task", fold: "collapse" });
-  });
-
-  it("keeps the asked fold across a push that does not carry it yet", async () => {
-    // Arrange
-    await withRoster({ shown: "task" });
-    await harness.click(TASK_FOLD);
-    // Act
-    harness.fake.setRoster(roster({ shown: "task" }));
-    await harness.settle();
-    // Assert
-    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
-  });
-
-  it("draws the fold another page asked for, from the push", async () => {
-    // Arrange
-    await withRoster({ shown: "task" });
-    // Act
-    harness.fake.setRoster(roster({ shown: "task", taskCollapsed: true }));
-    await harness.settle();
-    // Assert
-    expect(harness.$(TASK_FOLD)?.dataset.folded).toBe("true");
-  });
-});
 
 /** The one repository section, as the daemon pushes it collapsed. */
 const COLLAPSED_REPOSITORY = [{ repositoryId: "repo-1", label: "doom", rows: [rosterRow()], collapsed: true }];
@@ -318,7 +142,7 @@ describe("repository folds", () => {
 });
 
 /** The open workspaces section's own fold triangle, in the repository grouping's copy. */
-const OPEN_FOLD = '[data-grouping="repository"] .open-section > .repo-head [data-section-fold]';
+const OPEN_FOLD = '.sb-pane .open-section > .repo-head [data-section-fold]';
 
 describe("the open workspaces section's fold", () => {
   it("starts unfolded, as the daemon's default is", async () => {
@@ -340,7 +164,7 @@ describe("the open workspaces section's fold", () => {
 });
 
 /** The merged band's fold triangle, in the repository grouping's copy. */
-const MERGED_FOLD = '[data-grouping="repository"] .merged-section [data-section-fold]';
+const MERGED_FOLD = '.sb-pane .merged-section [data-section-fold]';
 
 describe("the recently-merged band's fold", () => {
   it("starts folded, as the daemon's default is", async () => {
@@ -503,7 +327,7 @@ describe("row decoration", () => {
     // Arrange / Act
     await withRoster({ mergedCollapsed: false });
     // Assert
-    const group = harness.$('[data-grouping="repository"] .merged-group [data-roster-row="ws-merged"]')?.closest(".merged-group");
+    const group = harness.$('.sb-pane .merged-group [data-roster-row="ws-merged"]')?.closest(".merged-group");
     expect(group?.querySelector(".merged-group-head")?.textContent).toBe("doom");
   });
 
@@ -511,7 +335,7 @@ describe("row decoration", () => {
     // Arrange / Act
     await withRoster({ mergedCollapsed: false, mergedRepositoryCollapsed: true });
     // Assert
-    expect(harness.$('[data-grouping="repository"] .merged-section')?.getAttribute("data-merged-empty")).toBe("true");
+    expect(harness.$('.sb-pane .merged-section')?.getAttribute("data-merged-empty")).toBe("true");
   });
 });
 
@@ -699,94 +523,6 @@ describe("the merge verb's source", () => {
   });
 });
 
-describe("the task verbs", () => {
-  it("calls CreateTask with the typed title", async () => {
-    // Arrange
-    await withRoster({});
-    const input = harness.$("[data-task-title]") as HTMLInputElement;
-    input.value = "a new task";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    // Act
-    await harness.click("[data-task-create]");
-    // Assert
-    const [request] = harness.fake.calls<{ title: string }>("createTask");
-    expect(request.title).toBe("a new task");
-  });
-
-  it("calls UpdateTask with the set_title change", async () => {
-    // Arrange
-    await withRoster({});
-    const input = harness.$('[data-task-rename="task-1"]') as HTMLInputElement;
-    input.value = "renamed";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    // Act
-    await harness.click('[data-task-change="setTitle"]');
-    // Assert
-    const [request] = harness.fake.calls<{ change: { case?: string } }>("updateTask");
-    expect(request.change.case).toBe("setTitle");
-  });
-
-  it("calls UpdateTask with the set_done change", async () => {
-    // Arrange
-    await withRoster({});
-    // Act
-    await harness.click('[data-task-change="setDone"]');
-    // Assert
-    const [request] = harness.fake.calls<{ change: { case?: string } }>("updateTask");
-    expect(request.change.case).toBe("setDone");
-  });
-
-  it("calls UpdateTask with the set_open change", async () => {
-    // Arrange
-    await withRoster({});
-    // Act
-    await harness.click('[data-task-change="setOpen"]');
-    // Assert
-    const [request] = harness.fake.calls<{ change: { case?: string } }>("updateTask");
-    expect(request.change.case).toBe("setOpen");
-  });
-
-  it("echoes the task's own TaskRef on an update", async () => {
-    // Arrange
-    await withRoster({});
-    // Act
-    await harness.click('[data-task-change="setDone"]');
-    // Assert
-    const [request] = harness.fake.calls<{ task?: { id: string } }>("updateTask");
-    expect(request.task?.id).toBe("task-1");
-  });
-
-  it("calls AssignWorkspaceTask with a task when one is picked", async () => {
-    // Arrange
-    await withRoster({ rows: [rosterRow({ id: "ws-assign" })] });
-    // Act
-    await harness.click('[data-roster-row="ws-assign"] [data-assign-task="task-1"]');
-    // Assert
-    const [request] = harness.fake.calls<{ task?: { id: string } }>("assignWorkspaceTask");
-    expect(request.task?.id).toBe("task-1");
-  });
-
-  it("calls AssignWorkspaceTask with no task to unassign", async () => {
-    // Arrange
-    await withRoster({ rows: [rosterRow({ id: "ws-assign" })] });
-    // Act
-    await harness.click('[data-roster-row="ws-assign"] [data-assign-task=""]');
-    // Assert
-    const [request] = harness.fake.calls<{ task?: { id: string } }>("assignWorkspaceTask");
-    expect(request.task).toBeUndefined();
-  });
-
-  it("echoes the workspace on an assignment", async () => {
-    // Arrange
-    await withRoster({ rows: [rosterRow({ id: "ws-assign" })] });
-    // Act
-    await harness.click('[data-roster-row="ws-assign"] [data-assign-task="task-1"]');
-    // Assert
-    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("assignWorkspaceTask");
-    expect(request.workspace?.id).toBe("ws-assign");
-  });
-});
-
 describe("row omission", () => {
   it("drops a row the next push omits rather than waiting for a deletion event", async () => {
     // Arrange
@@ -840,15 +576,6 @@ describe("the preferences a page once stored", () => {
     window.localStorage.removeItem(PREFS_KEY);
   });
 
-  it("never pick the grouping: the daemon's is drawn", async () => {
-    // Arrange: what a reload of an old page looks like.
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
-    // Act
-    await withRoster({});
-    // Assert
-    expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
-  });
-
   it("are dropped from storage", async () => {
     // Arrange
     window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task", folded: { "task:task-1": true } }));
@@ -888,7 +615,7 @@ describe("roster ordering", () => {
     // Assert
     expect(
       harness
-        .$$('[data-grouping="repository"] [data-roster-row]')
+        .$$('.sb-pane [data-roster-row]')
         .map((el) => el.dataset.rosterRow),
     ).toEqual(["ws-zeta", "ws-alpha", "ws-mid", "ws-merged"]);
   });
@@ -904,7 +631,7 @@ describe("roster ordering", () => {
     // Assert
     // The open workspaces section heads the pane and the recently-merged
     // section is its last, by construction.
-    expect(harness.texts('[data-grouping="repository"] .repo-head .sb-label')).toEqual([
+    expect(harness.texts('.sb-pane .repo-head .sb-label')).toEqual([
       "Open",
       "zulu",
       "alpha",
@@ -923,7 +650,7 @@ describe("roster ordering", () => {
     // Assert
     expect(
       harness
-        .$$('[data-grouping="repository"] [data-roster-row]')
+        .$$('.sb-pane [data-roster-row]')
         .map((el) => el.dataset.rosterRow),
     ).toEqual(["ws-z", "ws-a", "ws-merged"]);
   });
@@ -962,43 +689,5 @@ describe("a roster with no current workspace", () => {
     await withRoster({ currentUnset: true, rows: [rosterRow({ id: "ws-1", current: true })] });
     // Assert
     expect(harness.$('[data-roster-row="ws-1"]')?.dataset.current).toBe("true");
-  });
-});
-
-describe("a task section's done check", () => {
-  it("draws the open state the header carries", async () => {
-    // Arrange
-    await withRoster({ taskDone: false });
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    expect(harness.$('.task-head [data-task-status]')?.dataset.taskStatus).toBe("open");
-  });
-
-  it("draws the done state the header carries", async () => {
-    // Arrange
-    await withRoster({ taskDone: true });
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    expect(harness.$('.task-head [data-task-status]')?.dataset.taskStatus).toBe("done");
-  });
-
-  it("offers the reopen change on a done task", async () => {
-    // Arrange
-    await withRoster({ taskDone: true });
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert: the control flips what the check currently says.
-    expect(harness.$('.task-head [data-task-status]')?.dataset.taskChange).toBe("setOpen");
-  });
-
-  it("offers the complete change on an open task", async () => {
-    // Arrange
-    await withRoster({ taskDone: false });
-    // Act
-    await harness.click('[data-grouping-pick="task"]');
-    // Assert
-    expect(harness.$('.task-head [data-task-status]')?.dataset.taskChange).toBe("setDone");
   });
 });

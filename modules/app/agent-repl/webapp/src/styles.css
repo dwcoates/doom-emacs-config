@@ -863,28 +863,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* View selector: a two-button segmented control switching the rail
-   between repo grouping and task grouping, plus (in the Task view) the
-   new-task +. */
-#ws-sidebar .sb-views {
-  margin-left: auto;
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-}
-#ws-sidebar .sb-view-btn {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.55rem;
-  cursor: pointer;
-}
-#ws-sidebar .sb-view-btn:hover { background: var(--card); }
-#ws-sidebar .sb-view-btn.active { background: var(--info-ws); color: var(--bg); }
 #ws-sidebar .sb-add {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -909,51 +887,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    content-sized basis flipped Recently Merged between five and six lines
    many times a second). */
 #ws-sidebar .sb-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 0.35rem 0 1rem; }
-
-/* Task section header: checkbox + label (opens the org notes) + count +
-   add-workspace +. A done task greys and strikes through. Mirrors the
-   .repo-head spacing so task and repo sections read as one system. */
-#ws-sidebar .task-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.7rem 0.25rem;
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--info-ws);
-  font-weight: 700;
-}
-#ws-sidebar .task-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.05em;
-  height: 1.05em;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--ok, #5ac37a);
-  font-size: 0.8rem;
-  line-height: 1;
-  cursor: pointer;
-}
-#ws-sidebar .task-check.done { border-color: var(--ok, #5ac37a); }
-#ws-sidebar .task-label { cursor: pointer; }
-#ws-sidebar .task-label:hover { text-decoration: underline; }
-#ws-sidebar .task-label.no-task { cursor: default; color: var(--muted); }
-#ws-sidebar .task-label.no-task:hover { text-decoration: none; }
-#ws-sidebar .task-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
-#ws-sidebar .task-add {
-  margin-left: auto;
-  color: var(--info-ws);
-  font-size: 1rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.2rem;
-}
-#ws-sidebar .task-add:hover { color: var(--fg); }
-/* A completed task recedes: grey, struck-through label. */
-#ws-sidebar .task-section.done .task-label { color: var(--muted); text-decoration: line-through; }
 
 /* Repo section header: fold triangle + repo label in the --info-ws hue the
    topbar already uses for the workspace datapoint. */
@@ -1033,12 +966,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar { --ws-mark-width: 9px; --ws-mark-size: 9px; }
 #ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: var(--ws-mark-size); border-radius: 50%; }
 
-/* THE BANDS UNDER EVERY GROUPING -- Hidden Workspaces, then Recently Merged
-   -- hold no grouping's sections, so each is set off from the list above by
+/* THE BANDS UNDER THE REPOSITORY SECTIONS -- Hidden Workspaces, then Recently
+   Merged -- hold no repository's section, so each is set off from the list above by
    ONE shared light rule. Both bands' headers are drawn purple: Recently
    Merged's matches its rows' dots, and Hidden's matches Recently Merged's
    (owner request, 2026-10-11), and so is the open workspaces section's header
-   above the groupings (owner request, 2026-10-13). The rows under any of them
+   above the repository sections (owner request, 2026-10-13). The rows under any of them
    keep their own colours. */
 #ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {

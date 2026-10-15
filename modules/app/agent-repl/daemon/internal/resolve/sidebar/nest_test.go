@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/ids"
-	"agent-repld/internal/wsm"
 )
 
 func TestRosterDoesNotNestAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {
@@ -166,32 +165,6 @@ func TestRosterStillDrawsACyclingParentChainsRows(t *testing.T) {
 	rows := repoRows(t, latest(t, r))
 	if rowFor(rows, "w-a") == nil || rowFor(rows, "w-b") == nil {
 		t.Fatal("a cycling parent chain lost a row")
-	}
-}
-
-func TestTaskViewNestsOnlyAmongTheRowsItDraws(t *testing.T) {
-	// Arrange: the child is on a task, its parent is not.
-	r, _ := newResolver(t)
-	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
-	parent := workspace("w-parent", "parent")
-	child := workspace("w-child", "child")
-	child.Parent = &parent.ID
-	taskID := task.ID
-	child.Task = &taskID
-	reg := registry(parent, child)
-	reg.Tasks = []wsm.Task{task}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert: a row can only nest under a row drawn beside it.
-	sections := latest(t, r).GetTask().GetSections()
-	if len(sections) != 1 {
-		t.Fatalf("the task view carried %d sections, want 1", len(sections))
-	}
-	rows := sections[0].GetRows().GetRows()
-	if got := rowNames(rows); !equal(got, []string{"child"}) {
-		t.Fatalf("task rows = %v, want the child at the section's top level", got)
 	}
 }
 

@@ -656,13 +656,6 @@ const REFUSAL_SITES: RefusalSite[] = [
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
   },
   {
-    name: "AssignWorkspaceTask",
-    rpc: "assignWorkspaceTask",
-    click: `[data-roster-row="${WORKSPACE_ID}"] [data-assign-task="task-1"]`,
-    site: `[data-roster-row="${WORKSPACE_ID}"]`,
-    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
-  },
-  {
     name: "SetModel",
     rpc: "setModel",
     click: '[data-model-option="sonnet"]',
@@ -1067,68 +1060,5 @@ describe("the create-workspace form", () => {
     await harness.click("[data-create-submit]");
     // Assert
     expect(harness.$("[data-create-form]")).toBeNull();
-  });
-});
-
-describe("the task verbs' refusals", () => {
-  /** Boot with a roster and a refusing task verb. */
-  const withRefusal = async (rpc: RpcName, arm: string): Promise<void> => {
-    harness = await startHarness({
-      arrange: (fake) => fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
-    });
-    harness.fake.refuse(rpc, arm);
-  };
-
-  /**
-   * Type a title into the new-task form.
-   *
-   * A BLANK TITLE IS NEVER SENT (src/sidebar/tasks.ts: the contract says the
-   * title is non-blank, so the refusal is avoided rather than provoked), so a
-   * test that clicked with an empty box would provoke no rpc at all and
-   * observe no refusal for the wrong reason.
-   */
-  const typeTitle = async (title: string): Promise<void> => {
-    const input = harness.$("[data-task-title]") as HTMLInputElement;
-    input.value = title;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await harness.settle();
-  };
-
-  it.each(refusalArmsOf("createTask"))("draws CreateTask's %s arm at its control", async (arm) => {
-    // Arrange
-    await withRefusal("createTask", arm);
-    await typeTitle("a new task");
-    // Act
-    await harness.click("[data-task-create]");
-    // Assert
-    expect(harness.$(`[data-component="sidebar"] .refusal[data-arm="${arm}"]`)).not.toBeNull();
-  });
-
-  it.each(refusalArmsOf("updateTask"))("draws UpdateTask's %s arm at its control", async (arm) => {
-    // Arrange
-    await withRefusal("updateTask", arm);
-    // Act
-    await harness.click('[data-task-change="setDone"]');
-    // Assert
-    expect(harness.$(`[data-component="sidebar"] .refusal[data-arm="${arm}"]`)).not.toBeNull();
-  });
-
-  it("draws exactly one refusal for a refused task create", async () => {
-    // Arrange
-    await withRefusal("createTask", "blankTitle");
-    await typeTitle("a new task");
-    // Act
-    await harness.click("[data-task-create]");
-    // Assert
-    expect(harness.refusalArms()).toEqual(["blankTitle"]);
-  });
-
-  it("draws no task refusal in the feed", async () => {
-    // Arrange
-    await withRefusal("updateTask", "unknownTask");
-    // Act
-    await harness.click('[data-task-change="setDone"]');
-    // Assert
-    expect(harness.feedContainer()?.querySelector(".refusal")).toBeNull();
   });
 });

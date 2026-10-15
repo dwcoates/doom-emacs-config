@@ -2,74 +2,9 @@ package wsm
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 )
-
-func TestSetTaskFoldedIsReadBack(t *testing.T) {
-	tests := []struct {
-		name   string
-		folded bool
-	}{{"collapsed", true}, {"expanded", false}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			task, err := s.CreateTask(context.Background(), "write the report")
-			if err != nil {
-				t.Fatalf("CreateTask: %v", err)
-			}
-			if err := s.SetTaskFolded(context.Background(), task.ID, !tt.folded); err != nil {
-				t.Fatalf("seed SetTaskFolded: %v", err)
-			}
-
-			// Act
-			err = s.SetTaskFolded(context.Background(), task.ID, tt.folded)
-
-			// Assert
-			if err != nil {
-				t.Fatalf("SetTaskFolded: %v", err)
-			}
-			tasks, _ := s.Tasks(context.Background())
-			if len(tasks) != 1 || tasks[0].Folded != tt.folded {
-				t.Fatalf("tasks = %+v, want folded=%v", tasks, tt.folded)
-			}
-		})
-	}
-}
-
-func TestANewTaskIsExpanded(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-
-	// Act
-	if _, err := s.CreateTask(context.Background(), "write the report"); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-
-	// Assert
-	tasks, _ := s.Tasks(context.Background())
-	if len(tasks) != 1 || tasks[0].Folded {
-		t.Fatalf("tasks = %+v, want a new task expanded", tasks)
-	}
-}
-
-func TestSetTaskFoldedRefusesAnUnknownTask(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-
-	// Act
-	err := s.SetTaskFolded(context.Background(), TaskID("absent"), true)
-
-	// Assert
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetTaskFolded = %v, want ErrNotFound", err)
-	}
-	if len(log.Records()) == 0 {
-		t.Fatal("the refused write left no record")
-	}
-}
 
 func TestSidebarViewDefaultsWhenUnset(t *testing.T) {
 	// Arrange
@@ -87,13 +22,6 @@ func TestSidebarViewDefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestTheDefaultViewExpandsTheBandAndShowsTheRepositoryGrouping(t *testing.T) {
-	// Arrange, Act, Assert
-	if DefaultSidebarView.MergedFolded || DefaultSidebarView.Grouping != GroupingRepository {
-		t.Fatalf("DefaultSidebarView = %+v, want the band expanded and the repository grouping", DefaultSidebarView)
-	}
-}
-
 func TestSidebarViewWritesAreReadBack(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -101,34 +29,29 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 		want  SidebarView
 	}{
 		{
-			name:  "folding the band keeps the default grouping",
+			name:  "folding the band keeps the other folds",
 			write: func(s *store) error { return s.SetMergedSectionFolded(context.Background(), true) },
-			want:  SidebarView{MergedFolded: true, Grouping: GroupingRepository},
-		},
-		{
-			name:  "showing the task grouping keeps the default band fold",
-			write: func(s *store) error { return s.SetGrouping(context.Background(), GroupingTask) },
-			want:  SidebarView{MergedFolded: false, Grouping: GroupingTask},
+			want:  SidebarView{MergedFolded: true},
 		},
 		{
 			name: "a second write keeps the first",
 			write: func(s *store) error {
-				if err := s.SetGrouping(context.Background(), GroupingTask); err != nil {
+				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
 					return err
 				}
 				return s.SetMergedSectionFolded(context.Background(), true)
 			},
-			want: SidebarView{MergedFolded: true, Grouping: GroupingTask},
+			want: SidebarView{MergedFolded: true, HiddenFolded: true},
 		},
 		{
-			name:  "folding the hidden section keeps the band and the grouping",
+			name:  "folding the hidden section keeps the band",
 			write: func(s *store) error { return s.SetHiddenSectionFolded(context.Background(), true) },
-			want:  SidebarView{HiddenFolded: true, Grouping: GroupingRepository},
+			want:  SidebarView{HiddenFolded: true},
 		},
 		{
-			name:  "folding the open section keeps the band, the hidden section and the grouping",
+			name:  "folding the open section keeps the band and the hidden section",
 			write: func(s *store) error { return s.SetOpenSectionFolded(context.Background(), true) },
-			want:  SidebarView{OpenFolded: true, Grouping: GroupingRepository},
+			want:  SidebarView{OpenFolded: true},
 		},
 		{
 			name: "unfolding the open section again replaces its fold",
@@ -138,7 +61,7 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 				}
 				return s.SetOpenSectionFolded(context.Background(), false)
 			},
-			want: SidebarView{Grouping: GroupingRepository},
+			want: SidebarView{},
 		},
 		{
 			name: "unfolding the hidden section again replaces its fold",
@@ -148,7 +71,7 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 				}
 				return s.SetHiddenSectionFolded(context.Background(), false)
 			},
-			want: SidebarView{Grouping: GroupingRepository},
+			want: SidebarView{},
 		},
 		{
 			name: "unfolding the band again replaces the fold",
@@ -158,7 +81,7 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 				}
 				return s.SetMergedSectionFolded(context.Background(), false)
 			},
-			want: SidebarView{MergedFolded: false, Grouping: GroupingRepository},
+			want: SidebarView{MergedFolded: false},
 		},
 	}
 	for _, tt := range tests {
@@ -184,25 +107,6 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 	}
 }
 
-func TestSetGroupingRefusesAGroupingThatIsNeither(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-
-	// Act
-	err := s.SetGrouping(context.Background(), Grouping("sideways"))
-
-	// Assert
-	if err == nil {
-		t.Fatal("SetGrouping(sideways) = nil, want a refusal")
-	}
-	if !loggedOperation(log, "daemon.wsm.set_grouping", "error") {
-		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
-	}
-	if rows := scalar[int](t, s, `SELECT count(*) FROM sidebar_view`); rows != 0 {
-		t.Fatalf("sidebar_view rows = %d, want nothing written", rows)
-	}
-}
-
 func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "wsm.db")
@@ -210,21 +114,11 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	task, err := first.CreateTask(context.Background(), "write the report")
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
+	if err := first.SetHiddenSectionFolded(context.Background(), true); err != nil {
+		t.Fatalf("SetHiddenSectionFolded: %v", err)
 	}
-	if err := first.SetTaskFolded(context.Background(), task.ID, true); err != nil {
-		t.Fatalf("SetTaskFolded: %v", err)
-	}
-	if err := first.SetMergedSectionFolded(context.Background(), false); err != nil {
-		t.Fatalf("SetMergedSectionFolded: %v", err)
-	}
-	if err := first.SetGrouping(context.Background(), GroupingTask); err != nil {
-		t.Fatalf("SetGrouping: %v", err)
-	}
-	if err := first.SetMaturityFolded(context.Background(), MaturityInProgress, true); err != nil {
-		t.Fatalf("SetMaturityFolded: %v", err)
+	if err := first.SetOpenSectionFolded(context.Background(), true); err != nil {
+		t.Fatalf("SetOpenSectionFolded: %v", err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -236,34 +130,12 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer second.Close()
-	tasks, tasksErr := second.Tasks(context.Background())
-	view, viewErr := second.SidebarView(context.Background())
+	view, err := second.SidebarView(context.Background())
 
 	// Assert
-	if tasksErr != nil || len(tasks) != 1 || !tasks[0].Folded {
-		t.Fatalf("tasks after reopen = %+v, %v; want the one task folded", tasks, tasksErr)
-	}
-	want := SidebarView{MergedFolded: false, MaturityFolded: MaturityFolds{InProgress: true}, Grouping: GroupingTask}
-	if viewErr != nil || view != want {
-		t.Fatalf("view after reopen = %+v, %v; want %+v", view, viewErr, want)
-	}
-}
-
-func TestSidebarViewRefusesAStoredGroupingThatIsNeither(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-	corrupt(t, s, `INSERT INTO sidebar_view (id, merged_folded, grouping) VALUES (1, 1, 'sideways')`)
-
-	// Act
-	_, err := s.SidebarView(context.Background())
-
-	// Assert
-	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "grouping" {
-		t.Fatalf("SidebarView = %v, want a DecodeError naming the grouping", err)
-	}
-	if !loggedOperation(log, "daemon.wsm.sidebar_view", "error") {
-		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	want := SidebarView{HiddenFolded: true, OpenFolded: true}
+	if err != nil || view != want {
+		t.Fatalf("view after reopen = %+v, %v; want %+v", view, err, want)
 	}
 }
 
@@ -286,155 +158,6 @@ func TestTheMigrationAddsTheSidebarView(t *testing.T) {
 	}
 	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sidebar_view'`); got != 1 {
 		t.Fatalf("sidebar_view tables after the migration = %d, want 1", got)
-	}
-}
-
-func TestTheDefaultViewExpandsEveryMaturityStage(t *testing.T) {
-	// Arrange, Act, Assert
-	if DefaultSidebarView.MaturityFolded != (MaturityFolds{}) {
-		t.Fatalf("DefaultSidebarView.MaturityFolded = %+v, want every stage expanded", DefaultSidebarView.MaturityFolded)
-	}
-}
-
-func TestSetMaturityFoldedIsReadBackOnItsStageOnly(t *testing.T) {
-	tests := []struct {
-		stage MaturityStage
-		want  MaturityFolds
-	}{
-		{MaturityBacklog, MaturityFolds{Backlog: true}},
-		{MaturityInProgress, MaturityFolds{InProgress: true}},
-		{MaturityMerging, MaturityFolds{Merging: true}},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.stage), func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-
-			// Act
-			err := s.SetMaturityFolded(context.Background(), tt.stage, true)
-
-			// Assert
-			if err != nil {
-				t.Fatalf("SetMaturityFolded: %v", err)
-			}
-			got, err := s.SidebarView(context.Background())
-			want := SidebarView{MergedFolded: false, MaturityFolded: tt.want, Grouping: GroupingRepository}
-			if err != nil || got != want {
-				t.Fatalf("SidebarView = %+v, %v; want %+v", got, err, want)
-			}
-		})
-	}
-}
-
-func TestUnfoldingAMaturityStageReplacesItsFold(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	if err := s.SetMaturityFolded(context.Background(), MaturityMerging, true); err != nil {
-		t.Fatalf("seed SetMaturityFolded: %v", err)
-	}
-
-	// Act
-	err := s.SetMaturityFolded(context.Background(), MaturityMerging, false)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SetMaturityFolded: %v", err)
-	}
-	got, _ := s.SidebarView(context.Background())
-	if got.MaturityFolded != (MaturityFolds{}) {
-		t.Fatalf("maturity folds = %+v, want every stage expanded", got.MaturityFolded)
-	}
-}
-
-func TestShowingTheMaturityGroupingIsReadBack(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-
-	// Act
-	err := s.SetGrouping(context.Background(), GroupingMaturity)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SetGrouping: %v", err)
-	}
-	got, err := s.SidebarView(context.Background())
-	if err != nil || got.Grouping != GroupingMaturity {
-		t.Fatalf("SidebarView = %+v, %v; want the maturity grouping", got, err)
-	}
-}
-
-func TestSetMaturityFoldedRefusesAStageThatIsNoneOfThem(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-
-	// Act
-	err := s.SetMaturityFolded(context.Background(), MaturityStage("shipped"), true)
-
-	// Assert
-	if err == nil {
-		t.Fatal("SetMaturityFolded(shipped) = nil, want a refusal")
-	}
-	if !loggedOperation(log, "daemon.wsm.set_maturity_folded", "error") {
-		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
-	}
-	if rows := scalar[int](t, s, `SELECT count(*) FROM sidebar_view`); rows != 0 {
-		t.Fatalf("sidebar_view rows = %d, want nothing written", rows)
-	}
-}
-
-func TestMaturityFoldsWithSetsOnlyItsStage(t *testing.T) {
-	tests := []struct {
-		stage MaturityStage
-		want  MaturityFolds
-	}{
-		{MaturityBacklog, MaturityFolds{Backlog: true}},
-		{MaturityInProgress, MaturityFolds{InProgress: true}},
-		{MaturityMerging, MaturityFolds{Merging: true}},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.stage), func(t *testing.T) {
-			// Arrange
-			var folds MaturityFolds
-
-			// Act
-			got := folds.With(tt.stage, true)
-
-			// Assert
-			if got != tt.want || !got.Folded(tt.stage) {
-				t.Fatalf("With(%s) = %+v, want %+v", tt.stage, got, tt.want)
-			}
-			if folds != (MaturityFolds{}) {
-				t.Fatalf("With mutated its receiver: %+v", folds)
-			}
-		})
-	}
-}
-
-func TestMaturityFoldsPanicsOnAStageThatIsNoneOfThem(t *testing.T) {
-	// Arrange
-	defer func() {
-		// Assert
-		if recover() == nil {
-			t.Fatal("Folded(shipped) answered, want a panic")
-		}
-	}()
-
-	// Act
-	MaturityFolds{}.Folded(MaturityStage("shipped"))
-}
-
-func TestMaturityStagesAreEveryStageInWorkOrder(t *testing.T) {
-	// Arrange
-	want := []MaturityStage{MaturityBacklog, MaturityInProgress, MaturityMerging}
-
-	// Act, Assert
-	if len(MaturityStages) != len(want) {
-		t.Fatalf("MaturityStages = %v, want %v", MaturityStages, want)
-	}
-	for i := range want {
-		if MaturityStages[i] != want[i] {
-			t.Fatalf("MaturityStages = %v, want %v", MaturityStages, want)
-		}
 	}
 }
 

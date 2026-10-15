@@ -3,17 +3,14 @@
 //
 // THE SIDEBAR LOOKS THE SAME IN EVERY WORKSPACE'S PAGE (owner rulings,
 // 2026-10-06). Every workspace has its own webview page, and view state a page
-// kept for itself — which sections are folded, which grouping is shown —
-// never reached the others. So it is the DAEMON'S: one verb changes it, and
+// kept for itself — which sections are folded — never reached the others. So it is the DAEMON'S: one verb changes it, and
 // the roster push every page already watches carries it, each piece on the
 // box it styles:
 //
-//   - a section's fold: RosterRepoSection.fold, RosterTaskSection.fold,
-//     RosterMaturitySection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold;
-//   - the grouping shown: WorkspaceRoster.shown.
+//   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
+//     RosterHiddenSection.fold, RosterOpenSection.fold.
 //
-// Both are DURABLE: they survive a daemon restart.
+// It is DURABLE: it survives a daemon restart.
 //
 // NOT VIEW STATE, and so not here: anything that acts on one workspace (its
 // verbs), and a dropdown open mid-gesture — a row's menu, a row's detail
@@ -55,7 +52,6 @@ type UpdateSidebarViewRequest struct {
 	// Types that are valid to be assigned to Change:
 	//
 	//	*UpdateSidebarViewRequest_FoldSection
-	//	*UpdateSidebarViewRequest_ShowGrouping
 	Change        isUpdateSidebarViewRequest_Change `protobuf_oneof:"change"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -107,15 +103,6 @@ func (x *UpdateSidebarViewRequest) GetFoldSection() *SidebarViewFoldSection {
 	return nil
 }
 
-func (x *UpdateSidebarViewRequest) GetShowGrouping() *SidebarViewShowGrouping {
-	if x != nil {
-		if x, ok := x.Change.(*UpdateSidebarViewRequest_ShowGrouping); ok {
-			return x.ShowGrouping
-		}
-	}
-	return nil
-}
-
 type isUpdateSidebarViewRequest_Change interface {
 	isUpdateSidebarViewRequest_Change()
 }
@@ -125,19 +112,15 @@ type UpdateSidebarViewRequest_FoldSection struct {
 	FoldSection *SidebarViewFoldSection `protobuf:"bytes,1,opt,name=fold_section,json=foldSection,proto3,oneof"`
 }
 
-type UpdateSidebarViewRequest_ShowGrouping struct {
-	// Show one grouping.
-	ShowGrouping *SidebarViewShowGrouping `protobuf:"bytes,2,opt,name=show_grouping,json=showGrouping,proto3,oneof"`
-}
-
 func (*UpdateSidebarViewRequest_FoldSection) isUpdateSidebarViewRequest_Change() {}
-
-func (*UpdateSidebarViewRequest_ShowGrouping) isUpdateSidebarViewRequest_Change() {}
 
 // Fold or unfold one section.
 //
 // `viewed` (field 8) is RETIRED and reserved: the fold of the retired viewed
 // band (frontend.v1.WorkspaceRoster) (2026-10-12).
+//
+// `task` (2) and `maturity` (6) are RETIRED and reserved: the task and stage
+// groupings whose sections they folded are gone (owner ruling, 2026-10-15).
 type SidebarViewFoldSection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHICH SECTION. THE ARM IS THE SECTION; unset is malformed.
@@ -145,9 +128,7 @@ type SidebarViewFoldSection struct {
 	// Types that are valid to be assigned to Section:
 	//
 	//	*SidebarViewFoldSection_Repository
-	//	*SidebarViewFoldSection_Task
 	//	*SidebarViewFoldSection_RecentlyMerged
-	//	*SidebarViewFoldSection_Maturity
 	//	*SidebarViewFoldSection_Hidden
 	//	*SidebarViewFoldSection_Open
 	Section isSidebarViewFoldSection_Section `protobuf_oneof:"section"`
@@ -208,28 +189,10 @@ func (x *SidebarViewFoldSection) GetRepository() *v1.RepositoryRef {
 	return nil
 }
 
-func (x *SidebarViewFoldSection) GetTask() *TaskRef {
-	if x != nil {
-		if x, ok := x.Section.(*SidebarViewFoldSection_Task); ok {
-			return x.Task
-		}
-	}
-	return nil
-}
-
 func (x *SidebarViewFoldSection) GetRecentlyMerged() *SidebarViewRecentlyMerged {
 	if x != nil {
 		if x, ok := x.Section.(*SidebarViewFoldSection_RecentlyMerged); ok {
 			return x.RecentlyMerged
-		}
-	}
-	return nil
-}
-
-func (x *SidebarViewFoldSection) GetMaturity() *v1.MaturityStage {
-	if x != nil {
-		if x, ok := x.Section.(*SidebarViewFoldSection_Maturity); ok {
-			return x.Maturity
 		}
 	}
 	return nil
@@ -292,19 +255,9 @@ type SidebarViewFoldSection_Repository struct {
 	Repository *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3,oneof"`
 }
 
-type SidebarViewFoldSection_Task struct {
-	// A task's section, echoed from RosterTaskKey.
-	Task *TaskRef `protobuf:"bytes,2,opt,name=task,proto3,oneof"`
-}
-
 type SidebarViewFoldSection_RecentlyMerged struct {
 	// The recently-merged band; the roster carries exactly one.
 	RecentlyMerged *SidebarViewRecentlyMerged `protobuf:"bytes,3,opt,name=recently_merged,json=recentlyMerged,proto3,oneof"`
-}
-
-type SidebarViewFoldSection_Maturity struct {
-	// A maturity stage's section, echoed from RosterMaturityKey.
-	Maturity *v1.MaturityStage `protobuf:"bytes,6,opt,name=maturity,proto3,oneof"`
 }
 
 type SidebarViewFoldSection_Hidden struct {
@@ -323,11 +276,7 @@ type SidebarViewFoldSection_Open struct {
 
 func (*SidebarViewFoldSection_Repository) isSidebarViewFoldSection_Section() {}
 
-func (*SidebarViewFoldSection_Task) isSidebarViewFoldSection_Section() {}
-
 func (*SidebarViewFoldSection_RecentlyMerged) isSidebarViewFoldSection_Section() {}
-
-func (*SidebarViewFoldSection_Maturity) isSidebarViewFoldSection_Section() {}
 
 func (*SidebarViewFoldSection_Hidden) isSidebarViewFoldSection_Section() {}
 
@@ -534,218 +483,6 @@ func (*SidebarViewCollapse) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{6}
 }
 
-// Show one grouping.
-type SidebarViewShowGrouping struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// THE ARM IS THE GROUPING. Unset is malformed.
-	//
-	// Types that are valid to be assigned to Grouping:
-	//
-	//	*SidebarViewShowGrouping_Repository
-	//	*SidebarViewShowGrouping_Task
-	//	*SidebarViewShowGrouping_Maturity
-	Grouping      isSidebarViewShowGrouping_Grouping `protobuf_oneof:"grouping"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarViewShowGrouping) Reset() {
-	*x = SidebarViewShowGrouping{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarViewShowGrouping) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarViewShowGrouping) ProtoMessage() {}
-
-func (x *SidebarViewShowGrouping) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarViewShowGrouping.ProtoReflect.Descriptor instead.
-func (*SidebarViewShowGrouping) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *SidebarViewShowGrouping) GetGrouping() isSidebarViewShowGrouping_Grouping {
-	if x != nil {
-		return x.Grouping
-	}
-	return nil
-}
-
-func (x *SidebarViewShowGrouping) GetRepository() *SidebarViewRepositoryGrouping {
-	if x != nil {
-		if x, ok := x.Grouping.(*SidebarViewShowGrouping_Repository); ok {
-			return x.Repository
-		}
-	}
-	return nil
-}
-
-func (x *SidebarViewShowGrouping) GetTask() *SidebarViewTaskGrouping {
-	if x != nil {
-		if x, ok := x.Grouping.(*SidebarViewShowGrouping_Task); ok {
-			return x.Task
-		}
-	}
-	return nil
-}
-
-func (x *SidebarViewShowGrouping) GetMaturity() *SidebarViewMaturityGrouping {
-	if x != nil {
-		if x, ok := x.Grouping.(*SidebarViewShowGrouping_Maturity); ok {
-			return x.Maturity
-		}
-	}
-	return nil
-}
-
-type isSidebarViewShowGrouping_Grouping interface {
-	isSidebarViewShowGrouping_Grouping()
-}
-
-type SidebarViewShowGrouping_Repository struct {
-	Repository *SidebarViewRepositoryGrouping `protobuf:"bytes,1,opt,name=repository,proto3,oneof"`
-}
-
-type SidebarViewShowGrouping_Task struct {
-	Task *SidebarViewTaskGrouping `protobuf:"bytes,2,opt,name=task,proto3,oneof"`
-}
-
-type SidebarViewShowGrouping_Maturity struct {
-	Maturity *SidebarViewMaturityGrouping `protobuf:"bytes,3,opt,name=maturity,proto3,oneof"`
-}
-
-func (*SidebarViewShowGrouping_Repository) isSidebarViewShowGrouping_Grouping() {}
-
-func (*SidebarViewShowGrouping_Task) isSidebarViewShowGrouping_Grouping() {}
-
-func (*SidebarViewShowGrouping_Maturity) isSidebarViewShowGrouping_Grouping() {}
-
-// The repository grouping. DELIBERATELY EMPTY: the arm is the fact.
-type SidebarViewRepositoryGrouping struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarViewRepositoryGrouping) Reset() {
-	*x = SidebarViewRepositoryGrouping{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarViewRepositoryGrouping) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarViewRepositoryGrouping) ProtoMessage() {}
-
-func (x *SidebarViewRepositoryGrouping) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarViewRepositoryGrouping.ProtoReflect.Descriptor instead.
-func (*SidebarViewRepositoryGrouping) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{8}
-}
-
-// The task grouping. DELIBERATELY EMPTY: the arm is the fact.
-type SidebarViewTaskGrouping struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarViewTaskGrouping) Reset() {
-	*x = SidebarViewTaskGrouping{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarViewTaskGrouping) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarViewTaskGrouping) ProtoMessage() {}
-
-func (x *SidebarViewTaskGrouping) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarViewTaskGrouping.ProtoReflect.Descriptor instead.
-func (*SidebarViewTaskGrouping) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{9}
-}
-
-// The maturity grouping. DELIBERATELY EMPTY: the arm is the fact.
-type SidebarViewMaturityGrouping struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SidebarViewMaturityGrouping) Reset() {
-	*x = SidebarViewMaturityGrouping{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SidebarViewMaturityGrouping) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SidebarViewMaturityGrouping) ProtoMessage() {}
-
-func (x *SidebarViewMaturityGrouping) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SidebarViewMaturityGrouping.ProtoReflect.Descriptor instead.
-func (*SidebarViewMaturityGrouping) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{10}
-}
-
 // THE ARM IS THE OUTCOME.
 type UpdateSidebarViewResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -760,7 +497,7 @@ type UpdateSidebarViewResponse struct {
 
 func (x *UpdateSidebarViewResponse) Reset() {
 	*x = UpdateSidebarViewResponse{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -772,7 +509,7 @@ func (x *UpdateSidebarViewResponse) String() string {
 func (*UpdateSidebarViewResponse) ProtoMessage() {}
 
 func (x *UpdateSidebarViewResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -785,7 +522,7 @@ func (x *UpdateSidebarViewResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSidebarViewResponse.ProtoReflect.Descriptor instead.
 func (*UpdateSidebarViewResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UpdateSidebarViewResponse) GetResult() isUpdateSidebarViewResponse_Result {
@@ -838,7 +575,7 @@ type UpdateSidebarViewSuccess struct {
 
 func (x *UpdateSidebarViewSuccess) Reset() {
 	*x = UpdateSidebarViewSuccess{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -850,7 +587,7 @@ func (x *UpdateSidebarViewSuccess) String() string {
 func (*UpdateSidebarViewSuccess) ProtoMessage() {}
 
 func (x *UpdateSidebarViewSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -863,19 +600,21 @@ func (x *UpdateSidebarViewSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSidebarViewSuccess.ProtoReflect.Descriptor instead.
 func (*UpdateSidebarViewSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{8}
 }
 
 // Validation failures (an unset field or arm, a blank id) are Connect
 // InvalidArgument, never an arm. A change to what the view already holds is
 // NOT refused: two pages may race to the same state, and both have what they
 // asked for.
+//
+// `unknown_task` (2) is RETIRED and reserved with the task sections it
+// refused folds of (owner ruling, 2026-10-15).
 type UpdateSidebarViewError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*UpdateSidebarViewError_UnknownRepository
-	//	*UpdateSidebarViewError_UnknownTask
 	Cause         isUpdateSidebarViewError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -883,7 +622,7 @@ type UpdateSidebarViewError struct {
 
 func (x *UpdateSidebarViewError) Reset() {
 	*x = UpdateSidebarViewError{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +634,7 @@ func (x *UpdateSidebarViewError) String() string {
 func (*UpdateSidebarViewError) ProtoMessage() {}
 
 func (x *UpdateSidebarViewError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +647,7 @@ func (x *UpdateSidebarViewError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSidebarViewError.ProtoReflect.Descriptor instead.
 func (*UpdateSidebarViewError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateSidebarViewError) GetCause() isUpdateSidebarViewError_Cause {
@@ -927,15 +666,6 @@ func (x *UpdateSidebarViewError) GetUnknownRepository() *UpdateSidebarViewUnknow
 	return nil
 }
 
-func (x *UpdateSidebarViewError) GetUnknownTask() *UpdateSidebarViewUnknownTask {
-	if x != nil {
-		if x, ok := x.Cause.(*UpdateSidebarViewError_UnknownTask); ok {
-			return x.UnknownTask
-		}
-	}
-	return nil
-}
-
 type isUpdateSidebarViewError_Cause interface {
 	isUpdateSidebarViewError_Cause()
 }
@@ -945,15 +675,10 @@ type UpdateSidebarViewError_UnknownRepository struct {
 	UnknownRepository *UpdateSidebarViewUnknownRepository `protobuf:"bytes,1,opt,name=unknown_repository,json=unknownRepository,proto3,oneof"`
 }
 
-type UpdateSidebarViewError_UnknownTask struct {
-	// No task by that id.
-	UnknownTask *UpdateSidebarViewUnknownTask `protobuf:"bytes,2,opt,name=unknown_task,json=unknownTask,proto3,oneof"`
-}
-
 func (*UpdateSidebarViewError_UnknownRepository) isUpdateSidebarViewError_Cause() {}
 
-func (*UpdateSidebarViewError_UnknownTask) isUpdateSidebarViewError_Cause() {}
-
+// No registered repository matches the ref. DELIBERATELY EMPTY: the arm is
+// the cause.
 type UpdateSidebarViewUnknownRepository struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -962,7 +687,7 @@ type UpdateSidebarViewUnknownRepository struct {
 
 func (x *UpdateSidebarViewUnknownRepository) Reset() {
 	*x = UpdateSidebarViewUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -974,7 +699,7 @@ func (x *UpdateSidebarViewUnknownRepository) String() string {
 func (*UpdateSidebarViewUnknownRepository) ProtoMessage() {}
 
 func (x *UpdateSidebarViewUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -987,94 +712,42 @@ func (x *UpdateSidebarViewUnknownRepository) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use UpdateSidebarViewUnknownRepository.ProtoReflect.Descriptor instead.
 func (*UpdateSidebarViewUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{14}
-}
-
-type UpdateSidebarViewUnknownTask struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UpdateSidebarViewUnknownTask) Reset() {
-	*x = UpdateSidebarViewUnknownTask{}
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UpdateSidebarViewUnknownTask) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateSidebarViewUnknownTask) ProtoMessage() {}
-
-func (x *UpdateSidebarViewUnknownTask) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateSidebarViewUnknownTask.ProtoReflect.Descriptor instead.
-func (*UpdateSidebarViewUnknownTask) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{10}
 }
 
 var File_agentrepl_v1_endpoint_update_sidebar_view_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc = "" +
 	"\n" +
-	"/agentrepl/v1/endpoint_update_sidebar_view.proto\x12\fagentrepl.v1\x1a\x17agentrepl/v1/task.proto\x1a\x1cworkspace/v1/workspace.proto\"\xbd\x01\n" +
+	"/agentrepl/v1/endpoint_update_sidebar_view.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x84\x01\n" +
 	"\x18UpdateSidebarViewRequest\x12I\n" +
-	"\ffold_section\x18\x01 \x01(\v2$.agentrepl.v1.SidebarViewFoldSectionH\x00R\vfoldSection\x12L\n" +
-	"\rshow_grouping\x18\x02 \x01(\v2%.agentrepl.v1.SidebarViewShowGroupingH\x00R\fshowGroupingB\b\n" +
-	"\x06change\"\xa0\x04\n" +
+	"\ffold_section\x18\x01 \x01(\v2$.agentrepl.v1.SidebarViewFoldSectionH\x00R\vfoldSectionB\b\n" +
+	"\x06changeJ\x04\b\x02\x10\x03R\rshow_grouping\"\xd4\x03\n" +
 	"\x16SidebarViewFoldSection\x12=\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
-	"repository\x12+\n" +
-	"\x04task\x18\x02 \x01(\v2\x15.agentrepl.v1.TaskRefH\x00R\x04task\x12R\n" +
+	"repository\x12R\n" +
 	"\x0frecently_merged\x18\x03 \x01(\v2'.agentrepl.v1.SidebarViewRecentlyMergedH\x00R\x0erecentlyMerged\x129\n" +
-	"\bmaturity\x18\x06 \x01(\v2\x1b.workspace.v1.MaturityStageH\x00R\bmaturity\x129\n" +
 	"\x06hidden\x18\a \x01(\v2\x1f.agentrepl.v1.SidebarViewHiddenH\x00R\x06hidden\x123\n" +
 	"\x04open\x18\t \x01(\v2\x1d.agentrepl.v1.SidebarViewOpenH\x00R\x04open\x129\n" +
 	"\x06expand\x18\x04 \x01(\v2\x1f.agentrepl.v1.SidebarViewExpandH\x01R\x06expand\x12?\n" +
 	"\bcollapse\x18\x05 \x01(\v2!.agentrepl.v1.SidebarViewCollapseH\x01R\bcollapseB\t\n" +
 	"\asectionB\x06\n" +
-	"\x04foldJ\x04\b\b\x10\tR\x06viewed\"\x1b\n" +
+	"\x04foldJ\x04\b\x02\x10\x03J\x04\b\x06\x10\aJ\x04\b\b\x10\tR\x06viewedR\x04taskR\bmaturity\"\x1b\n" +
 	"\x19SidebarViewRecentlyMerged\"\x13\n" +
 	"\x11SidebarViewHidden\"\x11\n" +
 	"\x0fSidebarViewOpen\"\x13\n" +
 	"\x11SidebarViewExpand\"\x15\n" +
-	"\x13SidebarViewCollapse\"\xfa\x01\n" +
-	"\x17SidebarViewShowGrouping\x12M\n" +
-	"\n" +
-	"repository\x18\x01 \x01(\v2+.agentrepl.v1.SidebarViewRepositoryGroupingH\x00R\n" +
-	"repository\x12;\n" +
-	"\x04task\x18\x02 \x01(\v2%.agentrepl.v1.SidebarViewTaskGroupingH\x00R\x04task\x12G\n" +
-	"\bmaturity\x18\x03 \x01(\v2).agentrepl.v1.SidebarViewMaturityGroupingH\x00R\bmaturityB\n" +
-	"\n" +
-	"\bgrouping\"\x1f\n" +
-	"\x1dSidebarViewRepositoryGrouping\"\x19\n" +
-	"\x17SidebarViewTaskGrouping\"\x1d\n" +
-	"\x1bSidebarViewMaturityGrouping\"\xa7\x01\n" +
+	"\x13SidebarViewCollapse\"\xa7\x01\n" +
 	"\x19UpdateSidebarViewResponse\x12B\n" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.UpdateSidebarViewSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.UpdateSidebarViewErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1a\n" +
-	"\x18UpdateSidebarViewSuccess\"\xd5\x01\n" +
+	"\x18UpdateSidebarViewSuccess\"\x98\x01\n" +
 	"\x16UpdateSidebarViewError\x12a\n" +
-	"\x12unknown_repository\x18\x01 \x01(\v20.agentrepl.v1.UpdateSidebarViewUnknownRepositoryH\x00R\x11unknownRepository\x12O\n" +
-	"\funknown_task\x18\x02 \x01(\v2*.agentrepl.v1.UpdateSidebarViewUnknownTaskH\x00R\vunknownTaskB\a\n" +
-	"\x05cause\"$\n" +
-	"\"UpdateSidebarViewUnknownRepository\"\x1e\n" +
-	"\x1cUpdateSidebarViewUnknownTaskB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x12unknown_repository\x18\x01 \x01(\v20.agentrepl.v1.UpdateSidebarViewUnknownRepositoryH\x00R\x11unknownRepositoryB\a\n" +
+	"\x05causeJ\x04\b\x02\x10\x03R\funknown_task\"$\n" +
+	"\"UpdateSidebarViewUnknownRepositoryB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescOnce sync.Once
@@ -1088,7 +761,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_update_sidebar_view_proto_goTypes = []any{
 	(*UpdateSidebarViewRequest)(nil),           // 0: agentrepl.v1.UpdateSidebarViewRequest
 	(*SidebarViewFoldSection)(nil),             // 1: agentrepl.v1.SidebarViewFoldSection
@@ -1097,42 +770,28 @@ var file_agentrepl_v1_endpoint_update_sidebar_view_proto_goTypes = []any{
 	(*SidebarViewOpen)(nil),                    // 4: agentrepl.v1.SidebarViewOpen
 	(*SidebarViewExpand)(nil),                  // 5: agentrepl.v1.SidebarViewExpand
 	(*SidebarViewCollapse)(nil),                // 6: agentrepl.v1.SidebarViewCollapse
-	(*SidebarViewShowGrouping)(nil),            // 7: agentrepl.v1.SidebarViewShowGrouping
-	(*SidebarViewRepositoryGrouping)(nil),      // 8: agentrepl.v1.SidebarViewRepositoryGrouping
-	(*SidebarViewTaskGrouping)(nil),            // 9: agentrepl.v1.SidebarViewTaskGrouping
-	(*SidebarViewMaturityGrouping)(nil),        // 10: agentrepl.v1.SidebarViewMaturityGrouping
-	(*UpdateSidebarViewResponse)(nil),          // 11: agentrepl.v1.UpdateSidebarViewResponse
-	(*UpdateSidebarViewSuccess)(nil),           // 12: agentrepl.v1.UpdateSidebarViewSuccess
-	(*UpdateSidebarViewError)(nil),             // 13: agentrepl.v1.UpdateSidebarViewError
-	(*UpdateSidebarViewUnknownRepository)(nil), // 14: agentrepl.v1.UpdateSidebarViewUnknownRepository
-	(*UpdateSidebarViewUnknownTask)(nil),       // 15: agentrepl.v1.UpdateSidebarViewUnknownTask
-	(*v1.RepositoryRef)(nil),                   // 16: workspace.v1.RepositoryRef
-	(*TaskRef)(nil),                            // 17: agentrepl.v1.TaskRef
-	(*v1.MaturityStage)(nil),                   // 18: workspace.v1.MaturityStage
+	(*UpdateSidebarViewResponse)(nil),          // 7: agentrepl.v1.UpdateSidebarViewResponse
+	(*UpdateSidebarViewSuccess)(nil),           // 8: agentrepl.v1.UpdateSidebarViewSuccess
+	(*UpdateSidebarViewError)(nil),             // 9: agentrepl.v1.UpdateSidebarViewError
+	(*UpdateSidebarViewUnknownRepository)(nil), // 10: agentrepl.v1.UpdateSidebarViewUnknownRepository
+	(*v1.RepositoryRef)(nil),                   // 11: workspace.v1.RepositoryRef
 }
 var file_agentrepl_v1_endpoint_update_sidebar_view_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateSidebarViewRequest.fold_section:type_name -> agentrepl.v1.SidebarViewFoldSection
-	7,  // 1: agentrepl.v1.UpdateSidebarViewRequest.show_grouping:type_name -> agentrepl.v1.SidebarViewShowGrouping
-	16, // 2: agentrepl.v1.SidebarViewFoldSection.repository:type_name -> workspace.v1.RepositoryRef
-	17, // 3: agentrepl.v1.SidebarViewFoldSection.task:type_name -> agentrepl.v1.TaskRef
-	2,  // 4: agentrepl.v1.SidebarViewFoldSection.recently_merged:type_name -> agentrepl.v1.SidebarViewRecentlyMerged
-	18, // 5: agentrepl.v1.SidebarViewFoldSection.maturity:type_name -> workspace.v1.MaturityStage
-	3,  // 6: agentrepl.v1.SidebarViewFoldSection.hidden:type_name -> agentrepl.v1.SidebarViewHidden
-	4,  // 7: agentrepl.v1.SidebarViewFoldSection.open:type_name -> agentrepl.v1.SidebarViewOpen
-	5,  // 8: agentrepl.v1.SidebarViewFoldSection.expand:type_name -> agentrepl.v1.SidebarViewExpand
-	6,  // 9: agentrepl.v1.SidebarViewFoldSection.collapse:type_name -> agentrepl.v1.SidebarViewCollapse
-	8,  // 10: agentrepl.v1.SidebarViewShowGrouping.repository:type_name -> agentrepl.v1.SidebarViewRepositoryGrouping
-	9,  // 11: agentrepl.v1.SidebarViewShowGrouping.task:type_name -> agentrepl.v1.SidebarViewTaskGrouping
-	10, // 12: agentrepl.v1.SidebarViewShowGrouping.maturity:type_name -> agentrepl.v1.SidebarViewMaturityGrouping
-	12, // 13: agentrepl.v1.UpdateSidebarViewResponse.success:type_name -> agentrepl.v1.UpdateSidebarViewSuccess
-	13, // 14: agentrepl.v1.UpdateSidebarViewResponse.error:type_name -> agentrepl.v1.UpdateSidebarViewError
-	14, // 15: agentrepl.v1.UpdateSidebarViewError.unknown_repository:type_name -> agentrepl.v1.UpdateSidebarViewUnknownRepository
-	15, // 16: agentrepl.v1.UpdateSidebarViewError.unknown_task:type_name -> agentrepl.v1.UpdateSidebarViewUnknownTask
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	11, // 1: agentrepl.v1.SidebarViewFoldSection.repository:type_name -> workspace.v1.RepositoryRef
+	2,  // 2: agentrepl.v1.SidebarViewFoldSection.recently_merged:type_name -> agentrepl.v1.SidebarViewRecentlyMerged
+	3,  // 3: agentrepl.v1.SidebarViewFoldSection.hidden:type_name -> agentrepl.v1.SidebarViewHidden
+	4,  // 4: agentrepl.v1.SidebarViewFoldSection.open:type_name -> agentrepl.v1.SidebarViewOpen
+	5,  // 5: agentrepl.v1.SidebarViewFoldSection.expand:type_name -> agentrepl.v1.SidebarViewExpand
+	6,  // 6: agentrepl.v1.SidebarViewFoldSection.collapse:type_name -> agentrepl.v1.SidebarViewCollapse
+	8,  // 7: agentrepl.v1.UpdateSidebarViewResponse.success:type_name -> agentrepl.v1.UpdateSidebarViewSuccess
+	9,  // 8: agentrepl.v1.UpdateSidebarViewResponse.error:type_name -> agentrepl.v1.UpdateSidebarViewError
+	10, // 9: agentrepl.v1.UpdateSidebarViewError.unknown_repository:type_name -> agentrepl.v1.UpdateSidebarViewUnknownRepository
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() }
@@ -1140,33 +799,23 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() {
 	if File_agentrepl_v1_endpoint_update_sidebar_view_proto != nil {
 		return
 	}
-	file_agentrepl_v1_task_proto_init()
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[0].OneofWrappers = []any{
 		(*UpdateSidebarViewRequest_FoldSection)(nil),
-		(*UpdateSidebarViewRequest_ShowGrouping)(nil),
 	}
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[1].OneofWrappers = []any{
 		(*SidebarViewFoldSection_Repository)(nil),
-		(*SidebarViewFoldSection_Task)(nil),
 		(*SidebarViewFoldSection_RecentlyMerged)(nil),
-		(*SidebarViewFoldSection_Maturity)(nil),
 		(*SidebarViewFoldSection_Hidden)(nil),
 		(*SidebarViewFoldSection_Open)(nil),
 		(*SidebarViewFoldSection_Expand)(nil),
 		(*SidebarViewFoldSection_Collapse)(nil),
 	}
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[7].OneofWrappers = []any{
-		(*SidebarViewShowGrouping_Repository)(nil),
-		(*SidebarViewShowGrouping_Task)(nil),
-		(*SidebarViewShowGrouping_Maturity)(nil),
-	}
-	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[11].OneofWrappers = []any{
 		(*UpdateSidebarViewResponse_Success)(nil),
 		(*UpdateSidebarViewResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[13].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[9].OneofWrappers = []any{
 		(*UpdateSidebarViewError_UnknownRepository)(nil),
-		(*UpdateSidebarViewError_UnknownTask)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1174,7 +823,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

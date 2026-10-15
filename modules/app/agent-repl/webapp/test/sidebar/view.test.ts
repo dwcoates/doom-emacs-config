@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   createSidebarView,
   foldViewKey,
-  GROUPING_VIEW_KEY,
   paintSectionFold,
   paintTriangle,
 } from "../../src/sidebar/view.js";
@@ -15,10 +14,7 @@ function recorder<T>(): { paint: (value: T) => void; painted: T[] } {
 }
 
 describe("the view keys", () => {
-  it.each([
-    [foldViewKey("task:t1"), "fold:task:t1"],
-    [GROUPING_VIEW_KEY, "grouping"],
-  ])("spells %s as %s", (key, want) => {
+  it.each([[foldViewKey("repo:r1"), "fold:repo:r1"]])("spells %s as %s", (key, want) => {
     expect(key).toBe(want);
   });
 });
@@ -43,12 +39,6 @@ describe("track", () => {
     expect(view.track("k", false, () => undefined)).toBe(false);
   });
 
-  it("holds a string value as it holds a boolean", () => {
-    const view = createSidebarView();
-    view.track(GROUPING_VIEW_KEY, "repository", () => undefined);
-    view.ask(GROUPING_VIEW_KEY, "task");
-    expect(view.track(GROUPING_VIEW_KEY, "repository", () => undefined)).toBe("task");
-  });
 });
 
 describe("ask", () => {

@@ -42,7 +42,7 @@ function mergedGroups(merged: number, groups: number): string {
 function rail(height: number, live: number, hidden: number, merged: number, groups = 1): string {
   const ids = (prefix: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${prefix}-${i}`);
   return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster">
-<div class="sb-pane" data-grouping="repository"><div class="sb-sections"><div class="repo"><div class="repo-head"><span class="sb-label">alpha</span></div><div class="rows">${ids("live", live).map((id) => wsRow(id, false)).join("")}</div></div></div>
+<div class="sb-pane"><div class="sb-sections"><div class="repo"><div class="repo-head"><span class="sb-label">alpha</span></div><div class="rows">${ids("live", live).map((id) => wsRow(id, false)).join("")}</div></div></div>
 ${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, false)).join(""))}
 ${bandSection("merged-section", "Recently Merged", merged, mergedGroups(merged, groups))}
 </div></div></div></nav>`;

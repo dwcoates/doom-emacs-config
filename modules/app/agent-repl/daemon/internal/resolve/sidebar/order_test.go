@@ -358,24 +358,6 @@ func TestRosterOrdersRepositorySectionsByName(t *testing.T) {
 	}
 }
 
-func TestRosterOrdersTaskSectionsByCreation(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	first := wsm.Task{ID: "task-z", Title: "zzz", CreatedAt: epoch}
-	second := wsm.Task{ID: "task-a", Title: "aaa", CreatedAt: epoch.Add(time.Hour)}
-	reg := registry()
-	reg.Tasks = []wsm.Task{second, first}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert: the title would order these the other way round.
-	sections := latest(t, r).GetTask().GetSections()
-	if len(sections) != 2 || sections[0].GetKey().GetTaskId() != "task-z" {
-		t.Fatal("task sections did not order by creation")
-	}
-}
-
 // equal reports whether two name lists match, in order.
 func equal(a, b []string) bool {
 	if len(a) != len(b) {

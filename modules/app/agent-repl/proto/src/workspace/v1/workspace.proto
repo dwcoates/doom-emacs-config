@@ -36,37 +36,3 @@ message RepositoryRef {
   string dir = 2;
 }
 
-// How far along a workspace's work is: the stage the sidebar's maturity
-// grouping files it under. The daemon resolves it and clients echo it back
-// (UpdateSidebarView folds a stage's section); a client never derives one.
-//
-// THE STAGES, in the order work moves through them:
-//
-//   - backlog: registered, and no turn has ever run in it;
-//   - in_progress: a turn has run, and no merge is in hand;
-//   - merging: a merge is queued, running, or failed and back with the user.
-//
-// DONE IS NOT A STAGE HERE. A settled merge is the roster's recently-merged
-// band (frontend.v1.WorkspaceRoster.recently_merged), which every grouping
-// draws under its sections, so the maturity grouping's last stage is that
-// band rather than a section of its own.
-message MaturityStage {
-  // THE ARM IS THE STAGE. Unset is malformed.
-  oneof stage {
-    MaturityStageBacklog backlog = 1;
-    MaturityStageInProgress in_progress = 2;
-    MaturityStageMerging merging = 3;
-  }
-}
-
-// No turn has ever run in the workspace. DELIBERATELY EMPTY: the arm is the
-// fact.
-message MaturityStageBacklog {}
-
-// A turn has run and no merge is in hand. DELIBERATELY EMPTY: the arm is the
-// fact.
-message MaturityStageInProgress {}
-
-// A merge is queued, running, or failed. DELIBERATELY EMPTY: the arm is the
-// fact.
-message MaturityStageMerging {}

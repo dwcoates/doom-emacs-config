@@ -7,9 +7,8 @@
  *    replaced. A held prompt IS a `conversation.v1.UserSaid` the daemon has
  *    not yet delivered — never a feed row — so the tray is the only place it
  *    can be seen, and `UpdateHeldPrompt` is issued from it.
- *  - the SIDEBAR roster, the ONE global stream (no workspace scoping), with
- *    both groupings arriving resolved as siblings and the client's local
- *    preference picking which to render.
+ *  - the SIDEBAR roster, the ONE global stream (no workspace scoping),
+ *    arriving resolved.
  *  - the LIFECYCLE banner: a drain-scheduled `WatchDaemon` push draws the
  *    standing page-wide restart banner.
  *
@@ -127,37 +126,18 @@ it(
 );
 
 // §F9 #37 — the roster is entirely daemon-resolved, over the ONE global
-// stream, with both groupings arriving as siblings.
+// stream.
 it(
   "draws the workspace roster from the daemon's own global stream",
   async () => {
     // Arrange / Act — boot alone opens the roster stream; this world has one
     // registered workspace, so the roster has exactly one row to resolve.
-    await awaitDrawn(app, "the roster", () => app.$("[data-grouping]") !== null);
+    await awaitDrawn(app, "the roster", () => app.$(".sb-pane") !== null);
 
-    // Assert — the rendered grouping is named on the element (the client's
-    // local preference picks which resolved sibling to draw).
-    const roster = app.$("[data-grouping]");
+    // Assert — the rail's one pane is drawn, and it carries the row.
+    const roster = app.$(".sb-pane");
     expect(roster).not.toBeNull();
-    expect(roster?.getAttribute("data-grouping")).not.toBe("");
     expect(textOf(roster)).not.toBe("");
-  },
-  TURN_TEST_MS,
-);
-
-it(
-  "offers both resolved groupings and renders the one the picker names",
-  async () => {
-    // Arrange — both groupings arrive RESOLVED as siblings on the same push,
-    // so the picker can offer both without another round trip.
-    await awaitDrawn(app, "the roster", () => app.$("[data-grouping]") !== null);
-    const picks = app.$$("[data-grouping-pick]").map((pick) => pick.getAttribute("data-grouping-pick"));
-
-    // Assert — the picker names each grouping the daemon resolved, and the
-    // rendered one is among them (grouping mode is webview-local, so the
-    // rendered value is always one the client could pick).
-    expect(picks.length).toBeGreaterThan(1);
-    expect(picks).toContain(app.$("[data-grouping]")?.getAttribute("data-grouping"));
     expect(app.failureArms()).toHaveLength(0);
   },
   TURN_TEST_MS,

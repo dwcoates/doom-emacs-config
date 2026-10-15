@@ -7,15 +7,10 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"agent-repld/internal/ids"
-	"agent-repld/internal/wsm"
 )
 
-// UpdateSidebarView changes one piece of the sidebar's view state — a fold or
-// the grouping shown — which the roster push carries to every
-// page. A change to what the view already holds is success.
+// UpdateSidebarView changes one piece of the sidebar's view state — a
+// section's fold — which the roster push carries to every page. A change to what the view already holds is success.
 func (s *server) UpdateSidebarView(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateSidebarViewRequest],
@@ -36,8 +31,6 @@ func (s *server) UpdateSidebarView(
 		if answered {
 			return answer(resp, cerr)
 		}
-	case *agentreplv1.UpdateSidebarViewRequest_ShowGrouping:
-		err = s.deps.Verbs.ShowGrouping(ctx, groupingOf(change.ShowGrouping))
 	default:
 		// validateUpdateSidebarViewRequest refuses an unset arm, and every arm
 		// the contract names is a case above: reaching here is a validator
@@ -69,49 +62,13 @@ func (s *server) foldSection(
 			return true, refused, nil
 		}
 		return false, nil, s.deps.Verbs.FoldRepository(ctx, repository.ID, folded)
-	case *agentreplv1.SidebarViewFoldSection_Task:
-		return false, nil, s.deps.Verbs.FoldTaskSection(ctx, ids.TaskID(section.Task.GetId()), folded)
 	case *agentreplv1.SidebarViewFoldSection_RecentlyMerged:
 		return false, nil, s.deps.Verbs.FoldMergedSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Hidden:
 		return false, nil, s.deps.Verbs.FoldHiddenSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Open:
 		return false, nil, s.deps.Verbs.FoldOpenSection(ctx, folded)
-	case *agentreplv1.SidebarViewFoldSection_Maturity:
-		return false, nil, s.deps.Verbs.FoldMaturitySection(ctx, maturityStageOf(section.Maturity), folded)
 	default:
 		panic(fmt.Sprintf("UpdateSidebarView: section arm %T passed validation that no case handles", section))
-	}
-}
-
-// groupingOf names the grouping a validated show-grouping change asks for.
-func groupingOf(show *agentreplv1.SidebarViewShowGrouping) wsm.Grouping {
-	switch arm := show.GetGrouping().(type) {
-	case *agentreplv1.SidebarViewShowGrouping_Repository:
-		return wsm.GroupingRepository
-	case *agentreplv1.SidebarViewShowGrouping_Task:
-		return wsm.GroupingTask
-	case *agentreplv1.SidebarViewShowGrouping_Maturity:
-		return wsm.GroupingMaturity
-	default:
-		// validateUpdateSidebarViewRequest refuses an unset arm, and every arm
-		// the contract names is a case above.
-		panic(fmt.Sprintf("UpdateSidebarView: grouping arm %T passed validation that no case handles", arm))
-	}
-}
-
-// maturityStageOf names the stage a validated maturity section ref echoes.
-func maturityStageOf(stage *workspacev1.MaturityStage) wsm.MaturityStage {
-	switch arm := stage.GetStage().(type) {
-	case *workspacev1.MaturityStage_Backlog:
-		return wsm.MaturityBacklog
-	case *workspacev1.MaturityStage_InProgress:
-		return wsm.MaturityInProgress
-	case *workspacev1.MaturityStage_Merging:
-		return wsm.MaturityMerging
-	default:
-		// validateSidebarViewFoldSection refuses an unset stage arm, and every
-		// arm the contract names is a case above.
-		panic(fmt.Sprintf("UpdateSidebarView: maturity stage arm %T passed validation that no case handles", arm))
 	}
 }

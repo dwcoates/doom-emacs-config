@@ -14,22 +14,18 @@ import {
   RosterRowSchema,
   RosterRowDetailSchema,
   RosterRowWhenSchema,
-  RosterMaturitySectionSchema,
   RosterHiddenSectionSchema,
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
-  RosterTaskSectionSchema,
   WorkspaceRosterSchema,
-  type RosterMaturitySection,
   type RosterHiddenSection,
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
   type RosterRepoSection,
   type RosterRow,
-  type RosterTaskSection,
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -40,7 +36,7 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
-import type { Grouping, MaturityStageName, SidebarContext } from "../../src/sidebar/context.js";
+import type { SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
@@ -151,7 +147,6 @@ export function sidebarContext(
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails),
     attention: new AttentionRegistry(timers),
-    tasks: [],
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);
@@ -244,41 +239,6 @@ export function repoSection(init: {
   });
 }
 
-/** One task section. */
-export function taskSection(init: {
-  id: string;
-  label?: string;
-  done?: boolean;
-  rows?: RosterRow[];
-  /** The daemon-held fold; expanded unless said, as a task never folded is. */
-  collapsed?: boolean;
-}): RosterTaskSection {
-  return create(RosterTaskSectionSchema, {
-    key: { taskId: init.id },
-    header: { label: { text: init.label ?? init.id }, done: { done: init.done ?? false } },
-    rows: { rows: init.rows ?? [] },
-    fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
-  });
-}
-
-/** One maturity stage's section. */
-export function maturitySection(init: {
-  stage: MaturityStageName;
-  label?: string;
-  rows?: RosterRow[];
-  /** The daemon-held fold; expanded unless said, as a stage never folded is. */
-  collapsed?: boolean;
-  /** The daemon-resolved folded count; the row count unless said. */
-  count?: number;
-}): RosterMaturitySection {
-  return create(RosterMaturitySectionSchema, {
-    key: { stage: { stage: { case: init.stage, value: {} } } },
-    header: { label: { text: init.label ?? init.stage }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
-    rows: { rows: init.rows ?? [] },
-    fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
-  });
-}
-
 /**
  * The recently-merged band. Its daemon-held fold is COLLAPSED unless said, as
  * the daemon draws a band nobody has unfolded.
@@ -353,46 +313,23 @@ export function openSection(collapsed: boolean = false): RosterOpenSection {
   });
 }
 
-/** The `WorkspaceRoster.shown` arm each grouping is spelled with. */
-const SHOWN_ARMS = {
-  repository: { case: "shownRepository", value: {} },
-  task: { case: "shownTask", value: {} },
-  maturity: { case: "shownMaturity", value: {} },
-} as const satisfies Record<Grouping, MessageInitShape<typeof WorkspaceRosterSchema>["shown"]>;
-
 /** A whole roster, with every required box present. */
 export function roster(init: {
   repos?: RosterRepoSection[];
-  tasks?: RosterTaskSection[];
-  maturity?: RosterMaturitySection[];
   merged?: RosterMergedSection;
   hidden?: RosterHiddenSection;
   open?: RosterOpenSection;
-  /**
-   * Each grouping's daemon-resolved open count; unless said, the sum of its
-   * sections' counts (a task section, which states none, counts its rows).
-   */
-  openCounts?: Partial<Record<Grouping, number>>;
+  /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
+  openCount?: number;
   current?: string;
-  /** The daemon-held grouping every page shows; the repository's unless said. */
-  shown?: Grouping;
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
-  const tasks = init.tasks ?? [];
-  const maturity = init.maturity ?? [];
-  const counted = (sections: { header?: { count?: { workspaces: number } } }[]): number =>
-    sections.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
+  const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
   return create(WorkspaceRosterSchema, {
-    repository: { sections: repos, openCount: { workspaces: init.openCounts?.repository ?? counted(repos) } },
-    task: {
-      sections: tasks,
-      openCount: { workspaces: init.openCounts?.task ?? tasks.reduce((sum, t) => sum + (t.rows?.rows.length ?? 0), 0) },
-    },
-    maturity: { sections: maturity, openCount: { workspaces: init.openCounts?.maturity ?? counted(maturity) } },
+    repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted } },
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
-    shown: SHOWN_ARMS[init.shown ?? "repository"],
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),

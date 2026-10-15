@@ -762,15 +762,13 @@ type OrphanReport struct {
 	At time.Time
 }
 
-// Task is one user task the roster's task view renders.
+// Task is one user task.
 type Task struct {
 	ID TaskID
 	// Title is the task's text.
 	Title string
 	// Done reports whether it is complete.
 	Done bool
-	// Folded reports whether its roster section is collapsed.
-	Folded bool
 	// CreatedAt is when it was created.
 	CreatedAt time.Time
 }

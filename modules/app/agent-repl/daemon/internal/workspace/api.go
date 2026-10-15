@@ -350,10 +350,6 @@ type Verbs interface {
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.
 	FoldRepository(ctx context.Context, repo ids.RepoID, folded bool) error
-	// FoldTaskSection records whether a task's roster section is collapsed
-	// and republishes the roster. An unknown task is refused with
-	// ArmUnknownTask.
-	FoldTaskSection(ctx context.Context, task ids.TaskID, folded bool) error
 	// FoldMergedSection records whether the recently-merged band is collapsed
 	// and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error
@@ -363,12 +359,6 @@ type Verbs interface {
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error
-	// FoldMaturitySection records whether a maturity stage's section is
-	// collapsed and republishes the roster.
-	FoldMaturitySection(ctx context.Context, stage wsm.MaturityStage, folded bool) error
-	// ShowGrouping records which grouping every page shows and republishes
-	// the roster.
-	ShowGrouping(ctx context.Context, grouping wsm.Grouping) error
 	// CreateTask records a new task.
 	CreateTask(ctx context.Context, title string) (wsm.Task, error)
 	// UpdateTask retitles, completes or reopens a task.

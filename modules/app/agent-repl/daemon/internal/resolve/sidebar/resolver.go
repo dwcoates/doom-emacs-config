@@ -59,14 +59,8 @@ type resolver struct {
 	// the lock is released.
 	pendingStatusChanges []statusChange
 
-	// now is the clock the Recently Merged window is measured against and a
-	// status change is stamped by, and
-	// after arms the re-render that drops a merge the moment it ages out of
-	// that window (WithClock). agingOut stops the one armed re-render, nil
-	// when none is armed.
-	now      func() time.Time
-	after    AfterFunc
-	agingOut func() bool
+	// now is the clock a status change is stamped by (WithClock).
+	now func() time.Time
 }
 
 // resultChange is one workspace's changed last turn result.
@@ -97,7 +91,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStat
 	}
 	return &resolver{
 		colors: colors, log: log, footer: footer, state: newRosterState(),
-		now: time.Now, after: timerAfter,
+		now: time.Now,
 	}, nil
 }
 
@@ -264,8 +258,8 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 
 	// A MERGED workspace files under recently_merged whatever its hidden flag:
 	// it has no tab to hide, and that it is done is the more useful fact.
-	// A merge older than the Recently Merged window is drawn NOWHERE: it is
-	// not live, and the band holds a week's worth (owner request, 2026-10-11).
+	// A merge past the band's newest MergedShown is drawn NOWHERE (owner
+	// ruling, 2026-10-15).
 	var live, hidden, merged []wsm.Workspace
 	var settled []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
@@ -281,19 +275,15 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 			live = append(live, ws)
 		}
 	}
-	merged, agesOut := recentMerges(settled, r.now())
-	r.armAgingOut(agesOut, log)
+	merged = recentMerges(settled)
 
 	out := &frontendv1.WorkspaceRoster{
 		Repository:     r.repositoryView(live, rc, log),
-		Task:           r.taskView(live, rc, log),
-		Maturity:       r.maturityView(live, rc, log),
 		Hidden:         r.hiddenSection(hidden, rc, log),
 		Open:           r.openSection(),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 		TabBar:         r.tabBar(),
 	}
-	setShownGrouping(out, r.state.reg.View.Grouping)
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur
 	}
@@ -325,7 +315,6 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 // draw around: the store refuses one on write and on read, so a registry
 // carrying one was composed by a caller that skipped the store.
 func (r *resolver) SetRegistry(reg Registry) {
-	r.assertGrouping(reg)
 	r.mutate("daemon.sidebar.set_registry", "the roster took a registry snapshot",
 		registryContext(reg), r.log.Global(), func() { r.installRegistry(reg) })
 }
@@ -339,7 +328,6 @@ func (r *resolver) SetRegistry(reg Registry) {
 // selection is installed AFTER the registry, exactly as the two calls did, so
 // a registry that no longer carries ws leaves the roster with no current.
 func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID) {
-	r.assertGrouping(reg)
 	ctx := registryContext(reg)
 	ctx["workspace_id"] = string(ws)
 	r.mutate("daemon.sidebar.set_registry_selected",
@@ -360,19 +348,6 @@ func (r *resolver) Selected() (ids.WorkspaceID, bool) {
 		return "", false
 	}
 	return *r.state.selected, true
-}
-
-// assertGrouping refuses a registry whose view names no grouping.
-func (r *resolver) assertGrouping(reg Registry) {
-	if !reg.View.Grouping.Valid() {
-		r.log.Global().Error("daemon.sidebar.set_registry", "the registry's view names a grouping that is none of repository, task, maturity",
-			dlog.Context{
-				"grouping":            string(reg.View.Grouping),
-				"invariant_violation": "Registry.View.Grouping is repository, task or maturity",
-				"remediation":         "compose the registry's view from wsm.SidebarView",
-			})
-		panic(fmt.Sprintf("sidebar: registry view grouping %q is none of repository, task, maturity", reg.View.Grouping))
-	}
 }
 
 // registryContext is the record context every registry install carries.

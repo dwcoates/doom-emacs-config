@@ -215,50 +215,6 @@ func TestASwitchEntrySelectsTheNamedWorkspace(t *testing.T) {
 	}
 }
 
-func TestATaskToggleDoneEntryChecksTheTaskSection(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "toggle via commandfile")
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the fresh task section", func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()) != nil
-	})
-
-	// Act
-	commandfileWrite(t, f.d, "workspace_commands_task_toggle.json",
-		`[{"type":"task-toggle-done","id":"`+task.GetId()+`","done":true}]`)
-
-	// Assert: checked exactly like UpdateTask{set_done}.
-	got := awaitRoster(t, f.d, roster, "the task section's done check", func(r *frontendv1.WorkspaceRoster) bool {
-		s := taskSection(r, task.GetId())
-		return s != nil && s.GetHeader().GetDone().GetDone()
-	})
-	if !taskSection(got, task.GetId()).GetHeader().GetDone().GetDone() {
-		t.Fatalf("command-file-toggled task section done = false, want true")
-	}
-}
-
-func TestATaskAddWorkspaceEntryAssignsTheNamedWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "assign via commandfile")
-	roster := f.d.WatchRoster()
-
-	// Act
-	commandfileWrite(t, f.d, "workspace_commands_task_assign.json",
-		`[{"type":"task-add-workspace","id":"`+task.GetId()+`","workspace":"`+f.ws.GetId()+`"}]`)
-
-	// Assert: grouped under the task exactly like AssignWorkspaceTask.
-	got := awaitRoster(t, f.d, roster, "the workspace grouped under its task", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterTaskRow(r, task.GetId(), f.ws.GetId()) != nil
-	})
-	if rosterTaskRow(got, task.GetId(), f.ws.GetId()) == nil {
-		t.Fatalf("roster = %v, want %s grouped under task %s", got, f.ws.GetId(), task.GetId())
-	}
-}
-
 func TestADirAddressedPromptEntryResolvesTheSameWorkspaceAsAnIdAddressedOne(t *testing.T) {
 	t.Parallel()
 	// Arrange: registered directly on the repo root, so its dir is exactly
@@ -475,24 +431,9 @@ func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T
 	commandfilePlace(t, dir, "workspace_commands_atomic.json", `[{"type":"task-create","title":"atomic-cmdfile-task"}]`, nil)
 
 	// Assert: the COMPLETE request is what actually applies.
-	roster := d.WatchRoster()
-	got := awaitRoster(t, d, roster, "the completed file's task section", func(r *frontendv1.WorkspaceRoster) bool {
-		return commandfileHasTaskTitled(r, "atomic-cmdfile-task")
+	d.AwaitLogRecord(d.RunLogPath(), "the task the completed file creates", func(r harness.LogRecord) bool {
+		return r.PID == d.PID() && r.Operation == "daemon.workspace.create_task" && r.Context["title"] == "atomic-cmdfile-task"
 	})
-	if !commandfileHasTaskTitled(got, "atomic-cmdfile-task") {
-		t.Fatalf("roster = %v, want the task created from the completed command file", got)
-	}
-}
-
-// commandfileHasTaskTitled reports whether any task section's header carries
-// the given title.
-func commandfileHasTaskTitled(r *frontendv1.WorkspaceRoster, title string) bool {
-	for _, s := range r.GetTask().GetSections() {
-		if s.GetHeader().GetLabel().GetText() == title {
-			return true
-		}
-	}
-	return false
 }
 
 func TestAForgetEntryRemovesTheWorkspaceFromTheRoster(t *testing.T) {

@@ -407,86 +407,6 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	}
 }
 
-func TestTaskViewGroupsAssignedWorkspaces(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-	created, err := f.d.Client().CreateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "land the rebuild"}))
-	if err != nil {
-		t.Fatalf("CreateTask = error %v, want a task ref", err)
-	}
-	task := created.Msg.GetSuccess().GetTask()
-	if task.GetId() == "" {
-		t.Fatalf("CreateTask = %v, want a minted task id", created.Msg)
-	}
-
-	// Act
-	if _, err := f.d.Client().AssignWorkspaceTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.AssignWorkspaceTaskRequest{Workspace: f.ws, Task: task})); err != nil {
-		t.Fatalf("AssignWorkspaceTask = error %v, want a success", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "the workspace grouped under its task", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterTaskRow(r, task.GetId(), f.ws.GetId()) != nil
-	})
-	section := taskSection(got, task.GetId())
-	if section.GetHeader().GetLabel().GetText() != "land the rebuild" {
-		t.Fatalf("task section label = %q, want the task's title", section.GetHeader().GetLabel().GetText())
-	}
-	if section.GetHeader().GetDone().GetDone() {
-		t.Fatalf("a fresh task section's done check = true, want false")
-	}
-}
-
-func TestMarkingATaskDoneChecksItsSection(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "finish it")
-	assignTask(t, f, task)
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the task section", func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()) != nil
-	})
-
-	// Act
-	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
-	})); err != nil {
-		t.Fatalf("UpdateTask{set_done} = error %v, want a success", err)
-	}
-
-	// Assert
-	awaitRoster(t, f.d, roster, "the task section's done check", func(r *frontendv1.WorkspaceRoster) bool {
-		s := taskSection(r, task.GetId())
-		return s != nil && s.GetHeader().GetDone().GetDone()
-	})
-}
-
-func TestUnassigningReturnsTheRowToTheRepositoryGrouping(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "temporary")
-	assignTask(t, f, task)
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the row under its task", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterTaskRow(r, task.GetId(), f.ws.GetId()) != nil
-	})
-
-	// Act
-	if _, err := f.d.Client().AssignWorkspaceTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.AssignWorkspaceTaskRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("AssignWorkspaceTask{unassign} = error %v, want a success", err)
-	}
-
-	// Assert
-	awaitRoster(t, f.d, roster, "the row back under its repository", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterTaskRow(r, task.GetId(), f.ws.GetId()) == nil && rosterRepoRow(r, f.ws.GetId()) != nil
-	})
-}
-
 // TestCreateTaskRefusesABlankTitle asserts the refusal IN BAND.
 // `CreateTaskError.blank_title` is a LANDED arm, spelled for exactly this
 // condition ("The title is blank once trimmed"), so the refusal is the
@@ -582,71 +502,6 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	})
 	if row := rosterRow(got, f.ws.GetId()); row.GetStartFailed() == nil {
 		t.Fatalf("the roster row's status = %T after a bring-up death, want start_failed", row.GetStatus())
-	}
-}
-
-// TestUpdateTaskSetTitleRelabelsTheTaskSectionHeader covers UpdateTaskSetTitle
-// against RosterTaskSectionHeader.label (frontend/v1/sidebar.proto), the
-// section header field the header's title text is drawn from.
-func TestUpdateTaskSetTitleRelabelsTheTaskSectionHeader(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "old title")
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the task section under its old title", func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()).GetHeader().GetLabel().GetText() == "old title"
-	})
-
-	// Act
-	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetTitle{SetTitle: &agentreplv1.UpdateTaskSetTitle{Title: "new title"}},
-	})); err != nil {
-		t.Fatalf("UpdateTask{set_title} = error %v, want a success", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "the task section relabeled", func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()).GetHeader().GetLabel().GetText() == "new title"
-	})
-	if label := taskSection(got, task.GetId()).GetHeader().GetLabel().GetText(); label != "new title" {
-		t.Fatalf("task section label after set_title = %q, want %q", label, "new title")
-	}
-}
-
-// TestUpdateTaskSetOpenUnchecksADoneTask covers UpdateTaskSetOpen reversing a
-// prior UpdateTaskSetDone.
-func TestUpdateTaskSetOpenUnchecksADoneTask(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "flip me")
-	roster := f.d.WatchRoster()
-	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
-	})); err != nil {
-		t.Fatalf("UpdateTask{set_done} = error %v, want a success", err)
-	}
-	awaitRoster(t, f.d, roster, "the task section done", func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()).GetHeader().GetDone().GetDone()
-	})
-
-	// Act
-	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetOpen{SetOpen: &agentreplv1.UpdateTaskSetOpen{}},
-	})); err != nil {
-		t.Fatalf("UpdateTask{set_open} = error %v, want a success", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "the task section reopened", func(r *frontendv1.WorkspaceRoster) bool {
-		return !taskSection(r, task.GetId()).GetHeader().GetDone().GetDone()
-	})
-	if done := taskSection(got, task.GetId()).GetHeader().GetDone().GetDone(); done {
-		t.Fatalf("task section done after set_open = %v, want false", done)
 	}
 }
 
@@ -986,50 +841,6 @@ func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetBlankTitle() == nil {
 		t.Fatalf("UpdateTask{set_title} with a blank title = %v, want UpdateTaskError.blank_title", resp.Msg)
-	}
-}
-
-// TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart is the durability half
-// of the task view: tasks and AssignWorkspaceTask rows are WSM-owned per
-// SPEC.md's "Tasks are daemon-owned rows in WSM", so a restart on the same
-// state root must reload them rather than starting the task view over empty.
-func TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{DurableState: true})
-	task := createTask(t, f, "outlives the daemon")
-	assignTask(t, f, task)
-	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
-		Task:   task,
-		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
-	})); err != nil {
-		t.Fatalf("UpdateTask{set_done} = error %v, want a success", err)
-	}
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the workspace grouped under its done task, before the restart", func(r *frontendv1.WorkspaceRoster) bool {
-		s := taskSection(r, task.GetId())
-		return s != nil && s.GetHeader().GetDone().GetDone() && rosterTaskRow(r, task.GetId(), f.ws.GetId()) != nil
-	})
-
-	// Act: restart the daemon on the same state root, per prompt_test.go's
-	// promptRestartDaemon idiom — it updates f.d in place.
-	nd := promptRestartDaemon(t, f)
-
-	// Assert
-	after := nd.WatchRoster()
-	got := harness.AwaitNext(t, nd.Ctx(), after, "the roster after the restart")
-	section := taskSection(got, task.GetId())
-	if section == nil {
-		t.Fatalf("no task section for %s survived the restart", task.GetId())
-	}
-	if section.GetHeader().GetLabel().GetText() != "outlives the daemon" {
-		t.Fatalf("task section label after restart = %q, want %q", section.GetHeader().GetLabel().GetText(), "outlives the daemon")
-	}
-	if !section.GetHeader().GetDone().GetDone() {
-		t.Fatalf("task section done after restart = false, want true (the done mark must survive too)")
-	}
-	if rosterTaskRow(got, task.GetId(), f.ws.GetId()) == nil {
-		t.Fatalf("the workspace's assignment to %s did not survive the restart", task.GetId())
 	}
 }
 

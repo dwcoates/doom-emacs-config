@@ -69,30 +69,6 @@ does not write to the durable sink."
                      "X" (agent-repl-test-wire-common--parse "{\"other\":\"x\"}"))))
                  '("X" other "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-common-maturity-stage-decodes-each-arm ()
-  "A MaturityStage decodes whichever stage arm it carries."
-  (dolist (case '(("backlog" . :backlog) ("inProgress" . :in-progress) ("merging" . :merging)))
-    (should (equal (agent-repl-test-wire-common--decode
-                    #'agent-repl-wire-decode-maturity-stage
-                    (format "{\"%s\":{}}" (car case)))
-                   (list :stage (list :arm (cdr case) :value nil))))))
-
-(ert-deftest agent-repl-test-wire-common-maturity-stage-without-an-arm-is-a-breach ()
-  "THE ARM IS THE STAGE: an unset one is a breach."
-  (should (equal (agent-repl-test-wire-common--breach
-                  (lambda ()
-                    (agent-repl-wire-decode-maturity-stage
-                     (agent-repl-test-wire-common--parse "{}"))))
-                 '("MaturityStage" stage "oneof is unset"))))
-
-(ert-deftest agent-repl-test-wire-common-maturity-stage-refuses-an-unknown-arm ()
-  "A stage this build has never heard of is refused, never ignored."
-  (should (equal (agent-repl-test-wire-common--breach
-                  (lambda ()
-                    (agent-repl-wire-decode-maturity-stage
-                     (agent-repl-test-wire-common--parse "{\"shipped\":{}}"))))
-                 '("MaturityStage" shipped "unknown field"))))
-
 (ert-deftest agent-repl-test-wire-common-workspace-ref-decodes-both-halves ()
   "A WorkspaceRef decodes its opaque id and its display dir."
   (let ((decoded (agent-repl-test-wire-common--decode

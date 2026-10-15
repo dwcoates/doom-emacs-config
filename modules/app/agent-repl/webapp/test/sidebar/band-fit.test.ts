@@ -50,7 +50,7 @@ function drawn(
     ),
   );
   document.body.replaceChildren(scroller);
-  const pane = scroller.querySelector('.sb-pane[data-grouping="repository"]') as HTMLElement;
+  const pane = scroller.querySelector('.sb-pane.sb-pane') as HTMLElement;
   return { scroller, pane };
 }
 

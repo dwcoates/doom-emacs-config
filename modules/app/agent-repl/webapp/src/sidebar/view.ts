@@ -5,8 +5,8 @@
  *
  * Every workspace has its own page, and each page draws the view the roster
  * push carries — a section's fold (`RosterRepoSection.fold`,
- * `RosterTaskSection.fold`, `RosterMergedSection.fold`) and the grouping shown
- * (`WorkspaceRoster.shown`) — so a change asked for in one page reaches every
+ * `RosterMergedSection.fold`, `RosterHiddenSection.fold`,
+ * `RosterOpenSection.fold`) — so a change asked for in one page reaches every
  * page on the same push.
  *
  * THE GESTURE IS INSTANT. A change the user asks for is painted on this page
@@ -26,8 +26,8 @@
  */
 import { log } from "../log.js";
 
-/** A piece of view state's value: a fold or a grouping. */
-export type ViewValue = boolean | string;
+/** A piece of view state's value: a fold, collapsed or not. */
+export type ViewValue = boolean;
 
 /** Paint one copy of a piece of view state. */
 export type ViewPaint<T extends ViewValue> = (value: T) => void;
@@ -36,9 +36,6 @@ export type ViewPaint<T extends ViewValue> = (value: T) => void;
 export function foldViewKey(sectionKey: string): string {
   return `fold:${sectionKey}`;
 }
-
-/** The key the grouping shown is held under. */
-export const GROUPING_VIEW_KEY = "grouping";
 
 /**
  * Say on a section, and on its OWN header's fold triangle, which way it stands.
@@ -67,8 +64,8 @@ export interface SidebarView {
   beginDraw(): void;
   /**
    * The value KEY draws, given what the wire says, and track PAINT as one
-   * copy of it (the merged band is drawn once per grouping, and the grouping
-   * picker is a copy of the grouping).
+   * copy of it (a repository's fold has two copies: its section and its
+   * merged group).
    *
    * A held ask the wire now agrees with is released here.
    */

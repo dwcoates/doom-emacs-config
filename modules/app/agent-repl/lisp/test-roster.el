@@ -80,15 +80,6 @@ a collapsed merged group's rows withheld."
   (list :repository (list :sections sections)
         :tab-bar (or tab-bar (agent-repl-test--tab-bar-of
                               sections hidden merged merged-groups))
-        ;; The task view is deliberately POPULATED in these fixtures: it is
-        ;; the same workspaces regrouped, and the walk must ignore it.
-        :task (list :sections
-                    (mapcar (lambda (s)
-                              (list :key (list :task-id "t-1")
-                                    :header (list :label (list :text "task")
-                                                  :done (list :done :false))
-                                    :rows (plist-get s :rows)))
-                            sections))
         :hidden (list :header (list :label (list :text "Hidden"))
                       :rows (list :rows hidden)
                       :fold (list :arm :expanded :value nil))
@@ -364,15 +355,6 @@ whose calls are the observation."
       ;; Assert
       (should (equal sections '(("p" . :repository) ("c" . :repository)
                                 ("h" . :hidden) ("m" . :merged)))))))
-
-(ert-deftest agent-repl-test-roster-walk-ignores-the-task-view ()
-  "The task view is the same rows regrouped; walking it would double them."
-  ;; Arrange — the fixture's task view carries the very same rows.
-  (let ((roster (agent-repl-test-roster--roster
-                 :sections (list (agent-repl-test-roster--section
-                                  "repo" (list (agent-repl-test-roster--row "a" "a" :ready)))))))
-    ;; Act / Assert
-    (should (equal (length (agent-repl-roster-walk roster)) 1))))
 
 ;;;; ---- Reconciliation ----
 

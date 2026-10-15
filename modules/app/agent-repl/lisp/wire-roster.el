@@ -41,7 +41,6 @@
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--object "wire-common")
-(declare-function agent-repl-wire-decode-maturity-stage "wire-common")
 (declare-function agent-repl-wire-decode-repository-ref "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 
@@ -69,14 +68,6 @@ How many workspaces the section holds; the webview draws it while folded."
      "RosterSectionCount"
      (list :workspaces (agent-repl-wire--decode-uint32
                         "RosterSectionCount" 'workspaces object)))))
-
-(defun agent-repl-wire-decode-roster-task-done (value)
-  "Decode VALUE as `RosterTaskDone', a plist `(:done)'."
-  (let ((object (agent-repl-wire--object "RosterTaskDone" value)))
-    (agent-repl-wire--check-keys "RosterTaskDone" object '(done))
-    (agent-repl-wire--decoded
-     "RosterTaskDone"
-     (list :done (agent-repl-wire--decode-bool "RosterTaskDone" 'done object)))))
 
 (defun agent-repl-wire-decode-roster-row-name (value)
   "Decode VALUE as `RosterRowName', a plist `(:text)'.
@@ -811,28 +802,6 @@ Fold state is WEBVIEW-LOCAL and is no element of this view."
                    "RosterSectionHeader" 'count object
                    #'agent-repl-wire-decode-roster-section-header-count)))))
 
-(defun agent-repl-wire-decode-roster-task-section-header-label (value)
-  "Decode `RosterTaskSectionHeader''s `label' field VALUE."
-  (agent-repl-wire-decode-roster-label value))
-
-(defun agent-repl-wire-decode-roster-task-section-header-done (value)
-  "Decode `RosterTaskSectionHeader''s `done' field VALUE."
-  (agent-repl-wire-decode-roster-task-done value))
-
-(defun agent-repl-wire-decode-roster-task-section-header (value)
-  "Decode VALUE as `RosterTaskSectionHeader', a plist `(:label :done)'.
-Its own message because the done axis exists ONLY for tasks."
-  (let ((object (agent-repl-wire--object "RosterTaskSectionHeader" value)))
-    (agent-repl-wire--check-keys "RosterTaskSectionHeader" object '(label done))
-    (agent-repl-wire--decoded
-     "RosterTaskSectionHeader"
-     (list :label (agent-repl-wire--decode-message
-                   "RosterTaskSectionHeader" 'label object
-                   #'agent-repl-wire-decode-roster-task-section-header-label)
-           :done (agent-repl-wire--decode-message
-                  "RosterTaskSectionHeader" 'done object
-                  #'agent-repl-wire-decode-roster-task-section-header-done)))))
-
 (defun agent-repl-wire-decode-roster-repo-key-repository (value)
   "Decode `RosterRepoKey''s `repository' field VALUE as a RepositoryRef."
   (agent-repl-wire-decode-repository-ref value))
@@ -848,16 +817,6 @@ back."
      (list :repository (agent-repl-wire--decode-message
                         "RosterRepoKey" 'repository object
                         #'agent-repl-wire-decode-roster-repo-key-repository)))))
-
-(defun agent-repl-wire-decode-roster-task-key (value)
-  "Decode VALUE as `RosterTaskKey', a plist `(:task-id)'.
-The ID, NOT the title: a task can be renamed without becoming another."
-  (let ((object (agent-repl-wire--object "RosterTaskKey" value)))
-    (agent-repl-wire--check-keys "RosterTaskKey" object '(taskId))
-    (agent-repl-wire--decoded
-     "RosterTaskKey"
-     (list :task-id (agent-repl-wire--decode-string
-                     "RosterTaskKey" 'taskId object)))))
 
 (defun agent-repl-wire-decode-roster-repo-section-key (value)
   "Decode `RosterRepoSection''s `key' field VALUE as a RosterRepoKey."
@@ -967,108 +926,6 @@ A plist `(:key :header :rows :fold :divergence)'."
            :divergence (agent-repl-wire--decode-message
                         "RosterRepoSection" 'divergence object
                         #'agent-repl-wire-decode-roster-repo-divergence)))))
-
-(defun agent-repl-wire-decode-roster-task-section-key (value)
-  "Decode `RosterTaskSection''s `key' field VALUE as a RosterTaskKey."
-  (agent-repl-wire-decode-roster-task-key value))
-
-(defun agent-repl-wire-decode-roster-task-section-rows (value)
-  "Decode `RosterTaskSection''s `rows' field VALUE as RosterRows."
-  (agent-repl-wire-decode-roster-rows value))
-
-(defun agent-repl-wire-decode-roster-task-section-expanded (value)
-  "Decode VALUE as the empty message `RosterTaskSectionExpanded'."
-  (agent-repl-wire--decode-empty "RosterTaskSectionExpanded" value))
-
-(defun agent-repl-wire-decode-roster-task-section-collapsed (value)
-  "Decode VALUE as the empty message `RosterTaskSectionCollapsed'."
-  (agent-repl-wire--decode-empty "RosterTaskSectionCollapsed" value))
-
-(defun agent-repl-wire-decode-roster-task-section-fold (object)
-  "Decode `RosterTaskSection''s `fold' oneof from OBJECT.
-THE ARM IS THE FOLD, the daemon's view state; it is never unset."
-  (agent-repl-wire--decode-oneof
-   "RosterTaskSection" 'fold object
-   '((expanded :expanded agent-repl-wire-decode-roster-task-section-expanded)
-     (collapsed :collapsed agent-repl-wire-decode-roster-task-section-collapsed))))
-
-(defun agent-repl-wire-decode-roster-task-section (value)
-  "Decode VALUE as `RosterTaskSection', a plist `(:key :header :rows :fold)'."
-  (let ((object (agent-repl-wire--object "RosterTaskSection" value)))
-    (agent-repl-wire--check-keys "RosterTaskSection" object
-                                 '(key header rows expanded collapsed))
-    (agent-repl-wire--decoded
-     "RosterTaskSection"
-     (list :key (agent-repl-wire--decode-message
-                 "RosterTaskSection" 'key object
-                 #'agent-repl-wire-decode-roster-task-section-key)
-           :header (agent-repl-wire--decode-message
-                    "RosterTaskSection" 'header object
-                    #'agent-repl-wire-decode-roster-task-section-header)
-           :rows (agent-repl-wire--decode-message
-                  "RosterTaskSection" 'rows object
-                  #'agent-repl-wire-decode-roster-task-section-rows)
-           :fold (agent-repl-wire-decode-roster-task-section-fold object)))))
-
-(defun agent-repl-wire-decode-roster-maturity-key-stage (value)
-  "Decode `RosterMaturityKey''s `stage' field VALUE as a MaturityStage."
-  (agent-repl-wire-decode-maturity-stage value))
-
-(defun agent-repl-wire-decode-roster-maturity-key (value)
-  "Decode VALUE as `RosterMaturityKey', a plist `(:stage STAGE)'."
-  (let ((object (agent-repl-wire--object "RosterMaturityKey" value)))
-    (agent-repl-wire--check-keys "RosterMaturityKey" object '(stage))
-    (agent-repl-wire--decoded
-     "RosterMaturityKey"
-     (list :stage (agent-repl-wire--decode-message
-                   "RosterMaturityKey" 'stage object
-                   #'agent-repl-wire-decode-roster-maturity-key-stage)))))
-
-(defun agent-repl-wire-decode-roster-maturity-section-key (value)
-  "Decode `RosterMaturitySection''s `key' field VALUE as a RosterMaturityKey."
-  (agent-repl-wire-decode-roster-maturity-key value))
-
-(defun agent-repl-wire-decode-roster-maturity-section-header (value)
-  "Decode `RosterMaturitySection''s `header' field VALUE."
-  (agent-repl-wire-decode-roster-section-header value))
-
-(defun agent-repl-wire-decode-roster-maturity-section-rows (value)
-  "Decode `RosterMaturitySection''s `rows' field VALUE as RosterRows."
-  (agent-repl-wire-decode-roster-rows value))
-
-(defun agent-repl-wire-decode-roster-maturity-section-expanded (value)
-  "Decode VALUE as the empty message `RosterMaturitySectionExpanded'."
-  (agent-repl-wire--decode-empty "RosterMaturitySectionExpanded" value))
-
-(defun agent-repl-wire-decode-roster-maturity-section-collapsed (value)
-  "Decode VALUE as the empty message `RosterMaturitySectionCollapsed'."
-  (agent-repl-wire--decode-empty "RosterMaturitySectionCollapsed" value))
-
-(defun agent-repl-wire-decode-roster-maturity-section-fold (object)
-  "Decode `RosterMaturitySection''s `fold' oneof from OBJECT.
-THE ARM IS THE FOLD, the daemon's view state; it is never unset."
-  (agent-repl-wire--decode-oneof
-   "RosterMaturitySection" 'fold object
-   '((expanded :expanded agent-repl-wire-decode-roster-maturity-section-expanded)
-     (collapsed :collapsed agent-repl-wire-decode-roster-maturity-section-collapsed))))
-
-(defun agent-repl-wire-decode-roster-maturity-section (value)
-  "Decode VALUE as `RosterMaturitySection', a plist `(:key :header :rows :fold)'."
-  (let ((object (agent-repl-wire--object "RosterMaturitySection" value)))
-    (agent-repl-wire--check-keys "RosterMaturitySection" object
-                                 '(key header rows expanded collapsed))
-    (agent-repl-wire--decoded
-     "RosterMaturitySection"
-     (list :key (agent-repl-wire--decode-message
-                 "RosterMaturitySection" 'key object
-                 #'agent-repl-wire-decode-roster-maturity-section-key)
-           :header (agent-repl-wire--decode-message
-                    "RosterMaturitySection" 'header object
-                    #'agent-repl-wire-decode-roster-maturity-section-header)
-           :rows (agent-repl-wire--decode-message
-                  "RosterMaturitySection" 'rows object
-                  #'agent-repl-wire-decode-roster-maturity-section-rows)
-           :fold (agent-repl-wire-decode-roster-maturity-section-fold object)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE."
@@ -1233,9 +1090,9 @@ It has no key of its own — the roster carries exactly one."
 
 (defun agent-repl-wire-decode-roster-open-section (value)
   "Decode VALUE as `RosterOpenSection', a plist `(:label :fold)'.
-The heading over the groupings; its fold folds sidebar rows only, so the
-tab bar reads nothing off it.  It is decoded because the codec refuses
-unknown fields."
+The heading over the repository sections; its fold folds sidebar rows
+only, so the tab bar reads nothing off it.  It is decoded because the
+codec refuses unknown fields."
   (let ((object (agent-repl-wire--object "RosterOpenSection" value)))
     (agent-repl-wire--check-keys "RosterOpenSection" object '(label expanded collapsed))
     (agent-repl-wire--decoded
@@ -1256,8 +1113,8 @@ unknown fields."
 
 (defun agent-repl-wire-decode-roster-open-count (value)
   "Decode VALUE as `RosterOpenCount', a plist `(:workspaces)'.
-How many rows the open-workspaces section lists under one grouping; the
-webview draws it.  Decoded because the codec refuses unknown fields."
+How many rows the open-workspaces section lists; the webview draws it.
+Decoded because the codec refuses unknown fields."
   (let ((object (agent-repl-wire--object "RosterOpenCount" value)))
     (agent-repl-wire--check-keys "RosterOpenCount" object '(workspaces))
     (agent-repl-wire--decoded
@@ -1265,48 +1122,20 @@ webview draws it.  Decoded because the codec refuses unknown fields."
      (list :workspaces (agent-repl-wire--decode-uint32
                         "RosterOpenCount" 'workspaces object)))))
 
-(defun agent-repl-wire--decode-grouping-view (message-name value sections)
-  "Decode VALUE as MESSAGE-NAME, one grouping's view.
-The plist is `(:sections LIST :open-count C)'.  SECTIONS decodes one element
-of its repeated `sections'.  Every grouping view shares this shape, so the
-three decode through this one function."
-  (let ((object (agent-repl-wire--object message-name value)))
-    (agent-repl-wire--check-keys message-name object '(sections openCount))
-    (agent-repl-wire--decoded
-     message-name
-     (list :sections (agent-repl-wire--decode-repeated
-                      message-name 'sections object sections)
-           :open-count (agent-repl-wire--decode-message
-                        message-name 'openCount object
-                        #'agent-repl-wire-decode-roster-open-count)))))
-
 (defun agent-repl-wire-decode-roster-repository-view (value)
-  "Decode VALUE as `RosterRepositoryView', a plist `(:sections LIST)'.
+  "Decode VALUE as `RosterRepositoryView', `(:sections LIST :open-count C)'.
+The rail's one grouping: the open workspaces, one section per repository.
 Order is the resolver's; clients do not re-sort."
-  (agent-repl-wire--decode-grouping-view
-   "RosterRepositoryView" value
-   #'agent-repl-wire-decode-roster-repository-view-sections))
-
-(defun agent-repl-wire-decode-roster-task-view-sections (value)
-  "Decode one element of `RosterTaskView''s repeated `sections'."
-  (agent-repl-wire-decode-roster-task-section value))
-
-(defun agent-repl-wire-decode-roster-task-view (value)
-  "Decode VALUE as `RosterTaskView', a plist `(:sections LIST)'."
-  (agent-repl-wire--decode-grouping-view
-   "RosterTaskView" value
-   #'agent-repl-wire-decode-roster-task-view-sections))
-
-(defun agent-repl-wire-decode-roster-maturity-view-sections (value)
-  "Decode one element of `RosterMaturityView''s repeated `sections'."
-  (agent-repl-wire-decode-roster-maturity-section value))
-
-(defun agent-repl-wire-decode-roster-maturity-view (value)
-  "Decode VALUE as `RosterMaturityView', a plist `(:sections LIST)'.
-Every stage, in the order work moves through them; clients do not re-sort."
-  (agent-repl-wire--decode-grouping-view
-   "RosterMaturityView" value
-   #'agent-repl-wire-decode-roster-maturity-view-sections))
+  (let ((object (agent-repl-wire--object "RosterRepositoryView" value)))
+    (agent-repl-wire--check-keys "RosterRepositoryView" object '(sections openCount))
+    (agent-repl-wire--decoded
+     "RosterRepositoryView"
+     (list :sections (agent-repl-wire--decode-repeated
+                      "RosterRepositoryView" 'sections object
+                      #'agent-repl-wire-decode-roster-repository-view-sections)
+           :open-count (agent-repl-wire--decode-message
+                        "RosterRepositoryView" 'openCount object
+                        #'agent-repl-wire-decode-roster-open-count)))))
 
 (defun agent-repl-wire-decode-roster-current-workspace-workspace (value)
   "Decode `RosterCurrentWorkspace''s `workspace' field VALUE."
@@ -1327,14 +1156,6 @@ name, which is not unique."
 (defun agent-repl-wire-decode-workspace-roster-repository (value)
   "Decode `WorkspaceRoster''s `repository' field VALUE."
   (agent-repl-wire-decode-roster-repository-view value))
-
-(defun agent-repl-wire-decode-workspace-roster-task (value)
-  "Decode `WorkspaceRoster''s `task' field VALUE."
-  (agent-repl-wire-decode-roster-task-view value))
-
-(defun agent-repl-wire-decode-workspace-roster-maturity (value)
-  "Decode `WorkspaceRoster''s `maturity' field VALUE."
-  (agent-repl-wire-decode-roster-maturity-view value))
 
 (defun agent-repl-wire-decode-workspace-roster-recently-merged (value)
   "Decode `WorkspaceRoster''s `recently_merged' field VALUE."
@@ -1406,50 +1227,19 @@ stay in the list."
   "Decode `WorkspaceRoster''s optional `current' field VALUE."
   (agent-repl-wire-decode-roster-current-workspace value))
 
-(defun agent-repl-wire-decode-roster-shown-repository (value)
-  "Decode VALUE as the empty message `RosterShownRepository'."
-  (agent-repl-wire--decode-empty "RosterShownRepository" value))
-
-(defun agent-repl-wire-decode-roster-shown-task (value)
-  "Decode VALUE as the empty message `RosterShownTask'."
-  (agent-repl-wire--decode-empty "RosterShownTask" value))
-
-(defun agent-repl-wire-decode-roster-shown-maturity (value)
-  "Decode VALUE as the empty message `RosterShownMaturity'."
-  (agent-repl-wire--decode-empty "RosterShownMaturity" value))
-
-(defun agent-repl-wire-decode-workspace-roster-shown (object)
-  "Decode `WorkspaceRoster''s `shown' oneof from OBJECT.
-THE ARM IS THE GROUPING every page shows; it is never unset."
-  (agent-repl-wire--decode-oneof
-   "WorkspaceRoster" 'shown object
-   '((shownRepository :shown-repository agent-repl-wire-decode-roster-shown-repository)
-     (shownTask :shown-task agent-repl-wire-decode-roster-shown-task)
-     (shownMaturity :shown-maturity agent-repl-wire-decode-roster-shown-maturity))))
-
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :task V :maturity V :open O :hidden H
-:recently-merged S :tab-bar B :current C-or-nil :shown ARM
-:revision N)'.  EVERY grouping arrives fully resolved:
-which one is drawn is the daemon's view state (`shown'), a selection
-between resolved views, never a derivation."
+Returns `(:repository V :open O :hidden H :recently-merged S :tab-bar B
+:current C-or-nil :revision N)'."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository task maturity open hidden recentlyMerged tabBar current
-                  shownRepository shownTask shownMaturity revision))
+     '(repository open hidden recentlyMerged tabBar current revision))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
                         "WorkspaceRoster" 'repository object
                         #'agent-repl-wire-decode-workspace-roster-repository)
-           :task (agent-repl-wire--decode-message
-                  "WorkspaceRoster" 'task object
-                  #'agent-repl-wire-decode-workspace-roster-task)
-           :maturity (agent-repl-wire--decode-message
-                      "WorkspaceRoster" 'maturity object
-                      #'agent-repl-wire-decode-workspace-roster-maturity)
            :open (agent-repl-wire--decode-message
                   "WorkspaceRoster" 'open object
                   #'agent-repl-wire-decode-workspace-roster-open)
@@ -1465,7 +1255,6 @@ between resolved views, never a derivation."
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
                      #'agent-repl-wire-decode-workspace-roster-current)
-           :shown (agent-repl-wire-decode-workspace-roster-shown object)
            :revision (agent-repl-wire--decode-uint64 "WorkspaceRoster" 'revision object)))))
 
 ;;;; ---- The rpc ----

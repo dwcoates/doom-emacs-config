@@ -478,11 +478,6 @@ func rosterRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.Roster
 			return found
 		}
 	}
-	for _, s := range roster.GetTask().GetSections() {
-		if found := walk(s.GetRows().GetRows()); found != nil {
-			return found
-		}
-	}
 	return walk(rosterwalk.MergedRows(roster))
 }
 
@@ -512,21 +507,6 @@ func rosterNests(roster *frontendv1.WorkspaceRoster, parentID, childID string) b
 		}
 	}
 	return false
-}
-
-// rosterTaskRow finds a workspace's row under a named task section.
-func rosterTaskRow(roster *frontendv1.WorkspaceRoster, taskID, id string) *frontendv1.RosterRow {
-	for _, s := range roster.GetTask().GetSections() {
-		if s.GetKey().GetTaskId() != taskID {
-			continue
-		}
-		for _, r := range s.GetRows().GetRows() {
-			if r.GetWorkspace().GetWorkspace().GetId() == id {
-				return r
-			}
-		}
-	}
-	return nil
 }
 
 // connectCode reads a Connect error's code, or CodeUnknown for anything else.
@@ -611,16 +591,6 @@ func sameOrder(got, want []string) bool {
 		}
 	}
 	return true
-}
-
-// taskSection finds a task section by task id.
-func taskSection(r *frontendv1.WorkspaceRoster, taskID string) *frontendv1.RosterTaskSection {
-	for _, s := range r.GetTask().GetSections() {
-		if s.GetKey().GetTaskId() == taskID {
-			return s
-		}
-	}
-	return nil
 }
 
 // createTask creates a task and answers its ref.

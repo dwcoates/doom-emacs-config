@@ -20,89 +20,6 @@ func loggedAtError(f *fixture, operation string) bool {
 	return false
 }
 
-func TestFoldTaskSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
-	tests := []struct {
-		name   string
-		folded bool
-	}{{"collapse", true}, {"expand", false}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			f.db.tasks = append(f.db.tasks, wsm.Task{ID: "task-1", Title: "t", Folded: !tt.folded})
-
-			// Act
-			err := f.verbs.FoldTaskSection(context.Background(), "task-1", tt.folded)
-
-			// Assert
-			if err != nil {
-				t.Fatalf("FoldTaskSection: %v", err)
-			}
-			if len(f.sidebar.registries) != 1 {
-				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
-			}
-			if got := f.sidebar.registries[0].Tasks[0].Folded; got != tt.folded {
-				t.Fatalf("republished task fold = %v, want %v", got, tt.folded)
-			}
-		})
-	}
-}
-
-func TestFoldTaskSectionAnswersAFoldAlreadyHeldAsSuccess(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	f.db.tasks = append(f.db.tasks, wsm.Task{ID: "task-1", Title: "t", Folded: true})
-
-	// Act
-	err := f.verbs.FoldTaskSection(context.Background(), "task-1", true)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("FoldTaskSection = %v, want success for a fold already held", err)
-	}
-	if len(f.sidebar.registries) != 1 {
-		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
-	}
-}
-
-func TestFoldTaskSectionRefusesAnUnknownTask(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-
-	// Act
-	err := f.verbs.FoldTaskSection(context.Background(), "absent", true)
-
-	// Assert
-	asRefusal(t, err, ArmUnknownTask)
-	if len(f.sidebar.registries) != 0 {
-		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
-	}
-}
-
-func TestFoldTaskSectionSurfacesAFailedWriteAtError(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	f.db.tasks = append(f.db.tasks, wsm.Task{ID: "task-1", Title: "t"})
-	f.db.setTaskFoldedErr = errors.New("disk I/O error")
-
-	// Act
-	err := f.verbs.FoldTaskSection(context.Background(), "task-1", true)
-
-	// Assert
-	if err == nil {
-		t.Fatal("a failed fold write was answered as success")
-	}
-	if _, refused := AsRefusal(err); refused {
-		t.Fatalf("a failed write was answered as a refusal: %v", err)
-	}
-	if !loggedAtError(f, opFoldTaskSection) {
-		t.Fatal("the failed write was not recorded at error")
-	}
-	if len(f.sidebar.registries) != 0 {
-		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
-	}
-}
-
 func TestFoldMergedSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -256,11 +173,11 @@ func TestFoldHiddenSectionSurfacesAFailedWriteAtError(t *testing.T) {
 func TestTheRepublishedRosterCarriesTheDefaultViewWhenNoneWasSet(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	f.db.tasks = append(f.db.tasks, wsm.Task{ID: "task-1", Title: "t"})
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
 
 	// Act
-	if err := f.verbs.FoldTaskSection(context.Background(), "task-1", true); err != nil {
-		t.Fatalf("FoldTaskSection: %v", err)
+	if err := f.verbs.FoldRepository(context.Background(), "repo-1", true); err != nil {
+		t.Fatalf("FoldRepository: %v", err)
 	}
 
 	// Assert
@@ -292,7 +209,7 @@ func TestARepublishThatCannotReadTheViewPublishesNothingAndSaysSoAtError(t *test
 func TestPublishRegistryCarriesTheRecordedView(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	recorded := wsm.SidebarView{MergedFolded: false, Grouping: wsm.GroupingTask}
+	recorded := wsm.SidebarView{MergedFolded: true, HiddenFolded: true}
 	f.db.view = &recorded
 
 	// Act
@@ -323,106 +240,6 @@ func TestPublishRegistryRefusesWhenTheViewCannotBeRead(t *testing.T) {
 	}
 	if !loggedAtError(f, opRegister) {
 		t.Fatal("the unreadable view was not recorded at error")
-	}
-}
-
-func TestShowGroupingRecordsTheGroupingAndRepublishesTheRoster(t *testing.T) {
-	tests := []struct {
-		name     string
-		grouping wsm.Grouping
-	}{{"task", wsm.GroupingTask}, {"repository", wsm.GroupingRepository}, {"maturity", wsm.GroupingMaturity}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-
-			// Act
-			err := f.verbs.ShowGrouping(context.Background(), tt.grouping)
-
-			// Assert
-			if err != nil {
-				t.Fatalf("ShowGrouping: %v", err)
-			}
-			if len(f.sidebar.registries) != 1 || f.sidebar.registries[0].View.Grouping != tt.grouping {
-				t.Fatalf("registries = %+v, want one showing %s", f.sidebar.registries, tt.grouping)
-			}
-		})
-	}
-}
-
-func TestShowGroupingSurfacesAFailedWriteAtError(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	f.db.setGroupingErr = errors.New("disk I/O error")
-
-	// Act
-	err := f.verbs.ShowGrouping(context.Background(), wsm.GroupingTask)
-
-	// Assert
-	if err == nil {
-		t.Fatal("a failed grouping write was answered as success")
-	}
-	if !loggedAtError(f, opShowGrouping) {
-		t.Fatal("the failed write was not recorded at error")
-	}
-	if len(f.sidebar.registries) != 0 {
-		t.Fatalf("roster republications = %d, want none for a failed write", len(f.sidebar.registries))
-	}
-}
-
-func TestFoldMaturitySectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
-	tests := []struct {
-		name   string
-		stage  wsm.MaturityStage
-		folded bool
-		want   wsm.MaturityFolds
-	}{
-		{"collapse the backlog", wsm.MaturityBacklog, true, wsm.MaturityFolds{Backlog: true}},
-		{"collapse in progress", wsm.MaturityInProgress, true, wsm.MaturityFolds{InProgress: true}},
-		{"expand merging", wsm.MaturityMerging, false, wsm.MaturityFolds{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			prior := wsm.DefaultSidebarView
-			prior.MaturityFolded = prior.MaturityFolded.With(tt.stage, !tt.folded)
-			f.db.view = &prior
-
-			// Act
-			err := f.verbs.FoldMaturitySection(context.Background(), tt.stage, tt.folded)
-
-			// Assert
-			if err != nil {
-				t.Fatalf("FoldMaturitySection: %v", err)
-			}
-			if len(f.sidebar.registries) != 1 {
-				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
-			}
-			if got := f.sidebar.registries[0].View.MaturityFolded; got != tt.want {
-				t.Fatalf("republished maturity folds = %+v, want %+v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFoldMaturitySectionSurfacesAFailedWriteAtError(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	f.db.setMaturityFoldedErr = errors.New("disk I/O error")
-
-	// Act
-	err := f.verbs.FoldMaturitySection(context.Background(), wsm.MaturityBacklog, true)
-
-	// Assert
-	if err == nil {
-		t.Fatal("a failed fold write was answered as success")
-	}
-	if !loggedAtError(f, opFoldMaturitySection) {
-		t.Fatal("the failed write was not recorded at error")
-	}
-	if len(f.sidebar.registries) != 0 {
-		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
 	}
 }
 

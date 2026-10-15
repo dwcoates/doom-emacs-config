@@ -657,16 +657,12 @@ func validateUpdateSidebarViewRequest(req *agentreplv1.UpdateSidebarViewRequest)
 		return invalid("change", "a change arm is required")
 	case *agentreplv1.UpdateSidebarViewRequest_FoldSection:
 		return validateSidebarViewFoldSection(change.FoldSection)
-	case *agentreplv1.UpdateSidebarViewRequest_ShowGrouping:
-		if change.ShowGrouping.GetGrouping() == nil {
-			return invalid("show_grouping.grouping", "a grouping arm is required")
-		}
 	}
 	return nil
 }
 
 // validateSidebarViewFoldSection is SidebarViewFoldSection's base function: a
-// section arm (a repository's or task's carrying its ref) and a fold arm.
+// section arm (a repository's carrying its ref) and a fold arm.
 func validateSidebarViewFoldSection(fold *agentreplv1.SidebarViewFoldSection) *connect.Error {
 	switch section := fold.GetSection().(type) {
 	case nil:
@@ -674,14 +670,6 @@ func validateSidebarViewFoldSection(fold *agentreplv1.SidebarViewFoldSection) *c
 	case *agentreplv1.SidebarViewFoldSection_Repository:
 		if err := validateRepositoryRef("fold_section.repository", section.Repository); err != nil {
 			return err
-		}
-	case *agentreplv1.SidebarViewFoldSection_Task:
-		if err := validateTaskRef("fold_section.task", section.Task); err != nil {
-			return err
-		}
-	case *agentreplv1.SidebarViewFoldSection_Maturity:
-		if section.Maturity.GetStage() == nil {
-			return invalid("fold_section.maturity.stage", "a maturity stage arm is required")
 		}
 	}
 	if fold.GetFold() == nil {

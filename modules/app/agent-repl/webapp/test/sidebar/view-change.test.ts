@@ -8,6 +8,8 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { changeView, updateSidebarViewRefusal } from "../../src/sidebar/view-change.js";
+import { MERGED_FOLD_KEY } from "../../src/sidebar/context.js";
+import { foldViewKey } from "../../src/sidebar/view.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
@@ -26,72 +28,78 @@ function daemon(answer: () => UpdateSidebarViewResponse) {
   return { asked, sc };
 }
 
-const GROUPING_TASK = { case: "showGrouping", value: { grouping: { case: "task", value: {} } } } as const;
+/** Collapse the recently-merged band: the change every case below asks for. */
+const COLLAPSE_MERGED = {
+  case: "foldSection",
+  value: { section: { case: "recentlyMerged", value: {} }, fold: { case: "collapse", value: {} } },
+} as const;
+
+/** The view key the recently-merged band's fold is held under. */
+const KEY = foldViewKey(MERGED_FOLD_KEY);
 
 describe("changeView", () => {
   it("paints the asked value before the daemon answers", () => {
     const { sc } = daemon(() => OK);
-    const painted: string[] = [];
-    sc.view.track("grouping", "repository", (v) => painted.push(v));
-    void changeView(sc, { key: "grouping", value: "task", control: document.createElement("button"), change: GROUPING_TASK });
-    expect(painted).toEqual(["task"]);
+    const painted: boolean[] = [];
+    sc.view.track(KEY, false, (v) => painted.push(v));
+    void changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
+    expect(painted).toEqual([true]);
   });
 
   it("sends the change arm it was given", async () => {
     const { asked, sc } = daemon(() => OK);
-    sc.view.track("grouping", "repository", () => undefined);
-    await changeView(sc, { key: "grouping", value: "task", control: document.createElement("button"), change: GROUPING_TASK });
-    expect(asked.map((r) => r.change.case)).toEqual(["showGrouping"]);
+    sc.view.track(KEY, false, () => undefined);
+    await changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
+    expect(asked.map((r) => r.change.case)).toEqual(["foldSection"]);
   });
 
   it("answers true and keeps the hold when the daemon took it", async () => {
     const { sc } = daemon(() => OK);
-    sc.view.track("grouping", "repository", () => undefined);
-    const took = await changeView(sc, { key: "grouping", value: "task", control: document.createElement("button"), change: GROUPING_TASK });
-    expect([took, sc.view.track("grouping", "repository", () => undefined)]).toEqual([true, "task"]);
+    sc.view.track(KEY, false, () => undefined);
+    const took = await changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
+    expect([took, sc.view.track(KEY, false, () => undefined)]).toEqual([true, true]);
   });
 
   it("repaints from the wire when the daemon refuses", async () => {
     const { sc } = daemon(() =>
       create(UpdateSidebarViewResponseSchema, {
-        result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
+        result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
       }),
     );
-    const painted: string[] = [];
-    sc.view.track("grouping", "repository", (v) => painted.push(v));
-    const took = await changeView(sc, { key: "grouping", value: "task", control: document.createElement("button"), change: GROUPING_TASK });
-    expect([took, painted]).toEqual([false, ["task", "repository"]]);
+    const painted: boolean[] = [];
+    sc.view.track(KEY, false, (v) => painted.push(v));
+    const took = await changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
+    expect([took, painted]).toEqual([false, [true, false]]);
   });
 
   it("draws the refusal beside the control", async () => {
     const { sc } = daemon(() =>
       create(UpdateSidebarViewResponseSchema, {
-        result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
+        result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
       }),
     );
     const host = document.createElement("div");
     const control = document.createElement("button");
     host.appendChild(control);
-    sc.view.track("grouping", "repository", () => undefined);
-    await changeView(sc, { key: "grouping", value: "task", control, change: GROUPING_TASK });
-    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("unknownTask");
+    sc.view.track(KEY, false, () => undefined);
+    await changeView(sc, { key: KEY, value: true, control, change: COLLAPSE_MERGED });
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("unknownRepository");
   });
 
   it("repaints from the wire when the daemon cannot be reached", async () => {
     const { sc } = daemon(() => {
       throw new Error("down");
     });
-    const painted: string[] = [];
-    sc.view.track("grouping", "repository", (v) => painted.push(v));
-    await changeView(sc, { key: "grouping", value: "task", control: document.createElement("button"), change: GROUPING_TASK });
-    expect(painted).toEqual(["task", "repository"]);
+    const painted: boolean[] = [];
+    sc.view.track(KEY, false, (v) => painted.push(v));
+    await changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
+    expect(painted).toEqual([true, false]);
   });
 });
 
 describe("updateSidebarViewRefusal", () => {
   it.each([
     ["unknownRepository", "the daemon no longer has that repository"],
-    ["unknownTask", "the daemon no longer has that task"],
   ] as const)("words %s", (arm, sentence) => {
     expect(updateSidebarViewRefusal({ case: arm, value: {} } as never)).toBe(sentence);
   });

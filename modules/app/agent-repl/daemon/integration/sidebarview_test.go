@@ -37,21 +37,6 @@ func collapseMergedBand() *agentreplv1.UpdateSidebarViewRequest {
 	})
 }
 
-func collapseTaskSection(task *agentreplv1.TaskRef) *agentreplv1.UpdateSidebarViewRequest {
-	return foldSection(&agentreplv1.SidebarViewFoldSection{
-		Section: &agentreplv1.SidebarViewFoldSection_Task{Task: task},
-		Fold:    &agentreplv1.SidebarViewFoldSection_Collapse{Collapse: &agentreplv1.SidebarViewCollapse{}},
-	})
-}
-
-func showTaskGrouping() *agentreplv1.UpdateSidebarViewRequest {
-	return &agentreplv1.UpdateSidebarViewRequest{
-		Change: &agentreplv1.UpdateSidebarViewRequest_ShowGrouping{ShowGrouping: &agentreplv1.SidebarViewShowGrouping{
-			Grouping: &agentreplv1.SidebarViewShowGrouping_Task{Task: &agentreplv1.SidebarViewTaskGrouping{}},
-		}},
-	}
-}
-
 func mergedBandCollapsed(r *frontendv1.WorkspaceRoster) bool {
 	return r.GetRecentlyMerged().GetCollapsed() != nil
 }
@@ -89,100 +74,20 @@ func TestFoldingTheRecentlyMergedBandReachesEveryRosterSubscriber(t *testing.T) 
 	awaitRoster(t, f.d, two, "the folded band on the second subscriber", mergedBandCollapsed)
 }
 
-func TestFoldingATaskSectionReachesEveryRosterSubscriber(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	task := createTask(t, f, "fold me")
-	one := f.d.WatchRoster()
-	two := f.d.WatchRosterOn(f.d.Dial())
-	collapsed := func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()).GetCollapsed() != nil
-	}
-
-	// Act
-	resp := updateSidebarView(t, f, collapseTaskSection(task))
-
-	// Assert
-	if resp.GetSuccess() == nil {
-		t.Fatalf("UpdateSidebarView = %v, want success", resp)
-	}
-	awaitRoster(t, f.d, one, "the folded task on the first subscriber", collapsed)
-	awaitRoster(t, f.d, two, "the folded task on the second subscriber", collapsed)
-}
-
-func TestUpdateSidebarViewWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-
-	// Act
-	resp := updateSidebarView(t, f, collapseTaskSection(&agentreplv1.TaskRef{Id: "no-such-task"}))
-
-	// Assert
-	if resp.GetError().GetUnknownTask() == nil {
-		t.Fatalf("UpdateSidebarView = %v, want unknown_task", resp)
-	}
-}
-
 func TestTheSidebarViewSurvivesADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{DurableState: true})
-	task := createTask(t, f, "stays folded")
 	roster := f.d.WatchRoster()
-	updateSidebarView(t, f, collapseTaskSection(task))
 	updateSidebarView(t, f, collapseMergedBand())
-	updateSidebarView(t, f, showTaskGrouping())
-	awaitRoster(t, f.d, roster, "the whole view, before the restart", func(r *frontendv1.WorkspaceRoster) bool {
-		return taskSection(r, task.GetId()).GetCollapsed() != nil && mergedBandCollapsed(r) && r.GetShownTask() != nil
-	})
+	awaitRoster(t, f.d, roster, "the folded band, before the restart", mergedBandCollapsed)
 
 	// Act
 	nd := promptRestartDaemon(t, f)
 
 	// Assert
 	got := harness.AwaitNext(t, nd.Ctx(), nd.WatchRoster(), "the roster after the restart")
-	if taskSection(got, task.GetId()).GetCollapsed() == nil {
-		t.Fatalf("task fold after restart = %v, want collapsed", taskSection(got, task.GetId()).GetFold())
-	}
 	if !mergedBandCollapsed(got) {
 		t.Fatalf("band fold after restart = %v, want collapsed", got.GetRecentlyMerged().GetFold())
 	}
-	if got.GetShownTask() == nil {
-		t.Fatalf("grouping after restart = %v, want the task grouping", got.GetShown())
-	}
-}
-
-func TestTheRosterOpensOnTheRepositoryGrouping(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-
-	// Act
-	first := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchRoster(), "the opening roster")
-
-	// Assert
-	if first.GetShownRepository() == nil {
-		t.Fatalf("the grouping before anyone chose one = %v, want the repository grouping", first.GetShown())
-	}
-}
-
-func TestShowingAGroupingReachesEveryRosterSubscriber(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	one := f.d.WatchRoster()
-	two := f.d.WatchRosterOn(f.d.Dial())
-	shownTask := func(r *frontendv1.WorkspaceRoster) bool { return r.GetShownTask() != nil }
-
-	// Act
-	resp := updateSidebarView(t, f, showTaskGrouping())
-
-	// Assert
-	if resp.GetSuccess() == nil {
-		t.Fatalf("UpdateSidebarView = %v, want success", resp)
-	}
-	awaitRoster(t, f.d, one, "the task grouping on the first subscriber", shownTask)
-	awaitRoster(t, f.d, two, "the task grouping on the second subscriber", shownTask)
 }

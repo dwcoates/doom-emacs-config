@@ -22,12 +22,6 @@
 import { createControl, isControl, type Control } from "../control.js";
 import { create, type Message, type MessageInitShape } from "@bufbuild/protobuf";
 import {
-  AssignWorkspaceTaskRequestSchema,
-  AssignWorkspaceTaskResponseSchema,
-  type AssignWorkspaceTaskError,
-  type AssignWorkspaceTaskRequest,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
-import {
   CloseWorkspaceRequestSchema,
   CloseWorkspaceResponseSchema,
   type CloseWorkspaceError,
@@ -95,8 +89,7 @@ export type Verb =
   | "nuke"
   | "merge"
   | "restart"
-  | "priority"
-  | "assign";
+  | "priority";
 
 /** The priority menu's entries; `clear` is the unset request. */
 export type PriorityChoice = "p05" | "p1" | "p2" | "p3" | "clear";
@@ -119,7 +112,6 @@ const VERB_LABELS: Readonly<Record<Verb, string>> = {
   merge: "Merge",
   restart: "Restart",
   priority: "Priority",
-  assign: "Task",
 };
 
 /** What each priority entry is labelled; the badge itself is the daemon's. */
@@ -151,7 +143,6 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
   menu.appendChild(simpleVerbItem("merge", target));
   menu.appendChild(simpleVerbItem("restart", target));
   menu.appendChild(drawPriorityItem(target));
-  menu.appendChild(drawAssignItem(target));
   menu.appendChild(drawKillItem(target));
   menu.appendChild(drawNukeItem(target));
   return menu;
@@ -364,69 +355,6 @@ function drawPriorityItem(target: VerbTarget): HTMLElement {
   row.appendChild(button);
   row.appendChild(submenu);
   return row;
-}
-
-/**
- * Task assignment: the task view's own sections, offered as choices.
- *
- * The list comes off the LAST PUSHED ROSTER rather than from anything this
- * menu remembers, and the ids are the daemon's `RosterTaskKey.task_id` handed
- * straight back. "Unassign" is the empty id, which is the request's UNSET.
- */
-function drawAssignItem(target: VerbTarget): HTMLElement {
-  const row = menuRow();
-  const button = disclosureButton(VERB_LABELS.assign);
-  const submenu = document.createElement("div");
-  submenu.className = "sb-submenu list-rows";
-  submenu.hidden = true;
-  fillAssignSubmenu(submenu, target);
-  button.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    fillAssignSubmenu(submenu, target);
-    submenu.hidden = !submenu.hidden;
-  });
-  row.appendChild(button);
-  row.appendChild(submenu);
-  return row;
-}
-
-/** (Re)build the assign choices from whatever the last push resolved. */
-export function fillAssignSubmenu(submenu: HTMLElement, target: VerbTarget): void {
-  const choices: Array<{ id: string; label: string }> = [
-    { id: "", label: "Unassign" },
-    ...target.sc.tasks,
-  ];
-  log.debug("filling the assign-task submenu", {
-    operation: "sidebar.verbs.assign-choices",
-    context: { workspace: target.workspace.id, choices: choices.length },
-  });
-  submenu.replaceChildren();
-  for (const choice of choices) {
-    const entry = createControl();
-    entry.className = "sb-menu-item";
-    entry.setAttribute("data-assign-task", choice.id);
-    entry.textContent = choice.label;
-    entry.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void fireVerb(entry, {
-        sc: target.sc,
-        rpc: "AssignWorkspaceTask",
-        call: (client) =>
-          client.assignWorkspaceTask(
-            buildAssignWorkspaceTaskRequest(
-              target.workspace,
-              choice.id === "" ? null : choice.id,
-            ),
-          ),
-        schema: AssignWorkspaceTaskResponseSchema,
-        refusalText: (cause) =>
-          assignWorkspaceTaskRefusal(cause as CauseOf<AssignWorkspaceTaskError>),
-      });
-    });
-    submenu.appendChild(entry);
-  }
 }
 
 function menuRow(): HTMLElement {
@@ -764,16 +692,6 @@ export function restartWorkspaceRefusal(cause: CauseOf<RestartWorkspaceError>): 
   }
 }
 
-/** AssignWorkspaceTask's own arm. */
-export function assignWorkspaceTaskRefusal(cause: CauseOf<AssignWorkspaceTaskError>): string {
-  switch (cause.case) {
-    case "unknownTask":
-      return "the daemon does not know that task";
-    default:
-      return unreachableArm("AssignWorkspaceTaskError.cause", cause.case);
-  }
-}
-
 /** The refusal, drawn as the NEXT SIBLING of the control that made the call. */
 export function drawRefusal(
   control: HTMLElement,
@@ -918,19 +836,5 @@ function priorityLevel(
     case "p3":
       return { case: "p3", value: {} };
   }
-}
-
-/**
- * AssignWorkspaceTask: a task, or the UNSET request that unassigns.
- *
- * The id is echoed verbatim — it is the daemon's `RosterTaskKey.task_id` and
- * this end never parses or constructs one.
- */
-export function buildAssignWorkspaceTaskRequest(
-  workspace: WorkspaceRef,
-  taskId: string | null,
-): AssignWorkspaceTaskRequest {
-  if (taskId === null) return create(AssignWorkspaceTaskRequestSchema, { workspace });
-  return create(AssignWorkspaceTaskRequestSchema, { workspace, task: { id: taskId } });
 }
 

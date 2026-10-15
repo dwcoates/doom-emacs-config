@@ -1,40 +1,26 @@
 /**
- * roster — the rail's groupings, their sections, and the recently-merged band
- * that sits under every one.
+ * roster — the rail: the open workspaces by repository, the hidden
+ * workspaces, and the recently-merged band, one copy of each (owner ruling,
+ * 2026-10-15). Nothing is re-grouped, re-sorted or counted here.
  *
- * EVERY GROUPING IS DRAWN, ONE IS SHOWN. The daemon resolves the repository,
- * task and maturity views as siblings, so choosing between them is a
- * SELECTION — exactly as folding hides rows — and never a derivation: this
- * file draws every pane and hides all but one. Nothing is re-grouped,
- * re-sorted or counted here: which stage a workspace is at is the daemon's
- * resolution, never this file's.
+ * RECENTLY MERGED has no key of its own (the roster carries exactly one), so
+ * its fold identity is fixed. Its merges sit in one group per repository, and
+ * a group follows its REPOSITORY'S fold: a collapsed repository's group is not
+ * drawn here.
  *
- * RECENTLY MERGED APPEARS UNDER EVERY GROUPING, because the interesting fact
- * about those workspaces is that they are done, which is true in any grouping
- * (under the maturity grouping it IS the done stage). It has no key of its own
- * (the roster carries exactly one), so its fold identity is fixed. Its merges
- * sit in one group per repository, and a group follows its REPOSITORY'S fold:
- * the repository grouping is the one place a repository's workspaces are
- * collapsed, and a collapsed repository's group is not drawn here.
- *
- * THE VIEW IS THE DAEMON'S. Every section's fold and which grouping is shown
- * are drawn from the push, painted at once on a gesture and asked of the
- * daemon (`view-change.ts`), so the sidebar looks the same in every
- * workspace's page.
+ * THE VIEW IS THE DAEMON'S. Every section's fold is drawn from the push,
+ * painted at once on a gesture and asked of the daemon (`view-change.ts`), so
+ * the sidebar looks the same in every workspace's page.
  *
  * `WorkspaceRoster.current` IS NOT COMPARED HERE. The row states its own
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
-import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
   RosterHiddenSection,
   RosterLabel,
-  RosterMaturityKey,
-  RosterMaturitySection,
-  RosterMaturityView,
   RosterMergedRepoGroup,
   RosterMergedRepoGroupHeader,
   RosterMergedSection,
@@ -47,21 +33,10 @@ import type {
   RosterRows,
   RosterSectionCount,
   RosterSectionHeader,
-  RosterTaskDone,
-  RosterTaskKey,
-  RosterTaskSection,
-  RosterTaskSectionHeader,
-  RosterTaskView,
   WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import {
-  MaturityStageSchema,
-  type MaturityStage,
-  type RepositoryRef,
-} from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
-import { TaskRefSchema } from "../../../proto/gen/ts/agentrepl/v1/task_pb";
-import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import type { RepositoryRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -69,17 +44,12 @@ import {
   HIDDEN_FOLD_KEY,
   MERGED_FOLD_KEY,
   OPEN_FOLD_KEY,
-  maturityFoldKey,
   repoFoldKey,
-  taskFoldKey,
-  type Grouping,
-  type MaturityStageName,
   type SidebarContext,
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
-import { toggleHiddenDropdown } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
-import { foldViewKey, GROUPING_VIEW_KEY, paintSectionFold, paintTriangle } from "./view.js";
+import { foldViewKey, paintSectionFold, paintTriangle } from "./view.js";
 import {
   drawRosterRow,
   drawRosterRowDetailCommits,
@@ -89,27 +59,12 @@ import {
   tickPaint,
   type RowPlace,
 } from "./row.js";
-import {
-  buildUpdateTaskRequest,
-  drawCreateTaskControl,
-  updateTaskRefusal,
-  type TaskChange,
-} from "./tasks.js";
-import { fireVerb } from "./verbs.js";
 import { countNoun } from "../count-noun.js";
 
-/**
- * The whole roster.
- *
- * The task choices the assign menu offers are refreshed here, at the top of
- * the draw, from the task view's own sections — the one place the rail learns
- * which tasks exist.
- */
+/** The whole roster. */
 export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTMLElement {
   const path = "WorkspaceRoster";
   const repository = requireMessage(u.repository, `${path}.repository`);
-  const task = requireMessage(u.task, `${path}.task`);
-  const maturity = requireMessage(u.maturity, `${path}.maturity`);
   const merged = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
   const hidden = requireMessage(u.hidden, `${path}.hidden`);
   const open = requireMessage(u.open, `${path}.open`);
@@ -121,12 +76,9 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
     operation: "sidebar.roster",
     context: {
       repo_sections: repository.sections.length,
-      task_sections: task.sections.length,
-      maturity_sections: maturity.sections.length,
       merged_groups: merged.groups.length,
       hidden_rows: hidden.rows?.rows.length ?? 0,
       current,
-      grouping: drawRosterShown(u.shown, `${path}.shown`),
     },
   });
 
@@ -134,81 +86,25 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   sc.view.beginDraw();
   sc.dropdowns.beginDraw();
   sc.rowHover.beginDraw();
-  sc.tasks.length = 0;
-  for (const [index, section] of task.sections.entries()) {
-    sc.tasks.push({
-      id: requireMessage(section.key, `${path}.task.sections[${index}].key`).taskId,
-      label: requireMessage(
-        requireMessage(section.header, `${path}.task.sections[${index}].header`).label,
-        `${path}.task.sections[${index}].header.label`,
-      ).text,
-    });
-  }
 
+  // ONE COPY OF EVERY SECTION (owner ruling, 2026-10-15): the open workspaces
+  // by repository, then the hidden workspaces, then the recently-merged band.
+  // The pane is the box band-fit.ts fits the two bands' viewports in.
   const roster = document.createElement("div");
   roster.className = "sb-roster";
-  const bands: PaneBands = { open, hidden, merged, path };
-  roster.appendChild(pane("repository", drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, bands));
-  roster.appendChild(pane("task", drawRosterTaskView(task, sc, `${path}.task`), sc, bands));
-  roster.appendChild(pane("maturity", drawRosterMaturityView(maturity, sc, `${path}.maturity`), sc, bands));
-  const shown = sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(u.shown, `${path}.shown`), (grouping) =>
-    showPane(roster, grouping),
-  );
-  showPane(roster, shown);
+  const pane = document.createElement("div");
+  pane.className = "sb-pane";
+  pane.appendChild(drawRosterOpenSection(open, drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, `${path}.open`));
+  pane.appendChild(drawRosterHiddenSection(hidden, sc, `${path}.hidden`));
+  pane.appendChild(drawRosterMergedSection(merged, sc, `${path}.recently_merged`));
+  roster.appendChild(pane);
   return roster;
 }
 
-/** Which grouping the daemon says every page shows. EVERY arm is named; unset is malformed. */
-export function drawRosterShown(shown: WorkspaceRoster["shown"], path: string): Grouping {
-  const arm = requireCase(shown, path);
-  switch (arm.case) {
-    case "shownRepository":
-      return "repository";
-    case "shownTask":
-      return "task";
-    case "shownMaturity":
-      return "maturity";
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(path, other.case);
-    }
-  }
-}
-
-/** Show GROUPING's pane under ROSTER and hide the others. */
-export function showPane(roster: ParentNode, grouping: string): void {
-  for (const pane of roster.querySelectorAll<HTMLElement>(":scope > [data-grouping]")) {
-    pane.hidden = pane.getAttribute("data-grouping") !== grouping;
-  }
-}
-
-/** The sections drawn around EVERY grouping, and the roster path they sit at. */
-interface PaneBands {
-  open: RosterOpenSection;
-  hidden: RosterHiddenSection;
-  merged: RosterMergedSection;
-  path: string;
-}
-
-/** One grouping's drawn sections and the count of the rows they list. */
+/** The open workspaces' drawn repository sections and the count of the rows they list. */
 export interface DrawnGroupingView {
   body: HTMLElement;
   openCount: number;
-}
-
-/**
- * One grouping's pane: its sections inside its own copy of the open-workspaces
- * section, then its own copies of the sections every grouping draws below:
- * the hidden workspaces, then the recently-merged band.
- */
-function pane(grouping: Grouping, view: DrawnGroupingView, sc: SidebarContext, bands: PaneBands): HTMLElement {
-  const element = document.createElement("div");
-  element.className = "sb-pane";
-  element.setAttribute("data-grouping", grouping);
-  element.appendChild(drawRosterOpenSection(bands.open, view, sc, `${bands.path}.open`));
-  element.appendChild(drawRosterHiddenSection(bands.hidden, sc, `${bands.path}.hidden`));
-  element.appendChild(drawRosterMergedSection(bands.merged, sc, `${bands.path}.recently_merged`));
-  return element;
 }
 
 /**
@@ -221,7 +117,7 @@ export function drawRosterCurrentWorkspace(u: RosterCurrentWorkspace, path: stri
   return requireMessage(u.workspace, `${path}.workspace`).id;
 }
 
-/** The repository grouping: one section per repository, in the resolver's order. */
+/** The open workspaces: one section per repository, in the resolver's order. */
 export function drawRosterRepositoryView(
   u: RosterRepositoryView,
   sc: SidebarContext,
@@ -235,36 +131,7 @@ export function drawRosterRepositoryView(
   return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
 }
 
-/** The task grouping: one section per task, plus the new-task control. */
-export function drawRosterTaskView(
-  u: RosterTaskView,
-  sc: SidebarContext,
-  path: string,
-): DrawnGroupingView {
-  const view = document.createElement("div");
-  view.className = "sb-sections";
-  view.appendChild(drawCreateTaskControl(sc));
-  for (const [index, section] of u.sections.entries()) {
-    view.appendChild(drawRosterTaskSection(section, sc, `${path}.sections[${index}]`));
-  }
-  return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
-}
-
-/** The maturity grouping: one section per stage, in the order work moves through them. */
-export function drawRosterMaturityView(
-  u: RosterMaturityView,
-  sc: SidebarContext,
-  path: string,
-): DrawnGroupingView {
-  const view = document.createElement("div");
-  view.className = "sb-sections";
-  for (const [index, section] of u.sections.entries()) {
-    view.appendChild(drawRosterMaturitySection(section, sc, `${path}.sections[${index}]`));
-  }
-  return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
-}
-
-/** How many rows the open-workspaces section lists under a grouping, exactly as the daemon resolved it. */
+/** How many rows the open-workspaces section lists, exactly as the daemon resolved it. */
 export function drawRosterOpenCount(u: RosterOpenCount, path: string): number {
   void path;
   return u.workspaces;
@@ -275,15 +142,14 @@ export const OPEN_SECTION_CLASS = "open-section";
 export const OPEN_COUNT_CLASS = "sb-open-count";
 
 /**
- * The open-workspaces section: the "Open" heading over one grouping's
+ * The open-workspaces section: the "Open" heading over the repository
  * sections, drawn like the Hidden and Recently Merged headings, with "(N)"
  * beside the label whether the section is folded or not (owner request,
- * 2026-10-13). N is the grouping's own count, the daemon's sum of its
- * sections' counts, so it is what a person counting the section's entries
- * arrives at, a folded section's entries included.
+ * 2026-10-13). N is the daemon's sum of the sections' counts, so it is what a
+ * person counting the section's entries arrives at, a folded section's
+ * entries included.
  *
- * Its fold is the daemon's, like every section's, and a fold gesture paints
- * every pane's copy at once.
+ * Its fold is the daemon's, like every section's.
  */
 export function drawRosterOpenSection(
   u: RosterOpenSection,
@@ -305,42 +171,6 @@ export function drawRosterOpenSection(
   section.appendChild(header);
   section.appendChild(view.body);
   return section;
-}
-
-/** One maturity stage's section: its key, its header, its rows. */
-export function drawRosterMaturitySection(
-  u: RosterMaturitySection,
-  sc: SidebarContext,
-  path: string,
-): HTMLElement {
-  const stage = drawRosterMaturityKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
-  const section = drawHeadedSection(u, sc, path, {
-    foldKey: maturityFoldKey(stage),
-    className: "maturity-section",
-    target: { case: "maturity", value: maturityStageRef(stage) },
-  });
-  section.setAttribute("data-maturity-stage", stage);
-  return section;
-}
-
-/** A stage's stable identity: the stage arm. EVERY arm is named; unset is malformed. */
-export function drawRosterMaturityKey(u: RosterMaturityKey, path: string): MaturityStageName {
-  const arm = requireCase(requireMessage(u.stage, `${path}.stage`).stage, `${path}.stage.stage`);
-  switch (arm.case) {
-    case "backlog":
-    case "inProgress":
-    case "merging":
-      return arm.case;
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(`${path}.stage.stage`, other.case);
-    }
-  }
-}
-
-/** The stage's wire identity, echoed back on a fold. */
-function maturityStageRef(stage: MaturityStageName): MaturityStage {
-  return create(MaturityStageSchema, { stage: { case: stage, value: {} } });
 }
 
 /** One repository's section: its key, its header, its rows. */
@@ -443,8 +273,8 @@ export interface HeadedSectionShape extends HeadedBoxShape {
  * folded as the daemon says, the label-and-count header whose gesture asks
  * for the other fold, and the rows with closed workspaces dropped.
  *
- * THE ONE SHAPE every folding section but a task's and the merged band's
- * draws — repository, maturity stage, hidden workspaces — through
+ * THE ONE SHAPE every folding section but the merged band
+ * draws — repository, hidden workspaces — through
  * `drawHeadedBox`, which the merged band shares, so none can disagree with
  * another on how a header folds.
  */
@@ -519,34 +349,6 @@ export function drawRosterSectionFold(fold: RosterSectionFold, path: string): bo
 /** A repository's stable identity — the fold key and the create echo token. */
 export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef {
   return requireMessage(u.repository, `${path}.repository`);
-}
-
-/** One task's section: its key, its header (with the done check), its rows. */
-export function drawRosterTaskSection(
-  u: RosterTaskSection,
-  sc: SidebarContext,
-  path: string,
-): HTMLElement {
-  const taskId = drawRosterTaskKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
-  const section = daemonFoldedBox(taskFoldKey(taskId), drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add("task-section");
-  section.appendChild(
-    drawRosterTaskSectionHeader(
-      requireMessage(u.header, `${path}.header`),
-      taskId,
-      section,
-      sc,
-      `${path}.header`,
-    ),
-  );
-  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
-  return section;
-}
-
-/** A task's stable identity: the ID, never the title. */
-export function drawRosterTaskKey(u: RosterTaskKey, path: string): string {
-  void path;
-  return u.taskId;
 }
 
 /**
@@ -868,62 +670,6 @@ function sectionFold(sc: SidebarContext, foldKey: string, target: MessageInitSha
   };
 }
 
-/**
- * A task section's header: label, fold, done check, rename.
- *
- * ITS OWN MESSAGE, because the done axis exists only for tasks — and its own
- * function here for the same reason. The check is a CONTROL as well as a fact:
- * clicking it is `UpdateTask`, with the arm chosen by what the check currently
- * says, so a done task reopens and an open one completes.
- */
-export function drawRosterTaskSectionHeader(
-  u: RosterTaskSectionHeader,
-  taskId: string,
-  section: HTMLElement,
-  sc: SidebarContext,
-  path: string,
-): HTMLElement {
-  const done = drawRosterTaskDone(requireMessage(u.done, `${path}.done`), `${path}.done`);
-  const title = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
-  log.debug("drawing a task section header", {
-    operation: "sidebar.roster.task-header",
-    context: { path, task: taskId, done },
-  });
-
-  const header = document.createElement("div");
-  header.className = "task-head";
-  if (done) header.classList.add("done");
-  const fold = sectionFold(sc, taskFoldKey(taskId), {
-    case: "task",
-    value: create(TaskRefSchema, { id: taskId }),
-  });
-  header.appendChild(drawFoldToggle(section, fold));
-  header.appendChild(drawTaskDoneCheck(taskId, done, sc));
-
-  const label = document.createElement("span");
-  label.className = "task-label";
-  label.textContent = title;
-  header.appendChild(label);
-
-  // THE TASK'S OWN VERBS, drawn with the header and revealed by the "⋯"
-  // control beside it — the same shape the roster row's menu has, for the same
-  // reason: what a task IS and what can be DONE to one are two surfaces.
-  const menu = drawTaskMenu(taskId, title, sc);
-  const more = createControl();
-  more.className = "sb-more";
-  more.textContent = "⋯";
-  more.title = "task actions";
-  more.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleHiddenDropdown(sc.dropdowns, "task-menu", menu, [more]);
-  });
-  header.appendChild(more);
-  header.appendChild(menu);
-  header.addEventListener("click", () => fold(section, header));
-  return header;
-}
-
 /** The class every section header's label is drawn with. */
 export const SECTION_LABEL_CLASS = "sb-label";
 
@@ -942,12 +688,6 @@ export function drawSectionLabel(u: RosterLabel, path: string): HTMLElement {
 export function drawRosterLabel(u: RosterLabel, path: string): string {
   void path;
   return u.text;
-}
-
-/** A task's done check, as the daemon resolved it. */
-export function drawRosterTaskDone(u: RosterTaskDone, path: string): boolean {
-  void path;
-  return u.done;
 }
 
 /**
@@ -1010,102 +750,3 @@ function drawFoldToggle(section: HTMLElement, gesture: FoldGesture): HTMLElement
   return triangle;
 }
 
-/** The done check: a fact from the wire and the control that flips it. */
-function drawTaskDoneCheck(taskId: string, done: boolean, sc: SidebarContext): HTMLElement {
-  const check = createControl();
-  check.className = done ? "task-check done" : "task-check";
-  check.setAttribute("data-task-status", done ? "done" : "open");
-  check.setAttribute("data-task-change", done ? "setOpen" : "setDone");
-  check.textContent = done ? "✓" : "";
-  check.title = done ? "reopen this task" : "mark this task done";
-  check.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void fireVerb(check, {
-      sc,
-      rpc: "UpdateTask",
-      call: (client) =>
-        client.updateTask(
-          buildUpdateTaskRequest(taskId, done ? { case: "setOpen" } : { case: "setDone" }),
-        ),
-      schema: UpdateTaskResponseSchema,
-      refusalText: (cause) => updateTaskRefusal(cause as never),
-    });
-  });
-  return check;
-}
-
-/**
- * A task's menu: rename, complete, reopen.
- *
- * BOTH done arms are offered, always. `UpdateTask` has three changes and the
- * daemon answers `no_change` when one is a no-op, so the rail draws all three
- * controls and lets the refusal say so at the control — rather than hiding an
- * arm and deciding on the daemon's behalf what a task's state permits.
- */
-function drawTaskMenu(taskId: string, title: string, sc: SidebarContext): HTMLElement {
-  const menu = document.createElement("div");
-  menu.className = "sb-menu list-rows";
-  menu.hidden = true;
-  menu.addEventListener("click", (event) => event.stopPropagation());
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "task-rename";
-  input.setAttribute("data-task-rename", taskId);
-  input.value = title;
-  menu.appendChild(input);
-
-  const rename = taskChangeButton(
-    "setTitle",
-    "Rename",
-    () => {
-      const next = input.value.trim();
-      return next === "" ? null : { case: "setTitle", title: next };
-    },
-    taskId,
-    sc,
-  );
-  menu.appendChild(rename);
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") rename.click();
-  });
-
-  menu.appendChild(
-    taskChangeButton("setDone", "Mark done", () => ({ case: "setDone" }), taskId, sc),
-  );
-  menu.appendChild(
-    taskChangeButton("setOpen", "Reopen", () => ({ case: "setOpen" }), taskId, sc),
-  );
-  return menu;
-}
-
-/** One `UpdateTask` control, with the change it composes when clicked. */
-function taskChangeButton(
-  arm: TaskChange["case"],
-  label: string,
-  compose: () => TaskChange | null,
-  taskId: string,
-  sc: SidebarContext,
-): Control {
-  const button = createControl();
-  button.className = "sb-menu-item";
-  button.setAttribute("data-task-change", arm);
-  button.textContent = label;
-  button.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const change = compose();
-    // A blank title is not SENT: the contract says the title is non-blank, so
-    // the refusal is avoided rather than provoked.
-    if (change === null) return;
-    void fireVerb(button, {
-      sc,
-      rpc: "UpdateTask",
-      call: (client) => client.updateTask(buildUpdateTaskRequest(taskId, change)),
-      schema: UpdateTaskResponseSchema,
-      refusalText: (cause) => updateTaskRefusal(cause as never),
-    });
-  });
-  return button;
-}
