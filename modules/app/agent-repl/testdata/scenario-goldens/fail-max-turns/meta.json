@@ -1,6 +1,6 @@
 {
   "scenario": "!fail-max-turns",
-  "seam": null,
+  "seam": "turn-failure",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

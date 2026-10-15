@@ -1,6 +1,6 @@
 {
   "scenario": "!bash-detach-fail",
-  "seam": null,
+  "seam": "shell-spool",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

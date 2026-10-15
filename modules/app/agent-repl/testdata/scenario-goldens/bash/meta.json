@@ -1,6 +1,6 @@
 {
   "scenario": "!bash",
-  "seam": null,
+  "seam": "stream-tool-card",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

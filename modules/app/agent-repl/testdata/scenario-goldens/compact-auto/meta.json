@@ -1,6 +1,6 @@
 {
   "scenario": "!compact-auto",
-  "seam": null,
+  "seam": "compaction",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

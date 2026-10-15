@@ -1,6 +1,6 @@
 {
   "scenario": "!cold-seed",
-  "seam": null,
+  "seam": "cold-gate",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

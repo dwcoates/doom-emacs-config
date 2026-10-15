@@ -1,6 +1,6 @@
 {
   "scenario": "!keepalive",
-  "seam": null,
+  "seam": "keepalive-marker",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

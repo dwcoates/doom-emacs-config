@@ -1,6 +1,6 @@
 {
   "scenario": "!fast-on",
-  "seam": null,
+  "seam": "session-footer",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

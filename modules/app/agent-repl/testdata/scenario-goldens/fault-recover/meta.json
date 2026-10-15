@@ -1,6 +1,6 @@
 {
   "scenario": "!fault-recover",
-  "seam": null,
+  "seam": "shim-diagnostics",
   "nowMs": 1800000000000,
   "planes": [
     "stream",

@@ -1,6 +1,6 @@
 {
   "scenario": "!model-fallback",
-  "seam": null,
+  "seam": "session-footer",
   "nowMs": 1800000000000,
   "planes": [
     "stream",
