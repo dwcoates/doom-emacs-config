@@ -117,7 +117,7 @@ type harness struct {
 	// held is each test reader's oldest held row's order key, as a client
 	// holds it: the oldest row of every page served to it. It is what an
 	// older page is asked for by (GetFeedPage older_than).
-	held map[testReader]string
+	held     map[testReader]string
 	resolver *resolver
 	// catalogs is the slash-command catalog table the resolver stamps user
 	// prompts' known commands from (Deps.Commands).
