@@ -76,21 +76,8 @@ func pmNewPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 func pmNewPermissionWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
 	t.Helper()
 	ws := w.NewWorkspace(t)
-	pmOpenWorkspace(t, w, ws)
+	w.RequireOpen(t, ws)
 	return ws
-}
-
-// pmOpenWorkspace sends OpenWorkspace, which is what spawns the real shim
-// session a permission test needs before it can SubmitPrompt.
-func pmOpenWorkspace(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
-	t.Helper()
-	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace = %v, want a success", resp.Msg)
-	}
 }
 
 // pmOpenFeedWatch opens the workspace's root feed and answers both the current

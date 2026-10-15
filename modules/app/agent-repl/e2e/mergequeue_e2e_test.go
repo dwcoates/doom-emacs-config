@@ -608,9 +608,7 @@ func TestFanWideCancel(t *testing.T) {
 	// machinery needed for this scenario).
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
-	if _, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
+	w.RequireOpen(t, ws)
 
 	footer := w.WatchFooter(ws)
 	defer footer.Close()

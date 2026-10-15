@@ -341,6 +341,19 @@ func (w *World) NewRepoWorkspace(t testing.TB) (*harness.Repo, *workspacev1.Work
 	return repo, harness.Register(t, w.Daemon, repo.Dir)
 }
 
+// RequireOpen sends OpenWorkspace, which spawns the workspace's real shim,
+// and fails t unless the daemon answers a success.
+func (w *World) RequireOpen(t testing.TB, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace(%s) = error %v, want a success", ws.GetId(), err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace(%s) = %v, want a success", ws.GetId(), resp.Msg)
+	}
+}
+
 // requireServicesOutlivedTheTest fails t if the store or the sidecar exited
 // on its own before t's cleanup: one a test stopped on purpose (Store.Stop,
 // Store.StartSameDB) is the test's own doing. Every World's test asks it, an

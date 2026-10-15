@@ -430,13 +430,8 @@ func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 
 	// Act: retry the same verb — start-once's own doc comment: "something
 	// was wrong, it was fixed, the same warm shim serves the conversation."
-	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace (retry) = error %v, want success (the refusal was one-shot)", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace (retry) = %v, want success", resp.Msg)
-	}
+	// The refusal was one-shot, so the retry opens.
+	w.RequireOpen(t, ws)
 
 	// Assert: the recovered session serves a real turn end to end.
 	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
