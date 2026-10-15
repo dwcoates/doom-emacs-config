@@ -510,6 +510,72 @@ func TestSelectFeedRowBubbleSelectsAsTheRowsKind(t *testing.T) {
 	}
 }
 
+// TestSelectFeedRowSelectionViewportNamesTheGesture pins what the viewport
+// does about a newly selected row, on the push the webapp draws: a click holds
+// the feed still under the clicked bubble, whatever arm the row takes, and a
+// step from Emacs centers the row.
+func TestSelectFeedRowSelectionViewportNamesTheGesture(t *testing.T) {
+	tests := []struct {
+		name string
+		move *agentreplv1.SelectFeedRowRequest
+		want string
+	}{
+		{name: "a click on a final response holds", move: bubbleMove(&frontendv1.FeedId{Value: "final-1"}), want: "hold"},
+		{name: "a click on a rollback prompt holds", move: bubbleMove(&frontendv1.FeedId{Value: "prompt-1"}), want: "hold"},
+		{name: "a click on an interim response holds", move: bubbleMove(&frontendv1.FeedId{Value: "interim-1"}), want: "hold"},
+		{name: "a step landing on a prompt centers", move: boundaryStep(older), want: "center"},
+		{name: "a step landing on a final response centers", move: boundaryStep(newer), want: "center"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("final-1")
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.markdown = map[string]string{"interim-1": "meanwhile"}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := openRootWatch(t, h, ctx)
+
+			// Act.
+			if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.move)); err != nil {
+				t.Fatalf("SelectFeedRow: %v", err)
+			}
+
+			// Assert.
+			sel := receiveSelection(t, stream)
+			if got := selectionViewport(t, sel); got != tc.want {
+				t.Fatalf("viewport = %s, want %s (selection %v)", got, tc.want, sel)
+			}
+		})
+	}
+}
+
+// selectionViewport names the viewport arm a selected SEL carries, failing the
+// test when SEL selects nothing or carries none.
+func selectionViewport(t *testing.T, sel *frontendv1.FeedSelection) string {
+	t.Helper()
+	var viewport *frontendv1.FeedSelectionRowViewport
+	switch arm := sel.GetSelection().(type) {
+	case *frontendv1.FeedSelection_Response:
+		viewport = arm.Response.GetViewport()
+	case *frontendv1.FeedSelection_Prompt:
+		viewport = arm.Prompt.GetViewport()
+	case *frontendv1.FeedSelection_Bubble:
+		viewport = arm.Bubble.GetViewport()
+	default:
+		t.Fatalf("selection = %v, want a selected row", sel)
+	}
+	switch viewport.GetViewport().(type) {
+	case *frontendv1.FeedSelectionRowViewport_Center:
+		return "center"
+	case *frontendv1.FeedSelectionRowViewport_Hold:
+		return "hold"
+	}
+	t.Fatalf("selection = %v carries no viewport", sel)
+	return ""
+}
+
 // TestSelectFeedRowBubbleRefusesAnUnselectableRow pins the not_selectable arm:
 // the row is echoed and the standing selection is left as it was.
 func TestSelectFeedRowBubbleRefusesAnUnselectableRow(t *testing.T) {
@@ -686,11 +752,11 @@ func TestSelectFeedRowNewerPastTheNewestIsRecordedAtInfo(t *testing.T) {
 	t.Fatalf("records = %v, want the end at INFO", log.records)
 }
 
-// TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithStay pins the click
+// TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithHold pins the click
 // toggle: a click naming the selected row ends the selection, acks none and
-// pushes none{stay}, so the feed does not scroll, whichever arm the row was
-// selected as.
-func TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithStay(t *testing.T) {
+// pushes none{hold}, so the feed holds still under the clicked bubble,
+// whichever arm the row was selected as.
+func TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithHold(t *testing.T) {
 	tests := []struct {
 		name string
 		seed *agentreplv1.SelectFeedRowRequest
@@ -722,8 +788,8 @@ func TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithStay(t *testing.T) {
 			if resp.Msg.GetSuccess().GetNone() == nil {
 				t.Fatalf("outcome = %v, want none", resp.Msg.GetSuccess().GetOutcome())
 			}
-			if sel := receiveSelection(t, stream); sel.GetNone().GetStay() == nil {
-				t.Fatalf("selection = %v, want none{stay}", sel)
+			if sel := receiveSelection(t, stream); sel.GetNone().GetHold() == nil {
+				t.Fatalf("selection = %v, want none{hold}", sel)
 			}
 			if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
 				t.Fatalf("a selection is still stored after the click on the selected row")

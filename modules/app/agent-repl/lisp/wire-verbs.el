@@ -4386,20 +4386,41 @@ it.  An incomplete request errors here rather than reaching the wire."
           (agent-repl-wire-encode-select-feed-row-request-move
            (agent-repl-wire-verbs--require message "move" (plist-get request :move))))))
 
+(defun agent-repl-wire-decode-feed-selection-row-viewport (json)
+  "Decode FeedSelectionRowViewport from JSON into (:viewport (:arm ARM :value nil)).
+ARM is `:center' (a step from Emacs) or `:hold' (a click in the webapp);
+exactly one is set."
+  (let ((message "FeedSelectionRowViewport"))
+    (agent-repl-wire-verbs--check-keys message json '(center hold))
+    (list :viewport
+          (agent-repl-wire-verbs--decode-oneof
+           message "viewport" json
+           (list (list 'center :center
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionRowViewportCenter" v)))
+                 (list 'hold :hold
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionRowViewportHold" v))))))))
+
 (defun agent-repl-wire-decode-feed-selection-row (message json)
-  "Decode the selected-row MESSAGE from JSON into (:row FEEDID).
+  "Decode the selected-row MESSAGE from JSON into (:row FEEDID :viewport VP).
 MESSAGE is `FeedSelectionResponse', `FeedSelectionPrompt' or
-`FeedSelectionBubble'.  The row is REQUIRED: a selection that names no
-row is a contract breach."
-  (agent-repl-wire-verbs--check-keys message json '(row))
+`FeedSelectionBubble'.  The row and the viewport are REQUIRED: a
+selection that names no row, or does not say what the viewport does
+about it, is a contract breach.  VP is the decoded
+`FeedSelectionRowViewport'."
+  (agent-repl-wire-verbs--check-keys message json '(row viewport))
   (list :row (agent-repl-wire-verbs--decode-required-message
-              message 'row json #'agent-repl-wire-decode-feed-id)))
+              message 'row json #'agent-repl-wire-decode-feed-id)
+        :viewport (agent-repl-wire-verbs--decode-required-message
+                   message 'viewport json
+                   #'agent-repl-wire-decode-feed-selection-row-viewport)))
 
 (defun agent-repl-wire-decode-feed-selection-none (json)
   "Decode FeedSelectionNone from JSON into (:viewport (:arm ARM :value nil)).
-ARM is `:return-to-tail' or `:stay'; exactly one is set."
+ARM is `:return-to-tail', `:stay' or `:hold'; exactly one is set."
   (let ((message "FeedSelectionNone"))
-    (agent-repl-wire-verbs--check-keys message json '(returnToTail stay))
+    (agent-repl-wire-verbs--check-keys message json '(returnToTail stay hold))
     (list :viewport
           (agent-repl-wire-verbs--decode-oneof
            message "viewport" json
@@ -4408,7 +4429,10 @@ ARM is `:return-to-tail' or `:stay'; exactly one is set."
                                     "FeedSelectionNoneReturnToTail" v)))
                  (list 'stay :stay
                        (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "FeedSelectionNoneStay" v))))))))
+                                    "FeedSelectionNoneStay" v)))
+                 (list 'hold :hold
+                       (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                    "FeedSelectionNoneHold" v))))))))
 
 (defun agent-repl-wire-decode-feed-selection (json)
   "Decode frontend.v1.FeedSelection from JSON into (:arm ARM :value V).

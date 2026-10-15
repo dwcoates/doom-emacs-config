@@ -93,9 +93,10 @@ message FeedId {
 // and every other selectable bubble collapsed, so at most one is expanded; the
 // client never expands or collapses a selectable bubble on its own.
 //
-// While a row is selected the webapp draws the selection border on it,
-// centers it when the selection moves to it (clamped at the feed edges), and
-// does not follow the tail, so a newly arriving row does not pull the viewport
+// While a row is selected the webapp draws the selection border on it, moves
+// the viewport as the selected arm's `viewport` says (a step from Emacs
+// centers the row, a click holds the feed still), and does not follow the
+// tail, so a newly arriving row does not pull the viewport
 // off it. A selection that is no longer visible is ended: the webapp reports
 // a selected row that has left the viewport entirely
 // (agentrepl.v1.SelectFeedRowLeftView), and the daemon answers with `none`.
@@ -129,6 +130,9 @@ message FeedSelectionNone {
     // Leave the viewport where it is, and follow the tail again only once the
     // reader is back at the newest row.
     FeedSelectionNoneStay stay = 2;
+    // The reader clicked the selected bubble: the feed does not move while the
+    // bubble collapses (FeedSelectionNoneHold).
+    FeedSelectionNoneHold hold = 3;
   }
 }
 // Scroll back to the newest row: the user dismissed the selection.
@@ -136,6 +140,32 @@ message FeedSelectionNoneReturnToTail {}
 // Leave the viewport as the reader left it: the selection ended because the
 // selected row left the viewport.
 message FeedSelectionNoneStay {}
+// THE READER'S CLICK NEVER MOVES THE FEED. The selection ended because the
+// reader clicked the selected bubble: the clicked bubble holds still on screen
+// while it collapses, nothing is centered, and the tail is not followed again
+// until the reader's next input. Unlike `stay`, whose row has left the
+// viewport, the row this ends is the one under the reader's pointer.
+message FeedSelectionNoneHold {}
+
+// What the viewport does when a row BECOMES selected. Required on every
+// selected arm. A push restating the row already selected moves nothing,
+// whatever this says.
+message FeedSelectionRowViewport {
+  oneof viewport {
+    // The reader stepped the selection to the row from Emacs (`C-p` / `C-n`,
+    // `C-S-p` / `C-S-n`): center the row, clamped at the feed edges.
+    FeedSelectionRowViewportCenter center = 1;
+    // The reader clicked the row's bubble: THE READER'S CLICK NEVER MOVES THE
+    // FEED. The clicked bubble holds still on screen while it expands (and the
+    // previously selected one collapses), nothing is centered, and the tail is
+    // not followed again until the reader's next input.
+    FeedSelectionRowViewportHold hold = 2;
+  }
+}
+// Center the newly selected row: the selection was stepped from Emacs.
+message FeedSelectionRowViewportCenter {}
+// Hold the feed still under the clicked row: the selection was a click.
+message FeedSelectionRowViewportHold {}
 
 // A selected final response: the next prompt sent is a reply to it, and the
 // daemon prepends a copy of it to that prompt. `M-s-j`/`M-s-k` in the
@@ -143,6 +173,8 @@ message FeedSelectionNoneStay {}
 message FeedSelectionResponse {
   // The selected final-response row, on the root feed.
   FeedId row = 1;
+  // What the viewport does now that the row is selected. Required.
+  FeedSelectionRowViewport viewport = 2;
 }
 
 // A selected prompt a rollback can reach: the rollback keys roll the
@@ -153,6 +185,8 @@ message FeedSelectionResponse {
 message FeedSelectionPrompt {
   // The selected prompt row, on the root feed.
   FeedId row = 1;
+  // What the viewport does now that the row is selected. Required.
+  FeedSelectionRowViewport viewport = 2;
 }
 
 // A selected bubble that is neither a final response nor a prompt a rollback
@@ -161,6 +195,8 @@ message FeedSelectionPrompt {
 message FeedSelectionBubble {
   // The selected row, on the root feed.
   FeedId row = 1;
+  // What the viewport does now that the row is selected. Required.
+  FeedSelectionRowViewport viewport = 2;
 }
 
 // THE FEED TEXT SCALE (zoom). A SINGLE daemon-global multiplier applied to the
