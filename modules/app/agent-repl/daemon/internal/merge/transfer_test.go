@@ -371,3 +371,35 @@ func TestASuccessorAdoptingBehindAMergeRunningInTheIncumbentAdmitsNothingQuietly
 		}
 	}
 }
+
+func TestTheFirstSuspensionOfARunStands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := &run{o: h.o}
+	h.o.mu.Lock()
+	r.suspendLocked(suspendPause)
+
+	// Act: the daemon's exit arrives under the paused merge.
+	r.suspendLocked(suspendExit)
+	h.o.mu.Unlock()
+
+	// Assert.
+	why, suspended := r.suspendedFor()
+	if !suspended || why.by != suspendPause.by {
+		t.Fatalf("suspendedFor = %q, %v; want the pause that took the run", why.by, suspended)
+	}
+}
+
+func TestARunNoSuspensionTookIsNotSuspended(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := &run{o: h.o}
+
+	// Act.
+	_, suspended := r.suspendedFor()
+
+	// Assert.
+	if suspended {
+		t.Fatal("suspendedFor reports a suspension no one made")
+	}
+}

@@ -354,7 +354,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		return Result{}, rollout.ErrJoining
 	}
 	if waiting, rolling := d.deps.Rollout.RollingOut(); rolling {
-		d.log.Info(opDeploy, "refused a deploy while a handover is in flight", merge(fields, dlog.Context{"waiting_on": wsNames(waiting)}))
+		d.log.Info(opDeploy, "refused a deploy while a handover is in flight", merge(fields, dlog.Context{"waiting_on": ids.Strings(waiting)}))
 		return Result{}, &rollout.ErrAlreadyRollingOut{WaitingOn: waiting}
 	}
 
@@ -1035,14 +1035,6 @@ func summarize(r Result) map[string]string {
 	out := make(map[string]string, len(r.Outcomes))
 	for _, o := range r.Outcomes {
 		out[string(o.Component)] = string(o.Kind)
-	}
-	return out
-}
-
-func wsNames(workspaces []ids.WorkspaceID) []string {
-	out := make([]string, 0, len(workspaces))
-	for _, ws := range workspaces {
-		out = append(out, string(ws))
 	}
 	return out
 }

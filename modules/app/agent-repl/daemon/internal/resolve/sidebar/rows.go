@@ -127,6 +127,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowAsyncMerging` states it:
 	// set while the workspace's own branch merges async, beside any arm.
 	out.AsyncMerging = asyncMergingMarker(r.state.asyncMerging(rec.ID), armName, rowLog)
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowMergePaused` states it:
+	// set while a merge indicator the row draws is on a paused queue.
+	out.MergePaused = mergePausedMarker(r.state, rec.ID, armName, out.AsyncMerging != nil, rowLog)
 	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
 	// most-recently-selected first by it (the landing after a close, the
 	// editor's jump to the most recent workspace), and it survives a restart

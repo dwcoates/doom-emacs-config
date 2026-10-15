@@ -45,3 +45,15 @@ func Optional[ID ~string](id *ID) string {
 	}
 	return string(*id)
 }
+
+// Strings spells typed ids -- or any string-kinded values -- as plain
+// strings, in order, for a record's context or a wire field. A nil or empty
+// IN answers an empty, non-nil slice, so a record states "none" as [] rather
+// than null.
+func Strings[ID ~string](in []ID) []string {
+	out := make([]string, 0, len(in))
+	for _, id := range in {
+		out = append(out, string(id))
+	}
+	return out
+}

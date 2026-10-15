@@ -428,23 +428,19 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 		})
 }
 
-// SetAsyncMerges replaces REPO's set of workspaces whose own branch merges
-// async.
-func (r *resolver) SetAsyncMerges(repo wsm.RepoKey, requesters []ids.WorkspaceID) {
-	names := make([]string, 0, len(requesters))
-	set := make(map[ids.WorkspaceID]struct{}, len(requesters))
-	for _, ws := range requesters {
-		set[ws] = struct{}{}
-		names = append(names, string(ws))
-	}
-	r.mutate("daemon.sidebar.set_async_merges", "the roster took a repository's async merges",
-		dlog.Context{"repo": string(repo), "requesters": names}, r.log.Global(),
+// SetMergeQueue replaces REPO's merge queue as the roster draws it.
+func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
+	r.mutate("daemon.sidebar.set_merge_queue", "the roster took a repository's merge queue",
+		dlog.Context{"repo": string(repo), "paused": queue.Paused,
+			"workspaces": ids.Strings(queue.Workspaces), "async_requesters": ids.Strings(queue.AsyncRequesters)},
+		r.log.Global(),
 		func() {
-			if len(set) == 0 {
-				delete(r.state.asyncMerges, repo)
+			q := newMergeQueue(queue)
+			if q.empty() {
+				delete(r.state.queues, repo)
 				return
 			}
-			r.state.asyncMerges[repo] = set
+			r.state.queues[repo] = q
 		})
 }
 

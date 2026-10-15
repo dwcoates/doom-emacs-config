@@ -157,13 +157,15 @@ type run struct {
 	// displaced is the user turn this merge displaced, captured at admission
 	// with the text it carried.
 	displaced *Displaced
-	// suspending reports that the daemon's exit took this run away before its
-	// terminal: from then on the run publishes nothing, records nothing,
-	// starts no git, and leaves its lease, queue entry and progress record to
-	// the next boot, which resumes it where the record says it stood. Set once,
-	// under the orchestrator's mutex: by the drain, or by a registration or a
-	// terminal that arrives after the drain began.
-	suspending bool
+	// suspending reports that a SUSPENSION took this run away before its
+	// terminal -- the daemon's exit, its workspace's transfer or restart, or
+	// its queue's pause: from then on the run publishes nothing, records
+	// nothing, starts no git, and leaves its lease, queue entry and progress
+	// record to whoever resumes it where the record says it stood.
+	// suspendedBy names that suspension. Both are set once, together, under
+	// the orchestrator's mutex, and only through suspendLocked.
+	suspending  bool
+	suspendedBy suspension
 	// executing reports that the run left its queue and began its steps
 	// (execute). Until then nothing a restart could lose is in flight: its
 	// wait for the workspace to fall free is simply let go. Guarded by the

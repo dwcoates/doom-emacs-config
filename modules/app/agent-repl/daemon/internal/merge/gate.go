@@ -211,24 +211,34 @@ func (r *run) admitGate(ctx context.Context, adm *gateAdmission) (*cpugov.Permit
 // unrun settles a gate that ended with ERR before its verdict -- cut while it
 // waited for its turn, for the governor, or while it ran -- and answers ERR. A
 // gate whose base moved was cut on purpose and runs again on the new base; a
-// gate the daemon's exit, a restart or a transfer stopped runs again from its
-// start on resume; any other could not run.
+// gate a suspension stopped (the daemon's exit, a restart, a transfer or the
+// queue's pause) runs again from its start when the merge resumes; any other
+// could not run.
 func (g *gateRun) unrun(ctx context.Context, err error) error {
 	r, round := g.r, g.round
 	if errors.Is(err, errPromoted) {
-		g.cut(ctx, "the merge's promotion to its queue's head")
+		g.cut(ctx, "the merge's promotion to its queue's head", "it runs again from its start at the head")
 		const promoted = "the merge reached its queue's head; its tests run there"
 		r.endRun(ctx, round, promoted, nil, g.link(), "restarted")
 		return err
 	}
 	if errors.Is(context.Cause(ctx), errBaseMoved) {
-		g.cut(ctx, "the merge ahead moved")
+		g.cut(ctx, "the merge ahead moved", "it runs again from its start on the new tip")
 		const moved = "the merge ahead moved; the tests run again on its new tip"
 		r.endRun(ctx, round, moved, nil, g.link(), "restarted")
 		return err
 	}
-	if ctx.Err() != nil || r.o.isDraining() || errors.Is(err, errMergeStopping) {
-		g.cut(ctx, "the daemon's exit, a restart or a transfer")
+	// THE CUT NAMES WHAT CUT IT. A suspension names itself (suspendedFor),
+	// so a pause is never told as an exit; a stop the daemon's exit began
+	// before the run was marked is the exit's.
+	if why, suspended := r.suspendedFor(); suspended {
+		g.cut(ctx, why.by, why.gateRerun)
+	} else if r.o.isDraining() || errors.Is(err, errMergeStopping) {
+		g.cut(ctx, suspendExit.by, suspendExit.gateRerun)
+	} else if cause, abandoned := abandonCauseOf(ctx); abandoned {
+		g.cut(ctx, "the merge's abandonment ("+string(cause)+")", "the merge ends, so it does not run again")
+	} else if ctx.Err() != nil {
+		g.cut(ctx, "its run's cancellation ("+context.Cause(ctx).Error()+")", "the merge ends, so it does not run again")
 	}
 	const unrun = "the test gate could not run"
 	r.endRun(ctx, round, unrun, nil, g.link(), "failed")
@@ -418,9 +428,10 @@ const testrunPrefix = "[agent-repl-tests]"
 // since is the seconds since the gate began.
 func (g *gateRun) since() float64 { return g.r.o.deps.Now().Sub(g.begun).Seconds() }
 
-// cut records a gate cut before its verdict, which runs again from its start.
-func (g *gateRun) cut(ctx context.Context, by string) {
-	g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test gate was cut before its verdict; it runs again from its start", dlog.Context{
+// cut records a gate cut BY something before its verdict, and THEN, what
+// becomes of the gate.
+func (g *gateRun) cut(ctx context.Context, by, then string) {
+	g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test gate was cut before its verdict by "+by+"; "+then, dlog.Context{
 		"workspace": string(g.r.ws), "round": g.round.n, "by": by, "since_gate_start_seconds": g.since()})
 }
 

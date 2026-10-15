@@ -39,6 +39,7 @@ import type {
   RosterRowOneShot,
   RosterRowOpening,
   RosterRowAsyncMerging,
+  RosterRowMergePaused,
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenHidden,
@@ -185,6 +186,7 @@ export function drawRosterRow(
   const markers: RowMarkers = {
     oneShot: u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`),
     asyncMerging: u.asyncMerging !== undefined && drawRosterRowAsyncMerging(u.asyncMerging, `${path}.asyncMerging`),
+    mergePaused: u.mergePaused !== undefined && drawRosterRowMergePaused(u.mergePaused, `${path}.mergePaused`),
   };
   const mark = rosterRowMark(status.case, markers);
   const ws = document.createElement("div");
@@ -383,6 +385,17 @@ export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): boolean
  * decides which marks it inks.
  */
 export function drawRosterRowAsyncMerging(u: RosterRowAsyncMerging, path: string): boolean {
+  void u;
+  void path;
+  return true;
+}
+
+/**
+ * The MERGE-PAUSED marker: the merge queue holding the row's merge is paused.
+ * EMPTY -- presence is the fact -- so this answers `true` for a marker that is
+ * there at all; what it changes is `tones.rosterRowMark`'s.
+ */
+export function drawRosterRowMergePaused(u: RosterRowMergePaused, path: string): boolean {
   void u;
   void path;
   return true;
@@ -617,6 +630,7 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
       arm,
       one_shot: markers.oneShot,
       async_merging: markers.asyncMerging,
+      merge_paused: markers.mergePaused,
       glyph: mark.glyph,
       tone: mark.toneClass,
       ink: mark.ink ?? "",

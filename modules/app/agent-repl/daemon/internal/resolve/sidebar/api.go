@@ -77,12 +77,12 @@ type Resolver interface {
 	// SetMerge installs one workspace's merge facts, which drive its merge
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)
-	// SetAsyncMerges installs, WHOLE, the workspaces whose own branch has an
-	// async merge on REPO's merge queue: from the moment the async request is
-	// recorded until its merge leaves the queue. Each row carries the
-	// `async_merging` marker beside its own status arm. The merge
-	// orchestrator is the one caller, on every change of the queue.
-	SetAsyncMerges(repo wsm.RepoKey, requesters []ids.WorkspaceID)
+	// SetMergeQueue installs, WHOLE, REPO's merge queue as the roster draws
+	// it: whether it is paused, the workspaces with a row on it, and the
+	// workspaces whose own branch has an async merge on it. The merge
+	// orchestrator is the one caller, on every change of the queue's rows and
+	// of its pause.
+	SetMergeQueue(repo wsm.RepoKey, queue MergeQueue)
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)
@@ -174,6 +174,24 @@ type Resolver interface {
 	FooterStatusChanged(ws ids.WorkspaceID)
 	// Topic is the one editor-global roster publication.
 	Topic() *publish.Topic[*frontendv1.WorkspaceRoster]
+}
+
+// MergeQueue is one repository's merge queue as the roster draws it. It is
+// stated whole on every change, so nothing a queue no longer says can linger
+// in the roster.
+type MergeQueue struct {
+	// Paused reports whether the queue is paused. A row whose merge is on a
+	// paused queue carries the `merge_paused` marker beside its merge
+	// indicator (frontend.v1.RosterRowMergePaused).
+	Paused bool
+	// Workspaces are the workspaces with a row on the queue, in queue order:
+	// the queue a `merging` or `merge_queued` row's own merge is on.
+	Workspaces []ids.WorkspaceID
+	// AsyncRequesters are the workspaces whose own branch has an async merge
+	// on the queue, from the moment the async request is recorded until its
+	// merge leaves the queue. Each row carries the `async_merging` marker
+	// beside its own status arm.
+	AsyncRequesters []ids.WorkspaceID
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip

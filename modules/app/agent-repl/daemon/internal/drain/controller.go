@@ -569,15 +569,6 @@ func merge(base, extra dlog.Context) dlog.Context {
 	return out
 }
 
-// workspaceIDs is the id list of a workspace slice, for a record's context.
-func workspaceIDs(in []ids.WorkspaceID) []string {
-	out := make([]string, 0, len(in))
-	for _, ws := range in {
-		out = append(out, string(ws))
-	}
-	return out
-}
-
 // Republish re-arms the schedule a previous process left in force: the row is
 // durable, but the daemon topic replays only what THIS process announced, so a
 // reconnecting client would otherwise never learn a shutdown is still standing.

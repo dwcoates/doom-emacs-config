@@ -25,7 +25,7 @@ const MERGE_GLYPHS = renderColors.merge_glyphs as Record<string, string>;
 const GATE_GLYPHS = renderColors.gate_glyphs as Record<string, string>;
 const GLYPH_INKS = renderColors.glyph_inks as Record<string, string>;
 /** A one-shot row carrying no other marker. */
-const ONE_SHOT: RowMarkers = { oneShot: true, asyncMerging: false };
+const ONE_SHOT: RowMarkers = { oneShot: true, asyncMerging: false, mergePaused: false };
 /** The arms a one-shot's glyph replaces the mark on, in the generated spelling. */
 const ONE_SHOT_ARMS: string[] = ROSTER_STATUS_CASES.filter((arm) =>
   renderColors.one_shot_glyph_arms.includes(protoArmName(arm)),
@@ -201,7 +201,7 @@ describe("a row's mark with its one-shot mark", () => {
 // the plain dot gives way to the shared vocabulary's async-merge glyph, ink
 // and motion, on the arm's own tone; every other mark outranks it.
 describe("a row's mark with its async-merging marker", () => {
-  const ASYNC_MERGING: RowMarkers = { oneShot: false, asyncMerging: true };
+  const ASYNC_MERGING: RowMarkers = { oneShot: false, asyncMerging: true, mergePaused: false };
   const PLAIN_DOT_ARMS = ROSTER_STATUS_CASES.filter(
     (arm) => rosterArmMark(arm).glyph === "dot" && rosterArmMark(arm).ink === undefined,
   );
@@ -230,7 +230,7 @@ describe("a row's mark with its async-merging marker", () => {
   });
 
   it.each(ONE_SHOT_ARMS)("keeps a working one-shot's target over the async merge on %s", (arm) => {
-    expect(rosterRowMark(arm, { oneShot: true, asyncMerging: true })).toEqual(rosterRowMark(arm, ONE_SHOT));
+    expect(rosterRowMark(arm, { oneShot: true, asyncMerging: true, mergePaused: false })).toEqual(rosterRowMark(arm, ONE_SHOT));
   });
 
   it("covers the idle and working dots among the plain ones", () => {
@@ -239,5 +239,48 @@ describe("a row's mark with its async-merging marker", () => {
 
   it("refuses an arm the rail cannot draw even under an async merge", () => {
     expect(() => rosterRowMark("notAnArm", ASYNC_MERGING)).toThrow(MalformedView);
+  });
+});
+
+// A PAUSED QUEUE (owner ruling, 2026-10-14): every merge indicator the row
+// draws takes the shared vocabulary's paused ink, the merge's breath stops,
+// and the arm's tone stands.
+describe("a row's mark with its merge-paused marker", () => {
+  const PAUSED: RowMarkers = { oneShot: false, asyncMerging: false, mergePaused: true };
+  const PAUSED_ASYNC: RowMarkers = { oneShot: false, asyncMerging: true, mergePaused: true };
+
+  it.each(["merging", "mergeQueued"] as const)("inks the paused %s glyph grey and holds it still on its own tone", (arm) => {
+    expect(rosterRowMark(arm, PAUSED)).toEqual({ ...rosterArmMark(arm), ink: "grey", motion: "still" });
+  });
+
+  it("greys the async-merge mark over a plain idle dot and holds it still", () => {
+    expect(rosterRowMark("ready", PAUSED_ASYNC)).toEqual({
+      ...rosterArmMark("ready"),
+      glyph: "merge",
+      image: GLYPH_IMAGES.merge,
+      ink: "grey",
+      motion: "still",
+    });
+  });
+
+  it("keeps a turn's own breath under a paused async merge", () => {
+    expect(rosterRowMark("thinking", PAUSED_ASYNC).motion).toBe("breathes");
+  });
+
+  it("keeps a gate's own mark under a paused async merge", () => {
+    expect(rosterRowMark("permission", PAUSED_ASYNC)).toEqual(rosterArmMark("permission"));
+  });
+
+  it("reads its ink and motion from the shared vocabulary", () => {
+    const mark = rosterRowMark("merging", PAUSED);
+    expect([mark.ink, mark.motion]).toEqual([renderColors.paused_merge_mark.ink, renderColors.paused_merge_mark.motion]);
+  });
+
+  it("refuses the marker on a row that draws no merge", () => {
+    expect(() => rosterRowMark("ready", PAUSED)).toThrow(MalformedView);
+  });
+
+  it("refuses the marker on a failed merge", () => {
+    expect(() => rosterRowMark("mergeFailed", PAUSED)).toThrow(MalformedView);
   });
 });

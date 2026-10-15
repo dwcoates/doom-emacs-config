@@ -39,7 +39,25 @@ fi
 # The preflight's output is the actionable part (start Docker, build the
 # image), so it is reproduced VERBATIM rather than paraphrased — the same
 # rule the harness itself follows for its Go-side skip.
-if ! preflight_out="$("$SANDBOX" preflight 2>&1)"; then
+#
+# THIS CHECKOUT'S IMAGE IS BUILT, NEVER DECLINED FOR. Each image is tagged by
+# the sandbox sources it was built from (sandbox/bin/sandbox-image.sh), so a
+# checkout whose sandbox sources are new has no image yet. That is not an
+# unusable sandbox: the image is built here (a no-op once it exists, and
+# exclusive under the build's host-wide lock), and a build that fails FAILS
+# the suite rather than skipping it, so a sandbox change can never turn the
+# Emacs layer into a quiet skip.
+readonly PREFLIGHT_IMAGE_NOT_BUILT=12
+preflight_status=0
+preflight_out="$("$SANDBOX" preflight 2>&1)" || preflight_status=$?
+if [ "$preflight_status" -eq "$PREFLIGHT_IMAGE_NOT_BUILT" ]; then
+    printf '%s\n' "$preflight_out"
+    printf "[e2e-emacs] building this checkout's sandbox image first\n"
+    "$SANDBOX" build
+    preflight_status=0
+    preflight_out="$("$SANDBOX" preflight 2>&1)" || preflight_status=$?
+fi
+if [ "$preflight_status" -ne 0 ]; then
     printf '[e2e-emacs] SKIPPED: the e2e sandbox is not usable, and this suite never runs unsandboxed.\n' >&2
     printf '%s\n' "$preflight_out" >&2
     exit "$EXIT_DECLINED"

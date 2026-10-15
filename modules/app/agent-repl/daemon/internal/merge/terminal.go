@@ -703,7 +703,7 @@ func (o *orchestrator) Drain(ctx context.Context) {
 		if _, terminal := o.terminals[ws]; terminal {
 			continue
 		}
-		r.suspending = true
+		r.suspendLocked(suspendExit)
 		suspended = append(suspended, r)
 	}
 	o.mu.Unlock()

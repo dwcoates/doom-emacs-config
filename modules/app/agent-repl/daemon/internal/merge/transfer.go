@@ -68,12 +68,19 @@ func (o *orchestrator) ResumeAfterRestart(ctx context.Context, ws ids.WorkspaceI
 	return o.AdoptWorkspace(ctx, ws)
 }
 
-// suspension names why a merge is brought to a stopping point.
+// suspension names why a merge is brought to a stopping point, and every
+// sentence a record says about a run it took.
 type suspension struct {
 	op    string
 	cause error
 	// moved is said once a suspended run let go.
 	moved string
+	// by names the suspension in a record, as what stopped the merge.
+	by string
+	// resumes says what becomes of the suspended merge from here.
+	resumes string
+	// gateRerun says what becomes of a test gate the suspension cut.
+	gateRerun string
 	// stepBoundary asks a run that began its steps to finish the step in
 	// flight and let go at the next boundary, rather than at once.
 	stepBoundary bool
@@ -81,12 +88,48 @@ type suspension struct {
 
 var (
 	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver,
-		moved: "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded"}
+		moved:     "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded",
+		by:        "its workspace's transfer",
+		resumes:   "the successor resumes it at the step it recorded",
+		gateRerun: "it runs again from its start when the successor resumes the merge"}
 	suspendPause = suspension{op: "daemon.merge.pause", cause: errPaused,
-		moved: "a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed"}
+		moved:     "a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed",
+		by:        "its queue's pause",
+		resumes:   "it stays suspended at the step it recorded until the queue is resumed",
+		gateRerun: "it runs again from its start once the queue is resumed"}
 	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
-		moved: "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished"}
+		moved:     "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished",
+		by:        "its workspace's restart",
+		resumes:   "it resumes at the step it recorded once the restart finished",
+		gateRerun: "it runs again from its start once the restart finished"}
+	// suspendExit is the daemon's exit (Drain). Its records are the drain's
+	// own, so it is never handed to suspendFor and says nothing on moving.
+	suspendExit = suspension{op: "daemon.merge.drain", cause: errDaemonExiting,
+		by:        "the daemon's exit",
+		resumes:   "the next boot resumes it at the step it recorded",
+		gateRerun: "it runs again from its start when the next boot resumes the merge"}
 )
+
+// suspendLocked marks R suspending for WHY. It is the ONE way a run starts
+// suspending, so a suspended run always names the suspension that took it.
+// The first suspension stands: a run already suspending was cut by it, and a
+// later one (the daemon's exit under a paused merge) takes nothing further.
+// Called with the orchestrator's mutex held.
+func (r *run) suspendLocked(why suspension) {
+	if r.suspending {
+		return
+	}
+	r.suspending = true
+	r.suspendedBy = why
+}
+
+// suspendedFor answers the suspension that took R, and false while R is not
+// suspending.
+func (r *run) suspendedFor() (suspension, bool) {
+	r.o.mu.Lock()
+	defer r.o.mu.Unlock()
+	return r.suspendedBy, r.suspending
+}
 
 // errPaused is the cause a pause cuts a running merge with.
 var errPaused = errors.New("merge: the queue was paused; the merge is suspended until the queue is resumed")
@@ -154,7 +197,7 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		atBoundary = r.executing && !r.idling
 	}
 	if running && !terminal && !atBoundary {
-		r.suspending = true
+		r.suspendLocked(why)
 	}
 	o.mu.Unlock()
 	log := o.deps.Log.Global()

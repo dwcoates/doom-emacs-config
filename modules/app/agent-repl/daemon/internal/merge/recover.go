@@ -343,6 +343,16 @@ func (o *orchestrator) loadProgress(ctx context.Context, ws ids.WorkspaceID, lea
 func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc) error {
 	const op = "daemon.merge.recover"
 	ws := lease.Workspace
+	// A PAUSED QUEUE RESUMES NOTHING (pumpOnce), so the record below says the
+	// merge stays suspended rather than that it resumes: the pause's own
+	// take-back (suspendForPause) and a boot under a pause both land here. It
+	// is read before anything is taken, so a read that fails takes nothing.
+	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read whether the queue of a merge taken back is paused", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "error": err.Error()})
+		return fmt.Errorf("merge: read whether the queue of %q is paused: %w", ws, err)
+	}
 	if _, err := o.deps.DB.AdoptMergeLease(ctx, ws, lease.ID); err != nil {
 		o.deps.Log.Global().Error(op, "the merge's lease could not be adopted for its resume", dlog.Context{
 			"workspace": string(ws), "lease": string(lease.ID), "error": err.Error()})
@@ -367,9 +377,13 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
-		"round": doc.Active.N, "turn": doc.Turn}
-	o.log(ctx, ws).Info(op, "a merge a restart interrupted resumes at the step it recorded", fields)
-	o.deps.Log.Global().Info(op, "a merge a restart interrupted resumes at the step it recorded", fields)
+		"round": doc.Active.N, "turn": doc.Turn, "paused": paused}
+	message := "a merge a restart interrupted resumes at the step it recorded"
+	if paused {
+		message = "a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed"
+	}
+	o.log(ctx, ws).Info(op, message, fields)
+	o.deps.Log.Global().Info(op, message, fields)
 	return nil
 }
 

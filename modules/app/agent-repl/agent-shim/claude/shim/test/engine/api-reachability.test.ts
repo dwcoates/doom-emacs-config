@@ -27,10 +27,22 @@ import {
 import { NETWORK_RESUME_PROBE_INTERVAL_MS } from "../../src/engine/network-resume.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 
-const servers: http.Server[] = [];
+/** Each loopback server, with every raw connection it ever accepted. */
+const servers: Array<{ server: http.Server; connections: Set<import("node:net").Socket> }> = [];
 
+// THE TEARDOWN DESTROYS EVERY CONNECTION, then closes. `close()` waits for
+// every open connection, and a CONNECT tunnel is detached from the server's
+// own bookkeeping, so a tunnel a test held open -- including one whose request
+// arrived only after the test had finished -- would keep close() from ever
+// resolving. Tracking the raw sockets makes the teardown independent of when
+// any request arrives.
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+  await Promise.all(
+    servers.splice(0).map(({ server, connections }) => {
+      for (const socket of connections) socket.destroy();
+      return new Promise((resolve) => server.close(resolve));
+    }),
+  );
 });
 
 /** A loopback server; answers with the handler, or leaves CONNECT to `onConnect`. */
@@ -40,7 +52,12 @@ async function loopback(
 ): Promise<number> {
   const server = http.createServer(handler);
   if (onConnect !== undefined) server.on("connect", onConnect);
-  servers.push(server);
+  const connections = new Set<import("node:net").Socket>();
+  server.on("connection", (socket) => {
+    connections.add(socket);
+    socket.on("close", () => connections.delete(socket));
+  });
+  servers.push({ server, connections });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return (server.address() as AddressInfo).port;
 }
@@ -349,7 +366,7 @@ describe("NODE_TRANSPORT, against a loopback server", () => {
   it("HEAD rejects when nothing listens", async () => {
     // Arrange: take a port, then close it.
     const port = await loopback((_request, response) => response.end());
-    await new Promise((resolve) => servers.pop()?.close(resolve));
+    await new Promise((resolve) => servers.pop()?.server.close(resolve));
 
     // Act / Assert
     await expect(NODE_TRANSPORT.head(new URL(`http://127.0.0.1:${String(port)}/`), 1_000)).rejects.toThrow();

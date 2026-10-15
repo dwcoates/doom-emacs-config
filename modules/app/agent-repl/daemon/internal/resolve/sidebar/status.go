@@ -6,6 +6,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/wsm"
@@ -265,6 +266,22 @@ func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *fronten
 		"the workspace's own branch merges async, so the row carries the async_merging marker beside its status",
 		dlog.Context{"status": arm})
 	return &frontendv1.RosterRowAsyncMerging{}
+}
+
+// mergePausedMarker answers the row's `merge_paused` marker: present exactly
+// while a merge indicator the row draws -- its own `merging` or
+// `merge_queued` arm, or its async_merging marker (ASYNC) -- is on a paused
+// repository queue (owner ruling, 2026-10-14). The arm and its color stand;
+// the marker changes only how the merge indicator is drawn.
+func mergePausedMarker(state *rosterState, ws ids.WorkspaceID, arm string, async bool, log dlog.Logger) *frontendv1.RosterRowMergePaused {
+	repo, paused := state.pausedMergeQueue(ws, arm, async)
+	if !paused {
+		return nil
+	}
+	log.Debug("daemon.sidebar.merge_paused_marker",
+		"the merge the row draws is on a paused queue, so the row carries the merge_paused marker beside its merge indicator",
+		dlog.Context{"status": arm, "async_merging": async, "repo": string(repo)})
+	return &frontendv1.RosterRowMergePaused{}
 }
 
 // setStatus installs the named arm on the row. It is the ONE place a name

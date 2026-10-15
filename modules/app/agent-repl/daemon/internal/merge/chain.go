@@ -234,7 +234,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		delete(o.resumes, r.ws)
 	}
 	if o.draining {
-		r.suspending = true
+		r.suspendLocked(suspendExit)
 		r.git.stop()
 	}
 	o.signalChainLocked(repo)

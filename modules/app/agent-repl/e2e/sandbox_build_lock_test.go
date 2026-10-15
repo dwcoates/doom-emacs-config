@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,7 +72,9 @@ case "${1:-}" in
       cat "` + f.labelPth + `" 2>/dev/null || true
       exit 0
     fi
-    # A plain 'image inspect IMAGE' is the existence probe: the tag exists.
+    # A plain 'image inspect IMAGE' is the existence probe: the tag exists
+    # unless the test said it does not.
+    [[ -e "` + f.dir + `/missing" ]] && exit 1
     exit 0 ;;
   build) exit 0 ;;
   run) exit 0 ;;
@@ -85,6 +88,14 @@ esac
 		t.Fatalf("link the fake git: %v", err)
 	}
 	return f
+}
+
+// imageMissing makes every existence probe answer that no image is tagged.
+func (f *fakeDocker) imageMissing(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.dir, "missing"), nil, 0o644); err != nil {
+		t.Fatalf("write missing marker: %v", err)
+	}
 }
 
 func (f *fakeDocker) setLabel(t *testing.T, stamp string) {
@@ -152,21 +163,31 @@ func sandboxScript(t *testing.T) string {
 	return p
 }
 
-// currentSandboxStamp asks the script itself, so the test never re-derives the
-// stamp rule and cannot drift from it.
+// currentSandboxStamp asks the scripts' own image library, so the test never
+// re-derives the stamp rule and cannot drift from it.
 func currentSandboxStamp(t *testing.T, f *fakeDocker) string {
 	t.Helper()
-	script := sandboxScript(t)
-	// The script's own stamp section is evaluated on its own -- sourcing the
-	// whole file would run its dispatch -- so the rule under test is the
-	// script's, never a copy of it kept here.
-	cmd := exec.Command("bash", "-c",
-		fmt.Sprintf(`set -euo pipefail; eval "$(sed -n '/^# --- the source stamp/,/^do_build() {$/p' %q | sed '$d')"; here=%q; sandbox_dir=$(cd -- "$here/.." && pwd); repo_root=$(cd -- "$sandbox_dir/../../../../.." && pwd); MODULE_REL=modules/app/agent-repl; IMAGE=x; log() { :; }; sandbox_stamp`,
-			script, filepath.Dir(script)))
-	cmd.Env = append(os.Environ(), "PATH="+f.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return sandboxLib(t, f, "sandbox_stamp")
+}
+
+// sandboxLib sources sandbox/bin/sandbox-image.sh -- the one place a
+// checkout's sandbox stamp and image name are decided, shared by
+// e2e-sandbox.sh and preflight.sh -- and runs CALL against it, with the fake
+// git on PATH and EXTRA added to the environment.
+func sandboxLib(t *testing.T, f *fakeDocker, call string, extra ...string) string {
+	t.Helper()
+	lib := filepath.Join(filepath.Dir(sandboxScript(t)), "sandbox-image.sh")
+	cmd := exec.Command("bash", "-c", fmt.Sprintf(`set -euo pipefail; . %q; %s`, lib, call))
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "AGENT_REPL_SANDBOX_IMAGE=") {
+			env = append(env, kv)
+		}
+	}
+	cmd.Env = append(append(env, "PATH="+f.bin+string(os.PathListSeparator)+os.Getenv("PATH")), extra...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("sandbox_stamp: %v\n%s", err, out)
+		t.Fatalf("%s: %v\n%s", call, err, out)
 	}
 	return strings.TrimSpace(string(out))
 }
@@ -561,5 +582,195 @@ func TestE2EEmacsScriptHandsItsSlotWidthToTheSandbox(t *testing.T) {
 				t.Fatalf("test-e2e-emacs.sh = %v:\n%s\nwant a line %q", err, out, tt.want)
 			}
 		})
+	}
+}
+
+// TestSandboxImageIsTaggedByTheSandboxStamp: every checkout's sandbox image is
+// its own, named by the sandbox sources it is built from, so no build can
+// evict another checkout's image.
+func TestSandboxImageIsTaggedByTheSandboxStamp(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newFakeDocker(t)
+	stamp := currentSandboxStamp(t, f)
+
+	// Act.
+	image := sandboxLib(t, f, "sandbox_image")
+
+	// Assert.
+	if want := "agent-repl-e2e-sandbox:" + stamp; image != want {
+		t.Fatalf("sandbox_image = %q, want %q", image, want)
+	}
+}
+
+// TestSandboxImageHonorsAnExplicitImage: AGENT_REPL_SANDBOX_IMAGE still names
+// an image deliberately, over the stamp's.
+func TestSandboxImageHonorsAnExplicitImage(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newFakeDocker(t)
+
+	// Act.
+	image := sandboxLib(t, f, "sandbox_image", "AGENT_REPL_SANDBOX_IMAGE=elsewhere:pinned")
+
+	// Assert.
+	if image != "elsewhere:pinned" {
+		t.Fatalf("sandbox_image = %q, want the explicit elsewhere:pinned", image)
+	}
+}
+
+// TestSandboxBuildTagsTheStampImage: a build tags the image the checkout's
+// stamp names, never a shared tag another checkout also uses.
+func TestSandboxBuildTagsTheStampImage(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newFakeDocker(t)
+	want := "-t agent-repl-e2e-sandbox:" + currentSandboxStamp(t, f) + " "
+	lock := filepath.Join(t.TempDir(), "build.lock")
+
+	// Act.
+	cmd := exec.Command("bash", sandboxScript(t), "build")
+	cmd.Env = sandboxEnv(f, lock)
+	out, err := cmd.CombinedOutput()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("build exited %v\n%s", err, out)
+	}
+	for _, c := range f.calls(t) {
+		if strings.HasPrefix(c, "build ") && strings.Contains(c, want) {
+			return
+		}
+	}
+	t.Fatalf("no build tagged %q; calls:\n%s", want, strings.Join(f.calls(t), "\n"))
+}
+
+// TestSandboxPreflightNamesTheStampImageWhenItIsNotBuilt: the preflight looks
+// for this checkout's own image, and says exactly which one is missing.
+func TestSandboxPreflightNamesTheStampImageWhenItIsNotBuilt(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newFakeDocker(t)
+	f.imageMissing(t)
+	image := "agent-repl-e2e-sandbox:" + currentSandboxStamp(t, f)
+	lock := filepath.Join(t.TempDir(), "build.lock")
+
+	// Act.
+	cmd := exec.Command("bash", sandboxScript(t), "preflight")
+	cmd.Env = sandboxEnv(f, lock)
+	out, err := cmd.CombinedOutput()
+
+	// Assert.
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 12 {
+		t.Fatalf("preflight = %v, want exit 12\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "'"+image+"' is not built") {
+		t.Fatalf("preflight did not name %s:\n%s", image, out)
+	}
+}
+
+// e2eEmacsModule lays the suite script in a module of its own beside a fake
+// sandbox runner whose behaviour is SANDBOX, and answers the script's path.
+func e2eEmacsModule(t *testing.T, sandbox string) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "bin", "test-e2e-emacs.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := t.TempDir()
+	for path, body := range map[string]string{
+		filepath.Join(module, "bin", "test-e2e-emacs.sh"):                string(suiteScript),
+		filepath.Join(module, "e2e", "sandbox", "bin", "e2e-sandbox.sh"): "#!/usr/bin/env bash\nset -u\nhere=$(cd -- \"$(dirname -- \"$0\")\" && pwd)\n" + sandbox,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(module, "bin", "test-e2e-emacs.sh")
+}
+
+// runE2EEmacs runs the suite script at SCRIPT, answering its output and exit.
+func runE2EEmacs(t *testing.T, script string) (string, int) {
+	t.Helper()
+	cmd := exec.Command("bash", script)
+	cmd.Env = append(os.Environ(), "AGENT_REPL_BACKGROUND_PRIORITY=1")
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return string(out), 0
+	case errors.As(err, &exit):
+		return string(out), exit.ExitCode()
+	default:
+		t.Fatalf("run test-e2e-emacs.sh: %v\n%s", err, out)
+		return "", 0
+	}
+}
+
+// builtSandbox is a fake runner whose image does not exist until `build`.
+const builtSandbox = `case $1 in
+  preflight) [ -e "$here/built" ] && { echo READY; exit 0; }; echo "image not built"; exit 12 ;;
+  build) touch "$here/built"; echo BUILT ;;
+  run) echo RAN ;;
+esac
+`
+
+func TestE2EEmacsBuildsThisCheckoutsImageWhenItIsNotBuilt(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	script := e2eEmacsModule(t, builtSandbox)
+
+	// Act.
+	out, code := runE2EEmacs(t, script)
+
+	// Assert.
+	if code != 0 || !strings.Contains(out, "BUILT\n") || !strings.Contains(out, "RAN\n") {
+		t.Fatalf("test-e2e-emacs.sh exit %d, want the image built and the layer run:\n%s", code, out)
+	}
+}
+
+func TestE2EEmacsFailsWhenTheImageCannotBeBuilt(t *testing.T) {
+	t.Parallel()
+	// Arrange: the build fails.
+	script := e2eEmacsModule(t, `case $1 in
+  preflight) echo "image not built"; exit 12 ;;
+  build) echo "BUILD BROKE"; exit 1 ;;
+  run) echo RAN ;;
+esac
+`)
+
+	// Act.
+	out, code := runE2EEmacs(t, script)
+
+	// Assert: a failure, never the decline (77) and never a run.
+	if code == 0 || code == 77 || strings.Contains(out, "RAN\n") {
+		t.Fatalf("test-e2e-emacs.sh exit %d, want a failure without a run:\n%s", code, out)
+	}
+}
+
+func TestE2EEmacsDeclinesAnUnusableSandboxWithoutBuilding(t *testing.T) {
+	t.Parallel()
+	// Arrange: the runtime is down.
+	script := e2eEmacsModule(t, `case $1 in
+  preflight) echo "docker is not running"; exit 11 ;;
+  build) echo BUILT ;;
+  run) echo RAN ;;
+esac
+`)
+
+	// Act.
+	out, code := runE2EEmacs(t, script)
+
+	// Assert.
+	if code != 77 || strings.Contains(out, "BUILT\n") || strings.Contains(out, "RAN\n") {
+		t.Fatalf("test-e2e-emacs.sh exit %d, want the decline (77) with no build and no run:\n%s", code, out)
 	}
 }

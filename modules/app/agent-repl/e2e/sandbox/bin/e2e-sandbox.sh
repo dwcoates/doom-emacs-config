@@ -20,11 +20,12 @@
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-sandbox_dir=$(cd -- "$here/.." && pwd)
-repo_root=$(cd -- "$sandbox_dir/../../../../.." && pwd)
+# sandbox_dir, repo_root, MODULE_REL, SANDBOX_STAMP_LABEL, sandbox_stamp and
+# sandbox_image: which image this checkout's sandbox is.
+# shellcheck source=sandbox-image.sh
+. "$here/sandbox-image.sh"
 
-IMAGE=${AGENT_REPL_SANDBOX_IMAGE:-agent-repl-e2e-sandbox:latest}
-MODULE_REL=modules/app/agent-repl
+IMAGE=$(sandbox_image)
 
 log() { printf 'e2e-sandbox: %s\n' "$*" >&2; }
 die() { log "$*"; exit 1; }
@@ -159,9 +160,10 @@ load_pins() {
 # --- the source stamp and the build lock ----------------------------------
 #
 # WHY. Five `build` runs at once thrashed one buildkit cache, and a build from
-# a STALE checkout re-tagged the shared `:latest` over a good image, so a suite
-# then ran against sandbox sources nobody was looking at. Two structural
-# fixes, and neither is advisory:
+# a STALE checkout re-tagged a shared `:latest` over a good image, so a suite
+# then ran against sandbox sources nobody was looking at. Each image is now
+# tagged by its own sandbox stamp (sandbox-image.sh), and two structural fixes
+# remain, neither advisory:
 #
 #   * BUILD IS EXCLUSIVE, host-wide. The lock is a directory claimed with
 #     `mkdir` -- the one filesystem operation that is atomic and fails if the
@@ -174,39 +176,6 @@ load_pins() {
 #     which sandbox sources produced it. A build whose stamp already matches
 #     the tagged image does nothing at all, and `run` REFUSES an image whose
 #     stamp is not this checkout's rather than silently using it.
-
-SANDBOX_STAMP_LABEL=org.agent-repl.sandbox-tree
-
-# sandbox_stamp prints the identity of THIS checkout's e2e/sandbox sources.
-#
-# The git tree hash is the honest answer when the sandbox directory is clean:
-# it is exactly "these bytes, in this shape". When it is dirty, or there is no
-# git at all, the tree hash would name sources that are NOT what would be
-# built, so a content digest of the directory is computed instead and marked
-# `dirty-`; two dirty checkouts with identical sandbox bytes still agree, and
-# a dirty one never claims to be the committed tree.
-sandbox_stamp() {
-  local rel=$MODULE_REL/e2e/sandbox tree dirty
-
-  if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
-    dirty=$(git -C "$repo_root" status --porcelain -- "$rel" 2>/dev/null || echo dirty)
-    if [[ -z $dirty ]]; then
-      tree=$(git -C "$repo_root" rev-parse "HEAD:$rel" 2>/dev/null || true)
-      if [[ -n $tree ]]; then
-        printf '%s\n' "$tree"
-        return 0
-      fi
-    fi
-  fi
-
-  # Content digest fallback: every file under the sandbox dir, by path and by
-  # bytes, in a stable order.
-  local digest
-  digest=$( { cd -- "$sandbox_dir" && find . -type f -not -name '.*' -print0 \
-      | LC_ALL=C sort -z \
-      | xargs -0 shasum -a 256 2>/dev/null; } | shasum -a 256 | awk '{print $1}')
-  printf 'dirty-%s\n' "$digest"
-}
 
 # image_stamp RUNTIME — the stamp recorded on the tagged image, empty when the
 # image does not exist or carries no stamp (an image built before this label
@@ -221,7 +190,7 @@ image_stamp() {
 # BUILD_LOCK_DIR is a fixed host path, NOT under $TMPDIR: on macOS $TMPDIR is
 # per-process, which would hand every caller a private lock and therefore no
 # exclusion at all. Builds from DIFFERENT worktrees of this repo share one
-# buildkit cache and one `:latest` tag, so they must share one lock.
+# buildkit cache, so they must share one lock.
 BUILD_LOCK_DIR=${AGENT_REPL_SANDBOX_BUILD_LOCK_DIR:-/tmp/agent-repl-sandbox-build.lock}
 
 # BUILD_LOCK_HELD is the lock this process holds, released by the EXIT trap.
@@ -261,7 +230,7 @@ acquire_build_lock() {
     if (( announced == 0 )); then
       log "WAITING: another sandbox build holds the host build lock${pid:+ (pid $pid)}."
       log "  This is the build gate, not a hang: $BUILD_LOCK_DIR is the lock."
-      log "  Concurrent builds thrash one buildkit cache and race the '$IMAGE' tag."
+      log "  Concurrent builds thrash one buildkit cache."
       announced=1
     elif (( waited % 30 == 0 )); then
       log "still waiting for the sandbox build lock (${waited}s)"
@@ -316,7 +285,7 @@ do_build() {
   "$rt" info >/dev/null 2>&1 || die "'$rt' is not usable; run 'e2e-sandbox.sh preflight' for details"
 
   # EXCLUSIVE, HOST-WIDE, AND BEFORE ANYTHING IS STAGED. Everything below this
-  # line writes the shared buildkit cache or the shared '$IMAGE' tag.
+  # line writes the shared buildkit cache.
   acquire_build_lock
 
   # The wait above is usually a wait for the very image this run wanted. Once

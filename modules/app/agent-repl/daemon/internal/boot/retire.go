@@ -78,11 +78,7 @@ func (s *sequence) retireGoneRepositories(ctx context.Context, log dlog.Logger, 
 			log.Error(op, "a repository whose directory is gone could not be retired", fields)
 			return fmt.Errorf("boot: retire the gone repository %s: %w", repo.ID, err)
 		}
-		retiredIDs := make([]string, 0, len(retired.Workspaces))
-		for _, ws := range retired.Workspaces {
-			retiredIDs = append(retiredIDs, string(ws))
-		}
-		fields["workspaces_retired"] = retiredIDs
+		fields["workspaces_retired"] = ids.Strings(retired.Workspaces)
 		log.Info(op, "the repository directory is gone and its workspaces are all closed; the repository is retired", fields)
 		report.RetiredRepositories = append(report.RetiredRepositories, repo.ID)
 	}

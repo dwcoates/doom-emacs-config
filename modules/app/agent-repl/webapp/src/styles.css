@@ -5900,6 +5900,10 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .st.ink-red { color: var(--err); }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st.ink-purple { color: var(--blocked); }
+/* A PAUSED QUEUE'S MERGE INDICATORS (render-colors.json paused_merge_mark,
+   owner ruling 2026-10-14): the merge glyph of a merging, queued or async
+   merge whose queue is paused, in the grey of an inactive dot. */
+#ws-sidebar .st.ink-grey { color: var(--muted); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
 /* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every breath
    (bright, faded, bright) runs the same keyframes, easing and

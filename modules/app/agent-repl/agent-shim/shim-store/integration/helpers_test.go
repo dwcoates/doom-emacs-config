@@ -46,12 +46,39 @@ import (
 )
 
 const (
-	// readyTimeout bounds the wait for the store's socket to accept. It is a
-	// deadline on a polling loop, never a sleep that stands in for a signal.
-	// 2s is ~3x the observed healthy max for this package (0.62s, -race,
-	// go test -v ./... baseline) — the store binary is built once in TestMain
-	// and every boot in this suite lands in well under 100ms.
+	// readyTimeout bounds the waits that are not on the store process's own
+	// work (the pprof surface's first answer). It is a deadline on a polling
+	// loop, never a sleep that stands in for a signal. 2s is ~3x the observed
+	// healthy max for this package (0.62s, -race, go test -v ./... baseline).
 	readyTimeout = 2 * time.Second
+
+	// storeCPUBudget bounds the CPU the live store may spend reaching a
+	// condition (its socket accepting and `store.serve` logged, or a named
+	// record) before the wait calls it stalled. A wait on a live process is
+	// bounded by the process's OWN WORK, never by the wall clock: in a merge
+	// gate's full run the store is one of many suites at a lowered niceness,
+	// and on 2026-10-14 one boot sat in package init (3ms of CPU when it
+	// runs) for over 2s of wall time, unscheduled, and failed a 2s wall bound
+	// it was nowhere near exceeding on its own work. A store that is genuinely
+	// stuck in a loop burns CPU and is caught by this budget at once; one
+	// that is merely starved is waited for. Just over 2x the measured healthy
+	// maximum (storeBootCPUMeasured), plus one tick of the CPU reading's
+	// resolution (ps reports hundredths; /proc counts 10ms ticks).
+	storeCPUBudget = 2*storeBootCPUMeasured + cpuReadingResolution
+	// storeBootCPUMeasured is the most CPU a healthy boot was measured to
+	// spend before it accepted and logged `store.serve`: 30ms, over the 234
+	// boots of one `go test -v ./integration` run (median 20ms). await logs
+	// every wait's figure, so the measure can be re-taken from any run.
+	storeBootCPUMeasured = 30 * time.Millisecond
+	// cpuReadingResolution is the granularity of processCPU's reading.
+	cpuReadingResolution = 10 * time.Millisecond
+	// storeHangGuard bounds the wall clock of a wait on a live store whose CPU
+	// stays under storeCPUBudget: a store the scheduler never runs at all.
+	// It is a hang guard, not the readiness bound: the gate's own per-unit
+	// bound sits above it. 2x the worst inflation measured in a gate run
+	// (the store binary's build: 6.7s wall for 0.74s CPU, ~9x) applied to
+	// the 0.62s healthy max.
+	storeHangGuard = 12 * time.Second
 	// shutdownTimeout bounds an orderly SIGTERM exit before the harness kills.
 	// Same 2s basis as readyTimeout: this suite's real store process has never
 	// taken close to that long to exit.
@@ -351,56 +378,209 @@ func TestStoreEnvSetsAPrivateLockDir(t *testing.T) {
 	}
 }
 
-// awaitReady polls the socket under a deadline, failing at once if the process
-// died instead of coming up.
+// awaitReady polls the socket until the store accepts and has logged
+// `store.serve`, failing at once if the process died instead of coming up, and
+// as stalled once the store has spent storeCPUBudget of its own CPU without
+// getting there (storeProcess.await).
 func (s *storeProcess) awaitReady() {
 	s.t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), readyTimeout)
-	defer cancel()
+	firstAccept := time.Duration(-1)
+	stalled, err := s.await(func() bool {
+		conn, err := net.Dial("unix", s.socket)
+		if err != nil {
+			return false
+		}
+		if firstAccept < 0 {
+			firstAccept = time.Since(s.startedAt)
+		}
+		if err := conn.Close(); err != nil {
+			s.t.Fatalf("closing the readiness probe: %v", err)
+		}
+		// THE SOCKET ACCEPTS BEFORE STARTUP HAS FINISHED LOGGING: it is
+		// bound, then `store.server.new` and `store.serve` are written. A
+		// test that takes its log mark on the dial alone can count those
+		// startup records as its own rpc's under load, so ready means this
+		// process has also logged `store.serve`.
+		return s.loggedServe()
+	})
+	if err != nil {
+		s.t.Fatalf("waiting for the store to accept on %q: %v\nstderr:\n%s", s.socket, err, s.stderrText())
+	}
+	if stalled == "" {
+		return
+	}
+	// WHERE THE TIME WENT is the whole diagnosis of a missed boot: an exec
+	// that never ran, a database open that stalled, or a serve record that
+	// never landed are different faults.
+	//
+	// AND A LIVE STORE IS ASKED WHERE IT IS. Seen 2026-10-06 in a full-suite
+	// run, here and in two e2e stores at once: the log ends at
+	// store.buildreport and the schema record a quiet boot writes 3ms later
+	// never comes. The Go runtime's SIGQUIT dump of every goroutine lands in
+	// the stderr quoted below.
+	startup := describeStartup(s.startedAt, firstAccept, s.cmd.Process.Pid, s.logRecords())
+	dump := s.dumpOnStall(dumpBound)
+	s.t.Fatalf("the store did not accept on %q: %s\n%s\n%s\nstderr:\n%s",
+		s.socket, stalled, startup, dump, s.stderrText())
+}
 
+// await polls COND until it holds on this live store (awaitCondition, with
+// the store's own CPU reading and budgets), logging what reaching it cost. A
+// store that exits first fails the test at once.
+func (s *storeProcess) await(cond func() bool) (string, error) {
+	s.t.Helper()
+	pid := s.cmd.Process.Pid
+	outcome, err := awaitCondition(conditionWait{
+		cond:   cond,
+		cpu:    func() (time.Duration, error) { return processCPU(pid) },
+		exited: s.done,
+		budget: storeCPUBudget,
+		guard:  storeHangGuard,
+	})
+	if errors.Is(err, errExitedWaiting) {
+		s.t.Fatalf("the store exited before it was ready: %v\nstderr:\n%s", s.exit(), s.stderrText())
+	}
+	if err != nil {
+		return "", err
+	}
+	if outcome.stalled == "" {
+		s.t.Logf("the store reached its condition after %s wall, %s of its own CPU",
+			outcome.wall.Round(time.Millisecond), outcome.cpu.Round(time.Millisecond))
+	}
+	return outcome.stalled, nil
+}
+
+// errExitedWaiting is awaitCondition's answer when the process exited first.
+var errExitedWaiting = errors.New("the process exited before the condition held")
+
+// conditionWait is one wait on a live process: COND is polled until it holds,
+// bounded by the process's OWN CPU (BUDGET, counted from the wait's start, as
+// read by CPU) and by a wall-clock GUARD against a process never scheduled.
+type conditionWait struct {
+	cond   func() bool
+	cpu    func() (time.Duration, error)
+	exited <-chan struct{}
+	budget time.Duration
+	guard  time.Duration
+}
+
+// conditionOutcome is how a wait ended: STALLED says why it gave up, empty
+// when the condition held; WALL and CPU are what the wait cost.
+type conditionOutcome struct {
+	stalled string
+	wall    time.Duration
+	cpu     time.Duration
+}
+
+// awaitCondition runs one wait (conditionWait). It answers the outcome, or
+// errExitedWaiting, or the CPU reading's error, which is reported and never
+// guessed around.
+func awaitCondition(w conditionWait) (conditionOutcome, error) {
+	start := time.Now()
+	startCPU, err := w.cpu()
+	if err != nil {
+		return conditionOutcome{}, fmt.Errorf("reading the process's CPU time: %w", err)
+	}
+	spent := func() (time.Duration, error) {
+		cpu, err := w.cpu()
+		if err != nil {
+			return 0, fmt.Errorf("reading the process's CPU time: %w", err)
+		}
+		return cpu - startCPU, nil
+	}
+	guard := time.NewTimer(w.guard)
+	defer guard.Stop()
 	ticker := time.NewTicker(2 * time.Millisecond)
 	defer ticker.Stop()
+	cpuCheck := time.NewTicker(50 * time.Millisecond)
+	defer cpuCheck.Stop()
 
-	firstAccept := time.Duration(-1)
 	for {
-		conn, err := net.Dial("unix", s.socket)
-		if err == nil {
-			if firstAccept < 0 {
-				firstAccept = time.Since(s.startedAt)
+		if w.cond() {
+			cpu, err := spent()
+			if err != nil {
+				return conditionOutcome{}, err
 			}
-			if err := conn.Close(); err != nil {
-				s.t.Fatalf("closing the readiness probe: %v", err)
-			}
-			// THE SOCKET ACCEPTS BEFORE STARTUP HAS FINISHED LOGGING: it is
-			// bound, then `store.server.new` and `store.serve` are written. A
-			// test that takes its log mark on the dial alone can count those
-			// startup records as its own rpc's under load, so ready means this
-			// process has also logged `store.serve`.
-			if s.loggedServe() {
-				return
-			}
+			return conditionOutcome{wall: time.Since(start), cpu: cpu}, nil
 		}
 		select {
-		case <-s.done:
-			s.t.Fatalf("the store exited before it was ready: %v\nstderr:\n%s", s.exit(), s.stderrText())
-		case <-ctx.Done():
-			// WHERE THE TIME WENT is the whole diagnosis of a missed boot: an
-			// exec that never ran, a database open that stalled, or a serve
-			// record that never landed are different faults.
-			//
-			// AND A LIVE STORE IS ASKED WHERE IT IS. Seen 2026-10-06 in a
-			// full-suite run, here and in two e2e stores at once: the log
-			// ends at store.buildreport and the schema record a quiet boot
-			// writes 3ms later never comes. The Go runtime's SIGQUIT dump of
-			// every goroutine lands in the stderr quoted below.
-			startup := describeStartup(s.startedAt, firstAccept, s.cmd.Process.Pid, s.logRecords())
-			dump := s.dumpOnStall(dumpBound)
-			s.t.Fatalf("the store did not accept on %q within %s\n%s\n%s\nstderr:\n%s",
-				s.socket, readyTimeout, startup, dump, s.stderrText())
+		case <-w.exited:
+			return conditionOutcome{}, errExitedWaiting
+		case <-cpuCheck.C:
+			cpu, err := spent()
+			if err != nil {
+				return conditionOutcome{}, err
+			}
+			if cpu > w.budget {
+				wall := time.Since(start)
+				return conditionOutcome{wall: wall, cpu: cpu, stalled: fmt.Sprintf(
+					"it spent %s of its own CPU (budget %s) over %s of wall time without getting there",
+					cpu.Round(time.Millisecond), w.budget, wall.Round(time.Millisecond))}, nil
+			}
+		case <-guard.C:
+			cpu, err := spent()
+			if err != nil {
+				return conditionOutcome{}, err
+			}
+			return conditionOutcome{wall: time.Since(start), cpu: cpu, stalled: fmt.Sprintf(
+				"it was not scheduled enough to get there in %s of wall time (%s of its own CPU, budget %s)",
+				w.guard, cpu.Round(time.Millisecond), w.budget)}, nil
 		case <-ticker.C:
 		}
 	}
+}
+
+// processCPU answers the user plus system CPU time live process PID has used
+// so far: /proc/PID/stat on Linux, ps(1) elsewhere (macOS has no /proc).
+func processCPU(pid int) (time.Duration, error) {
+	if raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+		// The command name is parenthesised and may hold spaces: the fields
+		// counted from the state onwards follow its LAST ')'.
+		text := string(raw)
+		fields := strings.Fields(text[strings.LastIndexByte(text, ')')+1:])
+		if len(fields) < 13 {
+			return 0, fmt.Errorf("/proc/%d/stat has %d fields after the name, want utime and stime", pid, len(fields))
+		}
+		var ticks int64
+		for _, f := range fields[11:13] {
+			n, err := strconv.ParseInt(f, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("/proc/%d/stat: %w", pid, err)
+			}
+			ticks += n
+		}
+		// USER_HZ is 100 on every Linux this suite runs on.
+		return time.Duration(ticks) * 10 * time.Millisecond, nil
+	}
+	out, err := exec.Command("ps", "-o", "time=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, fmt.Errorf("ps -o time= -p %d: %w", pid, err)
+	}
+	return parsePSTime(strings.TrimSpace(string(out)))
+}
+
+// parsePSTime reads ps(1)'s `time` column: [[hh:]mm:]ss[.ff].
+func parsePSTime(text string) (time.Duration, error) {
+	parts := strings.Split(text, ":")
+	if text == "" || len(parts) > 3 {
+		return 0, fmt.Errorf("ps time %q is not [[hh:]mm:]ss[.ff]", text)
+	}
+	secs, err := strconv.ParseFloat(parts[len(parts)-1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("ps time %q: %w", text, err)
+	}
+	total := time.Duration(secs * float64(time.Second))
+	unit := time.Minute
+	for i := len(parts) - 2; i >= 0; i-- {
+		n, err := strconv.Atoi(parts[i])
+		if err != nil {
+			return 0, fmt.Errorf("ps time %q: %w", text, err)
+		}
+		total += time.Duration(n) * unit
+		unit *= 60
+	}
+	return total, nil
 }
 
 // dumpBound is how long a store asked for its goroutines has to write them and
@@ -2403,5 +2583,134 @@ func TestDescribeStartup(t *testing.T) {
 				t.Fatalf("describeStartup =\n%s\nwant\n%s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParsePSTimeReadsEveryShapeOfPSTimeColumn(t *testing.T) {
+	tests := []struct {
+		text string
+		want time.Duration
+	}{
+		{text: "0:00.05", want: 50 * time.Millisecond},
+		{text: "1:02.50", want: 62500 * time.Millisecond},
+		{text: "1:00:00", want: time.Hour},
+		{text: "12.30", want: 12300 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			// Act.
+			got, err := parsePSTime(tt.text)
+
+			// Assert.
+			if err != nil || got != tt.want {
+				t.Fatalf("parsePSTime(%q) = %v, %v; want %v", tt.text, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsePSTimeRefusesWhatIsNotATime(t *testing.T) {
+	for _, text := range []string{"", "a:00", "0:xx", "1:2:3:4"} {
+		t.Run(text, func(t *testing.T) {
+			// Act.
+			_, err := parsePSTime(text)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("parsePSTime(%q) accepted it", text)
+			}
+		})
+	}
+}
+
+func TestProcessCPUReadsALiveProcess(t *testing.T) {
+	// Act: this test process is live, and has run.
+	cpu, err := processCPU(os.Getpid())
+
+	// Assert.
+	if err != nil || cpu < 0 {
+		t.Fatalf("processCPU(self) = %v, %v; want a reading", cpu, err)
+	}
+}
+
+// fakeCPU is a CPU reading that advances by STEP on every read.
+func fakeCPU(step time.Duration) func() (time.Duration, error) {
+	var mu sync.Mutex
+	var now time.Duration
+	return func() (time.Duration, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		now += step
+		return now, nil
+	}
+}
+
+func TestAwaitConditionAnswersAtOnceWhenTheConditionHolds(t *testing.T) {
+	// Act.
+	outcome, err := awaitCondition(conditionWait{
+		cond: func() bool { return true }, cpu: fakeCPU(0), exited: make(chan struct{}),
+		budget: time.Hour, guard: time.Hour,
+	})
+
+	// Assert.
+	if err != nil || outcome.stalled != "" {
+		t.Fatalf("awaitCondition = %+v, %v; want the condition held", outcome, err)
+	}
+}
+
+func TestAwaitConditionCallsAProcessThatBurnsItsCPUBudgetStalled(t *testing.T) {
+	// Act: every reading has spent another second; the budget is 1ms.
+	outcome, err := awaitCondition(conditionWait{
+		cond: func() bool { return false }, cpu: fakeCPU(time.Second), exited: make(chan struct{}),
+		budget: time.Millisecond, guard: time.Hour,
+	})
+
+	// Assert.
+	if err != nil || !strings.Contains(outcome.stalled, "of its own CPU (budget") {
+		t.Fatalf("awaitCondition = %+v, %v; want a CPU-budget stall", outcome, err)
+	}
+}
+
+func TestAwaitConditionWaitsOutAStarvedProcessUntilTheHangGuard(t *testing.T) {
+	// Act: the process never gets CPU, so only the wall-clock guard ends it.
+	outcome, err := awaitCondition(conditionWait{
+		cond: func() bool { return false }, cpu: fakeCPU(0), exited: make(chan struct{}),
+		budget: time.Millisecond, guard: 120 * time.Millisecond,
+	})
+
+	// Assert: never called stuck on CPU it did not spend.
+	if err != nil || !strings.Contains(outcome.stalled, "not scheduled enough") || outcome.wall < 120*time.Millisecond {
+		t.Fatalf("awaitCondition = %+v, %v; want the hang guard after its full wall bound", outcome, err)
+	}
+}
+
+func TestAwaitConditionAnswersAnExitedProcess(t *testing.T) {
+	// Arrange.
+	exited := make(chan struct{})
+	close(exited)
+
+	// Act.
+	_, err := awaitCondition(conditionWait{
+		cond: func() bool { return false }, cpu: fakeCPU(0), exited: exited,
+		budget: time.Hour, guard: time.Hour,
+	})
+
+	// Assert.
+	if !errors.Is(err, errExitedWaiting) {
+		t.Fatalf("awaitCondition = %v, want errExitedWaiting", err)
+	}
+}
+
+func TestAwaitConditionReportsACPUReadingThatFails(t *testing.T) {
+	// Act.
+	_, err := awaitCondition(conditionWait{
+		cond:   func() bool { return false },
+		cpu:    func() (time.Duration, error) { return 0, errors.New("no such process") },
+		exited: make(chan struct{}), budget: time.Hour, guard: time.Hour,
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "no such process") {
+		t.Fatalf("awaitCondition = %v, want the reading's error", err)
 	}
 }

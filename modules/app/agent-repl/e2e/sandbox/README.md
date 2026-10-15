@@ -105,11 +105,22 @@ Any of those missing fails the build loudly. The same three are asserted in
 the Dockerfile; they are re-asserted in `verify_image` so the property
 belongs to the *image*, not to one build path.
 
-### One build at a time, and the image says which sources made it
+### One image per sandbox source, one build at a time
 
-Two structural properties, because five simultaneous builds thrashed one
-buildkit cache and a build from a stale checkout re-tagged
-`agent-repl-e2e-sandbox:latest` over a good image:
+Every checkout runs in ITS OWN image, tagged with the stamp of the sandbox
+sources it is built from: `agent-repl-e2e-sandbox:<stamp>`
+(`bin/sandbox-image.sh`, which `e2e-sandbox.sh` and `preflight.sh` both
+source; `AGENT_REPL_SANDBOX_IMAGE` still names an image deliberately). A single
+shared `:latest` tag made two checkouts whose sandbox sources differ (master
+and a branch cut before master's last sandbox change) mutually exclusive:
+building one evicted the other, and the evicted checkout's e2e-emacs suite
+failed whatever its own code did. A checkout whose image is not built yet has
+it built by `bin/test-e2e-emacs.sh` before the layer runs; a build that fails
+fails the suite, never a skip.
+
+Two more structural properties, because five simultaneous builds thrashed one
+buildkit cache and a build from a stale checkout once re-tagged a shared tag
+over a good image:
 
 * **`build` takes an exclusive, host-wide lock.** It is a directory claimed
   with `mkdir` at `/tmp/agent-repl-sandbox-build.lock` (override with

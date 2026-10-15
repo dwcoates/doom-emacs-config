@@ -966,3 +966,36 @@ func TestAMergeResumedAtAFixRebasesOntoATargetThatMovedBeforeItsGate(t *testing.
 		t.Fatalf("the gate ran %d times, want once, after the rebase onto the moved tip", len(h.runner.argv))
 	}
 }
+
+func TestADrainedMergesSuspendRecordNamesTheExit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.landsCleanly("abc123def4567")
+
+	// Act.
+	heldInGate(t, h)
+
+	// Assert.
+	rec, found := recordWith(h, "info", "daemon.merge.suspend")
+	if !found {
+		t.Fatal("the drained merge wrote no INFO suspend record")
+	}
+	if rec.Context["by"] != suspendExit.by || rec.Context["cause"] != errDaemonExiting.Error() {
+		t.Fatalf("suspend record context = %v, want the daemon's exit as its cause", rec.Context)
+	}
+}
+
+func TestSuspendingARunNoSuspensionTookPanics(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := &run{o: h.o, ws: theWorkspace}
+
+	// Act, Assert: suspend is reached only through exiting(), so a run that
+	// is not suspending is a broken invariant.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("suspend on a run no suspension took did not panic")
+		}
+	}()
+	r.suspend(context.Background(), nil)
+}

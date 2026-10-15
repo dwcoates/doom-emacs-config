@@ -68,6 +68,7 @@ status arm and whatever else the case is about."
                    :one-shot nil
                    :opening nil
                    :async-merging nil
+                   :merge-paused nil
                    :last-selected nil
                    :last-turn-ended nil
                    :closure nil
@@ -115,6 +116,25 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"asyncMerging\":{\"repo\":{}}"))
                  '("RosterRowAsyncMerging" repo "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-merge-paused-marker ()
+  "A row carrying `mergePaused\=' decodes it as PRESENT, beside its status arm."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row "\"merging\":{}" "\"mergePaused\":{}"))))
+    ;; Assert
+    (should (eq (plist-get row :merge-paused) t))
+    (should (equal (plist-get row :status) '(:arm :merging :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-merge-paused-marker-carries-no-payload ()
+  "`RosterRowMergePaused\=' is EMPTY: a field inside it is an unknown field."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"merging\":{}" "\"mergePaused\":{\"repo\":{}}"))
+                 '("RosterRowMergePaused" repo "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
   "A row carrying `opening' decodes it as PRESENT, beside its status arm."

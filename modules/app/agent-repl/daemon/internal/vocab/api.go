@@ -72,6 +72,9 @@ type RenderColors struct {
 	// AsyncMergeMark is how both surfaces draw RosterRowAsyncMerging: the
 	// workspace's own branch merging async while the row keeps its status.
 	AsyncMergeMark AsyncMergeMark
+	// PausedMergeMark is how the sidebar draws RosterRowMergePaused: the
+	// merge indicators of a row whose merge's queue is paused.
+	PausedMergeMark PausedMergeMark
 	// FooterStatus maps each FooterStatus.status arm name to its color.
 	FooterStatus map[string]string
 	// ComposerClosedColors are the footer status colors under which a
@@ -108,9 +111,19 @@ type AsyncMergeMark struct {
 	TabBracket string `json:"tab_bracket"`
 }
 
-// asyncMergeMotions are the motions a mark may take: the rail's one
-// animation, or none.
-var asyncMergeMotions = []string{"breathes", "still"}
+// PausedMergeMark is the shared drawing of a row whose merge's queue is
+// paused (frontend.v1.RosterRowMergePaused, owner ruling 2026-10-14): the ink
+// every merge indicator of the row takes, and the motion the merge's breath
+// on the row's name takes. Every renderer reads it here, so no surface picks
+// its own grey.
+type PausedMergeMark struct {
+	Ink    string `json:"ink"`
+	Motion string `json:"motion"`
+}
+
+// markMotions are the motions a mark may take: the rail's one animation, or
+// none.
+var markMotions = []string{"breathes", "still"}
 
 // renderColorsJSON is the file's on-disk shape. It is separate from
 // RenderColors so an absent table is distinguishable from an empty one.
@@ -125,6 +138,7 @@ type renderColorsJSON struct {
 	GlyphOnlyColors         []string                     `json:"glyph_only_colors"`
 	OneShotGlyphArms        []string                     `json:"one_shot_glyph_arms"`
 	AsyncMergeMark          AsyncMergeMark               `json:"async_merge_mark"`
+	PausedMergeMark         PausedMergeMark              `json:"paused_merge_mark"`
 	FooterStatus            map[string]string            `json:"footer_status"`
 	ComposerClosedColors    []string                     `json:"composer_closed_colors"`
 	ComposerOpenSubstatuses map[string][]string          `json:"composer_open_substatuses"`
@@ -264,7 +278,7 @@ func (c RenderColors) validate() error {
 		if !ok {
 			return fmt.Errorf("glyph_inks[%q] names no roster_status arm", arm)
 		}
-		if ink == ColorNone || !(contains(c.Colors, ink) || contains(c.GlyphOnlyColors, ink)) {
+		if !c.inkColor(ink) {
 			return fmt.Errorf("glyph_inks[%q] = %q, which is neither a color nor a glyph-only color", arm, ink)
 		}
 		if ink == color {
@@ -292,11 +306,17 @@ func (c RenderColors) validate() error {
 	if m := c.AsyncMergeMark; m.Ink == ColorNone || !contains(c.Colors, m.Ink) {
 		return fmt.Errorf("async_merge_mark.ink = %q, which is not a color", m.Ink)
 	}
-	if m := c.AsyncMergeMark; !contains(asyncMergeMotions, m.Motion) {
-		return fmt.Errorf("async_merge_mark.motion = %q, which is none of %v", m.Motion, asyncMergeMotions)
+	if err := checkMotion("async_merge_mark", c.AsyncMergeMark.Motion); err != nil {
+		return err
 	}
 	if m := c.AsyncMergeMark; m.TabBracket == ColorNone || !contains(c.Colors, m.TabBracket) {
 		return fmt.Errorf("async_merge_mark.tab_bracket = %q, which is not a color", m.TabBracket)
+	}
+	if m := c.PausedMergeMark; !c.inkColor(m.Ink) {
+		return fmt.Errorf("paused_merge_mark.ink = %q, which is neither a color nor a glyph-only color", m.Ink)
+	}
+	if err := checkMotion("paused_merge_mark", c.PausedMergeMark.Motion); err != nil {
+		return err
 	}
 	if len(c.TopbarTones) == 0 {
 		return fmt.Errorf("topbar_tones is empty")
@@ -332,6 +352,20 @@ func (c RenderColors) validate() error {
 
 func (c RenderColors) knownColor(color string) bool {
 	return color == ColorNone || contains(c.Colors, color)
+}
+
+// inkColor reports whether INK may ink a mark: one of the colors or one of
+// the glyph-only colors, and never none.
+func (c RenderColors) inkColor(ink string) bool {
+	return ink != ColorNone && (contains(c.Colors, ink) || contains(c.GlyphOnlyColors, ink))
+}
+
+// checkMotion refuses a SECTION whose MOTION is none of markMotions.
+func checkMotion(section, motion string) error {
+	if !contains(markMotions, motion) {
+		return fmt.Errorf("%s.motion = %q, which is none of %v", section, motion, markMotions)
+	}
+	return nil
 }
 
 // LoadPaintClasses reads paint-classes.json from the vocab directory.

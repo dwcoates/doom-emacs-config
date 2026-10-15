@@ -179,6 +179,18 @@ its [N] run with the shared vocabulary\='s `async_merge_mark\='."
   (agent-repl-wire--decode-empty "RosterRowAsyncMerging" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-merge-paused (value)
+  "Decode VALUE as `RosterRowMergePaused' and return t.
+The MERGE-PAUSED marker: the merge queue holding the row\='s merge is
+paused.  EMPTY, and PRESENCE IS THE FACT, as for the markers above.
+
+EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The marker greys the
+webapp sidebar\='s merge indicators, and the tab bar is outside that
+ruling.  It is decoded because the codec refuses unknown fields, and
+refusing this one would drop every roster push."
+  (agent-repl-wire--decode-empty "RosterRowMergePaused" value)
+  t)
+
 (defun agent-repl-wire-decode-roster-row-opening (value)
   "Decode VALUE as `RosterRowOpening' and return t.
 The OPENING marker: the editor is opening this workspace, whose status
@@ -678,7 +690,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging lastSelected lastTurnEnded closure lastUpdated availability name current children when detail closed)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded closure lastUpdated availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -686,7 +698,8 @@ Nested workspaces — a spawned family under its parent — in render order."
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:last-selected L :last-turn-ended LT :closure CL :last-updated LU
+:merge-paused MP :last-selected L :last-turn-ended LT :closure CL
+:last-updated LU
 :availability AV
 :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
@@ -722,6 +735,9 @@ the message tree preserved as the contract spells it."
            :async-merging (agent-repl-wire--decode-optional-message
                            "RosterRow" 'asyncMerging object
                            #'agent-repl-wire-decode-roster-row-async-merging)
+           :merge-paused (agent-repl-wire--decode-optional-message
+                          "RosterRow" 'mergePaused object
+                          #'agent-repl-wire-decode-roster-row-merge-paused)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
