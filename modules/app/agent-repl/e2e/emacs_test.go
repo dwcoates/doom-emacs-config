@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -878,6 +879,56 @@ var emacsAdvisedPrimitives = []string{
 	"yes-or-no-p",
 }
 
+// scenarioOverride is a scenario form redefining a function: a `cl-letf' of
+// its symbol-function, or an `advice-add' on it.
+var scenarioOverride = regexp.MustCompile(`(?:symbol-function|advice-add) #?'([a-zA-Z0-9-]+)`)
+
+// scenarioOverriddenFunctions is every function a scenario's own forms
+// redefine, read off the layer's test sources.
+//
+// A SCENARIO'S REDEFINITION OF A PRIMITIVE COMPILES A TRAMPOLINE TOO, and
+// mid-scenario: `cl-letf' on `completing-read' (the create and register
+// flows answer its prompt that way) compiled one inside a running test,
+// whose second Emacs then pinned the container's two CPUs for seconds and
+// starved the other scenario's Emacs past its heartbeat (2026-10-15, the
+// matrix-halves-2 gate: "the container's CPU ... throttled in 31 of 31
+// periods", with an `emacs --batch ... comp-subr--trampoline' running).
+// assertTrampolinesWerePrewarmed reads the BOOT's trampolines only, so these
+// are taken from the sources the scenarios are, and cannot drift from them.
+func scenarioOverriddenFunctions(t *testing.T) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(repo.e2eDir, "emacs_*_test.go"))
+	if err != nil {
+		t.Fatalf("glob the Emacs layer's sources: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for _, m := range scenarioOverride.FindAllSubmatch(src, -1) {
+			seen[string(m[1])] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
+// prewarmedFunctions is every function whose trampoline the prewarm builds
+// when Emacs says it is a primitive: the boot's redefinitions and the
+// scenarios' own, each once.
+func prewarmedFunctions(t *testing.T) []string {
+	t.Helper()
+	all := map[string]bool{}
+	for _, name := range emacsAdvisedPrimitives {
+		all[name] = true
+	}
+	for _, name := range scenarioOverriddenFunctions(t) {
+		all[name] = true
+	}
+	return sortedKeys(all)
+}
+
 // trampolinePrewarmBound bounds the one prewarm. It is nine `call-process'
 // compilations of a second Emacs each, run serially. MEASURED at 887ms for
 // all nine on a cold container with the machine otherwise idle, which is
@@ -909,9 +960,12 @@ func prewarmTrampolines(t *testing.T, box sandbox) {
   (require 'comp-run)
   (let ((native-compile-target-directory %q))
     (dolist (subr '(%s))
-      (unless (comp--trampoline-search subr)
+      ;; ONLY A PRIMITIVE HAS A TRAMPOLINE. A scenario also redefines Lisp
+      ;; functions and the module's own, which -Q has not even loaded.
+      (when (and (fboundp subr) (subr-primitive-p (symbol-function subr))
+                 (not (comp--trampoline-search subr)))
         (comp-trampoline-compile subr)))))`,
-			trampolineCacheDir+"/", strings.Join(emacsAdvisedPrimitives, " "))
+			trampolineCacheDir+"/", strings.Join(prewarmedFunctions(t), " "))
 		ctx, cancel := context.WithTimeout(context.Background(), trampolinePrewarmBound)
 		defer cancel()
 		out, err := box.Exec(ctx, "env", "EMACSNATIVELOADPATH="+trampolineCacheDir,
@@ -924,8 +978,8 @@ func prewarmTrampolines(t *testing.T, box sandbox) {
 	})
 	if trampolinePrewarm.err != nil {
 		t.Fatalf("the shared subr-trampoline cache could not be built, and every "+
-			"scenario boot would otherwise compile all %d of them itself: %v",
-			len(emacsAdvisedPrimitives), trampolinePrewarm.err)
+			"scenario would otherwise compile the trampolines of %v itself: %v",
+			prewarmedFunctions(t), trampolinePrewarm.err)
 	}
 	t.Logf("subr trampolines prewarmed in %s (bound %s)", trampolinePrewarm.took.Round(time.Millisecond), trampolinePrewarmBound)
 }
@@ -951,6 +1005,35 @@ func prewarmTrampolines(t *testing.T, box sandbox) {
 // as a boot-bound flake on a busy machine.
 func (e *Emacs) assertTrampolinesWerePrewarmed() {
 	e.t.Helper()
+	if strays := e.strayTrampolines(); len(strays) > 0 {
+		e.t.Fatalf("this boot built %d subr trampoline(s) itself instead of finding one "+
+			"already on disk: %s\nAdd the name(s) to emacsAdvisedPrimitives so the prewarm "+
+			"builds them once into %s, rather than every scenario paying a child Emacs "+
+			"inside Doom's %s boot bound.",
+			len(strays), strings.Join(strays, ", "), trampolineCacheDir, doomBootBound)
+	}
+}
+
+// assertTheScenarioBuiltNoTrampoline is assertTrampolinesWerePrewarmed at the
+// scenario's END: a trampoline a scenario's own form compiled (a `cl-letf' of
+// a primitive) is a child Emacs pinning the container's CPUs mid-test, which
+// starves every other scenario's Emacs past its heartbeat. The prewarm takes
+// the scenarios' redefinitions from their sources (scenarioOverriddenFunctions),
+// so a stray here is a redefinition that scan does not read.
+func (e *Emacs) assertTheScenarioBuiltNoTrampoline() {
+	e.t.Helper()
+	if strays := e.strayTrampolines(); len(strays) > 0 {
+		e.t.Errorf("this scenario built %d subr trampoline(s) mid-test instead of finding one "+
+			"already on disk: %s\nscenarioOverriddenFunctions did not read the form that redefines "+
+			"them; widen scenarioOverride so the prewarm builds them once into %s.",
+			len(strays), strings.Join(strays, ", "), trampolineCacheDir)
+	}
+}
+
+// strayTrampolines is every trampoline this Emacs installed that was not on
+// disk before it booted, as "<name> (from <file>)".
+func (e *Emacs) strayTrampolines() []string {
+	e.t.Helper()
 	loaded := e.EvalStrings(`(let (r)
   (maphash (lambda (name trampoline)
              (push (format "%s %s" name
@@ -971,13 +1054,7 @@ func (e *Emacs) assertTrampolinesWerePrewarmed() {
 		}
 		strays = append(strays, fmt.Sprintf("%s (from %s)", name, file))
 	}
-	if len(strays) > 0 {
-		e.t.Fatalf("this boot built %d subr trampoline(s) itself instead of finding one "+
-			"already on disk: %s\nAdd the name(s) to emacsAdvisedPrimitives so the prewarm "+
-			"builds them once into %s, rather than every scenario paying a child Emacs "+
-			"inside Doom's %s boot bound.",
-			len(strays), strings.Join(strays, ", "), trampolineCacheDir, doomBootBound)
-	}
+	return strays
 }
 
 // trampolineWasOnDiskBeforeThisBoot reports whether the trampoline loaded
@@ -1771,6 +1848,7 @@ func (e *Emacs) stop() {
 	asked := false
 	stopAsked := false
 	if !e.isWedged() {
+		e.assertTheScenarioBuiltNoTrampoline()
 		// ONLY A WORLD WITH A DAEMON IS ASKED TO STOP ONE. Several worlds in
 		// this layer never spawn a daemon at all -- the substrate pages put a
 		// bare webview in a bare Emacs -- and `agent-repl-frontend-daemon-stop`
