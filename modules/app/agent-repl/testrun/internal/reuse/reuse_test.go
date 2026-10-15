@@ -467,3 +467,20 @@ func TestADeclaredFilesDirectoryListingIsPlacedToo(t *testing.T) {
 		t.Fatalf("Dirs = %v, want the declared file's directory listed", set.Dirs())
 	}
 }
+
+func TestAFailedKeyedSuiteIsToldItRanConfined(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	v := f.decide(t, Reusing, lockSuite)
+
+	// Act
+	err := RecordPasses(f.d, Reusing, v, []run.SuiteResult{{Name: "lock", Outcome: run.Failed}}, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.log.info) != 1 || !strings.HasPrefix(f.log.info[0], "lock ran confined to its inputs") {
+		t.Fatalf("info = %v", f.log.info)
+	}
+}

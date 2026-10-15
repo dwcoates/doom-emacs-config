@@ -470,6 +470,11 @@ func RecordPasses(d Deps, mode Mode, verdicts []Verdict, results []run.SuiteResu
 			passed[r.Name] = true
 		}
 	}
+	for _, v := range verdicts {
+		if v.Keyed && v.Reused == nil && !passed[v.Suite.Name] {
+			d.Log.Infof("%s ran confined to its inputs: a failure reading a checkout file with \"operation not permitted\" is a read its Reuse does not declare (testrun/roster; AGENTS.md, \"A run reuses an earlier pass of a suite's exact inputs\")", v.Suite.Name)
+		}
+	}
 	var branch, commit string
 	var dirty, headRead bool
 	for _, v := range verdicts {
