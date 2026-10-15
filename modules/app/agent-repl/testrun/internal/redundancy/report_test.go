@@ -237,3 +237,83 @@ func TestReportCommand(t *testing.T) {
 		})
 	}
 }
+
+func verificationFixture(estimate bool) *Measurement {
+	m := reportFixture()
+	m.Mutants = nil
+	m.Verification = &Verification{
+		Estimate: estimate, Deleted: []string{"Dup", "Line"}, Reached: 5, SettledByUnit: 3, Residual: 2,
+		ResidualCostLow: 2 * ms, ResidualCostHigh: 9 * ms,
+	}
+	if !estimate {
+		m.Verification.SurvivedDeleted = 1
+		m.Verification.Proven = []string{"Dup"}
+		m.Verification.PutBack = []PutBack{{Case: "Line", Mutant: "a.go:1:1:< -> <="}}
+	}
+	return m
+}
+
+func TestReportOfAVerificationEstimate(t *testing.T) {
+	// Arrange
+	var out bytes.Buffer
+
+	// Act
+	err := Report(&out, verificationFixture(true), Options{Budget: Budget{MaxDrop: 100}})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# Deletion-set verification: d/p/a_test.go",
+		"- Deleted: 2 cases; mutants they reach: 5",
+		"- Settled by a kept unit case: 3; residual (R): 2",
+		"- Settling R costs between 2ms and 9ms of case runtime",
+		"- ESTIMATE ONLY: stopped after the unit tier; nothing is proven yet.",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the report lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestReportOfAVerification(t *testing.T) {
+	// Arrange
+	var out bytes.Buffer
+
+	// Act
+	err := Report(&out, verificationFixture(false), Options{Budget: Budget{MaxDrop: 100}})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- Of R: no deleted case kills 1; a kept integration or e2e case kills 0; 1 are caught only by a deleted case",
+		"- Proven deletable: 1; put back: 1",
+		"| `Line` | `a.go:1:1:< -> <=` |",
+		"## Deletable after both checks (1, saving 1ms)",
+		"- `Dup` (1ms), proven",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the report lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestReportOfAVerificationHoldsTheProvenSetToTheBudget(t *testing.T) {
+	// Arrange: a budget of 0 points allows no statement lost at all. Dup's
+	// one block is also Big's, so deleting Dup loses none and it stays.
+	var out bytes.Buffer
+
+	// Act
+	err := Report(&out, verificationFixture(false), Options{Budget: Budget{MaxDrop: 0}})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "## Deletable after both checks (1, saving 1ms)") {
+		t.Fatalf("report:\n%s", out.String())
+	}
+}

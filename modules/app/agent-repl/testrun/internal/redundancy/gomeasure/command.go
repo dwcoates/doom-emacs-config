@@ -43,6 +43,25 @@ func splitList(s string) []string {
 	return out
 }
 
+// readDeleteSet reads a -delete file: one case per line; blank lines and
+// lines starting with # are skipped.
+func readDeleteSet(path string) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read -delete %s: %w", path, err)
+	}
+	var out []string
+	for _, l := range strings.Split(string(b), "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			out = append(out, l)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("-delete %s names no case", path)
+	}
+	return out, nil
+}
+
 // readSuites reads a -suites file.
 func readSuites(path string) ([]Suite, error) {
 	b, err := os.ReadFile(path)
@@ -84,6 +103,8 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs.StringVar(&universe, "universe", "kills-only", "kills-only or strict (killed mutants and reached blocks)")
 	fs.DurationVar(&a.Overhead, "overhead", DefaultOverhead, "fixed weight per kept case")
 	fs.BoolVar(&a.KeepScratch, "keep-scratch", false, "keep the scratch directory")
+	deleteFile := fs.String("delete", "", "a file naming a deletion set to verify, one case ID or top-level test per line, instead of minimizing")
+	fs.BoolVar(&a.Estimate, "estimate", false, "with -delete: stop after the unit tier and report what the rest would cost")
 	maxDrop := fs.Float64("max-coverage-drop", redundancy.DefaultMaxDrop, "the most statement-coverage points any system may lose")
 	baseline := fs.String("baseline", "", "the pinned coverage baseline (testrun/coverage-baseline.json); without it each system is held to the measured population's own coverage")
 	fs.StringVar(&a.Go, "go", "go", "the go command")
@@ -127,6 +148,13 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 			return Args{}, fmt.Errorf("-mutate is required when -suites names several")
 		}
 		a.Mutate = []string{a.Suites[0].Package}
+	}
+	if *deleteFile != "" {
+		if a.Delete, err = readDeleteSet(*deleteFile); err != nil {
+			return Args{}, err
+		}
+	} else if a.Estimate {
+		return Args{}, fmt.Errorf("-estimate needs -delete")
 	}
 	a.PinCalls = splitList(pinCalls)
 	a.Pins = splitList(pins)

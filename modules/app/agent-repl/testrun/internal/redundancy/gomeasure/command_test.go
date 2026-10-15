@@ -182,3 +182,60 @@ func TestParseArgsRefusesASuitesFile(t *testing.T) {
 		})
 	}
 }
+
+func TestParseArgsReadsADeletionSet(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "delete.txt")
+	if err := os.WriteFile(path, []byte("# the audit's rows\n./integration:TestA\n\n./integration:TestB\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	a, err := ParseArgs([]string{"-module", "/m", "-pkg", "./p", "-out", "/o", "-delete", path, "-estimate"}, &bytes.Buffer{})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a.Delete, []string{"./integration:TestA", "./integration:TestB"}) || !a.Estimate {
+		t.Fatalf("delete %v estimate %t", a.Delete, a.Estimate)
+	}
+}
+
+func TestParseArgsRefusesADeletionSet(t *testing.T) {
+	tests := []struct {
+		name string
+		body *string
+		argv []string
+		want string
+	}{
+		{name: "an estimate of nothing", argv: []string{"-estimate"}, want: "-estimate needs -delete"},
+		{name: "an empty deletion set", body: strPtr("# nothing\n"), want: "names no case"},
+		{name: "a missing deletion set", want: "read -delete"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			argv := append([]string{"-module", "/m", "-pkg", "./p", "-out", "/o"}, tt.argv...)
+			if tt.argv == nil {
+				path := filepath.Join(t.TempDir(), "delete.txt")
+				if tt.body != nil {
+					if err := os.WriteFile(path, []byte(*tt.body), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				argv = append(argv, "-delete", path)
+			}
+
+			// Act
+			_, err := ParseArgs(argv, &bytes.Buffer{})
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }

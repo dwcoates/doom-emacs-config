@@ -88,6 +88,13 @@ type Config struct {
 	// Root is the agent-repl module root the roster's paths are relative to;
 	// "" finds it above Module.
 	Root string
+	// Delete, when set, is a deletion set to verify (verify.go) instead of
+	// a whole kill matrix to minimize: case IDs, or top-level tests standing
+	// for all their leaves.
+	Delete []string
+	// Estimate stops a verification after the unit tier, reporting how many
+	// mutants it leaves unsettled and what settling them would cost.
+	Estimate bool
 }
 
 // leaf is one case: a leaf test of one suite.
@@ -233,7 +240,15 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	log.Infof("redundancy: %d leaf cases", len(leaves))
 	phase("discovery")
 
-	cases, statements, healthy, err := m.coverage(ctx, leaves)
+	var deleted map[leaf]bool
+	if len(cfg.Delete) > 0 {
+		if deleted, err = m.splitDeleted(leaves); err != nil {
+			return nil, err
+		}
+	} else if cfg.Estimate {
+		return nil, fmt.Errorf("gomeasure: an estimate is of a deletion set; name one")
+	}
+	cases, statements, healthy, err := m.coverage(ctx, leaves, deleted)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +279,18 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	}
 	phase("schema baseline")
 
+	if deleted != nil {
+		out.Verification, out.Anomalies, err = m.verify(ctx, schemas, imports, leaves, cases, healthy, deleted)
+		out.Hangs = m.hangs
+		if err != nil {
+			return nil, err
+		}
+		phase("deletion-set verification")
+		out.Cases = cases
+		m.cost.Wall = time.Since(start)
+		out.Cost = m.cost
+		return out, nil
+	}
 	out.Mutants, out.Anomalies, err = m.mutate(ctx, schemas, imports, leaves, cases, healthy)
 	out.Hangs = m.hangs
 	if err != nil {
@@ -501,17 +528,22 @@ func (m *measurer) discover(ctx context.Context, tops [][]string) ([]leaf, error
 	return leaves, nil
 }
 
-// coverage measures every leaf alone, Runs times, and returns its cases
+// coverage measures every leaf alone, Runs times (in a verification, only a
+// deleted leaf: a kept leaf's reach is measured once, since under-measuring
+// it can only put back more), and returns its cases
 // (blocks unioned over the runs and over its test binary and the systems it
 // spawned; cost the median runtime), every block of the covered packages
 // with its statement count, and each leaf's healthy process latency (its
 // slowest run's wall).
-func (m *measurer) coverage(ctx context.Context, leaves []leaf) ([]redundancy.Case, map[string]int, map[leaf]time.Duration, error) {
+func (m *measurer) coverage(ctx context.Context, leaves []leaf, deleted map[leaf]bool) ([]redundancy.Case, map[string]int, map[leaf]time.Duration, error) {
 	elapsed := make([][]time.Duration, len(leaves))
 	healthy := map[leaf]time.Duration{}
 	roots := make([]string, len(leaves))
 	for r := 0; r < m.cfg.Runs; r++ {
 		for i, l := range leaves {
+			if r > 0 && deleted != nil && !deleted[l] {
+				continue
+			}
 			st := m.suites[l.suite]
 			roots[i] = filepath.Join(m.cfg.Scratch, "cov", strconv.Itoa(i))
 			self := filepath.Join(roots[i], strconv.Itoa(r), "self")

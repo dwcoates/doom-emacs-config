@@ -53,6 +53,9 @@ type Measurement struct {
 	Mutants []MutantResult
 	// Anomalies are failures the measurement could not attribute.
 	Anomalies []string `json:",omitempty"`
+	// Verification, in a deletion-set verification, is its outcome; the
+	// measurement then holds no whole kill matrix (Mutants is empty).
+	Verification *Verification `json:",omitempty"`
 	// Statements maps every block of the measured scope, reached or not, to
 	// its statement count: what the coverage budget weighs.
 	Statements map[string]int `json:",omitempty"`
@@ -60,6 +63,33 @@ type Measurement struct {
 	// listed because load, not the mutant, can cause one.
 	Hangs []string `json:",omitempty"`
 	Cost  Cost
+}
+
+// Verification is a deletion set checked against the kept rest, mutant by
+// mutant (gomeasure verify.go).
+type Verification struct {
+	// Estimate says the check stopped after the unit tier.
+	Estimate bool `json:",omitempty"`
+	// Deleted is the set checked; Proven the part of it that stays deleted,
+	// proven to lose no kill; PutBack what went back, each with the mutant
+	// only it caught.
+	Deleted []string
+	Proven  []string  `json:",omitempty"`
+	PutBack []PutBack `json:",omitempty"`
+	// Reached counts the mutants a deleted case reaches; SettledByUnit those
+	// a kept unit case kills; Residual the rest (R).
+	Reached, SettledByUnit, Residual int
+	// SurvivedDeleted counts the residual mutants no deleted case kills;
+	// SettledByTier those a kept integration or e2e case kills.
+	SurvivedDeleted, SettledByTier int
+	// ResidualCostLow and ResidualCostHigh bound what settling R costs: one
+	// cheapest deleted case per mutant, against every reaching case.
+	ResidualCostLow, ResidualCostHigh time.Duration
+}
+
+// PutBack is one deleted case put back, and the mutant only it caught.
+type PutBack struct {
+	Case, Mutant string
 }
 
 // WriteMeasurement saves m to path.
@@ -108,6 +138,9 @@ func budgeted(m *Measurement, u Universe, o Options) (Result, []string, []System
 // cases the other universe disagrees on, the mutants and the measurement's
 // own cost.
 func Report(w io.Writer, m *Measurement, o Options) error {
+	if m.Verification != nil {
+		return reportVerification(w, m, o)
+	}
 	u := o.Universe
 	main, restored, systems, err := budgeted(m, u, o)
 	if err != nil {
@@ -327,4 +360,95 @@ func ReportCommand(log Logger, argv []string, out io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// reportVerification is the report of a deletion-set verification: what it
+// settled where, what it put back and why, and each system's coverage once
+// the proven part is deleted.
+func reportVerification(w io.Writer, m *Measurement, o Options) error {
+	v := m.Verification
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Deletion-set verification: %s\n\n", m.Subject)
+	fmt.Fprintf(&b, "- Adapter: %s; mutated: %s\n", m.Adapter, strings.Join(m.Scope, ", "))
+	fmt.Fprintf(&b, "- Deleted: %d cases; mutants they reach: %d\n", len(v.Deleted), v.Reached)
+	fmt.Fprintf(&b, "- Settled by a kept unit case: %d; residual (R): %d\n", v.SettledByUnit, v.Residual)
+	fmt.Fprintf(&b, "- Settling R costs between %s and %s of case runtime\n", round(v.ResidualCostLow), round(v.ResidualCostHigh))
+	if v.Estimate {
+		b.WriteString("- ESTIMATE ONLY: stopped after the unit tier; nothing is proven yet.\n")
+		_, err := io.WriteString(w, b.String())
+		if err != nil {
+			return fmt.Errorf("redundancy: write the report: %w", err)
+		}
+		return nil
+	}
+	fmt.Fprintf(&b, "- Of R: no deleted case kills %d; a kept integration or e2e case kills %d; %d are caught only by a deleted case\n", v.SurvivedDeleted, v.SettledByTier, len(v.PutBack))
+	backSet := map[string]bool{}
+	for _, p := range v.PutBack {
+		backSet[p.Case] = true
+	}
+	fmt.Fprintf(&b, "- Proven deletable: %d; put back: %d\n\n", len(v.Proven), len(backSet))
+	if len(v.PutBack) > 0 {
+		b.WriteString("## Put back (each the cheapest deleted case killing a mutant nothing kept kills)\n\n| Case | Mutant |\n|---|---|\n")
+		for _, p := range v.PutBack {
+			fmt.Fprintf(&b, "| `%s` | `%s` |\n", p.Case, p.Mutant)
+		}
+		b.WriteString("\n")
+	}
+	proven := map[string]bool{}
+	for _, id := range v.Proven {
+		proven[id] = true
+	}
+	r := Result{}
+	for _, c := range m.Cases {
+		if proven[c.ID] {
+			r.Removed = append(r.Removed, Removal{Case: c.ID, Saves: c.Cost})
+		} else {
+			r.Kept = append(r.Kept, c.ID)
+		}
+	}
+	budgeted, restored, systems, err := ApplyBudget(m.Cases, r, m.Statements, m.Modules, o.Budget, o.Overhead)
+	if err != nil {
+		return err
+	}
+	var saved time.Duration
+	for _, rm := range budgeted.Removed {
+		saved += rm.Saves
+	}
+	b.WriteString("## Statement coverage\n\n| System | Reference | Statements | Before | After | Drop | Floor |\n|---|---|---|---|---|---|---|\n")
+	for _, sc := range systems {
+		fmt.Fprintf(&b, "| %s | %s | %d | %.2f%% | %.2f%% | %.2f | %.2f%% |\n", sc.System, sc.Reference, sc.Statements, sc.Before, sc.After, sc.Drop(), sc.Floor)
+	}
+	fmt.Fprintf(&b, "\nRequest limit: %.2f points.\n\n", o.Budget.MaxDrop)
+	if len(restored) > 0 {
+		fmt.Fprintf(&b, "Put back by the coverage budget (%d):\n\n", len(restored))
+		for _, id := range restored {
+			fmt.Fprintf(&b, "- `%s`\n", id)
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "## Deletable after both checks (%d, saving %s)\n\n", len(budgeted.Removed), round(saved))
+	for _, rm := range budgeted.Removed {
+		fmt.Fprintf(&b, "- `%s` (%s), proven\n", rm.Case, round(rm.Saves))
+	}
+	if len(m.Hangs) > 0 {
+		fmt.Fprintf(&b, "\n## Kills by hang (%d)\n\n", len(m.Hangs))
+		for _, h := range m.Hangs {
+			fmt.Fprintf(&b, "- %s\n", h)
+		}
+	}
+	if len(m.Anomalies) > 0 {
+		b.WriteString("\n## Anomalies\n\n")
+		for _, a := range m.Anomalies {
+			fmt.Fprintf(&b, "- %s\n", a)
+		}
+	}
+	b.WriteString("\n## Measurement cost\n\n")
+	fmt.Fprintf(&b, "- Wall: %s, CPU: %s, processes: %d\n", round(m.Cost.Wall), round(m.Cost.CPU), m.Cost.Processes)
+	for _, p := range m.Cost.Phases {
+		fmt.Fprintf(&b, "- %s: %s\n", p.Name, round(p.Wall))
+	}
+	if _, err := io.WriteString(w, b.String()); err != nil {
+		return fmt.Errorf("redundancy: write the report: %w", err)
+	}
+	return nil
 }

@@ -127,7 +127,11 @@ func withParents(leaves []string) []string {
 
 func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 	base := filepath.Base(c.Path)
-	f.calls = append(f.calls, base+" "+strings.Join(c.Args, " "))
+	call := base + " " + strings.Join(c.Args, " ")
+	if id := envOf(c.Env, gomut.EnvMutant); id != "" {
+		call += " [mutant " + id + "]"
+	}
+	f.calls = append(f.calls, call)
 	switch {
 	case base == "go" && c.Args[0] == "list" && c.Args[1] == "-m":
 		return Result{Lines: lines("fix")}, nil
