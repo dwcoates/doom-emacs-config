@@ -276,6 +276,73 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	})
 }
 
+// deployHandsOver asks CLIENT for an unforced deploy and fails unless its
+// daemon decision is a handover. Found live on 2026-09-21: the first deploy
+// after a handover was refused as `joining` by a daemon that had finished
+// joining minutes before.
+func deployHandsOver(t *testing.T, ctx context.Context, client interface {
+	Deploy(context.Context, *connect.Request[agentreplv1.DeployRequest]) (*connect.Response[agentreplv1.DeployResponse], error)
+}, who string) {
+	t.Helper()
+	resp, err := client.Deploy(ctx, connect.NewRequest(&agentreplv1.DeployRequest{}))
+	if err != nil {
+		t.Fatalf("Deploy on %s = error %v, want an answer", who, err)
+	}
+	if resp.Msg.GetError().GetJoining() != nil {
+		t.Fatalf("Deploy on %s = %v, want a handover, not joining", who, resp.Msg)
+	}
+	for _, o := range resp.Msg.GetSuccess().GetComponents() {
+		if o.GetComponent() == agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON && o.GetHandingOver() != nil {
+			return
+		}
+	}
+	t.Fatalf("Deploy on %s = %v, want the daemon handing over", who, resp.Msg)
+}
+
+// A SUCCESSOR THAT FINISHED JOINING ACCEPTS THE NEXT DEPLOY. Every daemon a
+// second deploy talks to booted as a successor, so this is every deploy after
+// the first. The staged build stays the stale-daemon one, so the successor,
+// running the same binary the incumbent did, finds itself stale in turn and
+// hands over to a third daemon, which then serves the workspace.
+func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
+	t.Parallel()
+	// Arrange: one completed handover of a headless workspace.
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	daemonStream := d.WatchDaemonStream()
+	d.StageDeployBuild(harness.DeployStaleDaemon)
+	deployHandsOver(t, d.Ctx(), d.Client(), "the first incumbent")
+	first := harness.AwaitView(t, d.Ctx(), daemonStream, "the first shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced().GetAddress()
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the first incumbent's exit code = %d, want an orderly 0", code)
+	}
+	drainAwaitAddrFileChange(t, d, first)
+	handover := d.AwaitRunLogRecordFromAnyProcess("the first handover naming its successor", func(r harness.LogRecord) bool {
+		return r.PID == d.PID() && r.Operation == "daemon.rollout.handover" && r.Context["successor_pid"] != nil
+	})
+	d.StateServiceBuilds(int(handover.Context["successor_pid"].(float64)))
+	successor := drainDial(first)
+	announcements := d.WatchDaemonStreamOn(successor)
+
+	// Act
+	deployHandsOver(t, d.Ctx(), successor, "the successor")
+
+	// Assert: a THIRD daemon is announced, and it serves the workspace.
+	second := harness.AwaitView(t, d.Ctx(), announcements, "the successor's shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced().GetAddress()
+	if second == first {
+		t.Fatalf("the second handover announced %q, the successor's own address", second)
+	}
+	drainAwaitAddrFileChange(t, d, second)
+	if _, err := drainDial(second).SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("SelectWorkspace on the third daemon = error %v, want the workspace served", err)
+	}
+}
+
 // ---- a failed deploy: the deploy_failed fault on the footer -----------------
 
 // footerFault answers the transient fault line on an idle strip, nil when none
