@@ -19,7 +19,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
+import type { FeedId, FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { FeedHeld } from "../../frontend/v1/feed_held_pb";
 import { file_frontend_v1_feed_held } from "../../frontend/v1/feed_held_pb";
@@ -31,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ihQIKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBAUIMCgpfc2VsZWN0aW9uQhIKEF9mZWVkX3RleHRfc2NhbGVCBwoFX2hlbGQiXgoTV2F0Y2hGZWVkSGVsZENoYW5nZRIjCgRoZWxkGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZEhlbGQSIgoEcm93cxgCIAMoCzIULmZyb250ZW5kLnYxLkZlZWRSb3dCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_agentrepl_v1_feed_token]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ihQIKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBAUIMCgpfc2VsZWN0aW9uQhIKEF9mZWVkX3RleHRfc2NhbGVCBwoFX2hlbGQijgEKE1dhdGNoRmVlZEhlbGRDaGFuZ2USIwoEaGVsZBgBIAEoCzIVLmZyb250ZW5kLnYxLkZlZWRIZWxkEiIKBHJvd3MYAiADKAsyFC5mcm9udGVuZC52MS5GZWVkUm93Ei4KBWZvbGRzGAMgAygLMh8uYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRGb2xkIlsKEVdhdGNoRmVlZEhlbGRGb2xkEiMKBmZvbGRlZBgBIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBIhCgRpbnRvGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_agentrepl_v1_feed_token]);
 
 /**
  * Opens the tail of the ONE feed the token names.
@@ -148,6 +148,23 @@ export type WatchFeedHeldChange = Message<"agentrepl.v1.WatchFeedHeldChange"> & 
    * @generated from field: repeated frontend.v1.FeedRow rows = 2;
    */
   rows: FeedRow[];
+
+  /**
+   * THE FOLDS THIS CHANGE MADE: every held prompt that left the section in
+   * this change because it was folded into the entry ahead of it, whether the
+   * user folded it (FoldHeldPrompt) or the classifier coalesced it. Empty
+   * when no prompt was folded.
+   *
+   * A CHANGE, NOT A STATE, so it rides only here and never on OpenFeed's
+   * section: a reader that opens after the fold sees the merged entry and
+   * nothing to animate. A client flashes the entry folded into once, and,
+   * when it was drawing the folded prompt's card, shows that card for a
+   * moment with a "folding above" badge before taking it down. A folded
+   * prompt a client never drew is not drawn now.
+   *
+   * @generated from field: repeated agentrepl.v1.WatchFeedHeldFold folds = 3;
+   */
+  folds: WatchFeedHeldFold[];
 };
 
 /**
@@ -156,4 +173,35 @@ export type WatchFeedHeldChange = Message<"agentrepl.v1.WatchFeedHeldChange"> & 
  */
 export const WatchFeedHeldChangeSchema: GenMessage<WatchFeedHeldChange> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_feed, 2);
+
+/**
+ * One held prompt folded into the held entry directly ahead of it.
+ *
+ * @generated from message agentrepl.v1.WatchFeedHeldFold
+ */
+export type WatchFeedHeldFold = Message<"agentrepl.v1.WatchFeedHeldFold"> & {
+  /**
+   * The folded prompt's held item id (FeedHeldItem.id), absent from `held`
+   * in the same change. REQUIRED.
+   *
+   * @generated from field: frontend.v1.FeedId folded = 1;
+   */
+  folded?: FeedId | undefined;
+
+  /**
+   * The held item id of the entry it was folded into, which now carries both
+   * prompts' content. REQUIRED. Not always drawn: an entry of an origin the
+   * section draws no card for takes a fold all the same.
+   *
+   * @generated from field: frontend.v1.FeedId into = 2;
+   */
+  into?: FeedId | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.WatchFeedHeldFold.
+ * Use `create(WatchFeedHeldFoldSchema)` to create a new message.
+ */
+export const WatchFeedHeldFoldSchema: GenMessage<WatchFeedHeldFold> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_feed, 3);
 

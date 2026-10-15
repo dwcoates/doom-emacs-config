@@ -80,4 +80,27 @@ message WatchFeedHeldChange {
   // delivery found no session). These rows ride ONLY here, never also as
   // `row` frames. Empty when the change only reshaped the section.
   repeated frontend.v1.FeedRow rows = 2;
+  // THE FOLDS THIS CHANGE MADE: every held prompt that left the section in
+  // this change because it was folded into the entry ahead of it, whether the
+  // user folded it (FoldHeldPrompt) or the classifier coalesced it. Empty
+  // when no prompt was folded.
+  //
+  // A CHANGE, NOT A STATE, so it rides only here and never on OpenFeed's
+  // section: a reader that opens after the fold sees the merged entry and
+  // nothing to animate. A client flashes the entry folded into once, and,
+  // when it was drawing the folded prompt's card, shows that card for a
+  // moment with a "folding above" badge before taking it down. A folded
+  // prompt a client never drew is not drawn now.
+  repeated WatchFeedHeldFold folds = 3;
+}
+
+// One held prompt folded into the held entry directly ahead of it.
+message WatchFeedHeldFold {
+  // The folded prompt's held item id (FeedHeldItem.id), absent from `held`
+  // in the same change. REQUIRED.
+  frontend.v1.FeedId folded = 1;
+  // The held item id of the entry it was folded into, which now carries both
+  // prompts' content. REQUIRED. Not always drawn: an entry of an origin the
+  // section draws no card for takes a fold all the same.
+  frontend.v1.FeedId into = 2;
 }
