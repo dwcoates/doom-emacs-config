@@ -1,4 +1,4 @@
-package e2e
+package sandboxscripts
 
 import (
 	"io/fs"
@@ -55,8 +55,8 @@ func TestEveryLocalGoReplaceIsStagedInTheSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	module := filepath.Dir(wd)
-	staged := stageEntries(t, filepath.Join(wd, "sandbox", "bin", "e2e-sandbox.sh"))
+	module := filepath.Dir(filepath.Dir(wd))
+	staged := stageEntries(t, filepath.Join(wd, "..", "sandbox", "bin", "e2e-sandbox.sh"))
 
 	// Act: resolve every local replace target of every go.mod in the module.
 	var unstaged []string
