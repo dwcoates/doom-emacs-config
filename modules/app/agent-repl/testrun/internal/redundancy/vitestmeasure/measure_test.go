@@ -24,6 +24,13 @@ type fakeNpx struct {
 	failRun bool
 	report  string
 	calls   []string
+	// dirty is git status's answer on its nth call (0 before Stryker, 1
+	// after); gitFail fails it.
+	dirty   []string
+	gitFail bool
+	gits    int
+	// strykerEnv is the env Stryker ran with.
+	strykerEnv []string
 }
 
 func (f *fakeNpx) exec(_ context.Context, c proc.Cmd) (proc.Result, error) {
@@ -47,7 +54,18 @@ func (f *fakeNpx) exec(_ context.Context, c proc.Cmd) (proc.Result, error) {
 			b.Write(append(line, '\n'))
 		}
 		return proc.Result{}, os.WriteFile(path, b.Bytes(), 0o644)
+	case c.Path == "git":
+		n := f.gits
+		f.gits++
+		if f.gitFail {
+			return proc.Result{Exit: 128, Lines: []proc.Line{{Text: "fatal: not a git repository"}}}, nil
+		}
+		if n < len(f.dirty) && f.dirty[n] != "" {
+			return proc.Result{Lines: []proc.Line{{Text: f.dirty[n]}}}, nil
+		}
+		return proc.Result{}, nil
 	case c.Path == "npx" && c.Args[0] == "stryker":
+		f.strykerEnv = c.Env
 		var cfg struct {
 			JSONReporter struct {
 				FileName string `json:"fileName"`
@@ -213,5 +231,202 @@ func TestTheTraceConfigAddsTheTracerToThePackagesOwn(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("the trace config lacks %q:\n%s", want, b)
 		}
+	}
+}
+
+func TestStrykerMutatesThePackageInPlace(t *testing.T) {
+	// Arrange
+	cfg, f := fakePackage(t)
+
+	// Act
+	if _, err := Measure(context.Background(), cfg, f.exec, quiet()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	b, err := os.ReadFile(filepath.Join(cfg.Scratch, "stryker.config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		InPlace bool `json:"inPlace"`
+	}
+	if err := json.Unmarshal(b, &c); err != nil || !c.InPlace {
+		t.Fatalf("config %s: want inPlace (err %v)", b, err)
+	}
+	if f.gits != 2 {
+		t.Fatalf("%d clean-tree checks, want one each side of Stryker", f.gits)
+	}
+}
+
+func TestMeasureRefusesATreeThatIsNotClean(t *testing.T) {
+	tests := []struct {
+		name    string
+		dirty   []string
+		gitFail bool
+		want    string
+		stryker bool
+	}{
+		{name: "an edit before Stryker", dirty: []string{" M src/a.ts"}, want: "has tracked changes before Stryker", stryker: false},
+		{name: "a mutant left after Stryker", dirty: []string{"", " M src/a.ts"}, want: "has tracked changes after Stryker", stryker: true},
+		{name: "git status failing", gitFail: true, want: "git status in", stryker: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			cfg, f := fakePackage(t)
+			f.dirty, f.gitFail = tt.dirty, tt.gitFail
+
+			// Act
+			_, err := Measure(context.Background(), cfg, f.exec, quiet())
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), cfg.Package) {
+				t.Fatalf("err = %v, want %q naming the package", err, tt.want)
+			}
+			ran := false
+			for _, c := range f.calls {
+				ran = ran || strings.HasPrefix(c, "npx stryker")
+			}
+			if ran != tt.stryker {
+				t.Fatalf("Stryker ran: %t, want %t", ran, tt.stryker)
+			}
+		})
+	}
+}
+
+func TestWrapConfigMergesTheTestOverThePackagesOwnConfig(t *testing.T) {
+	// Arrange
+	cfg, _ := fakePackage(t)
+	m := &measurer{cfg: cfg}
+	dir := t.TempDir()
+
+	// Act
+	path, err := m.wrapConfig(dir, "x.config.mjs", `{ isolate: true }`)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`import { mergeConfig } from "` + filepath.Join(cfg.Package, "node_modules", "vitest", "dist", "config.js") + `"`,
+		`import base from "` + filepath.Join(cfg.Package, "vitest.config.ts") + `"`,
+		`root: "` + cfg.Package + `"`,
+		`test: { isolate: true }`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("config lacks %s:\n%s", want, b)
+		}
+	}
+}
+
+func TestWrapConfigRefusesAPackageWithNoVitest(t *testing.T) {
+	// Arrange
+	cfg, _ := fakePackage(t)
+	if err := os.RemoveAll(filepath.Join(cfg.Package, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	m := &measurer{cfg: cfg}
+
+	// Act
+	_, err := m.wrapConfig(t.TempDir(), "x.config.mjs", `{}`)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "has no vitest installed") {
+		t.Fatalf("err = %v, want the missing vitest named", err)
+	}
+}
+
+func TestMeasurePinsAndSkipsATestThatReadsAMutatedSource(t *testing.T) {
+	tests := []struct {
+		name    string
+		read    string
+		pins    []string
+		pinned  string
+		skipped bool
+	}{
+		{name: "a mutated source", read: "src/a.ts", pinned: "reads src/a.ts, a source Stryker mutates in place: its kills are of text, not behavior", skipped: true},
+		{name: "a source the globs exclude", read: "src/fake/sdk.ts"},
+		{name: "a file outside the package", read: "../proto/vocab/x.json"},
+		{name: "a mutated source named with -pin", read: "src/a.ts", pins: []string{"test/a.test.ts:a > adds"}, pinned: "named with -pin", skipped: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			cfg, f := fakePackage(t)
+			cfg.Mutate = []string{"src/**/*.ts", "!src/fake/**"}
+			cfg.Skip = "/m/testrun/vitest/redundancy-skip.mjs"
+			cfg.Pins = tt.pins
+			f.traced[0].Read = []string{filepath.Join(cfg.Package, tt.read)}
+
+			// Act
+			m, err := Measure(context.Background(), cfg, f.exec, quiet())
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			pinned := map[string]string{}
+			for _, c := range m.Cases {
+				pinned[c.ID] = c.Pinned
+			}
+			if pinned["test/a.test.ts:a > adds"] != tt.pinned || pinned["test/a.test.ts:a > compares"] != "" {
+				t.Fatalf("pins = %v, want %q on a > adds alone", pinned, tt.pinned)
+			}
+			b, err := os.ReadFile(filepath.Join(cfg.Scratch, "skip.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var skips []skipped
+			if err := json.Unmarshal(b, &skips); err != nil {
+				t.Fatal(err)
+			}
+			want := []skipped{}
+			if tt.skipped {
+				want = []skipped{{File: f.traced[0].File, Name: "a > adds"}}
+			}
+			if !reflect.DeepEqual(skips, want) {
+				t.Fatalf("skip list = %+v, want %+v", skips, want)
+			}
+		})
+	}
+}
+
+func TestStrykerRunsThroughTheSkipSetupFile(t *testing.T) {
+	// Arrange
+	cfg, f := fakePackage(t)
+	cfg.Skip = "/m/testrun/vitest/redundancy-skip.mjs"
+
+	// Act
+	if _, err := Measure(context.Background(), cfg, f.exec, quiet()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	b, err := os.ReadFile(filepath.Join(cfg.Scratch, "stryker.config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		Vitest struct {
+			ConfigFile string `json:"configFile"`
+		} `json:"vitest"`
+	}
+	if err := json.Unmarshal(b, &c); err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := os.ReadFile(c.Vitest.ConfigFile)
+	if err != nil {
+		t.Fatalf("Stryker's vitest config %q: %v", c.Vitest.ConfigFile, err)
+	}
+	if !strings.Contains(string(wrapped), `setupFiles: ["/m/testrun/vitest/redundancy-skip.mjs"]`) {
+		t.Fatalf("Stryker's vitest config adds no skip setup file:\n%s", wrapped)
+	}
+	if len(f.strykerEnv) == 0 || f.strykerEnv[0] != SkipEnv+"="+filepath.Join(cfg.Scratch, "skip.json") {
+		t.Fatalf("Stryker's env = %v, want the skip list named", f.strykerEnv)
 	}
 }

@@ -372,9 +372,20 @@ it. Never delete a test on a judgement of overlap alone.
 - Mutants are a SCHEMA (`internal/redundancy/gomut`): every mutant is
   compiled into one binary behind `AGENT_REPL_MUTANT`, applied through `go
   -overlay`, so no source file is ever written.
-- What stays regardless: a case that asserts a canonical log record (its
-  body or a helper it calls uses `-pin-calls`, default `FindRecord,Records`),
-  and any case named with `-pin`.
+- `bin/background.sh testrun redundancy vitest -package agent-shim/claude/shim -mutate 'src/**/*.ts,!src/fake/**' -out DIR`
+  is the same measurement for a vitest package. It traces each test's
+  istanbul statements (`testrun/vitest/redundancy-trace.mjs`) and joins them
+  with Stryker's per-test kills.
+  - Stryker MUTATES THE PACKAGE'S SOURCES IN PLACE, because its sandbox copy
+    breaks every import out of the package. Run it only in a worktree
+    nothing else edits or builds from. It refuses a package whose tracked
+    files differ from `HEAD`, both before Stryker and after it.
+- What stays regardless:
+  - a Go case that asserts a canonical log record (its body or a helper it
+    calls uses `-pin-calls`, default `FindRecord,Records`);
+  - a vitest case that reads a source Stryker mutates, since it would read
+    the mutant switches (Stryker's runs skip it);
+  - any case named with `-pin`.
 - A kill by hang counts only when it reproduces at `-hang-bound` (11s): a
   mutant that merely slows a case is no kill, and a false kill would make
   other cases look dominated.

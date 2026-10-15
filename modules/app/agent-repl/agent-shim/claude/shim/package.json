@@ -34,6 +34,8 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-istanbul": "2.1.9",
     "c8": "10.1.3",

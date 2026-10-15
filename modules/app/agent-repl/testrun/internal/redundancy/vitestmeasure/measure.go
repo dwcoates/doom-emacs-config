@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,10 +31,17 @@ const (
 	// it is reported, and the bound is resized from what the first real run
 	// measures.
 	StrykerTimeout = 6 * time.Hour
+	// GitTimeout bounds the clean-tree check: twice its measured 10ms in
+	// either package, plus the 500ms a process start can take under load.
+	GitTimeout = 520 * time.Millisecond
 )
 
-// TraceEnv names the file redundancy-trace.mjs appends to.
-const TraceEnv = "AGENT_REPL_REDUNDANCY_TRACE"
+// TraceEnv names the file redundancy-trace.mjs appends to; SkipEnv the
+// list redundancy-skip.mjs reads.
+const (
+	TraceEnv = "AGENT_REPL_REDUNDANCY_TRACE"
+	SkipEnv  = "AGENT_REPL_REDUNDANCY_SKIP"
+)
 
 // Config is one vitest measurement.
 type Config struct {
@@ -51,8 +59,10 @@ type Config struct {
 	Delete []string
 	// Pins are tests kept whatever they cover.
 	Pins []string
-	// Trace is testrun/vitest/redundancy-trace.mjs.
+	// Trace is testrun/vitest/redundancy-trace.mjs; Skip its
+	// redundancy-skip.mjs beside it.
 	Trace   string
+	Skip    string
 	Scratch string
 	Gate    proc.Gate
 }
@@ -64,6 +74,13 @@ type tracedTest struct {
 	State string   `json:"state"`
 	MS    float64  `json:"ms"`
 	Hit   []string `json:"hit"`
+	Read  []string `json:"read"`
+}
+
+// skipped is one test Stryker's runs skip (redundancy-skip.mjs).
+type skipped struct {
+	File string `json:"file"`
+	Name string `json:"name"`
 }
 
 type measurer struct {
@@ -71,6 +88,8 @@ type measurer struct {
 	counter *proc.Counter
 	log     *run.Log
 	cost    redundancy.Cost
+	// skips are the tests that read a source Stryker mutates.
+	skips []skipped
 }
 
 // run runs one process, counted, ending at an interrupt (proc.Counter).
@@ -156,6 +175,19 @@ func Measure(ctx context.Context, cfg Config, exec proc.Exec, log *run.Log) (*re
 // with the trace setup file added, istanbul coverage on, isolated, and one
 // worker, so no two tests' counters interleave.
 func (m *measurer) traceConfig(dir string) (string, error) {
+	return m.wrapConfig(dir, "trace.config.mjs", fmt.Sprintf(`{
+    setupFiles: [%q],
+    isolate: true,
+    maxWorkers: 1,
+    minWorkers: 1,
+    coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: %q },
+  }`, m.cfg.Trace, filepath.Join(dir, "coverage")))
+}
+
+// wrapConfig writes dir/name, a vitest config that is the package's own with
+// test merged over it (vite's mergeConfig: arrays such as setupFiles append),
+// rooted at the package, and answers its path.
+func (m *measurer) wrapConfig(dir, name, test string) (string, error) {
 	pkg := m.cfg.Package
 	vitestConfig := filepath.Join(pkg, "node_modules", "vitest", "dist", "config.js")
 	if _, err := os.Stat(vitestConfig); err != nil {
@@ -166,16 +198,10 @@ import { mergeConfig } from %q;
 import base from %q;
 export default mergeConfig(base, {
   root: %q,
-  test: {
-    setupFiles: [%q],
-    isolate: true,
-    maxWorkers: 1,
-    minWorkers: 1,
-    coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: %q },
-  },
+  test: %s,
 });
-`, vitestConfig, filepath.Join(pkg, m.cfg.ConfigFile), pkg, m.cfg.Trace, filepath.Join(dir, "coverage"))
-	path := filepath.Join(dir, "trace.config.mjs")
+`, vitestConfig, filepath.Join(pkg, m.cfg.ConfigFile), pkg, test)
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		return "", fmt.Errorf("vitestmeasure: write %s: %w", path, err)
 	}
@@ -189,6 +215,13 @@ func (m *measurer) trace(ctx context.Context) ([]redundancy.Case, map[string]int
 	type acc struct {
 		hit map[string]bool
 		ms  []float64
+		// reads is the first source Stryker mutates the test read.
+		reads string
+		test  skipped
+	}
+	mutated, err := newMutateMatcher(m.cfg.Mutate)
+	if err != nil {
+		return nil, nil, err
 	}
 	byID := map[string]*acc{}
 	var order []string
@@ -233,6 +266,14 @@ func (m *measurer) trace(ctx context.Context) ([]redundancy.Case, map[string]int
 				order = append(order, id)
 			}
 			a.ms = append(a.ms, t.MS)
+			reads := slices.Clone(t.Read)
+			sort.Strings(reads)
+			for _, r := range reads {
+				rel, err := filepath.Rel(m.cfg.Package, r)
+				if a.reads == "" && err == nil && !strings.HasPrefix(rel, "..") && mutated.match(rel) {
+					a.reads, a.test = rel, skipped{File: t.File, Name: t.Name}
+				}
+			}
 			for _, h := range t.Hit {
 				src, sid, ok := strings.Cut(h, ":")
 				if !ok {
@@ -260,6 +301,12 @@ func (m *measurer) trace(ctx context.Context) ([]redundancy.Case, map[string]int
 		for _, p := range m.cfg.Pins {
 			if id == p || strings.HasPrefix(id, p+" > ") {
 				c.Pinned = "named with -pin"
+			}
+		}
+		if a.reads != "" {
+			m.skips = append(m.skips, a.test)
+			if c.Pinned == "" {
+				c.Pinned = "reads " + a.reads + ", a source Stryker mutates in place: its kills are of text, not behavior"
 			}
 		}
 		cases = append(cases, c)
@@ -301,21 +348,26 @@ func durationsMS(ms []float64) []time.Duration {
 
 // strykerConfig is the Stryker config the measurement runs: perTest
 // coverage and bail disabled, so every killer of every mutant is named.
-func (m *measurer) strykerConfig(report string) (string, error) {
+func (m *measurer) strykerConfig(report, vitestConfig string) (string, error) {
 	c := map[string]any{
 		"testRunner":       "vitest",
 		"plugins":          []string{"@stryker-mutator/vitest-runner"},
-		"vitest":           map[string]any{"configFile": m.cfg.ConfigFile},
+		"vitest":           map[string]any{"configFile": vitestConfig},
 		"coverageAnalysis": "perTest",
 		"disableBail":      true,
 		"mutate":           m.cfg.Mutate,
 		"reporters":        []string{"json"},
 		"jsonReporter":     map[string]any{"fileName": report},
 		"concurrency":      1,
-		"cleanTempDir":     true,
-		"tempDirName":      ".stryker-tmp",
-		"thresholds":       map[string]any{"break": nil},
-		"ignoreStatic":     false,
+		// IN PLACE: a sandbox copy breaks every import out of the package
+		// (vitest.config.ts's ../../../bin/require-background.mjs), so Stryker
+		// mutates the package's own sources and restores them; the clean-tree
+		// check on both sides of the run makes a leftover mutant loud.
+		"inPlace":      true,
+		"cleanTempDir": true,
+		"tempDirName":  ".stryker-tmp",
+		"thresholds":   map[string]any{"break": nil},
+		"ignoreStatic": false,
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -328,24 +380,63 @@ func (m *measurer) strykerConfig(report string) (string, error) {
 	return path, nil
 }
 
+// cleanTree refuses a package whose tracked files differ from HEAD, when
+// Stryker mutates it in place: before the run, the mutants would be laid
+// over an edit (or a killed run's leftover mutant); after it, Stryker left a
+// mutant in the sources.
+func (m *measurer) cleanTree(ctx context.Context, when string) error {
+	res, err := m.run(ctx, proc.Cmd{Dir: m.cfg.Package, Path: "git", Args: []string{"status", "--porcelain", "--untracked-files=no", "--", "."}, Timeout: GitTimeout})
+	if err != nil {
+		return err
+	}
+	if res.Exit != 0 || res.TimedOut {
+		return fmt.Errorf("vitestmeasure: git status in %s failed (exit %d, timed out %t):\n%s", m.cfg.Package, res.Exit, res.TimedOut, res.Text())
+	}
+	if dirty := strings.TrimSpace(res.Text()); dirty != "" {
+		return fmt.Errorf("vitestmeasure: %s has tracked changes %s Stryker mutates it in place; run in a worktree nothing else edits:\n%s", m.cfg.Package, when, dirty)
+	}
+	return nil
+}
+
 // stryker runs Stryker and reads its report.
 func (m *measurer) stryker(ctx context.Context) (*Matrix, error) {
 	if err := m.cfg.Gate.AwaitQuiet(ctx, "Stryker"); err != nil {
 		return nil, fmt.Errorf("vitestmeasure: %w", err)
 	}
 	report := filepath.Join(m.cfg.Scratch, "mutation.json")
-	cfgPath, err := m.strykerConfig(report)
+	skipList := filepath.Join(m.cfg.Scratch, "skip.json")
+	b, err := json.Marshal(append([]skipped{}, m.skips...))
+	if err != nil {
+		return nil, fmt.Errorf("vitestmeasure: encode the skip list: %w", err)
+	}
+	if err := os.WriteFile(skipList, b, 0o644); err != nil {
+		return nil, fmt.Errorf("vitestmeasure: write %s: %w", skipList, err)
+	}
+	if len(m.skips) > 0 {
+		m.log.Infof("redundancy: %d tests read a source Stryker mutates; Stryker skips them and they are pinned", len(m.skips))
+	}
+	vitestConfig, err := m.wrapConfig(m.cfg.Scratch, "stryker.vitest.config.mjs", fmt.Sprintf(`{ setupFiles: [%q] }`, m.cfg.Skip))
 	if err != nil {
 		return nil, err
 	}
-	res, err := m.run(ctx, proc.Cmd{Dir: m.cfg.Package, Path: "npx", Args: []string{"stryker", "run", cfgPath}, Timeout: StrykerTimeout})
+	cfgPath, err := m.strykerConfig(report, vitestConfig)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.cleanTree(ctx, "before"); err != nil {
+		return nil, err
+	}
+	res, err := m.run(ctx, proc.Cmd{Dir: m.cfg.Package, Path: "npx", Args: []string{"stryker", "run", cfgPath}, Env: []string{SkipEnv + "=" + skipList}, Timeout: StrykerTimeout})
+	if err != nil {
+		return nil, err
+	}
+	if err := m.cleanTree(ctx, "after"); err != nil {
 		return nil, err
 	}
 	if res.Exit != 0 || res.TimedOut {
 		return nil, fmt.Errorf("vitestmeasure: Stryker failed (exit %d, timed out %t):\n%s", res.Exit, res.TimedOut, res.Text())
 	}
-	b, err := os.ReadFile(report)
+	b, err = os.ReadFile(report)
 	if err != nil {
 		return nil, fmt.Errorf("vitestmeasure: read Stryker's report %s: %w", report, err)
 	}
