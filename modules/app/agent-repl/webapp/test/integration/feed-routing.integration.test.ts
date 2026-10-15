@@ -9,6 +9,7 @@
  * nested-content loader is a defect by ruling, and the way to catch it is to
  * compare the two rpc sequences directly.
  */
+import type { GetFeedPageRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
@@ -154,7 +155,7 @@ describe("presentation nesting", () => {
 });
 
 describe("paging", () => {
-  it("asks GetFeedPage for `next`, never for a cursor", async () => {
+  it("asks GetFeedPage for the page above its oldest held row", async () => {
     // Arrange
     harness = await startHarness({
       arrange: (fake) => {
@@ -165,8 +166,10 @@ describe("paging", () => {
     // Act
     await harness.click("[data-load-more]");
     // Assert
-    const [request] = harness.fake.calls<{ page: { case?: string } }>("getFeedPage");
-    expect(request.page.case).toBe("next");
+    const [request] = harness.fake.calls<GetFeedPageRequest>("getFeedPage");
+    expect(request.page.case === "olderThan" ? request.page.value.oldestHeld?.key : undefined).toBe(
+      userPromptRow("newest").order?.key,
+    );
   });
 
   it("prepends the older page above the newest rows", async () => {
@@ -613,14 +616,16 @@ describe("paging a sub-feed", () => {
     expect(request.feed?.value).toBe("bubble");
   });
 
-  it("asks for `next`, never for a cursor", async () => {
+  it("asks for the page above the bubble's oldest held row", async () => {
     // Arrange
     await openPagedBubble();
     // Act
     await harness.click('[data-feed-row="bubble"] [data-subfeed] [data-load-more]');
     // Assert
-    const [request] = harness.fake.calls<{ page: { case?: string } }>("getFeedPage");
-    expect(request.page.case).toBe("next");
+    const [request] = harness.fake.calls<GetFeedPageRequest>("getFeedPage");
+    expect(request.page.case === "olderThan" ? request.page.value.oldestHeld?.key : undefined).toBe(
+      responseRow("success", "newest inner", { id: feedId("inner-new") }).order?.key,
+    );
   });
 
   it("prepends the older rows inside the bubble", async () => {

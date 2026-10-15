@@ -1,4 +1,4 @@
-import { FeedWalkIdSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedRowOrderSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
@@ -39,20 +39,23 @@ describe("buildWatchFeedRequest", () => {
 });
 
 describe("buildGetFeedPageRequest", () => {
+  const OLDEST = create(FeedRowOrderSchema, { key: "k-1" });
+
   it("asks for the newest page as `first`", () => {
-    expect(buildGetFeedPageRequest(WORKSPACE, undefined, "first").page.case).toBe("first");
+    expect(buildGetFeedPageRequest(WORKSPACE, undefined, { case: "first" }).page.case).toBe("first");
   });
 
-  it("continues the daemon's own walk as `next`", () => {
-    expect(buildGetFeedPageRequest(WORKSPACE, undefined, "next").page.case).toBe("next");
+  it("asks for the page above the oldest held row as `older_than`", () => {
+    const ask = buildGetFeedPageRequest(WORKSPACE, undefined, { case: "olderThan", oldestHeld: OLDEST }).page;
+    expect(ask.case === "olderThan" ? ask.value.oldestHeld?.key : undefined).toBe("k-1");
   });
 
-  it("leaves the feed unset for the root feed's walk", () => {
-    expect(buildGetFeedPageRequest(WORKSPACE, undefined, "next").feed).toBeUndefined();
+  it("leaves the feed unset for the root feed", () => {
+    expect(buildGetFeedPageRequest(WORKSPACE, undefined, { case: "first" }).feed).toBeUndefined();
   });
 
-  it("echoes a sub-feed's address on its own walk", () => {
-    expect(buildGetFeedPageRequest(WORKSPACE, feedId("b"), "next").feed?.value).toBe("b");
+  it("echoes a sub-feed's address", () => {
+    expect(buildGetFeedPageRequest(WORKSPACE, feedId("b"), { case: "first" }).feed?.value).toBe("b");
   });
 });
 
@@ -87,18 +90,13 @@ describe("buildLoadFeedThroughRequest", () => {
     expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).target?.value).toBe("r-1");
   });
 
-  it("names the reader's walk when it has one", () => {
-    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1"), create(FeedWalkIdSchema, { value: "w-1" })).walk?.value).toBe("w-1");
+  it("names the reader's oldest held row when it holds one", () => {
+    expect(
+      buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1"), create(FeedRowOrderSchema, { key: "k-1" })).oldestHeld?.key,
+    ).toBe("k-1");
   });
 
-  it("names no walk when the reader has none", () => {
-    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).walk).toBeUndefined();
-  });
-});
-
-describe("buildGetFeedPageRequest's walk", () => {
-  it("names the walk a next continues", () => {
-    const ask = buildGetFeedPageRequest(WORKSPACE, undefined, "next", create(FeedWalkIdSchema, { value: "w-2" })).page;
-    expect(ask.case === "next" ? ask.value.walk?.value : undefined).toBe("w-2");
+  it("names no oldest held row when the reader holds none", () => {
+    expect(buildLoadFeedThroughRequest(WORKSPACE, feedId("r-1")).oldestHeld).toBeUndefined();
   });
 });

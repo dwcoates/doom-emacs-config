@@ -41,7 +41,7 @@ import {
 import type { SelectionVisibility } from "../../src/feed/selection-visibility.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { onDiscard, tickWhileShown } from "../../src/feed/ticking.js";
-import { FIXTURE_WALK,
+import {
   agentPromptRow,
   countingTicker,
   feedId,
@@ -897,7 +897,7 @@ describe("createFeedController: the walk", () => {
     );
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
-    expect(h.calls.getFeedPage[0]?.page.case).toBe("next");
+    expect(h.calls.getFeedPage[0]?.page.case).toBe("olderThan");
   });
 
   it("walks one page older when a turn's earlier-steps fold is activated", async () => {
@@ -922,10 +922,10 @@ describe("createFeedController: the walk", () => {
     await settle();
 
     // Assert
-    expect(h.calls.getFeedPage[0]?.page.case).toBe("next");
+    expect(h.calls.getFeedPage[0]?.page.case).toBe("olderThan");
   });
 
-  it("names the walk the last page with more named", async () => {
+  it("names the oldest row it holds as the row to page above", async () => {
     const h = harness({
       getFeedPage: () =>
         create(GetFeedPageResponseSchema, {
@@ -937,7 +937,19 @@ describe("createFeedController: the walk", () => {
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
     const ask = h.calls.getFeedPage[0]?.page;
-    expect(ask?.case === "next" ? ask.value.walk?.value : undefined).toBe(FIXTURE_WALK);
+    expect(ask?.case === "olderThan" ? ask.value.oldestHeld?.key : undefined).toBe(responseRow("a").order?.key);
+  });
+
+  it("asks for the newest page when it holds no row", async () => {
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, { result: { case: "success", value: page([responseRow("a")]) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([], { hasMore: true }), "replace");
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    expect(h.calls.getFeedPage[0]?.page.case).toBe("first");
   });
 
   it("prepends the older page above what is already drawn", async () => {
@@ -1001,14 +1013,10 @@ describe("createFeedController: the walk", () => {
 // A COMPACTION ON AN OPEN FEED STARTS A NEW WALK AT ITS DIVIDER. The rows above
 // it leave the screen, and "load previous page" pages back into them from the
 // divider (owner ruling, 2026-10-10).
-describe("createFeedController: a live compaction re-anchors the walk", () => {
-  /** A newest page answered with the given edge, walking NEW_WALK when it has more. */
+describe("createFeedController: a live compaction re-reads the edge at its divider", () => {
+  /** A newest page answered with the given edge. */
   function firstPageAnswer(rows: readonly FeedRow[], hasMore: boolean) {
-    const answer = page(rows, { hasMore });
-    if (hasMore && answer.result.case === "success" && answer.result.value.edge.case === "hasMore") {
-      answer.result.value.edge.value.walk = { $typeName: "frontend.v1.FeedWalkId", value: "w-new" };
-    }
-    return create(GetFeedPageResponseSchema, { result: { case: "success", value: answer } });
+    return create(GetFeedPageResponseSchema, { result: { case: "success", value: page(rows, { hasMore }) } });
   }
 
   it("asks for a fresh newest page once the divider is placed", async () => {
@@ -1053,7 +1061,7 @@ describe("createFeedController: a live compaction re-anchors the walk", () => {
     await settle();
     // Assert
     const ask = h.calls.getFeedPage[1]?.page;
-    expect(ask?.case === "next" ? ask.value.walk?.value : undefined).toBe("w-new");
+    expect(ask?.case === "olderThan" ? ask.value.oldestHeld?.key : undefined).toBe(separationRow("cut").order?.key);
   });
 
   it("leaves the rows on screen as they are", async () => {
@@ -1099,12 +1107,13 @@ describe("createFeedController: a live compaction re-anchors the walk", () => {
     // Act: the compaction lands while that ask is still in the queue.
     controller.upsert(separationRow("cut"));
     await settle();
-    // Assert: the old walk's page landed first, and the new walk stands.
-    expect(h.calls.getFeedPage.map((ask) => ask.page.case)).toEqual(["next", "first"]);
+    // Assert: the older page asked first landed first, and the divider is
+    // what the next older page is asked above.
+    expect(h.calls.getFeedPage.map((ask) => ask.page.case)).toEqual(["olderThan", "first"]);
     host.querySelector<HTMLElement>("[data-load-more]")?.click();
     await settle();
     const ask = h.calls.getFeedPage[2]?.page;
-    expect(ask?.case === "next" ? ask.value.walk?.value : undefined).toBe("w-new");
+    expect(ask?.case === "olderThan" ? ask.value.oldestHeld?.key : undefined).toBe(separationRow("cut").order?.key);
   });
 
   it("does not re-anchor at a clear", async () => {

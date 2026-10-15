@@ -257,7 +257,7 @@ export interface FakeDaemon {
   // --- the feed universe --------------------------------------------------
   /** The page OpenFeed answers with, and GetFeedPage `first` returns. */
   setPage(workspace: string, feed: FeedKey, page: FeedPage): void;
-  /** The page GetFeedPage `next` returns; falls back to `setPage` when unset. */
+  /** The page GetFeedPage `older_than` returns; falls back to `setPage` when unset. */
   setNextPage(workspace: string, feed: FeedKey, page: FeedPage): void;
   /** Deliver a row on every live WatchFeed tailing that feed. */
   pushRow(workspace: string, feed: FeedKey, row: FeedRow): void;
@@ -1195,7 +1195,7 @@ export function createFakeDaemon(): FakeDaemon {
         const workspace = request.workspace?.id ?? "";
         const feed: FeedKey = request.feed?.value ?? ROOT_FEED;
         const wanted =
-          request.page.case === "next"
+          request.page.case === "olderThan"
             ? nextPages.get(key(workspace, feed)) ?? pages.get(key(workspace, feed))
             : pages.get(key(workspace, feed));
         const message =

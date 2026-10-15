@@ -16,7 +16,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import type { FeedId, FeedWalkId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedId, FeedRowOrder } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   OpenFeedRequestSchema,
   type OpenFeedRequest,
@@ -27,7 +27,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
   GetFeedPageFirstSchema,
-  GetFeedPageNextSchema,
+  GetFeedPageOlderThanSchema,
   GetFeedPageRequestSchema,
   type GetFeedPageRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
@@ -68,29 +68,31 @@ export function buildWatchFeedRequest(watch: FeedWatchToken): WatchFeedRequest {
   return create(WatchFeedRequestSchema, { watch });
 }
 
-/** Which page of a feed's walk to ask for. */
-export type FeedPageAsk = "first" | "next";
+/**
+ * Which page of a feed to ask for: the newest, or the page above the oldest
+ * row the reader holds, named by that row's order exactly as the daemon
+ * served it.
+ */
+export type FeedPageAsk = { case: "first" } | { case: "olderThan"; oldestHeld: FeedRowOrder };
 
 /**
- * Walk one feed's pages. `first` resets the walk to the newest page; `next`
- * continues older from wherever the daemon's walk for this feed stands.
+ * Ask for one page of a feed: its newest page, or the page of rows sorting
+ * before the reader's oldest held row.
  *
- * NO CURSOR EXISTS ON THE WIRE, so there is nothing for a caller to hold
- * between calls and nothing here to thread through.
+ * THE READER'S OLDEST HELD ROW IS THE POSITION. The daemon keeps no walk, so
+ * whatever this feed freed, repainted or loaded through a jump, the page asked
+ * for is exactly the one above what it holds.
  */
 export function buildGetFeedPageRequest(
   workspace: WorkspaceRef,
   feed: FeedId | undefined,
   ask: FeedPageAsk,
-  walk?: FeedWalkId,
 ): GetFeedPageRequest {
-  // A `next` NAMES ITS WALK (the `has_more.walk` of the page it continues), so
-  // the daemon finds it whichever connection carries the request.
   const request = create(GetFeedPageRequestSchema, feed === undefined ? { workspace } : { workspace, feed });
   request.page =
-    ask === "first"
+    ask.case === "first"
       ? { case: "first", value: create(GetFeedPageFirstSchema) }
-      : { case: "next", value: create(GetFeedPageNextSchema, walk === undefined ? {} : { walk }) };
+      : { case: "olderThan", value: create(GetFeedPageOlderThanSchema, { oldestHeld: ask.oldestHeld }) };
   return request;
 }
 
@@ -133,11 +135,12 @@ export function buildInterruptMergeTabRequest(
 export function buildLoadFeedThroughRequest(
   workspace: WorkspaceRef,
   target: FeedId,
-  walk?: FeedWalkId,
+  oldestHeld?: FeedRowOrder,
 ): LoadFeedThroughRequest {
-  // The reader's own walk, advanced; unnamed, the daemon begins one at the top.
+  // The walk begins above the reader's oldest held row; a reader holding none
+  // names none, and the daemon begins at the newest page.
   return create(
     LoadFeedThroughRequestSchema,
-    walk === undefined ? { workspace, target } : { workspace, target, walk },
+    oldestHeld === undefined ? { workspace, target } : { workspace, target, oldestHeld },
   );
 }
