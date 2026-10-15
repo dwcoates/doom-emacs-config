@@ -435,7 +435,7 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 	// Assert: the queue's own turn-ended handling has run to completion, so
 	// reading the merge queue past this point is race-free rather than a
 	// timing guess — and no merge was ever enqueued.
-	d.AwaitWorkspaceLogOperation(ws.GetDir(), "daemon.promptqueue.turn_ended")
+	d.AwaitWorkspaceLogOperation(ws.GetDir(), harness.OpTurnEnded)
 	evict, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ws}},
 	}))

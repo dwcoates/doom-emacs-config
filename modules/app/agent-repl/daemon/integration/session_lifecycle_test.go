@@ -230,7 +230,7 @@ func TestAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 		f.shim.ExpectStartTurn()
 		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, i+1)
 		pushConcludedTurn(f.shim, mainAgent, fmt.Sprintf("resp-%d", i))
-		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.promptqueue.turn_ended", i+1)
+		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnEnded, i+1)
 	}
 
 	// Assert
@@ -947,7 +947,7 @@ func TestTheHostsVendorConversationIsUnchangedByATurn(t *testing.T) {
 	f.submit("go", "k-vendor-stable", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
 	pushConcludedTurn(f.shim, mainAgent, "resp-1")
-	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.promptqueue.turn_ended", 1)
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnEnded, 1)
 
 	// Assert: a fresh host watch names the same conversation.
 	after := harness.AwaitView(t, f.d.Ctx(), f.d.WatchHost(f.ws), "the host after the turn", named).

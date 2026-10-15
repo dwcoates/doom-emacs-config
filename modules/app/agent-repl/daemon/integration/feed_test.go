@@ -2344,7 +2344,7 @@ func TestAPromptRacingAVendorStartedTurnEndsOnItsOwnTerminalAndHoldsTheNextBehin
 		return r.GetTurnEnded() != nil && r.GetTurn().GetValue() == vendorTurn
 	})
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record that the vendor turn ended while the racing turn runs", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_ended" && r.Level == "info" && r.Context["turn_in_flight"] == racing
+		return r.Operation == harness.OpTurnEnded && r.Level == "info" && r.Context["turn_in_flight"] == racing
 	})
 	startsAfterVendorEnd := f.shim.Count(harness.RPCStartTurn)
 

@@ -55,7 +55,7 @@ func concludeFirstTurn(t *testing.T, f *fixture) {
 	// orphan at WARN (`closed the in-flight turns of a workspace with no
 	// session`).
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the first turn's durable close", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_ended" && r.Message == "stamped the turn's close"
+		return r.Operation == harness.OpTurnEnded && r.Message == "stamped the turn's close"
 	})
 }
 
@@ -193,7 +193,7 @@ func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
 	})
 	// Assert: its durable row is closed, as the agent dying, by the queue.
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the cut turn's agent-died close", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_ended" && r.Context["turn"] == cut && r.Context["close"] == "agent_died"
+		return r.Operation == harness.OpTurnEnded && r.Context["turn"] == cut && r.Context["close"] == "agent_died"
 	})
 	// Assert: the revived session is not drawn as the cut turn thinking: the
 	// cut turn stands as agent-repl's turn_died fault until the next turn
