@@ -126,6 +126,11 @@ type fakeStore struct {
 	writeResult WriteResult
 	writeErr    error
 	writes      []string
+	// writeEntered is closed the first time WriteBatch is called, when non-nil,
+	// and writeRelease, when non-nil, holds that first call until the test
+	// closes it: a batch caught mid-commit.
+	writeEntered chan struct{}
+	writeRelease chan struct{}
 
 	opened  OpenedPage
 	openErr error
@@ -234,7 +239,15 @@ func (f *fakeStore) WriteBatch(_ context.Context, producer string, class WriteCl
 	f.shapesWritten = append(f.shapesWritten, shapes)
 	f.classes = append(f.classes, class)
 	result, err := f.writeResult, f.writeErr
+	entered, release := f.writeEntered, f.writeRelease
+	f.writeEntered, f.writeRelease = nil, nil
 	f.mu.Unlock()
+	if entered != nil {
+		close(entered)
+	}
+	if release != nil {
+		<-release
+	}
 	return result, err
 }
 
@@ -1519,6 +1532,95 @@ func TestWatchDeliversALineWrittenBetweenOpenAndWatchExactlyOnce(t *testing.T) {
 	}
 	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p2" {
 		t.Fatalf("second pointer = %q, want %q (p1 was delivered twice)", got, "p2")
+	}
+}
+
+func TestWatchDropsEveryWriteTheCoalescedReplaySuperseded(t *testing.T) {
+	// Arrange. A line written three times between open and watch replays ONCE,
+	// at its latest write ordinal, while its three writes also reach the live
+	// channel. The two earlier writes are stale, and re-sending them after the
+	// replay would draw the line's latest state and then each older one.
+	store := newFakeStore()
+	store.since = []LineWritten{line("a1", "p1", 3)}
+	store.sinceRelease = make(chan struct{})
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+	for seq := uint64(1); seq <= 3; seq++ {
+		store.mu.Lock()
+		store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p1", seq)}}
+		store.mu.Unlock()
+		writeOne(t, h)
+	}
+	close(store.sinceRelease)
+
+	// Act. A later, distinct line proves nothing sat between the two.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the replayed line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p1" {
+		t.Fatalf("first pointer = %q, want %q", got, "p1")
+	}
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p2", 4)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the next line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p2" {
+		t.Fatalf("second pointer = %q, want %q (a stale write of p1 was re-sent)", got, "p2")
+	}
+}
+
+func TestWriteBatchHoldsTheCommitOrderUntilItsLinesArePublished(t *testing.T) {
+	// Arrange. A batch caught inside its commit.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p1", 1)}}
+	entered, release := make(chan struct{}), make(chan struct{})
+	store.writeEntered, store.writeRelease = entered, release
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := startWatch(h, ctx, token).open(t)
+	written := make(chan error, 1)
+	go func() {
+		_, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+			WriteClass: interactiveClass(),
+			Producer:   "claude-shim:test",
+			Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		}))
+		written <- err
+	}()
+	<-entered
+
+	// Act. Whether a second producer's batch could commit now.
+	free := h.server.commitOrder.TryLock()
+	if free {
+		h.server.commitOrder.Unlock()
+	}
+	close(release)
+
+	// Assert. The commit order is held across the commit, and the held
+	// batch's line is published before it is let go.
+	if free {
+		t.Fatal("the commit order was free while a batch was mid-commit, so a later batch could publish ahead of it")
+	}
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the held batch's line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p1" {
+		t.Fatalf("pointer = %q, want %q", got, "p1")
+	}
+	if err := <-written; err != nil {
+		t.Fatalf("WriteBatch: %v", err)
 	}
 }
 

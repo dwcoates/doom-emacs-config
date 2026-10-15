@@ -41,6 +41,14 @@ type Server struct {
 	bashFan *fanout[BashRowWritten]
 	http    *http.Server
 
+	// commitOrder is held across a batch's commit AND its publish, so watchers
+	// are handed lines in the order the store committed them. Released between
+	// the two, a second producer's batch committed after the first could be
+	// published before it, and a watcher would read a later write ahead of an
+	// earlier one. SQLite already serializes the commits; this extends that
+	// order to the fan-out.
+	commitOrder sync.Mutex
+
 	// done is CLOSED by Shutdown before the HTTP server is drained. Standing
 	// watch streams select on it and return cleanly, which is what lets
 	// http.Server.Shutdown finish: it waits for handlers, and a pure tail would
@@ -247,6 +255,8 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	}
 
 	class := writeClassOf(msg.GetWriteClass())
+	s.commitOrder.Lock()
+	defer s.commitOrder.Unlock()
 	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), class, msg.GetBatch(), msg.GetShapes())
 	if err != nil {
 		// WHAT COMMITTED BEFORE THE FAILURE IS STILL PUBLISHED. A split bulk
@@ -514,6 +524,15 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 	// SUBSCRIBE BEFORE THE REPLAY QUERY. Everything committed from this instant
 	// on reaches the channel, so the replay can only overlap the live stream,
 	// never leave a hole in it; the overlap is removed below by write ordinal.
+	//
+	// THE OVERLAP IS EVERY WRITE AT OR BELOW THE REPLAY'S NEWEST. The replay is
+	// coalesced: a row written three times since the pin is one line, at its
+	// latest write_seq, and its two earlier writes are still sitting in the
+	// channel. Dropping only the write_seqs the replay served re-sent those
+	// earlier writes after it, so a watcher drew a line's latest state and then
+	// each stale one. Write ordinals are assigned in commit order, so a write
+	// of this book at or below the replay's newest was committed before the
+	// replay read, and the replay already carries it or what superseded it.
 	sub := s.fan.subscribe(entry.agentID, hash)
 	defer s.fan.unsubscribe(sub)
 
@@ -522,12 +541,12 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 		ref := s.storeFailure(log, "store.rpc.watch-agent-session", err, logging.Fields{WriteSeq: entry.pinSeq})
 		return connect.NewError(connect.CodeInternal, ref)
 	}
-	replayed := make(map[uint64]struct{}, len(replay))
+	through := entry.pinSeq
 	for _, line := range replay {
 		if err := s.send(log, stream, line); err != nil {
 			return err
 		}
-		replayed[line.WriteSeq] = struct{}{}
+		through = max(through, line.WriteSeq)
 	}
 	// THE HEADERS GO OUT BEFORE THE TAIL BLOCKS. Until they do, the caller's
 	// WatchAgentSession call has not returned, so the producer that would write
@@ -563,9 +582,8 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line at or below the pin")
 				continue
 			}
-			if _, duplicate := replayed[line.WriteSeq]; duplicate {
-				delete(replayed, line.WriteSeq)
-				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line the replay already delivered")
+			if line.WriteSeq <= through {
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a write the replay already delivered or superseded")
 				continue
 			}
 			if err := s.send(log, stream, line); err != nil {

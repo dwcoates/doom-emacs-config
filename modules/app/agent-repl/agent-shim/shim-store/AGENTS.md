@@ -964,11 +964,22 @@ and not something this change touches.
   the register exactly as the open does.
 - The watch pin is the global `write_seq` at the moment the page was read,
   taken INSIDE that read transaction. `WatchAgentSession` then **subscribes to
-  the fan-out BEFORE running the replay query** and dedupes by `write_seq`, so
-  the replay-to-live handoff is gapless and duplicate-free. Upserts of old rows
-  stream at their ORIGINAL pointer. No keep-alive or residue row is ever
-  streamed, and there is no terminal frame: the stream ends only when the
-  client cancels or the store shuts down.
+  the fan-out BEFORE running the replay query**, so the replay-to-live handoff
+  is gapless. Upserts of old rows stream at their ORIGINAL pointer. No
+  keep-alive or residue row is ever streamed, and there is no terminal frame:
+  the stream ends only when the client cancels or the store shuts down.
+- **THE WATCH REPLAY IS COALESCED, SO IT IS SERVED IN FIRST-INSERT ORDER**
+  (`LinesSince`, 2026-10-15). It selects every line whose `write_seq` is past
+  the pin and serves each ONCE, as it now stands, by `position`. By its latest
+  `write_seq` it once served a turn's terminal ahead of the answer row it
+  names, whenever another plane rewrote that row after the terminal landed,
+  and the daemon judged the answer unlanded. The handoff drops every live write
+  AT OR BELOW THE REPLAY'S NEWEST `write_seq`, not only the ordinals the replay
+  served: a line written three times is one replayed line, and its two earlier
+  writes, still in the channel, are stale.
+- **A BATCH'S COMMIT AND ITS PUBLISH HOLD ONE LOCK** (`Server.commitOrder`), so
+  live watchers are handed lines in commit order. Released between the two, a
+  second producer's later batch could publish ahead of the first's.
 - `WatchBashRun` replays every stored row of a run in **FIRST-INSERT order**
   (`position`), then follows live rows, and ENDS after a `success`/`failure` row
   — including when the terminal was already stored, in which case the replay IS
@@ -980,9 +991,9 @@ and not something this change touches.
   re-sent to watchers that already ended, and a fresh replay still serves the
   terminal exactly once. The order is `position` and not `write_seq` because a run's
   rows are a spool being filled in: a redelivered delta upserts its row and must
-  appear where it always was. (`WatchAgentSession` replays by `write_seq` for the
-  opposite reason: a book's upsert is NEW INFORMATION about a line the caller has
-  already read past.) A run the store holds no row for is a refused open at the
+  appear where it always was. (`WatchAgentSession`'s replay is in `position`
+  order too; it SELECTS by `write_seq` because a book's upsert is NEW
+  INFORMATION about a line the caller has already read past.) A run the store holds no row for is a refused open at the
   transport (`CodeNotFound`) — the absence of a row IS the unknown-run signal, so
   no sentinel crosses the db/server contract; an empty run identity is
   `CodeInvalidArgument`, because the caller must fix the request rather than

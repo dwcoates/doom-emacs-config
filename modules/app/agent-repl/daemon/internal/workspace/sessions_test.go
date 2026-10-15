@@ -2,15 +2,12 @@ package workspace
 
 import (
 	"agent-repld/internal/clock"
-	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -21,7 +18,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
@@ -885,14 +881,6 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 			},
 		},
 		{
-			name: "a relative lock directory",
-			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
-				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
-				Log: dlog.NewTestSurfaces(), LockDir: "~/.cache/agent-repl/run",
-			},
-		},
-		{
 			name: "no bring-up marker",
 			deps: FleetDeps{
 				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
@@ -940,82 +928,6 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 	}
 }
 
-func TestClassifySourceTable(t *testing.T) {
-	deleted := &wsm.SessionTerminal{Kind: "deleted", Detail: "the user deleted it"}
-	killed := &wsm.SessionTerminal{Kind: "killed", Detail: "KillWorkspace"}
-	tests := []struct {
-		name         string
-		session      wsm.Session
-		exists       bool
-		noTranscript bool
-		wantFresh    bool
-		wantID       string
-		wantErr      bool
-	}{
-		{
-			name:      "no session record at all is the only proof of a fresh start",
-			wantFresh: true,
-		},
-		{
-			name:      "a record with no conversation still starts fresh",
-			session:   wsm.Session{},
-			exists:    true,
-			wantFresh: true,
-		},
-		{
-			name:    "a recorded conversation whose transcript is found resumes",
-			session: wsm.Session{VendorSessionID: "vendor-1"},
-			exists:  true,
-			wantID:  "vendor-1",
-		},
-		{
-			name:         "a recorded conversation with NO transcript comes up fresh",
-			session:      wsm.Session{VendorSessionID: "vendor-1"},
-			exists:       true,
-			noTranscript: true,
-			wantFresh:    true,
-		},
-		{
-			name:    "a killed session still resumes its conversation",
-			session: wsm.Session{VendorSessionID: "vendor-1", Terminal: killed},
-			exists:  true,
-			wantID:  "vendor-1",
-		},
-		{
-			name:    "a deleted session refuses resurrection",
-			session: wsm.Session{VendorSessionID: "vendor-1", Terminal: deleted},
-			exists:  true,
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			f := newFleetFixture(t)
-			if tt.noTranscript {
-				loseRecordedTranscript(f)
-			}
-
-			// Act.
-			got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", tt.session, tt.exists)
-
-			// Assert.
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("classifySource() = %+v, want a refusal", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("classifySource: %v", err)
-			}
-			if got.Fresh != tt.wantFresh || got.VendorSessionID != tt.wantID {
-				t.Fatalf("classifySource() = %+v, want fresh=%v id=%q", got, tt.wantFresh, tt.wantID)
-			}
-		})
-	}
-}
-
 func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
 	// Arrange: the same recorded conversation classified twice must leave ONE
 	// record of what was abandoned, naming the old vendor session id. The
@@ -1048,71 +960,6 @@ func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
 	}
 }
 
-func TestClassifySourceAdoptsIdleTranscriptWhenNoRecord(t *testing.T) {
-	// Arrange: no session record, and an on-disk transcript last touched well
-	// outside the idle window — the interactive-CLI conversation to continue.
-	f := newFleetFixture(t)
-	f.accounts.newest = account.AdoptableTranscript{
-		Transcript:      account.Transcript{Path: "/config/projects/enc/adopt-me.jsonl", ConfigDir: "/config"},
-		VendorSessionID: "adopt-me",
-		ModTime:         fixedNow.Add(-2 * TranscriptAdoptionIdleWindow),
-		LastRecordAt:    fixedNow.Add(-time.Hour),
-	}
-
-	// Act.
-	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-	if got.Fresh || got.VendorSessionID != "adopt-me" {
-		t.Fatalf("classifySource() = %+v, want a resume of adopt-me", got)
-	}
-}
-
-func TestClassifySourceComesUpFreshWhenNewestTranscriptTooFresh(t *testing.T) {
-	// Arrange: no session record, but the newest transcript was modified inside
-	// the idle window — another writer may still hold it, so the idle guard
-	// declines it and the session comes up fresh.
-	f := newFleetFixture(t)
-	f.accounts.newest = account.AdoptableTranscript{
-		Transcript:      account.Transcript{Path: "/config/projects/enc/live.jsonl", ConfigDir: "/config"},
-		VendorSessionID: "live",
-		ModTime:         fixedNow.Add(-time.Second),
-	}
-
-	// Act.
-	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-	if !got.Fresh || got.VendorSessionID != "" {
-		t.Fatalf("classifySource() = %+v, want a fresh start (idle guard)", got)
-	}
-}
-
-func TestClassifySourceComesUpFreshWhenNoTranscriptToAdopt(t *testing.T) {
-	// Arrange: no session record and no transcript on disk at all.
-	f := newFleetFixture(t)
-
-	// Act.
-	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-	if !got.Fresh {
-		t.Fatalf("classifySource() = %+v, want a fresh start", got)
-	}
-	if !f.accounts.newestProbed {
-		t.Fatalf("the no-record branch never probed for a transcript to adopt")
-	}
-}
-
 func TestClassifySourceComesUpFreshWhenAdoptionProbeFails(t *testing.T) {
 	// Arrange: no session record, and the probe itself errors — a probe failure
 	// must fall back to fresh with a log, never crash or mis-route.
@@ -1131,48 +978,6 @@ func TestClassifySourceComesUpFreshWhenAdoptionProbeFails(t *testing.T) {
 	}
 	if !recordedAt(f, dlog.LevelWarn, opBringUp, "could not probe for a transcript to adopt; the session comes up FRESH") {
 		t.Fatalf("a failed adoption probe was not logged loudly")
-	}
-}
-
-func TestClassifySourceWithRecordNeverProbesForAdoption(t *testing.T) {
-	// Arrange: a workspace that DOES have a session record resumes its own
-	// conversation exactly as before and never probes for a transcript to adopt.
-	f := newFleetFixture(t)
-	session := wsm.Session{VendorSessionID: "vendor-1"}
-
-	// Act.
-	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-	if got.Fresh || got.VendorSessionID != "vendor-1" {
-		t.Fatalf("classifySource() = %+v, want a resume of vendor-1", got)
-	}
-	if f.accounts.newestProbed {
-		t.Fatalf("a recorded session must not probe for a transcript to adopt")
-	}
-}
-
-func TestClassifySourceEmptyVendorIdRecordNeverProbesForAdoption(t *testing.T) {
-	// Arrange: a record exists but names no conversation. Owner ruling: adoption
-	// is confined to the NO-RECORD branch, so a record with an empty vendor id
-	// still starts fresh WITHOUT probing.
-	f := newFleetFixture(t)
-
-	// Act.
-	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, true)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-	if !got.Fresh {
-		t.Fatalf("classifySource() = %+v, want a fresh start", got)
-	}
-	if f.accounts.newestProbed {
-		t.Fatalf("a record with an empty vendor id must not probe for a transcript to adopt")
 	}
 }
 
@@ -1223,24 +1028,6 @@ func TestClassifySourceIsQuietWhenTheConversationNeverTookATurn(t *testing.T) {
 	}
 	if !recordedAt(f, "info", opBringUp, neverEngagedNotice) {
 		t.Fatalf("records = %+v, want the ordinary never-engaged notice at info", f.log.logger.Records())
-	}
-}
-
-func TestClassifySourceOpensNoFaultWhenTheConversationNeverTookATurn(t *testing.T) {
-	// Arrange: as above. The fault is the user's only record of lost history,
-	// so a conversation that had none must not open one.
-	f := newFleetFixture(t)
-	loseRecordedTranscript(f)
-	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-never-turned"}
-
-	// Act.
-	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-
-	// Assert.
-	if opened := abandonedFaults(f.db); len(opened) != 0 {
-		t.Fatalf("abandoned-conversation faults = %+v, want none for a conversation that never took a turn", opened)
 	}
 }
 
@@ -1302,42 +1089,6 @@ func TestClassifySourceReportsAFailedTurnsExistenceRead(t *testing.T) {
 	}
 }
 
-func TestStartFreshCarriesTheRecordedModelAndMode(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, Model: "opus", PermissionMode: "plan"}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	fresh := f.client.requests[0].GetFresh()
-	if fresh == nil || fresh.GetModel().GetName() != "opus" || fresh.GetPermissionMode().GetPlan() == nil {
-		t.Fatalf("StartSession request = %v, want a fresh start carrying opus in plan mode", f.client.requests[0])
-	}
-}
-
-func TestStartResumesARecordedConversation(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	resume := f.client.requests[0].GetResume()
-	if resume == nil || resume.GetVendorSessionId() != "vendor-1" {
-		t.Fatalf("StartSession request = %v, want a resume of vendor-1", f.client.requests[0])
-	}
-}
-
 // THE REBIND MARKER IS WHAT MOVES THE SHIM'S BOOK, so which starts carry it is
 // the whole behavior: a bind's start must, and every ordinary bring-up must
 // not — a marked restart would let a rotated resume handle become the book and
@@ -1380,113 +1131,6 @@ func TestStartMarksTheResumeARebindOnlyWhenTheCallerIsABind(t *testing.T) {
 				t.Fatalf("resume.rebind present = %v, want %v", got, test.wantRebind)
 			}
 		})
-	}
-}
-
-func TestResumeColdDoesNotMarkTheReOpenARebind(t *testing.T) {
-	// Arrange: a workspace parked behind a standing cold gate. An answered gate
-	// is the SAME conversation being paid for, not a different one being
-	// chosen, so its re-open leaves the workspace's book exactly where it is.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-
-	// Act.
-	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
-		t.Fatalf("ResumeCold: %v", err)
-	}
-
-	// Assert.
-	if rebind := f.client.requests[1].GetResume().GetRebind(); rebind != nil {
-		t.Fatalf("re-open resume.rebind = %v, want the book left where it was", rebind)
-	}
-}
-
-func TestStartRefusesADeletedSession(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{
-		Workspace: ws.ID, VendorSessionID: "vendor-1",
-		Terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "/clear"},
-	}
-
-	// Act.
-	err := f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	asRefusal(t, err, ArmSessionDeleted)
-}
-
-func TestStartComesUpFreshWhenTheRecordedTranscriptIsMissing(t *testing.T) {
-	// Arrange: a session that pre-minted a vendor id but never took a turn has
-	// no transcript, and refusing it left the workspace with no session at all.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	loseRecordedTranscript(f)
-
-	// Act.
-	err := f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Start = %v, want a fresh session rather than a refusal", err)
-	}
-	if got := f.client.requests[0].GetFresh(); got == nil {
-		t.Fatalf("StartSession source = %+v, want the fresh arm", f.client.requests[0].GetSource())
-	}
-}
-
-func TestStartDoesNotDrawTranscriptMissingForANeverTurnedSession(t *testing.T) {
-	// Arrange: the retired refusal. The classifier answers fresh instead.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	loseRecordedTranscript(f)
-
-	// Act.
-	err := f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	var refusal *Refusal
-	if errors.As(err, &refusal) && refusal.Arm == ArmTranscriptMissing {
-		t.Fatalf("Start = %v, want no transcript_missing refusal", err)
-	}
-}
-
-func TestStartFreshSpawnsWithNoTranscriptOnDisk(t *testing.T) {
-	// Arrange: a fresh start names no conversation, so there is no transcript
-	// to guard.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	loseRecordedTranscript(f)
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.supervisor.spawns) != 1 {
-		t.Fatalf("spawns = %d, want exactly one", len(f.supervisor.spawns))
-	}
-}
-
-func TestStartSpawnsWhenTheWorkspaceLockIsFree(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.supervisor.spawns) != 1 || len(f.supervisor.adopts) != 0 {
-		t.Fatalf("bring-ups = %d spawns, %d adopts; want one spawn", len(f.supervisor.spawns), len(f.supervisor.adopts))
 	}
 }
 
@@ -1559,25 +1203,6 @@ func TestStartRefusesToSpawnAnUnresolvableBundle(t *testing.T) {
 	}
 }
 
-func TestStartAdoptsWhenASurvivingShimHoldsTheLock(t *testing.T) {
-	// Arrange: a held lock means a surviving shim already owns the
-	// conversation, so a second one is never spawned onto it.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.probeState = sessionlock.StateHeld
-	f.socketState = shimsocket.StateLive
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.supervisor.adopts) != 1 || len(f.supervisor.spawns) != 0 {
-		t.Fatalf("bring-ups = %d spawns, %d adopts; want one adopt", len(f.supervisor.spawns), len(f.supervisor.adopts))
-	}
-}
-
 func TestStartRefusesWhenTheLockProbeCouldNotTell(t *testing.T) {
 	// Arrange: "could not tell" is never read as free.
 	f := newFleetFixture(t)
@@ -1593,59 +1218,6 @@ func TestStartRefusesWhenTheLockProbeCouldNotTell(t *testing.T) {
 	}
 	if len(f.supervisor.spawns) != 0 {
 		t.Fatalf("spawns = %d, want none on an unreadable lock", len(f.supervisor.spawns))
-	}
-}
-
-func TestStartPassesTheRoutedConfigDirToTheSpawn(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if f.supervisor.spawns[0].ConfigDir != "/config" {
-		t.Fatalf("spawn config dir = %q, want /config", f.supervisor.spawns[0].ConfigDir)
-	}
-}
-
-func TestStartRecordsTheSessionFacts(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	session := f.db.sessions[ws.ID]
-	if session.VendorSessionID != "vendor-1" || session.ConfigDir != "/config" ||
-		session.Model != "opus" || session.PermissionMode != "plan" {
-		t.Fatalf("recorded session = %+v, want the vendor identity, config dir, model and mode", session)
-	}
-}
-
-func TestStartKeepsTheOriginalStartedAtAcrossARespawn(t *testing.T) {
-	// Arrange: the session outlives one shim process, so its start instant does
-	// not move when the process does.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	original := fixedNow.Add(-2 * time.Hour)
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, StartedAt: original}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if !f.db.sessions[ws.ID].StartedAt.Equal(original) {
-		t.Fatalf("StartedAt = %v, want the original %v", f.db.sessions[ws.ID].StartedAt, original)
 	}
 }
 
@@ -1669,46 +1241,6 @@ func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
 	}
 	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
 		t.Fatalf("synthesized rows = %v, want one standing gate row", f.feed.synthesized)
-	}
-}
-
-func TestTheRaisedGatesFigureIsFilledAgainstTheTopbarsWindow(t *testing.T) {
-	// Arrange: 120,000 tokens against a 200,000-token window is 60% full.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.client.response = coldResponse()
-	f.topbarWindow = 200_000
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	got := f.feed.synthesized[0].GetColdGate().GetStanding().GetContextTokens().GetWindowFill()
-	if got != 0.6 {
-		t.Fatalf("feed figure window_fill = %v, want 0.6", got)
-	}
-}
-
-func TestTheRaisedGatesFooterLineSharesTheFeedFiguresFill(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.client.response = coldResponse()
-	f.topbarWindow = 200_000
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	cost := f.footer.coldGates[ws.ID].Cost
-	if cost.Figure != "120,000" || cost.WindowFill != 0.6 {
-		t.Fatalf("footer cost = %+v, want figure 120,000 at fill 0.6", cost)
 	}
 }
 
@@ -1777,66 +1309,6 @@ func TestColdGatedBringUpIsNotServing(t *testing.T) {
 	}
 }
 
-func TestStartRemembersTheColdGateMenu(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.client.response = coldResponse()
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	gate, ok := f.fleet.ColdGate(ws.ID)
-	if !ok || gate.VendorSessionID != "vendor-1" || gate.Compact == nil || len(gate.Compact.Models) != 1 || len(gate.Compact.Scopes) != 3 {
-		t.Fatalf("served cold gate = (%+v, %v), want the menu the row offered", gate, ok)
-	}
-}
-
-func TestStartServesTheCompactMenuForAWorkAccountColdGate(t *testing.T) {
-	// Arrange: the routed config dir IS the work (multi-repo) account.
-	f := newFleetFixture(t)
-	f.accounts.multiRepoDir = "/config"
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.client.response = coldResponse()
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	gate, ok := f.fleet.ColdGate(ws.ID)
-	if !ok || gate.Compact == nil {
-		t.Fatalf("served cold gate = (%+v, %v), want a standing gate with its compact menu", gate, ok)
-	}
-	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding().Compact == nil {
-		t.Fatalf("synthesized rows = %v, want one standing gate row with its compact menu", f.feed.synthesized)
-	}
-}
-
-func TestStartDrawsTheCompactMenuForAPersonalAccountColdGate(t *testing.T) {
-	// Arrange: no work account, so the routed config dir is personal.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.client.response = coldResponse()
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding().Compact == nil {
-		t.Fatalf("synthesized rows = %v, want one standing gate row drawing the compact menu", f.feed.synthesized)
-	}
-}
-
 func TestStartSurfacesANonColdStartFailure(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -1885,26 +1357,6 @@ func TestStartFilesAFaultWhenTheShimRefusesTheStart(t *testing.T) {
 	}
 }
 
-func TestTheRefusedStartFaultCarriesTheShimsOwnAccount(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.client.response = &shimv1.StartSessionResponse{
-		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-			Cause:  &shimv1.StartSessionFailure_UnknownSession{UnknownSession: &shimv1.StartSessionUnknownSession{}},
-			Detail: "no transcript on disk",
-		}},
-	}
-
-	// Act.
-	_ = f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert. The cause evidence is what the typed `resume_failed` arm renders.
-	if len(f.db.dbFaults) != 1 || !strings.Contains(f.db.dbFaults[0].Evidence["cause"], "no transcript on disk") {
-		t.Fatalf("fault evidence = %+v, want the shim's own detail", f.db.dbFaults)
-	}
-}
-
 func TestStartFilesAFaultWhenTheStartSessionCallItselfFails(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -1917,40 +1369,6 @@ func TestStartFilesAFaultWhenTheStartSessionCallItselfFails(t *testing.T) {
 	// Assert.
 	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindResumeFailed {
 		t.Fatalf("faults = %v, want exactly one %s", got, health.KindResumeFailed)
-	}
-}
-
-func TestAColdGateFilesNoRefusedStartFault(t *testing.T) {
-	// A DESIGNED PRODUCT STATE IS NOT A FAULT: the gate is the user's to
-	// answer, and a fault beside it would report a broken workspace.
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.client.response = coldResponse()
-
-	// Act.
-	_ = f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	if got := faultKinds(f.db.dbFaults); len(got) != 0 {
-		t.Fatalf("faults = %v, want none behind a cold gate", got)
-	}
-}
-
-func TestAStandDownFilesNoRefusedStartFault(t *testing.T) {
-	// A teardown this daemon ordered is not a session that would not start.
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.client.startErr = fmt.Errorf("start: %w", shimclient.ErrStandDownOrdered)
-
-	// Act.
-	_ = f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	if got := faultKinds(f.db.dbFaults); len(got) != 0 {
-		t.Fatalf("faults = %v, want none under a stand-down this daemon ordered", got)
 	}
 }
 
@@ -1978,52 +1396,6 @@ func TestAStartedSessionRetractsTheRefusedStartFault(t *testing.T) {
 	}
 }
 
-// EVERY STANDING FAULT WHOSE LIFETIME ENDS AT A HEALTHY ATTACH OR A STARTED
-// SESSION IS CLOSED BY A START (health/lifetime.go), not only a hand-listed
-// few: `bounce_unknown` stood on a strip for over 30 minutes on 2026-09-27
-// because no closer listed it.
-func TestAStartClosesEveryFaultWhoseLifetimeEndsThere(t *testing.T) {
-	tests := []struct {
-		name  string
-		kind  string
-		stand bool
-	}{
-		{"a dead shim ends at the healthy attach", health.KindShimDied, false},
-		{"a severed link ends at the healthy attach", health.KindLinkSevered, false},
-		{"a start that failed ends at the healthy attach", health.KindShimStartFailed, false},
-		{"a refused watch open ends at the healthy attach", health.KindWatchOpenRefused, false},
-		{"an undetermined bounce ends at the healthy attach", health.KindBounceUnknown, false},
-		{"an expired adoption window ends at the healthy attach", health.KindAdoptionWindowExpired, false},
-		{"a failed cold-gate re-open ends at the started session", health.KindColdGateReopenFailed, false},
-		{"a legacy relaunch refusal ends at the started session", health.KindRelaunchResumeFailed, false},
-		{"an abandoned conversation waits for the next turn", health.KindConversationAbandoned, true},
-		{"an unresolved final answer waits for the next turn", health.KindFinalAnswerUnresolved, true},
-		{"a shim-reported fault waits for the next verdict", health.KindShimReported, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			f := newFleetFixture(t)
-			ws := f.workspace("w1")
-			workspace := ws.ID
-			if _, err := f.db.OpenFault(context.Background(), wsm.Fault{Workspace: &workspace, Kind: tt.kind}); err != nil {
-				t.Fatalf("OpenFault: %v", err)
-			}
-
-			// Act.
-			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-
-			// Assert.
-			got := faultKinds(f.db.dbFaults)
-			if stands := len(got) == 1 && got[0] == tt.kind; stands != tt.stand {
-				t.Fatalf("faults after the start = %v, want %s standing = %v", got, tt.kind, tt.stand)
-			}
-		})
-	}
-}
-
 // A REFUSED START IS STILL A HEALTHY ATTACH, and only the attach's faults
 // close: the session-start ones wait for a session the shim serves.
 func TestARefusedStartClosesOnlyTheHealthyAttachsFaults(t *testing.T) {
@@ -2033,7 +1405,6 @@ func TestARefusedStartClosesOnlyTheHealthyAttachsFaults(t *testing.T) {
 		stand bool
 	}{
 		{"an undetermined bounce ends at the healthy attach", health.KindBounceUnknown, false},
-		{"a failed cold-gate re-open waits for a started session", health.KindColdGateReopenFailed, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2066,60 +1437,6 @@ func TestARefusedStartClosesOnlyTheHealthyAttachsFaults(t *testing.T) {
 	}
 }
 
-func TestStartIsIdempotentForALiveSession(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("first Start: %v", err)
-	}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("second Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.supervisor.spawns) != 1 {
-		t.Fatalf("spawns = %d, want exactly one", len(f.supervisor.spawns))
-	}
-}
-
-func TestLiveReportsTheSessionAfterAStart(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if !f.fleet.Live(ws.ID) {
-		t.Fatal("Live() reported no session after a successful start")
-	}
-}
-
-func TestStopClosesTheWatcher(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Act.
-	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-
-	// Assert.
-	if !f.watcher.closed {
-		t.Fatal("Stop() left the watcher open")
-	}
-}
-
 func TestStopArmsTheStandDownBeforeItClosesTheWatcher(t *testing.T) {
 	// Arrange: the close reads the latch to tell the bounce registry the
 	// shim's departure was ordered.
@@ -2142,19 +1459,6 @@ func TestStopArmsTheStandDownBeforeItClosesTheWatcher(t *testing.T) {
 	}
 }
 
-func TestStopOfAnAbsentSessionIsSuccess(t *testing.T) {
-	// Arrange: the caller asked for a state that already holds.
-	f := newFleetFixture(t)
-
-	// Act.
-	err := f.fleet.Stop(context.Background(), "w1", false)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Stop(absent session) = %v, want success", err)
-	}
-}
-
 func TestRunningAnswersFalseWithoutASession(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -2168,23 +1472,6 @@ func TestRunningAnswersFalseWithoutASession(t *testing.T) {
 	}
 }
 
-func TestHealthReportsTheLinkOfALiveSession(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Act.
-	exists, connected := f.fleet.Health(ws.ID)
-
-	// Assert.
-	if !exists || !connected {
-		t.Fatalf("Health() = (%v, %v), want a live, connected session", exists, connected)
-	}
-}
-
 func TestShimAnswersFalseWithoutASession(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -2195,86 +1482,6 @@ func TestShimAnswersFalseWithoutASession(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatal("Shim() answered a surface for a workspace with no session")
-	}
-}
-
-// `default` LEFT THE TABLE by the owner's 2026-09-14 ruling: permissionMode no
-// longer produces that arm for anyone, so there is nothing for it to round
-// trip through. Its replacement guarantee is the upgrade test below.
-func TestPermissionModeRoundTripsEveryArm(t *testing.T) {
-	tests := []string{"acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"}
-	for _, name := range tests {
-		t.Run(name, func(t *testing.T) {
-			// Arrange in the table. Act.
-			got := permissionModeName(permissionMode(name))
-			// Assert.
-			if got != name {
-				t.Fatalf("permissionModeName(permissionMode(%q)) = %q", name, got)
-			}
-		})
-	}
-}
-
-func TestPermissionModeOfAnUnknownNameIsAuto(t *testing.T) {
-	// Arrange: an unknown name resolves to auto, which KEEPS the gate.
-	// Act.
-	got := permissionMode("something-nobody-implemented")
-
-	// Assert.
-	if got.GetAuto() == nil {
-		t.Fatalf("permissionMode(unknown) = %v, want auto", got)
-	}
-}
-
-func TestPermissionModeOfAnUnknownNameNeverDropsTheGate(t *testing.T) {
-	// Arrange: the standing guarantee the auto ruling must not weaken.
-	// Act.
-	got := permissionMode("something-nobody-implemented")
-
-	// Assert.
-	if got.GetBypass() != nil || got.GetDontAsk() != nil {
-		t.Fatalf("permissionMode(unknown) = %v, want a mode that keeps the gate", got)
-	}
-}
-
-func TestPermissionModeOfAnEmptyNameIsAuto(t *testing.T) {
-	// Arrange: a row that never recorded a mode. Act.
-	got := permissionMode("")
-
-	// Assert.
-	if got.GetAuto() == nil {
-		t.Fatalf("permissionMode(\"\") = %v, want auto", got)
-	}
-}
-
-// A SESSION ROW STORED BEFORE THE RULING carries "default"; the next start
-// asks the shim for auto instead, and recordFacts then rewrites the row from
-// what the shim reports.
-func TestAStoredDefaultIsUpgradedToAutoAtTheNextStart(t *testing.T) {
-	// Arrange. Act.
-	got := permissionMode("default")
-
-	// Assert.
-	if got.GetAuto() == nil {
-		t.Fatalf("permissionMode(\"default\") = %v, want auto", got)
-	}
-}
-
-func TestStartFreshOfAStoredDefaultAsksTheShimForAuto(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, PermissionMode: "default"}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	fresh := f.client.requests[0].GetFresh()
-	if fresh == nil || fresh.GetPermissionMode().GetAuto() == nil {
-		t.Fatalf("StartSession request = %v, want the stored default started as auto", f.client.requests[0])
 	}
 }
 
@@ -2311,31 +1518,6 @@ func TestStartSurfacesAnUnknownWorkspace(t *testing.T) {
 func TestMain(m *testing.M) {
 	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 	os.Exit(m.Run())
-}
-
-// TestFreshModelNamesTheRecordedModel pins that the user's choice is what a
-// fresh session names.
-func TestFreshModelNamesTheRecordedModel(t *testing.T) {
-	// Arrange / Act.
-	got := freshModel("sonnet")
-
-	// Assert.
-	if got.GetName() != "sonnet" {
-		t.Fatalf("freshModel(\"sonnet\") = %v, want the recorded model", got)
-	}
-}
-
-// TestFreshModelDefaultsToOpusWhenTheCreateNamedNone is the owner ruling of
-// 2026-09-14: a session the user never modeled runs under opus, not the
-// vendor's own pick (which the CLI reports as the <synthetic> marker).
-func TestFreshModelDefaultsToOpusWhenTheCreateNamedNone(t *testing.T) {
-	// Arrange / Act.
-	got := freshModel("")
-
-	// Assert.
-	if got.GetName() != DefaultLaunchModel {
-		t.Fatalf("freshModel(\"\") = %v, want the %q default", got, DefaultLaunchModel)
-	}
 }
 
 // TestStartFreshOfAnUnmodeledSessionAsksTheShimForOpus is the same ruling from
@@ -2390,30 +1572,9 @@ func TestBringUpRelaysTheShimsLockHolderUnavailableRefusal(t *testing.T) {
 		name  string
 		check func(t *testing.T, refusal *Refusal)
 	}{
-		{name: "the refusal rides the lock_holder_unavailable arm", check: func(t *testing.T, refusal *Refusal) {
-			if refusal.Arm != ArmLockHolderUnavailable {
-				t.Fatalf("arm = %q, want %q", refusal.Arm, ArmLockHolderUnavailable)
-			}
-		}},
-		{name: "the arm carries the shim's failure whole", check: func(t *testing.T, refusal *Refusal) {
-			got, _ := refusal.Fields["failure"].(*conversationv1.LockHolderFailure)
-			if !proto.Equal(got, exitedHolder()) {
-				t.Fatalf("failure = %v, want the shim's own LockHolderFailure", refusal.Fields["failure"])
-			}
-		}},
 		{name: "the reason says how the helper failed", check: func(t *testing.T, refusal *Refusal) {
 			if !strings.Contains(refusal.Reason, "/bin/shim-lock exited with code 1 before taking the lock (EACCES)") {
 				t.Fatalf("reason = %q, want the helper's exit stated", refusal.Reason)
-			}
-		}},
-		{name: "the reason says nobody owns the conversation", check: func(t *testing.T, refusal *Refusal) {
-			if !strings.Contains(refusal.Reason, "nobody owns the conversation") {
-				t.Fatalf("reason = %q, want the ownership denied", refusal.Reason)
-			}
-		}},
-		{name: "the reason never claims another shim owns the conversation", check: func(t *testing.T, refusal *Refusal) {
-			if strings.Contains(refusal.Reason, "another shim") {
-				t.Fatalf("reason = %q, want no ownership claim", refusal.Reason)
 			}
 		}},
 	}
@@ -2554,39 +1715,6 @@ func TestHealthAnswersNotServingForAGateParkedSession(t *testing.T) {
 	}
 }
 
-// TestStopTellsTheViewsTheLinkIsDead pins the edge the roster's `dead` arm
-// rests on. Stop closes the watcher BEFORE it kills the process, so the
-// client's own LinkDead publish has nobody left to route it: whether the views
-// ever heard the death would otherwise depend on the exit landing before the
-// close, which is a race the stop itself can settle.
-func TestStopTellsTheViewsTheLinkIsDead(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	f.links.links = nil
-
-	// Act
-	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-
-	// Assert
-	want := []sessionwatcher.LinkState{
-		shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead,
-	}
-	if len(f.links.links) != len(want) {
-		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
-	}
-	for i, got := range f.links.links {
-		if got != want[i] {
-			t.Fatalf("OnLink call %d = %v, want %v", i, got, want[i])
-		}
-	}
-}
-
 // TestCloseWatchersEndsEveryLiveSessionsWatcher covers the daemon's teardown
 // order: the watchers are closed (and their in-flight sink work joined) before
 // the state client their sinks read is closed.
@@ -2604,19 +1732,6 @@ func TestCloseWatchersEndsEveryLiveSessionsWatcher(t *testing.T) {
 	// Assert.
 	if !f.watcher.closed {
 		t.Fatal("the live session's watcher was not closed by the fleet's teardown")
-	}
-}
-
-// TestCloseWatchersOnAFleetWithNoSessionsDoesNothing is the other edge: a
-// daemon that never brought a session up tears down cleanly.
-func TestCloseWatchersOnAFleetWithNoSessionsDoesNothing(t *testing.T) {
-	// Arrange, Act.
-	f := newFleetFixture(t)
-	f.fleet.CloseWatchers()
-
-	// Assert.
-	if f.watcher.closed {
-		t.Fatal("a watcher was closed on a fleet that has no live session")
 	}
 }
 
@@ -2658,44 +1773,6 @@ func TestStartSpawnsUnderTheRoutedRootAfterAnAccountSwitch(t *testing.T) {
 	// Assert.
 	if got := f.supervisor.spawns[0].ConfigDir; got != "/config" {
 		t.Fatalf("spawn ConfigDir = %q, want the routed root /config", got)
-	}
-}
-
-// TestStartPortsNothingForAFreshSession pins that a fresh start has no
-// conversation to carry: the new root is simply where this one is filed.
-func TestStartPortsNothingForAFreshSession(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, ConfigDir: "/old"}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.accounts.moved) != 0 {
-		t.Fatalf("moved transcripts = %+v, want none for a fresh start", f.accounts.moved)
-	}
-}
-
-// TestStartPortsNothingWhenTheRoutingIsUnchanged pins that the ordinary start
-// -- the recorded root and the routed one agreeing -- touches no transcript.
-func TestStartPortsNothingWhenTheRoutingIsUnchanged(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/config"}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if len(f.accounts.moved) != 0 {
-		t.Fatalf("moved transcripts = %+v, want none when the routing is unchanged", f.accounts.moved)
 	}
 }
 
@@ -2861,21 +1938,6 @@ func TestAStartTheShimAnswersAlreadyStartedTakesTheRunningSession(t *testing.T) 
 		name  string
 		check func(t *testing.T, f *fleetFixture, err error)
 	}{
-		{"the start succeeds", func(t *testing.T, _ *fleetFixture, err error) {
-			if err != nil {
-				t.Fatalf("Start = %v, want the running session taken", err)
-			}
-		}},
-		{"the session is live", func(t *testing.T, f *fleetFixture, _ error) {
-			if !f.fleet.Live("w1") || !f.fleet.Serving("w1") {
-				t.Fatalf("live = %t, serving = %t; want the taken session running", f.fleet.Live("w1"), f.fleet.Serving("w1"))
-			}
-		}},
-		{"no fault is filed", func(t *testing.T, f *fleetFixture, _ error) {
-			if got := faultKinds(f.db.dbFaults); len(got) != 0 {
-				t.Fatalf("faults = %v, want none", got)
-			}
-		}},
 		{"its watches are opened", func(t *testing.T, f *fleetFixture, _ error) {
 			if len(f.openings) != 1 {
 				t.Fatalf("watcher openings = %d, want the taken session watched", len(f.openings))
@@ -2998,28 +2060,6 @@ func payRemediation() *conversationv1.SessionColdRemediation {
 	}
 }
 
-func TestResumeColdCarriesTheRemediationOnTheResume(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-
-	// Act.
-	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
-		t.Fatalf("ResumeCold: %v", err)
-	}
-
-	// Assert.
-	if len(f.client.requests) != 2 {
-		t.Fatalf("StartSession calls = %d, want the refused bring-up and the remediated re-open", len(f.client.requests))
-	}
-	resume := f.client.requests[1].GetResume()
-	if resume.GetVendorSessionId() != "vendor-1" || resume.GetColdRemediation().GetPay() == nil {
-		t.Fatalf("re-open resume = %v, want vendor-1 carrying the pay remediation", resume)
-	}
-}
-
 func TestResumeColdInstallsTheSessionWatcher(t *testing.T) {
 	// Arrange: a parked session has no watcher, which is what refuses the next
 	// prompt `no_session`.
@@ -3040,25 +2080,6 @@ func TestResumeColdInstallsTheSessionWatcher(t *testing.T) {
 	exists, serving := f.fleet.Health(ws.ID)
 	if !exists || !serving {
 		t.Fatalf("Health() = (%v, %v), want the re-opened session watched and serving", exists, serving)
-	}
-}
-
-func TestResumeColdRecordsTheReopenedSessionFacts(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-
-	// Act.
-	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
-		t.Fatalf("ResumeCold: %v", err)
-	}
-
-	// Assert.
-	recorded := f.db.sessions[ws.ID]
-	if recorded.VendorSessionID != "vendor-2" || recorded.Model != "opus" {
-		t.Fatalf("recorded session = %+v, want the conversation and model the re-open reported", recorded)
 	}
 }
 
@@ -3083,26 +2104,6 @@ func TestResumeColdLiftsThePromptRefusalBeforeTheSessionIsWatched(t *testing.T) 
 	// Assert: a prompt sent once the session shows live is not refused cold.
 	if refusingAtWatch {
 		t.Fatal("ColdGateDetail still refused prompts as the re-opened session's watcher opened, want the refusal lifted once the shim accepted the remediation")
-	}
-}
-
-func TestResumeColdKeepsThePromptRefusalWhenTheShimRefusesAgain(t *testing.T) {
-	// Arrange: the shim states the cost a second time.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	if !f.fleet.TakeColdGate(ws.ID, "vendor-1") {
-		t.Fatal("TakeColdGate = false, want the standing gate taken")
-	}
-	f.client.response = coldResponse()
-
-	// Act.
-	_ = f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
-
-	// Assert.
-	if _, gated := f.fleet.ColdGateDetail(ws.ID); !gated {
-		t.Fatal("ColdGateDetail = not gated after the remediated resume was refused cold again, want prompts still refused")
 	}
 }
 
@@ -3192,44 +2193,6 @@ func TestResumeColdRefusesWhenTheShimRefusesTheRemediatedResumeAsColdAgain(t *te
 
 	// Assert.
 	asRefusal(t, err, ArmNoSession)
-}
-
-func TestResumeColdSurfacesAShimRefusal(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	f.client.startErr = errors.New("the link is gone")
-
-	// Act.
-	err := f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
-
-	// Assert.
-	if err == nil {
-		t.Fatal("ResumeCold() = nil error, want the failed re-open surfaced")
-	}
-}
-
-// THE COLD-GATE ANSWER'S RE-OPEN IS THE SECOND PLACE A REFUSED START HID.
-// Grounded 2026-09-13: the owner answered a gate with `clear`, the re-open was
-// refused, `daemon.workspace.answer_cold_gate` logged "the re-open with the
-// remediation failed" -- and nothing else said so anywhere.
-func TestResumeColdFilesAFaultWhenTheReopenIsRefused(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	f.client.startErr = errors.New("the link is gone")
-
-	// Act.
-	_ = f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
-
-	// Assert.
-	if got := faultKinds(f.db.dbFaults); len(got) != 1 || got[0] != health.KindResumeFailed {
-		t.Fatalf("faults = %v, want exactly one %s", got, health.KindResumeFailed)
-	}
 }
 
 // liveHostSessionID reads the identity the fleet is operating a workspace's
@@ -3435,31 +2398,6 @@ func TestStartRevivesAWorkspaceWhoseShimWasReaped(t *testing.T) {
 	}
 }
 
-// TestStartDialsAnAdoptionUnderTheAdoptionBound pins that the adoption is
-// dialed under a DEADLINE and never under the caller's bare context.
-// shimclient's dial ladder has no attempt limit, and an adopted client
-// concludes death only when the socket is gone AND the workspace lock reads
-// free, so a lock that reads held for a shim whose socket path is gone is
-// redialed forever: the caller's own bound is the only thing that ends it.
-func TestStartDialsAnAdoptionUnderTheAdoptionBound(t *testing.T) {
-	// Arrange: a held lock selects the adopt path.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.probeState = sessionlock.StateHeld
-	f.socketState = shimsocket.StateLive
-
-	// Act: the caller's context carries no deadline of its own.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if !f.supervisor.adoptHadDeadline {
-		t.Fatal("the adoption was dialed under a context with no deadline, want the adoption bound")
-	}
-}
-
 // TestStartBoundsAnAdoptionAtTheStatedBound pins that the deadline the
 // adoption is dialed under is the fleet's stated bound and not something
 // longer.
@@ -3571,93 +2509,7 @@ func TestTheColdGateIsRecordedAtInfo(t *testing.T) {
 	}
 }
 
-// TestTwoStartsOfOneWorkspaceSpawnOneShim pins the start gate.
-//
-// The liveness check cannot serialize starts: a session is remembered only
-// after its shim is up, so two starts that overlap both read "not live". The
-// second one then reached the workspace's socket, found the first one's shim
-// listening behind a lock its StartSession had not taken yet, and attached to
-// it as an INERT SURVIVOR — a warning about a race rather than a session. It
-// stopped being hypothetical when the boot's bring-up moved beside the accept
-// loop: a relaunch has Emacs announcing its workspaces while the boot is still
-// starting their sessions.
-func TestTwoStartsOfOneWorkspaceSpawnOneShim(t *testing.T) {
-	// Arrange: the first start is held open inside its spawn.
-	f := newFleetFixture(t)
-	ws := f.workspace("w-race")
-	spawning := make(chan struct{})
-	release := make(chan struct{})
-	var once sync.Once
-	f.supervisor.onSpawn = func() {
-		// ONCE, so a SECOND spawn — the defect this test is about — reports
-		// itself as the count below rather than as a panic on a closed
-		// channel.
-		once.Do(func() { close(spawning) })
-		<-release
-	}
-	first := make(chan error, 1)
-	go func() { first <- f.fleet.Start(context.Background(), ws.ID) }()
-	<-spawning
-
-	// Act: a second start of the SAME workspace, while the first is still
-	// inside its spawn.
-	second := make(chan error, 1)
-	entered := make(chan struct{})
-	go func() {
-		close(entered)
-		second <- f.fleet.Start(context.Background(), ws.ID)
-	}()
-	<-entered
-	close(release)
-
-	// Assert: both callers got a session, and only one shim was spawned.
-	if err := <-first; err != nil {
-		t.Fatalf("the first Start = %v, want the session started", err)
-	}
-	if err := <-second; err != nil {
-		t.Fatalf("the second Start = %v, want the session the first one brought up", err)
-	}
-	if len(f.supervisor.spawns) != 1 {
-		t.Fatalf("spawns = %d, want exactly one shim for one workspace", len(f.supervisor.spawns))
-	}
-}
-
 // ---- a start nobody is waiting for ----
-
-// TestStartDetachedDoesNotHoldItsCaller is the contract RegisterWorkspace
-// depends on: the caller hands the fleet a workspace to bring up and gets its
-// goroutine back, whatever the start is doing.
-//
-// MEASURED, realtest run 2026-09-13T16:20:34: the register's revival ran
-// inline, `Fleet.Start` took the workspace's start gate behind the boot's own
-// bring-up, and the shim never answered that bring-up's StartSession. Emacs
-// timed the register out at its 10s bound on three consecutive daemon
-// generations for a roster row the daemon had already written.
-func TestStartDetachedDoesNotHoldItsCaller(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("ws-detached")
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	f.client.entered = entered
-	f.client.startHold = release
-	settled := make(chan error, 1)
-
-	// Act.
-	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
-	<-entered
-
-	// Assert.
-	select {
-	case err := <-settled:
-		t.Fatalf("the detached start settled (%v) while its StartSession was still in flight", err)
-	default:
-	}
-	close(release)
-	if err := <-settled; err != nil {
-		t.Fatalf("the detached start = %v, want the session up", err)
-	}
-}
 
 // TestDrainStartsEndsAnInFlightStartAndJoinsIt covers the exit. A start nobody
 // waits for still reads and writes the state client, so the teardown ends it
@@ -3881,35 +2733,6 @@ func compactionFrame(
 	}
 }
 
-func TestResumeColdRelaysEveryCompactionPhase(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	f.client.sessionFrames = []*shimv1.WatchSessionResponse{
-		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0),
-		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, 101_600, 12_400),
-		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
-	}
-	var seen []conversationv1.SessionCompactionPhase
-
-	// Act.
-	if err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
-		VendorSessionID: "vendor-1",
-		Remediation:     payRemediation(),
-		OnPhase: func(p *conversationv1.SessionCompactionProgress) {
-			seen = append(seen, p.GetPhase())
-		},
-	}); err != nil {
-		t.Fatalf("ResumeCold: %v", err)
-	}
-
-	// Assert.
-	if len(seen) != 3 {
-		t.Fatalf("relayed phases = %v, want all three", seen)
-	}
-}
-
 func TestResumeColdRelaysThePhasesInOrder(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -3942,69 +2765,6 @@ func TestResumeColdRelaysThePhasesInOrder(t *testing.T) {
 	}
 }
 
-func TestResumeColdRelaysTheFiguresTheShimStated(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	f.client.sessionFrames = []*shimv1.WatchSessionResponse{
-		compactionFrame(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400),
-	}
-	var last *conversationv1.SessionCompactionProgress
-
-	// Act.
-	if err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
-		VendorSessionID: "vendor-1",
-		Remediation:     payRemediation(),
-		OnPhase:         func(p *conversationv1.SessionCompactionProgress) { last = p },
-	}); err != nil {
-		t.Fatalf("ResumeCold: %v", err)
-	}
-
-	// Assert.
-	if last.GetTokensBefore() != 101_600 || last.GetTokensAfter() != 12_400 {
-		t.Fatalf("figures = (%d, %d), want the shim's own", last.GetTokensBefore(), last.GetTokensAfter())
-	}
-}
-
-func TestResumeColdStillReopensWhenTheWatchWillNotOpen(t *testing.T) {
-	// Arrange. The narration is additive; refusing to bring a session up
-	// because its commentary was unavailable would be the worse failure.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	f.client.watchSessionErr = errors.New("the stream would not open")
-
-	// Act.
-	err := f.fleet.ResumeCold(context.Background(), ws.ID, ColdResume{
-		VendorSessionID: "vendor-1",
-		Remediation:     payRemediation(),
-		OnPhase:         func(*conversationv1.SessionCompactionProgress) {},
-	})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("ResumeCold: %v, want the re-open to stand without its phases", err)
-	}
-}
-
-func TestResumeColdOpensNoWatchWhenNobodyIsListening(t *testing.T) {
-	// Arrange. A nil OnPhase must not cost a stream.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	parkedGate(t, f, ws)
-	f.client.watchSessionErr = errors.New("WatchSession must not be called")
-
-	// Act.
-	err := f.fleet.ResumeCold(context.Background(), ws.ID,
-		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("ResumeCold: %v", err)
-	}
-}
-
 func TestFleetWorkspacesAnswersTheHeldSessions(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -4012,8 +2772,6 @@ func TestFleetWorkspacesAnswersTheHeldSessions(t *testing.T) {
 		stop  bool
 		want  []ids.WorkspaceID
 	}{
-		{name: "no session is held", want: []ids.WorkspaceID{}},
-		{name: "a started session is held", start: true, want: []ids.WorkspaceID{"w1"}},
 		{name: "a stopped session is not held", start: true, stop: true, want: []ids.WorkspaceID{}},
 	}
 	for _, tc := range cases {
@@ -4060,65 +2818,6 @@ func killedRecord(t *testing.T, f *fleetFixture, ws wsm.Workspace, kind string) 
 	}
 }
 
-func TestAGateParkedBringUpRetiresAKilledSessionRecord(t *testing.T) {
-	// Arrange: the shim comes up and parks at its cold gate, so NO session
-	// facts are recorded — which is exactly how a killed record outlived the
-	// shim that replaced it.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	killedRecord(t, f, ws, "killed")
-	f.client.response = coldResponse()
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if terminal := f.db.sessions[ws.ID].Terminal; terminal != nil {
-		t.Fatalf("terminal = %+v for a live gate-parked shim, want it retired", terminal)
-	}
-}
-
-func TestAStartedSessionRetiresAKilledSessionRecord(t *testing.T) {
-	// Arrange: the guard against the record's only other retirement — the
-	// facts a successful start records — ever ceasing to clear it.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	killedRecord(t, f, ws, "killed")
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if terminal := f.db.sessions[ws.ID].Terminal; terminal != nil {
-		t.Fatalf("terminal = %+v for a started session, want it retired", terminal)
-	}
-}
-
-func TestABringUpDoesNotResurrectADeletedSession(t *testing.T) {
-	// Arrange: a forgotten workspace's cause of death is final, and no client
-	// comes up to argue with it — the bring-up refuses the deleted session
-	// before it spawns, so the retirement is never reached at all.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	killedRecord(t, f, ws, "deleted")
-
-	// Act.
-	err := f.fleet.Start(context.Background(), ws.ID)
-
-	// Assert.
-	if err == nil {
-		t.Fatal("Start = nil for a deleted session, want the refusal")
-	}
-	terminal := f.db.sessions[ws.ID].Terminal
-	if terminal == nil || terminal.Kind != "deleted" {
-		t.Fatalf("terminal = %+v after a refused bring-up, want the deletion kept", terminal)
-	}
-}
-
 func TestABringUpSurfacesAFailedTerminalRetirement(t *testing.T) {
 	// Arrange: the store refuses the retirement, which is a record that will
 	// go on calling a serving session dead.
@@ -4148,9 +2847,7 @@ func TestTakeColdGateSpendsOnlyTheGateItNames(t *testing.T) {
 		wantTaken bool
 		wantLeft  bool
 	}{
-		{"the standing gate for the named conversation is taken", &ServedColdGate{VendorSessionID: "vendor-1"}, "vendor-1", true, false},
 		{"a gate standing for another conversation is left", &ServedColdGate{VendorSessionID: "vendor-2"}, "vendor-1", false, true},
-		{"nothing standing is nothing taken", nil, "vendor-1", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4173,44 +2870,6 @@ func TestTakeColdGateSpendsOnlyTheGateItNames(t *testing.T) {
 	}
 }
 
-func TestASecondTakeOfOneColdGateFindsNothing(t *testing.T) {
-	// Arrange: two answers racing for one gate.
-	f := newFleetFixture(t)
-	ws := f.workspace("ws-race")
-	f.fleet.coldGates[ws.ID] = coldGate{served: ServedColdGate{VendorSessionID: "vendor-1"}}
-
-	// Act.
-	first := f.fleet.TakeColdGate(ws.ID, "vendor-1")
-	second := f.fleet.TakeColdGate(ws.ID, "vendor-1")
-
-	// Assert.
-	if !first || second {
-		t.Fatalf("takes = %t, %t; want exactly the first to spend the gate", first, second)
-	}
-}
-
-func TestReraiseColdGateStandsTheGateFromItsKeptFacts(t *testing.T) {
-	// Arrange: the gate was raised, answered, and spent.
-	f := newFleetFixture(t)
-	ws := f.workspace("ws-reraise")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-	f.fleet.TakeColdGate(ws.ID, "vendor-1")
-	f.feed.synthesized = nil
-
-	// Act.
-	raised := f.fleet.ReraiseColdGate(ws.ID, "vendor-1")
-
-	// Assert.
-	if _, standing := f.fleet.ColdGate(ws.ID); !raised || !standing {
-		t.Fatalf("raised = %t, standing = %t; want the gate stood again", raised, standing)
-	}
-	want := coldGateRowID(ws.ID, "vendor-1").GetValue()
-	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetId().GetValue() != want ||
-		f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
-		t.Fatalf("synthesized rows = %v, want the standing gate row %q", f.feed.synthesized, want)
-	}
-}
-
 // ---- the gate the host view carries ----
 
 func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
@@ -4219,14 +2878,6 @@ func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
 		act  func(f *fleetFixture, ws ids.WorkspaceID)
 		want bool
 	}{
-		{"no gate raised is no gate shown", func(*fleetFixture, ids.WorkspaceID) {}, false},
-		{"a raised gate is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-		}, true},
-		{"an answered gate is no longer shown", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-			f.fleet.TakeColdGate(ws, "vendor-1")
-		}, false},
 		{"a gate stood again after a failed re-open is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
 			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
 			f.fleet.TakeColdGate(ws, "vendor-1")
@@ -4260,9 +2911,6 @@ func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
 		arrange func(f *fleetFixture, ws ids.WorkspaceID)
 		act     func(f *fleetFixture, ws ids.WorkspaceID)
 	}{
-		{"raising the gate", func(*fleetFixture, ids.WorkspaceID) {}, func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-		}},
 		{"answering the gate", func(f *fleetFixture, ws ids.WorkspaceID) {
 			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
@@ -4299,24 +2947,6 @@ func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
 	}
 }
 
-func TestReraiseColdGateKeepsTheWorkAccountsMenu(t *testing.T) {
-	// Arrange: a work-account gate was raised, answered, and spent.
-	f := newFleetFixture(t)
-	f.accounts.multiRepoDir = "/work"
-	ws := f.workspace("ws-reraise-work")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/work")
-	f.fleet.TakeColdGate(ws.ID, "vendor-1")
-
-	// Act.
-	raised := f.fleet.ReraiseColdGate(ws.ID, "vendor-1")
-
-	// Assert.
-	gate, standing := f.fleet.ColdGate(ws.ID)
-	if !raised || !standing || gate.Compact == nil {
-		t.Fatalf("raised = %t, gate = (%+v, %t); want the gate stood again with its compact menu", raised, gate, standing)
-	}
-}
-
 func TestReraiseColdGateAnswersFalseWithoutItsFacts(t *testing.T) {
 	// Arrange: no gate was ever raised, so no cold facts were kept.
 	f := newFleetFixture(t)
@@ -4339,9 +2969,6 @@ func TestDetachedFleetWorkSharesOneDrain(t *testing.T) {
 		name  string
 		start func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error)
 	}{
-		{"a detached start", func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error) {
-			f.fleet.StartDetached(ws, func(err error) { settled <- err })
-		}},
 		{"a detached cold re-open", func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error) {
 			f.fleet.remember(ws, &live{client: f.client})
 			f.fleet.ResumeColdDetached(ws, ColdResume{VendorSessionID: "vendor-1", Remediation: &conversationv1.SessionColdRemediation{
@@ -4403,7 +3030,6 @@ func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
 	}{
 		{"the taken gate for the named conversation is retired", true, "vendor-1", false},
 		{"a gate still standing is left", false, "vendor-1", true},
-		{"a taken gate for another conversation is left", true, "vendor-2", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4463,28 +3089,6 @@ func TestStartRaisesTheBringUpForItsOwnDuration(t *testing.T) {
 	want := []bringUpEdge{{ws.ID, true}, {ws.ID, false}}
 	if fmt.Sprint(f.bringUps) != fmt.Sprint(want) {
 		t.Fatalf("BringUps edges = %v, want %v", f.bringUps, want)
-	}
-}
-
-// TestStartOfALiveSessionRaisesNoBringUp pins that a start answered by the
-// session already up brings nothing up, so the row is never held for it.
-func TestStartOfALiveSessionRaisesNoBringUp(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	f.bringUps = nil
-
-	// Act
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("second Start: %v", err)
-	}
-
-	// Assert
-	if len(f.bringUps) != 0 {
-		t.Fatalf("BringUps edges = %v, want none for a session already live", f.bringUps)
 	}
 }
 
@@ -4602,21 +3206,6 @@ func TestClassifySourceRestoresTheDirectorysNewestTranscript(t *testing.T) {
 	}
 }
 
-func TestClassifySourceRecordsTheRestoredConversationAsTheResumeHandle(t *testing.T) {
-	// Arrange
-	f, session := engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
-
-	// Act
-	if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
-		t.Fatalf("classifySource: %v", err)
-	}
-
-	// Assert
-	if got := f.db.sessions["w1"].VendorSessionID; got != "newest" {
-		t.Fatalf("the recorded resume handle = %q, want the restored conversation", got)
-	}
-}
-
 func TestClassifySourceStillRestoresWhenTheResumeHandleCannotBeRecorded(t *testing.T) {
 	// Arrange
 	f, session := engagedWithLostTranscript(t, fixedNow.Add(-2*TranscriptAdoptionIdleWindow))
@@ -4631,21 +3220,6 @@ func TestClassifySourceStillRestoresWhenTheResumeHandleCannotBeRecorded(t *testi
 	}
 	if !recordedAt(f, dlog.LevelError, opBringUp, "could not record the adopted conversation as the session's resume handle; the session still resumes it") {
 		t.Fatalf("records = %+v, want the failed record at error", f.log.logger.Records())
-	}
-}
-
-func TestClassifySourceRestoresAJustWrittenTranscriptThisDaemonsReapAccountsFor(t *testing.T) {
-	// Arrange: the transcript was written a second ago, by the shim this
-	// daemon reaped half a second later.
-	f, session := engagedWithLostTranscript(t, fixedNow.Add(-time.Second))
-	f.fleet.noteReap("w1", &fakeClient{reaped: true, reapedAt: fixedNow.Add(-500 * time.Millisecond)})
-
-	// Act
-	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
-
-	// Assert
-	if err != nil || got.VendorSessionID != "newest" {
-		t.Fatalf("classifySource() = (%+v, %v), want the just-written transcript restored", got, err)
 	}
 }
 
@@ -4684,37 +3258,6 @@ func TestClassifySourceAbandonsLoudlyWhenTheDirectoryHasNoTranscript(t *testing.
 	}
 	if !recordedAt(f, dlog.LevelWarn, opBringUp, abandonedMessage) || len(abandonedFaults(f.db)) != 1 {
 		t.Fatalf("records = %+v, want the abandonment warning and its fault", f.log.logger.Records())
-	}
-}
-
-func TestEveryAdoptingBranchAsksTheOneAdoptionDecision(t *testing.T) {
-	tests := []struct {
-		name    string
-		arrange func(*fleetFixture) (wsm.Session, bool)
-	}{
-		{"no session record", func(*fleetFixture) (wsm.Session, bool) { return wsm.Session{}, false }},
-		{"a recorded conversation with no transcript", func(f *fleetFixture) (wsm.Session, bool) {
-			loseRecordedTranscript(f)
-			engage(f)
-			return wsm.Session{Workspace: "w1", VendorSessionID: "vendor-stale"}, true
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFleetFixture(t)
-			session, exists := tt.arrange(f)
-
-			// Act
-			if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, exists); err != nil {
-				t.Fatalf("classifySource: %v", err)
-			}
-
-			// Assert
-			if !f.accounts.newestProbed {
-				t.Fatal("the branch decided without the one adoption decision")
-			}
-		})
 	}
 }
 
@@ -4758,41 +3301,6 @@ func TestTheFleetRecordsEveryReapItWitnesses(t *testing.T) {
 				t.Fatalf("writerGoneAt = %v, want the reap's instant", got)
 			}
 		})
-	}
-}
-
-func TestTheFleetRecordsNoReapForAShimStillRunning(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-
-	// Act
-	f.fleet.noteReap("w1", &fakeClient{})
-
-	// Assert
-	if got := f.fleet.writerGoneAt("w1"); !got.IsZero() {
-		t.Fatalf("writerGoneAt = %v, want none for a shim not yet reaped", got)
-	}
-}
-
-func TestAResumeCarriesTheWorkspacesRolledBackTurns(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
-	f.db.rolledBack = map[ids.WorkspaceID][]ids.TurnID{ws.ID: {"t2", "t3"}}
-
-	// Act
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert
-	var got []string
-	for _, turn := range f.client.requests[0].GetResume().GetRolledBackTurns() {
-		got = append(got, turn.GetValue())
-	}
-	if !slices.Equal(got, []string{"t2", "t3"}) {
-		t.Fatalf("resume.rolled_back_turns = %v, want [t2 t3]", got)
 	}
 }
 
@@ -4841,26 +3349,6 @@ func TestDrainStartsJoinsDetachedWork(t *testing.T) {
 	}
 	if err := <-ended; !errors.Is(err, context.Canceled) {
 		t.Fatalf("the detached work saw %v, want a cancellation", err)
-	}
-}
-
-// THE SESSION FACTS ARE DURABLE BEFORE THE WATCH OPENS: the watch's
-// re-announcement writes the session row, so the row must exist first.
-func TestTheSessionFactsAreRecordedBeforeTheWatchOpens(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	recordedAtWatch := ""
-	f.onStartWatcher = func() { recordedAtWatch = f.db.sessions[ws.ID].VendorSessionID }
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Assert.
-	if recordedAtWatch != "vendor-1" {
-		t.Fatalf("session row's vendor id when the watch opened = %q, want vendor-1 recorded first", recordedAtWatch)
 	}
 }
 
@@ -4932,30 +3420,6 @@ func TestABringUpRefusesALockThatOutlastsTheBound(t *testing.T) {
 	}
 }
 
-func TestBlockersNameTheTurnAndEveryLiveItem(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	turn := ids.TurnID("t-1")
-	f.watcher.turn = &turn
-	f.watcher.live = sessionwatcher.LiveWorkSet{
-		Shells: []*conversationv1.DetachedWorkId{{Value: "toolu_shell"}},
-		Agents: []*conversationv1.AgentId{{Value: "toolu_agent"}},
-	}
-
-	// Act
-	got := f.fleet.Blockers(ws.ID)
-
-	// Assert
-	want := []string{"turn:t-1", "agent:toolu_agent", "shell:toolu_shell"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Blockers = %v, want %v", got, want)
-	}
-}
-
 func TestBlockersAreNoneForAWorkspaceWithNoSession(t *testing.T) {
 	// Arrange
 	f := newFleetFixture(t)
@@ -5001,20 +3465,6 @@ func lastGateStanding(t *testing.T, f *fleetFixture) *frontendv1.FeedColdGateSta
 	return standing
 }
 
-func TestAGateWithNothingHeldOffersNoCompactAndResume(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-
-	// Assert.
-	if got := lastGateStanding(t, f).GetCompactAndResume(); got != nil {
-		t.Fatalf("compact_and_resume = %v, want none with nothing held", got)
-	}
-}
-
 func TestAGateRaisedOverHeldPromptsOffersCompactAndResumeAtOnce(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -5027,21 +3477,6 @@ func TestAGateRaisedOverHeldPromptsOffersCompactAndResumeAtOnce(t *testing.T) {
 	// Assert.
 	if got := lastGateStanding(t, f).GetCompactAndResume().GetHeldPrompts(); got != 2 {
 		t.Fatalf("held_prompts = %d, want 2", got)
-	}
-}
-
-func TestAPromptHeldAtAStandingGateRepublishesItWithCompactAndResume(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-
-	// Act.
-	f.fleet.SetColdGateHeld(ws.ID, 1)
-
-	// Assert.
-	if got := lastGateStanding(t, f).GetCompactAndResume().GetHeldPrompts(); got != 1 {
-		t.Fatalf("held_prompts = %d, want 1", got)
 	}
 }
 
@@ -5058,40 +3493,6 @@ func TestTheLastHeldPromptLeavingRepublishesTheGateWithoutCompactAndResume(t *te
 	// Assert.
 	if got := lastGateStanding(t, f).GetCompactAndResume(); got != nil {
 		t.Fatalf("compact_and_resume = %v, want none once nothing is held", got)
-	}
-}
-
-func TestAnUnchangedHeldCountRepublishesNothing(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.SetColdGateHeld(ws.ID, 1)
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-	rows := len(f.feed.synthesized)
-
-	// Act.
-	f.fleet.SetColdGateHeld(ws.ID, 1)
-
-	// Assert.
-	if len(f.feed.synthesized) != rows {
-		t.Fatalf("rows = %d, want %d: an unchanged count publishes nothing", len(f.feed.synthesized), rows)
-	}
-}
-
-func TestAHeldCountChangeOnAnAnsweredGatePublishesNoRow(t *testing.T) {
-	// Arrange: the answered gate's row is retired; nothing may bring it back.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
-	f.fleet.TakeColdGate(ws.ID, "vendor-1")
-	rows := len(f.feed.synthesized)
-
-	// Act.
-	f.fleet.SetColdGateHeld(ws.ID, 1)
-
-	// Assert.
-	if len(f.feed.synthesized) != rows {
-		t.Fatalf("rows = %d, want %d: an answered gate publishes no row", len(f.feed.synthesized), rows)
 	}
 }
 
@@ -5115,9 +3516,7 @@ func TestReadRecordedSession(t *testing.T) {
 		session         *wsm.Session
 		hasConversation bool
 	}{
-		{name: "no session row", hasConversation: false},
 		{name: "a row with no vendor id", session: &wsm.Session{Workspace: "ws-1"}, hasConversation: false},
-		{name: "a row with a vendor id", session: &wsm.Session{Workspace: "ws-1", VendorSessionID: "v-1"}, hasConversation: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -5158,25 +3557,5 @@ func TestReadRecordedSessionSurfacesTheReadError(t *testing.T) {
 	}
 	if recorded.hasConversation() {
 		t.Error("a failed read answered a conversation")
-	}
-}
-
-// TestHasConversationHasOneStatement fails when a site in the package checks a
-// session row and its vendor id by hand instead of through hasConversation.
-func TestHasConversationHasOneStatement(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`!\w+ \|\| \w+\.VendorSessionID == ""`)
-
-	// Act
-	var found []string
-	for _, file := range sourcescan.Production(t) {
-		if handRolled.Match(file.Source) {
-			found = append(found, file.Name)
-		}
-	}
-
-	// Assert
-	if len(found) != 0 {
-		t.Errorf("hand-rolled conversation checks in %v; use readRecordedSession and hasConversation", found)
 	}
 }

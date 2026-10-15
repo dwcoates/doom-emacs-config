@@ -355,12 +355,22 @@ func continuationPage(lines []*storev1.StoreLineAt, heads []*storev1.StoreTurnHe
 }
 
 // LinesSince is the watch replay: every page line of one book written after a
-// pin, in WRITE order rather than page order.
+// pin, each ONCE, as it now stands, in FIRST-INSERT (position) order.
 //
-// TWO ORDERINGS AND THIS ONE IS write_seq, deliberately. A watcher must receive
-// an UPSERT of an old row — the row keeps its original position and therefore
-// its original pointer, but it is new information, and ordering the replay by
-// position would place it back where the caller has already read past.
+// THE REPLAY IS COALESCED, so it cannot be in write order. A row written three
+// times after the pin is one replayed line carrying its latest state and its
+// latest write_seq; the two earlier writes are gone. Ordered by that latest
+// write_seq, a row inserted BEFORE a later line and upserted AFTER it was
+// served behind it: a turn's terminal reached the watcher ahead of the very
+// response it names (the answer row inserted, the terminal written, the answer
+// row rewritten by another plane), and the daemon judged the answer unlanded.
+// First-insert order keeps every line behind every row that existed when it
+// was written, which is the order every later line's references assume.
+//
+// AN UPSERTED OLD ROW STILL REACHES THE WATCHER: the filter is write_seq, not
+// position, so a row written before the pin and rewritten after it is
+// replayed, at its original pointer. Its consumer recognises it by pointer
+// and content (the shim's fingerprint), never by a positional high-water mark.
 func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error) {
 	base := logging.Fields{Operation: "store.db.lines-since", Table: "entry", BookAgentID: agentID, WriteSeq: afterSeq}
 	if agentID == "" {
@@ -461,11 +471,12 @@ const (
 	// linesSinceSQL binds (book, the page-line kind, the retired kind, the
 	// write_seq after which to replay). A retired row is replayed too — as its
 	// retirement — because a watcher whose page was read before the row was
-	// retired must still be told to withdraw it.
+	// retired must still be told to withdraw it. It is served in POSITION
+	// order, which is first-insert order (LinesSince says why).
 	linesSinceSQL = `SELECT e.position, e.write_seq, e.kind, e.frame, p.at_ms, p.ordinal, p.recorded
 	  FROM entry e LEFT JOIN entry_place p ON p.position = e.position
 	  WHERE e.book_agent_id = ? AND e.kind IN (?, ?) AND e.write_seq > ?
-	  ORDER BY e.write_seq ASC`
+	  ORDER BY e.position ASC`
 
 	// pointerInBookSQL binds (position, book, the page-line kind, the retired
 	// kind, the hook kind). A RETIRED ROW'S POSITION IS STILL A PLACE IN ITS
