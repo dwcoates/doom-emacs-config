@@ -114,6 +114,11 @@ func (l Layout) resolve(p string) string {
 	return roster.Resolve(l.Repo, l.Module, p)
 }
 
+// NoWebappBuildEnv tells e2e-sandbox.sh not to build the webapp dist into the
+// checkout: the run built it before any unit started (roster.Suite.
+// NeedsWebappDist), and the run is the dist's one writer.
+const NoWebappBuildEnv = "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD"
+
 func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	path, err := executableScriptPath(l, s)
 	if err != nil {
@@ -126,6 +131,9 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	u.MayDecline = s.MayDecline
 	u.Slots = s.Slots
 	u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
+	if s.NeedsWebappDist {
+		u.Env = append(u.Env, NoWebappBuildEnv+"=1")
+	}
 	return Units{Atomic: []run.Spec{u}}, nil
 }
 

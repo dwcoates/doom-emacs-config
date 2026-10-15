@@ -200,3 +200,17 @@ func TestAProgramBuiltFromAnIntegrationDirectoryIsAFake(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyTheSandboxSuiteReadsTheWebappDist(t *testing.T) {
+	// The sandbox suite stages webapp/dist into its container; no other
+	// suite reads it, and only a Script suite is handed the env that stops
+	// it building the dist itself (suites.NoWebappBuildEnv).
+	for _, s := range Suites {
+		if s.NeedsWebappDist != (s.Name == "e2e-emacs") {
+			t.Errorf("%s NeedsWebappDist = %v", s.Name, s.NeedsWebappDist)
+		}
+		if s.NeedsWebappDist && s.Kind != Script {
+			t.Errorf("%s needs the webapp dist but is not a Script suite", s.Name)
+		}
+	}
+}

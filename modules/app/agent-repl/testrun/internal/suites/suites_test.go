@@ -192,6 +192,35 @@ func TestScriptUnitsCarryTheirWidth(t *testing.T) {
 	}
 }
 
+func TestScriptUnitsThatReadTheWebappDistNeverBuildIt(t *testing.T) {
+	tests := []struct {
+		name  string
+		needs bool
+		want  bool
+	}{
+		{name: "a suite that reads the dist is told not to build it", needs: true, want: true},
+		{name: "any other suite is told nothing", needs: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			repo := t.TempDir()
+			write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
+
+			// Act
+			u, err := scriptUnits(Layout{Repo: repo, Module: repo}, roster.Suite{Name: "e", Path: "bin/e.sh", NeedsWebappDist: tt.needs})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Contains(u.Atomic[0].Env, "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1"); got != tt.want {
+				t.Fatalf("env %v carries the no-build switch = %v, want %v", u.Atomic[0].Env, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseScriptList(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -65,6 +65,13 @@ type Suite struct {
 	// Zero is one slot. A wider suite is told its width in
 	// AGENT_REPL_UNIT_SLOTS and must cap itself to exactly that many cores.
 	Slots int
+	// NeedsWebappDist marks a suite that reads the checkout's built webapp
+	// (webapp/dist). The run builds it ONCE, before any unit starts
+	// (cli.Deps.PrepareWebappDist), and the suite never builds it itself
+	// (suites.NoWebappBuildEnv): a suite that rebuilt it mid-run rewrote files
+	// another suite's watch-mode driver was reading, which restarted the
+	// driver and failed tests that had nothing to do with the rebuild.
+	NeedsWebappDist bool
 	// TestParallel names the Go packages (by path relative to Path, "." for
 	// the root) whose chunks overlap that many of their top-level tests
 	// (-test.parallel). A package not named runs its tests one at a time.
@@ -288,7 +295,7 @@ var Suites = []Suite{
 	// CPUs nearly as fast as on four -- 82s against 66s alone, worst Doom
 	// boot 0.88s against its 3.5s bound (2026-10-12) -- while holding half
 	// the run's slots: 264 -> 164 slot-seconds, a fifth of a full run's.
-	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2},
+	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true},
 }
 
 // AlwaysRunRegions are the parts of the repository that only suites which

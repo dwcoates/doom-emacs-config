@@ -627,7 +627,10 @@ acquire_slot() {
 # silently served -- it is rebuilt here, or refused there.
 #
 # AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1 skips the host build. It does NOT skip
-# the container's check, so the only thing it can buy is a louder failure.
+# the container's check, so a stale dist still fails loudly. testrun sets it:
+# a test run builds the dist once before any suite starts (testrun's
+# PrepareWebappDist), so no suite rewrites the checkout under another
+# suite's watch-mode driver mid-run.
 stage_webapp_dist() {
   if [[ ${AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD:-0} == 1 ]]; then
     log "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1: not building the webapp dist; the container will refuse a stale one"
