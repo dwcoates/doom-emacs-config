@@ -87,11 +87,11 @@ global_identity_field() {
   esac
 }
 
-# identity_origins SIDE — every binding that can set SIDE's (AUTHOR or
-# COMMITTER) name or email, each with where it comes from.
+# identity_origins SIDE LOWER — every binding that can set SIDE's (AUTHOR or
+# COMMITTER; LOWER is its config section) name or email, each with where it
+# comes from.
 identity_origins() {
-  local side="$1" lower var key out rc origin value
-  lower="$(printf '%s' "$side" | tr '[:upper:]' '[:lower:]')"
+  local side="$1" lower="$2" var key out rc origin value
   for var in "GIT_${side}_NAME" "GIT_${side}_EMAIL" EMAIL; do
     if [ -n "${!var+set}" ]; then
       printf '    %s=%s  (environment variable)\n' "$var" "${!var}"
@@ -123,7 +123,7 @@ check_identity() {
     lower="$(printf '%s' "$side" | tr '[:upper:]' '[:lower:]')"
     refuse_identity "the commit's $lower would be \"$ident\", not the global identity \"$GLOBAL_IDENTITY\"." \
       "where the $lower identity comes from (git uses the environment first, then $lower.*, then the last user.*):" \
-      "$(identity_origins "$side")"
+      "$(identity_origins "$side" "$lower")"
   fi
 }
 

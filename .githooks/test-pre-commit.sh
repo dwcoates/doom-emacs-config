@@ -108,8 +108,10 @@ stage_module_file() {
 }
 
 # run_hook WORKTREE HOOK [LINT_EXIT [SUITE_EXIT]] — run HOOK as git runs a
-# pre-commit hook for a commit in WORKTREE: from the worktree's top.  RUN_RC
-# and RUN_OUT hold its outcome and GIT_CALLS the git calls it made.
+# pre-commit hook for a commit in WORKTREE: from the worktree's top, with the
+# extra environment bindings RUN_ENV holds (none unless a test sets it).
+# RUN_RC and RUN_OUT hold its outcome and GIT_CALLS the git calls it made.
+RUN_ENV=()
 run_hook() {
   local worktree="$1"
   local hook="$2"
@@ -122,7 +124,8 @@ run_hook() {
   set +e
   RUN_OUT="$(
     cd "$worktree" &&
-      FAKE_GIT_LOG="$git_log" \
+      env ${RUN_ENV[@]+"${RUN_ENV[@]}"} \
+        FAKE_GIT_LOG="$git_log" \
         GIT_CONFIG_GLOBAL="$GLOBAL_CONFIG" \
         HOOK_TEST_RUN_LOG="$RUN_LOG" \
         HOOK_TEST_RUN_EXIT="$suite_exit" \
@@ -351,18 +354,18 @@ run_identity_commit() {
   shift
   printf 'docs\n' >"$repo/README.md"
   git -C "$repo" add "$repo/README.md"
-  local git_log="$repo/git-calls"
-  rm -f "$git_log"
-  set +e
-  RUN_OUT="$(
-    cd "$repo" &&
-      env FAKE_GIT_LOG="$git_log" GIT_CONFIG_GLOBAL="$GLOBAL_CONFIG" \
-        HOOK_TEST_RUN_LOG="$repo/unified-called" HOOK_TEST_LINT_LOG="$repo/lint-called" \
-        "$@" "$repo/.fakegit/hooks/pre-commit" 2>&1
-  )"
-  RUN_RC=$?
-  set -e
-  GIT_CALLS="$(cat "$git_log" 2>/dev/null || true)"
+  RUN_ENV=("$@")
+  run_commit "$repo"
+  RUN_ENV=()
+}
+
+# global_config_file NAME LINE... — a global config file of LINEs, for one
+# run: GLOBAL_CONFIG="$(global_config_file ...)" run_identity_commit ...
+global_config_file() {
+  local file="$TMP/$1"
+  shift
+  printf '%s\n' "$@" >"$file"
+  printf '%s\n' "$file"
 }
 
 # assert_refused NAME WANT... — the commit was refused, the output carries
@@ -397,10 +400,8 @@ test_identity_name_mismatch_is_refused() {
   # The global file's own committer.name outranks its user.name.
   local repo
   repo="$(mkrepo)"
-  GLOBAL_CONFIG="$TMP/global-committer-name"
-  printf 'user.name=Pat Example\nuser.email=pat@example.com\ncommitter.name=Someone Else\n' >"$GLOBAL_CONFIG"
-  run_identity_commit "$repo"
-  GLOBAL_CONFIG="$DEFAULT_GLOBAL_CONFIG"
+  GLOBAL_CONFIG="$(global_config_file global-committer-name 'user.name=Pat Example' 'user.email=pat@example.com' 'committer.name=Someone Else')" \
+    run_identity_commit "$repo"
   assert_refused "a committer name other than the global one is refused" \
     'the commit'"'"'s committer would be "Someone Else <pat@example.com>", not the global identity "Pat Example <pat@example.com>"' \
     "committer.name=Someone Else  (file:$TMP/global-committer-name)"
@@ -410,10 +411,8 @@ test_identity_name_mismatch_is_refused() {
 test_identity_email_mismatch_is_refused() {
   local repo
   repo="$(mkrepo)"
-  GLOBAL_CONFIG="$TMP/global-author-email"
-  printf 'user.name=Pat Example\nuser.email=pat@example.com\nauthor.email=pat@elsewhere.example\n' >"$GLOBAL_CONFIG"
-  run_identity_commit "$repo"
-  GLOBAL_CONFIG="$DEFAULT_GLOBAL_CONFIG"
+  GLOBAL_CONFIG="$(global_config_file global-author-email 'user.name=Pat Example' 'user.email=pat@example.com' 'author.email=pat@elsewhere.example')" \
+    run_identity_commit "$repo"
   assert_refused "an author email other than the global one is refused" \
     'the commit'"'"'s author would be "Pat Example <pat@elsewhere.example>", not the global identity "Pat Example <pat@example.com>"' \
     "author.email=pat@elsewhere.example  (file:$TMP/global-author-email)"
@@ -447,12 +446,9 @@ test_identity_repo_local_override_is_refused() {
 test_missing_global_identity_is_refused() {
   local repo
   repo="$(mkrepo)"
-  GLOBAL_CONFIG="$TMP/global-empty"
-  : >"$GLOBAL_CONFIG"
   git -C "$repo" config user.name Test
   git -C "$repo" config user.email test@example.com
-  run_identity_commit "$repo"
-  GLOBAL_CONFIG="$DEFAULT_GLOBAL_CONFIG"
+  GLOBAL_CONFIG="$(global_config_file global-empty)" run_identity_commit "$repo"
   assert_refused "a commit with no global identity configured is refused" \
     'no global git identity is configured (user.name="", user.email="")'
   if grep_in "$GIT_CALLS" -q "^git var"; then
