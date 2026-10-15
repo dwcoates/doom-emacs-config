@@ -15,6 +15,7 @@
 // only) and --maxWorkers=1, so no two tests' counters interleave.
 import { afterEach, beforeEach } from "vitest";
 import { appendFileSync } from "node:fs";
+import { fullName } from "./redundancy-names.mjs";
 
 const out = process.env.AGENT_REPL_REDUNDANCY_TRACE;
 if (!out) {
@@ -40,14 +41,6 @@ function snapshot() {
     snap[file] = { ...data.s };
   }
   return snap;
-}
-
-function fullName(task) {
-  const names = [];
-  for (let t = task; t && t.type !== "file" && t.name; t = t.suite) {
-    names.unshift(t.name);
-  }
-  return names.join(" > ");
 }
 
 let before = {};
