@@ -722,7 +722,11 @@ STAGE_ENTRIES=(
 #     the suite gets its build identity from .sandbox-sha instead;
 #   * node_modules, every `dist/` but the webapp's own, the host's vite cache
 #     (keyed to the host's absolute paths), worktrees, virtualenvs, Python
-#     caches, compiled `*.test` binaries and a stale `.sandbox-sha`.
+#     caches, compiled `*.test` binaries and a stale `.sandbox-sha`. Each
+#     excluded directory is excluded as a SYMLINK too: a checkout's
+#     webapp/node_modules is a link into the host's node store
+#     (lib-node-store.sh), and a `-type d` test alone streamed that link, a
+#     host path, into the container (2026-10-15).
 # THE WEBAPP DIST IS STAGED, and it is the one `dist/` that is: the Emacs
 # layer's panel is a real webview on the daemon's own origin, so it needs the
 # REAL built webapp, which the host builds (stage_webapp_dist) before the run.
@@ -730,9 +734,9 @@ stage_find() {
   local module_src=$1
   ( cd -- "$module_src" && find "${STAGE_ENTRIES[@]}" \
       \( -name .git \
-         -o \( -type d \( -name .claude -o -name .agents-sandbox -o -name node_modules \
+         -o \( \( -type d -o -type l \) \( -name .claude -o -name .agents-sandbox -o -name node_modules \
                          -o -name .vite-cache -o -name worktrees -o -name .venv -o -name __pycache__ \) \) \
-         -o \( -type d -name dist ! -path webapp/dist \) \
+         -o \( \( -type d -o -type l \) -name dist ! -path webapp/dist \) \
          -o -name .worktree -o -name '*.test' -o -name .sandbox-sha \) -prune \
       -o -print0 )
 }

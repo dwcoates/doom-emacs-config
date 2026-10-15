@@ -3,8 +3,10 @@ package sandboxscripts
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -112,5 +114,69 @@ func TestStageEntriesReadsTheEnumeratedNames(t *testing.T) {
 	// Assert
 	if len(got) != 2 || !got["daemon"] || !got["config.el"] {
 		t.Fatalf("stageEntries = %v, want daemon and config.el", got)
+	}
+}
+
+func TestStageFindExcludesAnExcludedDirectoryWhetherRealOrLinked(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, module, store string)
+		want    bool
+	}{
+		{name: "a real node_modules directory is not staged", arrange: func(t *testing.T, module, _ string) {
+			mustMkdir(t, filepath.Join(module, "webapp", "node_modules", "dep"))
+		}},
+		{name: "a node_modules linked into the host's node store is not staged", arrange: func(t *testing.T, module, store string) {
+			if err := os.Symlink(store, filepath.Join(module, "webapp", "node_modules")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a dist linked outside the webapp's own is not staged", arrange: func(t *testing.T, module, store string) {
+			if err := os.Symlink(store, filepath.Join(module, "webapp", "src", "dist")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			module, store := t.TempDir(), t.TempDir()
+			mustMkdir(t, filepath.Join(module, "webapp", "src"))
+			if err := os.WriteFile(filepath.Join(module, "webapp", "src", "main.ts"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			tt.arrange(t, module, store)
+			wd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := filepath.Join(wd, "..", "sandbox", "bin", "e2e-sandbox.sh")
+			cmd := exec.Command("bash", "-c", `set -euo pipefail; . "$1"; STAGE_ENTRIES=(webapp); stage_find "$2" | tr '\0' '\n'`, "bash", script, module)
+
+			// Act
+			out, err := cmd.CombinedOutput()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("stage_find = %v\n%s", err, out)
+			}
+			listed := strings.Split(strings.TrimSpace(string(out)), "\n")
+			if !slices.Contains(listed, "webapp/src/main.ts") {
+				t.Fatalf("stage_find listed %q, want webapp/src/main.ts staged", listed)
+			}
+			for _, e := range listed {
+				if strings.Contains(e, "node_modules") || strings.HasSuffix(e, "/dist") || strings.Contains(e, "/dist/") {
+					t.Fatalf("stage_find listed %q, which staging excludes", e)
+				}
+			}
+		})
+	}
+}
+
+func mustMkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
