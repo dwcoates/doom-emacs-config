@@ -102,9 +102,9 @@ func checkouts(repo string) ([]string, error) {
 }
 
 // hostToolchain answers the tool versions every keyed suite is built and run
-// with, once per run: Go builds every keyed suite, and node and npm build the
-// Node programs some of them run (the sidecar's mocked vendor is the shim's
-// bundle). A tool not on PATH is recorded as absent, which is itself a fact a
+// with, once per run: Go builds every keyed suite, node and npm run the
+// TypeScript suites and build the Node programs others run (the sidecar's
+// mocked vendor is the shim's bundle), and Emacs runs the ERT suite. A tool not on PATH is recorded as absent, which is itself a fact a
 // test can observe (a suite skips its Node cases without node).
 func hostToolchain() func(roster.Kind) (map[string]string, error) {
 	var once sync.Once
@@ -123,7 +123,7 @@ func hostToolchain() func(roster.Kind) (map[string]string, error) {
 				return
 			}
 			tools = map[string]string{"go": f[0], "goos": f[1], "goarch": f[2]}
-			for _, tool := range []string{"node", "npm"} {
+			for _, tool := range []string{"node", "npm", "emacs"} {
 				v, err := toolVersion(tool)
 				if err != nil {
 					toolsErr = err
@@ -136,7 +136,8 @@ func hostToolchain() func(roster.Kind) (map[string]string, error) {
 	}
 }
 
-// toolVersion is `tool --version`, or "absent" when tool is not on PATH.
+// toolVersion is the first line of `tool --version`, or "absent" when tool is
+// not on PATH.
 func toolVersion(tool string) (string, error) {
 	p, err := exec.LookPath(tool)
 	if err != nil {
@@ -146,5 +147,6 @@ func toolVersion(tool string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("reuse: %s --version: %w", tool, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return first, nil
 }

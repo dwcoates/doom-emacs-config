@@ -1,6 +1,7 @@
 package reuse
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -235,8 +236,36 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 				return nil, err
 			}
 		}
+	case roster.Vitest:
+		// A TypeScript package reads its whole tree (sources, tests, configs,
+		// package-lock.json), the runner's vitest reporter, and what its
+		// Reuse declares beyond it (the generated bindings, the shared
+		// logging module); its node_modules is declared Generated.
+		if err := addSuiteTree(d, set, s.Path); err != nil {
+			return nil, err
+		}
+		if err := addRunnerDir(d, set, "testrun/vitest"); err != nil {
+			return nil, err
+		}
+	case roster.ERT:
+		// The Emacs suite reads its whole tree, the runner's ERT driver, and
+		// builds the fake daemon its tests talk to (a Go program in its tree,
+		// whose build graph reaches the generated Go bindings).
+		if err := addSuiteTree(d, set, s.Path); err != nil {
+			return nil, err
+		}
+		if err := addRunnerDir(d, set, "testrun/ert"); err != nil {
+			return nil, err
+		}
+		pkgs, err := d.GoList(filepath.Join(d.Module, filepath.FromSlash(s.Path), "testsupport", "fakedaemon"), "", false, ".")
+		if err != nil {
+			return nil, err
+		}
+		if err := AddGoPackages(set, d.Repo, pkgs); err != nil {
+			return nil, err
+		}
 	default:
-		return nil, fmt.Errorf("reuse: %s is a kind of suite whose inputs this runner cannot derive yet", s.Name)
+		return nil, fmt.Errorf("reuse: %s is a kind of suite whose inputs this runner cannot derive", s.Name)
 	}
 	if err := addPrograms(d, set, s); err != nil {
 		return nil, err
@@ -254,6 +283,26 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 		return nil, fmt.Errorf("reuse: %s: %w", s.Name, err)
 	}
 	return set, nil
+}
+
+// addSuiteTree places a suite's own directory (a roster path) as a hashed
+// subtree.
+func addSuiteTree(d Deps, set *InputSet, p string) error {
+	rel, _, err := RepoPath(d, p)
+	if err != nil {
+		return err
+	}
+	return set.AddTree(rel)
+}
+
+// addRunnerDir places one of the runner's per-kind directories (its vitest
+// reporter, its ERT driver) flat.
+func addRunnerDir(d Deps, set *InputSet, p string) error {
+	rel, _, err := RepoPath(d, p)
+	if err != nil {
+		return err
+	}
+	return set.AddFlatDir(rel)
 }
 
 // addPrograms places the build graph of every shared program the suite's
@@ -317,7 +366,9 @@ func addDeclared(d Deps, set *InputSet, r *roster.Reuse) error {
 		if tree {
 			err = set.AddTree(rel)
 		} else {
-			err = set.AddFile(rel)
+			// A module resolver (esbuild, node) lists a file's directory to
+			// find it, so the directory's listing is read too, and hashed.
+			err = errors.Join(set.AddFile(rel), set.AddDir(path.Dir(rel)))
 		}
 		if err != nil {
 			return err

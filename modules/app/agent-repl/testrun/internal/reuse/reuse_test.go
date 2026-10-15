@@ -374,3 +374,96 @@ func TestTheReusedLineIsTheOneTheMergeGateReads(t *testing.T) {
 		t.Fatalf("info = %q, want %q", log.info, want)
 	}
 }
+
+func TestAVitestSuiteReadsItsTreeAndTheRunnersReporter(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	write(t, f.d.Repo, fixtureModule+"/web/src/a.ts", "export {}")
+	write(t, f.d.Repo, fixtureModule+"/web/node_modules/dep/index.js", "x")
+	write(t, f.d.Repo, fixtureModule+"/testrun/vitest/items-reporter.mjs", "r")
+	s := roster.Suite{Name: "web", Kind: roster.Vitest, Path: "web", Reuse: &roster.Reuse{Generated: []string{"web/node_modules/"}}}
+
+	// Act
+	set, err := SuiteInputs(f.d, s)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/web/src/a.ts", "/testrun/vitest/items-reporter.mjs", "/web/node_modules/dep/index.js"} {
+		if !set.Contains(fixtureModule + p) {
+			t.Errorf("the set does not place %s", p)
+		}
+	}
+	k, err := ComputeKey(f.d.Repo, set, Facts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, hashed := k.Manifest[fixtureModule+"/web/node_modules/dep/index.js"]; hashed {
+		t.Error("a generated node_modules file was hashed")
+	}
+}
+
+func TestAnERTSuiteReadsItsTreeTheDriverAndItsFakeDaemonsBuild(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	write(t, f.d.Repo, fixtureModule+"/lisp/test-a.el", "(ert-deftest a ())")
+	write(t, f.d.Repo, fixtureModule+"/lisp/testsupport/fakedaemon/go.mod", "module fakedaemon")
+	write(t, f.d.Repo, fixtureModule+"/testrun/ert/driver.el", "d")
+	var listed []string
+	inner := f.d.GoList
+	f.d.GoList = func(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
+		listed = append(listed, dir)
+		return inner(dir, tags, tests, patterns...)
+	}
+	s := roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp", Reuse: &roster.Reuse{}}
+
+	// Act
+	set, err := SuiteInputs(f.d, s)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/lisp/test-a.el", "/testrun/ert/driver.el"} {
+		if !set.Contains(fixtureModule + p) {
+			t.Errorf("the set does not place %s", p)
+		}
+	}
+	if want := filepath.Join(f.d.Module, "lisp", "testsupport", "fakedaemon"); !slices.Contains(listed, want) {
+		t.Errorf("go list ran in %v, want the fake daemon's directory %s", listed, want)
+	}
+}
+
+func TestASuiteKindWithoutDerivableInputsIsRefused(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	s := roster.Suite{Name: "x", Kind: roster.Script, Path: "bin/x.sh", Reuse: &roster.Reuse{}}
+
+	// Act
+	_, err := SuiteInputs(f.d, s)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "cannot derive") {
+		t.Fatalf("err = %v, want the kind refused", err)
+	}
+}
+
+func TestADeclaredFilesDirectoryListingIsPlacedToo(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	write(t, f.d.Repo, fixtureModule+"/bin/x.sh", "#!/bin/sh")
+	s := lockSuite
+	s.Reuse = &roster.Reuse{Inputs: []string{"bin/x.sh"}}
+
+	// Act
+	set, err := SuiteInputs(f.d, s)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(set.Dirs(), fixtureModule+"/bin") {
+		t.Fatalf("Dirs = %v, want the declared file's directory listed", set.Dirs())
+	}
+}
