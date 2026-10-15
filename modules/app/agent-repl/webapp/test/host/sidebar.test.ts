@@ -35,6 +35,7 @@ function start(host: Host, deps: WebhostSidebarStartDeps) {
   stop = startWebhostSidebar(document, window, host, document.createElement("nav"), {
     client,
     installLogger: () => undefined,
+    installCensus: () => ({ stop: () => undefined }),
     ...deps,
   });
   return logged;
@@ -159,5 +160,40 @@ describe("startWebhostSidebar", () => {
 
     // Assert
     expect(disposed).toBe(true);
+  });
+
+  it("installs the load census on the webhost's document", () => {
+    // Arrange
+    const { host } = recordingHost();
+    const installedOn: Document[] = [];
+
+    // Act
+    start(host, {
+      mount: () => ({ dispose: () => undefined }),
+      installCensus: (doc) => {
+        installedOn.push(doc);
+        return { stop: () => undefined };
+      },
+    });
+
+    // Assert
+    expect(installedOn).toEqual([document]);
+  });
+
+  it("stops the load census when stopped", () => {
+    // Arrange
+    const { host } = recordingHost();
+    let stopped = 0;
+    start(host, {
+      mount: () => ({ dispose: () => undefined }),
+      installCensus: () => ({ stop: () => void stopped++ }),
+    });
+
+    // Act
+    stop?.dispose();
+    stop = null;
+
+    // Assert
+    expect(stopped).toBe(1);
   });
 });
