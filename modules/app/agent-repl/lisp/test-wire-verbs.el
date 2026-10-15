@@ -3382,6 +3382,16 @@ here."
                            :confirm-agents nil)))
                    "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{},\"confirmAgents\":false}"))))
 
+(ert-deftest agent-repl-test-wire-verbs-interrupt-turn-roll-back-unanswered-request ()
+  "A turn stop asking to roll an unanswered prompt back carries the presence message."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-interrupt-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :target '(:arm :turn :value (:roll-back-unanswered t))
+                           :confirm-agents nil)))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{\"rollBackUnanswered\":{}},\"confirmAgents\":false}"))))
+
 (ert-deftest agent-repl-test-wire-verbs-interrupt-confirm-agents-true ()
   "A re-sent turn stop states `confirm_agents' true."
   (agent-repl-test-wire-verbs--with-common
@@ -3435,11 +3445,46 @@ so authoring it is refused rather than sent malformed."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-turn ()
-  "An interrupted turn decodes to the interrupted_turn success arm."
+  "An interrupted turn decodes to the interrupted_turn success arm, with no
+rollback refusal when none was attempted."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-interrupt-response
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"interruptedTurn\":{}}}"))
-                   '(:arm :success :value (:arm :interrupted-turn :value nil))))))
+                   '(:arm :success :value (:arm :interrupted-turn :value (:not-rolled-back nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-turn-not-rolled-back ()
+  "An interrupted turn whose rollback was refused carries the RollBackError cause."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"interruptedTurn\":{\"notRolledBack\":{\"cause\":{\"firstPrompt\":{}}}}}}"))
+                   '(:arm :success :value
+                     (:arm :interrupted-turn
+                      :value (:not-rolled-back (:cause (:arm :first-prompt :value nil)))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-not-rolled-back-without-cause-refused ()
+  "A rollback refusal naming no cause is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"interruptedTurn\":{\"notRolledBack\":{}}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-rolled-back-unanswered ()
+  "A stop that rolled its unanswered prompt back carries the prompt's words."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((decoded (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"rolledBackUnanswered\":{\"prompt\":{\"content\":{\"blocks\":[{\"text\":{\"text\":\"fix it\"}}]}}}}}"))))
+      (should (eq (plist-get (plist-get decoded :value) :arm) :rolled-back-unanswered))
+      (should (plist-get (plist-get (plist-get decoded :value) :value) :prompt)))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-rolled-back-unanswered-without-prompt-refused ()
+  "A rolled-back answer with no prompt leaves the composer nothing to hold: a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{\"rolledBackUnanswered\":{}}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-response-nothing-running ()
   "A stop that found the session quiet decodes to the nothing_running SUCCESS
@@ -3570,12 +3615,12 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                  (sort (list "turn" "detached" "allAgents" "mergeTab") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-success-arms-pinned ()
-  "InterruptSuccess's outcome oneof has exactly the four arms decoded here."
+  "InterruptSuccess's outcome oneof has exactly the five arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptSuccess")
                        #'string<)
                  (sort (list "interruptedTurn" "interruptedDetached" "nothingRunning"
-                             "mergeQueueOffered")
+                             "mergeQueueOffered" "rolledBackUnanswered")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-error-arms-pinned ()
@@ -4271,7 +4316,7 @@ webapp's alone."
 (ert-deftest agent-repl-test-wire-verbs-roll-back-error-arms-pinned ()
   "RollBackError's cause oneof has exactly the arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_roll_back.pb.go" "RollBackError")
+                        "agentrepl/v1/rollback.pb.go" "RollBackError")
                        #'string<)
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
                              "notYetAdopted" "planStale" "noSession" "promptNotRecorded"

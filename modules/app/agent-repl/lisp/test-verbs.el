@@ -535,12 +535,46 @@ step's end, however long that takes, and the call waits for it."
 ;;;; ---- Interrupt -------------------------------------------------------
 
 (ert-deftest agent-repl-verbs-interrupt-targets-the-turn ()
-  "`agent-repl-verb-interrupt' aims the Interrupt at the running turn."
+  "`agent-repl-verb-interrupt' aims the Interrupt at the running turn, always
+asking it to roll an unanswered prompt back into the composer."
   (agent-repl-test-verbs--with
       '((:interrupt . (:response (:arm :success :value (:arm :interrupted-turn :value nil)))))
     (agent-repl-verb-interrupt "ws-one")
     (should (equal (plist-get (agent-repl-test-verbs--request :interrupt) :target)
-                   '(:arm :turn :value nil)))))
+                   '(:arm :turn :value (:roll-back-unanswered t))))))
+
+(ert-deftest agent-repl-verbs-interrupt-rolled-back-unanswered-refills-the-composer ()
+  "A stop that rolled its unanswered prompt back hands the answer to the
+composer's rollback refill, and claims no plain stop."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value
+                                  (:arm :rolled-back-unanswered :value (:prompt (:content nil)))))))
+    (let ((refilled nil))
+      (cl-letf (((symbol-function 'agent-repl--input-rollback-done)
+                 (lambda (ws success) (push (list ws success) refilled))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should (equal refilled '(("ws-one" (:prompt (:content nil))))))
+      (should-not (agent-repl-test-verbs--messaged-p "turn stopped")))))
+
+(ert-deftest agent-repl-verbs-interrupt-not-rolled-back-says-the-prompt-was-kept ()
+  "A stop whose rollback was refused says the turn stopped, the prompt was
+kept, and why."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value
+                                  (:arm :interrupted-turn
+                                   :value (:not-rolled-back (:cause (:arm :first-prompt :value nil))))))))
+    (let ((refilled nil))
+      (cl-letf (((symbol-function 'agent-repl--input-rollback-done)
+                 (lambda (&rest args) (push args refilled))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should-not refilled)
+      (should (agent-repl-test-verbs--messaged-p "turn stopped, prompt kept"))
+      (should (agent-repl-test-verbs--messaged-p
+               (agent-repl--input-rollback-refusal-text '(:arm :first-prompt :value nil)))))))
 
 (ert-deftest agent-repl-verbs-interrupt-first-ask-does-not-confirm-agents ()
   "The first ask never speculatively sets `confirm_agents'."

@@ -99,6 +99,8 @@
 (declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl--input-rollback-offer "agent-repl-input" (ws offer))
+(declare-function agent-repl--input-rollback-done "agent-repl-input" (ws success))
+(declare-function agent-repl--input-rollback-refusal-text "agent-repl-input" (cause))
 (declare-function agent-repl-rpc-close-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-kill-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-nuke-workspace "agent-repl-rpc" (conn request &rest keys))
@@ -757,8 +759,16 @@ This is the clean turn stop the footer's stop button drives, NOT a forced
 restart: the session is not bounced and the agent is not resumed, only the
 in-flight vendor query is ended.
 
+EVERY STOP ASKS TO ROLL AN UNANSWERED PROMPT BACK: Emacs holds the composer
+the prompt's words return to, so the turn target always carries
+`roll_back_unanswered'.  When nothing has answered the running turn's
+prompt, the daemon stops the turn by rolling the prompt back and answers
+`rolled_back_unanswered': the composer is refilled exactly as after a
+rollback, and the feed draws no \"interrupted\" marker.
+
 THE OUTCOME IS THE ARM, and every arm reaches the user.  `interrupted_turn'
-says the turn was stopped; `nothing_running' is a SUCCESS arm, not a
+says the turn was stopped, and why its prompt stayed when the rollback it
+asked for was refused; `nothing_running' is a SUCCESS arm, not a
 failure -- the daemon found the session already quiet -- so it is a calm
 message rather than an error.  `merge_queue_offered' is the quiet
 workspace whose sync merge is queued: the stop raised the merge-queue
@@ -778,15 +788,29 @@ surfaced loudly by the shared dispatcher."
     (agent-repl-verbs--send
      #'agent-repl-rpc-interrupt (agent-repl-verbs--conn ws)
      (list :workspace ref
-           :target (list :arm :turn :value nil)
+           :target (list :arm :turn :value (list :roll-back-unanswered t))
            :confirm-agents (and confirm-agents t))
      :ws ws :op "interrupt"
      :on-success
      (lambda (value)
        (pcase (plist-get value :arm)
          (:interrupted-turn
-          (agent-repl--info ws "elisp.verbs.interrupt-stopped ws=%s" ws)
-          (message "agent-repl: turn stopped"))
+          (let ((refused (plist-get (plist-get value :value) :not-rolled-back)))
+            (if (null refused)
+                (progn
+                  (agent-repl--info ws "elisp.verbs.interrupt-stopped ws=%s" ws)
+                  (message "agent-repl: turn stopped"))
+              ;; THE STOP HAPPENED, THE ROLLBACK DID NOT: the prompt stays in
+              ;; the feed, and the reason is said beside the stop.
+              (agent-repl--info ws "elisp.verbs.interrupt-stopped-not-rolled-back ws=%s cause=%S"
+                                ws (plist-get refused :cause))
+              (message "agent-repl: turn stopped, prompt kept (%s)"
+                       (agent-repl--input-rollback-refusal-text (plist-get refused :cause))))))
+         (:rolled-back-unanswered
+          ;; NOTHING HAD ANSWERED THE PROMPT: the stop rolled it back, and its
+          ;; words return to the composer as after any rollback.
+          (agent-repl--info ws "elisp.verbs.interrupt-rolled-back ws=%s" ws)
+          (agent-repl--input-rollback-done ws (plist-get value :value)))
          (:nothing-running
           ;; NOTHING RUNNING IS THE STOP KEY'S SECOND PRESS: the daemon says
           ;; what rolling the latest prompt back offers, and input.el acts
@@ -1818,6 +1842,12 @@ running daemon does not."
 The clean turn stop the footer's stop button drives: the in-flight vendor
 query is ended, the session is left standing and the agent is not resumed.
 When the stop would also end live detached agents the user is asked first.
+
+WHEN NOTHING HAS ANSWERED THE RUNNING TURN'S PROMPT, the first press rolls
+that prompt back as it stops the turn: its words land in the composer and
+the feed shows no \"interrupted\" marker.  A prompt that cannot be rolled
+back (the first of its conversation, say) is kept, the turn stopped, and
+the reason said.
 
 PRESSED AGAIN, with no turn in flight, it rolls the latest prompt back:
 at once, the prompt landing in the composer, when nothing has answered it

@@ -4123,9 +4123,14 @@ arm this codec does not know is refused as an unknown field."
 ;; so no encoder is offered for it and an attempt to send it is refused as an
 ;; unknown oneof arm rather than an ill-formed FeedId reaching the wire.
 
-(defun agent-repl-wire-encode-interrupt-turn (_present)
-  "Encode InterruptTurn.  Empty: the arm's presence IS the target."
-  nil)
+(defun agent-repl-wire-encode-interrupt-turn (value)
+  "Encode InterruptTurn from VALUE, nil or (:roll-back-unanswered BOOL).
+The arm's presence IS the target.  ROLL-BACK-UNANSWERED asks the stop to roll
+the running turn's prompt back when nothing has answered it yet; it rides
+as the empty `InterruptTurnRollBackUnanswered' message, and absent it the
+key is omitted (the turn is only stopped)."
+  (when (plist-get value :roll-back-unanswered)
+    (list (cons 'rollBackUnanswered nil))))
 
 (defun agent-repl-wire-encode-interrupt-all-agents (_present)
   "Encode InterruptAllAgents.  Empty: the arm's presence IS the target."
@@ -4163,9 +4168,32 @@ the request states, never an omitted default."
         (cons 'confirmAgents
               (agent-repl-wire-verbs--encode-bool (plist-get request :confirm-agents)))))
 
+(defun agent-repl-wire-decode-interrupt-interrupted-turn-not-rolled-back (json)
+  "Decode InterruptedTurnNotRolledBack from JSON into (:cause CAUSE).
+CAUSE is the RollBackError's own (:arm ARM :value V), why the prompt stayed."
+  (let ((message "InterruptedTurnNotRolledBack"))
+    (agent-repl-wire-verbs--check-keys message json '(cause))
+    (agent-repl-wire-verbs--decode-required-message
+     message 'cause json #'agent-repl-wire-decode-roll-back-error)))
+
 (defun agent-repl-wire-decode-interrupt-interrupted-turn (json)
-  "Decode InterruptedTurn from JSON.  Empty: the turn was interrupted."
-  (agent-repl-wire-verbs--decode-empty "InterruptedTurn" json))
+  "Decode InterruptedTurn from JSON into (:not-rolled-back REFUSAL-or-nil).
+The turn was interrupted.  REFUSAL, (:cause CAUSE), is why a rollback the
+stop asked for did not happen; nil when none was attempted."
+  (let ((message "InterruptedTurn"))
+    (agent-repl-wire-verbs--check-keys message json '(notRolledBack))
+    (list :not-rolled-back
+          (agent-repl-wire-verbs--decode-optional-message
+           message 'notRolledBack json
+           #'agent-repl-wire-decode-interrupt-interrupted-turn-not-rolled-back))))
+
+(defun agent-repl-wire-decode-interrupt-rolled-back-unanswered (json)
+  "Decode InterruptRolledBackUnanswered from JSON into (:prompt SAID).
+The prompt is REQUIRED: it is what the composer holds again."
+  (let ((message "InterruptRolledBackUnanswered"))
+    (agent-repl-wire-verbs--check-keys message json '(prompt))
+    (list :prompt (agent-repl-wire-verbs--decode-required-message
+                   message 'prompt json #'agent-repl-wire-decode-user-said))))
 
 (defun agent-repl-wire-decode-interrupt-interrupted-detached (json)
   "Decode InterruptedDetached from JSON into a plist (`:count').
@@ -4211,7 +4239,8 @@ THE ARM IS WHAT THE STOP DID, so each outcome is its own arm; `nothing_running'
 is one of them, not a failure smuggled into success."
   (let ((message "InterruptSuccess"))
     (agent-repl-wire-verbs--check-keys
-     message json '(interruptedTurn interruptedDetached nothingRunning mergeQueueOffered))
+     message json '(interruptedTurn interruptedDetached nothingRunning mergeQueueOffered
+                    rolledBackUnanswered))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'interruptedTurn :interrupted-turn
@@ -4221,7 +4250,9 @@ is one of them, not a failure smuggled into success."
            (list 'nothingRunning :nothing-running
                  #'agent-repl-wire-decode-interrupt-nothing-running)
            (list 'mergeQueueOffered :merge-queue-offered
-                 (agent-repl-wire-verbs--empty-arm "InterruptMergeQueueOffered"))))))
+                 (agent-repl-wire-verbs--empty-arm "InterruptMergeQueueOffered"))
+           (list 'rolledBackUnanswered :rolled-back-unanswered
+                 #'agent-repl-wire-decode-interrupt-rolled-back-unanswered)))))
 
 (defun agent-repl-wire-decode-interrupt-confirm-required (json)
   "Decode InterruptConfirmRequired from JSON into a plist (`:live-agent-count').
