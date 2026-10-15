@@ -48,6 +48,7 @@ import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TopbarContext, WarningChipContext } from "./context.js";
 import { asAnchor } from "./strip.js";
+import { countNoun } from "../count-noun.js";
 
 /**
  * The chip, or NOTHING.
@@ -413,7 +414,7 @@ export function drawDegradedWindowDetail(
       const dropped = msOf(extent.value.droppedCount, `${path}.closed.dropped_count`);
       span.textContent =
         `${clockTime(beganAt)}–${clockTime(endedAt)}, ` +
-        `${dropped} observation${dropped === 1 ? "" : "s"} dropped`;
+        `${countNoun(dropped, "observation")} dropped`;
       break;
     }
     default: {

@@ -27,9 +27,11 @@ import {
   drawSectionLabel,
   drawWorkspaceRoster,
   MERGED_TODAY_COUNT_CLASS,
+  mergedTodayCommitsText,
   OPEN_COUNT_CLASS,
   OPEN_SECTION_CLASS,
   SECTION_LABEL_CLASS,
+  todaysMerges,
 } from "../../src/sidebar/roster.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import {
@@ -1526,6 +1528,91 @@ describe("the open Recently Merged band's today count", () => {
     );
     // Assert
     expect(todayCount(drawn).textContent).toBe("(1 today)");
+  });
+});
+
+describe("mergedTodayCommitsText", () => {
+  it.each([
+    { name: "no merge as zero commits", today: [], want: "0 commits merged today" },
+    { name: "one commit in the singular", today: [{ atMs: NOW, commits: 1 }], want: "1 commit merged today" },
+    { name: "every merge's commits summed", today: [{ atMs: NOW, commits: 3 }, { atMs: NOW, commits: 4 }], want: "7 commits merged today" },
+    { name: "a zero count as a real count", today: [{ atMs: NOW, commits: 0 }], want: "0 commits merged today" },
+    {
+      name: "one uncounted merge apart from the sum",
+      today: [{ atMs: NOW, commits: 2 }, { atMs: NOW, commits: undefined }],
+      want: "2 commits merged today (1 merge not counted)",
+    },
+    {
+      name: "several uncounted merges in the plural",
+      today: [{ atMs: NOW, commits: undefined }, { atMs: NOW, commits: undefined }],
+      want: "0 commits merged today (2 merges not counted)",
+    },
+  ])("words $name", ({ today, want }) => {
+    expect(mergedTodayCommitsText(today)).toBe(want);
+  });
+});
+
+describe("todaysMerges", () => {
+  it.each([
+    { name: "keeps a merge that landed at the start of today", atMs: () => startOfToday(), kept: 1 },
+    { name: "drops a merge that landed yesterday", atMs: () => startOfToday() - 1, kept: 0 },
+  ])("$name", ({ atMs, kept }) => {
+    expect(todaysMerges([{ atMs: atMs(), commits: 1 }], NOW)).toHaveLength(kept);
+  });
+});
+
+describe("the Recently Merged band header's commit hover", () => {
+  const merged = (id: string, atMs: number, commits?: number) =>
+    row({
+      id,
+      closed: true,
+      status: { case: "merged", value: {} },
+      when: { case: "merged", value: { atMs: BigInt(atMs) } },
+      detail: commits === undefined ? {} : { commits: { count: commits } },
+    });
+  const header = (drawn: HTMLElement): HTMLElement =>
+    pane(drawn, "repository").querySelector(".merged-section > .repo-head") as HTMLElement;
+  const todayCount = (drawn: HTMLElement): string | null | undefined =>
+    header(drawn).querySelector(`.${MERGED_TODAY_COUNT_CLASS}`)?.textContent;
+  const drawBand = (rows: ReturnType<typeof row>[], sc = sidebarContext()): HTMLElement =>
+    drawWorkspaceRoster(roster({ merged: mergedSection(rows, rows.length, false) }), sc);
+
+  it("sums the commits of only the merges that landed today", () => {
+    // Act
+    const drawn = drawBand([merged("ws-1", NOW, 3), merged("ws-2", startOfToday(), 5), merged("ws-3", startOfToday() - 1, 100)]);
+    // Assert
+    expect(header(drawn).title).toBe("8 commits merged today");
+  });
+
+  it("names a merge the daemon sent no count for", () => {
+    const drawn = drawBand([merged("ws-1", NOW, 3), merged("ws-2", NOW)]);
+    expect(header(drawn).title).toBe("3 commits merged today (1 merge not counted)");
+  });
+
+  it("leaves out a collapsed repository's merges, as the today count does", () => {
+    // Arrange
+    const band = mergedBand(
+      [
+        mergedGroup({ id: "repo-1", rows: [merged("ws-1", NOW, 2)] }),
+        mergedGroup({ id: "repo-2", rows: [merged("ws-2", NOW, 40)], repositoryCollapsed: true }),
+      ],
+      1,
+      false,
+    );
+    // Act
+    const drawn = drawWorkspaceRoster(roster({ merged: band }), sidebarContext());
+    // Assert
+    expect([header(drawn).title, todayCount(drawn)]).toEqual(["2 commits merged today", "(1 today)"]);
+  });
+
+  it("drops a merge at midnight on the same tick as the today count", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const drawn = drawBand([merged("ws-1", NOW, 3)], sidebarContext(appContext({}, ticker)));
+    // Act
+    ticker.tick(startOfTomorrow());
+    // Assert
+    expect([header(drawn).title, todayCount(drawn)]).toEqual(["0 commits merged today", "(0 today)"]);
   });
 });
 

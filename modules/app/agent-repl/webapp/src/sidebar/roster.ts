@@ -80,7 +80,15 @@ import { drawCreateWorkspaceControl } from "./create.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
 import { foldViewKey, GROUPING_VIEW_KEY, paintSectionFold, paintTriangle } from "./view.js";
-import { drawRosterRow, drawRosterRowWhenMerged, expandVisibleRows, mergedToday, tickPaint, type RowPlace } from "./row.js";
+import {
+  drawRosterRow,
+  drawRosterRowDetailCommits,
+  drawRosterRowWhenMerged,
+  expandVisibleRows,
+  mergedToday,
+  tickPaint,
+  type RowPlace,
+} from "./row.js";
 import {
   buildUpdateTaskRequest,
   drawCreateTaskControl,
@@ -88,6 +96,7 @@ import {
   type TaskChange,
 } from "./tasks.js";
 import { fireVerb } from "./verbs.js";
+import { countNoun } from "../count-noun.js";
 
 /**
  * The whole roster.
@@ -578,7 +587,11 @@ export function drawRosterMergedSection(
           drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
         attribute: "data-merged-empty",
       },
-      decorateHeader: (header) => header.appendChild(drawMergedTodayCount(groups.flatMap((g) => g.shownMergedAt), sc)),
+      decorateHeader: (header) => {
+        const merges = groups.flatMap((g) => g.shownMerges);
+        header.appendChild(drawMergedTodayCount(merges, sc));
+        tickMergedTodayCommits(header, merges, sc);
+      },
     },
     () => {
       const region = document.createElement("div");
@@ -600,11 +613,19 @@ export const MERGED_AT_ATTRIBUTE = "data-merged-at";
 /** The attribute a group states whether its repository is collapsed on. */
 export const MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE = "data-repository-collapsed";
 
-/** One drawn merged group, and the merged instants of its rows while it is shown. */
+/** One merged row's facts the band's header counts. */
+export interface MergedRowFacts {
+  /** When the merge landed (epoch ms). */
+  atMs: number;
+  /** The commits the merge brought in; undefined when the daemon has no count. */
+  commits: number | undefined;
+}
+
+/** One drawn merged group, and the facts of its rows while it is shown. */
 export interface DrawnMergedRepoGroup {
   element: HTMLElement;
-  /** Every row's merged instant when the wire shows the group; none when it does not. */
-  shownMergedAt: number[];
+  /** Every row's facts when the wire shows the group; none when it does not. */
+  shownMerges: MergedRowFacts[];
 }
 
 /**
@@ -627,11 +648,15 @@ export function drawRosterMergedRepoGroup(
 ): DrawnMergedRepoGroup {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const rows = requireMessage(u.rows, `${path}.rows`);
-  const mergedAt = rows.rows.map((row, i) => {
+  const merges = rows.rows.map((row, i): MergedRowFacts => {
     const when = requireMessage(row.when, `${path}.rows.rows[${i}].when`);
     const arm = requireCase(when.shown, `${path}.rows.rows[${i}].when.shown`);
     if (arm.case !== "merged") return unreachableArm(`${path}.rows.rows[${i}].when.shown`, arm.case);
-    return drawRosterRowWhenMerged(arm.value, `${path}.rows.rows[${i}].when.merged`);
+    const commits = requireMessage(row.detail, `${path}.rows.rows[${i}].detail`).commits;
+    return {
+      atMs: drawRosterRowWhenMerged(arm.value, `${path}.rows.rows[${i}].when.merged`),
+      commits: commits === undefined ? undefined : drawRosterRowDetailCommits(commits, `${path}.rows.rows[${i}].detail.commits`),
+    };
   });
   const wireCollapsed = drawRosterMergedRepoGroupDrawn(u.drawn, `${path}.drawn`);
   const group = document.createElement("div");
@@ -639,13 +664,13 @@ export function drawRosterMergedRepoGroup(
   group.setAttribute("data-repository", key.id);
   group.appendChild(drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`));
   const region = drawRosterRows(rows, sc, `${path}.rows`, false, "merged");
-  [...region.children].forEach((row, i) => row.setAttribute(MERGED_AT_ATTRIBUTE, String(mergedAt[i])));
+  [...region.children].forEach((row, i) => row.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs)));
   group.appendChild(region);
   const collapsed = sc.view.track(foldViewKey(repoFoldKey(key.id)), wireCollapsed, (folded) =>
     paintMergedRepoGroup(group, folded),
   );
   paintMergedRepoGroup(group, collapsed);
-  return { element: group, shownMergedAt: wireCollapsed ? [] : mergedAt };
+  return { element: group, shownMerges: wireCollapsed ? [] : merges };
 }
 
 /** Whether a merged group's repository is collapsed. EVERY arm is named; unset is malformed. */
@@ -688,13 +713,50 @@ export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
  * shared ticker recounts it, so it drops at midnight together with the green
  * names.
  */
-export function drawMergedTodayCount(mergedAt: number[], sc: SidebarContext): HTMLElement {
+export function drawMergedTodayCount(merges: MergedRowFacts[], sc: SidebarContext): HTMLElement {
   const count = document.createElement("span");
   count.className = MERGED_TODAY_COUNT_CLASS;
   tickPaint(sc, (nowMs) => {
-    count.textContent = `(${mergedAt.filter((atMs) => mergedToday(atMs, nowMs)).length} today)`;
+    count.textContent = `(${todaysMerges(merges, nowMs).length} today)`;
   });
   return count;
+}
+
+/**
+ * The merges among MERGES that landed today (local date): the ONE filter the
+ * header's "(K today)" and its commit hover both count over, so the hover
+ * always sums exactly the merges the count names.
+ */
+export function todaysMerges(merges: MergedRowFacts[], nowMs: number): MergedRowFacts[] {
+  return merges.filter((m) => mergedToday(m.atMs, nowMs));
+}
+
+/**
+ * Paint the band header's hover now and on every tick: the commits today's
+ * merges brought in, summed (owner request, 2026-10-14). The ticker drops a
+ * merge at midnight from the sum on the same paint as from "(K today)".
+ */
+function tickMergedTodayCommits(header: HTMLElement, merges: MergedRowFacts[], sc: SidebarContext): void {
+  tickPaint(sc, (nowMs) => {
+    header.title = mergedTodayCommitsText(todaysMerges(merges, nowMs));
+  });
+}
+
+/**
+ * The hover's words for TODAY's merges: their commits summed. A merge the
+ * daemon sent no count for is named as uncounted rather than summed as zero,
+ * so the total never claims more certainty than the wire carries.
+ */
+export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
+  let commits = 0;
+  let uncounted = 0;
+  for (const m of today) {
+    if (m.commits === undefined) uncounted += 1;
+    else commits += m.commits;
+  }
+  const summed = `${countNoun(commits, "commit")} merged today`;
+  if (uncounted === 0) return summed;
+  return `${summed} (${countNoun(uncounted, "merge")} not counted)`;
 }
 
 /**

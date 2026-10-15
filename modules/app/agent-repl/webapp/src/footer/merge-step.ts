@@ -32,6 +32,7 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { toneClass } from "../vocab.js";
 import { textLine } from "./parts.js";
 import { activityDatumClass } from "./tones.js";
+import { pluralNoun } from "../count-noun.js";
 
 /** The glyph each suite edge is drawn with. */
 export const SUITE_EDGE_GLYPHS = {
@@ -126,7 +127,7 @@ export function drawMergeStepConflict(u: FooterMergeStepConflict): HTMLElement {
   count.setAttribute("data-datum", "count");
   count.textContent = String(u.files);
   line.appendChild(count);
-  line.appendChild(document.createTextNode(u.files === 1 ? " file" : " files"));
+  line.appendChild(document.createTextNode(` ${pluralNoun(u.files, "file")}`));
   return line;
 }
 

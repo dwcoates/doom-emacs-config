@@ -36,6 +36,7 @@ import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { fireVerb, type PriorityChoice } from "./verbs.js";
+import { countNoun } from "../count-noun.js";
 
 /** What the form collected, before it becomes a request. */
 export interface CreateWorkspaceSpec {
@@ -317,9 +318,7 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
           : cause.value.policyDir
       }`;
     case "namingFailed":
-      return `the workspace could not be named (${cause.value.cause}, ${cause.value.attempts} attempt${
-        cause.value.attempts === 1 ? "" : "s"
-      })${cause.value.answer !== "" ? `: the model answered "${cause.value.answer}"` : ""}`;
+      return `the workspace could not be named (${cause.value.cause}, ${countNoun(cause.value.attempts, "attempt")})${cause.value.answer !== "" ? `: the model answered "${cause.value.answer}"` : ""}`;
     case "insideTemporaryDirectory":
       return `${cause.value.dir} is inside the temporary directory ${cause.value.temporaryRoot}; agent-repl does not register temporary folders`;
     case "baseRefOffPrimaryBranch":
