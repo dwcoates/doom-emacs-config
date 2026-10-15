@@ -215,11 +215,20 @@ describe("an unspawnable lock holder", () => {
 });
 
 describe("the workspace lock", () => {
+  /**
+   * A shim taking its locks through the REAL holder: these cases are about
+   * the kernel lock itself, which the suite's stand-in does not take.
+   */
+  function spawnRealLockShim(options: Parameters<typeof spawnShim>[0] = {}): ReturnType<typeof spawnShim> {
+    return spawnShim({ ...options, env: { ...options.env, AGENT_REPL_SHIM_LOCK_BIN: SHIM_LOCK_BINARY } });
+  }
+
+
   /** A second shim over the first's directories, on its own socket. */
   async function secondShimOver(
     first: Awaited<ReturnType<typeof spawnShim>>,
   ): Promise<Awaited<ReturnType<typeof spawnShim>>> {
-    return spawnShim({
+    return spawnRealLockShim({
       reuse: first.dirs,
       argv: [
         "--listen",
@@ -238,7 +247,7 @@ describe("the workspace lock", () => {
     // daemon can stand a replacement up beside the shim it is retiring. A
     // startup-time workspace claim would wedge the newcomer behind a lock the
     // live shim only drops when it dies.
-    const first = await spawnShim();
+    const first = await spawnRealLockShim();
     await first.clients.h1.startSession(freshSession());
 
     const second = await secondShimOver(first);
@@ -250,7 +259,7 @@ describe("the workspace lock", () => {
   test("the inert second shim's StartSession is refused conversation_owned", async () => {
     // The exclusion did not vanish, it MOVED: the claim is made where the
     // conversation is, and the refusal names the lock that proved it.
-    const first = await spawnShim();
+    const first = await spawnRealLockShim();
     await first.clients.h1.startSession(freshSession());
     const second = await secondShimOver(first);
 
@@ -262,7 +271,7 @@ describe("the workspace lock", () => {
   test("the refused shim stays inert and keeps serving", async () => {
     // A refusal is not a death: the shim is still the daemon's to use once the
     // conversation is free, and killing it would throw away a warm process.
-    const first = await spawnShim();
+    const first = await spawnRealLockShim();
     await first.clients.h1.startSession(freshSession());
     const second = await secondShimOver(first);
     await second.clients.h1.startSession(freshSession());
@@ -277,7 +286,7 @@ describe("the workspace lock", () => {
     // The session claim is taken before the workspace claim, so the refusal
     // path hands one lock back. It must hand back only its OWN — a release that
     // reached the incumbent's lock file would unlock a live conversation.
-    const first = await spawnShim();
+    const first = await spawnRealLockShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     const second = await secondShimOver(first);
     await second.clients.h1.startSession(freshSession());
@@ -293,7 +302,7 @@ describe("the workspace lock", () => {
   test("SIGTERM on an INERT shim exits 0 with no lock activity at all", async () => {
     // An inert shim's stand-down has nothing to release, and a teardown that
     // logged a release would mean it had been holding one.
-    const shim = await spawnShim();
+    const shim = await spawnRealLockShim();
 
     const exit = await shim.standDown();
 
@@ -307,7 +316,7 @@ describe("the workspace lock", () => {
   test("KillSession on an INERT shim is refused no_session and holds no lock", async () => {
     // There is no session to kill, so the verb refuses; the point here is that
     // the refusal path never touched a lock either.
-    const shim = await spawnShim();
+    const shim = await spawnRealLockShim();
 
     const response = await shim.clients.h1.killSession(
       create(shimv1.KillSessionRequestSchema, { force: false }),
@@ -319,7 +328,7 @@ describe("the workspace lock", () => {
 
   test("no lock file of either kind exists before StartSession", async () => {
     // The whole inert contract in one assertion: the directory is empty.
-    const shim = await spawnShim();
+    const shim = await spawnRealLockShim();
 
     expect(readdirSync(shim.dirs.lockDir)).toEqual([]);
   });
@@ -328,7 +337,7 @@ describe("the workspace lock", () => {
     // The lock directory is a CROSS-SYSTEM rendezvous (the daemon probes the
     // workspace lock by path), so the override is what lets a test run private
     // locks instead of contending with the developer's own running shim.
-    const shim = await spawnShim();
+    const shim = await spawnRealLockShim();
 
     await shim.clients.h1.startSession(freshSession());
 
@@ -339,7 +348,7 @@ describe("the workspace lock", () => {
   test("the session lock appears once StartSession has minted a vendor id", async () => {
     // The session lock is keyed by the vendor session id, which does not exist
     // until StartSession pre-mints it.
-    const shim = await spawnShim();
+    const shim = await spawnRealLockShim();
 
     const before = readdirSync(shim.dirs.lockDir);
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));

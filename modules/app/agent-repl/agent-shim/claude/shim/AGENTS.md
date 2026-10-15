@@ -131,6 +131,13 @@ means the daemon and this build disagree about the contract.
     a `shim-lock` CHILD PROCESS this shim keeps the stdin pipe of; see
     `agent-shim/shim-lock/AGENTS.md`. Every suite that spawns a real shim
     overrides it at the binary that suite built.
+    - The shim's integration suite spawns a STAND-IN holder by default
+      (`test/integration-support/shim-lock-stand-in.sh`): it speaks the
+      protocol and creates the lock file, but takes no kernel lock, so the
+      suite runs the shim alone ("A system's integration tests run that system
+      alone", the module's `AGENTS.md`).
+    - Only the cases about the lock itself (`process.test.ts`, "the workspace
+      lock") spawn the real `shim-lock` built by `pretest:integration`.
   - `AGENT_REPL_FORBID_VENDOR_CALLS` — the guard (see below).
   - `AGENT_REPL_FAKE_TURN_GATE`, `AGENT_REPL_FAKE_TURN_GATE_TEXT`,
     `AGENT_REPL_FAKE_SPOOL_ROOT`, `AGENT_REPL_FAKE_REFUSE`,
