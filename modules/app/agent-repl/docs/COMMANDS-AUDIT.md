@@ -66,7 +66,7 @@ Findings are collected at the end, in "Audit findings".
 
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
-| `agent-repl-interrupt-turn` | Interrupt the running turn; pressed again with nothing running, roll the latest prompt back (or pick one when output follows it). | `C-c C-k` | composer | works |
+| `agent-repl-interrupt-turn` | Interrupt the running turn, rolling its prompt back at once when nothing has answered it; pressed again with nothing running, roll the latest prompt back (or pick one when output follows it). | `C-c C-k` | composer | works |
 | `agent-repl-rollback-keep-files` | Roll back to before the selected prompt, keeping files. | `C-c C-RET` | composer | works |
 | `agent-repl-rollback-restore-files` | Roll back to before the selected prompt, restoring files. | `C-c M-RET` | composer | works |
 

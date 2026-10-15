@@ -26,6 +26,13 @@ type InterruptOutcome struct {
 	// raised the merge-queue question in the workspace's pinned merge bubble
 	// instead: the interrupt is about the queued merge, and changed nothing.
 	MergeQueueOffered bool
+	// RolledBack reports that the turn was stopped by rolling its prompt back
+	// (InterruptTarget.RollBack).
+	RolledBack bool
+	// RollbackRefused is why the rollback a Turn stop asked for did not
+	// happen: a *ShimRefusal or promptqueue.ErrHoldsChanged. The turn was
+	// then stopped by the ordinary kill, so Turn is set too.
+	RollbackRefused error
 }
 
 // ConfirmRequired is the challenge an unconfirmed turn interrupt raises while
@@ -98,6 +105,9 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 		if running.Turn == nil && v.offerMergeQueue(ctx, log, ws) {
 			return InterruptOutcome{MergeQueueOffered: true}, nil
 		}
+		if target.RollBack != nil && running.Turn != nil {
+			return v.interruptRollingBack(ctx, log, ws, shim, running, confirm, *target.RollBack)
+		}
 		return v.interruptTurn(ctx, log, ws, shim, running, confirm)
 	case target.Detached != nil:
 		return v.interruptDetached(ctx, log, ws, shim, *target.Detached)
@@ -125,6 +135,46 @@ func directCommand() *conversationv1.AgentInterruptedByUser {
 			Direct: &conversationv1.AgentInterruptedByUserDirect{},
 		},
 	}
+}
+
+// interruptRollingBack stops the open turn by rolling its prompt back (REQ),
+// so the feed draws no interrupted ending. Live detached agents make it the
+// ordinary stop: the rollback interrupts the turn as an unforced kill does,
+// and the confirm challenge governs taking agents with it. A refused rollback
+// is answered by the ordinary kill, the stop the user asked for, with the
+// refusal carried on the outcome; any other rollback failure is the stop's.
+func (v *verbs) interruptRollingBack(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running, confirm bool, req RollbackRequest) (InterruptOutcome, error) {
+	if live := len(running.LiveWork.Agents); live > 0 {
+		log.Info(opInterrupt, "detached agents are live, so the stop does not roll its prompt back", dlog.Context{
+			"turn": string(*running.Turn), "live_agent_count": live,
+		})
+		return v.interruptTurn(ctx, log, ws, shim, running, confirm)
+	}
+	_, err := v.RollBack(ctx, ws, req)
+	if err == nil {
+		log.Info(opInterrupt, "stopped the turn by rolling back its unanswered prompt", dlog.Context{
+			"turn": string(*running.Turn), "turns": len(req.Turns),
+		})
+		return InterruptOutcome{RolledBack: true}, nil
+	}
+	if !IsRollbackRefusal(err) {
+		return InterruptOutcome{}, fmt.Errorf("interrupt %q: roll back the unanswered prompt: %w", ws, err)
+	}
+	outcome, killErr := v.interruptTurn(ctx, log, ws, shim, running, confirm)
+	if killErr != nil {
+		return InterruptOutcome{}, killErr
+	}
+	if outcome.NothingRunning {
+		// THE REFUSED ROLLBACK HAD ALREADY INTERRUPTED THE TURN: the shim
+		// interrupts before a cut the vendor then refuses, so the kill finds
+		// the turn gone. The stop still happened.
+		outcome = InterruptOutcome{Turn: true}
+	}
+	outcome.RollbackRefused = err
+	log.Info(opInterrupt, "the stop's rollback was refused; the turn was stopped and its prompt kept", dlog.Context{
+		"turn": string(*running.Turn), "cause": err.Error(),
+	})
+	return outcome, nil
 }
 
 // interruptTurn kills the open turn, raising the confirm challenge first when

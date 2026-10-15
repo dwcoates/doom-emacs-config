@@ -57,6 +57,13 @@ type wsState struct {
 	// rolledBack is the turns rolled back (rollback.go): no row of one is
 	// drawn.
 	rolledBack map[ids.TurnID]bool
+	// rollingBack is the turns a rollback is cutting away while it runs
+	// (rollback.go, HoldTurns): a row of one is withheld rather than drawn
+	// until the rollback settles.
+	rollingBack map[ids.TurnID]bool
+	// withheld is the rows of rollingBack turns that arrived while held, in
+	// arrival order: dropped when the rollback lands, drawn when it is refused.
+	withheld []withheldRow
 	// signedIn is the turns whose account failure a completed sign-in
 	// answered (signin.go): no failure row of one is drawn.
 	signedIn map[ids.TurnID]bool
@@ -703,6 +710,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		answerRows:           map[string]*frontendv1.FeedId{},
 		finalAnswerSeen:      map[string]bool{},
 		rolledBack:           map[ids.TurnID]bool{},
+		rollingBack:          map[ids.TurnID]bool{},
 		signedIn:             map[ids.TurnID]bool{},
 		signInTurns:          map[ids.TurnID]bool{},
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
@@ -967,7 +975,7 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 // feed its placement names; nothing copies it onto another.
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
-	if r.rolledBackRow(s, f, row) || r.signedInRow(s, f, row) {
+	if r.rolledBackRow(s, f, row) || r.withheldRollingBack(s, f, at, row, durable) || r.signedInRow(s, f, row) {
 		return
 	}
 	id := row.GetId().GetValue()

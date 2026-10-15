@@ -221,6 +221,12 @@ type InterruptTarget struct {
 	Detached *feedid.Ref
 	// AllAgents interrupts fan-wide.
 	AllAgents bool
+	// RollBack, on a Turn stop, rolls the running turn's prompt back instead
+	// of killing the turn, when no detached agent is live: the rollback's own
+	// interrupt stops the turn and no interrupted ending is drawn. The caller
+	// sets it only for a prompt nothing has answered yet. A refused rollback
+	// stops the turn by the ordinary kill. nil: the turn is only stopped.
+	RollBack *RollbackRequest
 }
 
 // Verbs is the whole verb surface. Each method is one rpc's body.

@@ -220,6 +220,116 @@ func TestARowOfARolledBackTurnArrivingLaterIsNotDrawn(t *testing.T) {
 	}
 }
 
+// turnRows answers the ids of the root feed's rows of TURN, in feed order.
+func turnRows(h *harness, turn string) []string {
+	h.t.Helper()
+	var out []string
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetTurn().GetValue() == turn {
+			out = append(out, row.GetId().GetValue())
+		}
+	}
+	return out
+}
+
+func TestARowOfAHeldTurnIsWithheld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := turnRows(h, "t3")
+	h.resolver.HoldTurns(testWorkspace, []ids.TurnID{"t3"})
+
+	// Act
+	h.liveResponse("u-held", "words during the rollback", "t3")
+
+	// Assert
+	if got := turnRows(h, "t3"); !slices.Equal(got, before) {
+		t.Fatalf("t3 rows = %v, want the held turn's new row withheld (%v)", got, before)
+	}
+	if !h.hasRecord("debug", opRollbackHold) {
+		t.Fatalf("records = %+v, want the withheld row recorded", h.records())
+	}
+}
+
+func TestAHoldLeavesOtherTurnsDrawn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := len(turnRows(h, "t2"))
+	h.resolver.HoldTurns(testWorkspace, []ids.TurnID{"t3"})
+
+	// Act
+	h.liveResponse("u-t2-more", "more of t2", "t2")
+
+	// Assert
+	if got := len(turnRows(h, "t2")); got != before+1 {
+		t.Fatalf("t2 rows = %d, want %d: a hold on t3 withheld a row of t2", got, before+1)
+	}
+}
+
+func TestReleasingAHoldDrawsTheWithheldRowsInOrder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := len(turnRows(h, "t3"))
+	h.resolver.HoldTurns(testWorkspace, []ids.TurnID{"t3"})
+	h.liveResponse("u-first", "first held", "t3")
+	h.liveResponse("u-second", "second held", "t3")
+
+	// Act
+	h.resolver.ReleaseTurns(testWorkspace, []ids.TurnID{"t3"})
+
+	// Assert
+	got := turnRows(h, "t3")
+	if len(got) != before+2 {
+		t.Fatalf("t3 rows = %v, want both withheld rows drawn after the release", got)
+	}
+	first := slices.IndexFunc(got, func(id string) bool { return strings.Contains(id, "u-first") })
+	second := slices.IndexFunc(got, func(id string) bool { return strings.Contains(id, "u-second") })
+	if first < 0 || second < 0 || first > second {
+		t.Fatalf("t3 rows = %v, want u-first drawn before u-second", got)
+	}
+	if !h.hasRecordWith("info", opRollbackHold, "drawn", 2) {
+		t.Fatalf("records = %+v, want the release recorded at INFO with the drawn count", h.records())
+	}
+}
+
+func TestARowAfterAReleaseIsDrawnAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	h.resolver.HoldTurns(testWorkspace, []ids.TurnID{"t3"})
+	h.resolver.ReleaseTurns(testWorkspace, []ids.TurnID{"t3"})
+	before := len(turnRows(h, "t3"))
+
+	// Act
+	h.liveResponse("u-after", "after the release", "t3")
+
+	// Assert
+	if got := len(turnRows(h, "t3")); got != before+1 {
+		t.Fatalf("t3 rows = %d, want %d: the released turn is still withheld", got, before+1)
+	}
+}
+
+func TestRollingBackAHeldTurnDropsItsWithheldRows(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	h.resolver.HoldTurns(testWorkspace, []ids.TurnID{"t3"})
+	h.liveResponse("u-held", "the interrupted ending", "t3")
+
+	// Act
+	if err := h.resolver.RollBackTurns(testWorkspace, []ids.TurnID{"t3"}); err != nil {
+		t.Fatalf("RollBackTurns: %v", err)
+	}
+	h.resolver.ReleaseTurns(testWorkspace, []ids.TurnID{"t3"})
+
+	// Assert
+	if got := turnRows(h, "t3"); len(got) != 0 {
+		t.Fatalf("t3 rows = %v, want none: a withheld row of a rolled-back turn was drawn", got)
+	}
+}
+
 func TestARolledBackTurnStaysRolledBackAfterARestart(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{}

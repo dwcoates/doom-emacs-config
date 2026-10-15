@@ -9,6 +9,7 @@ package agentrepl.v1;
 import "workspace/v1/workspace.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/rollback.proto";
+import "conversation/v1/user.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -37,7 +38,25 @@ message InterruptRequest {
   // targets. Default false.
   bool confirm_agents = 5;
 }
-message InterruptTurn {}
+// The running turn, as the target of a stop.
+message InterruptTurn {
+  // Asks the stop to roll the running turn's prompt back as well, when
+  // nothing the agent produced follows that prompt in the root feed yet: the
+  // turn is then stopped BY the rollback, its prompt and every row of it leave
+  // the feed without an "interrupted" marker, and the answer is
+  // `rolled_back_unanswered` carrying the prompt's words. Set by a client that
+  // holds a composer to put those words back into (Emacs's stop key); a
+  // client with no composer leaves it UNSET, because a rolled-back prompt's
+  // words would have nowhere to go. UNSET: the turn is only stopped. The
+  // rollback is skipped, and the turn only stopped, when output already
+  // follows the prompt, when no prompt can be rolled back, or when detached
+  // agents are live (the confirm_required challenge governs that stop).
+  optional InterruptTurnRollBackUnanswered roll_back_unanswered = 1;
+}
+// Presence asks a turn stop to roll back an unanswered prompt. DELIBERATELY
+// EMPTY: the prompt is the latest one a rollback can reach, and files are
+// always kept, so there is nothing for the client to choose.
+message InterruptTurnRollBackUnanswered {}
 message InterruptAllAgents {}
 
 // THE ARM IS THE OUTCOME.
@@ -68,9 +87,41 @@ message InterruptSuccess {
     // untouched until the question is answered, and no rollback is offered:
     // the stop key's second press means the merge here, never the prompt.
     InterruptMergeQueueOffered merge_queue_offered = 4;
+    // The running turn's prompt had nothing after it, the stop asked for it
+    // (InterruptTurn.roll_back_unanswered), and the turn was stopped by
+    // rolling that prompt back.
+    InterruptRolledBackUnanswered rolled_back_unanswered = 5;
   }
 }
-message InterruptedTurn {}
+// The turn was interrupted.
+message InterruptedTurn {
+  // Why the prompt was not rolled back, when the stop asked for an unanswered
+  // prompt's rollback (InterruptTurn.roll_back_unanswered), nothing followed
+  // that prompt, and the rollback was refused: the turn was stopped anyway, as
+  // the stop the user asked for, and the prompt stays in the feed. UNSET when
+  // no rollback was attempted.
+  optional InterruptedTurnNotRolledBack not_rolled_back = 1;
+}
+// A stop's rollback that did not happen. The conversation, the feed, the held
+// prompts and the files are as they were, and the turn was stopped.
+message InterruptedTurnNotRolledBack {
+  // Why, exactly as RollBack refuses: the first prompt of a vendor
+  // conversation cannot be cut away, the vendor may not yet hold the prompt's
+  // record, the vendor may refuse the cut.
+  RollBackError cause = 1;
+}
+// THE STOP ROLLED THE UNANSWERED PROMPT BACK. The conversation ends just
+// before the prompt, held prompts queued after it are dropped, files are
+// kept, and the feed draws neither the prompt nor its turn's end, so no
+// "interrupted" marker appears. Emacs saves the composer's contents to its
+// history and fills it with the prompt, exactly as after RollBack.
+message InterruptRolledBackUnanswered {
+  // The prompt rolled back, as the user said it: its text and attachments,
+  // for the composer to hold again. A quote the prompt replied with
+  // (conversation.v1.UserQuoteBlock) is left out: a resend replies to
+  // whatever is selected when it is sent.
+  conversation.v1.UserSaid prompt = 1;
+}
 // The frontend focuses the merge bubble's question. DELIBERATELY EMPTY: the
 // question itself rides the bubble's row.
 message InterruptMergeQueueOffered {}
@@ -83,7 +134,9 @@ message InterruptedDetached {
 // The stop found the session quiet. A turn stop that finds nothing running is
 // the SECOND PRESS of the stop key: the turn it would stop already ended (the
 // first press stopped it, or it concluded on its own), so the key moves on to
-// rolling the latest prompt back.
+// rolling the latest prompt back. A first press whose prompt had nothing after
+// it already rolled the prompt back (rolled_back_unanswered), so a second
+// press reaches the prompt before it.
 message InterruptNothingRunning {
   // What rolling back offers now, for a turn stop. UNSET when no prompt can be
   // rolled back (none since the last clear or compaction), and always UNSET on

@@ -42,7 +42,9 @@ type RollbackResult struct {
 // shim rewinds the vendor conversation (interrupting the open turn, and when
 // restoring files, stopping the dropped turns' detached work and restoring
 // the files); only then are the planned held prompts dropped and the dropped
-// turns removed from the feed for good.
+// turns removed from the feed for good. The dropped turns' rows arriving
+// meanwhile are withheld (feed.Resolver.HoldTurns), so an interrupted
+// ending is never drawn.
 //
 // A shim refusal comes back as a *ShimRefusal naming its arm, and a queue
 // that changed since the plan as promptqueue.ErrHoldsChanged; either leaves
@@ -64,6 +66,10 @@ func (v *verbs) RollBack(ctx context.Context, ws ids.WorkspaceID, req RollbackRe
 		log.Info(opRollBack, "the rollback was refused: no session is running", nil)
 		return RollbackResult{}, refusal
 	}
+	// THE DROPPED TURNS' ROWS ARE WITHHELD WHILE THE SHIM CUTS: it interrupts
+	// a running turn first, and that turn's interrupted ending must not be
+	// drawn only to vanish when the cut lands. A refused rollback draws them.
+	v.deps.Feed.HoldTurns(ws, req.Turns)
 	var restored []string
 	err = v.deps.Queue.RollBack(ctx, ws, req.Since, req.DropHeld, func(ctx context.Context) error {
 		paths, err := shim.RollBackSession(ctx, req.Turns, req.RestoreFiles)
@@ -71,6 +77,7 @@ func (v *verbs) RollBack(ctx context.Context, ws ids.WorkspaceID, req RollbackRe
 		return err
 	})
 	if err != nil {
+		v.deps.Feed.ReleaseTurns(ws, req.Turns)
 		if refusal, ok := AsShimRefusal(err); ok {
 			log.Info(opRollBack, "the shim refused the rollback; nothing was rolled back",
 				dlog.Context{"arm": refusal.Arm, "detail": refusal.Detail})
@@ -88,6 +95,17 @@ func (v *verbs) RollBack(ctx context.Context, ws ids.WorkspaceID, req RollbackRe
 	_ = v.deps.Feed.RollBackTurns(ws, req.Turns)
 	log.Info(opRollBack, "the conversation was rolled back", dlog.Context{"files_restored": len(restored)})
 	return RollbackResult{FilesRestored: len(restored)}, nil
+}
+
+// IsRollbackRefusal reports whether ERR from RollBack is a refusal, which
+// leaves the conversation whole and is answered to the caller as why, rather
+// than a failure: the shim's refusal, or the queue's held prompts having
+// changed since the plan.
+func IsRollbackRefusal(err error) bool {
+	if _, ok := AsShimRefusal(err); ok {
+		return true
+	}
+	return errors.Is(err, promptqueue.ErrHoldsChanged)
 }
 
 func firstTurnOf(turns []ids.TurnID) string {

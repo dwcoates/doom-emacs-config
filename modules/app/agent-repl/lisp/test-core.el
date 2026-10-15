@@ -499,6 +499,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their restart failed")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped"
      "confirms the user's interrupt stopped the running turn")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, prompt kept (%s)"
+     "tells the user their interrupt stopped the turn but could not roll its prompt back, and why")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: nothing to interrupt"
      "tells the user there was no running turn to interrupt")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s agent%s also ended"

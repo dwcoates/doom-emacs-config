@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -154,11 +155,8 @@ func (s *server) RollBack(
 		Turns: planned.turns, Since: planned.since, DropHeld: planned.dropHeld, RestoreFiles: planned.restore,
 	})
 	if err != nil {
-		if errors.Is(err, promptqueue.ErrHoldsChanged) {
-			return stale("the held prompts changed since the rollback was planned")
-		}
-		if refusal, ok := workspace.AsShimRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, rollbackRefusal(s, refusal)))
+		if r, ok := s.rollBackRefusalOf(err); ok {
+			return answer(resp, s.refuse(subject.Log, rpc, resp, r))
 		}
 		if r, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, r))
@@ -191,23 +189,67 @@ func (s *server) mintRollbackToken(plan rollbackPlan) string {
 	return token
 }
 
+// planLatestPrompt plans a files-keeping rollback to just before WS's latest
+// reachable prompt: what the stop key rolls back. ok is false, logged under
+// SITUATION, when no prompt is reachable or the latest cannot be planned.
+func (s *server) planLatestPrompt(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, situation string) (rollbackPlan, bool, error) {
+	prompts := s.deps.Feed.RollbackPrompts(ws)
+	if len(prompts) == 0 {
+		log.Info(opRollback, situation+" and no prompt to roll back", nil)
+		return rollbackPlan{}, false, nil
+	}
+	latest := prompts[len(prompts)-1]
+	plan, ok, err := s.planRollback(ctx, ws, false, latest)
+	if err != nil {
+		return rollbackPlan{}, false, err
+	}
+	if !ok {
+		log.Info(opRollback, situation+" and the latest prompt could not be planned", dlog.Context{"row": latest.GetValue()})
+		return rollbackPlan{}, false, nil
+	}
+	return plan, true, nil
+}
+
+// unansweredRollback plans the rollback a turn stop that asked for one
+// performs (agentrepl.v1.InterruptTurn.roll_back_unanswered): the latest
+// prompt's, when a turn is open and nothing the agent produced follows the
+// prompt. ok is false, and the stop only stops, otherwise.
+func (s *server) unansweredRollback(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (rollbackPlan, bool, error) {
+	plan, ok, err := s.planLatestPrompt(ctx, ws, log, "the stop key found a turn to stop")
+	if err != nil || !ok {
+		return rollbackPlan{}, false, err
+	}
+	if !plan.running || plan.followed {
+		log.Info(opRollback, "the stop key's prompt is answered or no turn is open, so the stop rolls nothing back", plan.context())
+		return rollbackPlan{}, false, nil
+	}
+	log.Info(opRollback, "nothing follows the stop key's prompt, so the stop rolls it back", plan.context())
+	return plan, true, nil
+}
+
+// rollBackErrorOf answers the RollBackError a refused rollback ERR is
+// relayed as. ERR is always a refusal (workspace.InterruptOutcome
+// .RollbackRefused), so a failure here is a defect, answered as one.
+func (s *server) rollBackErrorOf(log dlog.Logger, rpc string, err error) (*agentreplv1.RollBackError, error) {
+	r, ok := s.rollBackRefusalOf(err)
+	if !ok {
+		return nil, fail(log, rpc, fmt.Errorf("a refused rollback carried a failure, not a refusal: %w", err))
+	}
+	holder := &agentreplv1.RollBackResponse{}
+	if !setResponseError(holder, r.Arm, r.Fields) {
+		return nil, UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
+	}
+	return holder.GetError(), nil
+}
+
 // interruptRollbackOffer answers what the stop key's second press offers for
 // WS: nil when no prompt can be rolled back; `immediate`, with a token minted
 // for the latest prompt, when nothing the agent produced follows it; `choose`
 // when agent output does. See endpoint_interrupt.proto.
 func (s *server) interruptRollbackOffer(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (*agentreplv1.InterruptNothingRunningRollback, error) {
-	prompts := s.deps.Feed.RollbackPrompts(ws)
-	if len(prompts) == 0 {
-		log.Info(opRollback, "the stop key found nothing running and no prompt to roll back", nil)
-		return nil, nil
-	}
-	plan, ok, err := s.planRollback(ctx, ws, false, prompts[len(prompts)-1])
-	if err != nil {
+	plan, ok, err := s.planLatestPrompt(ctx, ws, log, "the stop key found nothing running")
+	if err != nil || !ok {
 		return nil, err
-	}
-	if !ok {
-		log.Info(opRollback, "the stop key found nothing running and the latest prompt could not be planned", dlog.Context{"row": prompts[len(prompts)-1].GetValue()})
-		return nil, nil
 	}
 	if plan.followed {
 		log.Info(opRollback, "the stop key found nothing running; agent output follows the latest prompt, so the reader chooses", plan.context())
@@ -219,6 +261,24 @@ func (s *server) interruptRollbackOffer(ctx context.Context, ws ids.WorkspaceID,
 	log.Info(opRollback, "the stop key found nothing running and nothing after the latest prompt; it is offered for rollback at once", plan.context())
 	return &agentreplv1.InterruptNothingRunningRollback{Offer: &agentreplv1.InterruptNothingRunningRollback_Immediate{
 		Immediate: &agentreplv1.InterruptNothingRunningRollbackImmediate{Token: &agentreplv1.RollbackToken{Value: token}}}}, nil
+}
+
+// rollBackRefusalOf answers the RollBackError arm a rollback the verbs
+// refused is answered with: the queue's changed holds are a stale plan, and
+// the shim's refusal names its own arm. false when ERR is a failure rather
+// than a refusal.
+func (s *server) rollBackRefusalOf(err error) (refusal, bool) {
+	if !workspace.IsRollbackRefusal(err) {
+		return refusal{}, false
+	}
+	if errors.Is(err, promptqueue.ErrHoldsChanged) {
+		return s.fill(refusal{Arm: "plan_stale", Reason: "the held prompts changed since the rollback was planned", Info: true}), true
+	}
+	shim, ok := workspace.AsShimRefusal(err)
+	if !ok {
+		panic(fmt.Sprintf("server: a rollback refusal is neither changed holds nor the shim's: %v", err))
+	}
+	return rollbackRefusal(s, shim), true
 }
 
 // rollbackRefusal maps the shim's refusal onto RollBackError's arm.
