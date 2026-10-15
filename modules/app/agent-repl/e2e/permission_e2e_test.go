@@ -186,18 +186,6 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 		wantToolRan  bool
 	}{
 		{
-			name:   "AllowOnce",
-			prompt: "!perm-allow-once",
-			buildRequest: func(ws *workspacev1.WorkspaceRef, id *frontendv1.FeedId) *agentreplv1.AnswerPermissionRequest {
-				return &agentreplv1.AnswerPermissionRequest{
-					Workspace:  ws,
-					Permission: id,
-					Answer:     &agentreplv1.AnswerPermissionRequest_AllowOnce{AllowOnce: &agentreplv1.AnswerPermissionAllowOnce{}},
-				}
-			},
-			wantToolRan: true,
-		},
-		{
 			name:   "AllowStanding",
 			prompt: "!perm-allow-standing",
 			buildRequest: func(ws *workspacev1.WorkspaceRef, id *frontendv1.FeedId) *agentreplv1.AnswerPermissionRequest {
@@ -208,28 +196,6 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 				}
 			},
 			wantToolRan: true,
-		},
-		{
-			// SPEC.md's own entry #12 also mentions "SessionUpdate's
-			// authoritative permission-mode restatement (set_mode)" for
-			// allow-standing. Reading permissions.ts's PERM_ALLOW_STANDING
-			// body (support.ts's default askPermission suggestion is
-			// add-rules only, never setMode) shows THIS scenario's ask never
-			// offers a mode change, so this subtest asserts only the
-			// standing echo token. The mode-restatement fact is real and
-			// grounded, but by the DIFFERENT scenario #17
-			// (PermissionModeChangedMidSession) drives —
-			// "!perm-allow-standing-mode" — not this one.
-			name:   "DeniedByUser",
-			prompt: "!perm-deny-user",
-			buildRequest: func(ws *workspacev1.WorkspaceRef, id *frontendv1.FeedId) *agentreplv1.AnswerPermissionRequest {
-				return &agentreplv1.AnswerPermissionRequest{
-					Workspace:  ws,
-					Permission: id,
-					Answer:     &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
-				}
-			},
-			wantToolRan: false,
 		},
 	}
 
@@ -302,57 +268,6 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 				t.Fatalf("turn ended = %v, want concluded (success.completed)", endedRow.GetTurnEnded())
 			}
 		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// #14 PermissionDeniedByPolicy
-// ---------------------------------------------------------------------------
-
-// TestPermissionDeniedByPolicy drives "!perm-deny-policy", one of the "two
-// denials that never reach the callback" (shim.md "The permission gate"):
-// permission.proto's AgentPermissionDeniedByPolicy is documented as "the
-// only denial that never had an open ask: a consumer sees `start` and this
-// in one frame, or this alone". This test watches the feed from BEFORE the
-// prompt is submitted so it can prove the open state was never observed —
-// not merely absent from the final snapshot (see pmWatchFeedFromNow).
-func TestPermissionDeniedByPolicy(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := pmNewPermissionWorld(t)
-	stream := pmWatchFeedFromNow(t, w, ws)
-	defer stream.Close()
-
-	// Act
-	turn := SubmitPrompt(t, w, ws, "!perm-deny-policy")
-
-	// Assert
-	var sawOpen, sawDeniedByPolicy, sawToolDenied bool
-	for !(sawDeniedByPolicy && sawToolDenied) {
-		row := harness.AwaitNext(t, w.Ctx(), stream, "a permission/tool push for this turn")
-		if row.GetTurn().GetValue() != turn.GetValue() {
-			continue
-		}
-		if p := row.GetPermission(); p != nil {
-			if p.GetOpen() != nil {
-				sawOpen = true
-			}
-			if p.GetAnswered().GetDeniedByPolicy() != nil {
-				sawDeniedByPolicy = true
-			}
-		}
-		if call := row.GetActivity().GetSimpleToolCall(); call.GetDenied() != nil {
-			sawToolDenied = true
-		}
-	}
-	if sawOpen {
-		t.Fatalf("a policy denial showed an open ask; want no open ask ever (permission.proto: policy is " +
-			"'the only denial that never had an open ask')")
-	}
-
-	endedRow := AwaitTurnEnded(t, w, ws, turn)
-	if endedRow.GetTurnEnded().GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want concluded (success.completed)", endedRow.GetTurnEnded())
 	}
 }
 
@@ -473,139 +388,6 @@ func TestHeldTurnGate(t *testing.T) {
 	// occupying the agent); drain its own terminal too, so nothing is left
 	// in flight when this test's World tears down.
 	AwaitTurnEnded(t, w, ws, turn1)
-}
-
-// ---------------------------------------------------------------------------
-// #17 PermissionModeChangedMidSession
-// ---------------------------------------------------------------------------
-
-// TestPermissionModeChangedMidSession drives "!perm-allow-standing-mode",
-// whose ask offers a standing carrying `setMode: acceptEdits` (permissions.ts
-// PERM_ALLOW_STANDING_MODE — "the ONE grounded producer of a mode-changing
-// grant"). Granting standing (AnswerPermission{allow_standing}, no
-// SetPermissionMode call of the client's own) moves the session's permission
-// mode; shim.md: "a standing grant's set_mode can change the session's
-// permission mode, restated authoritatively on WatchSession" — surfaced here
-// on the topbar's permission-mode picker (frontend/v1/topbar.proto).
-func TestPermissionModeChangedMidSession(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := pmNewPermissionWorld(t)
-	topbar := w.WatchTopbar(ws)
-	defer topbar.Close()
-	initial := harness.AwaitView(t, w.Ctx(), topbar, "the initial permission-mode picker", func(v *frontendv1.TopbarView) bool {
-		return v.GetPermissionModePicker().GetCurrent().GetMode() != ""
-	})
-	beforeMode := initial.GetPermissionModePicker().GetCurrent().GetMode()
-
-	turn := SubmitPrompt(t, w, ws, "!perm-allow-standing-mode")
-	askRow := pmAwaitFeedRow(t, w, ws, "the mode-offering permission ask", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
-	})
-	if askRow.GetPermission().GetStandingOffered() == nil {
-		t.Fatalf("mode-offering permission ask standing_offered = unset, want present")
-	}
-
-	// Act: allow with standing. No SetPermissionMode call is made — the mode
-	// change, if any, comes solely from the vendor's offered standing.
-	resp, err := w.Client().AnswerPermission(w.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
-		Workspace:  ws,
-		Permission: askRow.GetId(),
-		Answer:     &agentreplv1.AnswerPermissionRequest_AllowStanding{AllowStanding: &agentreplv1.AnswerPermissionAllowStanding{}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("AnswerPermission{allow_standing} = %v, %v, want a success", resp, err)
-	}
-
-	// Assert: the topbar's mode picker updates to acceptEdits without a
-	// client-initiated SetPermissionMode call.
-	// THE DAEMON'S OWN VOCABULARY IS SNAKE_CASE. The picker's mode string is
-	// composed by daemon/internal/resolve/topbar/resolver.go:558-559
-	// (permissionModeName: AgentPermissionMode_AcceptEdits -> "accept_edits"),
-	// not the vendor's camelCase `acceptEdits`, so the old expectation could
-	// never match.
-	updated := harness.AwaitView(t, w.Ctx(), topbar, "the mode picker to reflect the vendor-offered accept_edits mode", func(v *frontendv1.TopbarView) bool {
-		return v.GetPermissionModePicker().GetCurrent().GetMode() == "accept_edits"
-	})
-	if got := updated.GetPermissionModePicker().GetCurrent().GetMode(); got == beforeMode {
-		t.Fatalf("permission mode did not change from %q", beforeMode)
-	}
-
-	AwaitTurnEnded(t, w, ws, turn)
-}
-
-// ---------------------------------------------------------------------------
-// Coverage extension — `!perm-no-standing`: an ask that offers NO standing.
-// ---------------------------------------------------------------------------
-
-// TestPermissionAskOffersNoStanding drives "!perm-no-standing"
-// (permissions.ts's PERM_NO_STANDING, which calls askPermission with
-// `{ suggestions: [] }` — "the shape the vendor sends when no standing rule
-// could be written for the call. The ask can only ever produce a
-// once-allow").
-//
-// The contract fact under test is feed.proto's FeedPermission.standing_offered
-// (field 5): "PRESENT iff the vendor offered a standing form — presence is
-// what makes the 'always allow' button drawable." So an ask with no
-// suggestions must draw the card with standing_offered UNSET, and that
-// absence is the whole assertion: it is the exact negative of
-// TestPermissionAskAnsweredArms's positive check, which requires the field
-// PRESENT for the three scenarios whose asks do offer one.
-//
-// The once-allow is then answered for real, so the test also pins that a
-// no-standing ask still reaches the ordinary allowed_once verdict and runs
-// its gated call — an unoffered standing narrows the buttons, it does not
-// break the card.
-func TestPermissionAskOffersNoStanding(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := pmNewPermissionWorld(t)
-
-	// Act
-	turn := SubmitPrompt(t, w, ws, "!perm-no-standing")
-	askRow := pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
-	})
-
-	// Assert: the card offers NO standing.
-	if askRow.GetPermission().GetStandingOffered() != nil {
-		t.Fatalf("permission ask standing_offered = present, want UNSET: the scenario's ask carries no "+
-			"suggestions, and feed.proto declares standing_offered \"PRESENT iff the vendor offered a standing "+
-			"form\" (row %v)", askRow)
-	}
-
-	// Act: the only answer such an ask can produce is a once-allow.
-	resp, err := w.Client().AnswerPermission(w.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
-		Workspace:  ws,
-		Permission: askRow.GetId(),
-		Answer:     &agentreplv1.AnswerPermissionRequest_AllowOnce{AllowOnce: &agentreplv1.AnswerPermissionAllowOnce{}},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("AnswerPermission(AllowOnce) = %v, %v, want a success", resp, err)
-	}
-
-	// Assert: it settles allowed_once, still with no standing offered.
-	answeredRow := pmAwaitFeedRow(t, w, ws, "the answered permission card", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == askRow.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
-	})
-	if answeredRow.GetPermission().GetAnswered().GetAllowedOnce() == nil {
-		t.Fatalf("answered permission = %v, want allowed_once", answeredRow.GetPermission().GetAnswered())
-	}
-	if answeredRow.GetPermission().GetStandingOffered() != nil {
-		t.Errorf("answered card standing_offered = present, want UNSET: answering must not synthesize an offer the ask never made (row %v)", answeredRow)
-	}
-
-	// Assert: the gated `git log -1` ran and the turn concluded.
-	toolRow := pmAwaitFeedRow(t, w, ws, "the gated Bash tool call's settled state", func(r *frontendv1.FeedRow) bool {
-		call := r.GetActivity().GetSimpleToolCall()
-		return r.GetTurn().GetValue() == turn.GetValue() && call != nil && (call.GetReturned() != nil || call.GetDenied() != nil)
-	})
-	if call := toolRow.GetActivity().GetSimpleToolCall(); call.GetReturned().GetSucceeded() == nil {
-		t.Fatalf("gated Bash outcome = %v, want returned.succeeded", call)
-	}
-	if ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded(); ended.GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want concluded", ended)
-	}
 }
 
 // ---------------------------------------------------------------------------

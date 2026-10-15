@@ -222,25 +222,6 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 // awaited view is the one carrying BOTH (`sfAwaitSampledAllowance`).
 // ===========================================================================
 
-func TestRateLimitFiveHourWindowFeedsTheSessionAllowance(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-five-hour")
-	sfAwaitConclusion(t, w, ws, turn, "The five_hour window is 82% used.")
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	view := sfAwaitSampledAllowance(t, ctx, footer.Stream, "the session allowance", (*frontendv1.FooterActivityEnduringUsage).GetSession, 0.82)
-
-	// Assert
-	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetSession(), 0.82)
-}
-
 // ===========================================================================
 // The seven-day rate-limit window — `!rate-limit-seven-day` (the same
 // scenario factory naming the `seven_day` window at utilization 0.91).
@@ -285,26 +266,6 @@ func TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 // `daemon.footer.rate_limit_overage` warning stays gone.
 // ===========================================================================
 
-func TestRateLimitOverageWindowFeedsTheOverageAllowance(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit")
-	sfAwaitConclusion(t, w, ws, turn, "The account is approaching its overage threshold.")
-
-	// Assert
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the overage allowance's warning on the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return footerEnduringUsage(v).GetOverage().GetAllowedWarning() != nil
-	})
-	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetOverage(), 0.79)
-}
-
 // sfAwaitSampledAllowance awaits the footer view whose enduring usage line
 // draws the SAMPLED allowance PICK with a rate-limit event's `allowed_warning`
 // verdict AND the account's figure WANT, within half a point. On a sampled
@@ -336,15 +297,6 @@ func sfAssertEventFeedsAllowance(t *testing.T, view *frontendv1.FooterView, allo
 	if allowance.GetResetsAtS() == 0 {
 		t.Errorf("FooterAllowance.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
 	}
-}
-
-// footerOf opens a footer watch bound to the test's cleanup, for the reads
-// that need one view rather than a wait across a scenario.
-func footerOf(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *harness.Stream[*frontendv1.FooterView] {
-	t.Helper()
-	footer := w.WatchFooter(ws)
-	t.Cleanup(footer.Close)
-	return footer.Stream
 }
 
 // ===========================================================================
@@ -482,40 +434,6 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 	if got := line.GetSession().GetResetsAtS(); got <= readAt {
 		t.Errorf("FooterAllowance(session).resets_at_s = %d, want an instant after the read at %d: a sampled window must reset in the FUTURE, never at `resets in 0m`",
 			got, readAt)
-	}
-}
-
-// THE SAMPLE THE SESSION PROBES AT ITS OWN START REACHES THE FOOTER, and it
-// did not before. The shim probes the account's usage once inside StartSession
-// (engine/session.ts, the `void pushAccountUsage()` beside the keepalive
-// cadence), while the daemon opens its standing WatchSession only AFTER
-// StartSession has answered — so with `accountUsage` missing from
-// SessionPushes.REPLAYED that first sample was fanned out to a stream nobody
-// was reading and the footer held no allowance figure at all until a turn
-// closed and reprobed.
-//
-// MEASURED in a sandbox run before the fix: the sample went out at 37.494 to
-// the bring-up's stream, the daemon's own watch opened at 37.503, and the
-// footer's first sighting of any account usage was the turn-close reprobe
-// 41ms later.
-//
-// THE TURN HERE READS NOTHING on purpose: the probe is switched to an unread
-// arm by it, so its turn-close reprobe files no figure, and the session's 41%
-// on the enduring line cannot have come from anything but the start-time
-// probe.
-func TestAccountUsageProbedAtSessionStartReachesTheFooter(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-
-	// Act: the workspace's very first turn, and it reads nothing.
-	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
-	line := sfAwaitUsage(t, w, ws)
-
-	// Assert
-	if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
-		t.Errorf("FooterAllowance(session).utilization = %v, want %v from the session's own start-time probe",
-			got, sfFiveHourUtilization)
 	}
 }
 

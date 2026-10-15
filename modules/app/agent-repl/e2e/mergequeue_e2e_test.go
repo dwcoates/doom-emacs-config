@@ -53,7 +53,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/integration/harness"
 
@@ -171,26 +170,6 @@ func mqSubFeedTabs(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, head *f
 		}
 	}
 	return tabs
-}
-
-// mqRosterRow finds a workspace's own row anywhere in the repository
-// grouping (top-level or nested under a parent), by workspace id.
-func mqRosterRow(r *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
-	for _, s := range r.GetRepository().GetSections() {
-		if row := mqFindRosterRow(s.GetRows().GetRows(), id); row != nil {
-			return row
-		}
-	}
-	return nil
-}
-
-func mqFindRosterRow(rows []*frontendv1.RosterRow, id string) *frontendv1.RosterRow {
-	for _, row := range rosterwalk.FlattenRows(rows) {
-		if row.GetWorkspace().GetWorkspace().GetId() == id {
-			return row
-		}
-	}
-	return nil
 }
 
 // mqOpenFeedRows opens a feed (root when feed is nil, a sub-feed otherwise)
@@ -534,26 +513,6 @@ func TestARebaseConflictDrivesARepairPromptInTheRequestingWorkspace(t *testing.T
 			t.Fatalf("the repair prompt reached the main feed: %v", row)
 		}
 	}
-}
-
-func TestAnUnresolvedRebaseConflictFailsTheMergeInConflicts(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	m := mqStartConflictedMerge(t, "mq-conflict-failed")
-	footer := m.w.WatchFooter(m.child)
-	defer footer.Close()
-	roster := m.w.WatchRoster()
-
-	// Act: the repair turn concludes without resolving anything.
-	m.awaitFailed(t)
-
-	// Assert: merge failed, in conflicts, on the footer and the roster.
-	harness.AwaitView(t, m.w.Ctx(), footer.Stream, "the footer's merge failed in conflicts", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMergeFailed().GetConflicts() != nil
-	})
-	harness.AwaitView(t, m.w.Ctx(), roster, "the roster's merge_failed", func(r *frontendv1.WorkspaceRoster) bool {
-		return mqRosterRow(r, m.child.GetId()).GetMergeFailed() != nil
-	})
 }
 
 func TestAnUnresolvedRebaseConflictLeavesTheRebaseInProgress(t *testing.T) {
@@ -1100,89 +1059,6 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		}
 	})
 
-	for _, tc := range []struct {
-		name     string
-		selfRepo bool
-	}{
-		{name: "after-action failure rides the terminal", selfRepo: true},
-		{name: "after-action failure rides the terminal outside the daemon's own repo", selfRepo: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			// Arrange: the SAME marked text, moved to the after-merge arm, run
-			// under BOTH methods.
-			//
-			// The non-self arm was once the reverse: method's non-emacsRepo
-			// branch returned postPrompt's error straight up, which execute()
-			// turned into an abort, so for every repository that is not the
-			// daemon's own an after-action failure DID fail the run — against
-			// endpoint_create_workspace.proto's "can never fail the run",
-			// feed.proto's "failure never fails the run (it rides the
-			// terminal)" and postPrompt's own doc comment. FIXED: both methods
-			// now run the after-action through run.go's single afterAction
-			// helper, which warns and lets the run conclude, so the two cannot
-			// drift apart again. This arm is what holds that.
-			// harness.NewRepo directly, not mqCleanRepo: the self-repo world
-			// writes the passing gate script itself, and writing
-			// bin/test-all.sh twice into one repo would leave two authors for
-			// one file.
-			repo := harness.NewRepo(t)
-			var w *World
-			if tc.selfRepo {
-				w = mqSelfRepoWorld(t, repo)
-			} else {
-				// The other method never runs the gate, so it needs no script.
-				w = NewWorld(t, WorldOpts{})
-			}
-			repoRef := mqRepositoryRef(t, w, repo)
-			child := mqCreateChildWithActions(t, w, repoRef, "mq-marker-after", &agentreplv1.CreateWorkspaceMergeActions{
-				PostprocessingPrompt: mqSaid(mqMarkedAction),
-			})
-			root := mqOpenFeedWatch(t, w, child, nil)
-			defer root.Close()
-			// Warning discipline: exactly one daemon record, and it is the
-			// contract's own — "the post-merge prompt failed; the merge still
-			// landed" (daemon.merge.post_prompt, internal/merge/run.go's
-			// afterAction). Its presence is half the fact this arm asserts:
-			// the failure was RECORDED, not swallowed.
-			w.ExpectWarnings("daemon.merge.post_prompt")
-
-			// Act
-			harness.CommitWork(t, child.GetDir())
-			mqMerge(t, w, child, harness.OneShot())
-			head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
-				return row.GetActivity().GetMerge() != nil
-			})
-			tabs := mqOpenFeedWatch(t, w, child, head.GetId())
-			defer tabs.Close()
-
-			// Assert: the post_prompt tab settles FAILED — the failure is
-			// drawn, not swallowed.
-			postTab := tabs.AwaitRow("the post_prompt tab, settled", func(row *frontendv1.FeedRow) bool {
-				return row.GetMergeTab().GetPostPrompt().GetSettled() != nil
-			}).GetMergeTab().GetPostPrompt().GetSettled()
-			if postTab.GetFailed() == nil {
-				t.Fatalf("post_prompt tab settled = %v, want the failed arm (the marked action's turn failed)", postTab)
-			}
-			const wantSummary = "the after-merge prompt did not complete"
-			if got := postTab.GetFailed().GetSummary(); got != wantSummary {
-				t.Errorf("post_prompt tab failure summary = %q, want %q", got, wantSummary)
-			}
-
-			// Assert: THE RUN STILL LANDED — the opposite direction, from the
-			// same failing turn. This is the whole point of the pair.
-			terminal := root.AwaitRow("the merge bubble's terminal", func(row *frontendv1.FeedRow) bool {
-				merge := row.GetActivity().GetMerge()
-				return merge.GetError() != nil || merge.GetSuccess() != nil
-			}).GetActivity().GetMerge()
-			if terminal.GetSuccess() == nil {
-				t.Fatalf("merge terminal = %v, want FeedMergeSuccess (an after-action failure rides the terminal)", terminal)
-			}
-			if tc.selfRepo {
-				w.AwaitLandingDeployed()
-			}
-		})
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1228,17 +1104,6 @@ func mqLandedOwnBranch(t *testing.T, name string) (*World, *workspacev1.Workspac
 	return w, child, head
 }
 
-func TestALandedMergesBubbleCarriesItsRebasingTab(t *testing.T) {
-	t.Parallel()
-	// Arrange, Act
-	w, child, head := mqLandedOwnBranch(t, "mq-tab-rebasing")
-
-	// Assert
-	if rebasing, _, _ := mqTabKinds(mqSubFeedTabs(t, w, child, head.GetId())); !rebasing {
-		t.Fatal("the landed merge's bubble carried no rebasing tab")
-	}
-}
-
 func TestALandedMergesBubbleCarriesItsCommittingTab(t *testing.T) {
 	t.Parallel()
 	// Arrange, Act
@@ -1247,71 +1112,6 @@ func TestALandedMergesBubbleCarriesItsCommittingTab(t *testing.T) {
 	// Assert
 	if _, committing, _ := mqTabKinds(mqSubFeedTabs(t, w, child, head.GetId())); !committing {
 		t.Fatal("the landed merge's bubble carried no committing tab")
-	}
-}
-
-func TestAMergedUpstreamSourceCarriesTheUpdatingMainTab(t *testing.T) {
-	t.Parallel()
-	// Arrange: the workspace's pull request merged upstream.
-	repo := harness.NewRepo(t)
-	w := mqSelfRepoWorld(t, repo)
-	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, "mq-merged-upstream")
-	upstream := repo.SetUpstream(harness.DefaultBranch)
-	root := mqOpenFeedWatch(t, w, child, nil)
-	defer root.Close()
-
-	// Act
-	mqMerge(t, w, child, harness.OneShotMergedUpstream())
-	head := root.AwaitRow("the merge bubble's terminal", mqConcluded)
-	w.AwaitLandingDeployed()
-
-	// Assert: the default branch moved to upstream's tip through the updating
-	// main step, drawn as its own tab.
-	if head.GetActivity().GetMerge().GetSuccess() == nil {
-		t.Fatalf("merge terminal = %v, want landed", head.GetActivity().GetMerge())
-	}
-	if got := repo.BranchHead(harness.DefaultBranch); got != upstream {
-		t.Fatalf("the default branch is at %s, want upstream's %s", got, upstream)
-	}
-	if _, _, updatingMain := mqTabKinds(mqSubFeedTabs(t, w, child, head.GetId())); !updatingMain {
-		t.Fatal("the merged-upstream merge's bubble carried no updating main tab")
-	}
-}
-
-func TestAMergeRequestThatNamesNoModeIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	repo := harness.NewRepo(t)
-	w := NewWorld(t, WorldOpts{})
-	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, "mq-no-mode")
-
-	// Act
-	_, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child}))
-
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("MergeWorkspace with no mode = %v, want invalid_argument: a merge request names its mode", err)
-	}
-}
-
-func TestAMergeOfABranchThatDoesNotExistIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	repo := harness.NewRepo(t)
-	w := NewWorld(t, WorldOpts{})
-	// The refused request is this test's own subject.
-	w.ExpectWarnings("daemon.merge.enqueue")
-	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, "mq-unknown-branch")
-
-	// Act
-	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(harness.MergeRequest(child, harness.Async("no-such-merge", "no-such-branch"))))
-
-	// Assert
-	if err != nil || resp.Msg.GetError().GetUnknownBranch() == nil {
-		t.Fatalf("MergeWorkspace of a missing branch = (%v, %v), want unknown_branch", resp.Msg.GetResult(), err)
 	}
 }
 

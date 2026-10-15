@@ -161,15 +161,6 @@ func scTranscriptRecordsUnderProject(t *testing.T, w *World, projectDir string) 
 	return lines
 }
 
-// scLocalCommandSystemRecord is the Shape B raw transcript shape SLASH_LOCAL
-// appends (session.ts: `type: "system", subtype: "local_command"`).
-type scLocalCommandSystemRecord struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	Content string `json:"content"`
-	IsMeta  bool   `json:"isMeta"`
-}
-
 // scShapeAUserRecord is the Shape A / Shape A unnamed raw transcript shape
 // (session.ts: `type: "user", message: {role: "user", content: ...}`).
 type scShapeAUserRecord struct {
@@ -210,103 +201,6 @@ func TestVendorAnsweredSlashCommand(t *testing.T) {
 
 	// Assert.
 	const wantConclusion = "Answered the slash command locally."
-	if got := scAnsweringResponseProse(t, w, ws, turn); got != wantConclusion {
-		t.Errorf("answering response prose = %q, want %q", got, wantConclusion)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// #63 — SlashShapeBViaSlash: the SAME "!slash" turn, asserting the OTHER
-// half of what SLASH_LOCAL writes — the durable `system`/`local_command`
-// transcript record itself (remediation item 2: "no new scenario code
-// needed", retiring a hand-fabricated fixture of exactly this shape).
-// Distinct from #60, which asserts the DRAWN answer; this test asserts the
-// STORED raw record — daemon-side bookkeeping is #61/#62's, not this one's.
-// ---------------------------------------------------------------------------
-
-// TestSlashShapeBViaSlash drives "!slash" and asserts the vendor transcript
-// durably carries the `system`/`local_command` record SLASH_LOCAL appends,
-// wrapping the vendor's own output in `<local-command-stdout>...
-// </local-command-stdout>` with `isMeta: false` — read back from the real
-// file the real shim wrote, never asserted by inspecting store internals or
-// hand-authoring a fixture.
-func TestSlashShapeBViaSlash(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
-
-	// Act.
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "slash")
-
-	// Assert.
-	var found *scLocalCommandSystemRecord
-	for _, line := range scTranscriptRecordsUnderProject(t, w, projectDir) {
-		var rec scLocalCommandSystemRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue // a differently-shaped line (prompt, turn record, ...); not this record
-		}
-		if rec.Type == "system" && rec.Subtype == "local_command" {
-			found = &rec
-			break
-		}
-	}
-	if found == nil {
-		t.Fatalf("e2e: no system/local_command transcript record found under %s", projectDir)
-	}
-	if found.IsMeta {
-		t.Errorf("system/local_command record IsMeta = true, want false")
-	}
-	if !strings.HasPrefix(found.Content, "<local-command-stdout>") || !strings.HasSuffix(found.Content, "</local-command-stdout>") {
-		t.Errorf("system/local_command record Content = %q, want it wrapped in <local-command-stdout>...</local-command-stdout>", found.Content)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// #61 — SlashShapeANamed: the CLI's own slash-command bookkeeping, a raw
-// `user`-typed transcript record naming a command. UNGROUNDED/INVENTED (see
-// file header). Scenario driven: SLASH_SHAPE_A ("!slash-shape-a [command]").
-// ---------------------------------------------------------------------------
-
-// TestSlashShapeANamed drives "!slash-shape-a merge" (a command name chosen
-// to prove the name is genuinely a parameter, not the scenario's own
-// "compact" default) and asserts BOTH halves SPEC.md's #61 entry names: the
-// durable file-plane `user`-typed bookkeeping record (never signaled on the
-// stream — this is the whole reason it needs a durability wait rather than a
-// stream assertion) and the ordinary conclusion text the turn still ends
-// with.
-func TestSlashShapeANamed(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
-
-	// Act.
-	turn := driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "!slash-shape-a merge")
-
-	// Assert: the raw Shape-A bookkeeping record landed with the given name.
-	const wantContent = "<command-message>merge</command-message>\n<command-name>/merge</command-name>\n<command-args></command-args>"
-	var found *scShapeAUserRecord
-	for _, line := range scTranscriptRecordsUnderProject(t, w, projectDir) {
-		var rec scShapeAUserRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
-		}
-		if rec.Type == "user" && rec.Message.Content == wantContent {
-			found = &rec
-			break
-		}
-	}
-	if found == nil {
-		t.Fatalf("e2e: no user-typed transcript record with Shape-A content %q found under %s", wantContent, projectDir)
-	}
-
-	// Assert: the turn still concludes ordinarily.
-	const wantConclusion = "Recorded the Shape-A bookkeeping for /merge."
 	if got := scAnsweringResponseProse(t, w, ws, turn); got != wantConclusion {
 		t.Errorf("answering response prose = %q, want %q", got, wantConclusion)
 	}

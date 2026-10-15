@@ -208,20 +208,6 @@ func rmRequireSucceeded(t *testing.T, row *frontendv1.FeedRow, toolName string) 
 	return returned
 }
 
-// rmRequireFailed fails the test if the row's tool call did not settle with
-// the failed verdict.
-func rmRequireFailed(t *testing.T, row *frontendv1.FeedRow, toolName string) *frontendv1.FeedToolCallReturned {
-	t.Helper()
-	returned := row.GetActivity().GetSimpleToolCall().GetReturned()
-	if returned.GetFailed() == nil {
-		t.Fatalf("%s tool call returned = %v, want the failed verdict", toolName, returned)
-	}
-	if returned.GetSucceeded() != nil {
-		t.Fatalf("%s tool call returned = %v, want no succeeded verdict alongside failed", toolName, returned)
-	}
-	return returned
-}
-
 // rmMainAgentID answers ws's main-agent conversation.v1.AgentId, per
 // project-lead ruling 2 (this file's header comment): AgentId "never
 // crosses the wire" to any frontend rpc, so the ONLY way this suite obtains
@@ -282,33 +268,6 @@ func rmFindContextInjected(page *storev1.AgentSessionPage) *conversationv1.Agent
 // (driveScenarioToCompletion already does this: it fails the test if the
 // turn does not reach its terminal row).
 // ===========================================================================
-
-func TestArtifactPublishAndList(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := rmNewWorkspace(t)
-
-	// Act: publish.
-	publishTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "artifact-publish")
-
-	// Assert: the published bubble.
-	row := rmAwaitFeedRow(t, w, ws, "the artifact-publish bubble", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == publishTurn.GetValue() && r.GetActivity().GetArtifact().GetPublished() != nil
-	})
-	artifact := row.GetActivity().GetArtifact()
-	if artifact.GetHeading().GetText() == "" {
-		t.Fatal("artifact bubble carries no heading, want the composed favicon+title")
-	}
-	if artifact.GetPublished().GetUrl().GetUrl() == "" {
-		t.Fatal("published artifact bubble carries no URL")
-	}
-
-	// Act: list (no row expected per feed.proto's own doc comment).
-	listTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "artifact-list")
-	if listTurn.GetValue() == "" {
-		t.Fatal("artifact-list turn minted no id")
-	}
-}
 
 // TestArtifactHeadingKeepsTheFavicon reads the published heading exactly.
 // #72 only asks that it is non-empty, which a heading that lost its glyph
@@ -436,21 +395,6 @@ func TestContextInjectedSkills(t *testing.T) {
 // gate). This test asserts the turn's own conclusion, never a tool card.
 // ===========================================================================
 
-func TestCronCreateListDelete(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w, ws := rmNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "cron")
-
-	// Assert: the turn concluded (this golden's own terminal).
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
-	if ended.GetConcluded() == nil {
-		t.Fatalf("the cron turn ended = %v, want a concluded outcome", ended)
-	}
-}
-
 // TestCronCreateSetsTheFootersCronsChip drives `!cron-create`, which creates a
 // job and leaves it standing, so the footer's ⏱ chip stays set once the turn
 // has ended: a state every footer reader is handed, however far behind.
@@ -538,27 +482,6 @@ func TestDiagnostics(t *testing.T) {
 // comment); this asserts the FINAL "planned" state, which carries the
 // document and, when the vendor named a plan file, an edit target.
 // ===========================================================================
-
-func TestPlanModeEnterExit(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := rmNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
-
-	// Assert
-	row := rmAwaitFeedRow(t, w, ws, "the plan bubble's planned state", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == turn.GetValue() && r.GetActivity().GetPlan().GetPlanned() != nil
-	})
-	planned := row.GetActivity().GetPlan().GetPlanned()
-	if planned.GetProse().GetMarkdown() == "" {
-		t.Fatal("plan bubble's planned state carries no document")
-	}
-	if planned.GetEdit().GetPath() == "" {
-		t.Fatal("plan bubble's planned state carries no edit target, want one (PLAN_MODE names a plan file)")
-	}
-}
 
 // TestPlanModeCoalescesOntoOneBubble is the SAME turn as #85 asked the other
 // way: feed.proto's FeedPlan says the daemon keys the enter and the exit onto
@@ -1116,22 +1039,6 @@ func rmAwaitFooter(t *testing.T, w *World, footer *FooterWatch, what string, pre
 // #97 WebFetch — golden "web-fetch", registered scenario name "web-fetch"
 // (web.ts WEB_FETCH). Name matches exactly; no mismatch to flag here.
 // ===========================================================================
-
-func TestWebFetch(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws := rmNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "web-fetch")
-
-	// Assert
-	row := rmAwaitFeedRow(t, w, ws, "the WebFetch settled tool card", rmToolCallSettled(turn, "WebFetch"))
-	returned := rmRequireSucceeded(t, row, "WebFetch")
-	if returned.GetText().GetText() == "" {
-		t.Fatal("WebFetch tool call carries no text output, want the fetched page's summarized result")
-	}
-}
 
 // ===========================================================================
 // #98 WebSearch — golden "web-search", registered scenario name "web-search"

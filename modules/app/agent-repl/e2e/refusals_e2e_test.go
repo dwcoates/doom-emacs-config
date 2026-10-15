@@ -418,22 +418,6 @@ func rfAwaitVendorStartFailed(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 // session did not come up, which is precisely what the lever asked for.
 var rfVendorStartFaultWarnings = []string{"daemon.health.open_fault", "daemon.workspace.open"}
 
-func TestStartSessionVendorStartFailed(t *testing.T) {
-	t.Parallel()
-	// Arrange: a world whose every StartSession is refused by the vendor.
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start"}}})
-	// The bring-up's own record of the rejection ("nothing retries until a
-	// restart") is the refusal this arrangement asks for, as in the recovering
-	// sibling below.
-	w.ExpectWarnings(append(rfVendorStartFaultWarnings, "daemon.workspace.bring_up")...)
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-
-	// Act + Assert: opening the workspace answers the typed arm carrying the
-	// shim's own account, never a silently healthy session.
-	rfAwaitVendorStartFailed(t, w, ws)
-}
-
 func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 	t.Parallel()
 	// Arrange: a world whose FIRST StartSession only is refused.

@@ -141,38 +141,6 @@ func shimRecords(t *testing.T, path string) []harness.LogRecord {
 	return harness.ReadLog(t, path)
 }
 
-// TestKeepAliveRewindsOnlyKeepAliveMaterial — several beats in a row, then a
-// real prompt: every rewind discards exactly one keep-alive turn, every one
-// resumes at the same real anchor, and the prompt's own rewind is no
-// different.
-func TestKeepAliveRewindsOnlyKeepAliveMaterial(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, shimLog := keepaliveWorld(t)
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
-	beats := awaitShimRecords(t, w, shimLog, "a rewind before a keep-alive beat", 3, isRewind("keepalive"))
-
-	// Act
-	after := SubmitPrompt(t, w, ws, "after several keep-alives")
-	AwaitTurnEnded(t, w, ws, after)
-	prompt := w.Daemon.AwaitLogRecord(shimLog, "the real prompt's rewind", isRewind("real_prompt"))
-
-	// Assert
-	for i, rewind := range append(beats, prompt) {
-		if got := spanKinds(t, rewind, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
-			t.Errorf("rewind #%d discards span kinds %v, want exactly one keep-alive turn", i+1, got)
-		}
-		if got := fmt.Sprint(rewind.Context["anchor_turn_id"]); got != turn.GetValue() {
-			t.Errorf("rewind #%d anchors on turn %q, want the real turn %q", i+1, got, turn.GetValue())
-		}
-	}
-	for _, r := range shimRecords(t, shimLog) {
-		if isRefusal(r) {
-			t.Errorf("the shim refused a rewind %v, want every rewind's span to be keep-alive material", r.Context)
-		}
-	}
-}
-
 // TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone — a real prompt that
 // arrives while a keep-alive is in flight waits it out, then rewinds past
 // exactly that keep-alive to the last real turn.
@@ -195,46 +163,6 @@ func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	}
 	if got := fmt.Sprint(rewind.Context["anchor_turn_id"]); got != turn.GetValue() {
 		t.Errorf("the real prompt's rewind anchors on turn %q, want the real turn %q", got, turn.GetValue())
-	}
-}
-
-// TestCompletedTaskBesideKeepAliveAnchorsTheRewind — a background task that
-// completes while a keep-alive is outstanding starts a genuine vendor turn. It
-// is real conversation (ruled 2026-10-06): it is served, it anchors the next
-// rewind, which keeps it and discards only the keep-alive, and nothing is
-// refused.
-func TestCompletedTaskBesideKeepAliveAnchorsTheRewind(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, shimLog := keepaliveWorld(t)
-	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
-	AwaitTurnEnded(t, w, ws, queued)
-
-	// Act
-	rewind := w.Daemon.AwaitLogRecord(shimLog, "the first rewind before a beat", isRewind("keepalive"))
-	after := SubmitPrompt(t, w, ws, "after the completed task")
-	AwaitTurnEnded(t, w, ws, after)
-
-	// Assert
-	if got := fmt.Sprint(rewind.Context["anchor_turn_id"]); got == queued.GetValue() || !strings.HasPrefix(got, "adopted-") {
-		t.Errorf("the rewind anchors on turn %q, want the completed task's adopted turn", got)
-	}
-	if got := spanKinds(t, rewind, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
-		t.Errorf("the rewind discards span kinds %v, want exactly the keep-alive", got)
-	}
-	for _, r := range shimRecords(t, shimLog) {
-		if isRefusal(r) {
-			t.Errorf("the shim refused a rewind %v, want the completed task's turn kept by anchoring on it", r.Context)
-		}
-	}
-	var vendorTurnDrawn bool
-	for _, row := range feedRows(t, w, ws) {
-		if strings.Contains(row.String(), "A background task finished.") {
-			vendorTurnDrawn = true
-		}
-	}
-	if !vendorTurnDrawn {
-		t.Errorf("the feed drew no row for the completed task's turn, want it served")
 	}
 }
 
@@ -292,16 +220,6 @@ func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 		assert func(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, shimLog, armed string, rewinds []harness.LogRecord)
 	}{
 		{
-			name: "every rewind resumes at the one real anchor",
-			assert: func(t *testing.T, _ *World, _ *workspacev1.WorkspaceRef, _, armed string, rewinds []harness.LogRecord) {
-				for i, r := range rewinds {
-					if got := fmt.Sprint(r.Context["anchor_turn_id"]); got != armed {
-						t.Errorf("rewind #%d anchors on turn %q, want the arming real turn %q", i+1, got, armed)
-					}
-				}
-			},
-		},
-		{
 			// THE REAL SHAPE ANSWERS THE STOP WITH NO REPLY (a lone result), and
 			// its notification is a transcript-only record the stream never
 			// carries: the span the shim sees past the anchor is the keep-alive.
@@ -310,16 +228,6 @@ func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 				for i, r := range rewinds {
 					if got := spanKinds(t, r, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
 						t.Errorf("rewind #%d discards span kinds %v, want exactly the keep-alive", i+1, got)
-					}
-				}
-			},
-		},
-		{
-			name: "no rewind is refused",
-			assert: func(t *testing.T, _ *World, _ *workspacev1.WorkspaceRef, shimLog, _ string, _ []harness.LogRecord) {
-				for _, r := range shimRecords(t, shimLog) {
-					if isRefusal(r) {
-						t.Errorf("the shim refused a rewind %v, want the stop's answer judged keep-alive material", r.Context)
 					}
 				}
 			},

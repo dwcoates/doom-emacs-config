@@ -480,55 +480,6 @@ func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 // build's, never the path's.
 const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/agent-repld/main.go"
 
-func TestHandoverTransfersAtFreeness(t *testing.T) {
-	t.Parallel()
-	// Arrange: a HEADLESS workspace — registered, never opened, so it has
-	// ZERO rendezvous participants and, per daemon.md ("headless workspaces
-	// transfer with zero rendezvous"), transfers the instant the handover
-	// recognizes it as free (no in-flight turn, no live detached work).
-	selfRepo, w := adSelfRepoWorld(t)
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	roster := w.WatchRoster()
-	defer roster.Close()
-	harness.AwaitNext(t, w.Ctx(), roster, "the roster with the headless row")
-	daemonStream := w.WatchDaemonStream()
-	defer daemonStream.Close()
-
-	// Act: land a real, fake-git-scripted commit on the daemon's own
-	// checkout, driven through a real created child workspace and a real
-	// MergeWorkspace call.
-	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
-
-	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetShutdownAnnounced() != nil
-	}).GetShutdownAnnounced()
-	if announced.GetCause().GetSelfMergeRollout() == nil {
-		t.Fatalf("shutdown_announced.cause = %v, want self_merge_rollout", announced.GetCause())
-	}
-	if announced.GetExpectedOutageMs() <= 0 {
-		t.Fatalf("shutdown_announced.expected_outage_ms = %d, want a stated positive bounded outage", announced.GetExpectedOutageMs())
-	}
-	addr := announced.GetAddress()
-	if addr == "" {
-		t.Fatal("shutdown_announced.address is unset, want the successor's address for a handover")
-	}
-
-	// Assert: the incumbent exits once the headless (free, zero-participant)
-	// workspace has transferred, having needed no AdoptHostWorkspace/
-	// AdoptWebWorkspace rendezvous call for it at all.
-	if code := w.AwaitExit(); code != 0 {
-		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the handover", code)
-	}
-	adAwaitAddrFileChange(t, w.Daemon, addr)
-
-	// Assert: the workspace is immediately usable on the successor.
-	successor := adDial(addr)
-	if _, err := successor.SelectWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("SelectWorkspace on the successor for the transferred headless workspace = error %v, want a success", err)
-	}
-}
-
 func TestRefusalOrderingDuringHandover(t *testing.T) {
 	t.Parallel()
 	// Arrange: an ordinary, idle (free) workspace whose host+web streams are

@@ -38,7 +38,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -48,7 +47,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/encoding/prototext"
 
 	"agent-repld/integration/harness"
 )
@@ -270,44 +268,6 @@ func turnToolCard(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *co
 // "StructuredOutput".
 // ===========================================================================
 
-func TestUnmodeledTool(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	// THE UNMODELED ACTIVITY IS WHAT THIS TEST DRIVES. `AgentActivity.unmodeled`
-	// is a modeled arm, the watcher routes it to the topbar's warning dropdown
-	// (asserted below) and records it on the way past; the scenario runs twice
-	// and both planes carry each frame, so the record is repeated while the
-	// dropdown still holds exactly one warning per distinct name.
-	w.ExpectWarnings("daemon.sessionwatcher.unmodeled_activity")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	topbar := w.WatchTopbar(ws)
-	defer topbar.Close()
-
-	// Act
-	firstTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "unmodeled")
-	secondTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "unmodeled")
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	const toolName = "StructuredOutput"
-	view := harness.AwaitView(t, ctx, topbar, "the StructuredOutput unmodeled-tool warning", func(v *frontendv1.TopbarView) bool {
-		return countUnmodeledWarnings(v, toolName) > 0
-	})
-
-	// Assert: one warning per distinct name, even though the tool ran twice.
-	if got := countUnmodeledWarnings(view, toolName); got != 1 {
-		t.Fatalf("TopbarWarningStrip carries %d warnings for %q, want exactly 1 (one per distinct name): %v",
-			got, toolName, view.GetWarnings())
-	}
-
-	// Assert: neither turn's feed content mentions the tool or its opaque
-	// payload — its only home is the warning dropdown just asserted above.
-	assertFeedRowsMentionNoneOf(t, w, ws, firstTurn, toolName, "Structured output provided successfully")
-	assertFeedRowsMentionNoneOf(t, w, ws, secondTurn, toolName, "Structured output provided successfully")
-}
-
 // countUnmodeledWarnings counts TopbarWarning entries whose unmodeled_tool
 // detail names toolName.
 func countUnmodeledWarnings(v *frontendv1.TopbarView, toolName string) int {
@@ -318,35 +278,6 @@ func countUnmodeledWarnings(v *frontendv1.TopbarView, toolName string) int {
 		}
 	}
 	return n
-}
-
-// assertFeedRowsMentionNoneOf reads the workspace's root feed page and fails
-// the test if any row belonging to turn contains any of the forbidden
-// substrings, anywhere in the row's own fields.
-func assertFeedRowsMentionNoneOf(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId, forbidden ...string) {
-	t.Helper()
-	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed: %v", err)
-	}
-	rows := opened.Msg.GetSuccess().GetPage().GetSuccess().GetRows()
-	found := false
-	for _, row := range rows {
-		if row.GetTurn().GetValue() != turn.GetValue() {
-			continue
-		}
-		found = true
-		text := prototext.Format(row)
-		for _, needle := range forbidden {
-			if strings.Contains(text, needle) {
-				t.Errorf("turn %s feed row mentions %q, which must be confined to the topbar warning dropdown: %s",
-					turn.GetValue(), needle, text)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("no feed rows found for turn %s", turn.GetValue())
-	}
 }
 
 // ===========================================================================
@@ -411,33 +342,6 @@ func TestMonitorPersistent(t *testing.T) {
 
 	// Assert
 	assertOneMonitorRow(t, view, "echo watch", true /* persistent */)
-}
-
-// A MONITOR ROW JUMPS TO ITS CALL'S CARD: the Monitor call draws the ordinary
-// tool-call card on the root feed, and the footer's row names exactly that
-// FeedId, so a click centers the card.
-func TestMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Act
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "monitor-persistent")
-
-	// Assert
-	card := awaitFeedRow(t, w, ws, "the monitor's tool-call card", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Monitor"
-	})
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	harness.AwaitView(t, ctx, footer.Stream, "the monitor row naming the card", func(v *frontendv1.FooterView) bool {
-		rows := v.GetExpanded().GetMonitors().GetRows()
-		return len(rows) == 1 && rows[0].GetJump().GetEntry().GetValue() == card.GetId().GetValue()
-	})
 }
 
 // assertOneMonitorRow asserts the footer carries exactly one live monitor,
