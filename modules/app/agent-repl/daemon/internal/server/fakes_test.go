@@ -314,6 +314,8 @@ type fakeVerbs struct {
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
 	setHiddenErr error
+	// registeredPaths records every RegisterRepository path the verb received.
+	registeredPaths []string
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
 	folds   []repositoryFold
@@ -542,6 +544,11 @@ type hiddenSet struct {
 func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool) error {
 	f.hiddenSets = append(f.hiddenSets, hiddenSet{ws: ws, hidden: hidden})
 	return f.setHiddenErr
+}
+
+func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {
+	f.registeredPaths = append(f.registeredPaths, path)
+	return workspace.RegisteredRepository{}, nil
 }
 
 func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
