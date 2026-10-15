@@ -531,6 +531,23 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 	return sorted[idx]
 }
 
+// spread is a set of durations' count, median, 90th percentile and maximum,
+// the columns every latency table of the report prints.
+type spread struct {
+	n             int
+	p50, p90, max time.Duration
+}
+
+// spreadOf sorts ds in place and answers its spread. Every caller holds at
+// least one duration, so an empty ds is a bug and panics.
+func spreadOf(ds []time.Duration) spread {
+	if len(ds) == 0 {
+		panic("spreadOf: no durations")
+	}
+	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
+	return spread{len(ds), percentile(ds, 0.5), percentile(ds, 0.9), ds[len(ds)-1]}
+}
+
 // latencyTable prints each interaction's latencies ranked by how far its p90
 // is over budget.
 func latencyTable(w io.Writer, records []record) {
@@ -539,16 +556,14 @@ func latencyTable(w io.Writer, records []record) {
 		byKind[l.kind] = append(byKind[l.kind], l.took)
 	}
 	type row struct {
-		kind          string
-		n             int
-		p50, p90, max time.Duration
-		over          float64
+		kind string
+		spread
+		over float64
 	}
 	var rows []row
 	for kind, ds := range byKind {
-		sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
-		p90 := percentile(ds, 0.9)
-		rows = append(rows, row{kind, len(ds), percentile(ds, 0.5), p90, ds[len(ds)-1], float64(p90) / float64(budgets[kind].limit)})
+		sp := spreadOf(ds)
+		rows = append(rows, row{kind, sp, float64(sp.p90) / float64(budgets[kind].limit)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].over > rows[j].over })
 	fmt.Fprintln(w, "## User-visible latency (real log edges), worst over budget first")
@@ -624,8 +639,8 @@ func switchPhaseTable(w io.Writer, records []record) {
 		if len(ds) == 0 {
 			continue
 		}
-		sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
-		fmt.Fprintf(w, "| %s | %d | %s | %s | %s |\n", p.name, len(ds), ms(percentile(ds, 0.5)), ms(percentile(ds, 0.9)), ms(ds[len(ds)-1]))
+		sp := spreadOf(ds)
+		fmt.Fprintf(w, "| %s | %d | %s | %s | %s |\n", p.name, sp.n, ms(sp.p50), ms(sp.p90), ms(sp.max))
 	}
 	if incomplete > 0 {
 		fmt.Fprintf(w, "\n%d switches left out: an edge of theirs is missing from the logs.\n", incomplete)

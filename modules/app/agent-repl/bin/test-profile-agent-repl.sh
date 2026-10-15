@@ -222,6 +222,11 @@ cat >"$R/logs.jsonl" <<'EOF'
 EOF
 HELPER="$TMP/profile-report"
 go build -o "$HELPER" "$THIS_DIR/profile-report.go"
+if out="$(cd "$THIS_DIR" && go test profile-report.go profile-report_test.go 2>&1)"; then
+    pass "the report's Go unit tests pass"
+else
+    fail "the report's Go unit tests pass" "$out"
+fi
 report="$("$HELPER" --session "$R/sess" --logs "$R/logs.jsonl" --startup 2026-10-12T15:59:59Z)"
 
 if grep -q '| daemon | 101 | 3.50 | 150 | 200 | 2 |' <<<"$report"; then
