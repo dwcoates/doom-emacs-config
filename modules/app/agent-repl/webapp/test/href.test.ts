@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { codeSpanFileHref, FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "../src/href.js";
+import {
+  codeSpanFileHref,
+  FILE_LINK_EXTENSIONS,
+  fileLinkLabel,
+  hasFileExtension,
+  isFileLinkHref,
+  isPathLinkText,
+  isWebHref,
+} from "../src/href.js";
 
 describe("isWebHref", () => {
   it.each([
@@ -65,5 +73,33 @@ describe("codeSpanFileHref", () => {
   ])("answers $want for $name", ({ code, want }) => {
     // Act + Assert
     expect(codeSpanFileHref(code)).toBe(want);
+  });
+});
+
+describe("isPathLinkText", () => {
+  it.each([
+    { name: "a home-relative path", text: "~/a/b.ts", want: true },
+    { name: "a path with a line", text: "~/a/b.ts:12", want: true },
+    { name: "a relative path", text: "lisp/status.el", want: true },
+    { name: "an absolute path", text: "/Users/u/a.el", want: true },
+    { name: "a bare file name", text: "README.md", want: false },
+    { name: "prose", text: "the config file", want: false },
+    { name: "a path with more words", text: "~/a.el foo", want: false },
+    { name: "a web URL", text: "https://x.test/a", want: false },
+  ])("answers $want for $name", ({ text, want }) => {
+    expect(isPathLinkText(text)).toBe(want);
+  });
+});
+
+describe("fileLinkLabel", () => {
+  it.each([
+    { name: "a file", path: "~/a/b.ts", want: "b.ts" },
+    { name: "a file with a line", path: "~/a/b.go:193", want: "b.go:193" },
+    { name: "a directory", path: "~/a/b/", want: "b/" },
+    { name: "a relative path", path: "lisp/status.el", want: "status.el" },
+    { name: "a bare name", path: "README.md", want: "README.md" },
+    { name: "the root", path: "/", want: "/" },
+  ])("draws $want for $name", ({ path, want }) => {
+    expect(fileLinkLabel(path)).toBe(want);
   });
 });

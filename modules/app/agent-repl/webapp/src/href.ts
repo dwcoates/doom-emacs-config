@@ -68,3 +68,25 @@ export function hasFileExtension(label: string): boolean {
   if (dot <= 0) return false;
   return FILE_LINK_EXTENSIONS.includes(label.slice(dot + 1).toLowerCase());
 }
+
+/**
+ * WHETHER A LINK'S VISIBLE TEXT IS A PATH (owner request, 2026-10-15): one
+ * token with no whitespace, holding a `/`, that is itself a file-link href. A
+ * file link whose text is such a path draws `fileLinkLabel` of it, while text
+ * the author chose (`[the config](~/x.el)`) is drawn as written.
+ */
+export function isPathLinkText(text: string): boolean {
+  return !/\s/.test(text) && text.includes("/") && isFileLinkHref(text);
+}
+
+/**
+ * THE TEXT A FILE LINK DRAWS FOR PATH: its last segment, keeping any `:<line>`
+ * suffix (`~/a/b.ts:12` draws `b.ts:12`), and a directory's trailing `/`. The
+ * full path stays the anchor's href, which is what a click opens.
+ */
+export function fileLinkLabel(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const name = trimmed.slice(trimmed.lastIndexOf("/") + 1);
+  if (name === "") return path;
+  return trimmed.length < path.length ? `${name}/` : name;
+}

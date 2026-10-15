@@ -472,11 +472,13 @@ describe("renderMarkdown: bare file names", () => {
 describe("code spans that are home-relative paths", () => {
   const anchors = (html: string): string[] => [...html.matchAll(/<a href="([^"]*)"/g)].map((m) => m[1]);
 
-  it("renderMarkdown wraps a ~/ path code span in a file link, keeping the code", () => {
+  it("renderMarkdown wraps a ~/ path code span in a file link drawing the file name as code", () => {
     // Act
     const html = renderMarkdown("see `~/a/b.ts` now");
     // Assert
-    expect(html).toContain('<a href="~/a/b.ts" target="_blank" rel="noopener noreferrer"><code>~/a/b.ts</code></a>');
+    expect(html).toContain(
+      '<a href="~/a/b.ts" title="~/a/b.ts" target="_blank" rel="noopener noreferrer"><code>b.ts</code></a>',
+    );
   });
 
   it("renderMarkdown keeps a line suffix in the href", () => {
@@ -499,9 +501,9 @@ describe("code spans that are home-relative paths", () => {
     expect(anchors(renderMarkdown("- one `~/a.el:4`"))).toEqual(["~/a.el:4"]);
   });
 
-  it("inline wraps a ~/ path code span in a file link, keeping the code", () => {
+  it("inline wraps a ~/ path code span in a file link drawing the file name as code", () => {
     expect(inline("see `~/a/b.ts` now")).toContain(
-      '<a href="~/a/b.ts" target="_blank" rel="noopener noreferrer"><code>~/a/b.ts</code></a>',
+      '<a href="~/a/b.ts" title="~/a/b.ts" target="_blank" rel="noopener noreferrer"><code>b.ts</code></a>',
     );
   });
 
@@ -519,5 +521,38 @@ describe("code spans that are home-relative paths", () => {
     const anchor = (html: string): string | undefined => /<a [^>]*><code>[^<]*<\/code><\/a>/.exec(html)?.[0];
     // Act + Assert
     expect(anchor(inline(src))).toBe(anchor(renderMarkdown(src)));
+  });
+});
+
+describe("a file link draws its file name, not its path", () => {
+  const drawn = (html: string): string[] =>
+    [...html.matchAll(/<a [^>]*>(.*?)<\/a>/g)].map((m) => m[1].replace(/<[^>]*>/g, ""));
+  const titles = (html: string): (string | null)[] =>
+    [...html.matchAll(/<a ([^>]*)>/g)].map((m) => /title="([^"]*)"/.exec(m[1])?.[1] ?? null);
+  const renderers = [
+    { renderer: "renderMarkdown", render: (src: string) => renderMarkdown(src) },
+    { renderer: "inline", render: (src: string) => inline(src) },
+  ];
+  const cases = [
+    { name: "a ~/ code span with a line", src: "at `~/a/b.go:193`", text: "b.go:193", title: "~/a/b.go:193" },
+    { name: "a ~/ code span directory", src: "in `~/a/b/`", text: "b/", title: "~/a/b/" },
+    { name: "a path as explicit link text", src: "[~/a/b.ts:4](~/a/b.ts:4)", text: "b.ts:4", title: "~/a/b.ts:4" },
+    { name: "a code span path as explicit link text", src: "[`~/a/b.ts`](/Users/u/a/b.ts)", text: "b.ts", title: "~/a/b.ts" },
+    { name: "a relative path as explicit link text", src: "[lisp/status.el](lisp/status.el)", text: "status.el", title: "lisp/status.el" },
+    { name: "prose link text", src: "[the config](~/a/b.ts)", text: "the config", title: null },
+    { name: "a bare file name as link text", src: "[b.ts](~/a/b.ts)", text: "b.ts", title: null },
+    { name: "a web link whose text is a path", src: "[a/b.ts](https://x.test/a/b.ts)", text: "a/b.ts", title: null },
+  ];
+  for (const { renderer, render } of renderers) {
+    it.each(cases)(`${renderer} draws $text for $name`, ({ src, text }) => {
+      expect(drawn(render(src))).toEqual([text]);
+    });
+    it.each(cases)(`${renderer} titles $name with $title`, ({ src, title }) => {
+      expect(titles(render(src))).toEqual([title]);
+    });
+  }
+
+  it("keeps the full path as the href", () => {
+    expect(renderMarkdown("[~/a/b.ts:4](~/a/b.ts:4)")).toContain('href="~/a/b.ts:4"');
   });
 });

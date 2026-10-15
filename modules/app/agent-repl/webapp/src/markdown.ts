@@ -31,7 +31,15 @@
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { escapeHtml, highlightCode } from "./highlight.js";
-import { codeSpanFileHref, FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "./href.js";
+import {
+  codeSpanFileHref,
+  FILE_LINK_EXTENSIONS,
+  fileLinkLabel,
+  hasFileExtension,
+  isFileLinkHref,
+  isPathLinkText,
+  isWebHref,
+} from "./href.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 
 /**
@@ -57,13 +65,16 @@ export function inline(escaped: string): string {
   // Links: [text](url) — a web URL or a file link (path or bare file name).
   // A code span in the link text is restored here as plain code: it is
   // already inside an anchor, so it must not become one of its own below.
-  out = out.replace(
-    /\[([^\]]+)\]\(([^)\s]+)\)/g,
-    (whole: string, text: string, url: string) =>
-      isWebHref(url) || isFileLinkHref(url)
-        ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${restoreCodeSpans(text, codeSpans, false)}</a>`
-        : whole,
-  );
+  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole: string, text: string, url: string) => {
+    if (isWebHref(url)) return anchorHtml(url, null, restoreCodeSpans(text, codeSpans, false));
+    if (!isFileLinkHref(url)) return whole;
+    // eslint-disable-next-line no-control-regex -- the code-span sentinel, as below
+    const span = /^\u0000(\d+)\u0000$/.exec(text);
+    const shown = span === null ? text : codeSpans[Number(span[1])];
+    if (!isPathLinkText(shown)) return anchorHtml(url, null, restoreCodeSpans(text, codeSpans, false));
+    const label = fileLinkLabel(shown);
+    return anchorHtml(url, shown, span === null ? label : `<code>${label}</code>`);
+  });
   // Bold before italic so ** is not consumed as two *.
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
@@ -93,8 +104,18 @@ function restoreCodeSpans(text: string, codeSpans: readonly string[], link: bool
     const code = codeSpans[Number(i)];
     const html = `<code>${code}</code>`;
     const href = link ? codeSpanFileHref(code) : null;
-    return href === null ? html : `<a href="${href}" target="_blank" rel="noopener noreferrer">${html}</a>`;
+    return href === null ? html : anchorHtml(href, href, `<code>${fileLinkLabel(href)}</code>`);
   });
+}
+
+/**
+ * The anchor `inline` draws, attributes in the order the markdown-it pipeline
+ * renders them so both draw the same link. TITLE, when set, is the full path a
+ * file link's shortened text stands for (`file-link-label`), shown on hover.
+ */
+function anchorHtml(href: string, title: string | null, body: string): string {
+  const titleAttr = title === null ? "" : ` title="${title}"`;
+  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${body}</a>`;
 }
 
 // One shared instance. `html: false` is the security linchpin (see file
@@ -168,6 +189,29 @@ md.core.ruler.after("file-linkify", "code-span-file-link", (state) => {
       const open = new state.Token("link_open", "a", 1);
       open.attrSet("href", href);
       return [open, token, new state.Token("link_close", "a", -1)];
+    });
+  }
+  return true;
+});
+
+// A FILE LINK DRAWS ITS FILE NAME, NOT ITS PATH (owner request, 2026-10-15).
+// A file link whose whole text is one path (`isPathLinkText`), as plain text or
+// as a code span, draws `fileLinkLabel` of it (`b.ts:12`) and carries the full
+// path as its hover title. The href is untouched, so a click opens the path;
+// the browser wraps the drawn name alone, and a tree measures it alone.
+md.core.ruler.after("code-span-file-link", "file-link-label", (state) => {
+  for (const block of state.tokens) {
+    const children = block.children ?? [];
+    children.forEach((token, index) => {
+      if (token.type !== "link_open") return;
+      const href = token.attrGet("href") ?? "";
+      if (isWebHref(href) || !isFileLinkHref(href)) return;
+      const text = children[index + 1];
+      if (children[index + 2]?.type !== "link_close") return;
+      if (text.type !== "text" && text.type !== "code_inline") return;
+      if (!isPathLinkText(text.content)) return;
+      token.attrSet("title", text.content);
+      text.content = fileLinkLabel(text.content);
     });
   }
   return true;
