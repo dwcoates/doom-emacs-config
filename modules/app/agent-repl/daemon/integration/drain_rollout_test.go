@@ -226,9 +226,8 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *tes
 	f.d.AwaitExit()
 	// The stand-down SIGKILLs each shim's whole process group and waits for
 	// the reap before it returns, so nothing is left the moment the daemon has
-	// gone. The bound is for the kernel's own bookkeeping catching up in `ps`,
-	// not for a process still standing down.
-	if left := awaitNoStrays(t, f.d, strayReclaimBound); len(left) > 0 {
+	// gone: ONE READ, NO POLL. The listing skips a process that has exited.
+	if left := f.d.StrayPIDs(); len(left) > 0 {
 		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim outliving its daemon holds the workspace lock that refuses the next session", len(left), left)
 	}
 }
@@ -298,31 +297,6 @@ func TestUpdateShutdownScheduleNowAfterACompletedTurnExitsRidingNoBound(t *testi
 // ride without a WARN.
 const killDidNotAnswer = "the session kill did not answer; stopping the process anyway"
 
-// strayReclaimBound is how long the kernel is given to finish reaping a
-// process group the daemon already SIGKILLed and already waited on.
-//
-// MEASURED: with the stand-down in place, the stray set is empty on the first
-// read every time (observed over the -count=10 run of this test). This is a
-// hundred times that, and anything still present after it is a leak rather
-// than a slow reap.
-const strayReclaimBound = 2 * time.Second
-
-// awaitNoStrays polls until nothing names the daemon's state directory any
-// more, answering whatever is left when the bound expires.
-func awaitNoStrays(t *testing.T, d *harness.Daemon, bound time.Duration) []int {
-	t.Helper()
-	deadline := time.Now().Add(bound)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		left := d.StrayPIDs()
-		if len(left) == 0 || time.Now().After(deadline) {
-			return left
-		}
-		<-ticker.C
-	}
-}
-
 // TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp is the
 // leak the test above CANNOT reach: its workspace has a registered session, so
 // the walk over the workspaces finds it. A shim that has been spawned and has
@@ -376,7 +350,9 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	}
 	harness.AwaitProcessGone(t, f.d.Ctx(), shimPID)
 	f.d.AwaitExit()
-	if left := awaitNoStrays(t, f.d, strayReclaimBound); len(left) > 0 {
+	// ONE READ, NO POLL: the stand-down waited for every spawn's exit before
+	// the daemon did, and the listing skips a process that has exited.
+	if left := f.d.StrayPIDs(); len(left) > 0 {
 		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim spawned and not yet registered is nothing but the supervisor's to stand down", len(left), left)
 	}
 	// The bring-up its process was stood down under does not succeed, and the

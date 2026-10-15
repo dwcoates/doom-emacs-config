@@ -33,16 +33,12 @@ func TestAKilledDaemonLeavesNoProcessNamingItsStateDir(t *testing.T) {
 	f.d.Kill()
 	f.d.ReapStrays()
 
-	// Assert: nothing naming this run's state dir survives.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		stray := f.d.StrayPIDs()
-		if len(stray) == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("StrayPIDs() = %v after the sweep, want none: a killed test left processes behind", stray)
-		}
+	// Assert: nothing naming this run's state dir survives. ONE READ, NO
+	// POLL: ReapStrays returns only once a listing names no live process
+	// (it awaits each SIGKILLed stray's exit event), and the listing skips a
+	// process that has exited, so anything this read names is a leak.
+	if stray := f.d.StrayPIDs(); len(stray) != 0 {
+		t.Fatalf("StrayPIDs() = %v after the sweep, want none: a killed test left processes behind", stray)
 	}
 }
 
