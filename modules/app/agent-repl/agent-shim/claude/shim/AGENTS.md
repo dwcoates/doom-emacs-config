@@ -58,6 +58,8 @@ src/
     backup.ts detached.ts pushes.ts permission-gate.ts rollback.ts
     start-failure.ts   the retry label (and cause: network | vendor) a failed vendor start carries
     network-resume.ts  classifyAgentFailure: THE one network classifier, plus the resume of cut-off agents
+    vendor-error-retry.ts  the retry of a main turn the vendor gave up on, or a usage limit stopped
+    shim-prompt.ts     the delivery shape every prompt the shim authors shares (deliverShimPrompt)
     network-reach.ts   what each SDK message says about the network: raises and resolves
                        the `network_unreachable` session fault (component "network")
   convert/
@@ -1348,7 +1350,8 @@ and end by its spawning call's unit (`store.v1.GetDetachedWork`,
 
 Owner ruling after the 2026-09-27 DNS outage. `src/engine/network-resume.ts`
 owns the rule, `src/engine/api-reachability.ts` the probe, and
-`deliverNetworkResume` in `src/engine/session.ts` the delivery.
+`deliverShimPrompt` in `src/engine/session.ts` the delivery (the one delivery
+every shim-authored prompt shares, `src/engine/shim-prompt.ts`).
 
 - **Only a network failure is resumed.** `classifyAgentFailure` reads the
   vendor's structured error class first, then a connection code, then an HTTP
@@ -1414,6 +1417,40 @@ owns the rule, `src/engine/api-reachability.ts` the probe, and
 | `AGENT_REPL_FAKE_API_REACHABLE_GATE` | a path whose existence is the API being reachable; unset means always reachable |
 | `AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS` | the probe beat |
 | `AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS` | the give-up window |
+
+## A main turn the vendor gave up on is retried (2026-10-14)
+
+Owner ruling. `src/engine/vendor-error-retry.ts` owns the rule, and
+`deliverShimPrompt` in `src/engine/session.ts` the delivery, the same one the
+network resume uses.
+
+- **A retried API failure is retried every five minutes for two hours.** A
+  main turn qualifies when its terminal is `AgentFailure.api_request_failed`
+  and the vendor stated `api_retry` during it: the vendor retried the call
+  (ten times by its own default) and gave up. The two hours run from the
+  chain's first `api_retry`. A failure the vendor never retried is not retried
+  here either.
+- **An exhausted usage allowance waits for its reset instead.** A usage-limit
+  terminal (a 429, `blocking_limit`, `rapid_refill_breaker`: the set the
+  footer calls `usage_limit`) reads the account's usage afresh
+  (`readUsageForRetry`, a `SerialProbe.run` of the same sample the footer's
+  session and weekly figures come from). The retry is made when the exhausted
+  window resets: the five-hour session window, or a weekly one (the latest
+  reset when several are exhausted). Should the vendor still refuse after
+  that reset, the retry repeats every five minutes for thirty minutes. A
+  usage-limit failure with no exhausted window on record falls to the rule
+  above when the vendor retried it, and is not retried otherwise.
+- **The retry is an adopted turn with a marked prompt**
+  (`src/engine/vendor-error-retry-prompt.ts`, `<!--agent-repl:vendor-error-retry-->`)
+  asking the main agent to continue where it left off. It is delivered only on
+  an idle main agent; a busy one makes it ask again five seconds later.
+- **A chain ends** on a retry turn that ends any other way, on a `StartTurn`
+  (someone else's prompt; one that fails the same way opens a fresh chain),
+  and at stand-down or the vendor query dying. A keep-alive turn is never
+  counted.
+- **Every transition is one record** under `shim.engine.vendor_error_retry`.
+  Running out of window, of tail, or the vendor refusing the retry prompt is
+  ERROR, because the turn's work is left undone.
 
 ## The store writer: it never drops a row
 

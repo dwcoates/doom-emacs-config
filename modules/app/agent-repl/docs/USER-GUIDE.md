@@ -489,6 +489,11 @@ An event that is not a message is drawn in the feed as an **outcome marker**: a 
   - **resend this prompt** appears when the turn produced nothing; it sends the same prompt again as a new turn.
   - A refused resend says why beside the button.
 - **The workspace status carries the fault too.** Until the next turn starts, the footer reads `vendor fault · vendor error` (or the account block's own step) or `agent repl fault · turn died`, with the cause on its activity line, and the sidebar dot and the tab take the same color. The composer stays open, so the next prompt is what clears it.
+- **A turn the vendor gave up on is retried for you:**
+  - When the vendor retried a failed call itself and then gave up, agent-repl asks the agent to continue every 5 minutes, for up to 2 hours from the vendor's first retry.
+  - When your session or weekly usage allowance is exhausted, it waits instead until that allowance resets, as the footer's usage figures report it, and then asks the agent to continue. If the vendor still refuses, it asks again every 5 minutes for 30 minutes.
+  - Each retry appears in the feed as a turn the agent started on its own.
+  - Sending a prompt of your own stops the retrying.
 
 ## The editor popup
 
