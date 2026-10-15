@@ -1,0 +1,553 @@
+package wsm
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+)
+
+// THE SIDEBAR'S ARRANGEMENT is three durable orders (agentrepl.v1
+// ArrangeSidebar), which the repository grouping draws and the tab bar walks:
+//
+//   - the REPOSITORIES' order, each row's `place` (unique, at least 1);
+//   - each repository's SUBSECTIONS, in the subsections table, each row's
+//     `place` unique within its repository;
+//   - which subsection a WORKSPACE sits in (`subsection_id`, NULL for none),
+//     its place among the others there being its registry place (place.go).
+//
+// A WORKSPACE SITS ONLY IN A SUBSECTION OF ITS OWN REPOSITORY. The
+// workspaces_subsection_same_repo triggers make SQLite refuse any write that
+// would say otherwise, so the roster never has to decide what such a row
+// means. Deleting a subsection returns its workspaces to none (ON DELETE SET
+// NULL); a repository's subsections go with the repository (ON DELETE
+// CASCADE).
+
+// arrangementDDL is the layout-58 addition: the repositories' place, the
+// subsections table, and a workspace's subsection.
+//
+// IT IS ADDITIVE: the previous build names none of these columns. A
+// repository it inserts states no place and takes 0, and
+// repositories_land_unplaced moves it after every other one in the same
+// statement, exactly as workspaces_land_unplaced does for a workspace. Every
+// existing repository is placed in the order the roster drew repositories
+// before (name, then id), so the first boot after the step draws the same
+// picture.
+const arrangementDDL = `
+ALTER TABLE repositories ADD COLUMN place INTEGER NOT NULL DEFAULT 0;
+UPDATE repositories SET place = (
+  SELECT COUNT(*) FROM repositories AS earlier
+   WHERE earlier.name < repositories.name
+      OR (earlier.name = repositories.name AND earlier.id <= repositories.id));
+CREATE UNIQUE INDEX repositories_by_place ON repositories(place);
+CREATE TRIGGER repositories_land_unplaced AFTER INSERT ON repositories WHEN NEW.place = 0
+BEGIN
+  UPDATE repositories SET place = (SELECT MAX(place) FROM repositories) + 1 WHERE id = NEW.id;
+END;
+CREATE TABLE subsections (
+  id      TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  name    TEXT NOT NULL CHECK (trim(name) <> ''),
+  place   INTEGER NOT NULL,
+  UNIQUE (repo_id, place)
+);
+ALTER TABLE workspaces ADD COLUMN subsection_id TEXT REFERENCES subsections(id) ON DELETE SET NULL;
+CREATE TRIGGER workspaces_subsection_same_repo_insert BEFORE INSERT ON workspaces
+WHEN NEW.subsection_id IS NOT NULL
+ AND NEW.repo_id IS NOT (SELECT repo_id FROM subsections WHERE id = NEW.subsection_id)
+BEGIN
+  SELECT RAISE(ABORT, 'wsm: a workspace sits only in a subsection of its own repository');
+END;
+CREATE TRIGGER workspaces_subsection_same_repo_update BEFORE UPDATE OF subsection_id, repo_id ON workspaces
+WHEN NEW.subsection_id IS NOT NULL
+ AND NEW.repo_id IS NOT (SELECT repo_id FROM subsections WHERE id = NEW.subsection_id)
+BEGIN
+  SELECT RAISE(ABORT, 'wsm: a workspace sits only in a subsection of its own repository');
+END;
+`
+
+// ErrUnknownSubsection is a subsection id no subsection carries. It wraps
+// ErrNotFound, so a caller asking only "was it there" still reads it.
+var ErrUnknownSubsection = fmt.Errorf("wsm: unknown subsection: %w", ErrNotFound)
+
+// ErrUnknownRepository is a repository id no repository carries. It wraps
+// ErrNotFound, as ErrUnknownSubsection does.
+var ErrUnknownRepository = fmt.Errorf("wsm: unknown repository: %w", ErrNotFound)
+
+// ErrOtherRepository refuses an arrangement that relates two things of
+// different repositories: a subsection placed before another repository's,
+// a workspace put into another repository's subsection, or a workspace moved
+// onto another repository's place. Nothing is written.
+var ErrOtherRepository = errors.New("wsm: the arrangement relates two repositories")
+
+// ErrAnchorElsewhere refuses placing a workspace before one that does not
+// sit in the destination (or that moves with it). Nothing is written.
+var ErrAnchorElsewhere = errors.New("wsm: the workspace to place before is not in the destination")
+
+// ErrBlankSubsectionName refuses a subsection name that is empty or only
+// whitespace. Nothing is written.
+var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
+
+// isArrangementRefusal reports whether err is one of the arrangement's own
+// answers rather than the store failing: the verb turns each into the rpc's
+// arm and records it at its own level.
+func isArrangementRefusal(err error) bool {
+	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName)
+}
+
+// subsectionName trims NAME and refuses it when nothing is left.
+func subsectionName(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", ErrBlankSubsectionName
+	}
+	return trimmed, nil
+}
+
+// CreateSubsection records a subsection named NAME (trimmed) after REPO's
+// other subsections. A blank name is ErrBlankSubsectionName, an unknown
+// repository ErrUnknownRepository.
+func (s *store) CreateSubsection(ctx context.Context, repo RepoID, name string) (Subsection, error) {
+	const op = "daemon.wsm.create_subsection"
+	fields := dlog.Context{"repo_id": string(repo), "name": name}
+	trimmed, err := subsectionName(name)
+	if err != nil {
+		s.log.Debug(op, "refused a blank subsection name", withError(fields, err))
+		return Subsection{}, err
+	}
+	out := Subsection{ID: NewSubsectionID(), Repo: repo, Name: trimmed}
+	fields["subsection"] = string(out.ID)
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireRepository(ctx, tx, repo); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(place), 0) + 1 FROM subsections WHERE repo_id = ?`, repo).Scan(&out.Place); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO subsections (id, repo_id, name, place) VALUES (?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Name, out.Place)
+		return err
+	})
+	if err != nil {
+		return Subsection{}, err
+	}
+	return out, nil
+}
+
+// RenameSubsection relabels subsection ID to NAME (trimmed). A blank name is
+// ErrBlankSubsectionName, an unknown subsection ErrUnknownSubsection.
+func (s *store) RenameSubsection(ctx context.Context, id SubsectionID, name string) error {
+	const op = "daemon.wsm.rename_subsection"
+	fields := dlog.Context{"subsection": string(id), "name": name}
+	trimmed, err := subsectionName(name)
+	if err != nil {
+		s.log.Debug(op, "refused a blank subsection name", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE subsections SET name = ? WHERE id = ?`, trimmed, id)
+		if err != nil {
+			return err
+		}
+		return requireSubsectionRow(res, id)
+	})
+}
+
+// DeleteSubsection removes subsection ID. Its workspaces return to their
+// repository's unsectioned workspaces, keeping their order among themselves,
+// AFTER the ones already there, so they draw where the subsection's rows
+// were: below every unsectioned row. An unknown subsection is
+// ErrUnknownSubsection.
+func (s *store) DeleteSubsection(ctx context.Context, id SubsectionID) error {
+	const op = "daemon.wsm.delete_subsection"
+	return s.write(ctx, op, dlog.Context{"subsection": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
+		sub, err := subsectionRow(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		order, err := placeOrder(ctx, tx)
+		if err != nil {
+			return err
+		}
+		members, err := bucketMembers(ctx, tx, sub.Repo, &id)
+		if err != nil {
+			return err
+		}
+		unsectioned, err := bucketMembers(ctx, tx, sub.Repo, nil)
+		if err != nil {
+			return err
+		}
+		if err := rewritePlaces(ctx, tx, insertAfterBucket(order, members, unsectioned)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM subsections WHERE id = ?`, id); err != nil {
+			return err
+		}
+		// The subsections after it close the gap, so places stay dense.
+		return renumberSubsections(ctx, tx, sub.Repo)
+	})
+}
+
+// MoveSubsection moves subsection ID just before subsection BEFORE (nil:
+// after every other one) among its repository's subsections. BEFORE of
+// another repository is ErrOtherRepository; an unknown one of either is
+// ErrUnknownSubsection.
+func (s *store) MoveSubsection(ctx context.Context, id SubsectionID, before *SubsectionID) error {
+	const op = "daemon.wsm.move_subsection"
+	fields := dlog.Context{"subsection": string(id), "before": ids.Optional(before)}
+	if before != nil && *before == id {
+		err := fmt.Errorf("wsm: move subsection: %s before itself", id)
+		s.log.Error(op, "refused to move a subsection before itself", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		sub, err := subsectionRow(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if before != nil {
+			anchor, err := subsectionRow(ctx, tx, *before)
+			if err != nil {
+				return err
+			}
+			if anchor.Repo != sub.Repo {
+				return ErrOtherRepository
+			}
+		}
+		order, err := idsByPlace[SubsectionID](ctx, tx, `SELECT id FROM subsections WHERE repo_id = ? ORDER BY place`, sub.Repo)
+		if err != nil {
+			return err
+		}
+		order = moveBefore(order, id, before)
+		return assignPlaces(ctx, tx, "subsections", order)
+	})
+}
+
+// MoveRepository moves repository ID just before repository BEFORE (nil:
+// after every other one). An unknown one of either is ErrUnknownRepository.
+func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) error {
+	const op = "daemon.wsm.move_repository"
+	fields := dlog.Context{"repo_id": string(id), "before": ids.Optional(before)}
+	if before != nil && *before == id {
+		err := fmt.Errorf("wsm: move repository: %s before itself", id)
+		s.log.Error(op, "refused to move a repository before itself", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireRepository(ctx, tx, id); err != nil {
+			return err
+		}
+		if before != nil {
+			if err := requireRepository(ctx, tx, *before); err != nil {
+				return err
+			}
+		}
+		order, err := idsByPlace[RepoID](ctx, tx, `SELECT id FROM repositories ORDER BY place`)
+		if err != nil {
+			return err
+		}
+		return assignPlaces(ctx, tx, "repositories", moveBefore(order, id, before))
+	})
+}
+
+// PlaceWorkspace puts workspace WS, WITH ITS NESTED FAMILY, into subsection
+// INTO (nil: none) of its own repository, just before workspace BEFORE (nil:
+// after every workspace already there).
+//
+// The family is every descendant (by recorded parent) that sits where WS
+// sits: the sidebar draws them as one block under WS, so they move as one.
+// They keep their order among themselves.
+//
+// Refusals, each writing nothing: an unknown workspace is ErrNotFound, an
+// unknown subsection ErrUnknownSubsection, a subsection of another repository
+// ErrOtherRepository, and a BEFORE that is not in the destination (or is in
+// the family) ErrAnchorElsewhere.
+func (s *store) PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) error {
+	const op = "daemon.wsm.place_workspace"
+	fields := dlog.Context{"workspace": string(ws), "into": ids.Optional(into), "before": ids.Optional(before)}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var repo RepoID
+		var from sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, subsection_id", &repo, &from); err != nil {
+			return err
+		}
+		if into != nil {
+			sub, err := subsectionRow(ctx, tx, *into)
+			if err != nil {
+				return err
+			}
+			if sub.Repo != repo {
+				return ErrOtherRepository
+			}
+		}
+		family, err := familyInBucket(ctx, tx, ws, repo, nullSubsection(from))
+		if err != nil {
+			return err
+		}
+		order, err := placeOrder(ctx, tx)
+		if err != nil {
+			return err
+		}
+		destination, err := bucketMembers(ctx, tx, repo, into)
+		if err != nil {
+			return err
+		}
+		destination = slices.DeleteFunc(destination, func(id WorkspaceID) bool { return slices.Contains(family, id) })
+		var placed []WorkspaceID
+		if before != nil {
+			if !slices.Contains(destination, *before) {
+				return ErrAnchorElsewhere
+			}
+			placed = insertBefore(order, family, *before)
+		} else {
+			placed = insertAfterBucket(order, family, destination)
+		}
+		fields["family"] = len(family)
+		for _, member := range family {
+			if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, nullableSubsection(into), member); err != nil {
+				return err
+			}
+		}
+		return rewritePlaces(ctx, tx, placed)
+	})
+}
+
+// parentSubsection answers the subsection PARENT (nil: none) sits in when it
+// is a workspace of REPO, and nil otherwise: the subsection a new child of
+// PARENT lands in.
+func parentSubsection(ctx context.Context, tx *sql.Tx, parent *WorkspaceID, repo RepoID) (*SubsectionID, error) {
+	if parent == nil {
+		return nil, nil
+	}
+	var sub sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT subsection_id FROM workspaces WHERE id = ? AND repo_id = ?`, *parent, repo).Scan(&sub)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nullSubsection(sub), nil
+}
+
+// requireRepository refuses an id no repository carries with
+// ErrUnknownRepository.
+func requireRepository(ctx context.Context, tx *sql.Tx, id RepoID) error {
+	var found int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM repositories WHERE id = ?`, id).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("wsm: repository %s: %w", id, ErrUnknownRepository)
+	}
+	return err
+}
+
+// subsectionRow reads one subsection, ErrUnknownSubsection when none carries
+// the id.
+func subsectionRow(ctx context.Context, tx *sql.Tx, id SubsectionID) (Subsection, error) {
+	var sub Subsection
+	err := tx.QueryRowContext(ctx, `SELECT id, repo_id, name, place FROM subsections WHERE id = ?`, id).
+		Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Subsection{}, fmt.Errorf("wsm: subsection %s: %w", id, ErrUnknownSubsection)
+	}
+	return sub, err
+}
+
+// requireSubsectionRow refuses a write that touched no subsection with
+// ErrUnknownSubsection.
+func requireSubsectionRow(res sql.Result, id SubsectionID) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("wsm: subsection %s: %w", id, ErrUnknownSubsection)
+	}
+	return nil
+}
+
+// placeOrder answers every workspace id in registry order.
+func placeOrder(ctx context.Context, tx *sql.Tx) ([]WorkspaceID, error) {
+	return idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces ORDER BY place`)
+}
+
+// bucketMembers answers the workspaces of REPO sitting in subsection SUB
+// (nil: in none), in registry order.
+func bucketMembers(ctx context.Context, tx *sql.Tx, repo RepoID, sub *SubsectionID) ([]WorkspaceID, error) {
+	return idsByPlace[WorkspaceID](ctx, tx,
+		`SELECT id FROM workspaces WHERE repo_id = ? AND subsection_id IS ? ORDER BY place`, repo, nullableSubsection(sub))
+}
+
+// familyInBucket answers WS and every descendant of it (by recorded parent)
+// sitting in REPO's subsection SUB (nil: none), in registry order.
+func familyInBucket(ctx context.Context, tx *sql.Tx, ws WorkspaceID, repo RepoID, sub *SubsectionID) ([]WorkspaceID, error) {
+	return idsByPlace[WorkspaceID](ctx, tx, `
+WITH RECURSIVE family(id) AS (
+  SELECT ?
+  UNION
+  SELECT w.id FROM workspaces w JOIN family f ON w.parent_id = f.id
+   WHERE w.repo_id = ? AND w.subsection_id IS ?
+)
+SELECT w.id FROM workspaces w JOIN family f ON w.id = f.id ORDER BY w.place`, ws, repo, nullableSubsection(sub))
+}
+
+// idsByPlace runs QUERY, which selects one id column, and answers the ids in
+// the order it returned them.
+func idsByPlace[ID ~string](ctx context.Context, tx *sql.Tx, query string, args ...any) ([]ID, error) {
+	return listRows(ctx, tx, query, func(row interface{ Scan(...any) error }) (ID, error) {
+		var id ID
+		err := row.Scan(&id)
+		return id, err
+	}, args...)
+}
+
+// moveBefore answers ORDER with ID taken out and put back just before BEFORE,
+// or last when BEFORE is nil.
+func moveBefore[ID comparable](order []ID, id ID, before *ID) []ID {
+	out := slices.DeleteFunc(slices.Clone(order), func(x ID) bool { return x == id })
+	if before == nil {
+		return append(out, id)
+	}
+	at := slices.Index(out, *before)
+	return slices.Insert(out, at, id)
+}
+
+// insertBefore answers ORDER with MOVED taken out and put back, in their own
+// order, just before ANCHOR, which MOVED must not contain.
+func insertBefore(order, moved []WorkspaceID, anchor WorkspaceID) []WorkspaceID {
+	rest := without(order, moved)
+	return slices.Insert(rest, slices.Index(rest, anchor), moved...)
+}
+
+// insertAfterBucket answers ORDER with MOVED taken out and put back, in their
+// own order, just after the last of BUCKET (which MOVED must not overlap), or
+// last of all when BUCKET is empty.
+func insertAfterBucket(order, moved, bucket []WorkspaceID) []WorkspaceID {
+	rest := without(order, moved)
+	if len(bucket) == 0 {
+		return append(rest, moved...)
+	}
+	at := slices.Index(rest, bucket[len(bucket)-1]) + 1
+	return slices.Insert(rest, at, moved...)
+}
+
+// without answers ORDER less every id in DROP, the rest in their order.
+func without(order, drop []WorkspaceID) []WorkspaceID {
+	return slices.DeleteFunc(slices.Clone(order), func(id WorkspaceID) bool { return slices.Contains(drop, id) })
+}
+
+// rewritePlaces gives the workspaces of ORDER the places 1, 2, ... in that
+// order. ORDER is every workspace: a place left unassigned could collide.
+func rewritePlaces(ctx context.Context, tx *sql.Tx, order []WorkspaceID) error {
+	return assignPlaces(ctx, tx, "workspaces", order)
+}
+
+// assignPlaces gives the rows of TABLE named by ORDER the places 1, 2, ... in
+// that order. Every row goes through a negative place first, so no unique
+// index sees two rows on one place mid-way.
+func assignPlaces[ID ~string](ctx context.Context, tx *sql.Tx, table string, order []ID) error {
+	for i, id := range order {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+table+` SET place = ? WHERE id = ?`, -(i + 1), id); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE `+table+` SET place = -place WHERE place < 0`)
+	return err
+}
+
+// renumberSubsections closes the gaps in REPO's subsection places.
+func renumberSubsections(ctx context.Context, tx *sql.Tx, repo RepoID) error {
+	order, err := idsByPlace[SubsectionID](ctx, tx, `SELECT id FROM subsections WHERE repo_id = ? ORDER BY place`, repo)
+	if err != nil {
+		return err
+	}
+	return assignPlaces(ctx, tx, "subsections", order)
+}
+
+// ListSubsections loads every subsection, ordered by repository and then by
+// each repository's stored order, all-or-nothing.
+func (s *store) ListSubsections(ctx context.Context) ([]Subsection, error) {
+	var out []Subsection
+	err := s.read(ctx, "daemon.wsm.list_subsections", dlog.Context{}, func(ctx context.Context) error {
+		loaded, err := listSubsections(ctx, s.db())
+		out = loaded
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// listSubsections loads every subsection through Q, all-or-nothing.
+func listSubsections(ctx context.Context, q querier) ([]Subsection, error) {
+	return listRows(ctx, q, `SELECT id, repo_id, name, place FROM subsections ORDER BY repo_id, place`, scanSubsection)
+}
+
+// scanSubsection reads one Subsection from a row of its four columns.
+func scanSubsection(row interface{ Scan(...any) error }) (Subsection, error) {
+	var sub Subsection
+	err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place)
+	return sub, err
+}
+
+// Arrangement is the registry the roster's repository grouping and the tab
+// bar are drawn from, READ AS ONE SNAPSHOT: every subsection a workspace
+// names is among Subsections, and every repository a workspace or a
+// subsection names is among Repositories. Read separately, a subsection
+// deleted between two reads would leave a workspace naming one the list no
+// longer holds.
+type Arrangement struct {
+	Workspaces   []Workspace
+	Repositories []Repository
+	Subsections  []Subsection
+}
+
+// ReadArrangement reads the workspaces, the repositories and the subsections
+// in ONE read transaction, so they are one snapshot of the store.
+func (s *store) ReadArrangement(ctx context.Context) (Arrangement, error) {
+	var out Arrangement
+	err := s.read(ctx, "daemon.wsm.read_arrangement", dlog.Context{}, func(ctx context.Context) error {
+		tx, err := s.db().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return fmt.Errorf("wsm: begin the arrangement read: %w", err)
+		}
+		defer s.endTx(tx, "daemon.wsm.read_arrangement", dlog.Context{})
+		var read Arrangement
+		if read.Workspaces, err = listWorkspaces(ctx, tx); err != nil {
+			return err
+		}
+		if read.Repositories, err = listRepositories(ctx, tx); err != nil {
+			return err
+		}
+		if read.Subsections, err = listSubsections(ctx, tx); err != nil {
+			return err
+		}
+		out = read
+		return nil
+	})
+	return out, err
+}
+
+// nullableSubsection is a subsection id as a SQL argument, NULL for none.
+func nullableSubsection(id *SubsectionID) any {
+	if id == nil {
+		return nil
+	}
+	return string(*id)
+}
+
+// nullSubsection decodes a nullable subsection column.
+func nullSubsection(v sql.NullString) *SubsectionID {
+	if !v.Valid {
+		return nil
+	}
+	id := SubsectionID(v.String)
+	return &id
+}

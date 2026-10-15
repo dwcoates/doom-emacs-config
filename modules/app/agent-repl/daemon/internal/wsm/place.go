@@ -146,11 +146,25 @@ func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var from, to int64
-		if err := scanWorkspaceRow(ctx, tx, ws, "place", &from); err != nil {
+		var fromRepo, toRepo RepoID
+		var fromParent, toParent, fromSubsection, toSubsection sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "place, repo_id, parent_id, subsection_id", &from, &fromRepo, &fromParent, &fromSubsection); err != nil {
 			return err
 		}
-		if err := scanWorkspaceRow(ctx, tx, target, "place", &to); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, target, "place, repo_id, parent_id, subsection_id", &to, &toRepo, &toParent, &toSubsection); err != nil {
 			return err
+		}
+		// TWO ROOTS OF ONE REPOSITORY EXCHANGE THEIR SUBSECTIONS TOO (arrange.go),
+		// so each lands on the tab the other held even across subsections. A
+		// swap across repositories or families exchanges places alone: a
+		// workspace's repository is fixed, and a child sits wherever its root
+		// does.
+		if fromRepo == toRepo && !fromParent.Valid && !toParent.Valid {
+			for id, sub := range map[WorkspaceID]sql.NullString{ws: toSubsection, target: fromSubsection} {
+				if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, sub, id); err != nil {
+					return err
+				}
+			}
 		}
 		fields["from"], fields["to"] = from, to
 		// ws steps onto the parking slot first, so the unique index never sees

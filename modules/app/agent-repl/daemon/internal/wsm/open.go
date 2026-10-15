@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 57
+const LayoutVersion = 58
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -595,6 +595,13 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		// A REFUSED RETARGET is the store answering what was asked (an
 		// unknown or foreign parent, a cycle, no merge geometry); the verb
 		// turns it into the rpc's arm and records it at its own level.
+		// A REFUSED ARRANGEMENT is the store answering what was asked (two
+		// repositories related, an anchor elsewhere, a blank name); the verb
+		// turns it into the rpc's arm.
+		if isArrangementRefusal(err) {
+			s.log.Debug(op, "the arrangement was refused; nothing was written", withError(fields, err))
+			return err
+		}
 		if _, ok := AsParentRefused(err); ok {
 			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
 			return err

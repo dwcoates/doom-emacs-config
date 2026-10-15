@@ -32,6 +32,8 @@ type (
 	TurnID = ids.TurnID
 	// TaskID identifies one user task.
 	TaskID = ids.TaskID
+	// SubsectionID identifies one repository subsection.
+	SubsectionID = ids.SubsectionID
 	// FaultID identifies one recorded fault.
 	FaultID = ids.FaultID
 )
@@ -80,6 +82,9 @@ type Workspace struct {
 	Place int64
 	// Task is the task this workspace is assigned to, nil when unassigned.
 	Task *TaskID
+	// Subsection is the subsection of its repository's section the
+	// workspace sits in (arrange.go), nil when it sits in none.
+	Subsection *SubsectionID
 	// LastSelectedAt is when the user last selected the workspace.
 	LastSelectedAt *time.Time
 	// HiddenAt is when the user moved the workspace into the hidden section,
@@ -207,6 +212,23 @@ type Repository struct {
 	// Folded reports that the repository's roster section is collapsed: its
 	// rows hidden in the sidebar and its workspaces' tabs off the Emacs bar.
 	Folded bool
+	// Place is the repository's position among the repositories, which the
+	// repository grouping and the tab bar both follow (arrange.go). Unique,
+	// and at least 1.
+	Place int64
+}
+
+// Subsection is one user-named subsection of a repository's sidebar section
+// (arrange.go).
+type Subsection struct {
+	ID SubsectionID
+	// Repo is the repository whose section the subsection sits in.
+	Repo RepoID
+	// Name is the subsection's drawn label: never blank.
+	Name string
+	// Place is the subsection's position among its repository's
+	// subsections. Unique within the repository, and at least 1.
+	Place int64
 }
 
 // ForgetReport is what a Forget removed BESIDES the workspace's own rows.

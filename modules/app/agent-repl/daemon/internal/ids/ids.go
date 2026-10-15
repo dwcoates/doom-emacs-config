@@ -34,6 +34,10 @@ type TurnID string
 // TaskID identifies one user task.
 type TaskID string
 
+// SubsectionID identifies one user-named subsection of a repository's
+// sidebar section.
+type SubsectionID string
+
 // FaultID identifies one recorded fault.
 type FaultID string
 

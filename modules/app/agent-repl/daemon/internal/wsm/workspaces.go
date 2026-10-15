@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, subsection_id, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -82,8 +82,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		closedAt      sql.NullInt64
 		closedBy      sql.NullString
 		statusChanged sql.NullInt64
+		subsection    sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -137,6 +138,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		id := TaskID(task.String)
 		ws.Task = &id
 	}
+	ws.Subsection = nullSubsection(subsection)
 	ws.LastSelectedAt = optTime(selected)
 	ws.LastActivityAt = optTime(activity)
 	ws.LastTurnEndedAt = optTime(ended)
@@ -253,10 +255,15 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
+		// A CHILD LANDS IN ITS PARENT'S SUBSECTION, so it draws nested under
+		// the parent rather than alone among the unsectioned rows.
+		if out.Subsection, err = parentSubsection(ctx, tx, out.Parent, out.Repo); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place)
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, subsection_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, nullableSubsection(out.Subsection))
 		if err != nil {
 			return err
 		}
@@ -376,7 +383,8 @@ func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch string) 
 		return "", err
 	}
 	id = NewRepoID()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories (id, dir, name, default_branch) VALUES (?, ?, ?, ?)`, id, repoDir, filepath.Base(repoDir), defaultBranch); err != nil {
+	// A NEW REPOSITORY LANDS AFTER EVERY OTHER ONE (arrange.go).
+	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories (id, dir, name, default_branch, place) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(place), 0) + 1 FROM repositories))`, id, repoDir, filepath.Base(repoDir), defaultBranch); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -420,24 +428,9 @@ func (s *store) WorkspaceByDir(ctx context.Context, dir string) (Workspace, erro
 func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	var out []Workspace
 	err := s.read(ctx, "daemon.wsm.list_workspaces", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []Workspace
-		for rows.Next() {
-			ws, err := scanWorkspace(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, ws)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		loaded, err := listWorkspaces(ctx, s.db())
 		out = loaded
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -445,14 +438,19 @@ func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return out, nil
 }
 
+// listWorkspaces loads every workspace through Q, all-or-nothing.
+func listWorkspaces(ctx context.Context, q querier) ([]Workspace, error) {
+	return listRows(ctx, q, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`, scanWorkspace)
+}
+
 // repositoryColumns is every column a Repository is read from, in
 // scanRepository's order: the ONE column list both reads share.
-const repositoryColumns = `id, dir, name, default_branch, folded`
+const repositoryColumns = `id, dir, name, default_branch, folded, place`
 
 // scanRepository reads one Repository from a row of repositoryColumns.
 func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
 	var repo Repository
-	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded)
+	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded, &repo.Place)
 	return repo, err
 }
 
@@ -474,29 +472,20 @@ func (s *store) SetRepositoryFolded(ctx context.Context, id RepoID, folded bool)
 func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	var out []Repository
 	err := s.read(ctx, "daemon.wsm.list_repositories", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+repositoryColumns+` FROM repositories ORDER BY dir`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []Repository
-		for rows.Next() {
-			repo, err := scanRepository(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, repo)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		loaded, err := listRepositories(ctx, s.db())
 		out = loaded
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// listRepositories loads every repository through Q, in their stored order,
+// all-or-nothing.
+func listRepositories(ctx context.Context, q querier) ([]Repository, error) {
+	return listRows(ctx, q, `SELECT `+repositoryColumns+` FROM repositories ORDER BY place`, scanRepository)
 }
 
 // setWorkspaceField is the one write path for a single workspace column: it

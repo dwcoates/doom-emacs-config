@@ -99,6 +99,28 @@ type DB interface {
 	// registry order, every other workspace keeping its own; an unknown id is
 	// ErrNotFound and nothing is written.
 	SwapPlaces(ctx context.Context, ws, target WorkspaceID) error
+	// ListSubsections loads every subsection, by repository and then in each
+	// repository's stored order (arrange.go).
+	ListSubsections(ctx context.Context) ([]Subsection, error)
+	// ReadArrangement reads the workspaces, repositories and subsections as
+	// ONE snapshot (arrange.go).
+	ReadArrangement(ctx context.Context) (Arrangement, error)
+	// CreateSubsection records a named subsection after REPO's others.
+	CreateSubsection(ctx context.Context, repo RepoID, name string) (Subsection, error)
+	// RenameSubsection relabels one subsection.
+	RenameSubsection(ctx context.Context, id SubsectionID, name string) error
+	// DeleteSubsection removes one subsection, its workspaces returning to
+	// none.
+	DeleteSubsection(ctx context.Context, id SubsectionID) error
+	// MoveSubsection moves one subsection before another of its repository's
+	// (nil: last).
+	MoveSubsection(ctx context.Context, id SubsectionID, before *SubsectionID) error
+	// MoveRepository moves one repository before another (nil: last).
+	MoveRepository(ctx context.Context, id RepoID, before *RepoID) error
+	// PlaceWorkspace puts one workspace, with its nested family, into a
+	// subsection of its repository (nil: none) before a workspace there (nil:
+	// last).
+	PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

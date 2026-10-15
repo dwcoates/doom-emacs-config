@@ -319,12 +319,6 @@ func (s *store) HasTurns(ctx context.Context, id WorkspaceID) (bool, error) {
 	return has, nil
 }
 
-// querier is what openTurns needs: the handle or a transaction, so the orphan
-// close reads the same rows through the same decoder inside its transaction.
-type querier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 // openTurns loads the turns with no terminal, all-or-nothing.
 func openTurns(ctx context.Context, q querier, id WorkspaceID) ([]Turn, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE workspace_id = ? AND closed_at IS NULL ORDER BY started_at, id`, id)
