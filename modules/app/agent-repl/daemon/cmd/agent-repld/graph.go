@@ -67,6 +67,7 @@ import (
 	"agent-repld/internal/signin"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
+	"agent-repld/internal/webfootprint"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -833,6 +834,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)
 	}
+	// THE WEB CONTENT PROCESS'S FOOTPRINT, once a minute: every workspace
+	// page lives in it, and its size is what its main-thread stalls follow.
+	footprints, err := webfootprint.New(webfootprint.Deps{Runner: scripts, Clock: clock.System{}, Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the web footprint sampler: %w", err)
+	}
 	// ---- agent-repl's session ----
 	//
 	// The span the connectivity indicator's dropdown reports (owner ruling,
@@ -1322,6 +1329,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
+		{Name: "web_footprint", Run: func(ctx context.Context) error {
+			footprints.Run(ctx)
+			return nil
+		}},
 		{Name: "branch_commits", Run: commitRecounter.Run},
 		{Name: "cache_lapse", Run: cacheKeeper.Run},
 		{Name: "news_digest", Run: digest.Run},
