@@ -285,10 +285,5 @@ func displayArm(d *agentreplv1.UpdatePersistentWifiModeDisplay) string { return 
 // controller builds sets one, so an unset or absent oneof is a bug in this
 // package and panics rather than being named.
 func outcomeArm(m proto.Message) string {
-	r := m.ProtoReflect()
-	arm, ok := protoarm.Name(r, "outcome")
-	if !ok {
-		panic(fmt.Sprintf("persistentwifi: %s was built with no outcome", r.Descriptor().FullName()))
-	}
-	return string(arm)
+	return string(protoarm.Must(m.ProtoReflect(), "outcome", "persistentwifi.outcome_arm"))
 }
