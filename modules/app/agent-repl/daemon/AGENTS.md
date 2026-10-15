@@ -2228,7 +2228,8 @@ The integration fake pushes one with `push_retired` (`ShimControl.PushRetired`).
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
-edge case per test, no `time.Sleep` for synchronization. GIT IS NEVER CALLED
+edge case per test CASE (a case is the smallest unit the runner names: a
+`t.Run` subtest counts), no `time.Sleep` for synchronization. GIT IS NEVER CALLED
 DURING TESTING (user directive): every package above the git client tests
 against a fake `gitclient.Git`; the integration harness scripts every git
 fact (commits, conflicts, landed ranges, worktree lists) as fixture data;

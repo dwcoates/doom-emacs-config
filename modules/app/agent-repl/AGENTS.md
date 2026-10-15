@@ -774,6 +774,20 @@ the primary's address once the successor is reaped. Those two are the only
 sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
 isolation guarantee that makes the sharing safe.
 
+### A case may share an expensive fixture, never a slice another case reads
+
+Owner rule, 2026-10-14. A fixture that costs more than the cases it serves (an e2e `World`, a merge-queue fixture, a Doom boot) may be built once and shared by several cases, on these conditions:
+
+- **Each case owns its slice.** It opens its own workspace (so its own session, shim, feed and per-workspace logs), fresh, and asserts only on that slice.
+- **Fixture-wide views keep their own fixture.** A case that asserts on a view spanning the fixture (roster, sidebar, daemon stream, account usage or allowances, counts across workspaces, a log not scoped to its workspace) keeps its own fixture.
+- **Warning declarations are scoped to the case's workspace, never fixture-wide.** A case that must declare a warning the harness can only declare fixture-wide, or a record with no workspace, keeps its own fixture.
+- **A case that changes the fixture keeps its own.** That means stopping, restarting, deploying or relaunching the daemon, store or sidecar, or needing different fixture options or env. Two cases share only a fixture built with identical options.
+- **Each case is its own named case**, run in parallel with its siblings where the product allows. `t.Fatalf` ends only that case. The shared fixture's own failure fails every case that shares it, and that is reported once, as the fixture's.
+- **One act, several observers.** Tests that perform the byte-identical act and each assert a different view of its result are one test. Its observations are separate named cases using `t.Errorf`, so each one reports even when another fails.
+- **Sequential walks are the exception.** A case may start from another's end state only when the sequence is itself the subject. The walk's head states which later steps an early fatal failure hides.
+- **Mutation evidence first.** Merging existing tests under this section lands only with `testrun redundancy`'s evidence that no killed mutant is lost.
+- Why: the 2026-10-14 shared-setup audit (workspace `test-shared-setup`) measured an e2e test's `World` at about 2.7s of its 3.4s solo cost, while a fresh workspace in a running `World` costs 0.3-0.4s.
+
 ### A fixture workspace directory is process-private and swept per scenario
 
 Every `:project-dir` an integration scenario registers comes from
