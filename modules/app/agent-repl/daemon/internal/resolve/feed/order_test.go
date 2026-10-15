@@ -451,9 +451,9 @@ func TestALateRowOlderThanTheLoadedPageIsServedInPlaceByTheNextPage(t *testing.T
 
 	// Act: a row placed before everything the reader loaded arrives late.
 	h.sendAt(settledResponse("late", "written at 150"), 150)
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, err := h.olderPageOf(rootFeed(), "reader-1")
 	if err != nil {
-		t.Fatalf("NextPage: %v", err)
+		t.Fatalf("OlderPage: %v", err)
 	}
 
 	// Assert: the older page is exactly the rows before the reader's oldest,

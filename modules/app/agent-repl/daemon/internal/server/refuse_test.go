@@ -23,7 +23,6 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 )
@@ -134,7 +133,6 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 		{"not editing", promptqueue.ErrNotEditing, "not_editing"},
 		{"no editor", promptqueue.ErrNoEditor, "no_editor"},
 		{"being edited", &promptqueue.BeingEditedError{Turn: "turn-0"}, "being_edited"},
-		{"no walk", feed.ErrNoWalk, "no_walk_standing"},
 		{"nothing scheduled", drain.ErrNothingScheduled, "nothing_scheduled"},
 		{"no transfer announced", rollout.ErrNoTransferAnnounced, "no_transfer_announced"},
 		{"not yet adopted", rollout.ErrNotYetAdopted, "not_yet_adopted"},

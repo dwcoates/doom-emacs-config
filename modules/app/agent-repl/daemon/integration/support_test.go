@@ -39,9 +39,9 @@ type fixture struct {
 	// fixture's own: a test that wants to observe those streams opens its own.
 	host *harness.Stream[*agentreplv1.WatchHostWorkspaceResponse]
 	web  *harness.Stream[*agentreplv1.WatchWebWorkspaceResponse]
-	// walk is the walk the fixture's last page named (feedPage), so a next
-	// continues it.
-	walk *frontendv1.FeedWalkId
+	// oldestHeld is the order of the oldest row the fixture's pages served it
+	// (feedPage), so an older page is asked for above it, as a client asks.
+	oldestHeld *frontendv1.FeedRowOrder
 }
 
 // expectSessionKillRecords declares the WARN and ERROR trail that ENDING A LIVE

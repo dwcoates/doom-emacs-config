@@ -133,13 +133,6 @@ type wsState struct {
 	// (book.go): what its feed's book is told of every row it draws.
 	load *pageLoad
 
-	// readers are the standing page walks, keyed by the walk each opening
-	// minted (server/feed.go readerFor), at most maxStandingWalks of them.
-	readers map[ReaderID]*walk
-	// walkSeq stamps each walk's latest use, so the least recently used one
-	// is the one a full set drops.
-	walkSeq uint64
-
 	// units is the per-activity accumulation: the start facts a settled frame
 	// is drawn against, and the fold of a growing one.
 	units map[string]*unitState
@@ -533,25 +526,18 @@ type feedState struct {
 	book bookState
 }
 
-// walk is one reader's page position: the order key of the OLDEST row it has
-// been served. Ephemeral: minted by every opening, dropped on CloseReader or as
-// the least recently used of a full set.
+// walk is one request's page position: the order key of the OLDEST row the
+// reader holds, which the reader names and the walk moves down as it serves.
+// It lives for one request; the daemon keeps none between requests.
 type walk struct {
-	// feedKey is the feed this walk is of.
-	feedKey string
-	// used is the walkSeq of the walk's latest use.
-	used uint64
-	// oldest is the order key of the oldest row served so far; nil when the
+	// oldest is the order key of the oldest row held so far; nil when the
 	// walk has been served nothing, which stands it at the feed's start —
 	// unless top is set.
 	oldest *string
-	// top reports a walk that was served nothing and stands above every row:
-	// a LoadFeedThrough with no walk standing begins one here, so its first
-	// page is the newest, and an opening served nothing while no source was up
-	// stays here (pages.go, stepPage).
+	// top reports a walk that holds nothing and stands above every row: an
+	// opening, and a LoadFeedThrough from a reader holding no row, begin here
+	// so their first page is the newest (pages.go, stepPage).
 	top bool
-	// standing reports whether the walk has been opened at all.
-	standing bool
 }
 
 // watchToken is one minted tail address: which feed, and the publication the
@@ -684,7 +670,6 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		feedAddrs:            map[string]feedid.Feed{},
 		subFeeds:             map[string]*subFeedHead{},
 		agentFeeds:           map[string]string{},
-		readers:              map[ReaderID]*walk{},
 		units:                map[string]*unitState{},
 		responses:            map[string]*proseState{},
 		chessBoards:          map[string]chessBoardRow{},

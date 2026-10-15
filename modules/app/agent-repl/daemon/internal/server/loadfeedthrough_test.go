@@ -62,16 +62,37 @@ func TestLoadFeedThroughStreamsEveryPageThenReached(t *testing.T) {
 	}
 }
 
-func TestLoadFeedThroughWalksTheReadersRootWalk(t *testing.T) {
+func TestLoadFeedThroughFromAReaderHoldingNoRowStartsAtTheNewestPage(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 
 	// Act.
 	h.loadThrough(t, feedIDFor(testWorkspaceID))
 
-	// Assert: the walk is keyed exactly as GetFeedPage keys a root-feed walk.
-	if got := string(h.Feed.throughReader); got == "" || got[len(got)-1] != '|' {
-		t.Fatalf("reader = %q, want the root-feed reader key", got)
+	// Assert: no oldest held row reaches the resolver.
+	if h.Feed.throughOldest != nil {
+		t.Fatalf("oldest held = %q, want none", *h.Feed.throughOldest)
+	}
+}
+
+func TestLoadFeedThroughWalksAboveTheReadersOldestHeldRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	stream, err := h.Client.LoadFeedThrough(context.Background(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
+		Workspace: ref(), Target: feedIDFor(testWorkspaceID), OldestHeld: &frontendv1.FeedRowOrder{Key: "k-3"},
+	}))
+	if err != nil {
+		t.Fatalf("LoadFeedThrough: %v", err)
+	}
+	for stream.Receive() {
+	}
+	stream.Close()
+
+	// Assert.
+	if h.Feed.throughOldest == nil || *h.Feed.throughOldest != "k-3" {
+		t.Fatalf("oldest held = %v, want k-3", h.Feed.throughOldest)
 	}
 }
 

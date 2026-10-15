@@ -29,11 +29,6 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// ReaderID identifies one open connection's page walk. It is minted per
-// OpenFeed and dropped when the connection ends; nothing about a walk survives
-// a restart.
-type ReaderID string
-
 // The typed refusals the read side answers with. Each is a fact about the
 // REQUEST, never about the feed's contents: an empty feed is a page, not an
 // error.
@@ -41,7 +36,6 @@ type ReaderID string
 // THE SERVER MAPS THESE ONTO THE LANDED ERROR ARMS, one for one, and this is
 // the one place the mapping is written down:
 //
-//	ErrNoWalk       → GetFeedPageError.no_walk_standing
 //	ErrUnknownFeed  → OpenFeedError.feed_not_in_workspace /
 //	                  GetFeedPageError.feed_not_in_workspace
 //	ErrUnknownToken → WatchFeed's transport refusal (the token names no feed
@@ -63,8 +57,6 @@ var (
 	// feed's retained publication log, so the never-miss guarantee cannot be
 	// honored. The reader re-opens the feed.
 	ErrTokenExpired = errors.New("feed: watch token's pinned start is no longer retained")
-	// ErrNoWalk is a `next` with no walk standing for this reader.
-	ErrNoWalk = errors.New("feed: no page walk standing for this reader")
 	// ErrUnknownFeed is a feed this workspace does not own.
 	ErrUnknownFeed = errors.New("feed: unknown feed for this workspace")
 )
@@ -101,19 +93,18 @@ type Resolver interface {
 	Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, token *agentreplv1.FeedWatchToken) (Tail, error)
 	// OpenPage answers OpenFeed: the NEWEST page of one feed, plus the watch
 	// token the tail echoes, plus — for the root feed only, nil otherwise — the
-	// held section as it stands at the token's pin. It mints the reader's walk.
-	OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error)
-	// NextPage answers GetFeedPage's next arm: the page before this reader's
-	// current position. The daemon holds the walk.
-	NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, error)
-	// CloseReader drops a reader's walk when its connection ends.
-	CloseReader(ws ids.WorkspaceID, reader ReaderID)
-	// LoadThrough answers LoadFeedThrough: the reader's root-feed walk,
-	// advanced page by page — each handed to emit as it is served — until the
-	// target row is served (loadthrough.go). ErrTargetNotFound: the walk
-	// reached the conversation's start without it; ErrHistoryUnavailable
-	// (wrapped): a page could not be read.
-	LoadThrough(ctx context.Context, ws ids.WorkspaceID, reader ReaderID, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error)
+	// held section as it stands at the token's pin.
+	OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error)
+	// OlderPage answers GetFeedPage's older_than arm: the page of rows sorting
+	// before oldestHeld, the order key of the oldest row the reader holds.
+	OlderPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, oldestHeld string) (*frontendv1.FeedPage, error)
+	// LoadThrough answers LoadFeedThrough: the root feed walked older from
+	// directly above oldestHeld (from the newest page when nil), page by page —
+	// each handed to emit as it is served — until the target row is served
+	// (loadthrough.go). ErrTargetNotFound: the walk reached the conversation's
+	// start without it; ErrHistoryUnavailable (wrapped): a page could not be
+	// read.
+	LoadThrough(ctx context.Context, ws ids.WorkspaceID, oldestHeld *string, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error)
 	// LoadOlder loads the root feed's next older store page for a feature
 	// that reads held rows past the oldest loaded one, pushing its rows to
 	// every tail; false when nothing older can be loaded (loadthrough.go).

@@ -275,7 +275,13 @@ func validateLoadFeedThroughRequest(req *agentreplv1.LoadFeedThroughRequest) *co
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
-	return validateFeedID("target", req.GetTarget())
+	if err := validateFeedID("target", req.GetTarget()); err != nil {
+		return err
+	}
+	if req.OldestHeld != nil {
+		return validateFeedRowOrder("oldest_held", req.GetOldestHeld())
+	}
+	return nil
 }
 
 // validateWatchFeedRequest is WatchFeedRequest's base function.
@@ -301,6 +307,20 @@ func validateGetFeedPageRequest(req *agentreplv1.GetFeedPageRequest) *connect.Er
 	}
 	if req.GetPage() == nil {
 		return invalid("page", "a page arm is required")
+	}
+	if older := req.GetOlderThan(); older != nil {
+		return validateFeedRowOrder("older_than.oldest_held", older.GetOldestHeld())
+	}
+	return nil
+}
+
+// validateFeedRowOrder refuses an order a reader echoes back without its key.
+func validateFeedRowOrder(field string, order *frontendv1.FeedRowOrder) *connect.Error {
+	if order == nil {
+		return invalid(field, "the oldest held row's order is required")
+	}
+	if order.GetKey() == "" {
+		return invalid(field+".key", "the oldest held row's order key is required")
 	}
 	return nil
 }

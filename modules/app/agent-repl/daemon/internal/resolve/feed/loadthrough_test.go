@@ -9,18 +9,32 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
-// loadThrough walks reader-1 to the prompt row of TURN and answers the pages
-// handed over, oldest-so-far last, with the outcome.
+// loadThrough walks reader-1 from above its oldest held row (from the newest
+// page when it holds none) to the prompt row of TURN, and answers the pages
+// handed over, oldest-so-far last, with the outcome. Reader-1 then holds them.
 func (h *harness) loadThrough(turn string) ([]*frontendv1.FeedPage, *frontendv1.FeedId, error) {
 	h.t.Helper()
 	var pages []*frontendv1.FeedPage
-	reached, err := h.resolver.LoadThrough(context.Background(), testWorkspace, "reader-1",
+	reached, err := h.resolver.LoadThrough(context.Background(), testWorkspace, h.heldKey("reader-1"),
 		&frontendv1.FeedId{Value: h.promptRowID(turn)},
 		func(page *frontendv1.FeedPage) error {
 			pages = append(pages, page)
+			if h.held == nil {
+				h.held = map[testReader]string{}
+			}
+			h.hold("reader-1", page)
 			return nil
 		})
 	return pages, reached, err
+}
+
+// heldKey is READER's oldest held row's order key, nil when it holds none.
+func (h *harness) heldKey(reader testReader) *string {
+	key, ok := h.held[reader]
+	if !ok {
+		return nil
+	}
+	return &key
 }
 
 func TestLoadThroughATargetAlreadyLoadedHandsOverNoPage(t *testing.T) {
@@ -156,7 +170,7 @@ func TestLoadThroughWhosePageCannotBeHandedOverFails(t *testing.T) {
 	gone := errors.New("the reader went away")
 
 	// Act.
-	_, err := h.resolver.LoadThrough(context.Background(), testWorkspace, "reader-1",
+	_, err := h.resolver.LoadThrough(context.Background(), testWorkspace, h.heldKey("reader-1"),
 		&frontendv1.FeedId{Value: h.promptRowID("turn-0")},
 		func(*frontendv1.FeedPage) error { return gone })
 
@@ -183,24 +197,6 @@ func TestLoadOlderPushesTheOlderPagesRows(t *testing.T) {
 	// Assert.
 	if got, want := strings.Join(pushedBefore(t, rows, sentinel), ","), h.promptRowIDs("turn-0", "turn-1"); got != want {
 		t.Fatalf("pushed %v, want %v", got, want)
-	}
-}
-
-func TestLoadOlderMovesAWalkThatHeldEverythingLoaded(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.mainBook(2, promptsBook(6))
-	h.openPage(rootFeed(), "reader-1")
-	if _, err := h.resolver.LoadOlder(context.Background(), testWorkspace); err != nil {
-		t.Fatalf("LoadOlder: %v", err)
-	}
-
-	// Act: the reader's next continues below what the load pushed it.
-	page := h.nextPage("reader-1")
-
-	// Assert.
-	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowIDs("turn-0", "turn-1"); got != want {
-		t.Fatalf("next page = %v, want %v", got, want)
 	}
 }
 

@@ -2,9 +2,7 @@ package feed
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -44,24 +42,7 @@ func TestAnEmptyFeedIsAPageAndNotAnError(t *testing.T) {
 	}
 }
 
-func TestNextPageWithNoWalkStandingIsARefusal(t *testing.T) {
-	// Arrange: a reader that never opened.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "prompt")
-
-	// Act.
-	_, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
-
-	// Assert: a refusal, NOT an empty page.
-	if !errors.Is(err, ErrNoWalk) {
-		t.Fatalf("NextPage err = %v, want ErrNoWalk", err)
-	}
-	if !h.hasRecord("warn", "daemon.feed.next_without_walk") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.next_without_walk", h.records())
-	}
-}
-
-func TestWalksArePerReader(t *testing.T) {
+func TestEachReaderIsAnsweredAboveItsOwnOldestRow(t *testing.T) {
 	// Arrange: two readers on the same feed, one of which has paged back.
 	h := newHarness(t)
 	h.mainBook(2, promptsBook(6))
@@ -101,7 +82,7 @@ func TestANextPastTheStartServesTheWholeFeedStillAtStart(t *testing.T) {
 	}
 }
 
-func TestOpeningAgainDropsTheReadersWalk(t *testing.T) {
+func TestOpeningAgainLandsAtTheTail(t *testing.T) {
 	// Arrange: a reader that has paged back once.
 	h := newHarness(t)
 	h.mainBook(3, promptsBook(5))
@@ -117,52 +98,41 @@ func TestOpeningAgainDropsTheReadersWalk(t *testing.T) {
 	}
 }
 
-func TestCloseReaderDropsTheWalk(t *testing.T) {
-	// Arrange.
+func TestAnOlderPageIsTheRowsAboveARowKeptAfterOlderOnesWereFreed(t *testing.T) {
+	// Arrange: a reader paged back to the start, then freed every row older
+	// than the newest page, as an unshown page does.
 	h := newHarness(t)
-	h.deliverPrompt("turn-1", "prompt")
-	h.openPage(rootFeed(), "reader-1")
+	h.mainBook(2, promptsBook(6))
+	newest, _ := h.openPage(rootFeed(), "reader-1")
+	h.nextPage("reader-1")
+	h.nextPage("reader-1")
+	h.held["reader-1"] = pageRows(t, newest)[0].GetOrder().GetKey()
 
 	// Act.
-	h.resolver.CloseReader(testWorkspace, "reader-1")
-	_, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page := h.nextPage("reader-1")
 
-	// Assert.
-	if !errors.Is(err, ErrNoWalk) {
-		t.Fatalf("NextPage err = %v, want ErrNoWalk once the reader closed", err)
+	// Assert: the page directly above the kept rows, with no gap.
+	if got, want := strings.Join(rowIDs(pageRows(t, page)), ","), h.promptRowIDs("turn-2", "turn-3"); got != want {
+		t.Fatalf("page above the kept rows = %v, want %v", got, want)
 	}
 }
 
-func TestAFullSetOfWalksDropsTheLeastRecentlyUsed(t *testing.T) {
-	tests := []struct {
-		name     string
-		touched  bool // reader-0 continued its walk after the others opened
-		wantWalk bool // reader-0 still holds its walk after one more opening
-	}{
-		{name: "the oldest unused walk is dropped", touched: false, wantWalk: false},
-		{name: "a walk used since is kept", touched: true, wantWalk: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: a full set of walks, reader-0's opened first.
-			h := newHarness(t)
-			h.mainBook(2, promptsBook(6))
-			for i := 0; i < maxStandingWalks; i++ {
-				h.openPage(rootFeed(), ReaderID("reader-"+strconv.Itoa(i)))
-			}
-			if tt.touched {
-				h.nextPage("reader-0")
-			}
+func TestAnOlderPageIsDecidedByKeyOrderAloneForARowTheDaemonDoesNotHold(t *testing.T) {
+	// Arrange: a reader names a key sorting just after turn-3's prompt row,
+	// which no held row carries.
+	h := newHarness(t)
+	h.mainBook(2, promptsBook(6))
+	h.openPage(rootFeed(), "reader-1")
+	h.nextPage("reader-1")
+	h.nextPage("reader-1")
+	h.held["reader-1"] = h.rowKey(h.promptRowID("turn-3")) + "\x00"
 
-			// Act: one more opening overfills the set.
-			h.openPage(rootFeed(), "reader-new")
+	// Act.
+	page := h.nextPage("reader-1")
 
-			// Assert.
-			_, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-0")
-			if held := !errors.Is(err, ErrNoWalk); held != tt.wantWalk {
-				t.Fatalf("reader-0 holds its walk = %v (err %v), want %v", held, err, tt.wantWalk)
-			}
-		})
+	// Assert: the rows sorting before it, turn-3's included, by key alone.
+	if got := rowIDs(pageRows(t, page)); len(got) == 0 || got[len(got)-1] != h.promptRowID("turn-3") {
+		t.Fatalf("page above an unheld key = %v, want it to end at turn-3's prompt", got)
 	}
 }
 
@@ -339,9 +309,9 @@ func TestAWalkThatReachesAFlooredReplayClaimsTheStart(t *testing.T) {
 	h.openPage(rootFeed(), "reader-1")
 
 	// Act.
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, err := h.olderPageOf(rootFeed(), "reader-1")
 	if err != nil {
-		t.Fatalf("NextPage: %v", err)
+		t.Fatalf("OlderPage: %v", err)
 	}
 
 	// Assert.
@@ -431,7 +401,7 @@ func atStart(t *testing.T, page *frontendv1.FeedPage) bool {
 
 // walkToStart serves READER's walk older pages until one reaches the start,
 // answering every row served, oldest first, opening page included.
-func (h *harness) walkToStart(t *testing.T, reader ReaderID, first *frontendv1.FeedPage) []string {
+func (h *harness) walkToStart(t *testing.T, reader testReader, first *frontendv1.FeedPage) []string {
 	t.Helper()
 	served := rowIDs(pageRows(t, first))
 	page := first
@@ -439,9 +409,9 @@ func (h *harness) walkToStart(t *testing.T, reader ReaderID, first *frontendv1.F
 		if walks > 8 {
 			t.Fatalf("the walk never reached the start; served %v", served)
 		}
-		older, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), reader)
+		older, err := h.olderPageOf(rootFeed(), reader)
 		if err != nil {
-			t.Fatalf("NextPage: %v", err)
+			t.Fatalf("OlderPage: %v", err)
 		}
 		served = append(rowIDs(pageRows(t, older)), served...)
 		page = older
@@ -680,9 +650,9 @@ func TestAClearAfterThePageWasServedMovesTheBoundForTheWalk(t *testing.T) {
 
 	// Act: the clear lands, then the reader walks back.
 	h.cutAt("entry-cut", clearedCut())
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, err := h.olderPageOf(rootFeed(), "reader-1")
 	if err != nil {
-		t.Fatalf("NextPage: %v", err)
+		t.Fatalf("OlderPage: %v", err)
 	}
 
 	// Assert: the walk answers the divider alone, at_start — the rows it was
@@ -1079,4 +1049,16 @@ func TestAWalkOpenedWithNoSourceIsServedTheNewestPageOnceOneIsUp(t *testing.T) {
 	if got := edgeOf(t, page); got != "has_more" {
 		t.Fatalf("edge = %s, want has_more", got)
 	}
+}
+
+// rowKey is the order key the daemon holds for root-feed row ID.
+func (h *harness) rowKey(id string) string {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	defer h.resolver.mu.Unlock()
+	rank, ok := h.resolver.feed(h.resolver.state(testWorkspace), rootFeed()).rank[id]
+	if !ok {
+		h.t.Fatalf("the root feed holds no row %q", id)
+	}
+	return rank.key
 }

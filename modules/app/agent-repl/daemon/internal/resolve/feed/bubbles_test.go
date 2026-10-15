@@ -954,7 +954,7 @@ func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
 	h.failHookLive("hook-1")
 
 	// Act.
-	page, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed())
 
 	// Assert.
 	if err != nil {

@@ -1022,17 +1022,15 @@ type fakeFeed struct {
 	openErr error
 	// held is the held section OpenPage answers with.
 	held      *frontendv1.FeedHeld
-	nextPage  *frontendv1.FeedPage
-	nextErr   error
+	olderPage *frontendv1.FeedPage
+	olderErr  error
 	tail      *fakeTail
 	tailErr   error
 	lastFeed  feedid.Feed
-	lastRead  feed.ReaderID
 	openCalls int
-	// openReads and nextReads are the readers OpenPage and NextPage were
-	// asked for, in order.
-	openReads []feed.ReaderID
-	nextReads []feed.ReaderID
+	// olderKeys are the oldest held rows' keys OlderPage was asked above, in
+	// order.
+	olderKeys []string
 	// finals is the ordered selectable final-response set SelectFeedRow's
 	// response step walks; prompts is the ordered selectable rollback-prompt
 	// set its prompt step walks; markdown is each selectable row's copied
@@ -1087,10 +1085,11 @@ type fakeFeed struct {
 	loadOlderCalls int
 
 	// throughPages are the pages LoadThrough hands over, then answers
-	// throughErr or the target; throughReader is the reader it was asked for.
+	// throughErr or the target; throughOldest is the oldest held row's key it
+	// was asked to walk above, nil when the reader named none.
 	throughPages  []*frontendv1.FeedPage
 	throughErr    error
-	throughReader feed.ReaderID
+	throughOldest *string
 }
 
 // LoadOlder loads the next scripted older page, false when none is left.
@@ -1114,8 +1113,8 @@ func (f *fakeFeed) LoadOlder(context.Context, ids.WorkspaceID) (bool, error) {
 }
 
 // LoadThrough hands over the scripted pages, then answers the scripted outcome.
-func (f *fakeFeed) LoadThrough(_ context.Context, _ ids.WorkspaceID, reader feed.ReaderID, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error) {
-	f.throughReader = reader
+func (f *fakeFeed) LoadThrough(_ context.Context, _ ids.WorkspaceID, oldestHeld *string, target *frontendv1.FeedId, emit func(*frontendv1.FeedPage) error) (*frontendv1.FeedId, error) {
+	f.throughOldest = oldestHeld
 	for _, page := range f.throughPages {
 		if err := emit(page); err != nil {
 			return nil, err
@@ -1205,17 +1204,16 @@ func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
 	return f.rollBackTurnsErr
 }
 
-func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
+func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
 	f.openCalls++
 	f.lastFeed = target
-	f.lastRead = reader
-	f.openReads = append(f.openReads, reader)
 	return f.page, f.token, f.held, f.openErr
 }
 
-func (f *fakeFeed) NextPage(_ context.Context, _ ids.WorkspaceID, _ feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, error) {
-	f.nextReads = append(f.nextReads, reader)
-	return f.nextPage, f.nextErr
+func (f *fakeFeed) OlderPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, oldestHeld string) (*frontendv1.FeedPage, error) {
+	f.lastFeed = target
+	f.olderKeys = append(f.olderKeys, oldestHeld)
+	return f.olderPage, f.olderErr
 }
 
 func (f *fakeFeed) Tail(context.Context, ids.WorkspaceID, feedid.Feed, *agentreplv1.FeedWatchToken) (feed.Tail, error) {

@@ -332,9 +332,9 @@ func TestAResetReParksAStandingWalkAtTheStartOfTheEmptiedFeed(t *testing.T) {
 
 	// Assert: a `next` answers the emptied feed rather than refusing a walk
 	// the reader did begin.
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, err := h.olderPageOf(rootFeed(), "reader-1")
 	if err != nil {
-		t.Fatalf("NextPage after the reset: %v", err)
+		t.Fatalf("OlderPage after the reset: %v", err)
 	}
 	if got := rowIDs(pageRows(t, page)); len(got) != 0 {
 		t.Fatalf("page rows = %v, want none", got)
