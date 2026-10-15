@@ -26,7 +26,8 @@ const TerminalHibernated = wsm.TerminalHibernated
 func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceID, error) {
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		c.log.Error(opSweep, "could not list the workspaces to sweep", withCause(nil, err))
+		readFailed(c.log, opSweep, "could not list the workspaces to sweep",
+			"the workspace list ended when the drain loop's context was cancelled", nil, err)
 		return nil, fmt.Errorf("drain: sweep: %w", err)
 	}
 	queued, err := c.queuedSince(ctx)
@@ -45,7 +46,8 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		log := c.workspaceLog(ws)
 		session, found, err := c.deps.DB.Session(ctx, ws.ID)
 		if err != nil {
-			log.Error(opSweep, "could not read a workspace's session", withCause(fields, err))
+			readFailed(log, opSweep, "could not read a workspace's session",
+				"the session read ended when the drain loop's context was cancelled", fields, err)
 			return nil, fmt.Errorf("drain: sweep %q: %w", ws.ID, err)
 		}
 		if !found {
@@ -446,7 +448,8 @@ func (c *controller) claimFire() bool {
 func (c *controller) queuedSince(ctx context.Context) (map[ids.WorkspaceID]time.Time, error) {
 	queues, err := c.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
-		c.log.Error(opSweep, "could not read the merge queues to sweep", withCause(nil, err))
+		readFailed(c.log, opSweep, "could not read the merge queues to sweep",
+			"the merge queues' read ended when the drain loop's context was cancelled", nil, err)
 		return nil, fmt.Errorf("drain: sweep: read the merge queues: %w", err)
 	}
 	since := map[ids.WorkspaceID]time.Time{}
