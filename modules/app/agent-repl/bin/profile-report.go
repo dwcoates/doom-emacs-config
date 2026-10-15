@@ -38,7 +38,7 @@ type budget struct {
 // The perceptibility budgets, one per interaction the latency table measures.
 var budgets = map[string]budget{
 	"prompt_echo":         {"prompt echo (submit to the prompt drawn)", 100 * time.Millisecond, "a keystroke's echo; anything past ~100ms reads as lag"},
-	"switch_repeat":       {"switch to a shown workspace (keystroke to view visible)", 100 * time.Millisecond, "a navigation the user is waiting on"},
+	"switch_repeat":       {"switch to a shown workspace (keystroke to the page's first shown frame)", 100 * time.Millisecond, "a navigation the user is waiting on"},
 	"switch_first":        {"first switch to a never-shown workspace (keystroke to page painted)", 100 * time.Millisecond, "the same navigation; a blank page is the worst case of it"},
 	"page_boot":           {"page boot to first feed paint", 300 * time.Millisecond, "the page is on screen and empty meanwhile"},
 	"workspace_open":      {"workspace open (tab opened to session up)", 300 * time.Millisecond, "the workspace is visible but not usable meanwhile"},
@@ -102,6 +102,7 @@ func report(w io.Writer, session, logs, startup string) error {
 		return err
 	}
 	latencyTable(w, records)
+	switchPhaseTable(w, records)
 	if startup != "" {
 		since, err := time.Parse(time.RFC3339, startup)
 		if err != nil {
@@ -416,7 +417,16 @@ func isWebviewOnSwitch(r record) bool {
 	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.panels.webview-on-switch: ")
 }
 func isFeedPainted(r record) bool { return r.Runtime == "webapp" && r.Operation == "feed.page-placed" }
-func isPageBoot(r record) bool    { return r.Runtime == "webapp" && r.Operation == "main.boot" }
+func isActivationWon(r record) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.panels.switch-activation-won ")
+}
+func isPageSwitchedTo(r record) bool {
+	return r.Runtime == "webapp" && r.Operation == "page.switched-to"
+}
+func isPageShownFrame(r record) bool {
+	return r.Runtime == "webapp" && r.Operation == "page.shown-frame"
+}
+func isPageBoot(r record) bool { return r.Runtime == "webapp" && r.Operation == "main.boot" }
 func isTabOpen(r record) bool {
 	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.roster.tab-open: ")
 }
@@ -479,8 +489,11 @@ func pairLatencies(records []record) []latency {
 					end = painted.at
 				}
 				out = append(out, latency{"switch_first", r.WorkspaceID, r.at, end.Sub(r.at)})
-			} else {
-				out = append(out, latency{"switch_repeat", r.WorkspaceID, r.at, shown.at.Sub(r.at)})
+			} else if frame, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isPageShownFrame); ok {
+				// A SHOWN WORKSPACE'S SWITCH ENDS AT THE PAGE'S FIRST SHOWN FRAME,
+				// what the user actually sees; Emacs showing its view is only the
+				// half of it the editor owns (switchPhaseTable splits the rest).
+				out = append(out, latency{"switch_repeat", r.WorkspaceID, r.at, frame.at.Sub(r.at)})
 			}
 		case isPageBoot(r):
 			conn := connection(r)
@@ -518,6 +531,23 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 	return sorted[idx]
 }
 
+// spread is a set of durations' count, median, 90th percentile and maximum,
+// the columns every latency table of the report prints.
+type spread struct {
+	n             int
+	p50, p90, max time.Duration
+}
+
+// spreadOf sorts ds in place and answers its spread. Every caller holds at
+// least one duration, so an empty ds is a bug and panics.
+func spreadOf(ds []time.Duration) spread {
+	if len(ds) == 0 {
+		panic("spreadOf: no durations")
+	}
+	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
+	return spread{len(ds), percentile(ds, 0.5), percentile(ds, 0.9), ds[len(ds)-1]}
+}
+
 // latencyTable prints each interaction's latencies ranked by how far its p90
 // is over budget.
 func latencyTable(w io.Writer, records []record) {
@@ -526,16 +556,14 @@ func latencyTable(w io.Writer, records []record) {
 		byKind[l.kind] = append(byKind[l.kind], l.took)
 	}
 	type row struct {
-		kind          string
-		n             int
-		p50, p90, max time.Duration
-		over          float64
+		kind string
+		spread
+		over float64
 	}
 	var rows []row
 	for kind, ds := range byKind {
-		sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
-		p90 := percentile(ds, 0.9)
-		rows = append(rows, row{kind, len(ds), percentile(ds, 0.5), p90, ds[len(ds)-1], float64(p90) / float64(budgets[kind].limit)})
+		sp := spreadOf(ds)
+		rows = append(rows, row{kind, sp, float64(sp.p90) / float64(budgets[kind].limit)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].over > rows[j].over })
 	fmt.Fprintln(w, "## User-visible latency (real log edges), worst over budget first")
@@ -555,6 +583,67 @@ func latencyTable(w io.Writer, records []record) {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		fmt.Fprintf(w, "\nNot exercised in this session: %s.\n", strings.Join(missing, "; "))
+	}
+	fmt.Fprintln(w)
+}
+
+// The phases a switch to a shown workspace crosses, in order, each named for
+// who owns it, between the edge that ends the phase before it and its own.
+var switchPhases = []struct {
+	name string
+	end  func(record) bool
+}{
+	{"Emacs, before its switch pass runs (its redisplay and hooks)", isActivationWon},
+	{"Emacs's switch pass, to its view shown", isWebviewOnSwitch},
+	{"the webhost, to the page told it is shown", isPageSwitchedTo},
+	{"the page, to its first shown frame", isPageShownFrame},
+}
+
+// switchPhaseTable splits every switch to a shown workspace into the phases
+// it crossed, each from the edge before it, so a slow switch names its owner.
+// A switch missing any edge is left out, and counted.
+func switchPhaseTable(w io.Writer, records []record) {
+	took := make([][]time.Duration, len(switchPhases))
+	incomplete := 0
+	for i, r := range records {
+		if !isEditorSwitch(r) {
+			continue
+		}
+		if shown, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isWebviewOnSwitch); !ok || strings.Contains(shown.Message, " view=first ") {
+			continue
+		}
+		from, at := r.at, i+1
+		var phase []time.Duration
+		for _, p := range switchPhases {
+			end, ok := nextFor(records, at, r.WorkspaceID, from, p.end)
+			if !ok {
+				break
+			}
+			phase = append(phase, end.at.Sub(from))
+			from = end.at
+		}
+		if len(phase) != len(switchPhases) {
+			incomplete++
+			continue
+		}
+		for k, d := range phase {
+			took[k] = append(took[k], d)
+		}
+	}
+	fmt.Fprintln(w, "## Switch to a shown workspace, by phase")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| phase | n | p50 | p90 | max |")
+	fmt.Fprintln(w, "|---|---|---|---|---|")
+	for k, p := range switchPhases {
+		ds := took[k]
+		if len(ds) == 0 {
+			continue
+		}
+		sp := spreadOf(ds)
+		fmt.Fprintf(w, "| %s | %d | %s | %s | %s |\n", p.name, sp.n, ms(sp.p50), ms(sp.p90), ms(sp.max))
+	}
+	if incomplete > 0 {
+		fmt.Fprintf(w, "\n%d switches left out: an edge of theirs is missing from the logs.\n", incomplete)
 	}
 	fmt.Fprintln(w)
 }

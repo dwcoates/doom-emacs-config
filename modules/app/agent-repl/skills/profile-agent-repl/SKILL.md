@@ -1,7 +1,7 @@
 ---
 name: profile-agent-repl
 description: Profile a live agent-repl across every runtime at once — CPU and memory of the daemon, store, sidecar, every shim, Emacs and the webapp's pages and WebKit processes — and rank the user-visible latencies (workspace open, switch, first switch to a never-shown workspace, page load, prompt echo) against how perceptible each is; run the startup assessment; and keep the living list of perf-sensitive areas. Use when the user asks why agent-repl is slow, hot, heavy on memory or battery, wants a profile or a perf assessment, cares about how fast something feels, or invokes /profile-agent-repl.
-argument-hint: "<start|stop|status|report [--startup RFC3339]|startup-assessment|list> or a plain-English request"
+argument-hint: "<start|stop|status|report [--startup RFC3339]|startup-assessment|switch-tour [N]|list> or a plain-English request"
 lineage_root: user.dodge.skills.profile-agent-repl
 ---
 
@@ -38,6 +38,7 @@ which every runtime stops by itself.
 | `status` | The open session, armed runtimes, stale markers: `bin/profile-agent-repl.sh status`. |
 | `report [SESSION] [--startup RFC3339]` | Summarize a session (newest by default) into `<session>/summary.md`. |
 | `startup-assessment` | The startup procedure below. LEAD SESSION ONLY. |
+| `switch-tour [N]` | The switch tour below: N real switches right and N back (default 8), measured phase by phase. LEAD SESSION ONLY, and only with the owner's agreement to that run. |
 | `list` | Read or update the perf-sensitive areas below. |
 
 ## Steps
@@ -62,14 +63,22 @@ which every runtime stops by itself.
     | Interaction | Start edge | End edge | Budget |
     |---|---|---|---|
     | prompt echo | `elisp.input.submit` | webapp `feed.draw-user-prompt` | 100ms |
-    | switch to a shown workspace | `elisp.host.editor-switch` | `elisp.panels.webview-on-switch` (view `same`/`fresh`) | 100ms |
+    | switch to a shown workspace | `elisp.host.editor-switch` | webapp `page.shown-frame`, after `elisp.panels.webview-on-switch` (view `same`/`fresh`) | 100ms |
     | first switch to a never-shown workspace | `elisp.host.editor-switch` | the later of `elisp.panels.webview-on-switch` (view `first`) and webapp `feed.page-placed` | 100ms |
     | page boot to first feed paint | webapp `main.boot` | webapp `feed.page-placed`, same connection | 300ms |
     | workspace open | `elisp.roster.tab-open` | daemon `daemon.workspace.bring_up` "the session is up" | 300ms |
     | prompt to first response text | `elisp.input.submit` | webapp `feed.draw-text-block` / `feed.draw-response` | 1s (vendor-bound) |
 
     A short latency on an interaction the user is waiting on matters more than a long one in the background: rank by the ratio, never by raw milliseconds. An interaction the session did not exercise is named as such.
-  - d. Write what the session found into the perf-sensitive list (step 5).
+  - d. **Switch to a shown workspace, by phase** splits each such switch at its edges, so a slow switch names its owner:
+
+    | Phase | Ends at |
+    |---|---|
+    | Emacs, before its switch pass runs (its redisplay and hooks) | `elisp.panels.switch-activation-won` |
+    | Emacs's switch pass, to its view shown | `elisp.panels.webview-on-switch` |
+    | the webhost, to the page told it is shown | webapp `page.switched-to` |
+    | the page, to its first shown frame | webapp `page.shown-frame` |
+  - e. Write what the session found into the perf-sensitive list (step 6).
 
 4. Startup assessment (`startup-assessment`). LEAD SESSION ONLY: a subagent never launches, quits or drives Emacs.
   - a. Hold rollouts (step 1a). Note the instant, then quit and launch the real Emacs.app the user uses, the way they launch it.
@@ -78,7 +87,14 @@ which every runtime stops by itself.
   - d. `bin/profile-agent-repl.sh report --startup <the launch instant, RFC3339>`: it adds launch to the daemon's first record, each workspace's session up and page painted, launch to every workspace loaded, and every switch with first/repeat marked. A profiling session open across the launch adds the processes and frames.
   - e. All timings come from real log edges. Never time with the harness, a stopwatch or the tool-call clock.
 
-5. Keep the perf-sensitive list current.
+5. Switch tour (`switch-tour [N]`). LEAD SESSION ONLY: a subagent never drives Emacs. It takes over the owner's live editor while it runs, so it runs only when the owner has agreed to that run.
+  - a. Hold rollouts (step 1a), then `bin/profile-agent-repl.sh start`.
+  - b. Dispatch `(agent-repl-profiling-switch-tour N)` through `/runtime-eval-code`. It answers `touring <2N> switches` at once and queues each key as a keystroke, 1.5s apart, ending on the workspace it began on.
+  - c. Wait for `profiling.switch-tour-done` in the Emacs log (`bin/logs.sh --central --since 5m`). `(agent-repl-profiling-switch-tour-cancel)` stops a tour early.
+  - d. `bin/profile-agent-repl.sh stop`, then `bin/profile-agent-repl.sh report`, and read the "switch to a shown workspace" row and the phase table (step 3d).
+  - e. Record the result in the perf-sensitive list (step 6).
+
+6. Keep the perf-sensitive list current.
   - a. WHENEVER AN AREA BELOW COMES UP WITH THE USER, OR THE USER SHOWS A VESTED INTEREST IN HOW FAST SOMETHING IS (or in optimizing it or code like it), add an entry or update the existing one in the same turn. Measurements replace estimates as soon as they exist; keep the old number with its date when it moved.
   - b. Every entry has every field of the standard below; `unknown` is an honest value, a missing field is not.
 
@@ -106,10 +122,10 @@ which every runtime stops by itself.
 ### Switch to an already-shown workspace
 - **Interaction**: switch keystroke to the workspace's view visible.
 - **Budget**: 100ms.
-- **Measured**: unknown; the collector's "switch to a shown workspace" row.
-- **Code paths**: host.el's switch, panels.el's restore, the webview re-show.
-- **Contributors**: unknown.
-- **Status / next step**: open; measure with the collector.
+- **Measured**: 2026-10-15, from 132 switches' log edges (nearest-event joined, before the phase table existed), switch request to the page's first shown frame: 170ms median, 308ms p90. By phase, medians: Emacs before its switch pass about 88ms (57ms of it Emacs's own redisplay and hooks, `waited-ms`), the webhost to the page told about 37ms, the page to its first frame 58ms (201ms p90).
+- **Code paths**: host.el's switch, panels.el's deferred switch pass (it tells the webhost to show the page), the webhost's show, the page's shown handlers.
+- **Contributors**: measured: the switch pass waits on Emacs's redisplay before the webhost hears of the switch; main-thread stalls overlap about 20% of switches (web process memory pressure, investigated separately). Suspected: the page's shown handlers (animations resumed, repaint measuring).
+- **Status / next step**: open. Run the switch tour for an exact phase baseline, then tell the webhost at the switch itself rather than after Emacs's redisplay.
 - **Flagged by**: the owner, 2026-10-12 (workspace switching UX).
 
 ### Workspace open

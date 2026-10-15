@@ -254,5 +254,84 @@ profile.  Answers what it did as a string for the collector:
        (agent-repl--error agent-repl--global-log-scope "profiling: the reconcile failed: %s" why)
        (concat "failed: " why)))))
 
+;;;; ---- the switch tour ---------------------------------------------------
+
+;; A MEASURED RUN OF REAL SWITCHES.  The tour queues the `s-}' key COUNT times
+;; and then `s-{' COUNT times, one key per step, so it ends on the workspace it
+;; started from.  Each key goes into `unread-command-events', so the command
+;; loop reads it exactly as it reads a keystroke: the switch command, its
+;; post-command hooks and its redisplay all run as they do for the user.  A
+;; command called from the timer instead would skip that loop, which is part
+;; of what a switch costs.  The steps are spaced as a person pauses between
+;; switches; the measurement is the log's own edges (bin/profile-agent-repl.sh
+;; report), never this timer.
+
+(defconst agent-repl-profiling-switch-tour-interval 1.5
+  "Seconds between two keys of a switch tour.")
+
+(defvar agent-repl-profiling--tour nil
+  "The running switch tour, or nil: a plist of the keys still to queue
+\(:keys), how many it was asked for each way (:count), and its pending
+step (:timer).")
+
+(defun agent-repl-profiling--tour-refuse (fmt &rest args)
+  "Record a refused switch tour at error, and signal it.  FMT and ARGS word it."
+  (let ((why (apply #'format fmt args)))
+    (agent-repl--error agent-repl--global-log-scope "profiling.switch-tour-refused: %s" why)
+    (error "Switch tour refused: %s" why)))
+
+(defun agent-repl-profiling-switch-tour (count)
+  "Switch right COUNT times with `s-}', then back COUNT times with `s-{'.
+Each key is queued as a keystroke, `agent-repl-profiling-switch-tour-interval'
+seconds after the one before, and the tour ends on the workspace it began on.
+Answers at once, while the tour runs on its own timer."
+  (interactive "nSwitches each way: ")
+  (unless (and (integerp count) (> count 0))
+    (agent-repl-profiling--tour-refuse "the count %S is not a positive integer" count))
+  (when agent-repl-profiling--tour
+    (agent-repl-profiling--tour-refuse "a tour is already running, %d keys left"
+                                       (length (plist-get agent-repl-profiling--tour :keys))))
+  (setq agent-repl-profiling--tour
+        (list :keys (append (make-list count "s-}") (make-list count "s-{"))
+              :count count
+              :timer nil))
+  (agent-repl--info agent-repl--global-log-scope
+                    "profiling.switch-tour-started count=%d interval=%s"
+                    count agent-repl-profiling-switch-tour-interval)
+  (agent-repl-profiling--tour-step)
+  (format "touring %d switches" (* 2 count)))
+
+(defun agent-repl-profiling--tour-step ()
+  "Queue the running tour's next key and schedule the step after it.
+With no key left, the tour ends."
+  (let ((keys (plist-get agent-repl-profiling--tour :keys)))
+    (if (null keys)
+        (let ((count (plist-get agent-repl-profiling--tour :count)))
+          (setq agent-repl-profiling--tour nil)
+          (agent-repl--info agent-repl--global-log-scope
+                            "profiling.switch-tour-done switches=%d" (* 2 count)))
+      (setq unread-command-events
+            (append unread-command-events (listify-key-sequence (kbd (car keys)))))
+      (agent-repl--info agent-repl--global-log-scope
+                        "profiling.switch-tour-key key=%s remaining=%d"
+                        (car keys) (length (cdr keys)))
+      (setq agent-repl-profiling--tour
+            (plist-put (plist-put agent-repl-profiling--tour :keys (cdr keys))
+                       :timer (run-at-time agent-repl-profiling-switch-tour-interval nil
+                                           #'agent-repl-profiling--tour-step))))))
+
+(defun agent-repl-profiling-switch-tour-cancel ()
+  "Stop the running switch tour before its next key; answers what it did."
+  (interactive)
+  (if (null agent-repl-profiling--tour)
+      "no tour running"
+    (let ((left (length (plist-get agent-repl-profiling--tour :keys)))
+          (timer (plist-get agent-repl-profiling--tour :timer)))
+      (when (timerp timer) (cancel-timer timer))
+      (setq agent-repl-profiling--tour nil)
+      (agent-repl--info agent-repl--global-log-scope
+                        "profiling.switch-tour-cancelled keys-left=%d" left)
+      (format "cancelled with %d keys left" left))))
+
 (provide 'agent-repl-profiling)
 ;;; profiling.el ends here
