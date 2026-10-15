@@ -739,28 +739,10 @@ func (m *measurer) baseline(ctx context.Context, leaves []leaf, healthy map[leaf
 
 // mutate runs every live mutant against the cases that reach it.
 func (m *measurer) mutate(ctx context.Context, schemas []*gomut.Schema, imports map[string]string, leaves []leaf, cases []redundancy.Case, healthy map[leaf]time.Duration) ([]redundancy.MutantResult, []string, error) {
-	dirImport := map[string]string{}
-	for imp, dir := range imports {
-		dirImport[dir] = imp
+	reaching, err := newReachIndex(imports, leaves, cases)
+	if err != nil {
+		return nil, nil, err
 	}
-	var all []goprofile.Block
-	reach := map[string][]leaf{}
-	seen := map[string]bool{}
-	for i, c := range cases {
-		for _, key := range c.Blocks {
-			reach[key] = append(reach[key], leaves[i])
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			b, _, err := goprofile.ParseLine(key + " 1 1")
-			if err != nil {
-				return nil, nil, err
-			}
-			all = append(all, b)
-		}
-	}
-	idx := goprofile.NewIndex(all)
 	var results []redundancy.MutantResult
 	var anomalies []string
 	total := 0
@@ -778,13 +760,12 @@ func (m *measurer) mutate(ctx context.Context, schemas []*gomut.Schema, imports 
 			if done%max(1, total/10) == 0 {
 				m.log.Infof("redundancy: %d of %d mutants done", done, total)
 			}
-			file := dirImport[filepath.Dir(mu.File)] + "/" + filepath.Base(mu.File)
-			held := idx.Holding(file, mu.Line, mu.Col)
-			if len(held) == 0 {
+			covering := reaching.of(mu)
+			if covering == nil {
 				results = append(results, redundancy.MutantResult{Key: mu.Key(), Status: "unreached"})
 				continue
 			}
-			killed, anom, err := m.killers(ctx, mu, reach[held[0].Key()], healthy)
+			killed, anom, err := m.killers(ctx, mu, covering, healthy)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -801,6 +782,49 @@ func (m *measurer) mutate(ctx context.Context, schemas []*gomut.Schema, imports 
 		}
 	}
 	return results, anomalies, nil
+}
+
+// reachIndex answers which leaves reach a mutant: those whose blocks include
+// the innermost block holding its position.
+type reachIndex struct {
+	dirImport map[string]string
+	reach     map[string][]leaf
+	idx       goprofile.Index
+}
+
+func newReachIndex(imports map[string]string, leaves []leaf, cases []redundancy.Case) (*reachIndex, error) {
+	r := &reachIndex{dirImport: map[string]string{}, reach: map[string][]leaf{}}
+	for imp, dir := range imports {
+		r.dirImport[dir] = imp
+	}
+	var all []goprofile.Block
+	seen := map[string]bool{}
+	for i, c := range cases {
+		for _, key := range c.Blocks {
+			r.reach[key] = append(r.reach[key], leaves[i])
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			b, _, err := goprofile.ParseLine(key + " 1 1")
+			if err != nil {
+				return nil, err
+			}
+			all = append(all, b)
+		}
+	}
+	r.idx = goprofile.NewIndex(all)
+	return r, nil
+}
+
+// of is the leaves reaching mu; nil when none does.
+func (r *reachIndex) of(mu gomut.Mutant) []leaf {
+	file := r.dirImport[filepath.Dir(mu.File)] + "/" + filepath.Base(mu.File)
+	held := r.idx.Holding(file, mu.Line, mu.Col)
+	if len(held) == 0 {
+		return nil
+	}
+	return r.reach[held[0].Key()]
 }
 
 // killers runs one mutant against the given leaves, suite by suite, and
