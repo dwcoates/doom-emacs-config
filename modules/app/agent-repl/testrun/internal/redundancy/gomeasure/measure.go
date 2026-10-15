@@ -134,6 +134,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	if err != nil {
 		return nil, err
 	}
+	if out.Modules, err = m.modulePath(ctx); err != nil {
+		return nil, err
+	}
 	log.Infof("redundancy: %d top-level tests in %s, %d pinned as log-record assertions", len(tops), strings.Join(cfg.Tests, ", "), len(pins))
 
 	coverBin := filepath.Join(cfg.Scratch, "cover.test")
@@ -220,6 +223,19 @@ func (m *measurer) importPaths(ctx context.Context, pkgs []string) (map[string]s
 		return nil, fmt.Errorf("gomeasure: go list named %d packages for %d asked", len(out), len(pkgs))
 	}
 	return out, nil
+}
+
+// modulePath is the measured module's path, the one system its blocks
+// belong to.
+func (m *measurer) modulePath(ctx context.Context) ([]string, error) {
+	res, err := m.gocmd(ctx, BuildTimeout, "list", "-m")
+	if err != nil {
+		return nil, err
+	}
+	if res.Exit != 0 || res.TimedOut || len(res.Lines) != 1 {
+		return nil, fmt.Errorf("gomeasure: go list -m in %s failed or named no one module:\n%s", m.cfg.Module, res.Text())
+	}
+	return []string{strings.TrimSpace(res.Lines[0].Text)}, nil
 }
 
 func (m *measurer) build(ctx context.Context, bin string, flags ...string) error {

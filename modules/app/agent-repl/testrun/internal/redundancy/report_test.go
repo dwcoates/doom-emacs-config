@@ -16,7 +16,7 @@ import (
 // for less than Big, so strict keeps Line and Dup and drops Big.
 func reportFixture() *Measurement {
 	return &Measurement{
-		Adapter: "go", Subject: "d/p/a_test.go", Scope: []string{"./p"},
+		Adapter: "go", Subject: "d/p/a_test.go", Scope: []string{"./p"}, Modules: []string{"a"},
 		Cases: []Case{
 			{ID: "Big", Cost: 2 * ms, Kills: []string{"m1", "m2"}, Blocks: []string{"a/b1"}},
 			{ID: "Line", Cost: 2 * ms, Kills: []string{"m1"}, Blocks: []string{"a/b2"}},

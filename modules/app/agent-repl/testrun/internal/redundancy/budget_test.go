@@ -71,7 +71,7 @@ func TestApplyBudget(t *testing.T) {
 			}
 
 			// Act
-			got, restored, systems, err := ApplyBudget(cases, r, statements, tt.budget, 0)
+			got, restored, systems, err := ApplyBudget(cases, r, statements, []string{"a"}, tt.budget, 0)
 
 			// Assert
 			if err != nil {
@@ -134,7 +134,7 @@ func TestApplyBudgetRefuses(t *testing.T) {
 			}
 
 			// Act
-			_, _, _, err = ApplyBudget(cases, r, tt.statements(statements), tt.budget, 0)
+			_, _, _, err = ApplyBudget(cases, r, tt.statements(statements), []string{"a"}, tt.budget, 0)
 
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -144,9 +144,27 @@ func TestApplyBudgetRefuses(t *testing.T) {
 	}
 }
 
-func TestSystemOfIsTheModule(t *testing.T) {
-	if got := SystemOf("agent-repld/internal/x/y.go:1.1,2.2"); got != "agent-repld" {
-		t.Fatalf("SystemOf = %q", got)
+func TestSystemOfIsTheLongestModulePrefix(t *testing.T) {
+	modules := []string{"agent-repld", "agentrepl/shim-store", "agentrepl/shim-store/sub"}
+	tests := []struct {
+		block, want, wantErr string
+	}{
+		{block: "agent-repld/internal/x/y.go:1.1,2.2", want: "agent-repld"},
+		{block: "agentrepl/shim-store/internal/db/x.go:1.1,2.2", want: "agentrepl/shim-store"},
+		{block: "agentrepl/shim-store/sub/x.go:1.1,2.2", want: "agentrepl/shim-store/sub"},
+		{block: "agentrepl/shim-storex/x.go:1.1,2.2", wantErr: "belongs to none of the measured modules"},
+	}
+	for _, tt := range tests {
+		got, err := SystemOf(tt.block, modules)
+		if tt.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("SystemOf(%s) err = %v, want %q", tt.block, err, tt.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("SystemOf(%s) = %q, %v; want %q", tt.block, got, err, tt.want)
+		}
 	}
 }
 
@@ -208,7 +226,7 @@ func TestApplyBudgetHoldsARequestTighterThanTheBaselineFloor(t *testing.T) {
 	b := Budget{MaxDrop: 1, Baseline: map[string]SystemBaseline{"a": {Percent: 92, Statements: 100, Floor: 87}}}
 
 	// Act
-	_, restored, systems, err := ApplyBudget(cases, r, statements, b, 0)
+	_, restored, systems, err := ApplyBudget(cases, r, statements, []string{"a"}, b, 0)
 
 	// Assert
 	if err != nil {

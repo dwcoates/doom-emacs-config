@@ -49,12 +49,20 @@ type SystemCoverage struct {
 // Drop is the points the removal costs.
 func (s SystemCoverage) Drop() float64 { return s.Before - s.After }
 
-// SystemOf names the system a block belongs to: its module, the first
-// element of its file's import path ("agent-repld/internal/x/y.go:1.1,2.2"
-// is agent-repld's).
-func SystemOf(block string) string {
-	sys, _, _ := strings.Cut(block, "/")
-	return sys
+// SystemOf names the system a block belongs to: the module, among modules,
+// whose path is the longest prefix of the block's file
+// ("agentrepl/shim-store/internal/db/x.go:1.1,2.2" is agentrepl/shim-store's).
+func SystemOf(block string, modules []string) (string, error) {
+	best := ""
+	for _, mod := range modules {
+		if strings.HasPrefix(block, mod+"/") && len(mod) > len(best) {
+			best = mod
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("redundancy: block %s belongs to none of the measured modules %v", block, modules)
+	}
+	return best, nil
 }
 
 // ApplyBudget holds a minimization to the budget. Statements maps every
@@ -67,14 +75,21 @@ func SystemOf(block string) string {
 // statements per unit of weight goes back. It returns the budgeted result,
 // the cases put back in the order they went back, and each system's
 // coverage.
-func ApplyBudget(cases []Case, r Result, statements map[string]int, b Budget, overhead time.Duration) (Result, []string, []SystemCoverage, error) {
+func ApplyBudget(cases []Case, r Result, statements map[string]int, modules []string, b Budget, overhead time.Duration) (Result, []string, []SystemCoverage, error) {
 	if len(statements) == 0 {
 		return Result{}, nil, nil, fmt.Errorf("redundancy: the measurement carries no statement counts, so no coverage budget can hold")
 	}
+	systemOf := map[string]string{}
 	total := map[string]int{}
 	for blk, n := range statements {
-		total[SystemOf(blk)] += n
+		sys, err := SystemOf(blk, modules)
+		if err != nil {
+			return Result{}, nil, nil, err
+		}
+		systemOf[blk] = sys
+		total[sys] += n
 	}
+	SystemOf := func(blk string) string { return systemOf[blk] }
 	byID := map[string]Case{}
 	for _, c := range cases {
 		byID[c.ID] = c

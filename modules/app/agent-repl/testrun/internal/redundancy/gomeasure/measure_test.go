@@ -126,6 +126,8 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 	base := filepath.Base(c.Path)
 	f.calls = append(f.calls, base+" "+strings.Join(c.Args, " "))
 	switch {
+	case base == "go" && c.Args[0] == "list" && c.Args[1] == "-m":
+		return Result{Lines: lines("fix")}, nil
 	case base == "go" && c.Args[0] == "list":
 		return Result{Lines: lines("fix/p\t" + f.dir)}, nil
 	case base == "go" && c.Args[0] == "test":

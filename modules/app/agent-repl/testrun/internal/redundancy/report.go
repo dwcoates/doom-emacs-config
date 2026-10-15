@@ -45,7 +45,10 @@ type Measurement struct {
 	// Subject names the test files measured.
 	Subject string
 	// Scope names what was mutated.
-	Scope   []string
+	Scope []string
+	// Modules are the module paths the measured blocks belong to; each is
+	// a system of the coverage budget.
+	Modules []string `json:",omitempty"`
 	Cases   []Case
 	Mutants []MutantResult
 	// Anomalies are failures the measurement could not attribute.
@@ -97,7 +100,7 @@ func budgeted(m *Measurement, u Universe, o Options) (Result, []string, []System
 	if err != nil {
 		return Result{}, nil, nil, err
 	}
-	return ApplyBudget(m.Cases, r, m.Statements, o.Budget, o.Overhead)
+	return ApplyBudget(m.Cases, r, m.Statements, m.Modules, o.Budget, o.Overhead)
 }
 
 // Report writes the markdown report of m: the minimization under the chosen
