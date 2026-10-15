@@ -896,7 +896,7 @@ opens are OpenTabs streams."
   (concat "{\"workspace\":{\"workspace\":{\"id\":\"w1\",\"dir\":\"/t/w1\"}},"
           "\"name\":{\"text\":\"one\"},"
           "\"current\":{},\"when\":{\"noTurnRunning\":{}},\"detail\":{},\"closed\":{},"
-          "\"availability\":{\"available\":{}},\"ready\":{}}")
+          "\"availability\":{\"available\":{}},\"lastUpdated\":{\"atMs\":\"1\"},\"ready\":{}}")
   "A minimal valid RosterRow for workspace w1.")
 
 (defun agent-repl-test-wire-host--opened (arm value)
