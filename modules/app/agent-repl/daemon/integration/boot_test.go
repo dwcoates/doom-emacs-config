@@ -554,17 +554,12 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 // contract for `creation_jobs`: a half-written row is a CORRUPTION, and the
 // boot refuses it loudly rather than coming up with the row dropped.
 //
-// IT IS EXPECTED TO BE RED, and the defect it exposes is stated here so the
-// failure is read as the finding it is. The only boot path that reads a
-// workspace's creation job is the in-flight-merge recovery
-// (internal/boot/sequence.go: recoverMerges -> internal/merge/recover.go:
-// Recover -> recoverAdmitted -> layoutFor -> DB.CreationJob), and
-// recoverAdmitted's switch folds ANY layoutFor error -- a genuine corrupt-row
-// *wsm.DecodeError included -- into "the workspace's merge geometry is gone".
-// A data-corruption refusal is thereby downgraded to an ordinary
-// "unmergeable" business outcome: the row IS dropped and the daemon serves on.
-// The remediation belongs in internal/merge/recover.go, which is outside this
-// file's boundary; the test states the contract, not the defect.
+// The only boot path that reads a workspace's creation job is the in-flight
+// merge recovery (internal/boot/sequence.go: recoverMerges ->
+// internal/merge/recover.go: Recover -> recoverAdmitted -> recoverTarget ->
+// DB.CreationJob). recoverAdmitted refuses a *wsm.DecodeError there, at ERROR
+// in the run log, before anything else folds the error into "the workspace's
+// merge geometry is gone"; internal/merge/recover_test.go pins the branch.
 func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	t.Parallel()
 	// Arrange: register a workspace, then seed its merge geometry and an
