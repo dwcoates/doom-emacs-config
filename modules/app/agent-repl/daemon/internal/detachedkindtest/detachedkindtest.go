@@ -39,3 +39,28 @@ func Workflow() *conversationv1.DetachedWorkKind {
 		Workflow: &conversationv1.DetachedWorkKindWorkflow{},
 	}}
 }
+
+// CreatedSubagent announces a subagent spawned detached outright (the
+// `created` origin), owned by OWNER, under the handle WORK, running as the
+// agent CREATED with SUBAGENTTYPE, started at STARTEDATMS. Its kind and the
+// start it describes name the one agent, as the session watcher requires of
+// a created announcement (resolveDetachedLocked refuses two that disagree).
+func CreatedSubagent(owner *conversationv1.AgentId, work, created, subagentType string, startedAtMs int64) *conversationv1.AgentDetachedWork {
+	agent := &conversationv1.AgentId{Value: created}
+	return &conversationv1.AgentDetachedWork{
+		Kind:  Subagent(agent),
+		Owner: owner,
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{
+				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
+					Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+						CreatedAgentId: agent,
+						Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
+						StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: startedAtMs},
+					}},
+				}},
+			},
+		}},
+	}
+}

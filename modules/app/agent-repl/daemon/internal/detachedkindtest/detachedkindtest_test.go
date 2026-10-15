@@ -41,3 +41,20 @@ func TestSubagentCarriesTheAgentItRunsAs(t *testing.T) {
 		t.Fatalf("agent = %q, want agent-1", id)
 	}
 }
+
+func TestCreatedSubagentsKindAndDescribedStartNameOneAgent(t *testing.T) {
+	// Act
+	got := CreatedSubagent(&conversationv1.AgentId{Value: "main"}, "work-1", "agent-1", "Explore", 1_000)
+
+	// Assert
+	described := got.GetCreated().GetWorkCreated().GetSubagent().GetStart()
+	if kind, start := got.GetKind().GetSubagent().GetAgentId().GetValue(), described.GetCreatedAgentId().GetValue(); kind != "agent-1" || start != "agent-1" {
+		t.Fatalf("kind names %q and the start names %q, want both agent-1", kind, start)
+	}
+	if got.GetOwner().GetValue() != "main" || got.GetWork().GetValue() != "work-1" {
+		t.Fatalf("owner %q, work %q, want main and work-1", got.GetOwner().GetValue(), got.GetWork().GetValue())
+	}
+	if described.GetPrompt().GetSubagentType() != "Explore" || described.GetStartedAt().GetAtMs() != 1_000 {
+		t.Fatalf("start = %v, want Explore started at 1000", described)
+	}
+}

@@ -276,22 +276,7 @@ func TestASubagentsTerminalRetiresItsRow(t *testing.T) {
 // detachedSubagentWork announces a spawn that is detached from the moment the
 // footer hears of it -- the `created` origin.
 func detachedSubagentWork(work, created, subagentType string) *conversationv1.AgentDetachedWork {
-	return &conversationv1.AgentDetachedWork{
-		Kind:  kinds.Subagent(&conversationv1.AgentId{Value: created}),
-		Owner: mainAgent,
-		Work:  &conversationv1.DetachedWorkId{Value: work},
-		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
-			WorkCreated: &conversationv1.DetachableWork{
-				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
-					Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
-						CreatedAgentId: &conversationv1.AgentId{Value: created},
-						Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
-						StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
-					}},
-				}},
-			},
-		}},
-	}
+	return kinds.CreatedSubagent(mainAgent, work, created, subagentType, instant.UnixMilli())
 }
 
 // movedSubagent announces an in-turn spawn LEAVING the turn under a handle,

@@ -447,23 +447,7 @@ func TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches(t *testing.T) {
 		{name: "detached work outliving a read turn end", wantFooter: "background", want: "idle_async", apply: func(t *testing.T, s *surfaces) {
 			s.startTurn()
 			// A subagent spawned detached, announced as the shim announces it.
-			subagentType := "general-purpose"
-			work := &conversationv1.AgentDetachedWork{
-				Kind:  kinds.Subagent(agent("sub-1")),
-				Owner: agent("main"),
-				Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
-				Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
-					WorkCreated: &conversationv1.DetachableWork{
-						Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
-							Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
-								CreatedAgentId: agent("sub-1"),
-								Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
-								StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: epoch.UnixMilli()},
-							}},
-						}},
-					},
-				}},
-			}
+			work := kinds.CreatedSubagent(agent("main"), "work-1", "sub-1", "general-purpose", epoch.UnixMilli())
 			s.footer.OnDetachedWork(theWS, agent("main"), work)
 			s.roster.OnDetachedWork(theWS, agent("main"), work)
 			s.closeTurn(wsm.CloseCompleted)
