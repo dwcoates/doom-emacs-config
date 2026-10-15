@@ -3457,3 +3457,33 @@ func withoutWalk(resp *agentreplv1.GetFeedPageResponse) *agentreplv1.GetFeedPage
 	}
 	return clone
 }
+
+// A BOARD ON A DAEMON WITH NO CHECKOUT IS UNAVAILABLE, AND SAYS WHY. The
+// harness states the host's explanation-engine checkout empty
+// (harness.HostNeutralCheckoutEnv), so the daemon's real board backend cannot
+// ready a widget, and the bubble names the call's session and that reason.
+func TestABoardCallOnADaemonWithNoCheckoutDrawsTheBoardUnavailable(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-board", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the agent's board call returns.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("board-1"),
+		Item: &conversationv1.AgentActivity_ChessBoard{ChessBoard: &conversationv1.AgentChessBoard{
+			Result: &conversationv1.AgentChessBoard_Success{Success: &conversationv1.AgentChessBoardSuccess{
+				Session: &conversationv1.AgentChessBoardSession{SessionId: "fake-cee-session", GameId: "g-1"},
+			}},
+		}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the chess board, unavailable for want of a checkout", func(r *frontendv1.FeedRow) bool {
+		return strings.HasPrefix(r.GetActivity().GetChessBoard().GetUnavailable().GetReason().GetText(), "The explanation-engine checkout was not found")
+	})
+	if got := row.GetActivity().GetChessBoard().GetHeading().GetText(); got != "Chess board · CEE session fake-cee-session" {
+		t.Fatalf("heading = %q, want the call's session", got)
+	}
+}

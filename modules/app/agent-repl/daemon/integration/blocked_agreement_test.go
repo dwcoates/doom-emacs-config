@@ -173,3 +173,29 @@ func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) 
 		return rosterRow(r, f.ws.GetId()).GetThinking() != nil
 	})
 }
+
+// TestRosterAndFooterAgreeOnAnOpenQuestion pins the owner's ruling of
+// 2026-10-08: while a question gate stands in a running turn, the footer's
+// status is `question` and the roster row's arm is `question` (both green in
+// render-colors.json), never `working` or `thinking`.
+func TestRosterAndFooterAgreeOnAnOpenQuestion(t *testing.T) {
+	t.Parallel()
+	// Arrange: a running turn, watched on both surfaces.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	roster := f.d.WatchRoster()
+	f.submit("go", "k-open-question", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act: the agent asks.
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-gate", "How do you want the new branch set up?", "New worktree off master")},
+	}))
+
+	// Assert
+	awaitFooter(t, f, footer, "the strip to name the question gate", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetQuestion() != nil
+	})
+	awaitRoster(t, f.d, roster, "the row to name the question gate", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()).GetQuestion() != nil
+	})
+}
