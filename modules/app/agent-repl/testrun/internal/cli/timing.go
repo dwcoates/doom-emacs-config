@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"agentrepl/testrun/internal/atomicfile"
 )
 
 // CSVHeader is test_time.csv's header.
@@ -108,22 +109,7 @@ func AppendTimings(path string, rows []TimingRow) error {
 	for _, r := range rows {
 		fmt.Fprintf(&b, "%s,%s,%s,%s,%s,%.3f,%s\n", r.RunID, r.RecordedAt, r.Commit, r.Branch, r.Suite, r.Seconds, r.Measure)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".test_time.csv.")
-	if err != nil {
-		return fmt.Errorf("create a temp file beside %s: %w", path, err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(b.String()); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: %w", tmp.Name(), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Replace(path, ".test_time.csv.", []byte(b.String()))
 }
 
 // PendingRecord is a --record run's staged decision: the rows it would

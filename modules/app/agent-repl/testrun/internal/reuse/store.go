@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"time"
+
+	"agentrepl/testrun/internal/atomicfile"
 )
 
 // Record says one suite passed whole on one set of inputs.
@@ -140,20 +142,8 @@ func (s Store) Put(r Record) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return fmt.Errorf("reuse: create %s: %w", filepath.Dir(p), err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".record-*")
-	if err != nil {
-		return fmt.Errorf("reuse: create a temp file beside %s: %w", p, err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("reuse: write %s: %w", tmp.Name(), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("reuse: close %s: %w", tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), p); err != nil {
-		return fmt.Errorf("reuse: place %s: %w", p, err)
+	if err := atomicfile.Replace(p, ".record-*", data); err != nil {
+		return fmt.Errorf("reuse: %w", err)
 	}
 	return nil
 }
