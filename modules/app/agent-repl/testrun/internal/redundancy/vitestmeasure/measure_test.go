@@ -192,7 +192,7 @@ func TestMeasureRefuses(t *testing.T) {
 func TestTheTraceConfigAddsTheTracerToThePackagesOwn(t *testing.T) {
 	// Arrange
 	cfg, f := fakePackage(t)
-	m := &measurer{cfg: cfg, exec: f.exec, log: quiet()}
+	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: f.exec, Name: "vitestmeasure"}, log: quiet()}
 
 	// Act
 	path, err := m.traceConfig(t.TempDir())

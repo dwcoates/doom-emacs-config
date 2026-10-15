@@ -476,3 +476,11 @@ func (p *problem) dominators(i int, kept []int) Removal {
 	}
 	return r
 }
+
+// Median is the middle of ds (the upper one of an even count): a case's
+// cost over its measured runs. ds must not be empty.
+func Median(ds []time.Duration) time.Duration {
+	s := slices.Clone(ds)
+	slices.Sort(s)
+	return s[len(s)/2]
+}

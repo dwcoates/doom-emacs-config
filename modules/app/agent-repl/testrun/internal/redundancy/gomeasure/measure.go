@@ -21,6 +21,7 @@ import (
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomut"
+	"agentrepl/testrun/internal/redundancy/proc"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -135,11 +136,11 @@ type suiteState struct {
 }
 
 type measurer struct {
-	cfg    Config
-	exec   Exec
-	log    *run.Log
-	cost   redundancy.Cost
-	suites []*suiteState
+	cfg     Config
+	counter *proc.Counter
+	log     *run.Log
+	cost    redundancy.Cost
+	suites  []*suiteState
 	// coverPrograms and mutPrograms are the two programs directories, ""
 	// when no suite spawns programs.
 	coverPrograms, mutPrograms string
@@ -156,20 +157,9 @@ func (m *measurer) id(l leaf) string {
 	return m.suites[l.suite].Package + ":" + l.name
 }
 
-// run runs one process. A cancelled measurement (an interrupt) ends here:
-// a process the cancellation cut short would otherwise read as a hang, and a
-// hang as a kill.
+// run runs one process, counted, ending at an interrupt (proc.Counter).
 func (m *measurer) run(ctx context.Context, c Cmd) (Result, error) {
-	if err := ctx.Err(); err != nil {
-		return Result{}, fmt.Errorf("gomeasure: interrupted: %w", err)
-	}
-	res, err := m.exec(ctx, c)
-	m.cost.Processes++
-	m.cost.CPU += res.CPU
-	if err == nil && ctx.Err() != nil {
-		return Result{}, fmt.Errorf("gomeasure: interrupted during %s: %w", filepath.Base(c.Path), ctx.Err())
-	}
-	return res, err
+	return m.counter.Run(ctx, c)
 }
 
 func (m *measurer) gocmd(ctx context.Context, timeout time.Duration, args ...string) (Result, error) {
@@ -190,7 +180,7 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	if cfg.HangBound <= 0 {
 		return nil, fmt.Errorf("gomeasure: the hang bound must be positive, got %s", cfg.HangBound)
 	}
-	m := &measurer{cfg: cfg, exec: exec, log: log}
+	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: exec, Name: "gomeasure"}, log: log}
 	if err := m.gate().Check(); err != nil {
 		return nil, fmt.Errorf("gomeasure: %w", err)
 	}
@@ -331,6 +321,7 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 		phase("deletion-set verification")
 		out.Cases = cases
 		m.cost.Wall = time.Since(start)
+		m.cost.Processes, m.cost.CPU = m.counter.Processes, m.counter.CPU
 		out.Cost = m.cost
 		return out, nil
 	}
@@ -351,6 +342,7 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	}
 	out.Cases = cases
 	m.cost.Wall = time.Since(start)
+	m.cost.Processes, m.cost.CPU = m.counter.Processes, m.counter.CPU
 	out.Cost = m.cost
 	return out, nil
 }
@@ -654,7 +646,7 @@ func (m *measurer) coverage(ctx context.Context, leaves []leaf, deleted map[leaf
 	cases := make([]redundancy.Case, len(leaves))
 	statements := map[string]int{}
 	for i, l := range leaves {
-		c := redundancy.Case{ID: m.id(l), Cost: median(elapsed[i])}
+		c := redundancy.Case{ID: m.id(l), Cost: redundancy.Median(elapsed[i])}
 		dirs, err := goprofile.CounterDirs(roots[i])
 		if err != nil {
 			return nil, nil, nil, err
@@ -697,12 +689,6 @@ func (m *measurer) profile(ctx context.Context, dirs []string, out string) ([]st
 		keys = append(keys, b.Key())
 	}
 	return keys, all, nil
-}
-
-func median(ds []time.Duration) time.Duration {
-	s := slices.Clone(ds)
-	slices.Sort(s)
-	return s[len(s)/2]
 }
 
 var compileErr = regexp.MustCompile(`(?m)^(\S+\.go):(\d+):(\d+): `)

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,23 +67,15 @@ type tracedTest struct {
 }
 
 type measurer struct {
-	cfg  Config
-	exec proc.Exec
-	log  *run.Log
-	cost redundancy.Cost
+	cfg     Config
+	counter *proc.Counter
+	log     *run.Log
+	cost    redundancy.Cost
 }
 
+// run runs one process, counted, ending at an interrupt (proc.Counter).
 func (m *measurer) run(ctx context.Context, c proc.Cmd) (proc.Result, error) {
-	if err := ctx.Err(); err != nil {
-		return proc.Result{}, fmt.Errorf("vitestmeasure: interrupted: %w", err)
-	}
-	res, err := m.exec(ctx, c)
-	m.cost.Processes++
-	m.cost.CPU += res.CPU
-	if err == nil && ctx.Err() != nil {
-		return proc.Result{}, fmt.Errorf("vitestmeasure: interrupted during %s: %w", filepath.Base(c.Path), ctx.Err())
-	}
-	return res, err
+	return m.counter.Run(ctx, c)
 }
 
 // Measure traces every test's statements, has Stryker kill-matrix every
@@ -97,7 +88,7 @@ func Measure(ctx context.Context, cfg Config, exec proc.Exec, log *run.Log) (*re
 	if len(cfg.Mutate) == 0 {
 		return nil, fmt.Errorf("vitestmeasure: nothing to mutate")
 	}
-	m := &measurer{cfg: cfg, exec: exec, log: log}
+	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: exec, Name: "vitestmeasure"}, log: log}
 	cfg.Gate.Run = m.run
 	m.cfg.Gate = cfg.Gate
 	if err := cfg.Gate.Check(); err != nil {
@@ -156,6 +147,7 @@ func Measure(ctx context.Context, cfg Config, exec proc.Exec, log *run.Log) (*re
 		phase("deletion-set verification")
 	}
 	m.cost.Wall = time.Since(start)
+	m.cost.Processes, m.cost.CPU = m.counter.Processes, m.counter.CPU
 	out.Cost = m.cost
 	return out, nil
 }
@@ -260,7 +252,7 @@ func (m *measurer) trace(ctx context.Context) ([]redundancy.Case, map[string]int
 	cases := make([]redundancy.Case, 0, len(order))
 	for _, id := range order {
 		a := byID[id]
-		c := redundancy.Case{ID: id, Cost: medianMS(a.ms)}
+		c := redundancy.Case{ID: id, Cost: redundancy.Median(durationsMS(a.ms))}
 		for k := range a.hit {
 			c.Blocks = append(c.Blocks, k)
 		}
@@ -299,10 +291,12 @@ func readTrace(path string) ([]tracedTest, error) {
 	return out, nil
 }
 
-func medianMS(ms []float64) time.Duration {
-	s := slices.Clone(ms)
-	slices.Sort(s)
-	return time.Duration(s[len(s)/2] * float64(time.Millisecond))
+func durationsMS(ms []float64) []time.Duration {
+	out := make([]time.Duration, len(ms))
+	for i, v := range ms {
+		out[i] = time.Duration(v * float64(time.Millisecond))
+	}
+	return out
 }
 
 // strykerConfig is the Stryker config the measurement runs: perTest

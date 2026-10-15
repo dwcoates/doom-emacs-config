@@ -339,3 +339,18 @@ func TestParseUniverse(t *testing.T) {
 		})
 	}
 }
+
+func TestMedianIsTheUpperMiddle(t *testing.T) {
+	for _, tt := range []struct {
+		in   []time.Duration
+		want time.Duration
+	}{
+		{in: []time.Duration{3, 1, 2}, want: 2},
+		{in: []time.Duration{4, 1, 3, 2}, want: 3},
+		{in: []time.Duration{7}, want: 7},
+	} {
+		if got := Median(tt.in); got != tt.want {
+			t.Errorf("Median(%v) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}

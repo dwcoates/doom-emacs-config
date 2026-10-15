@@ -88,3 +88,58 @@ func TestOSExecReportsACommandThatCannotStart(t *testing.T) {
 		t.Fatalf("err = %v, want the start failure", err)
 	}
 }
+
+func TestCounterCountsEveryProcessAndItsCPU(t *testing.T) {
+	// Arrange
+	c := &Counter{Name: "x", Exec: func(context.Context, Cmd) (Result, error) { return Result{CPU: time.Second}, nil }}
+
+	// Act
+	for i := 0; i < 3; i++ {
+		if _, err := c.Run(context.Background(), Cmd{Path: "/bin/true"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Assert
+	if c.Processes != 3 || c.CPU != 3*time.Second {
+		t.Fatalf("processes %d, cpu %s", c.Processes, c.CPU)
+	}
+}
+
+func TestCounterEndsAtAnInterrupt(t *testing.T) {
+	tests := []struct {
+		name string
+		// cancelDuring cancels while the process runs, else before it.
+		cancelDuring bool
+		want         string
+	}{
+		{name: "before a process starts", want: "x: interrupted: context canceled"},
+		{name: "while a process runs", cancelDuring: true, want: "x: interrupted during tool: context canceled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx, cancel := context.WithCancel(context.Background())
+			ran := false
+			c := &Counter{Name: "x", Exec: func(context.Context, Cmd) (Result, error) {
+				ran = true
+				cancel()
+				return Result{TimedOut: true}, nil
+			}}
+			if !tt.cancelDuring {
+				cancel()
+			}
+
+			// Act
+			_, err := c.Run(ctx, Cmd{Path: "/usr/bin/tool"})
+
+			// Assert
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+			if ran != tt.cancelDuring {
+				t.Fatalf("ran = %t", ran)
+			}
+		})
+	}
+}

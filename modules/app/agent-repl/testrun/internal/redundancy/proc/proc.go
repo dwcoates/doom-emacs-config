@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -122,4 +123,29 @@ func readLines(r io.Reader, start time.Time) []Line {
 			return out
 		}
 	}
+}
+
+// Counter runs processes through Exec, counting each and its CPU, and ends
+// a cancelled measurement: a process an interrupt cut short would
+// otherwise read as a hang, and a hang as a kill.
+type Counter struct {
+	Exec Exec
+	// Name prefixes its errors (the adapter's package).
+	Name      string
+	Processes int
+	CPU       time.Duration
+}
+
+// Run runs one process.
+func (c *Counter) Run(ctx context.Context, cmd Cmd) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, fmt.Errorf("%s: interrupted: %w", c.Name, err)
+	}
+	res, err := c.Exec(ctx, cmd)
+	c.Processes++
+	c.CPU += res.CPU
+	if err == nil && ctx.Err() != nil {
+		return Result{}, fmt.Errorf("%s: interrupted during %s: %w", c.Name, filepath.Base(cmd.Path), ctx.Err())
+	}
+	return res, err
 }
