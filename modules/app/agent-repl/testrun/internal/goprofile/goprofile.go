@@ -1,4 +1,7 @@
-package gomeasure
+// Package goprofile reads the text coverage profiles Go writes (`go tool
+// covdata textfmt`, `-coverprofile`): every block with its statement count
+// and whether it ran. It is the one reader of that format in testrun.
+package goprofile
 
 import (
 	"fmt"
@@ -32,10 +35,10 @@ func (b Block) Contains(line, col int) bool {
 func ParseProfile(text string) (all, covered []Block, err error) {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	if len(lines) == 0 || !strings.HasPrefix(lines[0], "mode: ") {
-		return nil, nil, fmt.Errorf("gomeasure: a coverage profile starts with its mode, got %q", firstLine(text))
+		return nil, nil, fmt.Errorf("goprofile: a coverage profile starts with its mode, got %q", firstLine(text))
 	}
 	for _, l := range lines[1:] {
-		b, count, err := parseProfileLine(l)
+		b, count, err := ParseLine(l)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -52,10 +55,10 @@ func firstLine(s string) string {
 	return l
 }
 
-// parseProfileLine reads "file:l0.c0,l1.c1 statements count".
-func parseProfileLine(l string) (Block, int, error) {
+// ParseLine reads "file:l0.c0,l1.c1 statements count".
+func ParseLine(l string) (Block, int, error) {
 	bad := func() (Block, int, error) {
-		return Block{}, 0, fmt.Errorf("gomeasure: malformed coverage profile line %q", l)
+		return Block{}, 0, fmt.Errorf("goprofile: malformed coverage profile line %q", l)
 	}
 	colon := strings.LastIndex(l, ":")
 	if colon <= 0 {
@@ -94,11 +97,12 @@ func parseProfileLine(l string) (Block, int, error) {
 	return Block{File: l[:colon], Line0: nums[0], Col0: nums[1], Line1: nums[2], Col1: nums[3], Statements: stmts}, count, nil
 }
 
-// blockIndex finds the blocks of one file that hold a position.
-type blockIndex map[string][]Block
+// Index finds the blocks of one file that hold a position.
+type Index map[string][]Block
 
-func newBlockIndex(blocks []Block) blockIndex {
-	idx := blockIndex{}
+// NewIndex indexes blocks by file.
+func NewIndex(blocks []Block) Index {
+	idx := Index{}
 	for _, b := range blocks {
 		idx[b.File] = append(idx[b.File], b)
 	}
@@ -108,10 +112,10 @@ func newBlockIndex(blocks []Block) blockIndex {
 	return idx
 }
 
-// holding is every block of file containing line:col, innermost first (Go's
+// Holding is every block of file containing line:col, innermost first (Go's
 // blocks do not nest, but a function literal's blocks lie inside the span of
 // the statement holding it, so both may match).
-func (idx blockIndex) holding(file string, line, col int) []Block {
+func (idx Index) Holding(file string, line, col int) []Block {
 	var out []Block
 	for _, b := range idx[file] {
 		if b.Line0 > line {

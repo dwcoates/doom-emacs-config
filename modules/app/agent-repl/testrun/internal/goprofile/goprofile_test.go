@@ -1,4 +1,4 @@
-package gomeasure
+package goprofile
 
 import (
 	"reflect"
@@ -80,16 +80,16 @@ func TestHoldingIsInnermostFirstAndPerFile(t *testing.T) {
 	outer := Block{File: "f", Line0: 1, Col0: 1, Line1: 9, Col1: 1}
 	inner := Block{File: "f", Line0: 3, Col0: 5, Line1: 4, Col1: 2}
 	other := Block{File: "g", Line0: 1, Col0: 1, Line1: 9, Col1: 1}
-	idx := newBlockIndex([]Block{outer, inner, other})
+	idx := NewIndex([]Block{outer, inner, other})
 
 	// Act
-	got := idx.holding("f", 3, 6)
+	got := idx.Holding("f", 3, 6)
 
 	// Assert
 	if !reflect.DeepEqual(got, []Block{inner, outer}) {
 		t.Fatalf("holding = %v, want inner then outer", got)
 	}
-	if len(idx.holding("f", 10, 1)) != 0 {
+	if len(idx.Holding("f", 10, 1)) != 0 {
 		t.Fatal("a position past every block is held")
 	}
 }

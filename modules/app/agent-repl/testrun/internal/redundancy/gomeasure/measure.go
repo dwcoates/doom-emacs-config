@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/testrun/internal/goprofile"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomut"
@@ -347,7 +348,7 @@ func (m *measurer) coverage(ctx context.Context, bin string, leaves []string) ([
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("gomeasure: read %s's profile: %w", leaf, err)
 		}
-		all, covered, err := ParseProfile(string(text))
+		all, covered, err := goprofile.ParseProfile(string(text))
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("gomeasure: %s's profile: %w", leaf, err)
 		}
@@ -496,7 +497,7 @@ func (m *measurer) mutate(ctx context.Context, bin string, schemas []*gomut.Sche
 	for imp, dir := range imports {
 		dirImport[dir] = imp
 	}
-	var all []Block
+	var all []goprofile.Block
 	reach := map[string][]string{}
 	for _, c := range cases {
 		for _, key := range c.Blocks {
@@ -510,14 +511,14 @@ func (m *measurer) mutate(ctx context.Context, bin string, schemas []*gomut.Sche
 				continue
 			}
 			seen[key] = true
-			b, _, err := parseProfileLine(key + " 1 1")
+			b, _, err := goprofile.ParseLine(key + " 1 1")
 			if err != nil {
 				return nil, nil, err
 			}
 			all = append(all, b)
 		}
 	}
-	idx := newBlockIndex(all)
+	idx := goprofile.NewIndex(all)
 	var results []redundancy.MutantResult
 	var anomalies []string
 	total := 0
@@ -536,7 +537,7 @@ func (m *measurer) mutate(ctx context.Context, bin string, schemas []*gomut.Sche
 				m.log.Infof("redundancy: %d of %d mutants done", done, total)
 			}
 			file := dirImport[filepath.Dir(mu.File)] + "/" + filepath.Base(mu.File)
-			held := idx.holding(file, mu.Line, mu.Col)
+			held := idx.Holding(file, mu.Line, mu.Col)
 			if len(held) == 0 {
 				results = append(results, redundancy.MutantResult{Key: mu.Key(), Status: "unreached"})
 				continue
