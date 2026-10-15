@@ -46,6 +46,7 @@ import { fireIntersection } from "../intersection-observer.js";
 import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
 import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
+import { recordingFailures } from "../failure-sink.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -591,7 +592,7 @@ describe("the roster stream's planned ending", () => {
   it("files no failure and reopens when the daemon ends the stream as planned", async () => {
     // ARRANGE: run 1 carries a roster, then the planned ending, then ends
     // cleanly; the reopened run 2 stands, as a live daemon's stream does.
-    const reported: string[] = [];
+    const failures = recordingFailures();
     let requests = 0;
     const transport = createRouterTransport(({ service }) => {
       service(AgentRepl, {
@@ -610,7 +611,7 @@ describe("the roster stream's planned ending", () => {
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: fakeTicker(NOW),
-      failures: { report: (kind) => void reported.push(kind.kind.case ?? "unset"), retract: () => undefined },
+      failures,
       composerEnabled: false,
     });
     // ACT
@@ -618,7 +619,7 @@ describe("the roster stream's planned ending", () => {
     await settle();
     handle?.dispose();
     // ASSERT
-    expect({ reported, requests }).toEqual({ reported: [], requests: 2 });
+    expect({ reported: failures.cases, requests }).toEqual({ reported: [], requests: 2 });
   });
 });
 
@@ -1228,10 +1229,9 @@ describe("mounting the rail: a roster its frame cannot draw", () => {
   /** Mount on PUSHES, its failures recorded. */
   function mountRecording(pushes: WorkspaceRoster[]): { host: HTMLElement; reports: string[] } {
     const host = document.createElement("nav");
-    const reports: string[] = [];
-    const failures: FailureSink = { report: (kind) => void reports.push(kind.kind.case ?? ""), retract: () => undefined };
+    const failures = recordingFailures();
     mountSidebar(host, ctxFor(pushes, {}, failures), { storage: null, timers: fakeTimers() });
-    return { host, reports };
+    return { host, reports: failures.cases };
   }
 
   /** A roster whose repository section names no repository. */

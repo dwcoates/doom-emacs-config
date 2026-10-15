@@ -56,6 +56,7 @@ import {
   startOfToday,
   startOfTomorrow,
 } from "./harness.js";
+import { recordingFailures } from "../failure-sink.js";
 
 const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
@@ -1724,20 +1725,17 @@ describe("the recently-merged band: rows out of view are not drawn", () => {
 
   it("files a row it finds malformed when it comes into view, leaving the stand-in", () => {
     // Arrange
-    const reports: string[] = [];
+    const failures = recordingFailures();
     const bad = row({ id: "ws-bad" });
     bad.status = { case: undefined };
-    const { reveal } = drawBand(
-      [mergedGroup({ id: "r", rows: [...merges(MERGED_DRAWN_AT_ONCE), bad] })],
-      { report: (kind) => void reports.push(kind.kind.case ?? ""), retract: () => undefined },
-    );
+    const { reveal } = drawBand([mergedGroup({ id: "r", rows: [...merges(MERGED_DRAWN_AT_ONCE), bad] })], failures);
     const [standIn] = reveal.waiting();
 
     // Act
     reveal.show(standIn);
 
     // Assert
-    expect([reports, standIn.parentElement !== null]).toEqual([["frameUndecodable"], true]);
+    expect([failures.cases, standIn.parentElement !== null]).toEqual([["frameUndecodable"], true]);
   });
 
   it("logs a row it finds malformed when it comes into view", async () => {

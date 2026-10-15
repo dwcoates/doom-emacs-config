@@ -29,6 +29,7 @@ import type { Control } from "../../src/control.js";
 import { oneofArms } from "../arms.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { resetLoggingForTests } from "../../src/log.js";
+import { recordingFailures } from "../failure-sink.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const EXAMPLE: ClassifierExample = { text: "after the tests pass, bump the version", route: ClassifierRoute.HOLD_FOR_TURN_END };
@@ -58,7 +59,7 @@ function forms(answer: () => UpdateClassifierPromptResponse | Promise<UpdateClas
   reported: FailureKind[];
 } {
   const seen: UpdateClassifierPromptRequest[] = [];
-  const reported: FailureKind[] = [];
+  const failures = recordingFailures();
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       updateClassifierPrompt: (request) => {
@@ -71,10 +72,10 @@ function forms(answer: () => UpdateClassifierPromptResponse | Promise<UpdateClas
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(60_000),
-    failures: { report: (kind) => reported.push(kind), retract: () => undefined },
+    failures,
     composerEnabled: false,
   });
-  return { registry: new ClassifierUpdateForms(ctx), seen, reported };
+  return { registry: new ClassifierUpdateForms(ctx), seen, reported: failures.reports };
 }
 
 /** The form's parts, by their hooks. */

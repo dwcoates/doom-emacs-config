@@ -27,6 +27,7 @@ import {
   drawFeedCommandRefused,
   requestCommandSupportRefusal,
 } from "../../src/panels/refused.js";
+import { recordingFailures } from "../failure-sink.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
@@ -244,7 +245,7 @@ describe("an answer this build cannot read", () => {
     rc: RowContext;
     reported: string[];
   } {
-    const reported: string[] = [];
+    const failures = recordingFailures();
     const transport = createRouterTransport(({ service }) => {
       service(AgentRepl, { requestCommandSupport: () => answer() });
     });
@@ -252,15 +253,12 @@ describe("an answer this build cannot read", () => {
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: createTicker(60_000),
-      failures: {
-        report: (kind) => reported.push(kind.kind.case ?? "unset"),
-        retract: () => undefined,
-      },
+      failures,
       composerEnabled: false,
     });
     return {
       rc: { ctx, feed: "root", arrival: "page", row: create(FeedRowSchema, {}), revealRow: async () => true },
-      reported,
+      reported: failures.cases,
     };
   }
 

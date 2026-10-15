@@ -31,6 +31,7 @@ import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-car
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { orderFor } from "../../feed-order.js";
+import { recordingFailures } from "../../failure-sink.js";
 
 type InitState = MessageInitShape<typeof FeedPermissionSchema>["state"];
 
@@ -545,9 +546,9 @@ function unalteredPermission(answer: AnswerPermissionResponse): {
   rc: RowContext;
   filed: FailureKind[];
 } {
-  const filed: FailureKind[] = [];
+  const failures = recordingFailures();
   return {
-    filed,
+    filed: failures.reports,
     rc: {
       ctx: testAppContext({
         client: {
@@ -555,7 +556,7 @@ function unalteredPermission(answer: AnswerPermissionResponse): {
         } as unknown as AgentReplClient,
         workspace: WORKSPACE,
         ticker: createTicker(1000),
-        failures: { report: (kind) => filed.push(kind), retract: () => {} },
+        failures,
         composerEnabled: false,
       }),
       feed: "root",

@@ -45,6 +45,7 @@ import { shellElements } from "../../../src/shell.js";
 import { shellHTML } from "../../shell-html.js";
 import { orderFor } from "../../feed-order.js";
 import { stopClocks } from "../../../src/feed/ticking.js";
+import { recordingFailures } from "../../failure-sink.js";
 
 type InitState = MessageInitShape<typeof FeedColdGateSchema>["state"];
 
@@ -999,9 +1000,9 @@ function unalteredColdGate(answer: AnswerColdGateResponse): {
   rc: RowContext;
   filed: FailureKind[];
 } {
-  const filed: FailureKind[] = [];
+  const failures = recordingFailures();
   return {
-    filed,
+    filed: failures.reports,
     rc: {
       ctx: testAppContext({
         client: {
@@ -1009,7 +1010,7 @@ function unalteredColdGate(answer: AnswerColdGateResponse): {
         } as unknown as AgentReplClient,
         workspace: WORKSPACE,
         ticker: createTicker(1000),
-        failures: { report: (kind) => filed.push(kind), retract: () => {} },
+        failures,
         composerEnabled: false,
       }),
       feed: "root",

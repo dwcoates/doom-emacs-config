@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { codeOf } from "../source-text.js";
-import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
-import type { FailureSink } from "../../src/failure/sink.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -20,12 +18,7 @@ import {
   refusalOf,
   type SentenceTable,
 } from "../../src/rpc/refuse.js";
-
-/** A sink that keeps what was filed. */
-function recordingSink(): FailureSink & { reports: FailureKind[] } {
-  const reports: FailureKind[] = [];
-  return { reports, report: (kind) => reports.push(kind), retract: () => undefined };
-}
+import { recordingFailures } from "../failure-sink.js";
 
 /** The arms an endpoint words for itself. */
 const OWN: SentenceTable = {
@@ -189,7 +182,7 @@ describe("drawMalformedRefusal", () => {
   it("answers false for an error that is not a malformed view", () => {
     const host = document.createElement("div");
     const drawn = drawMalformedRefusal(
-      { failures: recordingSink() },
+      { failures: recordingFailures() },
       host,
       "op",
       new Error("something else"),
@@ -198,7 +191,7 @@ describe("drawMalformedRefusal", () => {
   });
 
   it("files one frame_undecodable card for a malformed refusal", () => {
-    const sink = recordingSink();
+    const sink = recordingFailures();
     drawMalformedRefusal(
       { failures: sink },
       document.createElement("div"),
@@ -211,7 +204,7 @@ describe("drawMalformedRefusal", () => {
   it("draws no refusal at the control for a frame it could not read", () => {
     const host = document.createElement("div");
     drawMalformedRefusal(
-      { failures: recordingSink() },
+      { failures: recordingFailures() },
       host,
       "op",
       new MalformedView("A.b", "the oneof sets no arm"),

@@ -86,6 +86,7 @@ import { codeOf } from "../source-text.js";
 import heldPromptSource from "../../src/held/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { filesUnder } from "../files-under.js";
+import { recordingFailures } from "../failure-sink.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -1865,7 +1866,7 @@ function editContext(
     }),
 ): { tc: HeldContext; seen: EditHeldPromptRequest[]; reported: FailureKind[] } {
   const seen: EditHeldPromptRequest[] = [];
-  const reported: FailureKind[] = [];
+  const failures = recordingFailures();
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       editHeldPrompt: (request) => {
@@ -1878,13 +1879,10 @@ function editContext(
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: fakeTicker(),
-    failures: {
-      report: (kind) => reported.push(kind),
-      retract: () => undefined,
-    },
+    failures,
     composerEnabled: false,
   });
-  return { tc: testHeldContext(ctx), seen, reported };
+  return { tc: testHeldContext(ctx), seen, reported: failures.reports };
 }
 
 /** An EditHeldPrompt refusal carrying ARM and its payload. */
