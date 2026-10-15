@@ -36,6 +36,12 @@ func (r *renderer) SetHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt) {
 	r.cards = holds.Prompts(r.held, r.editing, r.log)
 }
 
+// FoldHeldPrompts records the standing holds a fold left, and renders them
+// as SetHeldPrompts does: the fold itself is the feed resolver's to publish.
+func (r *renderer) FoldHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt, _ holds.Fold) {
+	r.SetHeldPrompts(ws, held)
+}
+
 // SetEditing records the hold being edited, and renders again.
 func (r *renderer) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {
 	r.editing = turn

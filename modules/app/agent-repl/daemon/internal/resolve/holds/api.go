@@ -25,6 +25,13 @@ type Sink interface {
 	// SetHeldPrompts installs a workspace's standing holds, whole. The prompt
 	// queue is the only caller.
 	SetHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt)
+	// FoldHeldPrompts installs a workspace's standing holds, whole, as
+	// SetHeldPrompts does, in the change that FOLD made: the section is
+	// published naming the fold (WatchFeedHeldChange.folds), so a client
+	// flashes the entry folded into and shows the folded card leaving. The
+	// prompt queue calls it after every fold, the user's and the
+	// classifier's alike, and nothing else does.
+	FoldHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt, fold Fold)
 	// SetEditing names the held prompt being edited (EditHeldPrompt), or
 	// clears it with the empty turn. Its card carries HeldPrompt.editing. The
 	// prompt queue is the only caller.
@@ -61,4 +68,13 @@ type Card struct {
 	Turn ids.TurnID
 	// Prompt is the card.
 	Prompt *frontendv1.HeldPrompt
+}
+
+// Fold is one held prompt folded into the held entry directly ahead of it.
+type Fold struct {
+	// From is the folded prompt's turn: it left the queue.
+	From ids.TurnID
+	// Into is the turn of the entry it was folded into, which now carries
+	// both prompts' content.
+	Into ids.TurnID
 }

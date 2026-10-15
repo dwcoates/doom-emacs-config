@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -414,6 +415,29 @@ func TestAnInterruptVerdictAgainstAQueuedPromptCoalescesTheTwo(t *testing.T) {
 	}
 }
 
+func TestACoalescenceNamesTheFoldOnTheTraysPush(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if got := h.holds.pushedFolds(); len(got) != 1 || got[0] != (holds.Fold{From: "later", Into: "older"}) {
+		t.Fatalf("pushed folds = %+v, want the later prompt folded into the older one alone", got)
+	}
+}
+
 func TestAFailedCoalescenceLeavesBothPromptsStanding(t *testing.T) {
 	// Arrange: the merge and the retirement are one store transaction, so a
 	// store that refuses it leaves the queued prompt's words and the new
@@ -444,6 +468,9 @@ func TestAFailedCoalescenceLeavesBothPromptsStanding(t *testing.T) {
 	}
 	if !logged(h.log.Records(), "error", opClassify, "could not fold the prompt into the queued prompt ahead; both entries stand as they were") {
 		t.Fatalf("the failed coalescence was not recorded at error: %v", h.log.Records())
+	}
+	if got := h.holds.pushedFolds(); len(got) != 0 {
+		t.Fatalf("pushed folds = %+v, want none for a coalescence the store refused", got)
 	}
 }
 

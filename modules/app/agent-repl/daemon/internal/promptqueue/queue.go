@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -344,12 +345,29 @@ func (q *queue) logger(ctx context.Context, ws ids.WorkspaceID) (dlog.Logger, er
 // pushTray republishes a workspace's standing holds, whole. The queue is the
 // tray's only author for prompts, so every state change ends here.
 func (q *queue) pushTray(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) error {
+	return q.publishTray(ctx, ws, nil, log)
+}
+
+// pushFold republishes a workspace's standing holds, whole, in the change
+// FOLD made, so the section is published naming it. Every fold ends here, the
+// user's (Fold) and the classifier's (coalesce) alike.
+func (q *queue) pushFold(ctx context.Context, ws ids.WorkspaceID, fold holds.Fold, log dlog.Logger) error {
+	return q.publishTray(ctx, ws, &fold, log)
+}
+
+// publishTray is pushTray and pushFold's one body: FOLD is nil for a change
+// that folded nothing.
+func (q *queue) publishTray(ctx context.Context, ws ids.WorkspaceID, fold *holds.Fold, log dlog.Logger) error {
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
 		log.Error(opTray, "could not read the standing holds", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("read the holds for %q: %w", ws, err)
 	}
-	q.deps.Holds.SetHeldPrompts(ws, standing)
+	if fold == nil {
+		q.deps.Holds.SetHeldPrompts(ws, standing)
+	} else {
+		q.deps.Holds.FoldHeldPrompts(ws, standing, *fold)
+	}
 	if q.deps.ColdGateHeld != nil {
 		q.deps.ColdGateHeld(ws, countHeldAtGate(standing))
 	}

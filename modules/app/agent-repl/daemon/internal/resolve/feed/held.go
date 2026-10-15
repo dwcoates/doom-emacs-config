@@ -64,12 +64,26 @@ func (r *resolver) rootFeed(s *wsState) *feedState {
 // SetHeldPrompts installs a workspace's standing holds, whole, and publishes
 // the section when that changed it.
 func (r *resolver) SetHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt) {
+	r.installHeld(ws, held, nil)
+}
+
+// FoldHeldPrompts installs a workspace's standing holds, whole, in the change
+// FOLD made, and publishes the section naming the fold.
+func (r *resolver) FoldHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt, fold holds.Fold) {
+	r.installHeld(ws, held, []holds.Fold{fold})
+}
+
+// installHeld is SetHeldPrompts and FoldHeldPrompts' one body: FOLDS is
+// empty for a change that folded nothing.
+func (r *resolver) installHeld(ws ids.WorkspaceID, held []wsm.HeldPrompt, folds []holds.Fold) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	r.heldOf(ws).prompts = held
-	r.logger(ws).Debug(opHeld, "the held section took the standing holds", dlog.Context{"held": len(held)})
-	r.publishHeld(s, nil)
+	r.logger(ws).Debug(opHeld, "the held section took the standing holds", dlog.Context{
+		"held": len(held), "folds": len(folds),
+	})
+	r.publishHeld(s, nil, folds)
 }
 
 // SetEditing names the held prompt being edited, or clears it with "".
@@ -79,7 +93,7 @@ func (r *resolver) SetEditing(ws ids.WorkspaceID, turn ids.TurnID) {
 	s := r.state(ws)
 	r.heldOf(ws).editing = turn
 	r.logger(ws).Debug(opHeld, "the held section took the edit standing", dlog.Context{"editing_turn": string(turn)})
-	r.publishHeld(s, nil)
+	r.publishHeld(s, nil, nil)
 }
 
 // currentHeld answers the section as it stands at this moment of the root
@@ -95,13 +109,13 @@ func (r *resolver) currentHeld(s *wsState) *frontendv1.FeedHeld {
 }
 
 // publishHeld publishes the section on the root feed when it changed, or
-// whenever ROWS moved with it: the section and the rows in one publication.
-// The caller holds the lock.
-func (r *resolver) publishHeld(s *wsState, rows []*frontendv1.FeedRow) {
+// whenever ROWS moved or FOLDS were made with it: the section, the rows and
+// the folds in one publication. The caller holds the lock.
+func (r *resolver) publishHeld(s *wsState, rows []*frontendv1.FeedRow, folds []holds.Fold) {
 	h := r.heldOf(s.id)
 	section := r.renderHeld(s, h)
 	log := r.logger(s.id)
-	if len(rows) == 0 && h.published != nil && proto.Equal(section, h.published) {
+	if len(rows) == 0 && len(folds) == 0 && h.published != nil && proto.Equal(section, h.published) {
 		log.Debug(opHeld, "the held section is unchanged; nothing was published", dlog.Context{"items": len(section.GetItems())})
 		return
 	}
@@ -110,10 +124,24 @@ func (r *resolver) publishHeld(s *wsState, rows []*frontendv1.FeedRow) {
 	for _, row := range rows {
 		moved = append(moved, row.GetId().GetValue())
 	}
+	wire := r.heldFolds(s, folds)
 	log.Info(opHeld, "the held section changed and was published on the root feed", dlog.Context{
-		"items": len(section.GetItems()), "moved_rows": moved,
+		"items": len(section.GetItems()), "moved_rows": moved, "folds": len(wire),
 	})
-	r.emit(s, r.rootFeed(s), Publication{Held: &agentreplv1.WatchFeedHeldChange{Held: section, Rows: rows}})
+	r.emit(s, r.rootFeed(s), Publication{Held: &agentreplv1.WatchFeedHeldChange{Held: section, Rows: rows, Folds: wire}})
+}
+
+// heldFolds names each fold by the two held items' ids: the ids each prompt's
+// card is keyed by, the same ids its row would carry once settled. The caller
+// holds the lock.
+func (r *resolver) heldFolds(s *wsState, folds []holds.Fold) []*agentreplv1.WatchFeedHeldFold {
+	out := make([]*agentreplv1.WatchFeedHeldFold, 0, len(folds))
+	for _, fold := range folds {
+		_, folded := r.promptRowFor(s, fold.From)
+		_, into := r.promptRowFor(s, fold.Into)
+		out = append(out, &agentreplv1.WatchFeedHeldFold{Folded: folded, Into: into})
+	}
+	return out
 }
 
 // renderHeld composes the section from its accumulation: the held prompts
@@ -189,9 +217,9 @@ func (r *resolver) emitRow(s *wsState, f *feedState, row *frontendv1.FeedRow) {
 		return
 	}
 	if root {
-		r.publishHeld(s, []*frontendv1.FeedRow{row})
+		r.publishHeld(s, []*frontendv1.FeedRow{row}, nil)
 		return
 	}
 	r.emit(s, f, Publication{Row: row})
-	r.publishHeld(s, nil)
+	r.publishHeld(s, nil, nil)
 }

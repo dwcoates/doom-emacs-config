@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -94,7 +95,7 @@ func (q *queue) Fold(ctx context.Context, ws ids.WorkspaceID, turn, above ids.Tu
 	q.clearHeadIf(ws, ahead.Turn)
 	q.clearHeadIf(ws, folded.Turn)
 	log.Info(opFold, "the held prompt was folded into the one ahead; the merged prompt's verdict is discarded and it is reclassified", nil)
-	if err := q.pushTray(ctx, ws, log); err != nil {
+	if err := q.pushFold(ctx, ws, holds.Fold{From: folded.Turn, Into: ahead.Turn}, log); err != nil {
 		return err
 	}
 
