@@ -814,6 +814,17 @@ else a line shows rides beside the string, in its affixes
      entries)))
 
 
+(defun agent-repl--switch-entry-invariant-failed (operation entry missing)
+  "Fail hard: switcher ENTRY lacks MISSING, which OPERATION ranks by.
+Records the violation through the canonical error log at the central
+sink, naming OPERATION, the entry and what it lacks, then signals.
+The one way a switcher ranking reports an entry that breaks its
+invariant."
+  (agent-repl--error '(:agent-repl-central "the workspace switcher reads the whole roster")
+                     "elisp.commands.%s: name=%s has no %s"
+                     operation (plist-get entry :name) missing)
+  (error "agent-repl: switcher entry %s has no %s" (plist-get entry :name) missing))
+
 (defun agent-repl--switch-most-recent (entries instant)
   "Return the `agent-repl--switch-recent-limit' ENTRIES latest by INSTANT.
 INSTANT answers an entry's epoch-ms instant; newest first.  Every entry
@@ -822,11 +833,8 @@ user-closed row when it was closed, by construction of the lists -- so
 an entry without one is a violated invariant and fails hard."
   (dolist (entry entries)
     (unless (funcall instant entry)
-      (agent-repl--error '(:agent-repl-central "the workspace switcher reads the whole roster")
-                         "elisp.commands.switch-most-recent: name=%s has no instant to rank by"
-                         (plist-get entry :name))
-      (error "agent-repl: switcher entry %s has no instant to rank by"
-             (plist-get entry :name))))
+      (agent-repl--switch-entry-invariant-failed
+       "switch-most-recent" entry "instant to rank by")))
     (seq-take (sort (copy-sequence entries)
                     (lambda (a b) (> (funcall instant a) (funcall instant b))))
               agent-repl--switch-recent-limit))
@@ -843,12 +851,8 @@ a row that does not state it -- and fails hard."
     (if (null row)
         most-positive-fixnum
       (or (agent-repl-roster-row-instant-ms row :last-updated)
-          (progn
-            (agent-repl--error '(:agent-repl-central "the workspace switcher reads the whole roster")
-                               "elisp.commands.switch-update-ms: name=%s has no update recency"
-                               (plist-get entry :name))
-            (error "agent-repl: switcher entry %s has no update recency"
-                   (plist-get entry :name)))))))
+          (agent-repl--switch-entry-invariant-failed
+           "switch-update-ms" entry "update recency")))))
 
 (defun agent-repl--switch-by-recency (entries)
   "Return ENTRIES most recently updated first (`agent-repl--switch-update-ms').

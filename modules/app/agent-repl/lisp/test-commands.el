@@ -1567,6 +1567,34 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (member "by-daemon" offered))
       (should (member "old" offered)))))
 
+(ert-deftest agent-repl-test-commands-switch-entry-invariant-failed-logs-then-signals ()
+  "The shared failure records the operation, the entry and what it lacks, then signals."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logged))))
+      ;; Act
+      (let ((err (should-error (agent-repl--switch-entry-invariant-failed
+                                "some-op" '(:name "e1") "thing"))))
+        ;; Assert
+        (should (equal (cadr err) "agent-repl: switcher entry e1 has no thing"))
+        (should (equal (cadr (car logged)) "elisp.commands.some-op: name=e1 has no thing"))
+        (should (eq (car (car (car logged))) :agent-repl-central))))))
+
+(ert-deftest agent-repl-test-commands-switch-rankings-share-the-invariant-failure ()
+  "Both switcher rankings report a broken entry through the one shared failure."
+  ;; Arrange
+  (let ((calls nil)
+        (row (agent-repl-test-commands--row "bare" "id-bare" 1)))
+    (plist-put row :last-updated nil)
+    (cl-letf (((symbol-function 'agent-repl--switch-entry-invariant-failed)
+               (lambda (op _entry _missing) (push op calls) (error "stop"))))
+      ;; Act
+      (ignore-errors (agent-repl--switch-most-recent '((:name "x")) #'ignore))
+      (ignore-errors (agent-repl--switch-update-ms (list :name "bare" :row row)))
+      ;; Assert
+      (should (equal (reverse calls) '("switch-most-recent" "switch-update-ms"))))))
+
 (ert-deftest agent-repl-test-commands-switcher-ranking-without-an-instant-fails-hard ()
   "An entry handed to the ranking with no instant is a violated invariant."
   ;; Arrange
