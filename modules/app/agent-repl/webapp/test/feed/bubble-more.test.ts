@@ -9,7 +9,7 @@
  * overflow, or a box that is not one of the two speaker bubbles), plus the
  * ResizeObserver wiring that keeps it in step on draw and re-wrap.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUBBLE_MORE_ATTRIBUTE,
   BUBBLE_MORE_ELLIPSIS,
@@ -20,6 +20,7 @@ import {
   TITLE_FOLD_OPEN_SELECTOR,
   HAS_MORE_UNMEASURABLE,
   hidesContentBeyondCap,
+  bubbleBodyOf,
   installHasMore,
   overflowsCap,
   refreshHasMore,
@@ -32,6 +33,7 @@ import { BUBBLE_SCROLL_CLASS, bubbleBox as sharedBubbleBox } from "../../src/fee
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { stopTicking } from "../../src/feed/ticking.js";
 import { fireResize } from "../resize-observer.js";
+import { ELLIPSIS_TRIM_PROPERTY, ELLIPSIS_TRIM_SLACK } from "../../src/feed/ellipsis-trim.js";
 
 /** Pixels per rendered line in these fixtures. */
 const LINE_PX = 20;
@@ -272,6 +274,182 @@ describe("refreshHasMore: the class follows the measurement", () => {
 
     // Assert
     expect(box.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+});
+
+/** The text every laid-out clamp below holds: its cut lands on the space after "world". */
+const CLAMP_TEXT = "hello world and";
+
+/**
+ * Lay every clamp out as WebKit would at 10px a character, the `…` 10px wide
+ * and the content edge at 130px: "hello world " fits beside the `…` and "a"
+ * does not, so the engine's own cut follows the space.
+ */
+function layOutClamps(): void {
+  vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
+    const i = this.startOffset;
+    const line = (i + 1) * 10 <= 130 ? 0 : 1;
+    const left = line === 0 ? i * 10 : 0;
+    return [{ left, right: left + 10, width: 10, top: line * 16, bottom: line * 16 + 16 }] as unknown as DOMRectList;
+  });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ right: 130 } as DOMRect);
+  vi.spyOn(window, "getComputedStyle").mockReturnValue({
+    borderRightWidth: "0px",
+    paddingRight: "0px",
+    fontStyle: "normal",
+    fontWeight: "400",
+    fontSize: "13px",
+    fontFamily: "sans-serif",
+  } as CSSStyleDeclaration);
+  const ctx = { font: "", measureText: () => ({ width: 10 }) };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+}
+
+/** The trim the laid-out clamp wears: its line ends past "world…" and the slack. */
+const PLACED_TRIM = `${130 - (110 + 10 + ELLIPSIS_TRIM_SLACK)}px`;
+
+/** The ellipsis bubble's body, holding the clamp text. */
+function ellipsisBody(scroll: HTMLElement): HTMLElement {
+  const body = scroll.querySelector<HTMLElement>(`.${BUBBLE_BODY_CLASS}`);
+  if (body === null) throw new Error("fixture: no body");
+  body.textContent = CLAMP_TEXT;
+  return body;
+}
+
+describe("refreshHasMore: a clamp's ellipsis follows a word character", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("trims a collapsed, overflowing title whose cut follows a space", () => {
+    // Arrange
+    layOutClamps();
+    const title = titleUnder("tool-fold", false);
+    title.textContent = CLAMP_TEXT;
+
+    // Act
+    refreshHasMore(title);
+
+    // Assert
+    expect(title.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)).toBe(PLACED_TRIM);
+  });
+
+  it("trims a collapsed ellipsis bubble's body, not its box", () => {
+    // Arrange
+    layOutClamps();
+    const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+    const body = ellipsisBody(scroll);
+
+    // Act
+    refreshHasMore(scroll);
+
+    // Assert
+    expect([body.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY), scroll.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)])
+      .toEqual([PLACED_TRIM, ""]);
+  });
+
+  it("clears a stale trim from a title whose fold is open", () => {
+    // Arrange
+    const title = titleUnder("tool-fold", true);
+    title.style.setProperty(ELLIPSIS_TRIM_PROPERTY, "4px");
+
+    // Act
+    refreshHasMore(title);
+
+    // Assert
+    expect(title.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)).toBe("");
+  });
+
+  it("clears a stale trim from a title that now fits its line", () => {
+    // Arrange
+    const title = titleUnder("tool-fold", false);
+    Object.defineProperty(title, "scrollHeight", { configurable: true, value: 40 });
+    title.style.setProperty(ELLIPSIS_TRIM_PROPERTY, "4px");
+
+    // Act
+    refreshHasMore(title);
+
+    // Assert
+    expect(title.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)).toBe("");
+  });
+
+  it("clears a stale trim from an expanded ellipsis bubble's body", () => {
+    // Arrange
+    const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+    scroll.classList.add(EXPANDED_CLASS);
+    const body = ellipsisBody(scroll);
+    body.style.setProperty(ELLIPSIS_TRIM_PROPERTY, "4px");
+
+    // Act
+    refreshHasMore(scroll);
+
+    // Assert
+    expect(body.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)).toBe("");
+  });
+
+  it("never measures a fade bubble's line, which writes no ellipsis", () => {
+    // Arrange
+    const rects = vi.spyOn(Range.prototype, "getClientRects");
+    const scroll = clampedBox(BUBBLE_MORE_FADE, 3);
+    ellipsisBody(scroll);
+
+    // Act
+    refreshHasMore(scroll);
+
+    // Assert
+    expect(rects).not.toHaveBeenCalled();
+  });
+});
+
+describe("installHasMore: a box that writes an ellipsis follows its text", () => {
+  /** Let the MutationObserver watching the box deliver. */
+  async function flushMutations(): Promise<void> {
+    await Promise.resolve();
+  }
+
+  it("re-measures a title whose text changed in place", async () => {
+    // Arrange -- the type-out rewrites a title's text without resizing it.
+    const title = titleUnder("tool-fold", false);
+    title.textContent = "hello";
+    const seen: HTMLElement[] = [];
+    installHasMore(title, (b) => seen.push(b));
+
+    // Act
+    (title.firstChild as Text).data = CLAMP_TEXT;
+    await flushMutations();
+
+    // Assert
+    expect(seen).toEqual([title]);
+  });
+
+  it("re-measures an ellipsis bubble whose body's text changed in place", async () => {
+    // Arrange
+    const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+    const body = ellipsisBody(scroll);
+    const seen: HTMLElement[] = [];
+    installHasMore(scroll, (b) => seen.push(b), bubbleBodyOf);
+
+    // Act
+    (body.firstChild as Text).data = "hello world, and";
+    await flushMutations();
+
+    // Assert
+    expect(seen).toEqual([scroll]);
+  });
+
+  it("leaves a fade bubble's text unfollowed, so a streaming response re-measures only on resize", async () => {
+    // Arrange
+    const scroll = clampedBox(BUBBLE_MORE_FADE, 3);
+    const body = ellipsisBody(scroll);
+    const seen: HTMLElement[] = [];
+    installHasMore(scroll, (b) => seen.push(b), bubbleBodyOf);
+
+    // Act
+    (body.firstChild as Text).data = "more words streamed in";
+    await flushMutations();
+
+    // Assert
+    expect(seen).toEqual([]);
   });
 });
 

@@ -388,7 +388,13 @@ hand any more:
   line (`-webkit-line-clamp`), so the engine ends that line in `…` exactly when
   anything follows it (a wrapped over-long line, a further line, a further
   block), and the fade is hidden; the measurer still sets `has-more`, reading
-  the clamped body's `scrollHeight`, and nothing keys on it. A HELD prompt
+  the clamped body's `scrollHeight`, and nothing keys on it. That `…`, and a
+  title fold's, never follows a space, period, comma or hyphen (owner request,
+  2026-10-15: "hello world…", never "hello world …" or "hello world.…"): the
+  same measurer reads the clamp's first line and narrows it through
+  `--ellipsis-trim`, a transparent right border, so the engine drops the run
+  itself (src/feed/ellipsis-trim.ts; real-engine placement in
+  test/webkit/ellipsis-trim.webkit.test.ts). A HELD prompt
   (owner spec, 2026-09-23) is HALF the one width
   (`calc(var(--bubble-max-width) / 2)`, so its trees wrap at the half), shows
   collapsed only its ONE first line under the ellipsis (owner ruling,

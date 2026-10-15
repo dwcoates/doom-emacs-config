@@ -11,12 +11,18 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const SETUP_FILES = ["setup.ts", "webapp-layer/setup.ts"];
 
 /** The single-capability installers only the shared installer may call. */
-const SINGLE_INSTALLERS = ["installResizeObserver", "installIntersectionObserver", "installGetAnimations"];
+const SINGLE_INSTALLERS = [
+  "installResizeObserver",
+  "installIntersectionObserver",
+  "installRangeClientRects",
+  "installGetAnimations",
+];
 
 describe("the jsdom capabilities", () => {
   it.each([
     { name: "ResizeObserver", present: (): boolean => typeof globalThis.ResizeObserver === "function" },
     { name: "IntersectionObserver", present: (): boolean => typeof globalThis.IntersectionObserver === "function" },
+    { name: "Range.getClientRects", present: (): boolean => typeof Range.prototype.getClientRects === "function" },
     { name: "Element.getAnimations", present: (): boolean => typeof Element.prototype.getAnimations === "function" },
   ])("installs $name", ({ present }) => {
     // Arrange / Act
@@ -35,6 +41,19 @@ describe("the jsdom capabilities", () => {
 
     // Assert
     expect(animations).toEqual([]);
+  });
+
+  it("answers no rects for a text range, since jsdom lays nothing out", () => {
+    // Arrange
+    installJsdomCapabilities();
+    const range = document.createRange();
+    range.selectNodeContents(document.createTextNode("hello"));
+
+    // Act
+    const rects = Array.from(range.getClientRects());
+
+    // Assert
+    expect(rects).toEqual([]);
   });
 
   it.each(SETUP_FILES)("is what %s installs", (file) => {

@@ -38,6 +38,7 @@ import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, inDocument, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
+import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
@@ -2170,6 +2171,14 @@ describe("the one-line clamp's shared shape", () => {
     expect(rule).toMatch(/line-break:\s*anywhere\s*;/);
   });
 
+  it("draws both clamps' ellipsis trim as a transparent right border, so the box never moves", () => {
+    // Arrange / Act
+    const rule = shapeRule() ?? "";
+
+    // Assert -- the property is the one ellipsis-trim.ts sets, defaulting to no trim.
+    expect(rule).toContain(`border-right: var(${ELLIPSIS_TRIM_PROPERTY}, 0px) solid transparent;`);
+  });
+
   it("is the only rule stating the shape for either clamp", () => {
     // Arrange / Act — any other rule re-declaring the box on one clamp alone.
     const handRolled = rulesOf(stylesheet).filter(
@@ -2266,6 +2275,14 @@ describe("the title fold", () => {
 
     // Assert
     expect(rule).toMatch(/line-break:\s*auto\s*;/);
+  });
+
+  it("drops an expanded title's ellipsis trim, so its whole width shows", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded .title-fold");
+
+    // Assert
+    expect(rule).toMatch(/border-right-width:\s*0\s*;/);
   });
 
   it("draws no fade on a title: the ellipsis is its whole signal", () => {
