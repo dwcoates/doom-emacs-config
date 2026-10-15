@@ -1635,8 +1635,8 @@ func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedW
 
 func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 	t.Parallel()
-	// Arrange: interruptAllAgents sweeps AGENTS only, so a lone detached
-	// subagent is the fixture (internal/workspace/interrupt.go).
+	// Arrange: a lone detached subagent. Shells are swept too; that half is
+	// TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents.
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
@@ -1667,9 +1667,82 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 	}
 }
 
+// THE FAN-WIDE STOP REACHES SHELLS AS WELL AS AGENTS. interruptAllAgents
+// stops every live detached item (internal/workspace/interrupt.go), so a live
+// shell beside a live agent is stopped in the same call.
+func TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents(t *testing.T) {
+	t.Parallel()
+	// Arrange: one live detached agent and one live detached shell.
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
+	pushDetachedShell(f.shim, "work-2", "sleep 5")
+	awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedSubagent() != nil
+	})
+	awaitShellHead(t, f, feed, "the shell bubble's head on the root feed")
+	awaitLiveWork(t, f, 2)
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+	}))
+
+	// Assert: both stopped in one call.
+	if err != nil {
+		t.Fatalf("Interrupt{all_agents} = error %v, want a success", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedDetached().GetCount(); got != 2 {
+		t.Fatalf("InterruptedDetached.count = %d, want 2 (the agent and the shell)", got)
+	}
+	if req := f.shim.ExpectUpdateAgent(); req.GetTarget().GetValue() != "sub-1" || req.GetInput().GetStop() == nil {
+		t.Fatalf("UpdateAgent = %v, want a stop of the live subagent sub-1", req)
+	}
+	f.shim.ExpectStopBash()
+}
+
 // ---------------------------------------------------------------------------
 // AnswerPermission
 // ---------------------------------------------------------------------------
+
+// AN ANSWER TO AN AGENT THE SHIM NO LONGER KNOWS IS REFUSED BY ITS LEDGERED
+// ARM. AnswerPermissionError carries no `unknown_agent` arm
+// (endpoint_answer_permission.proto); the gap is a row in daemon/ERROR-ARMS.md,
+// and server.UnlandedArm refuses it failed_precondition naming the intended
+// arm, recorded under daemon.refusal.unlanded_arm so the ledger reconciles
+// against the log.
+func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: an open ask, and a shim that no longer knows its agent.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-gone", "act-gone")},
+	}))
+	row := awaitRow(t, f, feed, "the permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "no such agent",
+			Kind:   &shimv1.UpdateAgentFailure_UnknownAgent{UnknownAgent: &shimv1.UpdateAgentUnknownAgent{}},
+		}},
+	})
+
+	// Act
+	_, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace: f.ws, Permission: row.GetId(),
+		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+	}))
+
+	// Assert
+	if code := connect.CodeOf(err); code != connect.CodeFailedPrecondition {
+		t.Fatalf("AnswerPermission to a forgotten agent = %v, want failed_precondition", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "intended arm: ") || !strings.Contains(msg, "AnswerPermissionError.unknown_agent") {
+		t.Fatalf("AnswerPermission refusal = %q, want it to name the intended arm AnswerPermissionError.unknown_agent", msg)
+	}
+}
 
 func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	t.Parallel()
@@ -2131,6 +2204,39 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 	if deferredRows != 1 {
 		t.Fatalf("standing deferred held_prompts rows after the restart = %d, want 1", deferredRows)
 	}
+}
+
+// TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn pins that a
+// prompt deferred behind a running turn is never lost to a workspace restart:
+// the restart stops the running turn, and the deferred prompt is delivered to
+// the restarted session as its own turn.
+func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: a running turn with a prompt deferred behind it.
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the
+	// restart's own stand-down of the shim, which the fake answers by exiting.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	f.shim.ExpectStartSession()
+	f.submit("start the work", "k-running-restart", origin)
+	f.shim.ExpectStartTurn()
+	turn := f.submitDeferred("run the tests afterwards", "k-deferred-restart").GetSuccess().GetTurn().GetTurn()
+
+	// Act
+	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = %v, %v, want a success", resp, err)
+	}
+
+	// Assert: the restarted session is handed the deferred prompt as its own
+	// turn. READ FROM THE SHIM'S DURABLE LOG: the restart answers once it
+	// happened, and a live dial of the new shim races its bring-up.
+	started := &shimv1.StartTurnRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartTurn,
+		"the deferred prompt's StartTurn on the restarted session", started,
+		func() bool { return started.GetTurn().GetValue() == turn.GetValue() })
 }
 
 // ---------------------------------------------------------------------------

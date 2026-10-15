@@ -173,6 +173,25 @@ describe("WatchSession's opening frames", () => {
     watch.close();
   });
 
+  test("an ordinary turn leaves the session healthy, with no degraded window", async () => {
+    // THE DAEMON'S TOPBAR WARNS FROM THIS PUSH, so a healthy session must say
+    // so: a fault or a degraded window here is a warning on every surface.
+    // Arrange: an ordinary turn, run to its close.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "an ordinary prompt" })));
+    await shim.log.record((record) => record.message === "closed a turn" && record.context.keepalive === false);
+
+    // Act.
+    const watch = watchSession(shim);
+    const update = sessionUpdate(await watch.next());
+
+    // Assert.
+    if (update.update.case !== "diagnostics") throw new Error("expected the opening diagnostics");
+    expect([update.update.value.health.case, update.update.value.degradedWindows]).toEqual(["healthy", []]);
+    watch.close();
+  });
+
   /** The unfiltered watch, which the re-announcement rides. */
   function watchSessionRaw(shim: Awaited<ReturnType<typeof spawnShim>>) {
     return openStream((options) =>
@@ -572,6 +591,31 @@ describe("identity rotation", () => {
       expect(update.update.value.previousVendorSessionId).toBe(started.vendorSessionId);
       expect(update.update.value.vendorSessionId).not.toBe(started.vendorSessionId);
     }
+    watch.close();
+  });
+
+  test("a second /clear rotates from the rotated id, never from the original", async () => {
+    // Arrange: the session already rotated once.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const watch = watchSession(shim);
+    await watch.next();
+    const isRotation = (frame: Parameters<typeof sessionUpdate>[0]) =>
+      sessionUpdate(frame).update.case === "identityRotated";
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!rotate" }));
+    const first = sessionUpdate(await watch.until(isRotation));
+
+    // Act.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!rotate" }));
+    const second = sessionUpdate(await watch.until(isRotation));
+
+    // Assert: the second rotation chains off the first's new id, to a third.
+    if (first.update.case !== "identityRotated" || second.update.case !== "identityRotated") {
+      throw new Error("expected two identity_rotated updates");
+    }
+    expect(second.update.value.previousVendorSessionId).toBe(first.update.value.vendorSessionId);
+    expect(second.update.value.vendorSessionId).not.toBe(first.update.value.vendorSessionId);
+    expect(second.update.value.vendorSessionId).not.toBe(started.vendorSessionId);
     watch.close();
   });
 

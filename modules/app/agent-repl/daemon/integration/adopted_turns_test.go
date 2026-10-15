@@ -55,7 +55,7 @@ func awaitAdoptedTurnOutcome(t *testing.T, d *harness.Daemon, f *fixture, turn i
 	t.Helper()
 	if tc.finishUnwatched {
 		d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO close of the unobserved turn", func(r harness.LogRecord) bool {
-			return r.Operation == "daemon.promptqueue.turn_ended" && r.Level == "info" &&
+			return r.Operation == harness.OpTurnEnded && r.Level == "info" &&
 				r.Context["turn"] == string(turn) && r.Context["close"] == "orphaned"
 		})
 		return
@@ -74,7 +74,7 @@ func awaitAdoptedTurnOutcome(t *testing.T, d *harness.Daemon, f *fixture, turn i
 	})
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	d.AwaitWorkspaceLogRecord(f.repo.Dir, "the kept turn's own completed close", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_ended" && r.Context["turn"] == string(turn) && r.Context["close"] == "completed"
+		return r.Operation == harness.OpTurnEnded && r.Context["turn"] == string(turn) && r.Context["close"] == "completed"
 	})
 	for _, r := range harness.ReadCumulativeWorkspaceLog(t, f.repo.Dir, "daemon") {
 		if r.Operation == "daemon.sessionwatcher.turn_ended_unobserved" && r.Context["turn_id"] == string(turn) {
@@ -335,7 +335,7 @@ func TestTheBootAdoptionKeepsATurnWaitingBehindAVendorStartedTurn(t *testing.T) 
 
 	// Assert
 	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the waiting turn's own completed close", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_ended" && r.Context["turn"] == string(waiting) && r.Context["close"] == "completed"
+		return r.Operation == harness.OpTurnEnded && r.Context["turn"] == string(waiting) && r.Context["close"] == "completed"
 	})
 	for _, r := range harness.ReadCumulativeWorkspaceLog(t, f.repo.Dir, "daemon") {
 		if r.Operation == "daemon.sessionwatcher.turn_ended_unobserved" && r.Context["turn_id"] == string(waiting) {

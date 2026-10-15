@@ -1246,6 +1246,74 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	}
 }
 
+// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt pins the owner
+// ruling of 2026-10-02: "The feed (or rather, the most recent page of the
+// feed) should be automatically rendered when the workspace bounces or its
+// backend(s) bounce, always." A workspace the incumbent serves with NO session
+// is handed over with a free lock; the successor used to adopt it on its WSM
+// facts alone and serve an empty feed until the user's next prompt revived it
+// (ship-gns, 2026-10-01 17:55). The successor starts its session as it adopts
+// it, so the conversation's turn is on the successor's feed with no prompt.
+func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
+	t.Parallel()
+	// Arrange: a headless workspace whose shim died twice before any turn
+	// ended, so the loop guard left its session down.
+	f := newRegistered(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
+	f.open()
+	f.d.RequireWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
+	f.shim.ExpectStartSession()
+	concludeFirstTurn(t, f)
+	killShim(t, f, f.shim)
+	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	revived.ExpectStartSession()
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the first revival's resumed opening", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.workspace.bring_up" && r.Context["opening"] == "resumed"
+	})
+	killShim(t, f, revived)
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the loop guard leaving the session down", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.revive" && r.Level == "warn"
+	})
+	// WRITTEN BEFORE THE HANDOVER: the successor's bring-up spawns the shim
+	// that resumes this book.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())})
+	daemonStream := f.d.WatchDaemonStream()
+
+	// Act: an unforced deploy hands the session-less workspace over.
+	f.d.StageDeployBuild(harness.DeployStaleDaemon)
+	deployHandsOver(t, f.d.Ctx(), f.d.Client(), "the incumbent")
+	addr := harness.AwaitView(t, f.d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced().GetAddress()
+	if code := f.d.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
+	}
+	drainAwaitAddrFileChange(t, f.d, addr)
+
+	// Assert: the successor brings the session up on its own, before anything
+	// asks it for the feed or sends a prompt.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the successor bringing the session up", func(r harness.LogRecord) bool {
+		return r.PID != f.d.PID() && r.Operation == "daemon.workspace.bring_up" && r.Message == "the session is up"
+	})
+	// Assert: and its feed then draws the conversation's turn.
+	successor := drainDial(addr)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		resp, err := successor.OpenFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: f.ws}))
+		if err != nil {
+			t.Fatalf("OpenFeed on the successor = error %v, want a page", err)
+		}
+		if pageCarriesTheConversation(resp.Msg.GetSuccess().GetPage()) {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-f.d.Ctx().Done():
+			t.Fatalf("waiting for the successor's feed to carry the conversation: %v", f.d.Ctx().Err())
+		}
+	}
+}
+
 // TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement
 // is critique 14's first arm: a client whose stream was NOT open at the
 // instant the handover was announced is refused with participant_not_expected

@@ -1085,6 +1085,36 @@ describe("pending-callback liveness", () => {
     stream.close();
   });
 
+  test("KillTurn during an open ask denies it and interrupts the turn", async () => {
+    // THE DAEMON'S INTERRUPT IS A KillTurn, not an UpdateAgent stop, and it
+    // must release a parked ask the same way: the ask settles denied and the
+    // turn reaches its interrupted terminal rather than wedging on the
+    // callback.
+    // Arrange: a turn parked on its ask.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-hold" }));
+    await awaitPermissionStart(stream);
+
+    // Act.
+    await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: "t1" }), force: false }),
+    );
+
+    // Assert.
+    const settled = await awaitPermissionSettled(stream);
+    const terminal = await stream.until((frame) => {
+      const agentFrame =
+        frame.frame.case === "entry" ? entryFrame(watchAgentEntry(frame)) : null;
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
+    expect(settled.result.case === "success" ? settled.result.value.decision.case : undefined).toBe("denied");
+    const frame = entryFrame(watchAgentEntry(terminal));
+    expect(frame?.result.case === "success" ? frame.result.value.outcome.case : undefined).toBe("interrupted");
+    stream.close();
+  });
+
   test("a query that DIES mid-ask denies the ask rather than leaving it open", async () => {
     // `!query-eof-mid-ask` opens the ask and then ends the iterable with the
     // callback still pending. The vendor is gone, so nothing will ever answer

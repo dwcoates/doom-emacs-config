@@ -1284,6 +1284,29 @@ cleared would be silently lost user intent."
       (agent-repl-discard-input)
       (should-not agent-repl-input-attachments))))
 
+(ert-deftest agent-repl-input-discard-empties-the-composer ()
+  "Discarding leaves the composer empty."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (with-current-buffer agent-repl-test-input--buffer
+      (agent-repl-discard-input))
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-input-discard-submits-nothing ()
+  "Discarding sends nothing to the daemon and holds nothing for it."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (with-current-buffer agent-repl-test-input--buffer
+      (agent-repl-discard-input))
+    ;; Assert
+    (should-not agent-repl-test-input--submitted)
+    (should-not agent-repl-test-input--queued)))
+
 ;;;; ---- Input preparation ----
 
 (ert-deftest agent-repl-input-wor-command-gets-a-source-tag ()

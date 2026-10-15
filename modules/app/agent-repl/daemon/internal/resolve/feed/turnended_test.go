@@ -479,6 +479,25 @@ func TestTheVendorsErrorTaxonomyIsRespelledArmForArm(t *testing.T) {
 	}
 }
 
+func TestAnUnmodeledVendorClassIsDrawnByItsOwnName(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Message: "the vendor said so",
+			Kind:    &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{Type: "teapot_error"}},
+		}},
+	})
+
+	// Assert: the class the vendor named, verbatim, never collapsed to empty.
+	if got := h.terminalRow("turn-1").GetErrored().GetVendorUnmodeled().GetType(); got != "teapot_error" {
+		t.Fatalf("vendor_unmodeled.type = %q, want the vendor's own class %q", got, "teapot_error")
+	}
+}
+
 // erroredArmWord names an errored terminal's cause arm.
 func erroredArmWord(errored *frontendv1.FeedTurnEndedErrored) string {
 	switch errored.GetError().(type) {
@@ -1601,5 +1620,48 @@ func TestEveryFailingCloseHeadlineIsTheSharedTurnFaultSentence(t *testing.T) {
 				t.Fatalf("headline = %q, want turnfault's sentence %q", got, want.Sentence)
 			}
 		})
+	}
+}
+
+// THE WORK A TURN REACHED OUTLIVES ITS STOP. A terminal is a row of its own;
+// the prose the turn settled before it stays on the feed, whichever way the
+// turn ended.
+func TestAFailedTurnKeepsTheProseItHadReached(t *testing.T) {
+	// Arrange: a turn that settled an answer, then failed.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "Working on it…"},
+		}, nil), nil, nil)
+
+	// Act.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}},
+	})
+
+	// Assert.
+	responses := h.responseRows()
+	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "Working on it…" {
+		t.Fatalf("response rows = %v, want exactly the answer the turn reached before it failed", responses)
+	}
+}
+
+func TestAnInterruptedTurnKeepsTheProseItHadReached(t *testing.T) {
+	// Arrange: a turn that settled an answer, then was stopped.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "Working on it…"},
+		}, nil), nil, nil)
+
+	// Act.
+	h.terminal("turn-1", interruptedByUser(), nil)
+
+	// Assert.
+	responses := h.responseRows()
+	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "Working on it…" {
+		t.Fatalf("response rows = %v, want exactly the answer the turn reached before it was stopped", responses)
 	}
 }

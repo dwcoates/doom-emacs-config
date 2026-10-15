@@ -50,6 +50,31 @@ func TestAPushNotificationStandsAsASalientLine(t *testing.T) {
 	}
 }
 
+func TestAPushTheVendorDidNotSendStillStandsAsASalientLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, notificationFrame("the agent needs you"))
+
+	// Act: the vendor settles the call without delivering it.
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "note-1"},
+		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
+			State: &conversationv1.AgentPushNotification_Success{Success: &conversationv1.AgentPushNotificationSuccess{
+				Outcome: &conversationv1.AgentPushNotificationSuccess_NotSent{NotSent: &conversationv1.AgentPushNotificationNotSent{
+					Reason: &conversationv1.AgentPushNotificationNotSent_ConfigOff{ConfigOff: &conversationv1.AgentPushNotificationConfigOff{}},
+				}},
+			}},
+		}},
+	})
+
+	// Assert: the line is the agent's message, and the vendor's delivery
+	// verdict does not take it down.
+	if got, want := lineNow(t, h), (activityLine{tier: "salient", kind: "notification", text: "the agent needs you"}); got != want {
+		t.Fatalf("activity = %+v, want %+v", got, want)
+	}
+}
+
 func TestAPushNotificationOutlivesItsTransientWindow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

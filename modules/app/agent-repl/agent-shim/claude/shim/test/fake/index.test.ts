@@ -947,6 +947,14 @@ describe("the account-usage probe", () => {
     });
   });
 
+  it("keeps the weekly window under !usage-opus-absent: only the opus window is absent", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-opus-absent"]);
+
+    // Assert
+    expect(answer.rate_limits?.seven_day).toMatchObject({ utilization: 63 });
+  });
+
   it("answers a null UTILIZATION when the figure is unavailable", async () => {
     // Arrange + Act
     const answer = await usage(["!usage-utilization-unavailable"]);

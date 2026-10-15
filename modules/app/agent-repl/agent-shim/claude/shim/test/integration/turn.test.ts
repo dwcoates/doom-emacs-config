@@ -321,12 +321,14 @@ describe("StartTurn", () => {
  *   sidecar is its only producer and no `!api-*` row can put one on this live
  *   WatchAgent. The rows below assert the terminal, which is the whole of what
  *   the stream plane owes.
- * - `!refusal-fallback`, `!refusal-no-fallback` and `!context-window` publish
- *   an `AgentResponseFailure` reason. The refusals arrive as a `fallback`
- *   content block (no text, so no response unit is minted) and
- *   `!context-window` emits no assistant message at all, so those three reasons
+ * - `!refusal-fallback` and `!context-window` publish an
+ *   `AgentResponseFailure` reason. The fallback refusal arrives as a
+ *   `fallback` content block (no text, so no response unit is minted) and
+ *   `!context-window` emits no assistant message at all, so those two reasons
  *   have NO producer on this plane today. Recorded as a gap rather than
- *   asserted from an invented fixture.
+ *   asserted from an invented fixture. `!refusal-no-fallback` DOES state its
+ *   refusal here, through its `model_refusal_no_fallback` record; "a refusal
+ *   with no fallback" below asserts it.
  */
 interface StopRow {
   /** The mock lever. */
@@ -499,6 +501,43 @@ describe("the turn-stop taxonomy", () => {
         );
       }),
     ).toBe(false);
+    watch.close();
+  });
+});
+
+describe("a refusal with no fallback", () => {
+  test("states the refusal on the live stream before the model_error terminal", async () => {
+    // THE DAEMON DRAWS feed.proto's `refusal` arm only from a response frame
+    // that witnessed one, so the stream plane owes that frame: the vendor's
+    // `model_refusal_no_fallback` record, converted to a settled response whose
+    // failure reason is `refused`, ahead of the turn's `model_error` end.
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    // Act.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!refusal-no-fallback" }));
+    const terminal = await untilTerminal(watch);
+
+    // Assert.
+    const refusals = watch.frames().filter((served) => {
+      if (served.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(served));
+      if (agentFrame?.result.case !== "update" || agentFrame.result.value.update.case !== "activity") return false;
+      const item = agentFrame.result.value.update.value.item;
+      return (
+        item.case === "response" &&
+        item.value.result.case === "failure" &&
+        item.value.result.value.reason?.reason.case === "refused"
+      );
+    });
+    expect(refusals.length).toBe(1);
+    const frame = entryFrame(terminal);
+    expect(frame?.result.case === "failure" ? frame.result.value.failure.case : undefined).toBe("modelError");
     watch.close();
   });
 });
@@ -1985,6 +2024,49 @@ describe("keep-alives", () => {
       promptText(record).includes("during the keep-alive"),
     );
     expect(delivered).toHaveLength(1);
+  });
+
+  test("a prompt sent during a keep-alive rewinds past that keep-alive alone, to the last real turn", async () => {
+    // Arrange: a real turn, then a keep-alive in flight.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" })));
+    await shim.log.record((record) => record.message === "closed a turn" && record.context.keepalive === false);
+    await keepaliveSubmitted(shim);
+    const rewind = shim.log.record(
+      (record) => record.message.startsWith("REWINDING the vendor context") && record.context.before === "real_prompt",
+    );
+
+    // Act.
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "during a keep-alive" })));
+    const record = await rewind;
+
+    // Assert: it discards exactly the keep-alive it waited out, and anchors on t1.
+    const kinds = (record.context.discarded_span as { kind: string }[]).map((turn) => turn.kind);
+    expect([kinds, record.context.anchor_turn_id]).toEqual([["keepalive"], "t1"]);
+  });
+
+  test("an interrupted turn's own tool result anchors the next rewind, and nothing is refused", async () => {
+    // Arrange: a turn stopped mid-tool, whose tool result lands after its last
+    // assistant record.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!interrupt" }));
+    await watch.until((frame) => frame.frame.case === "entry");
+    updateAccepted(await shim.clients.h1.updateAgent(stopAgent()));
+    await untilTerminal(watch);
+    watch.close();
+
+    // Act: the next beat rewinds.
+    const record = await shim.log.record(rewoundBeforeBeat);
+
+    // Assert: the interrupted turn is the anchor, only keep-alive material is
+    // discarded, and no rewind was refused.
+    const kinds = (record.context.discarded_span as { kind: string }[]).map((turn) => turn.kind);
+    expect([kinds, record.context.anchor_turn_id]).toEqual([["keepalive"], "t1"]);
+    expect(shim.log.records().filter((candidate) => candidate.message.startsWith(REFUSED))).toEqual([]);
   });
 
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {

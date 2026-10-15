@@ -835,6 +835,10 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogMessageCount(workspaceDir, operation
 // it — the point after which that turn's terminal frame will be attributed.
 const OpTurnOpened = "daemon.sessionwatcher.turn_opened"
 
+// OpTurnEnded is the record the prompt queue writes as it stamps a turn's
+// close: the turn's durable end, after which nothing of it is still in flight.
+const OpTurnEnded = "daemon.promptqueue.turn_ended"
+
 // ShimVerbOrder answers the shim.v1 verbs one workspace's fake shim received,
 // in arrival order.
 //

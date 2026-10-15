@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,36 @@ func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
 	req := f.shim.ExpectStartSession()
 	if req.GetFresh() == nil {
 		t.Fatalf("StartSession request = %v, want a fresh source for a workspace with no prior conversation", req)
+	}
+}
+
+// THE WORKSPACE'S OPENING IS ITS ONE REPLAY. Opening the workspace starts the
+// session watcher on a workspace_opened bring-up, and the turns that follow
+// start no watcher of their own.
+func TestAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+
+	// Act: two turns, each run to its end.
+	for i, key := range []string{"k-replay-once-1", "k-replay-once-2"} {
+		f.submit("say something", key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+		f.shim.ExpectStartTurn()
+		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, i+1)
+		pushConcludedTurn(f.shim, mainAgent, fmt.Sprintf("resp-%d", i))
+		f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnEnded, i+1)
+	}
+
+	// Assert
+	var openings []any
+	for _, rec := range f.d.WorkspaceLog(f.repo.Dir, "daemon") {
+		if opening, ok := rec.Context["opening"]; ok && rec.Operation == "daemon.workspace.bring_up" {
+			openings = append(openings, opening)
+		}
+	}
+	if len(openings) != 1 || openings[0] != "workspace_opened" {
+		t.Fatalf("watcher openings = %v, want exactly one workspace_opened", openings)
 	}
 }
 
@@ -893,6 +924,36 @@ func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testi
 		})
 	if got := view.GetHost().GetExisting().GetLive().GetClaude().GetConfigDir(); got != d.MultiRepoConfigDir {
 		t.Fatalf("HostVendorClaude.config_dir = %q for a workspace under MULTI_REPO_ROOT, want the multi-repo account root %q", got, d.MultiRepoConfigDir)
+	}
+}
+
+// THE VENDOR CONVERSATION A HOST NAMES IS THE BRING-UP'S, AND A TURN DOES NOT
+// MOVE IT. The host stream's vendor arm carries the conversation the session
+// started on, and a turn run in that conversation leaves it naming the same
+// one: only a rotation changes it.
+func TestTheHostsVendorConversationIsUnchangedByATurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: an opened workspace whose host names its conversation.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.shim.PushHealthy()
+	named := func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetHost().GetExisting().GetLive().GetClaude().GetSessionId() != ""
+	}
+	before := harness.AwaitView(t, f.d.Ctx(), f.host, "the host naming its vendor conversation", named).
+		GetHost().GetExisting().GetLive().GetClaude().GetSessionId()
+
+	// Act: a turn, run to its close.
+	f.submit("go", "k-vendor-stable", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	pushConcludedTurn(f.shim, mainAgent, "resp-1")
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnEnded, 1)
+
+	// Assert: a fresh host watch names the same conversation.
+	after := harness.AwaitView(t, f.d.Ctx(), f.d.WatchHost(f.ws), "the host after the turn", named).
+		GetHost().GetExisting().GetLive().GetClaude().GetSessionId()
+	if after != before {
+		t.Fatalf("the host names vendor conversation %q after a turn, want the bring-up's %q", after, before)
 	}
 }
 

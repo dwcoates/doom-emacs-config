@@ -689,6 +689,30 @@ func TestANonZeroExitStillCompletedTheCall(t *testing.T) {
 	}
 }
 
+func TestAPartialOutputEndsOnTheCountOfBytesNotShown(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "yes | head -100000"},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: &conversationv1.AgentBashOutput{
+					Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+						Stdout: "y\ny",
+						Extent: &conversationv1.AgentBashOutputText_Partial{Partial: &conversationv1.AgentBashOutputPartial{BytesOmitted: 1_234_567}},
+					}},
+				},
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	}))
+
+	// Assert: the shown lines, then the producer's own count of what was cut.
+	if got, want := h.card().GetReturned().GetText().GetText(), "y\ny\n1,234,567 bytes more not shown"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
 func TestATimedOutShellSaysSoAboveItsLastLines(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)

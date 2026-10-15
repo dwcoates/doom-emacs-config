@@ -710,6 +710,64 @@ func TestAnUnreadableServiceUnavailableRecordsNoCause(t *testing.T) {
 	t.Fatalf("no daemon.footer.usage_sample_unreadable record in %+v", h.log.Records())
 }
 
+// EVERY UNREAD ARM IS NAMED IN THE BREADCRUMB, and the figures on hand stand
+// whichever arm it was: the record is the one place a failing read stays
+// visible, so a collapsed or dropped reason word would hide which read failed.
+func TestEveryUnreadReasonIsNamedAndLeavesTheFiguresStanding(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason func(*conversationv1.SessionAccountUsageUnavailable)
+		want   string
+	}{
+		{name: "service unavailable", want: "service_unavailable", reason: func(u *conversationv1.SessionAccountUsageUnavailable) {
+			u.Reason = &conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable{ServiceUnavailable: &conversationv1.SessionUsageServiceUnavailable{}}
+		}},
+		{name: "window unavailable", want: "window_unavailable", reason: func(u *conversationv1.SessionAccountUsageUnavailable) {
+			u.Reason = &conversationv1.SessionAccountUsageUnavailable_WindowUnavailable{WindowUnavailable: &conversationv1.SessionUsageWindowUnavailable{}}
+		}},
+		{name: "utilization unavailable", want: "utilization_unavailable", reason: func(u *conversationv1.SessionAccountUsageUnavailable) {
+			u.Reason = &conversationv1.SessionAccountUsageUnavailable_UtilizationUnavailable{UtilizationUnavailable: &conversationv1.SessionUsageUtilizationUnavailable{}}
+		}},
+		{name: "sampling failure", want: "sampling_failure", reason: func(u *conversationv1.SessionAccountUsageUnavailable) {
+			u.Reason = &conversationv1.SessionAccountUsageUnavailable_SamplingFailure{SamplingFailure: &conversationv1.SessionUsageSamplingFailure{}}
+		}},
+		{name: "no stated reason", want: "unspecified", reason: func(u *conversationv1.SessionAccountUsageUnavailable) {
+			u.Reason = nil
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: figures read earlier, so the line draws.
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+			sample := unavailableUsageSample(instant.Add(time.Minute).UnixMilli())
+			tc.reason(sample.GetAccountUsage().GetUnavailable())
+
+			// Act
+			h.r.OnSessionUpdate(testWS, sample)
+
+			// Assert
+			line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
+			if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetUtilization() != 0.90 {
+				t.Fatalf("allowances = %+v, want the figures on hand left standing", line)
+			}
+			if line.GetSample() != nil {
+				t.Fatalf("sample = %+v, want unset: an unread sample draws no caveat", line.GetSample())
+			}
+			for _, rec := range h.log.Records() {
+				if rec.Operation == "daemon.footer.usage_sample_unreadable" {
+					if rec.Context["reason"] != tc.want {
+						t.Fatalf("reason = %v, want %q", rec.Context["reason"], tc.want)
+					}
+					return
+				}
+			}
+			t.Fatalf("no daemon.footer.usage_sample_unreadable record in %+v", h.log.Records())
+		})
+	}
+}
+
 // THE THRESHOLD IS A FRACTION AND THE VENDOR'S FIGURE IS A PERCENTAGE. An
 // ordinary allowance must not be colored as a warning.
 func TestAnAllowanceIsNewsworthyOnlyAboveTheThresholdOnceTheScalesAgree(t *testing.T) {

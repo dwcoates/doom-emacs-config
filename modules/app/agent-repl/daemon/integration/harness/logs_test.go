@@ -565,3 +565,31 @@ func TestAwaitLogRecordWithinReturnsTheRecordThePredicateAccepts(t *testing.T) {
 		t.Fatalf("record = %+v, want the mounted marker", got)
 	}
 }
+
+// TestEveryTurnEndedWaitNamesOpTurnEnded pins that the integration suite waits
+// on a turn's durable close through OpTurnEnded alone: a test that spelled the
+// operation by hand would keep passing on a stale spelling after a rename.
+func TestEveryTurnEndedWaitNamesOpTurnEnded(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob(filepath.Join("..", "*_test.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("glob the integration tests = %v, %v, want files", files, err)
+	}
+
+	// Act
+	var spelled []string
+	for _, f := range files {
+		body, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if strings.Contains(string(body), fmt.Sprintf("%q", OpTurnEnded)) {
+			spelled = append(spelled, f)
+		}
+	}
+
+	// Assert
+	if len(spelled) != 0 {
+		t.Fatalf("integration tests spell %q by hand instead of harness.OpTurnEnded: %v", OpTurnEnded, spelled)
+	}
+}

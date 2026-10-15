@@ -282,6 +282,50 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 	}
 }
 
+// A FAILED MERGE HANDS ITS WORKSPACE BACK. Once the resolution gives up, the
+// user's next prompt is delivered and runs to its end as an ordinary turn,
+// never refused as merging.
+func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: the merge failed in conflicts and handed the workspace back.
+	s := newSourcedRepo(t)
+	harness.CommitWork(t, s.f.ws.GetDir())
+	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
+	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
+	footer := s.d.WatchFooter(s.f.ws)
+	root := s.f.watchRootFeed()
+	s.mergeAs(t, harness.OneShot())
+	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
+		s.awaitStartTurn(t, 1+attempt)
+		pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
+	}
+	awaitFooter(t, s.f, footer, "merge failed in conflicts", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMergeFailed().GetConflicts() != nil
+	})
+	// The handback reports the failure to the session as its own turn.
+	if report := s.awaitStartTurn(t, 2+merge.MaxConflictAttempts); !strings.Contains(report, "It failed") {
+		t.Fatalf("the handback turn said %q, want the merge's failure reported", report)
+	}
+	pushConcludedTurn(s.f.shim, mainAgent, "reported")
+
+	// Act
+	const prompt = "please help carry the rebase on"
+	resp := s.f.submit(prompt, "k-after-failed-merge", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Assert: delivered as a turn, and run to its end.
+	turn := resp.GetSuccess().GetTurn().GetTurn()
+	if turn == nil {
+		t.Fatalf("SubmitPrompt after the failed merge = %v, want a turn", resp)
+	}
+	if said := s.awaitStartTurn(t, 3+merge.MaxConflictAttempts); said != prompt {
+		t.Fatalf("the session was handed %q, want the user's prompt %q", said, prompt)
+	}
+	pushConcludedTurn(s.f.shim, mainAgent, "helped")
+	awaitRow(t, s.f, root, "the prompt's turn concluded", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == turn.GetValue() && r.GetTurnEnded().GetConcluded() != nil
+	})
+}
+
 func TestExhaustedFixingAttemptsFailTheMergeInTests(t *testing.T) {
 	t.Parallel()
 	// Arrange: every gate run fails.
