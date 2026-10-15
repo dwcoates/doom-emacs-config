@@ -299,18 +299,32 @@ Rows re-ruled while implementing:
   - the one readiness stamp is written from Doom's after-init edge.
 - **Daemonless.** The fake daemon starts first, on the test's state root, and writes `daemon.addr`. Emacs's ensure then takes the adoption path for an already-answering daemon (`test-integration-daemon.el` `daemon-answering-daemon-is-adopted`), so no launcher, no `agent-repld` build and no shim are ever spawned.
 - **Rejected: running against the host's own Doom.** It would reach the developer's `~/.config/doom` and `~/.emacs.d`, which is the reason the Emacs layer is sandboxed at all.
-- **Considered, unverified: a batch Emacs that loads Doom's core** (noninteractive, the way the `doom` CLI loads it). It would skip Xvfb, but three obstacles stand in the way:
-  - the spec's reasons against batch still hold for popups: no window system, no redisplay, no tab-bar;
-  - `config.el` gates cold start on `(not noninteractive)`;
-  - persp-mode behavior in batch is unknown.
-  - First step if pursued: measure whether `map!` lookups and `display-buffer-alist` resolution are faithful in a Doom-loaded batch Emacs. Until that is measured, the GUI frame is the design.
+- **Measured and rejected: a batch Emacs that loads Doom** (2026-10-15, inside the sandbox image, through `e2e-sandbox.sh run`).
+  - `emacs --batch` with the staged profile's `early-init.el` and `doom-start` loads none of the user config.
+    - `map!`, evil, persp-mode and agent-repl were all absent, and the leader map had no `TAB C-n`.
+    - Doom skips the user's config when `noninteractive` is set, so a batch Emacs cannot be this tier.
+- **Measured: a display-less `emacs --daemon` boots the whole profile.**
+  - Staged exactly as `e2e-emacs` stages it, with `AGENT_REPL_E2E_SERVER` and `AGENT_REPL_E2E_READY` set, all 3 runs wrote the same readiness stamp the GUI boot writes (`map_bang`, `popup_rule` and `agent_repl` all true).
+  - `map!` and evil were loaded, there were 25 popup rules, persp-mode was on, and `SPC TAB C-n` resolved to `agent-repl-add-project-workspace`.
+  - `emacs-init-time` was 0.48 to 0.49s. The wall time to a running server was 0.82 to 0.88s, including process start and the forking parent's exit.
+  - The daemon's parent exits only once init has finished. That gives a structural readiness latch with no polling.
+  - Not verified: where a popup buffer lands. A daemon has no window system, and its only frame is the invisible initial one.
+- **The GUI frame stays the design, because dropping Xvfb buys almost nothing.**
+  - In the 2026-10-15 coverage run's `e2e-emacs` (60 boots), Xvfb readiness had a median of 41ms (3.2s total).
+  - The GUI Doom boot had a median of 530ms (37.8s total), the same cost as the daemon's init.
+  - Running display-less saves about 41ms per boot, and gives up a real window system for popup landing. That trade is not worth it.
 
 ### Cost per process
 
 - Measured today (`testrun/roster/roster.go`, 2026-10-12): the worst Doom boot inside the sandbox is 0.88s on 2 CPUs, against its 3.5s bound.
 - An `e2e-emacs` scenario costs about 4.4 slot-seconds. That includes the real daemon's spawn and its first link, and for turn scenarios the shim, store and sidecar.
 - The Doom tier pays Xvfb plus the Doom boot plus a fake-daemon start (a Go binary built once per run, like the ERT suites' `AGENT_REPL_ITEST_FAKEDAEMON` prebuild). The container start is shared by the whole suite.
-- This is unmeasured; the first implementation step measures one case end to end.
+- Measured per boot (2026-10-15, `e2e-emacs` in a full coverage run, 60 boots):
+  - staging the profile took a median of 56ms;
+  - Xvfb took a median of 41ms;
+  - the Doom boot took a median of 530ms;
+  - the server answered in a median of 30ms.
+- The tier never pays the real daemon's link, which had a median of 281ms there. The fake daemon's start replaces it, and that start is not yet measured.
 
 ### Sharing one boot across cases
 
