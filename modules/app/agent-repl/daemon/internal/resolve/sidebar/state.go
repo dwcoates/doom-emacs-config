@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"time"
+
 	"agent-repld/internal/ids"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/footer"
@@ -138,6 +140,11 @@ type wsState struct {
 	// lastArmSeen reports whether any arm has been published at all, so a
 	// workspace's first render is not mistaken for a change from "".
 	lastArmSeen bool
+	// statusChangedAt is when this daemon last saw the published arm MOVE,
+	// nil until it has. It is the live half of the row's status change
+	// instant; the durable half is wsm's StatusChangedAt, which the status
+	// change sink is told, so a restart still ranks the row by it.
+	statusChangedAt *time.Time
 
 	// merge is what the merge orchestrator last told the roster.
 	merge footer.MergeFacts

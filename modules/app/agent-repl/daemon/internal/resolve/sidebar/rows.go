@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"fmt"
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -46,6 +47,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	previousArm, armChanged := s.noteArm(armName)
 	if armChanged {
 		r.logArmChange(rec.ID, armName, previousArm, rc.cause)
+		r.noteStatusChange(rec.ID, s)
 	}
 	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
@@ -138,6 +140,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// switcher offers the workspaces the user most recently closed. Unset
 	// while open, and on a close that predates the record.
 	out.Closure = closure(rec, rowLog)
+	// THE UPDATE RECENCY, for ordering only: the editor's switcher offers
+	// workspaces most-recently-updated first. Always set.
+	out.LastUpdated = lastUpdated(rec, s.statusChangedAt)
 	for _, child := range rc.tree.children[rec.ID] {
 		out.Children = append(out.Children, r.row(child, rc, rowLog))
 	}
@@ -186,6 +191,30 @@ func lastTurnEnded(rec wsm.Workspace) *frontendv1.RosterRowLastTurnEnded {
 		return nil
 	}
 	return &frontendv1.RosterRowLastTurnEnded{AtMs: rec.LastTurnEndedAt.UnixMilli()}
+}
+
+// lastUpdated resolves the row's update recency
+// (frontend.v1.RosterRowLastUpdated): the LATEST of the record's creation, its
+// latest turn start or close, its close record, its hidden instant, its merge
+// landing, its requester's landing, and its status change -- the durable one
+// and LIVE, the one this daemon stamped (wsState.statusChangedAt), whichever
+// is later. The selection instant is deliberately not among them: viewing a
+// workspace is not an update to it. Like lastSelected it is never drawn.
+func lastUpdated(rec wsm.Workspace, live *time.Time) *frontendv1.RosterRowLastUpdated {
+	var closedAt, landedAt *time.Time
+	if rec.Closure != nil {
+		closedAt = &rec.Closure.At
+	}
+	if rec.Landed != nil {
+		landedAt = &rec.Landed.At
+	}
+	latest := rec.CreatedAt
+	for _, at := range []*time.Time{rec.LastActivityAt, rec.LastTurnEndedAt, closedAt, rec.HiddenAt, rec.MergedAt, landedAt, rec.StatusChangedAt, live} {
+		if at != nil && at.After(latest) {
+			latest = *at
+		}
+	}
+	return &frontendv1.RosterRowLastUpdated{AtMs: latest.UnixMilli()}
 }
 
 // closure resolves the row's durable close record, or nil for an open
@@ -332,6 +361,18 @@ func (r *resolver) noteResult(ws ids.WorkspaceID, s *wsState, log dlog.Logger) {
 		"result": s.result.String(), "end": s.turnEndArm(),
 	})
 	r.pendingResults = append(r.pendingResults, resultChange{ws: ws, result: snapshot})
+}
+
+// noteStatusChange stamps the workspace's live status change instant at the
+// moment its published arm moved, and queues the instant for mutate to hand
+// the status change sink once the lock is released.
+func (r *resolver) noteStatusChange(ws ids.WorkspaceID, s *wsState) {
+	at := r.now()
+	s.statusChangedAt = &at
+	if r.statusChanges == nil {
+		return
+	}
+	r.pendingStatusChanges = append(r.pendingStatusChanges, statusChange{ws: ws, at: at})
 }
 
 // logArmChange records a row's PUBLISHED status arm whenever it changes, and

@@ -22,7 +22,7 @@ func timerAfter(d time.Duration, f func()) func() bool {
 }
 
 // WithClock replaces the clock the Recently Merged window is measured against
-// and the timer that re-renders when a merge ages out of it.
+// and a status change is stamped by, and the timer that re-renders when a merge ages out of it.
 func WithClock(now func() time.Time, after AfterFunc) Option {
 	return func(r *resolver) {
 		r.now = now
