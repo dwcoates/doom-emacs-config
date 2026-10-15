@@ -63,6 +63,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 		return Args{}, err
 	}
 	a.Trace = filepath.Join(root, "testrun", "vitest", "redundancy-trace.mjs")
+	a.Skip = filepath.Join(root, "testrun", "vitest", "redundancy-skip.mjs")
 	a.Delete, a.Pins = a.Common.Delete, a.Common.Pins
 	return a, nil
 }
