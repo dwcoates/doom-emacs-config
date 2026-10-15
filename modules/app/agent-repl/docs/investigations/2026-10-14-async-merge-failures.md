@@ -15,6 +15,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | LANDED (`98f4bee425`), deployed |
 | 5 | 2026-10-15 | `test-fixture-table-rules-2` (entry 2's two rule commits, rebuilt on master `3e33b5963d`) | `fixture-rules-retry` | requested, pending; a retry of entry 2 from a turn whose prompt is a normal transcript record |
 | 6 | 2026-10-15 | `tier-audit-e2e-step-a` (tip `75e781c362`, e2e audit report plus lower-tier tests) | `tier-audit-e2e-step-a-merge` | requested, pending |
+| 7 | 2026-10-15 | `test-tier-audit-integration-step3` (tip `6ff96ad124`, shim-lock stand-in plus removal lists) | `tier-step3-shim-lock` | requested, pending |
 
 ## 1. `test-tier-rule` (landed)
 
