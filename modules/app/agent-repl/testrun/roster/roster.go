@@ -235,22 +235,14 @@ var Suites = []Suite{
 			"/.githooks/reference-transaction",
 		}}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]int{"integration": 8},
-		Programs: map[string][]string{"integration": {"shim-claude-sidecar", "shim-lock"}},
+		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
 		Reuse: &Reuse{Inputs: []string{
 			"proto/vocab/agent-repl-tools.json", "testdata/corpus/", "testdata/projects/", "logging-contract.md",
-			"agent-shim/claude/shim-sidecar/package.json",
-			// The mocked vendor IS the shim's fake mode, bundled from the
-			// shim's sources into a directory of the suite's own after
-			// bin/ensure-deps.sh installs its packages. Never the shim's dist/,
-			// which the shim suite's own integration build rewrites.
-			"agent-shim/claude/shim/src/", "agent-shim/claude/shim/test/", "agent-shim/claude/shim/scripts/",
-			"agent-shim/claude/shim/testdata/", "agent-shim/claude/shim/build.mjs", "agent-shim/claude/shim/build-options.mjs",
-			"agent-shim/claude/shim/build-options.d.mts", "agent-shim/claude/shim/package.json",
-			"agent-shim/claude/shim/package-lock.json", "agent-shim/claude/shim/tsconfig.json",
-			"bin/ensure-deps.sh", "bin/lib-node-store.sh",
-			// What the bundle imports from outside the shim.
-			"proto/gen/ts/", "proto/ts/", "agent-shim/logging/ts/",
-		}, Generated: []string{"agent-shim/claude/shim/node_modules/"}}},
+			// The mocked vendor's scenarios, as the shim's suite generates and
+			// keeps them fresh: this suite reads their files and never boots
+			// the shim.
+			"testdata/scenario-goldens/",
+		}}},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 8},
 		Programs: map[string][]string{"integration": {"shim-store"}},
 		// internal/testclose's scan walks the store's own tree.
