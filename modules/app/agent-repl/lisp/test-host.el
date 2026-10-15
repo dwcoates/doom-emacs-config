@@ -2476,6 +2476,57 @@ chose, addressed by the DIR, since the ids were re-minted."
     (should (agent-repl-test-host--logged-p
              :info "elisp.host.link-up-reselect ws=ws-1"))))
 
+(ert-deftest agent-repl-test-host-link-up-reasserts-a-selection-still-in-flight ()
+  "A select still unanswered when the link comes up is the one re-asserted.
+Its failure can land after the link-up, so the id recorded before it
+names the workspace the user already left."
+  (agent-repl-test-host--with-harness
+    ;; Arrange: ws-2's select was acknowledged; the user's select of ws-1
+    ;; is still in flight as the next daemon's link comes up.
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-host-last-selected-id "ws-id-2"
+            agent-repl-host--select-in-flight "ws-1"
+            agent-repl-test-host--current-ws "ws-1")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-2" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "ws-id-2") "ws-2")))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.link-up-reselect ws=ws-1")))))
+
+(ert-deftest agent-repl-test-host-selected-dir-prefers-a-queued-selection ()
+  "A selection queued behind the one in flight is the user's newest choice."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-host-last-selected-id "ws-id-1"
+          agent-repl-host--select-in-flight "ws-2"
+          agent-repl-host--select-queued (cons "ws-3" nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (ws _key) (concat "/tmp/" ws)))
+              ((symbol-function 'agent-repl--ws-by-ref-id)
+               (lambda (_id) "ws-1")))
+      ;; Act / Assert
+      (should (equal (agent-repl-host--selected-dir) "/tmp/ws-3")))))
+
+(ert-deftest agent-repl-test-host-selected-dir-reads-the-recorded-id-with-nothing-pending ()
+  "With no selection pending, the id Emacs last recorded decides."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-host-last-selected-id "ws-id-1"
+          agent-repl-test-host--current-ws "ws-2")
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (ws _key) (concat "/tmp/" ws)))
+              ((symbol-function 'agent-repl--ws-by-ref-id)
+               (lambda (id) (and (equal id "ws-id-1") "ws-1"))))
+      ;; Act / Assert
+      (should (equal (agent-repl-host--selected-dir) "/tmp/ws-1")))))
+
 (ert-deftest agent-repl-test-host-link-up-reselect-waits-for-every-registration ()
   "The re-assertion comes AFTER the last workspace re-registered.
 Asserting it earlier would let the workspaces still registering behind it

@@ -1659,10 +1659,20 @@ dired."
 THE DIR, NOT THE ID, IS WHAT SURVIVES A DAEMON RESTART: a relaunched
 daemon re-mints every `WorkspaceRef\=' id, so the id Emacs held before the
 link went down names nothing afterwards, while the directory the user
-stood in is the same directory the re-registration hands back.  The id is
-still where the answer is looked up FIRST — it is the selection Emacs
-last had acknowledged — and the tab the frame is on is the fallback."
-  (let ((ws (or (and agent-repl-host-last-selected-id
+stood in is the same directory the re-registration hands back.
+
+THE NEWEST REQUEST WINS: a selection still pending
+\(`agent-repl-host-pending-selection') is the user\='s newest choice, and
+it is looked up FIRST.  A select nobody has answered yet is recorded as
+the selection whichever way it ends (`agent-repl-host--select-failed'),
+but its failure can land AFTER the link-up that reads this, and reading
+only the recorded id then re-asserted the selection the user had already
+left (2026-10-15, e2e TestEmacsRestartKeepsTheSelectedWorkspace: the
+select of the workspace the user stood on was still in flight when the
+daemon stopped).  The id Emacs last had recorded comes next, and the tab
+the frame is on is the fallback."
+  (let ((ws (or (agent-repl-host-pending-selection)
+                (and agent-repl-host-last-selected-id
                      (agent-repl--ws-by-ref-id agent-repl-host-last-selected-id))
                 (agent-repl--ws-current-name))))
     (and ws (agent-repl--ws-get ws :project-dir))))
