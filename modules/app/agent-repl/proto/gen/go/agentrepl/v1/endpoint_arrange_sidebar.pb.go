@@ -861,9 +861,17 @@ func (*ArrangeSidebarResponse_Error) isArrangeSidebarResponse_Result() {}
 // Recorded; the roster push carries the new arrangement to every page and to
 // the tab bar.
 type ArrangeSidebarSuccess struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE REVISION OF A ROSTER THAT CARRIES THE CHANGE
+	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it
+	// shows the new arrangement. The answer and the push travel on separate
+	// streams, so a page that drew the change at once holds its own drawing
+	// until a push at or above this revision arrives, rather than drawing an
+	// older push that would put the moved item back for an instant. 0 when the
+	// daemon has resolved no roster yet.
+	RosterRevision uint64 `protobuf:"varint,1,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ArrangeSidebarSuccess) Reset() {
@@ -894,6 +902,13 @@ func (x *ArrangeSidebarSuccess) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ArrangeSidebarSuccess.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ArrangeSidebarSuccess) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
 }
 
 // Validation failures (an unset field or arm, a blank id, an item placed
@@ -1534,8 +1549,9 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\x16ArrangeSidebarResponse\x12?\n" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.ArrangeSidebarSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.ArrangeSidebarErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\x17\n" +
-	"\x15ArrangeSidebarSuccess\"\xd3\x06\n" +
+	"\x06result\"@\n" +
+	"\x15ArrangeSidebarSuccess\x12'\n" +
+	"\x0froster_revision\x18\x01 \x01(\x04R\x0erosterRevision\"\xd3\x06\n" +
 	"\x13ArrangeSidebarError\x12^\n" +
 	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.ArrangeSidebarUnknownRepositoryH\x00R\x11unknownRepository\x12^\n" +
 	"\x12unknown_subsection\x18\x02 \x01(\v2-.agentrepl.v1.ArrangeSidebarUnknownSubsectionH\x00R\x11unknownSubsection\x12[\n" +

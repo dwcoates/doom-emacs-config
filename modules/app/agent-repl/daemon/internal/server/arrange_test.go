@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/workspace"
@@ -264,6 +265,37 @@ func TestValidateArrangeSidebarRequestRefusesAnIncompleteRequest(t *testing.T) {
 			// Assert
 			if err == nil || err.Code() != connect.CodeInvalidArgument {
 				t.Fatalf("validate = %v, want invalid argument", err)
+			}
+		})
+	}
+}
+
+func TestArrangeSidebarAnswersTheRevisionOfTheRosterThatCarriesTheChange(t *testing.T) {
+	tests := []struct {
+		name      string
+		published []uint64
+		want      uint64
+	}{
+		{name: "the latest roster's revision", published: []uint64{4, 7}, want: 7},
+		{name: "zero before any roster", published: nil, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h, _ := arrangeHarness(t)
+			for _, revision := range tt.published {
+				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{Revision: revision})
+			}
+
+			// Act
+			resp, err := h.Client.ArrangeSidebar(context.Background(), connect.NewRequest(createSubsection("repo-1", "later")))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ArrangeSidebar: %v", err)
+			}
+			if got := resp.Msg.GetSuccess().GetRosterRevision(); got != tt.want {
+				t.Fatalf("roster revision = %d, want %d", got, tt.want)
 			}
 		})
 	}

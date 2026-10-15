@@ -74,7 +74,13 @@ func (s *server) ArrangeSidebar(
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
-	resp.Result = &agentreplv1.ArrangeSidebarResponse_Success{Success: &agentreplv1.ArrangeSidebarSuccess{}}
+	// THE VERB REPUBLISHED BEFORE ANSWERING, so the roster the topic holds now
+	// carries the change: its revision is the one a page waits for.
+	var revision uint64
+	if latest, ok := s.deps.Sidebar.Topic().Latest(); ok {
+		revision = latest.GetRevision()
+	}
+	resp.Result = &agentreplv1.ArrangeSidebarResponse_Success{Success: &agentreplv1.ArrangeSidebarSuccess{RosterRevision: revision}}
 	return connect.NewResponse(resp), nil
 }
 

@@ -140,7 +140,16 @@ message ArrangeSidebarResponse {
 
 // Recorded; the roster push carries the new arrangement to every page and to
 // the tab bar.
-message ArrangeSidebarSuccess {}
+message ArrangeSidebarSuccess {
+  // THE REVISION OF A ROSTER THAT CARRIES THE CHANGE
+  // (frontend.v1.WorkspaceRoster.revision): every roster at or above it
+  // shows the new arrangement. The answer and the push travel on separate
+  // streams, so a page that drew the change at once holds its own drawing
+  // until a push at or above this revision arrives, rather than drawing an
+  // older push that would put the moved item back for an instant. 0 when the
+  // daemon has resolved no roster yet.
+  uint64 roster_revision = 1;
+}
 
 // Validation failures (an unset field or arm, a blank id, an item placed
 // relative to itself) are Connect InvalidArgument, never an arm. Nothing
