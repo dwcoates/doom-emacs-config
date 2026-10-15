@@ -647,6 +647,29 @@ func TestAClearDeliversTheDividerAndTheTurnsAfterIt(t *testing.T) {
 	}
 }
 
+// CLEARS DO NOT STACK. A second clear says everything before it is no longer
+// the conversation, the first clear's divider included, so the feed begins at
+// the newest divider and delivers no other.
+func TestASecondClearDeliversOnlyItsOwnDivider(t *testing.T) {
+	// Arrange: two /clear directives, each cut keyed on its own turn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "prompt")
+	h.deliverPrompt("turn-2", "/clear")
+	h.cutAt("entry-clear-1", clearedCut())
+	h.deliverPrompt("turn-3", "prompt")
+	h.deliverPrompt("turn-4", "/clear")
+	h.cutAt("entry-clear-2", clearedCut())
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert: the second divider alone, first.
+	got := rowIDs(pageRows(t, page))
+	if len(got) != 1 || got[0] != h.clearDividerRowID("turn-4") {
+		t.Fatalf("page rows = %v, want only the second clear's divider %q", got, h.clearDividerRowID("turn-4"))
+	}
+}
+
 func TestAClearAfterThePageWasServedMovesTheBoundForTheWalk(t *testing.T) {
 	// Arrange: a reader standing on a page served BEFORE the clear.
 	h := newHarness(t)

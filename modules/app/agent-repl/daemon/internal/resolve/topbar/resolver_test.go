@@ -388,6 +388,29 @@ func TestARotatedIdentityReachesTheSessionLine(t *testing.T) {
 	}
 }
 
+func TestASecondRotationComposesOntoTheRotatedIdentity(t *testing.T) {
+	// Arrange: the session already rotated once.
+	h := newHarness(t)
+	h.ready(t)
+	rotate := func(from, to string) {
+		h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+			Update: &conversationv1.SessionUpdate_IdentityRotated{
+				IdentityRotated: &conversationv1.SessionIdentityRotated{PreviousVendorSessionId: from, VendorSessionId: to},
+			},
+		})
+	}
+	rotate("vend-1", "vend-2")
+
+	// Act
+	rotate("vend-2", "vend-3")
+
+	// Assert: the line names the third identity, never an earlier one.
+	got := h.view(t).GetSessionLine().GetText()
+	if !contains(got, "vend-3") || contains(got, "vend-2") || contains(got, "vend-1") {
+		t.Fatalf("session line = %q, want the second rotation's identity alone", got)
+	}
+}
+
 func TestTheOpeningModelIsTheFirstWriter(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
