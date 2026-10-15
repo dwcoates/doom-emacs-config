@@ -144,6 +144,7 @@ const (
 	RPCSetSessionEffort         = "SetSessionEffort"
 	RPCHibernate                = "Hibernate"
 	RPCSetKeepalive             = "SetKeepalive"
+	RPCSendKeepalive            = "SendKeepalive"
 	RPCKillSession              = "KillSession"
 	RPCStartTurn                = "StartTurn"
 	RPCWatchAgent               = "WatchAgent"

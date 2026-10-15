@@ -1109,6 +1109,23 @@ func (s *server) SetKeepalive(ctx context.Context, req *connect.Request[shimv1.S
 	}), nil
 }
 
+// SendKeepalive records the keep-alive asked for and answers sent unless a
+// script says otherwise. The fake sends nothing: a test states the lapse the
+// keep-alive's answer would move by pushing it on the session stream.
+func (s *server) SendKeepalive(ctx context.Context, req *connect.Request[shimv1.SendKeepaliveRequest]) (*connect.Response[shimv1.SendKeepaliveResponse], error) {
+	if err := s.enter(ctx, RPCSendKeepalive, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.SendKeepaliveResponse, *shimv1.SendKeepaliveResponse](s, RPCSendKeepalive); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.SendKeepaliveResponse{
+		Result: &shimv1.SendKeepaliveResponse_Success{Success: &shimv1.SendKeepaliveSuccess{
+			Outcome: &shimv1.SendKeepaliveSuccess_Sent{Sent: &shimv1.SendKeepaliveSent{}},
+		}},
+	}), nil
+}
+
 func (s *server) SetSessionModel(ctx context.Context, req *connect.Request[shimv1.SetSessionModelRequest]) (*connect.Response[shimv1.SetSessionModelResponse], error) {
 	if err := s.enter(ctx, RPCSetSessionModel, req.Msg); err != nil {
 		return nil, err

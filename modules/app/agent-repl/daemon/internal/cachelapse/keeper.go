@@ -34,6 +34,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
@@ -62,6 +63,10 @@ type Keepalives interface {
 	Hold(ctx context.Context) error
 	// Run keeps the cache warm again.
 	Run(ctx context.Context) error
+	// Beat sends one keep-alive now, leaving the cadence as it is, and
+	// answers the shim's judgment of it. ErrNoSession when the shim holds no
+	// session; a *BeatSubmitFailed when the submission failed.
+	Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, error)
 }
 
 // ErrNoSession is a shim's answer that it holds no session, so there is no

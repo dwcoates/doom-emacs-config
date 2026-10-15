@@ -1341,6 +1341,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			LoudFaults:        loudFaults.Topic(),
 			Focus:             focus,
 			PersistentWifi:    wifi,
+			HiddenKeepalives:  cacheKeeper,
 			NewsDigest:        digest,
 			ClassifierPrompt:  classifierPrompt,
 			EditorInstances:   editors,

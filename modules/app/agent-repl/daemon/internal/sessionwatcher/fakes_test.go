@@ -509,6 +509,10 @@ func (c *fakeClient) SetKeepalive(context.Context, *shimv1.SetKeepaliveRequest) 
 	panic("sessionwatcher must not call SetKeepalive")
 }
 
+func (c *fakeClient) SendKeepalive(context.Context, *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
+	panic("sessionwatcher must not call SendKeepalive")
+}
+
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	panic("sessionwatcher must not call Hibernate")
 }

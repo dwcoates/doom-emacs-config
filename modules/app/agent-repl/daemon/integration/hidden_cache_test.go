@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -117,5 +120,59 @@ func TestShowingAHiddenWorkspaceRunsItsKeepalivesAgain(t *testing.T) {
 	run := &shimv1.SetKeepaliveRequest{}
 	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCSetKeepalive, "the keep-alives run again", run, func() bool {
 		return run.GetRun() != nil
+	})
+}
+
+// SPC j R: one keep-alive to every hidden workspace, each cadence left held
+// (docs/protobuf-design/hidden-keepalives-on-demand.md).
+func TestSendingTheHiddenKeepalivesAsksEachHeldShimForOneAndLeavesItHeld(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := hiddenAndHeld(t)
+
+	// Act
+	resp, err := f.d.Client().SendHiddenKeepalives(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{}))
+
+	// Assert: the shim was asked once, answered sent, and its cadence is still held.
+	if err != nil {
+		t.Fatalf("SendHiddenKeepalives = error %v", err)
+	}
+	workspaces := resp.Msg.GetSuccess().GetWorkspaces()
+	if len(workspaces) != 1 || workspaces[0].GetWorkspace().GetId() != f.ws.GetId() || workspaces[0].GetSent() == nil {
+		t.Fatalf("SendHiddenKeepalives = %v, want the one hidden workspace sent", resp.Msg)
+	}
+	shim := f.d.OpenedShim(f.ws)
+	if n := shim.Count(harness.RPCSendKeepalive); n != 1 {
+		t.Fatalf("the shim was asked for %d keep-alives, want one", n)
+	}
+	var last any
+	for _, r := range f.d.RunLog() {
+		if r.Operation == "daemon.cachelapse.cadence" {
+			last = r.Context["cadence"]
+		}
+	}
+	if last != "hold" {
+		t.Fatalf("the shim's cadence was last set to %v, want it left held", last)
+	}
+}
+
+func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
+	t.Parallel()
+	// Arrange: a lapse projected, then the keep-alive sent.
+	f := hiddenAndHeld(t)
+	roster := f.d.WatchRoster()
+	shim := f.d.OpenedShim(f.ws)
+	shim.PushSessionUpdate(cacheLapse(time.Now().Add(10*time.Minute), 0))
+	if _, err := f.d.Client().SendHiddenKeepalives(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendHiddenKeepalivesRequest{})); err != nil {
+		t.Fatalf("SendHiddenKeepalives = error %v", err)
+	}
+	later := time.Now().Add(time.Hour)
+
+	// Act: the held shim restates its lapse once the keep-alive's answer re-anchors.
+	shim.PushSessionUpdate(cacheLapse(later, 0))
+
+	// Assert
+	awaitRoster(t, f.d, roster, "the hidden row counting down to the later lapse", func(r *frontendv1.WorkspaceRoster) bool {
+		return hiddenRow(r, f.ws.GetId()).GetWhen().GetHidden().GetCache().GetLapsesAtMs() == later.UnixMilli()
 	})
 }

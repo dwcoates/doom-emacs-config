@@ -1158,6 +1158,13 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   show, and every session coming up, reconciles the cadence with the stored
   visibility, and a hidden workspace's `StartSession` carries
   `hold_keepalive`, so no keep-alive fires between a start and a hold.
+- **The user can keep every hidden cache warm** (`SendHiddenKeepalives`,
+  `SPC j R`, 2026-10-14): `cachelapse.Keeper.SendHiddenKeepalives` asks each
+  hidden workspace's shim for one keep-alive at once
+  (`shim.v1.SendKeepalive`), leaving every cadence held. The keep-alive's
+  answer re-anchors the cache, the held shim restates its lapse, and the
+  keeper records it like any projection, so the countdown moves on the
+  roster with no second path.
 - **Collapse stands the session down** (`drain.StandDownWithheld`, called by
   `FoldRepository(collapse)`, which `UpdateSidebarView`'s repository fold
   reaches, and by the cache keeper at a hidden workspace's lapse): the
