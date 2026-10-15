@@ -23,7 +23,8 @@ the log records that show it, so the failures can be fixed at their source.
 | 12 | 2026-10-15 | `redundancy-tool` (tip `764923476a`, the redundancy tool and pinned baseline, minor) | `redundancy-tool-land` | LANDED (`c31781c36b`), deployed; landed the branch as it stood when the merge forked, missing six later fixes, see entry 12 |
 | 13 | 2026-10-15 | `sessions-test-slim` (one commit: 117 redundant cases removed from `sessions_test.go`, -0.04 coverage points) | `sessions-test-slim-land` | LANDED (`af0895c8c1`), deployed |
 | 14 | 2026-10-15 | `tier-audit-e2e-step-c2` (tip `4b99b4a9cc`, step (c) rebased onto the fd fix; the retry of entry 8) | `tier-audit-e2e-step-c2-merge` | LANDED (`a3691b9b8b`), deployed |
-| 15 | 2026-10-15 | `redundancy-tool-fixes` (the six fixes entry 12 missed, cut from master) | `redundancy-tool-fixes-land` | requested, pending |
+| 15 | 2026-10-15 | `redundancy-tool-fixes` (the six fixes entry 12 missed, cut from master) | `redundancy-tool-fixes-land` | LANDED (`116084f27a`) |
+| 16 | 2026-10-15 | `redundancy-preflight` (gomut panic skip, mutant pre-flight, extraction) | `redundancy-preflight-land` | requested, pending; `redundancy-dropsite` follows it, since the queue takes one merge per workspace |
 
 ## 1. `test-tier-rule` (landed)
 
