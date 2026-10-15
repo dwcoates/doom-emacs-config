@@ -855,3 +855,37 @@ func TestAwaitGroupEnd(t *testing.T) {
 		})
 	}
 }
+
+// TestStallListingShowsTheSelectedProcess pins the stuck-kill reports' one
+// listing: the process it selects, with the state columns a report reads.
+func TestStallListingShowsTheSelectedProcess(t *testing.T) {
+	// Act
+	out, err := stallListing("-p", os.Getpid())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("stallListing: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "STAT") || !strings.Contains(string(out), strconv.Itoa(os.Getpid())) {
+		t.Fatalf("the listing shows neither its columns nor this process:\n%s", out)
+	}
+}
+
+// TestEveryStallReportListsThroughStallListing pins that both stuck-kill
+// reports share the one listing, so their columns cannot drift apart.
+func TestEveryStallReportListsThroughStallListing(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("daemon.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	direct := strings.Count(string(src), `"pid,ppid,pgid,stat,wchan,flags,time,command"`)
+	shared := strings.Count(string(src), "stallListing(")
+
+	// Assert
+	if direct != 1 || shared != 3 {
+		t.Fatalf("the listing's columns are spelled %d times and stallListing named %d times, want 1 and 3 (its definition and both reports)", direct, shared)
+	}
+}

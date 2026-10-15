@@ -1473,15 +1473,21 @@ func awaitKilledLeader(pid int, reportAfter time.Duration, wait func(context.Con
 // kill leaves nowhere else.
 func (d *Daemon) leaderStalled(pid int, waited time.Duration) {
 	d.t.Helper()
-	out, err := exec.Command("ps", "-o", "pid,ppid,pgid,stat,wchan,flags,time,command", "-g", strconv.Itoa(pid)).CombinedOutput()
+	out, err := stallListing("-g", pid)
 	d.t.Errorf("harness: the daemon %d has not exited %s after its SIGKILL was accepted and it was continued; still waiting. Its group (ps err %v):\n%s", pid, waited, err, out)
+}
+
+// stallListing is what a stuck kill's report shows of the processes ps
+// selects by selector ("-g" a group, "-p" one process) and id.
+func stallListing(selector string, id int) ([]byte, error) {
+	return exec.Command("ps", "-o", "pid,ppid,pgid,stat,wchan,flags,time,command", selector, strconv.Itoa(id)).CombinedOutput()
 }
 
 // memberStalled reports a member of a killed daemon's group that has not
 // exited, with its group as the kernel shows it.
 func (d *Daemon) memberStalled(pid int, waited time.Duration) {
 	d.t.Helper()
-	out, err := exec.Command("ps", "-o", "pid,ppid,pgid,stat,wchan,flags,time,command", "-p", strconv.Itoa(pid)).CombinedOutput()
+	out, err := stallListing("-p", pid)
 	d.t.Errorf("harness: member %d of the killed daemon's group has not exited %s after the group's SIGKILL and SIGCONT; still waiting (ps err %v):\n%s", pid, waited, err, out)
 }
 
