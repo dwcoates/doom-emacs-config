@@ -144,7 +144,7 @@ over a good image:
   stamp at all. `AGENT_REPL_SANDBOX_ALLOW_STALE=1` overrides it deliberately
   and says so.
 
-The gate is covered by `e2e/sandbox_build_lock_test.go`, which drives the
+The gate is covered by `e2e/sandboxscripts/sandbox_build_lock_test.go`, which drives the
 script against a fake `docker` on `PATH`; it never needs a real runtime.
 
 ## Emacs is built FROM SOURCE, not installed from apt

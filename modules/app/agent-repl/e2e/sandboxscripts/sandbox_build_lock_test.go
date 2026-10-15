@@ -1,4 +1,4 @@
-package e2e
+package sandboxscripts
 
 import (
 	"bufio"
@@ -145,7 +145,7 @@ func fakeGitScript(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	p := filepath.Join(wd, "..", "bin", "fake-git.sh")
+	p := filepath.Join(wd, "..", "..", "bin", "fake-git.sh")
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("fake git not found: %v", err)
 	}
@@ -159,7 +159,7 @@ func sandboxScript(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	p := filepath.Join(wd, "sandbox", "bin", "e2e-sandbox.sh")
+	p := filepath.Join(wd, "..", "sandbox", "bin", "e2e-sandbox.sh")
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("script not found: %v", err)
 	}
@@ -545,7 +545,7 @@ func TestE2EEmacsScriptHandsItsSlotWidthToTheSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "bin", "test-e2e-emacs.sh"))
+	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "..", "bin", "test-e2e-emacs.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,7 +681,7 @@ func e2eEmacsModule(t *testing.T, sandbox string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "bin", "test-e2e-emacs.sh"))
+	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "..", "bin", "test-e2e-emacs.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
