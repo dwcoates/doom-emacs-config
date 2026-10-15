@@ -1,0 +1,10 @@
+test/main.test.ts > the boot > keeps the gate open when the footer reports the stopped merge's mergeFailed arm
+test/main.test.ts > the boot > keeps the gate open when the footer reports the stopped merge's merged arm
+test/main.test.ts > the boot > sets the gate networkFault -> closed by the footer's color
+test/main.test.ts > the boot > sets the gate closing -> closed by the footer's color
+test/main.test.ts > the boot > sets the gate vendorFault -> open by the footer's color
+test/main.test.ts > the boot > sets the gate merging -> open by the footer's color
+test/main.test.ts > the boot > sets the gate turnFailed -> open by the footer's color
+test/main.test.ts > the boot > sets the gate degraded -> open by the footer's color
+test/main.test.ts > the boot > sets the gate idle -> open by the footer's color
+test/main.test.ts > the boot > sets the gate working -> open by the footer's color
