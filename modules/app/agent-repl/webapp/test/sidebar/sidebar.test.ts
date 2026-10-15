@@ -35,6 +35,7 @@ import {
   rosterStream,
   row,
 } from "./harness.js";
+import { frameQueue } from "../frame-queue.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -314,11 +315,11 @@ describe("mounting the rail: its looping animations", () => {
 
   it("stops re-seeking on a page shown again once disposed", async () => {
     // Arrange
-    const frames: Array<() => void> = [];
+    const frames = frameQueue();
     const handle = mountSidebar(document.createElement("nav"), ctxFor([]), {
       storage: null,
       timers: fakeTimers(),
-      wallPhase: { animations: () => [], now: () => NOW, frame: (callback) => void frames.push(callback) },
+      wallPhase: { animations: () => [], now: () => NOW, frame: frames.frame },
     });
 
     // Act
@@ -326,7 +327,7 @@ describe("mounting the rail: its looping animations", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Assert
-    expect(frames).toEqual([]);
+    expect(frames.pending()).toBe(0);
   });
 });
 

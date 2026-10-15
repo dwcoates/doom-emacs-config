@@ -34,6 +34,7 @@ import {
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
 import { expandedSectionAt, installClickExpand } from "../src/expand.js";
+import { frameQueue } from "./frame-queue.js";
 
 /** An `ExpandedSectionAt` for a feed with no open section. */
 const noneOpen = (): HTMLElement | null => null;
@@ -3202,8 +3203,8 @@ describe("MoveWitness", () => {
   function witnessAt(top: number) {
     const box = { scrollTop: top };
     let now = 1000;
-    const frames: (() => void)[] = [];
-    const witness = new MoveWitness(box, () => now, (fn) => frames.push(fn));
+    const frames = frameQueue();
+    const witness = new MoveWitness(box, () => now, frames.frame);
     return {
       box,
       witness,
@@ -3211,9 +3212,7 @@ describe("MoveWitness", () => {
         now += ms;
       },
       /** Start one frame: run every callback waiting for it. */
-      frame: () => {
-        for (const fn of frames.splice(0)) fn();
-      },
+      frame: frames.run,
     };
   }
 

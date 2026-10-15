@@ -8,6 +8,7 @@ import {
   type PhasedAnimation,
 } from "../../src/sidebar/wall-phase.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import { frameQueue } from "../frame-queue.js";
 
 /** A running animation with TIMING, at no particular phase yet. */
 function animation(timing: EffectTiming): PhasedAnimation {
@@ -33,22 +34,6 @@ function fakeDocument(visibility: DocumentVisibilityState): Document & { show():
       target.dispatchEvent(new Event("visibilitychange"));
     },
   }) as unknown as Document & { show(): void; hide(): void };
-}
-
-/** A frame scheduler the test runs by hand. */
-function fakeFrames(): { frame: (callback: () => void) => void; run(): void; pending(): number } {
-  let queued: Array<() => void> = [];
-  return {
-    frame: (callback) => {
-      queued.push(callback);
-    },
-    run: () => {
-      const due = queued;
-      queued = [];
-      for (const callback of due) callback();
-    },
-    pending: () => queued.length,
-  };
 }
 
 describe("the wall clock's phase in a cycle", () => {
@@ -209,7 +194,7 @@ describe("keeping a rail on the wall clock", () => {
       },
       now: () => 2900,
       doc: fakeDocument("visible"),
-      frame: fakeFrames().frame,
+      frame: frameQueue().frame,
     });
 
     // Act
@@ -224,7 +209,7 @@ describe("keeping a rail on the wall clock", () => {
     // Arrange
     const pulse = loop(1300);
     const doc = fakeDocument("hidden");
-    const frames = fakeFrames();
+    const frames = frameQueue();
     installWallPhase(document.createElement("nav"), { animations: () => [pulse], now: () => 2900, doc, frame: frames.frame });
 
     // Act
@@ -240,7 +225,7 @@ describe("keeping a rail on the wall clock", () => {
     const pulse = loop(1300);
     const doc = fakeDocument("visible");
     const presence = createPresence(doc, true);
-    const frames = fakeFrames();
+    const frames = frameQueue();
     installWallPhase(document.createElement("nav"), { animations: () => [pulse], now: () => 2900, doc, frame: frames.frame, presence });
 
     // Act
@@ -256,7 +241,7 @@ describe("keeping a rail on the wall clock", () => {
     // Arrange
     const pulse = loop(1300);
     const doc = fakeDocument("hidden");
-    const frames = fakeFrames();
+    const frames = frameQueue();
     installWallPhase(document.createElement("nav"), { animations: () => [pulse], now: () => 2900, doc, frame: frames.frame });
 
     // Act
@@ -269,7 +254,7 @@ describe("keeping a rail on the wall clock", () => {
   it("asks for no frame when the page is hidden", () => {
     // Arrange
     const doc = fakeDocument("visible");
-    const frames = fakeFrames();
+    const frames = frameQueue();
     installWallPhase(document.createElement("nav"), { animations: () => [], now: () => 0, doc, frame: frames.frame });
 
     // Act
@@ -282,7 +267,7 @@ describe("keeping a rail on the wall clock", () => {
   it("stops watching the page once disposed", () => {
     // Arrange
     const doc = fakeDocument("hidden");
-    const frames = fakeFrames();
+    const frames = frameQueue();
     const wallPhase = installWallPhase(document.createElement("nav"), {
       animations: () => [],
       now: () => 0,
@@ -302,7 +287,7 @@ describe("keeping a rail on the wall clock", () => {
     // Arrange
     const pulse = loop(1300);
     const doc = fakeDocument("hidden");
-    const frames = fakeFrames();
+    const frames = frameQueue();
     const wallPhase = installWallPhase(document.createElement("nav"), {
       animations: () => [pulse],
       now: () => 2900,
