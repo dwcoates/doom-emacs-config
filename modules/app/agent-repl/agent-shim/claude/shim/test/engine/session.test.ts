@@ -258,6 +258,8 @@ function harness(
      * comes back over the state its predecessor left.
      */
     over?: { stateDir: string; configDir: string };
+    /** The minter of a fresh conversation's vendor session id (EngineDeps). */
+    mintVendorSessionId?: () => string;
   } = {},
 ): Harness {
   const stateDir = options.over?.stateDir ?? scratch();
@@ -322,6 +324,7 @@ function harness(
       return Promise.resolve(query);
     },
     runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+    ...(options.mintVendorSessionId === undefined ? {} : { mintVendorSessionId: options.mintVendorSessionId }),
     newUuid: () => {
       const uuid = `00000000-0000-4000-8000-${String(minted.length + 1).padStart(12, "0")}`;
       minted.push(uuid);
@@ -775,6 +778,24 @@ describe("StartSession, fresh", () => {
     await started(h);
 
     expect(h.scheduler.pendingTimeout()).toBeDefined();
+  });
+
+  it("starts a fresh conversation under the vendor session id its injected minter names", async () => {
+    const h = harness({ mintVendorSessionId: () => "11111111-1111-4111-8111-111111111111" });
+
+    await started(h);
+
+    expect(freshSessionId(h.queries[0]!.spec)).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  it("mints a fresh conversation's vendor session id at random when none is injected", async () => {
+    const first = harness();
+    const second = harness();
+
+    await started(first);
+    await started(second);
+
+    expect(freshSessionId(first.queries[0]!.spec)).not.toBe(freshSessionId(second.queries[0]!.spec));
   });
 
   it("refuses a SECOND StartSession — one shim serves exactly one session", async () => {
