@@ -322,23 +322,15 @@ type DB interface {
 	UpdateTask(ctx context.Context, id TaskID, change TaskChange) error
 	// Tasks loads every task, all-or-nothing.
 	Tasks(ctx context.Context) ([]Task, error)
-	// SetTaskFolded records whether a task's roster section is collapsed; an
-	// unknown task is ErrNotFound.
-	SetTaskFolded(ctx context.Context, id TaskID, folded bool) error
 	// SetMergedSectionFolded records whether the recently-merged band is
 	// collapsed.
 	SetMergedSectionFolded(ctx context.Context, folded bool) error
-	// SetMaturityFolded records whether a maturity stage's section is
-	// collapsed.
-	SetMaturityFolded(ctx context.Context, stage MaturityStage, folded bool) error
 	// SetHiddenSectionFolded records whether the hidden-workspaces section is
 	// collapsed.
 	SetHiddenSectionFolded(ctx context.Context, folded bool) error
 	// SetOpenSectionFolded records whether the open-workspaces section is
 	// collapsed.
 	SetOpenSectionFolded(ctx context.Context, folded bool) error
-	// SetGrouping records which grouping every page shows.
-	SetGrouping(ctx context.Context, grouping Grouping) error
 	// SidebarView loads the sidebar's view state that belongs to no row, or
 	// DefaultSidebarView when nobody has changed it.
 	SidebarView(ctx context.Context) (SidebarView, error)

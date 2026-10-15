@@ -30,42 +30,11 @@ func (r *resolver) Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 	return cloned, r.last.GetRevision(), true
 }
 
-// findRow answers WS's row in ROSTER, nil when it carries none.
+// findRow answers WS's row in ROSTER, nil when it carries none. Each
+// workspace is in exactly one of the repository sections, the hidden section
+// and the recently-merged band.
 func findRow(roster *frontendv1.WorkspaceRoster, ws string) *frontendv1.RosterRow {
-	var shown, others []*frontendv1.RosterRows
-	add := func(shownView bool, rows *frontendv1.RosterRows) {
-		if shownView {
-			shown = append(shown, rows)
-			return
-		}
-		others = append(others, rows)
-	}
-	for _, section := range roster.GetRepository().GetSections() {
-		add(roster.GetShownRepository() != nil, section.GetRows())
-	}
-	for _, section := range roster.GetTask().GetSections() {
-		add(roster.GetShownTask() != nil, section.GetRows())
-	}
-	for _, section := range roster.GetMaturity().GetSections() {
-		add(roster.GetShownMaturity() != nil, section.GetRows())
-	}
-	add(true, roster.GetHidden().GetRows())
-	for _, group := range roster.GetRecentlyMerged().GetGroups() {
-		add(true, group.GetRows())
-	}
-	for _, set := range [][]*frontendv1.RosterRows{shown, others} {
-		for _, rows := range set {
-			if row := findInRows(rows.GetRows(), ws); row != nil {
-				return row
-			}
-		}
-	}
-	return nil
-}
-
-// findInRows searches ROWS and their nested families for WS's row.
-func findInRows(rows []*frontendv1.RosterRow, ws string) *frontendv1.RosterRow {
-	for _, row := range rosterwalk.FlattenRows(rows) {
+	for _, row := range rosterwalk.AllRows(roster) {
 		if row.GetWorkspace().GetWorkspace().GetId() == ws {
 			return row
 		}

@@ -435,14 +435,6 @@ func TestTheMergeQueueVerbAsksFromANestedWorkspace(t *testing.T) {
 			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
 			return roster(grand)
 		}},
-		{name: "a child in a task section", roster: func(f *mergeFixture) *frontendv1.WorkspaceRoster {
-			parent := rosterRow(f.other, "done", 0)
-			parent.Workspace.Workspace.Id = "ws-parent"
-			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
-			return &frontendv1.WorkspaceRoster{Task: &frontendv1.RosterTaskView{
-				Sections: []*frontendv1.RosterTaskSection{{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{parent}}}},
-			}}
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

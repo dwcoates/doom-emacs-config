@@ -84,18 +84,15 @@ type fakeDB struct {
 	listRepositoriesErr error
 	tasks               []wsm.Task
 	// setTaskFoldedErr fails the task fold write, which the slice cannot.
-	setTaskFoldedErr error
 	// view is the sidebar's recorded view state, nil when nobody changed it
 	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
 	// setMaturityFoldedErr and setGroupingErr fail its writes and viewErr its
 	// read.
-	view                 *wsm.SidebarView
-	setMergedFoldedErr   error
-	setHiddenFoldedErr   error
-	setOpenFoldedErr     error
-	setMaturityFoldedErr error
-	setGroupingErr       error
-	viewErr              error
+	view               *wsm.SidebarView
+	setMergedFoldedErr error
+	setHiddenFoldedErr error
+	setOpenFoldedErr   error
+	viewErr            error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
 	// setHiddenErr fails the hidden-flag write.
@@ -2728,21 +2725,6 @@ func (f *fixture) selectAsync(ctx context.Context, ws ids.WorkspaceID) <-chan er
 	return done
 }
 
-// SetTaskFolded records the fold on the fake's task row; an unknown task is
-// wsm.ErrNotFound, as the store answers it.
-func (d *fakeDB) SetTaskFolded(_ context.Context, id ids.TaskID, folded bool) error {
-	if d.setTaskFoldedErr != nil {
-		return d.setTaskFoldedErr
-	}
-	for i := range d.tasks {
-		if d.tasks[i].ID == id {
-			d.tasks[i].Folded = folded
-			return nil
-		}
-	}
-	return fmt.Errorf("fake: task %s: %w", id, wsm.ErrNotFound)
-}
-
 // currentView is the recorded view, or the store's default.
 func (d *fakeDB) currentView() wsm.SidebarView {
 	if d.view == nil {
@@ -2780,28 +2762,6 @@ func (d *fakeDB) SetOpenSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.OpenFolded = folded
-	d.view = &view
-	return nil
-}
-
-// SetMaturityFolded records one maturity stage's fold.
-func (d *fakeDB) SetMaturityFolded(_ context.Context, stage wsm.MaturityStage, folded bool) error {
-	if d.setMaturityFoldedErr != nil {
-		return d.setMaturityFoldedErr
-	}
-	view := d.currentView()
-	view.MaturityFolded = view.MaturityFolded.With(stage, folded)
-	d.view = &view
-	return nil
-}
-
-// SetGrouping records the grouping shown.
-func (d *fakeDB) SetGrouping(_ context.Context, grouping wsm.Grouping) error {
-	if d.setGroupingErr != nil {
-		return d.setGroupingErr
-	}
-	view := d.currentView()
-	view.Grouping = grouping
 	d.view = &view
 	return nil
 }

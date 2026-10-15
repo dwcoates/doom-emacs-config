@@ -10,101 +10,11 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/repodivergence"
-	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 
 	"google.golang.org/protobuf/proto"
 )
-
-func TestRosterResolvesEveryGrouping(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
-	assigned := workspace("w-assigned", "assigned")
-	taskID := task.ID
-	assigned.Task = &taskID
-	reg := registry(assigned)
-	reg.Tasks = []wsm.Task{task}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert: which one is DRAWN is webview-local; both are resolved.
-	roster := latest(t, r)
-	if len(roster.GetRepository().GetSections()) != 1 {
-		t.Fatal("the repository grouping was not resolved")
-	}
-	if len(roster.GetTask().GetSections()) != 1 {
-		t.Fatal("the task grouping was not resolved")
-	}
-	if len(roster.GetMaturity().GetSections()) != 3 {
-		t.Fatal("the maturity grouping was not resolved")
-	}
-}
-
-func TestTaskViewOmitsAnUnassignedWorkspace(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
-	reg := registry(workspace("w-unassigned", "unassigned"))
-	reg.Tasks = []wsm.Task{task}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert: there is no "no task" section — an unassigned workspace is no
-	// answer to "what is each task's work".
-	sections := latest(t, r).GetTask().GetSections()
-	if len(sections) != 1 || len(sections[0].GetRows().GetRows()) != 0 {
-		t.Fatal("an unassigned workspace reached the task view")
-	}
-}
-
-func TestTaskSectionCarriesTheDoneCheck(t *testing.T) {
-	tests := []struct {
-		name string
-		done bool
-	}{
-		{name: "open", done: false},
-		{name: "done", done: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-			reg := registry()
-			reg.Tasks = []wsm.Task{{
-				ID: ids.TaskID("task-1"), Title: "the task", Done: tc.done, CreatedAt: epoch,
-			}}
-
-			// Act.
-			r.SetRegistry(reg)
-
-			// Assert.
-			sections := latest(t, r).GetTask().GetSections()
-			if got := sections[0].GetHeader().GetDone().GetDone(); got != tc.done {
-				t.Fatalf("done = %v, want %v", got, tc.done)
-			}
-		})
-	}
-}
-
-func TestTaskSectionIsKeyedByIdNotTitle(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	reg := registry()
-	reg.Tasks = []wsm.Task{{ID: ids.TaskID("task-7"), Title: "renamed later", CreatedAt: epoch}}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert: a task can be renamed without becoming a different task.
-	sections := latest(t, r).GetTask().GetSections()
-	if got := sections[0].GetKey().GetTaskId(); got != "task-7" {
-		t.Fatalf("task key = %q, want the task id", got)
-	}
-}
 
 func TestRepoSectionCarriesTheRepositoryJoinKey(t *testing.T) {
 	// Arrange.
@@ -177,27 +87,6 @@ func TestRecentlyMergedHoistsOutOfTheRepositoryGrouping(t *testing.T) {
 	}
 }
 
-func TestRecentlyMergedHoistsOutOfTheTaskGrouping(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
-	taskID := task.ID
-	merged := workspace("w-merged", "merged")
-	merged.MergedAt = at(0)
-	merged.Task = &taskID
-	reg := registry(merged)
-	reg.Tasks = []wsm.Task{task}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert.
-	sections := latest(t, r).GetTask().GetSections()
-	if len(sections[0].GetRows().GetRows()) != 0 {
-		t.Fatal("a merged workspace stayed in the task grouping")
-	}
-}
-
 func TestRecentlyMergedCarriesTheMergedRow(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
@@ -243,44 +132,17 @@ func TestRosterRecordsAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
 	}
 }
 
-func TestRosterRecordsAWorkspaceAssignedToAnUnregisteredTask(t *testing.T) {
-	// Arrange.
-	r, surfaces := newResolver(t)
-	stray := workspace("w-stray", "stray")
-	missing := ids.TaskID("task-missing")
-	stray.Task = &missing
-
-	// Act.
-	r.SetRegistry(registry(stray))
-
-	// Assert.
-	if !hasError(surfaces.Records(), "daemon.sidebar.task_view") {
-		t.Fatal("a workspace assigned to an unregistered task was not recorded")
-	}
-}
-
 // dirsInRoster walks the roster exactly as the sidecar's log forwarder does --
 // the repository sections, the task sections and the recently-merged section,
 // each row and its children -- and answers every workspace directory it can
 // resolve a ref for.
 func dirsInRoster(roster *frontendv1.WorkspaceRoster) map[string]bool {
 	out := map[string]bool{}
-	var walk func([]*frontendv1.RosterRow)
-	walk = func(rows []*frontendv1.RosterRow) {
-		for _, row := range rows {
-			if ref := row.GetWorkspace().GetWorkspace(); ref.GetId() != "" && ref.GetDir() != "" {
-				out[ref.GetDir()] = true
-			}
-			walk(row.GetChildren())
+	for _, row := range rosterwalk.AllRows(roster) {
+		if ref := row.GetWorkspace().GetWorkspace(); ref.GetId() != "" && ref.GetDir() != "" {
+			out[ref.GetDir()] = true
 		}
 	}
-	for _, section := range roster.GetRepository().GetSections() {
-		walk(section.GetRows().GetRows())
-	}
-	for _, section := range roster.GetTask().GetSections() {
-		walk(section.GetRows().GetRows())
-	}
-	walk(rosterwalk.MergedRows(roster))
 	return out
 }
 
@@ -405,34 +267,6 @@ func TestRepositorySectionStatesItsFold(t *testing.T) {
 
 			// Assert: the arm is always set, and it is the recorded fold.
 			section := latest(t, r).GetRepository().GetSections()[0]
-			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
-				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
-			}
-		})
-	}
-}
-
-func TestTaskSectionStatesItsFold(t *testing.T) {
-	tests := []struct {
-		name          string
-		folded        bool
-		wantCollapsed bool
-	}{
-		{"an expanded task", false, false},
-		{"a collapsed task", true, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-			reg := registry(workspace("w1", "one"))
-			reg.Tasks = []wsm.Task{{ID: ids.TaskID("task-1"), Title: "the task", Folded: tt.folded, CreatedAt: epoch}}
-
-			// Act.
-			r.SetRegistry(reg)
-
-			// Assert: the arm is always set, and it is the recorded fold.
-			section := latest(t, r).GetTask().GetSections()[0]
 			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
 				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
 			}
@@ -588,265 +422,6 @@ func TestRecentlyMergedCountsEveryMergedRowThoughEachIsClosed(t *testing.T) {
 	}
 }
 
-func TestTheRosterStatesTheShownGrouping(t *testing.T) {
-	tests := []struct {
-		name     string
-		grouping wsm.Grouping
-		shown    func(*frontendv1.WorkspaceRoster) bool
-	}{
-		{"the repository grouping", wsm.GroupingRepository, func(r *frontendv1.WorkspaceRoster) bool { return r.GetShownRepository() != nil }},
-		{"the task grouping", wsm.GroupingTask, func(r *frontendv1.WorkspaceRoster) bool { return r.GetShownTask() != nil }},
-		{"the maturity grouping", wsm.GroupingMaturity, func(r *frontendv1.WorkspaceRoster) bool { return r.GetShownMaturity() != nil }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-			reg := registry(workspace("w1", "one"))
-			reg.View.Grouping = tt.grouping
-
-			// Act.
-			r.SetRegistry(reg)
-
-			// Assert: the arm is always set, and it is the recorded grouping.
-			got := latest(t, r)
-			if !tt.shown(got) {
-				t.Fatalf("shown = %v, want %s", got.GetShown(), tt.grouping)
-			}
-		})
-	}
-}
-
-func TestSetRegistryRefusesAViewGroupingThatIsNeither(t *testing.T) {
-	// Arrange.
-	r, surfaces := newResolver(t)
-	reg := registry(workspace("w1", "one"))
-	reg.View.Grouping = ""
-
-	// Act.
-	defer func() {
-		// Assert: it failed hard, and said so at ERROR first.
-		if recover() == nil {
-			t.Fatal("SetRegistry accepted a view with no grouping")
-		}
-		if !hasError(surfaces.Records(), "daemon.sidebar.set_registry") {
-			t.Fatal("the invariant violation was not recorded at ERROR")
-		}
-	}()
-	r.SetRegistry(reg)
-}
-
-// maturitySection is the roster's section for STAGE, failing the test when
-// the maturity view does not carry it exactly once.
-func maturitySection(t *testing.T, roster *frontendv1.WorkspaceRoster, stage string) *frontendv1.RosterMaturitySection {
-	t.Helper()
-	var found *frontendv1.RosterMaturitySection
-	for _, section := range roster.GetMaturity().GetSections() {
-		if maturityStageName(section) != stage {
-			continue
-		}
-		if found != nil {
-			t.Fatalf("the maturity view carries the %s stage twice", stage)
-		}
-		found = section
-	}
-	if found == nil {
-		t.Fatalf("the maturity view carries no %s stage", stage)
-	}
-	return found
-}
-
-// maturityStageName names a section's stage arm.
-func maturityStageName(section *frontendv1.RosterMaturitySection) string {
-	stage := section.GetKey().GetStage()
-	switch {
-	case stage.GetBacklog() != nil:
-		return "backlog"
-	case stage.GetInProgress() != nil:
-		return "in_progress"
-	case stage.GetMerging() != nil:
-		return "merging"
-	default:
-		return ""
-	}
-}
-
-func TestMaturityViewDrawsEveryStageInWorkOrderEvenWhenEmpty(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-
-	// Act.
-	r.SetRegistry(registry())
-
-	// Assert: every stage, once, in the order work moves through them.
-	sections := latest(t, r).GetMaturity().GetSections()
-	want := []struct{ stage, label string }{
-		{"backlog", "Backlog"}, {"in_progress", "In Progress"}, {"merging", "Merging"},
-	}
-	if len(sections) != len(want) {
-		t.Fatalf("maturity sections = %d, want %d", len(sections), len(want))
-	}
-	for i, w := range want {
-		if got := maturityStageName(sections[i]); got != w.stage {
-			t.Fatalf("section %d stage = %q, want %q", i, got, w.stage)
-		}
-		if got := sections[i].GetHeader().GetLabel().GetText(); got != w.label {
-			t.Fatalf("section %d label = %q, want %q", i, got, w.label)
-		}
-		if len(sections[i].GetRows().GetRows()) != 0 || sections[i].GetHeader().GetCount().GetWorkspaces() != 0 {
-			t.Fatalf("section %d carries rows in an empty registry", i)
-		}
-	}
-}
-
-func TestMaturityViewFilesAWorkspaceByItsStage(t *testing.T) {
-	tests := []struct {
-		name    string
-		active  bool
-		arrange func(r sidebarResolver)
-		want    string
-	}{
-		{name: "never ran a turn", want: "backlog"},
-		{name: "ran a turn", active: true, want: "in_progress"},
-		{name: "queued to merge", active: true, want: "merging", arrange: func(r sidebarResolver) {
-			r.SetMerge(theWS, footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 1})
-		}},
-		{name: "merging", active: true, want: "merging", arrange: func(r sidebarResolver) {
-			r.SetMerge(theWS, footer.MergeFacts{State: "merging", Step: footer.StepTesting})
-		}},
-		{name: "a failed merge", active: true, want: "merging", arrange: func(r sidebarResolver) {
-			r.SetMerge(theWS, footer.MergeFacts{State: "failed", FailedArea: footer.FailedTests})
-		}},
-		{name: "a merge outranks never having run a turn", want: "merging", arrange: func(r sidebarResolver) {
-			r.SetMerge(theWS, footer.MergeFacts{State: "merging", Step: footer.StepTesting})
-		}},
-		{name: "no merge in hand", active: true, want: "in_progress", arrange: func(r sidebarResolver) {
-			r.SetMerge(theWS, footer.MergeFacts{State: "none"})
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			ws := workspace(string(theWS), "one")
-			if tt.active {
-				ws.LastActivityAt = at(time.Minute)
-			}
-			r := live(t, arrange(t, ws))
-
-			// Act.
-			if tt.arrange != nil {
-				tt.arrange(r)
-			}
-
-			// Assert: the workspace is in its stage's section and no other.
-			roster := latest(t, r)
-			for _, section := range roster.GetMaturity().GetSections() {
-				rows := section.GetRows().GetRows()
-				in := len(rows) == 1 && rows[0].GetWorkspace().GetWorkspace().GetId() == string(theWS)
-				if want := maturityStageName(section) == tt.want; in != want {
-					t.Fatalf("%s section carries the workspace = %v, want %v", maturityStageName(section), in, want)
-				}
-			}
-			if got := maturitySection(t, roster, tt.want).GetHeader().GetCount().GetWorkspaces(); got != 1 {
-				t.Fatalf("%s count = %d, want 1", tt.want, got)
-			}
-		})
-	}
-}
-
-func TestRecentlyMergedHoistsOutOfTheMaturityGrouping(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	merged := workspace("w-merged", "merged")
-	merged.MergedAt = at(0)
-	merged.LastActivityAt = at(0)
-
-	// Act.
-	r.SetRegistry(registry(merged))
-
-	// Assert: done is the band, never a stage section.
-	roster := latest(t, r)
-	for _, section := range roster.GetMaturity().GetSections() {
-		if len(section.GetRows().GetRows()) != 0 {
-			t.Fatalf("a merged workspace reached the %s stage", maturityStageName(section))
-		}
-	}
-	if len(rosterwalk.MergedRows(roster)) != 1 {
-		t.Fatal("the merged workspace is not in the recently-merged band")
-	}
-}
-
-func TestMaturityViewNestsAFamilyWithinItsStage(t *testing.T) {
-	// Arrange: a parent and its child, both in progress.
-	r, _ := newResolver(t)
-	parent := workspace("w-parent", "parent")
-	parent.LastActivityAt = at(0)
-	child := workspace("w-child", "child")
-	child.Parent = &parent.ID
-	child.LastActivityAt = at(0)
-
-	// Act.
-	r.SetRegistry(registry(parent, child))
-
-	// Assert.
-	rows := maturitySection(t, latest(t, r), "in_progress").GetRows().GetRows()
-	if len(rows) != 1 || len(rows[0].GetChildren()) != 1 {
-		t.Fatalf("in-progress rows = %v, want the child nested under its parent", rowNames(rows))
-	}
-}
-
-func TestMaturityViewMakesAChildWhoseParentIsInAnotherStageARoot(t *testing.T) {
-	// Arrange: the parent ran a turn; its child never has.
-	r, _ := newResolver(t)
-	parent := workspace("w-parent", "parent")
-	parent.LastActivityAt = at(0)
-	child := workspace("w-child", "child")
-	child.Parent = &parent.ID
-
-	// Act.
-	r.SetRegistry(registry(parent, child))
-
-	// Assert.
-	roster := latest(t, r)
-	backlog := maturitySection(t, roster, "backlog").GetRows().GetRows()
-	if len(backlog) != 1 || backlog[0].GetName().GetText() != "child" {
-		t.Fatalf("backlog rows = %v, want the child as a root", rowNames(backlog))
-	}
-	if rows := maturitySection(t, roster, "in_progress").GetRows().GetRows(); len(rows) != 1 || len(rows[0].GetChildren()) != 0 {
-		t.Fatalf("in-progress rows = %v, want the parent alone", rowNames(rows))
-	}
-}
-
-func TestMaturitySectionStatesItsFold(t *testing.T) {
-	tests := []struct {
-		stage wsm.MaturityStage
-		name  string
-	}{
-		{wsm.MaturityBacklog, "backlog"},
-		{wsm.MaturityInProgress, "in_progress"},
-		{wsm.MaturityMerging, "merging"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-			reg := registry()
-			reg.View.MaturityFolded = reg.View.MaturityFolded.With(tt.stage, true)
-
-			// Act.
-			r.SetRegistry(reg)
-
-			// Assert: the folded stage is collapsed and every other expanded.
-			for _, section := range latest(t, r).GetMaturity().GetSections() {
-				wantCollapsed := maturityStageName(section) == tt.name
-				if (section.GetCollapsed() != nil) != wantCollapsed || (section.GetExpanded() != nil) == wantCollapsed {
-					t.Fatalf("%s fold = %v, want collapsed=%v", maturityStageName(section), section.GetFold(), wantCollapsed)
-				}
-			}
-		})
-	}
-}
-
 // hiddenWorkspace is a registered workspace the user hid at the epoch.
 func hiddenWorkspace(id, name string) wsm.Workspace {
 	return hiddenAt(workspace(id, name), 0)
@@ -860,31 +435,17 @@ func hiddenAt(ws wsm.Workspace, d time.Duration) wsm.Workspace {
 	return ws
 }
 
-func TestAHiddenWorkspaceHoistsOutOfEveryGrouping(t *testing.T) {
+func TestAHiddenWorkspaceHoistsOutOfTheRepositorySections(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
-	taskID := task.ID
-	hidden := hiddenWorkspace("w-hidden", "hidden")
-	hidden.Task = &taskID
-	reg := registry(hidden, workspace("w-live", "live"))
-	reg.Tasks = []wsm.Task{task}
+	reg := registry(hiddenWorkspace("w-hidden", "hidden"), workspace("w-live", "live"))
 
 	// Act.
 	r.SetRegistry(reg)
 
 	// Assert.
-	roster := latest(t, r)
-	if got := rowNames(repoRows(t, roster)); !equal(got, []string{"live"}) {
+	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, []string{"live"}) {
 		t.Fatalf("repo rows = %v, want the hidden workspace hoisted out", got)
-	}
-	if rows := roster.GetTask().GetSections()[0].GetRows().GetRows(); len(rows) != 0 {
-		t.Fatalf("task rows = %v, want the hidden workspace hoisted out", rowNames(rows))
-	}
-	for _, section := range roster.GetMaturity().GetSections() {
-		if rowFor(section.GetRows().GetRows(), "w-hidden") != nil {
-			t.Fatal("a hidden workspace stayed in the maturity grouping")
-		}
 	}
 }
 
@@ -1317,16 +878,13 @@ func TestOpenSectionStatesItsFold(t *testing.T) {
 	}
 }
 
-func TestEveryGroupingCountsTheRowsItsOpenSectionLists(t *testing.T) {
-	// Arrange: a family of two on a task, an unassigned workspace, a closed
-	// one, a hidden one and a merged one, across two repositories.
+func TestTheOpenCountCountsTheRowsTheOpenSectionLists(t *testing.T) {
+	// Arrange: a family of two, a workspace in another repository, a closed
+	// one, a hidden one and a merged one.
 	r, _ := newResolver(t)
-	taskID := ids.TaskID("task-1")
 	parent := workspace("w-parent", "parent")
-	parent.Task = &taskID
 	child := workspace("w-child", "child")
 	child.Parent = &parent.ID
-	child.Task = &taskID
 	other := workspace("w-other", "other")
 	other.Repo = otherRepo.ID
 	closed := workspace("w-closed", "closed")
@@ -1334,27 +892,13 @@ func TestEveryGroupingCountsTheRowsItsOpenSectionLists(t *testing.T) {
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
 	reg := twoRepoRegistry(parent, child, other, closed, hiddenWorkspace("w-hidden", "hidden"), merged)
-	reg.Tasks = []wsm.Task{{ID: taskID, Title: "the task", CreatedAt: epoch}}
 
 	// Act.
 	r.SetRegistry(reg)
 
-	// Assert: each grouping counts the rows it lists, nested child included,
-	// and the task grouping leaves the unassigned workspace out.
-	roster := latest(t, r)
-	tests := []struct {
-		name string
-		got  uint32
-		want uint32
-	}{
-		{"repository", roster.GetRepository().GetOpenCount().GetWorkspaces(), 3},
-		{"task", roster.GetTask().GetOpenCount().GetWorkspaces(), 2},
-		{"maturity", roster.GetMaturity().GetOpenCount().GetWorkspaces(), 3},
-	}
-	for _, tt := range tests {
-		if tt.got != tt.want {
-			t.Errorf("%s open count = %d, want %d", tt.name, tt.got, tt.want)
-		}
+	// Assert: the nested child counts; the closed, hidden and merged do not.
+	if got := latest(t, r).GetRepository().GetOpenCount().GetWorkspaces(); got != 3 {
+		t.Fatalf("open count = %d, want 3", got)
 	}
 }
 

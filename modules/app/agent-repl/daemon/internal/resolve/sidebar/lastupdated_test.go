@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
@@ -17,15 +18,9 @@ import (
 
 // ---- the update recency the editor's switcher orders by ----
 
-// rowsEverywhere is every row the roster draws: the repository grouping's,
-// the hidden section's and the Recently Merged band's.
+// rowsEverywhere is every row the roster draws, through the one walk.
 func rowsEverywhere(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
-	var out []*frontendv1.RosterRow
-	for _, section := range roster.GetRepository().GetSections() {
-		out = append(out, section.GetRows().GetRows()...)
-	}
-	out = append(out, roster.GetHidden().GetRows().GetRows()...)
-	return append(out, mergedRows(roster)...)
+	return rosterwalk.AllRows(roster)
 }
 
 func TestTheRowStatesTheLatestUpdateItsRecordHolds(t *testing.T) {
@@ -88,7 +83,7 @@ func statusChangeResolver(t *testing.T, durable *time.Time) (sidebar.Resolver, *
 	var reports []statusChangeReport
 	now := epoch
 	r, _ := newResolver(t,
-		sidebar.WithClock(func() time.Time { return now }, (&manualTimers{}).after),
+		sidebar.WithClock(func() time.Time { return now }),
 		sidebar.WithStatusChangeSink(func(ws ids.WorkspaceID, at time.Time) {
 			mu.Lock()
 			defer mu.Unlock()

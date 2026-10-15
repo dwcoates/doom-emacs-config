@@ -136,143 +136,6 @@ func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspa
 	}
 }
 
-// taskView resolves the task grouping: one section per task, with the task's
-// done check on its own header.
-//
-// UNASSIGNED WORKSPACES ARE NOT IN THIS VIEW AT ALL. There is no "no task"
-// section: the task grouping answers "what is each task's work", and a
-// workspace assigned to nothing is not an answer to that.
-func (r *resolver) taskView(live []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterTaskView {
-	byTask := map[ids.TaskID][]wsm.Workspace{}
-	for _, ws := range live {
-		if ws.Task == nil {
-			continue
-		}
-		byTask[*ws.Task] = append(byTask[*ws.Task], ws)
-	}
-
-	tasks := make([]wsm.Task, len(r.state.reg.Tasks))
-	copy(tasks, r.state.reg.Tasks)
-	sort.SliceStable(tasks, func(i, j int) bool {
-		if !tasks[i].CreatedAt.Equal(tasks[j].CreatedAt) {
-			return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
-		}
-		if tasks[i].Title != tasks[j].Title {
-			return tasks[i].Title < tasks[j].Title
-		}
-		return tasks[i].ID < tasks[j].ID
-	})
-
-	out := &frontendv1.RosterTaskView{}
-	for _, task := range tasks {
-		rows := r.sectionRows(byTask[task.ID], rc, log.With(dlog.Context{"task_id": string(task.ID)}))
-		delete(byTask, task.ID)
-		section := &frontendv1.RosterTaskSection{
-			Key: &frontendv1.RosterTaskKey{TaskId: string(task.ID)},
-			Header: &frontendv1.RosterTaskSectionHeader{
-				Label: &frontendv1.RosterLabel{Text: task.Title},
-				Done:  &frontendv1.RosterTaskDone{Done: task.Done},
-			},
-			Rows: rows,
-		}
-		setTaskFold(section, task.Folded)
-		out.Sections = append(out.Sections, section)
-	}
-	out.OpenCount = openCount(out.GetSections())
-	for task, orphans := range byTask {
-		log.Error("daemon.sidebar.task_view",
-			"workspaces are assigned to a task the registry does not carry and were left out of the task grouping",
-			dlog.Context{
-				"task_id":             string(task),
-				"workspaces":          len(orphans),
-				"invariant_violation": "workspace.Task names no registered task",
-				"remediation":         "unassign the workspace or restore the task",
-			})
-	}
-	return out
-}
-
-// The maturity stages' headings, one author each.
-const (
-	BacklogSectionLabel    = "Backlog"
-	InProgressSectionLabel = "In Progress"
-	MergingSectionLabel    = "Merging"
-)
-
-// maturityView resolves the maturity grouping: ONE SECTION PER STAGE, every
-// stage drawn, in the order work moves through them. The last stage, done, is
-// the recently-merged band every grouping draws below its sections.
-//
-// A stage with no workspaces still draws its section, as a repository does,
-// so the grouping keeps its shape as work moves from stage to stage.
-func (r *resolver) maturityView(live []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMaturityView {
-	byStage := map[wsm.MaturityStage][]wsm.Workspace{}
-	for _, ws := range live {
-		stage := maturityStage(ws, r.footer.Status(ws.ID))
-		byStage[stage] = append(byStage[stage], ws)
-	}
-	out := &frontendv1.RosterMaturityView{}
-	for _, stage := range wsm.MaturityStages {
-		rows := r.sectionRows(byStage[stage], rc, log.With(dlog.Context{"maturity_stage": string(stage)}))
-		ref, label := maturityStageWire(stage)
-		section := &frontendv1.RosterMaturitySection{
-			Key:    &frontendv1.RosterMaturityKey{Stage: ref},
-			Header: sectionHeader(label, drawnLiveRowCount(rows)),
-			Rows:   rows,
-		}
-		setMaturityFold(section, r.state.reg.View.MaturityFolded.Folded(stage))
-		out.Sections = append(out.Sections, section)
-	}
-	out.OpenCount = openCount(out.GetSections())
-	return out
-}
-
-// maturityStage files a live workspace under its stage.
-//
-// THE MERGE FACT IS THE FOOTER'S, the same status the row's own arm projects
-// (statusArm), so a drawn row in the merging section draws a merge glyph. A
-// merge in hand outranks activity; otherwise a workspace that has never run a
-// turn (no last-activity instant, which wsm stamps at the turn edge) is
-// backlog, and one that has is in progress.
-func maturityStage(rec wsm.Workspace, status *frontendv1.FooterStatus) wsm.MaturityStage {
-	switch status.GetStatus().(type) {
-	case *frontendv1.FooterStatus_Merging, *frontendv1.FooterStatus_MergeFailed, *frontendv1.FooterStatus_Merged:
-		return wsm.MaturityMerging
-	}
-	if rec.LastActivityAt == nil {
-		return wsm.MaturityBacklog
-	}
-	return wsm.MaturityInProgress
-}
-
-// maturityStageWire is the stage's wire identity and its heading. A stage
-// that is none of the three is a defect: the stages are wsm's own constants.
-func maturityStageWire(stage wsm.MaturityStage) (*workspacev1.MaturityStage, string) {
-	switch stage {
-	case wsm.MaturityBacklog:
-		return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_Backlog{Backlog: &workspacev1.MaturityStageBacklog{}}},
-			BacklogSectionLabel
-	case wsm.MaturityInProgress:
-		return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_InProgress{InProgress: &workspacev1.MaturityStageInProgress{}}},
-			InProgressSectionLabel
-	case wsm.MaturityMerging:
-		return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_Merging{Merging: &workspacev1.MaturityStageMerging{}}},
-			MergingSectionLabel
-	default:
-		panic(fmt.Sprintf("sidebar: maturity stage %q is none of backlog, in_progress, merging", stage))
-	}
-}
-
-// setMaturityFold states a stage's fold on its section. The fold is the
-// daemon's so every page draws the same one (UpdateSidebarView).
-func setMaturityFold(section *frontendv1.RosterMaturitySection, folded bool) {
-	if folded {
-		section.Fold = &frontendv1.RosterMaturitySection_Collapsed{Collapsed: &frontendv1.RosterMaturitySectionCollapsed{}}
-		return
-	}
-	section.Fold = &frontendv1.RosterMaturitySection_Expanded{Expanded: &frontendv1.RosterMaturitySectionExpanded{}}
-}
-
 // mergedSection resolves the recently-merged section: the rows hoisted out of
 // every grouping, ONE GROUP PER REPOSITORY in the repository grouping's order,
 // each group's rows in merge order, the latest merge first
@@ -377,9 +240,9 @@ func (r *resolver) openSection() *frontendv1.RosterOpenSection {
 	return section
 }
 
-// openCount is how many rows the open-workspaces section lists under one
-// grouping: every not-closed row of every one of its sections, nested family
-// rows included, a folded section's too. It reads the very rows each section
+// openCount is how many rows the open-workspaces section lists: every
+// not-closed row of every repository section, nested family rows included, a
+// folded section's too. It reads the very rows each section
 // carries (drawnLiveRowCount), so it is always the sum of the sections' own
 // counts and no client counts rows for itself.
 func openCount[S interface{ GetRows() *frontendv1.RosterRows }](sections []S) *frontendv1.RosterOpenCount {
@@ -388,31 +251,6 @@ func openCount[S interface{ GetRows() *frontendv1.RosterRows }](sections []S) *f
 		n += drawnLiveRowCount(section.GetRows())
 	}
 	return &frontendv1.RosterOpenCount{Workspaces: uint32(n)}
-}
-
-// setShownGrouping states which grouping every page shows. The grouping is
-// one of the three: SetRegistry refuses a registry naming anything else.
-func setShownGrouping(roster *frontendv1.WorkspaceRoster, grouping wsm.Grouping) {
-	switch grouping {
-	case wsm.GroupingTask:
-		roster.Shown = &frontendv1.WorkspaceRoster_ShownTask{ShownTask: &frontendv1.RosterShownTask{}}
-	case wsm.GroupingMaturity:
-		roster.Shown = &frontendv1.WorkspaceRoster_ShownMaturity{ShownMaturity: &frontendv1.RosterShownMaturity{}}
-	case wsm.GroupingRepository:
-		roster.Shown = &frontendv1.WorkspaceRoster_ShownRepository{ShownRepository: &frontendv1.RosterShownRepository{}}
-	default:
-		panic(fmt.Sprintf("sidebar: shown grouping %q is none of repository, task, maturity", grouping))
-	}
-}
-
-// setTaskFold states a task's fold on its section. The fold is the daemon's
-// so every page draws the same one (UpdateSidebarView).
-func setTaskFold(section *frontendv1.RosterTaskSection, folded bool) {
-	if folded {
-		section.Fold = &frontendv1.RosterTaskSection_Collapsed{Collapsed: &frontendv1.RosterTaskSectionCollapsed{}}
-		return
-	}
-	section.Fold = &frontendv1.RosterTaskSection_Expanded{Expanded: &frontendv1.RosterTaskSectionExpanded{}}
 }
 
 // setMergedFold states the recently-merged band's fold. The fold is the

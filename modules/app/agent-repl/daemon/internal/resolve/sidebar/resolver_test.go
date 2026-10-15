@@ -144,8 +144,6 @@ func TestRosterPublishesTheWholeRosterOnEveryPush(t *testing.T) {
 	switch {
 	case roster.GetRepository() == nil:
 		t.Fatal("the push carried no repository grouping")
-	case roster.GetTask() == nil:
-		t.Fatal("the push carried no task grouping")
 	case roster.GetRecentlyMerged() == nil:
 		t.Fatal("the push carried no recently-merged section")
 	}
@@ -532,25 +530,6 @@ func TestARegistryWithASelectionItDoesNotCarryLeavesNoCurrent(t *testing.T) {
 	if got := latest(t, r).GetCurrent(); got != nil {
 		t.Fatalf("current = %v, want none for a workspace the registry does not carry", got)
 	}
-}
-
-func TestARegistryWithTheSelectionRefusesAViewGroupingThatIsNeither(t *testing.T) {
-	// Arrange.
-	r, surfaces := newResolver(t)
-	reg := registry(workspace("w1", "one"))
-	reg.View.Grouping = ""
-
-	// Act.
-	defer func() {
-		// Assert: it failed hard, and said so at ERROR first.
-		if recover() == nil {
-			t.Fatal("SetRegistrySelected accepted a view with no grouping")
-		}
-		if !hasError(surfaces.Records(), "daemon.sidebar.set_registry") {
-			t.Fatal("the invariant violation was not recorded at ERROR")
-		}
-	}()
-	r.SetRegistrySelected(reg, ids.WorkspaceID("w1"))
 }
 
 // TestAKindlessDetachmentFailsHardAndChangesNothing pins the invariant the

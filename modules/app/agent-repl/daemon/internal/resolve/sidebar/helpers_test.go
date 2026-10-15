@@ -30,48 +30,6 @@ func at(d time.Duration) *time.Time {
 	return &t
 }
 
-// manualTimers is the AfterFunc double: it records every armed timer, and a
-// test fires one by hand. Nothing fires on its own.
-type manualTimers struct {
-	mu    sync.Mutex
-	armed []*manualTimer
-}
-
-// manualTimer is one armed timer: its wait, its callback, and whether it was
-// stopped.
-type manualTimer struct {
-	wait    time.Duration
-	fire    func()
-	stopped bool
-}
-
-func (m *manualTimers) after(d time.Duration, f func()) func() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	t := &manualTimer{wait: d, fire: f}
-	m.armed = append(m.armed, t)
-	return func() bool {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		was := !t.stopped
-		t.stopped = true
-		return was
-	}
-}
-
-// live is every armed timer not stopped.
-func (m *manualTimers) live() []*manualTimer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []*manualTimer
-	for _, t := range m.armed {
-		if !t.stopped {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // testColors is the render-colors double: every roster_status arm painted and
 // every merge arm glyphed, which is exactly what the resolver asserts. The
 // values are irrelevant — the resolver reads the tables' KEYS, never a color —
@@ -110,7 +68,7 @@ func newResolver(t *testing.T, opts ...sidebar.Option) (sidebar.Resolver, *dlog.
 	// The Recently Merged window is measured at epoch, and its aging-out
 	// re-render never fires on its own: a test that wants it passes its own
 	// WithClock, which overrides this one.
-	clock := sidebar.WithClock(func() time.Time { return epoch }, (&manualTimers{}).after)
+	clock := sidebar.WithClock(func() time.Time { return epoch })
 	r, err = sidebar.New(testColors(), surfaces, f, append([]sidebar.Option{clock}, opts...)...)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
