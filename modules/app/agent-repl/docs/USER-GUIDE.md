@@ -369,6 +369,9 @@ The top bar's effort selector sits between the model selector and the permission
   - The 25 most recently merged.
   - The 25 you most recently closed or killed yourself; one closed by an agent, a merge or agent-repl is not listed.
 - **`SPC p P` lists every workspace agent-repl knows, however old.**
+- **Both list the most recently updated workspace first.**
+  - A turn finishing, opening, closing or killing a workspace, or a change of its status, brings it to the top.
+  - Only switching to a workspace does not move it.
 - **Each line shows the workspace's status mark as the sidebar draws it.**
   - A closed or merged workspace has the grey dot.
   - A hidden workspace has a dotted ring, `◌`, in its status color.
