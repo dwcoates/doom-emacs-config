@@ -73,13 +73,15 @@ merged workspaces, the merged ones static.
   `tasks.folded`; the columns stay until a later breaking migration
   (`daemon/internal/wsm/sidebarview.go`, `retiredGroupingColumn`).
 
-## Open for the owner's ruling: the task feature beyond its grouping
+## The task feature stays (owner ruling, 2026-10-15)
 
-The task grouping was the task feature's only drawn surface, and the rail's
-task controls went with it. Still in the contract, now with no drawn
-surface:
+Tasks are moving to the rail's "+" controls; only the tab is removed. The
+task protos (`agentrepl.v1.TaskRef`, `CreateTask`, `UpdateTask`,
+`AssignWorkspaceTask`), the daemon's task storage and assignments, and the
+command-file `task-*` entries are untouched.
 
-- `agentrepl.v1.CreateTask`, `agentrepl.v1.UpdateTask`,
-  `agentrepl.v1.AssignWorkspaceTask` and `agentrepl.v1.TaskRef`.
-- The workspace's task assignment in the daemon's registry, and the
-  roster resolver's `Registry.Tasks`, which nothing reads any more.
+What the move must supply: the tab's view (`RosterTaskView`) was the only
+place the roster carried the task list, so after this change no task list
+reaches the webapp. The row menu's assign-to-task entry was removed with the
+tab for that reason (its choices were read off the tab's sections). The
+"+" controls need their own element carrying the task list.
