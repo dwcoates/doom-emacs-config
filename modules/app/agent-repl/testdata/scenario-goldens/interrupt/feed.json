@@ -1,0 +1,89 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!interrupt"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "clock": {
+            "startedAtMs": "1800000000004",
+            "stopped": {
+              "endedAtMs": "1800000000005"
+            }
+          },
+          "input": {
+            "command": {},
+            "text": "sleep 600"
+          },
+          "name": {
+            "text": "Bash"
+          },
+          "returned": {
+            "succeeded": {},
+            "text": {
+              "text": "interrupted by the user"
+            }
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "interrupted": {
+          "marker": {
+            "label": {
+              "text": "interrupted"
+            },
+            "neutral": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

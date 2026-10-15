@@ -1,0 +1,81 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!task-reject"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "The board rejected the update."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000006",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_2}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

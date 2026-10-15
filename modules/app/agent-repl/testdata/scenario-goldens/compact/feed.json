@@ -1,0 +1,75 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "separation": {
+        "compacted": {
+          "summary": {
+            "markdown": "Compacted the conversation."
+          }
+        },
+        "label": {
+          "text": "context compacted on request · took 3m 14s"
+        },
+        "tokens": {
+          "afterText": "8.6k",
+          "beforeText": "435k"
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Compacted the conversation."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000006",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_2}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

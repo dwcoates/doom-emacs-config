@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!query-fail"
+                }
+              }
+            ]
+          }
+        },
+        "working": true
+      }
+    }
+  ],
+  "warnings": []
+}

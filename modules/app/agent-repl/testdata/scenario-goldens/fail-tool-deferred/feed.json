@@ -1,0 +1,93 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!fail-tool-deferred"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "success": {
+            "prose": {
+              "markdown": "Working on it…"
+            }
+          },
+          "usage": {
+            "atMs": "1800000000003",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the run ended waiting on a deferred tool call"
+          },
+          "marker": {
+            "label": {
+              "text": "tool deferred"
+            },
+            "neutral": {}
+          },
+          "message": {
+            "text": "the turn deferred a tool call to the host"
+          },
+          "turnFailed": {
+            "stopReason": "tool_deferred",
+            "vendor": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

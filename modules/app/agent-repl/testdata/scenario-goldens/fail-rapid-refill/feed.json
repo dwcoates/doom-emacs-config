@@ -1,0 +1,108 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!fail-rapid-refill"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "success": {
+            "prose": {
+              "markdown": "Working on it…"
+            }
+          },
+          "usage": {
+            "atMs": "1800000000003",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the account's refill-rate breaker tripped — this is a wait, not a fault"
+          },
+          "marker": {
+            "detail": {
+              "text": "rapid refill breaker"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "rapid_refill_breaker"
+                },
+                "message": {
+                  "text": "the rapid-refill breaker tripped"
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "message": {
+            "text": "the rapid-refill breaker tripped"
+          },
+          "turnFailed": {
+            "stopReason": "rapid_refill_breaker",
+            "vendor": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

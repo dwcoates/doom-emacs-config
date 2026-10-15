@@ -1,0 +1,128 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!worktree-remove"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "separation": {
+        "label": {
+          "text": "entered worktree /w/worktrees/throwaway"
+        },
+        "worktreeEntered": {
+          "branch": {
+            "text": "offline/throwaway"
+          },
+          "path": {
+            "text": "/w/worktrees/throwaway"
+          }
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "separation": {
+        "label": {
+          "text": "left the worktree"
+        },
+        "worktreeLeft": {
+          "removed": {
+            "discarded": {
+              "text": "3 files, 1 commit discarded"
+            }
+          }
+        }
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Removed the worktree."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000009",
+            "heat": {
+              "position": 0.1078
+            },
+            "text": "9.7k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_5}"
+      },
+      "order": {
+        "key": "${ORDER_5}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_4}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

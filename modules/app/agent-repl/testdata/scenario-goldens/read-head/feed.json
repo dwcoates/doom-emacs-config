@@ -1,0 +1,180 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!read-head"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "clock": {
+            "startedAtMs": "1800000000008",
+            "stopped": {
+              "endedAtMs": "1800000000008"
+            }
+          },
+          "input": {
+            "path": {},
+            "text": "/w/s/example.ts"
+          },
+          "name": {
+            "text": "Read"
+          },
+          "returned": {
+            "code": {
+              "omitted": {
+                "text": "showing 2 of 4 lines"
+              },
+              "spans": [
+                {
+                  "paintClass": "keyword",
+                  "text": "export"
+                },
+                {
+                  "text": " "
+                },
+                {
+                  "paintClass": "keyword",
+                  "text": "const"
+                },
+                {
+                  "text": " one "
+                },
+                {
+                  "paintClass": "operator",
+                  "text": "="
+                },
+                {
+                  "text": " "
+                },
+                {
+                  "paintClass": "number",
+                  "text": "1"
+                },
+                {
+                  "paintClass": "punctuation",
+                  "text": ";"
+                },
+                {
+                  "text": "\n"
+                },
+                {
+                  "paintClass": "keyword",
+                  "text": "export"
+                },
+                {
+                  "text": " "
+                },
+                {
+                  "paintClass": "keyword",
+                  "text": "const"
+                },
+                {
+                  "text": " two "
+                },
+                {
+                  "paintClass": "operator",
+                  "text": "="
+                },
+                {
+                  "text": " "
+                },
+                {
+                  "paintClass": "number",
+                  "text": "2"
+                },
+                {
+                  "paintClass": "punctuation",
+                  "text": ";"
+                }
+              ]
+            },
+            "succeeded": {}
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "Read the head of the file."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000006",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_3}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

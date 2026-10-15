@@ -1,0 +1,112 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!api-429"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "notice": {
+            "heading": "Notice — your allowance is exhausted. This is the vendor's own message, not the agent's."
+          },
+          "success": {
+            "prose": {
+              "markdown": "Rate limited; retry after 30 seconds."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000003",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "rate limited by the vendor"
+          },
+          "marker": {
+            "detail": {
+              "text": "rate limited"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "rate_limited"
+                },
+                "message": {
+                  "text": "Rate limited; retry after 30 seconds."
+                },
+                "retryAt": {
+                  "atMs": "${NOW}"
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "message": {
+            "text": "Rate limited; retry after 30 seconds."
+          },
+          "rateLimited": {
+            "retryAfterMs": "549"
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

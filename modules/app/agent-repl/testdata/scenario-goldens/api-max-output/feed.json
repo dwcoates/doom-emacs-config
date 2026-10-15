@@ -1,0 +1,107 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!api-max-output"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "notice": {
+            "heading": "Notice from the vendor's tooling, not the agent's answer."
+          },
+          "success": {
+            "prose": {
+              "markdown": "The response hit the max output tokens."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000003",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the request asked for more output than the model will produce"
+          },
+          "marker": {
+            "detail": {
+              "text": "max output tokens"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "max_output_tokens"
+                },
+                "message": {
+                  "text": "The response hit the max output tokens."
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "maxOutputTokens": {},
+          "message": {
+            "text": "The response hit the max output tokens."
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

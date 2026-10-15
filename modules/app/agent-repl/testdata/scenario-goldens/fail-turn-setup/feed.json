@@ -1,0 +1,108 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!fail-turn-setup"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "success": {
+            "prose": {
+              "markdown": "Working on it…"
+            }
+          },
+          "usage": {
+            "atMs": "1800000000003",
+            "heat": {
+              "position": 0.03593333333333334
+            },
+            "text": "3.2k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the run could not be set up and never reached the model"
+          },
+          "marker": {
+            "detail": {
+              "text": "turn setup failed"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "turn_setup_failed"
+                },
+                "message": {
+                  "text": "the turn could not be set up"
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "message": {
+            "text": "the turn could not be set up"
+          },
+          "turnFailed": {
+            "stopReason": "turn_setup_failed",
+            "vendor": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}

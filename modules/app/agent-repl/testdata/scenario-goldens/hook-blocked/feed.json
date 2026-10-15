@@ -1,0 +1,136 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!hook-blocked"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "activity": {
+        "simpleToolCall": {
+          "clock": {
+            "startedAtMs": "1800000000009",
+            "stopped": {
+              "endedAtMs": "1800000000009"
+            }
+          },
+          "input": {
+            "path": {},
+            "text": "/w/s/example.ts"
+          },
+          "name": {
+            "text": "Edit"
+          },
+          "returned": {
+            "failed": {},
+            "text": {
+              "text": "Blocked by a PostToolUse hook."
+            }
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "hook": {
+          "blocked": {
+            "reason": "the suite failed after the edit"
+          },
+          "headline": {
+            "text": "hook blocked: PostToolUse:Edit (PostToolUse)"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_3}"
+      },
+      "order": {
+        "key": "${ORDER_3}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "activity": {
+        "response": {
+          "finalAnswer": true,
+          "success": {
+            "prose": {
+              "markdown": "A hook blocked the edit."
+            }
+          },
+          "usage": {
+            "atMs": "1800000000007",
+            "heat": {
+              "position": 0.07186666666666668
+            },
+            "text": "6.5k"
+          }
+        }
+      },
+      "id": {
+        "value": "${ROW_4}"
+      },
+      "order": {
+        "key": "${ORDER_4}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_5}"
+      },
+      "order": {
+        "key": "${ORDER_5}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "concluded": {
+          "answer": {
+            "value": "${ROW_4}"
+          }
+        },
+        "endedAtMs": "${NOW}"
+      }
+    }
+  ],
+  "warnings": []
+}

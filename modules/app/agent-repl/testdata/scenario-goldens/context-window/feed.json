@@ -1,0 +1,93 @@
+{
+  "rows": [
+    {
+      "id": {
+        "value": "${ROW_1}"
+      },
+      "order": {
+        "key": "${ORDER_1}"
+      },
+      "selectable": {},
+      "turn": {
+        "value": "${TURN}"
+      },
+      "userPrompt": {
+        "author": {
+          "label": "You"
+        },
+        "success": {
+          "body": {
+            "blocks": [
+              {
+                "text": {
+                  "text": "!context-window"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": {
+        "value": "${ROW_2}"
+      },
+      "order": {
+        "key": "${ORDER_2}"
+      },
+      "turn": {
+        "value": "${TURN}"
+      },
+      "turnEnded": {
+        "endedAtMs": "${NOW}",
+        "errored": {
+          "headline": {
+            "text": "the prompt was too long to send — the context must be cut first"
+          },
+          "marker": {
+            "detail": {
+              "text": "prompt too long"
+            },
+            "label": {
+              "text": "vendor error"
+            },
+            "vendorFault": {
+              "expansion": {
+                "errorType": {
+                  "text": "prompt_too_long"
+                },
+                "message": {
+                  "text": "the conversation exceeds the model's context window"
+                },
+                "resend": {
+                  "said": {
+                    "content": {
+                      "blocks": [
+                        {
+                          "text": {
+                            "text": "!context-window"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "time": {
+                  "atMs": "${NOW}"
+                }
+              }
+            }
+          },
+          "message": {
+            "text": "the conversation exceeds the model's context window"
+          },
+          "turnFailed": {
+            "stopReason": "prompt_too_long",
+            "vendor": {}
+          }
+        }
+      }
+    }
+  ],
+  "warnings": []
+}
