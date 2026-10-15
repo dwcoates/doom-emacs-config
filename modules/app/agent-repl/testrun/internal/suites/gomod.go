@@ -67,23 +67,13 @@ func goPackageArg(rel string) string {
 // unit only when the caller explicitly asks for it.
 func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
-	pkgs, err := goTestedPackages(dir)
+	pkgs, ipkgs, err := GoSuitePackages(l, s)
 	if err != nil {
 		return Units{}, err
-	}
-	if len(pkgs) == 0 {
-		return Units{}, fmt.Errorf("suites: %s has no tested packages under %s", s.Name, dir)
 	}
 	u, err := goModuleUnitsForPackages(l, s, dir, pkgs)
 	if err != nil || s.IntegrationTags == "" {
 		return u, err
-	}
-	ipkgs, err := goTestedPackagesTagged(dir, s.IntegrationTags, s.IntegrationPackages)
-	if err != nil {
-		return Units{}, err
-	}
-	if len(ipkgs) == 0 {
-		return Units{}, fmt.Errorf("suites: %s has no %s-tagged tested packages in %s under %s", s.Name, s.IntegrationTags, s.IntegrationPackages, dir)
 	}
 	iu, err := goIntegrationUnitsForPackages(l, s, dir, ipkgs)
 	if err != nil {
@@ -92,6 +82,32 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	u.Atomic = append(u.Atomic, iu.Atomic...)
 	u.Splits = append(u.Splits, iu.Splits...)
 	return u, nil
+}
+
+// GoSuitePackages is a Go suite's tested packages, relative to its module:
+// the ordinary pass's, and its build-tagged integration pass's (none without
+// IntegrationTags). Every caller that runs a suite's packages lists them
+// here: the run, and `testrun redundancy`'s -roster-suite.
+func GoSuitePackages(l Layout, s roster.Suite) ([]string, []string, error) {
+	dir := l.resolve(s.Path)
+	pkgs, err := goTestedPackages(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pkgs) == 0 {
+		return nil, nil, fmt.Errorf("suites: %s has no tested packages under %s", s.Name, dir)
+	}
+	if s.IntegrationTags == "" {
+		return pkgs, nil, nil
+	}
+	ipkgs, err := goTestedPackagesTagged(dir, s.IntegrationTags, s.IntegrationPackages)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(ipkgs) == 0 {
+		return nil, nil, fmt.Errorf("suites: %s has no %s-tagged tested packages in %s under %s", s.Name, s.IntegrationTags, s.IntegrationPackages, dir)
+	}
+	return pkgs, ipkgs, nil
 }
 
 // goIntegrationUnitsForPackages is the suite's build-tagged integration pass:
