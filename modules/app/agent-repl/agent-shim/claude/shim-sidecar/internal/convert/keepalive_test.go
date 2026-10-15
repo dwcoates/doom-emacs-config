@@ -95,6 +95,24 @@ func kaAttachment(t *testing.T, uuid, parent string) string {
 	})
 }
 
+// kaBoundary is a compaction's boundary, which names no parent.
+func kaBoundary(t *testing.T, uuid string) string {
+	t.Helper()
+	return kaLine(t, map[string]any{
+		"type": "system", "subtype": "compact_boundary", "uuid": uuid, "parentUuid": "",
+		"compactMetadata": map[string]any{"trigger": "manual", "preTokens": 100, "postTokens": 10},
+	})
+}
+
+// kaSummary is the compaction's summary, parented on its boundary.
+func kaSummary(t *testing.T, uuid, boundary string) string {
+	t.Helper()
+	return kaLine(t, map[string]any{
+		"type": "user", "uuid": uuid, "parentUuid": boundary, "isCompactSummary": true,
+		"message": map[string]any{"role": "user", "content": "the story so far"},
+	})
+}
+
 // entriesPerLine converts lines through ONE converter in file order, joining
 // at `from`, and returns what each line produced.
 func entriesPerLine(t *testing.T, c *Converter, from int64, lines ...string) []int {
@@ -241,6 +259,25 @@ func TestKeepaliveRecordsAreClassifiedByTheirLinks(t *testing.T) {
 					kaPrompt(t, "k1", "", "", ka),
 					kaCall(t, "k2", "k1", "msg_k", "toolu_k"),
 					kaResult(t, "k3", "k2", "", "toolu_k"),
+				}
+			},
+			wantStored: false,
+		},
+		{
+			name: "a compaction's boundary landing inside a keep-alive's span",
+			lines: func(t *testing.T) []string {
+				return []string{kaPrompt(t, "k1", "", "pk", ka), kaBoundary(t, "b1")}
+			},
+			wantStored: true,
+		},
+		{
+			name: "the keep-alive's reply after an interposed compaction",
+			lines: func(t *testing.T) []string {
+				return []string{
+					kaPrompt(t, "k1", "", "pk", ka),
+					kaBoundary(t, "b1"),
+					kaSummary(t, "s1", "b1"),
+					kaReply(t, "k2", "k1", "msg_k", "."),
 				}
 			},
 			wantStored: false,
