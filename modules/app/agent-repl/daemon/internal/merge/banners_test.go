@@ -290,20 +290,25 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 }
 
 // TestEveryResolutionIsAnnouncedThroughEnded pins the one funnel: a merge's
-// resolved banner is raised only by ended (and by the fork that never made a
-// merge workspace), and a handback skips ended only for a merge never put in
-// line, so no terminal can hand back without announcing its end.
+// resolved banner is raised only through raiseResolved, by ended (and by the
+// fork that never made a merge workspace), and a handback skips ended only for
+// a merge never put in line, so no terminal can hand back without announcing
+// its end, and every end's banner is worded the same way.
 func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	// Arrange / Act: the package's own production sources.
-	resolved, handBacks := 0, 0
+	resolved, raised, handBacks := 0, 0, 0
 	for _, file := range sourcescan.Production(t) {
 		resolved += strings.Count(string(file.Source), "Banners.Resolved(")
+		raised += strings.Count(string(file.Source), "o.raiseResolved(")
 		handBacks += strings.Count(string(file.Source), "o.handBack(ctx")
 	}
 
 	// Assert
-	if resolved != 2 {
-		t.Errorf("Banners.Resolved is called at %d sites, want 2: ended and the failed fork", resolved)
+	if resolved != 1 {
+		t.Errorf("Banners.Resolved is called at %d sites, want 1: raiseResolved", resolved)
+	}
+	if raised != 2 {
+		t.Errorf("raiseResolved is called at %d sites, want 2: ended and the failed fork", raised)
 	}
 	if handBacks != 2 {
 		t.Errorf("handBack is called at %d sites, want 2: ended and a merge never put in line", handBacks)

@@ -124,8 +124,15 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
 	o.log(ctx, ws).Debug("daemon.merge.ended", "a merge left the queue for good; raising its resolved banner", dlog.Context{
 		"workspace": string(ws), "outcome": out.Kind.String()})
-	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.Summary)
+	o.raiseResolved(ws, out)
 	o.handBack(ctx, ws, out)
+}
+
+// raiseResolved raises the resolved desktop banner of a merge's outcome on ws.
+// It is the ONE place a resolved banner is raised from, so every end words it
+// the same way.
+func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
+	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.Summary)
 }
 
 // handBack reports how a merge ended to the workspace whose feed carries the

@@ -580,7 +580,7 @@ func (o *orchestrator) dropDetached(ctx context.Context, requester ids.Workspace
 	// workspace whose terminal would raise its resolved banner (ended), so it
 	// is raised here.
 	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Branch: source.DetachName}
-	o.deps.Banners.Resolved(requester, out.Kind.mergeEnd(), out.Summary)
+	o.raiseResolved(requester, out)
 	return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, out)
 }
 
