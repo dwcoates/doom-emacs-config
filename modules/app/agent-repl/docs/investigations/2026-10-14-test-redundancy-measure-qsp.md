@@ -1,8 +1,7 @@
 # Which test cases are redundant: the measurement and its pilot (2026-10-14)
 
-STATUS: draft, paused by owner decision on 2026-10-15 before the pilot
-rerun and the baseline run. The pilot and rollout sections are not written
-yet. The first pilot run's numbers are under "Pilot".
+STATUS: the pilot and the baseline are measured; the cross-tier
+verification of the audits' deletion sets is running.
 
 Option A of the test-slimming effort (parent workspace
 `agent-repl-test-slimming`): build the measurement that says which test
@@ -119,17 +118,27 @@ the rest's cost bounded.
 
 ## Pilot: `daemon/internal/workspace/sessions_test.go`
 
-First run (before hang confirmation; its hangs over-count kills, see
-above): 240 leaf cases, 29 pinned; 117 removable under kills-only (106
-under strict), proven cheapest; case runtime 141ms total, 54ms of it saved.
-Mutants: 1445 in the reached files of internal/workspace, 496 killed, 311
-survived, 638 unreached, 0 dropped (61.5% over reached). The measurement
-cost 28m27s of wall and 3m21s of CPU over 12411 processes; the schema
-compiled once.
+Measured 2026-10-15 at master 9e2f7e4874 (merged into this branch), host
+load under 32 throughout, against the pinned baseline; the full report is
+[pilot-sessions_test-report.md](2026-10-14-test-redundancy-measure-qsp/pilot-sessions_test-report.md).
 
-The second run (hang confirmation, coverage budget) ran under host loads of
-85-196 and was discarded; the tool now waits for load at most 32 (load.go).
-A rerun is queued behind the pause.
+| | |
+|---|---|
+| Leaf cases | 240 (173 top-level tests, their subtests expanded) |
+| Pinned (log-record assertions) | 29 |
+| Removable, kills-only | 117 (proven cheapest), keeping 123 |
+| Removable, strict | 106; kills-only removes 12 more for 2.7ms |
+| Case runtime | 110ms total, 37ms of it saved |
+| Coverage, agent-repld | 87.85% to 87.82% estimated (0.04 points) |
+| Mutants | 1445: 494 killed, 313 survived, 638 unreached (61.2% over reached) |
+| Kills by hang | 66 mutants' hangs confirmed at 11s; 2 only slowed a bound-measuring test and were not counted |
+| Measurement cost | 31m23s wall, 4m00s CPU, 13287 processes; builds 7s, mutant runs 31m |
+
+- The first run (before hang confirmation, under heavy load) found the
+  same 117; its kill sets over-counted by hangs. The second run under loads
+  of 85-196 was discarded.
+- Nearly half the cases go, but the time saved is noise: the package's
+  whole file runs in 0.11s against a 4s compile.
 
 ## Findings
 
