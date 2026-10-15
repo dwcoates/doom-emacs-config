@@ -29,9 +29,9 @@ not on master when this report was written.
 - **The recommended shape is one `World` per cluster, with a fresh workspace per case.**
   - Each case keeps its own session, shim, feed and per-workspace logs.
   - Sharing the session as well would save only about 0.05s more per case and would give up that isolation.
-- **On top of test-tier-audit-e2e's KEEP set:** 17 default-world KEEP rows can share one `World`.
+- **The headline is clusters K1 and K1b, on top of test-tier-audit-e2e's KEEP set:** 17 default-world KEEP rows can share one `World`.
   - That saves about 43s solo wall and at least about 5 CPU-s per run.
-  - If the owner rules the scenario matrix so that the MOVE rows stay in e2e, 48 more rows (57 worlds) can share. That saves about 150s solo wall more.
+  - Contingent only: the scenario matrix was ruled (a) on 2026-10-14, so the MOVE rows of clusters C-M1 and C-M2 mostly leave e2e. They are kept below in case some stay.
 - **This needs one rule change,** drafted in the "Proposed rule change" section, plus one harness change: warning declarations scoped to a workspace.
 
 ## Method
@@ -106,7 +106,7 @@ Ten of the costliest tests and eight random tests with a median history time, ru
   - Side finding: the e2e package's `sharePrebuilt` (`~/.config/doom-worktrees/test-shared-setup-lzb/modules/app/agent-repl/testrun/internal/suites/gopkg.go`) is the existing fix shape.
     - It builds once in the build unit and points every chunk at the result.
     - It loses no coverage.
-    - It matters only if the shards survive test-tier-audit-integration, which proposes replacing them with unit-level golden checks.
+    - Contingent: the shards are slated to become unit-level golden checks (test-tier-audit-integration), so this matters only if some survive.
 
 ### Suites with no expensive shared setup
 
@@ -162,6 +162,7 @@ Common to every e2e cluster:
 - **Why a condition:** `harness.Daemon.ExpectWarnings` (`~/.config/doom-worktrees/test-shared-setup-lzb/modules/app/agent-repl/daemon/integration/harness/logs.go:387`) widens the sweep for the WHOLE daemon.
   - In a shared `World`, one case's declared warning would license the same warning from every other case. That is a coverage loss.
   - They join K1 only once the harness has `ExpectWarningsFor(ws, ...)`, which matches the operation AND the record's workspace.
+  - Ruling, 2026-10-14: `ExpectWarningsFor(ws, ...)` is approved in principle, as a structural improvement on its own.
   - A record that carries no workspace keeps the case in its own `World`.
 - **Saving:** 3 more worlds removed, about 8s solo wall and at least 0.9 CPU-s.
 
@@ -191,9 +192,9 @@ Common to every e2e cluster:
   - `TestStopReplayedByEveryRewindNeverLoops`, six identical worlds cut to one with read-only `t.Run`s. The parent ruled this through test-cross-product-audit, and the rule below is its home.
   - The stop-after-turn and no-watch-token fold.
 
-### Conditional cluster C-M: MOVE rows, only if the scenario-matrix ruling keeps them in e2e
+### Contingent cluster C-M: MOVE rows, kept only for the rows that end up staying in e2e
 
-- **The condition:** test-tier-audit-e2e's question 1. If the owner rules (a), these rows leave e2e and this cluster saves nothing. Rows that leave go to their lower tier, with no `World` at all.
+- **The condition:** test-tier-audit-e2e's question 1, which was ruled (a) on 2026-10-14. These rows therefore mostly leave e2e for their lower tier, with no `World` at all. The cluster applies only to rows that stay.
 - **C-M1, MOVE rows on a default `World`, unconditional (40 funcs, 49 worlds):**
   - `TestTerminalReasonTurnFailedArms` builds 10 worlds alone.
   - The rows, grouped by file:
@@ -301,8 +302,8 @@ The saving in every e2e cluster comes from building fewer `World`s, not from hav
 |---|---|---|---|
 | K1 (KEEP, unconditional) | 13 | about 35s | 4.0 |
 | K1b (KEEP, needs scoped warnings) | 3 | about 8s | 0.9 |
-| C-M1 (only if MOVE rows stay) | 48 | about 130s | 15 |
-| C-M2 (only if MOVE rows stay, needs scoped warnings) | 8 | about 22s | 2.5 |
+| C-M1 (contingent: ruled (a), rows mostly leave) | 48 | about 130s | 15 |
+| C-M2 (contingent: ruled (a), rows mostly leave) | 8 | about 22s | 2.5 |
 | C-W (only if webapp areas stay and the owner overrides one-world-per-area) | 5 | about 13.5s | 1.5 |
 | D1 (daemon integration) | n/a | about 2.6s | 1.2 |
 
@@ -346,5 +347,10 @@ The saving in every e2e cluster comes from building fewer `World`s, not from hav
 ## Open questions (sent to the parent)
 
 1. **Which shape?** Approve the shared-fixture rule, and choose between per-cluster scenario tests and a package-wide shared default `World` that keeps every Test func.
-2. **Warning scope?** Approve the harness change `ExpectWarningsFor(ws, ...)`. K1b and C-M2 depend on it.
-3. **Sidecar warm-up:** should the sidecar integration package adopt `sharePrebuilt` if the mock shards survive?
+   - Still with the owner, because the rule rewords the "one edge case per test" sentence in four files. The parent has recommended the package-wide `World`.
+
+Ruled 2026-10-14:
+
+- The scenario matrix was ruled (a), so C-M1 and C-M2 are contingent.
+- `ExpectWarningsFor(ws, ...)` is approved in principle. K1b depends on it.
+- Sidecar `sharePrebuilt` is contingent on the mock shards surviving, and they are slated to become unit-level golden checks.
