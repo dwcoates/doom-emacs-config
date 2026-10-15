@@ -184,6 +184,30 @@ func TestASubagentTranscriptOfAnActiveSessionIsWatched(t *testing.T) {
 	}
 }
 
+func TestASubagentTranscriptWithoutItsMetaIsNotWatchedOrRead(t *testing.T) {
+	// Arrange: a live session's subagent transcript whose meta.json has not
+	// been written yet.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-live", promptLine)
+	dir := filepath.Join(h.rootA, "projects", "proj", "sess-live", "subagents")
+	path := filepath.Join(dir, "agent-a1.jsonl")
+	h.write(t, path, promptLine+"\n")
+	path = normalized(path)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: held, never tailed, so no cursor of its own either.
+	if _, watched := h.sc.watchers[path]; watched {
+		t.Fatal("a subagent transcript with no meta is watched")
+	}
+	if _, cursor := h.sc.cursors[path]; cursor {
+		t.Fatal("a subagent transcript with no meta was given a cursor")
+	}
+}
+
 func TestASubagentTranscriptOfAClosedSessionIsNotWatched(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
