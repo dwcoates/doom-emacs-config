@@ -421,7 +421,12 @@ func (w *walker) node(n ast.Node) {
 		case *ast.CommClause:
 			w.list(c.Body)
 		case *ast.ExprStmt:
-			if _, ok := c.X.(*ast.CallExpr); ok && w.listed[c] {
+			// Never a panic: it is the one call Go counts as a terminating
+			// statement, so a function ending in one, guarded, no longer
+			// compiles ("missing return", at the function's end, outside any
+			// site), and removing a panic is a mutant no test can be asked
+			// to kill by anything but the panic itself.
+			if call, ok := c.X.(*ast.CallExpr); ok && w.listed[c] && !isPanic(call) {
 				id := w.mutant(c, "remove call")
 				w.add(c, []int{id}, func(sub func(int, int) string) string {
 					return fmt.Sprintf("if !agentReplMutOn(%d) { %s }", id, sub(w.off(c.Pos()), w.off(c.End())))
@@ -532,4 +537,50 @@ func (w *walker) ret(r *ast.ReturnStmt) {
 	w.add(e, []int{id}, func(sub func(int, int) string) string {
 		return fmt.Sprintf("agentReplMutNilErr(%d, %s)", id, sub(w.off(e.Pos()), w.off(e.End())))
 	})
+}
+
+// isPanic says call is the builtin panic.
+func isPanic(call *ast.CallExpr) bool {
+	id, ok := call.Fun.(*ast.Ident)
+	return ok && id.Name == "panic"
+}
+
+// ProductionFiles are the files of the package in dir a schema may mutate:
+// every non-test Go file that is not generated, in name order.
+func ProductionFiles(dir string) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, fmt.Errorf("gomut: list %s: %w", dir, err)
+	}
+	var out []string
+	for _, path := range matches {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		af, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments|parser.PackageClauseOnly)
+		if err != nil {
+			return nil, fmt.Errorf("gomut: parse %s: %w", path, err)
+		}
+		if ast.IsGenerated(af) {
+			continue
+		}
+		out = append(out, filepath.Base(path))
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// DropKeys removes the sites of every mutant whose Key is in keys (sites an
+// earlier schema over the same files found do not type-check), and answers
+// how many mutants went with them.
+func (s *Schema) DropKeys(keys map[string]bool) int {
+	n := 0
+	for _, m := range s.Mutants {
+		st := s.byID[m.ID]
+		if keys[m.Key()] && !st.dropped {
+			st.dropped = true
+			n += len(st.mutants)
+		}
+	}
+	return n
 }

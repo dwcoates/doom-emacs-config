@@ -1012,12 +1012,35 @@ func shimDied(err error) error {
 }
 
 // diedUnder answers whether a call's transport failure was the shim dying:
-// only an `unavailable` failure can be, and only when Died says so.
+// only a transport cut (transportCut) can be, and only when Died says so.
 func (c *client) diedUnder(err error) (ExitInfo, bool) {
-	if connect.CodeOf(err) != connect.CodeUnavailable {
+	if !transportCut(err) {
 		return ExitInfo{}, false
 	}
 	return c.Died()
+}
+
+// transportCut answers whether err is the link breaking under a call rather
+// than anything the shim answered: `unavailable`, or a response the peer cut
+// partway through an envelope, which connect reports as invalid_argument
+// "protocol error: incomplete envelope" wrapping io.ErrUnexpectedEOF.
+//
+// AN ANSWER THE SHIM SENT CAN NEVER WRAP io.ErrUnexpectedEOF: a refusal that
+// crossed the wire is rebuilt on this side from its code and message alone,
+// so only this side's own read of a cut stream carries the cause.
+// MEASURED, merge gate 2026-10-15:
+// TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt caught
+// `daemon.shimclient.watch_agent` ERROR "shim stream refused {error=
+// invalid_argument: protocol error: incomplete envelope: unexpected EOF}" for
+// the shim it had SIGKILLed.
+func transportCut(err error) bool {
+	switch connect.CodeOf(err) {
+	case connect.CodeUnavailable:
+		return true
+	case connect.CodeInvalidArgument:
+		return errors.Is(err, io.ErrUnexpectedEOF)
+	}
+	return false
 }
 
 // Died answers whether the shim has died or is dying, from the process's own

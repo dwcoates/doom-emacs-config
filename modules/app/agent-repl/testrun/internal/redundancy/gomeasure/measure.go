@@ -146,6 +146,8 @@ type measurer struct {
 	coverPrograms, mutPrograms string
 	// hangs are the kills that were a lone hang.
 	hangs []string
+	// untyped are the mutant keys the pre-flight found do not type-check.
+	untyped map[string]bool
 }
 
 // id is a case's identity in the measurement: its leaf name, qualified by
@@ -251,6 +253,10 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	if out.Modules, err = m.modulePath(ctx); err != nil {
 		return nil, err
 	}
+	if err := m.preflight(ctx, imports); err != nil {
+		return nil, err
+	}
+	phase("schema pre-flight")
 
 	if err := m.coverBuilds(ctx); err != nil {
 		return nil, err
@@ -736,55 +742,40 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 			reached[imp][base] = true
 		}
 	}
-	var imps []string
-	for imp := range reached {
-		imps = append(imps, imp)
-	}
-	sort.Strings(imps)
-	var schemas []*gomut.Schema
-	next := 1
-	for _, imp := range imps {
-		var files []string
-		for f := range reached[imp] {
+	files := map[string][]string{}
+	for imp, set := range reached {
+		for f := range set {
 			if !strings.HasSuffix(f, "_test.go") {
-				files = append(files, f)
+				files[imp] = append(files[imp], f)
 			}
 		}
-		s, err := gomut.Build(imports[imp], files, next)
-		if err != nil {
-			return nil, err
-		}
-		next += len(s.Mutants)
-		schemas = append(schemas, s)
+	}
+	schemas, next, err := layoutSchemas(imports, files)
+	if err != nil {
+		return nil, err
 	}
 	if len(schemas) == 0 {
 		return nil, fmt.Errorf("gomeasure: the cases reach no production file of %s", strings.Join(m.cfg.Mutate, ", "))
 	}
+	// The sites the pre-flight found do not type-check go before the first
+	// build (preflight).
+	pre := 0
+	for _, s := range schemas {
+		pre += s.DropKeys(m.untyped)
+	}
+	if pre > 0 {
+		m.log.Infof("redundancy: %d mutants the pre-flight found untyped are dropped", pre)
+	}
 	for attempt := 0; ; attempt++ {
-		dir := filepath.Join(m.cfg.Scratch, "overlay-"+strconv.Itoa(attempt))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("gomeasure: %w", err)
-		}
-		replace := map[string]string{}
-		for _, s := range schemas {
-			r, err := s.Overlay(dir)
-			if err != nil {
-				return nil, err
-			}
-			for k, v := range r {
-				replace[k] = v
-			}
-		}
-		ov := filepath.Join(dir, "overlay.json")
-		if err := gomut.WriteOverlay(ov, replace); err != nil {
+		ov, err := writeOverlay(filepath.Join(m.cfg.Scratch, "overlay-"+strconv.Itoa(attempt)), schemas)
+		if err != nil {
 			return nil, err
 		}
 		var failed []Result
 		// The mutated packages alone first: one build, cached across
 		// attempts, finds the sites that do not type-check far faster than
 		// every suite's binary would.
-		check := append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...)
-		res, err := m.goBuild(ctx, m.cfg.Module, check)
+		res, err := m.buildMutated(ctx, ov)
 		if err != nil {
 			return nil, err
 		}
@@ -820,33 +811,146 @@ func (m *measurer) schema(ctx context.Context, cases []redundancy.Case, imports 
 			m.log.Infof("redundancy: mutant schema built after %d attempts, %d of %d mutants live", attempt+1, live, next-1)
 			return schemas, nil
 		}
-		dropped := 0
-		var text strings.Builder
-		for _, res := range failed {
-			text.WriteString(res.Text())
-		}
-		for _, mm := range compileErr.FindAllStringSubmatch(text.String(), -1) {
-			path := mm[1]
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(m.cfg.Module, path)
-			}
-			line, _ := strconv.Atoi(mm[2])
-			col, _ := strconv.Atoi(mm[3])
-			for _, s := range schemas {
-				if !s.Holds(path) {
-					continue
-				}
-				ids, err := s.Drop(path, line, col)
-				if err != nil {
-					return nil, fmt.Errorf("%w\n%s", err, text.String())
-				}
-				dropped += len(ids)
-			}
-		}
-		if dropped == 0 {
-			return nil, fmt.Errorf("gomeasure: the mutant schema does not build, and no error names a mutated file:\n%s", text.String())
+		if err := m.dropUntyped(schemas, failed); err != nil {
+			return nil, err
 		}
 	}
+}
+
+// dropUntyped drops every site the failed builds' compile errors name, and
+// refuses builds that failed naming none: the rewrite itself is then wrong.
+func (m *measurer) dropUntyped(schemas []*gomut.Schema, failed []Result) error {
+	dropped := 0
+	var text strings.Builder
+	for _, res := range failed {
+		text.WriteString(res.Text())
+	}
+	for _, mm := range compileErr.FindAllStringSubmatch(text.String(), -1) {
+		path := mm[1]
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(m.cfg.Module, path)
+		}
+		line, _ := strconv.Atoi(mm[2])
+		col, _ := strconv.Atoi(mm[3])
+		for _, s := range schemas {
+			if !s.Holds(path) {
+				continue
+			}
+			ids, err := s.Drop(path, line, col)
+			if err != nil {
+				return fmt.Errorf("%w\n%s", err, text.String())
+			}
+			dropped += len(ids)
+		}
+	}
+	if dropped == 0 {
+		return fmt.Errorf("gomeasure: the mutant schema does not build, and no error names a mutated file:\n%s", text.String())
+	}
+	return nil
+}
+
+// layoutSchemas lays out one schema per package of files (import path to
+// base names), numbering every mutant across them from 1.
+func layoutSchemas(imports map[string]string, files map[string][]string) ([]*gomut.Schema, int, error) {
+	var imps []string
+	for imp := range files {
+		imps = append(imps, imp)
+	}
+	sort.Strings(imps)
+	var schemas []*gomut.Schema
+	next := 1
+	for _, imp := range imps {
+		s, err := gomut.Build(imports[imp], files[imp], next)
+		if err != nil {
+			return nil, 0, err
+		}
+		next += len(s.Mutants)
+		schemas = append(schemas, s)
+	}
+	return schemas, next, nil
+}
+
+// writeOverlay writes every schema's mutated files under dir and the
+// go -overlay file mapping them over the sources, answering its path.
+func writeOverlay(dir string, schemas []*gomut.Schema) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("gomeasure: %w", err)
+	}
+	replace := map[string]string{}
+	for _, s := range schemas {
+		r, err := s.Overlay(dir)
+		if err != nil {
+			return "", err
+		}
+		for k, v := range r {
+			replace[k] = v
+		}
+	}
+	ov := filepath.Join(dir, "overlay.json")
+	if err := gomut.WriteOverlay(ov, replace); err != nil {
+		return "", err
+	}
+	return ov, nil
+}
+
+// buildMutated builds the -mutate packages alone under overlay ov.
+func (m *measurer) buildMutated(ctx context.Context, ov string) (Result, error) {
+	return m.goBuild(ctx, m.cfg.Module, append([]string{"go", "build", "-buildvcs=false", "-overlay", ov}, m.cfg.Mutate...))
+}
+
+// typeCheck builds the schemas' mutated packages alone (one go build over
+// -mutate, cached across attempts), dropping each site a compile error
+// names, until they build.
+func (m *measurer) typeCheck(ctx context.Context, schemas []*gomut.Schema, tag string) error {
+	for attempt := 0; ; attempt++ {
+		ov, err := writeOverlay(filepath.Join(m.cfg.Scratch, tag+"-"+strconv.Itoa(attempt)), schemas)
+		if err != nil {
+			return err
+		}
+		res, err := m.buildMutated(ctx, ov)
+		if err != nil {
+			return err
+		}
+		if res.Exit == 0 && !res.TimedOut {
+			return nil
+		}
+		if err := m.dropUntyped(schemas, []Result{res}); err != nil {
+			return err
+		}
+	}
+}
+
+// preflight lays out every mutant of every production file of the mutated
+// packages and type-checks them, before discovery: a rewrite the compiler
+// cannot place then fails the measurement in minutes rather than after its
+// coverage phase, and the sites found untyped are remembered for the real
+// schema, which covers a subset of the same files.
+func (m *measurer) preflight(ctx context.Context, imports map[string]string) error {
+	files := map[string][]string{}
+	for imp, dir := range imports {
+		fs, err := gomut.ProductionFiles(dir)
+		if err != nil {
+			return err
+		}
+		if len(fs) > 0 {
+			files[imp] = fs
+		}
+	}
+	schemas, next, err := layoutSchemas(imports, files)
+	if err != nil {
+		return err
+	}
+	if err := m.typeCheck(ctx, schemas, "preflight"); err != nil {
+		return err
+	}
+	m.untyped = map[string]bool{}
+	for _, s := range schemas {
+		for _, d := range s.Dropped() {
+			m.untyped[d.Key()] = true
+		}
+	}
+	m.log.Infof("redundancy: pre-flight: %d mutants laid out over every production file, %d untyped", next-1, len(m.untyped))
+	return nil
 }
 
 // baseline runs every case in the schema binaries with no mutant active.

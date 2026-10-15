@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/procgroup"
 	"bufio"
 	"context"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -769,5 +771,121 @@ func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestKillReturnsOnceEveryMemberHasExited pins that Kill awaits the whole
+// group, not only its leader: a member still exiting when Kill returned held
+// the killed daemon's boot claim, and the next daemon refused to boot.
+func TestKillReturnsOnceEveryMemberHasExited(t *testing.T) {
+	// Arrange
+	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+
+	// Act
+	d.Kill()
+
+	// Assert
+	unended, err := procgroup.UnendedMembers(d.cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("procgroup.UnendedMembers: %v", err)
+	}
+	for _, m := range unended {
+		if m.Pid == member {
+			t.Fatalf("the member %d (%s) had not exited when Kill returned", m.Pid, m.State)
+		}
+	}
+}
+
+// TestAwaitGroupEnd pins the group wait: every listed member is awaited once,
+// a member forked while the kill was under way is awaited on the next
+// listing, and a failure is answered naming the member.
+func TestAwaitGroupEnd(t *testing.T) {
+	errList := errors.New("the group could not be listed")
+	errWait := errors.New("the exit event could not be registered")
+	m := func(pid int) procgroup.Member { return procgroup.Member{Pid: pid, Comm: "c", State: "running"} }
+	tests := []struct {
+		name      string
+		listings  [][]procgroup.Member // answered in turn; the last repeats
+		listErr   error
+		waitErr   error
+		wantWaits []int
+		wantErr   error
+	}{
+		{name: "an empty group awaits nothing", listings: [][]procgroup.Member{nil}},
+		{name: "each member is awaited once though it stays listed until it is a zombie",
+			listings: [][]procgroup.Member{{m(1), m(2)}}, wantWaits: []int{1, 2}},
+		{name: "a member forked during the kill is awaited on the next listing",
+			listings: [][]procgroup.Member{{m(1)}, {m(1), m(3)}}, wantWaits: []int{1, 3}},
+		{name: "a listing that fails is answered", listErr: errList, wantErr: errList},
+		{name: "a wait that fails is answered", listings: [][]procgroup.Member{{m(1)}}, waitErr: errWait,
+			wantWaits: []int{1}, wantErr: errWait},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			calls := 0
+			list := func(int) ([]procgroup.Member, error) {
+				if tt.listErr != nil {
+					return nil, tt.listErr
+				}
+				l := tt.listings[min(calls, len(tt.listings)-1)]
+				calls++
+				return l, nil
+			}
+			var waits []int
+			wait := func(_ context.Context, pid int) error {
+				waits = append(waits, pid)
+				return tt.waitErr
+			}
+			stalled := func(int, time.Duration) { t.Error("a stall was reported") }
+
+			// Act
+			err := awaitGroupEnd(7, time.Minute, list, wait, stalled)
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if tt.waitErr != nil && !strings.Contains(err.Error(), "member 1") {
+				t.Errorf("err = %v, want the member named", err)
+			}
+			if !slices.Equal(waits, tt.wantWaits) {
+				t.Errorf("waits = %v, want %v", waits, tt.wantWaits)
+			}
+		})
+	}
+}
+
+// TestStallListingShowsTheSelectedProcess pins the stuck-kill reports' one
+// listing: the process it selects, with the state columns a report reads.
+func TestStallListingShowsTheSelectedProcess(t *testing.T) {
+	// Act
+	out, err := stallListing("-p", os.Getpid())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("stallListing: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "STAT") || !strings.Contains(string(out), strconv.Itoa(os.Getpid())) {
+		t.Fatalf("the listing shows neither its columns nor this process:\n%s", out)
+	}
+}
+
+// TestEveryStallReportListsThroughStallListing pins that both stuck-kill
+// reports share the one listing, so their columns cannot drift apart.
+func TestEveryStallReportListsThroughStallListing(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("daemon.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	direct := strings.Count(string(src), `"pid,ppid,pgid,stat,wchan,flags,time,command"`)
+	shared := strings.Count(string(src), "stallListing(")
+
+	// Assert
+	if direct != 1 || shared != 3 {
+		t.Fatalf("the listing's columns are spelled %d times and stallListing named %d times, want 1 and 3 (its definition and both reports)", direct, shared)
 	}
 }

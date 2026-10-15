@@ -84,6 +84,14 @@ func LiveMembers(pgid int) ([]Member, error) {
 	return live, nil
 }
 
+// UnendedMembers answers the members of process group pgid that are not yet
+// zombies. On Linux that is LiveMembers' set: an exiting process (PF_EXITING)
+// keeps its running state letter until it turns Z, so LiveMembers already
+// lists it.
+func UnendedMembers(pgid int) ([]Member, error) {
+	return LiveMembers(pgid)
+}
+
 // Exiting answers whether pid's process has begun exiting: PF_EXITING, a
 // zombie or dead state, or gone, read from /proc/<pid>/stat.
 func Exiting(pid int) (bool, error) {
