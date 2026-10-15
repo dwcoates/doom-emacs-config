@@ -62,7 +62,18 @@ func parseProcArgs2(buf []byte) (string, error) {
 	for i := 0; i < argc; i++ {
 		end := bytes.IndexByte(rest, 0)
 		if end < 0 {
-			return "", fmt.Errorf("procargs2 argument %d of %d is unterminated", i, argc)
+			// A REWRITTEN ARGV RUNS OUT OF STRINGS. A process that sets its
+			// title (npm's "npm exec vitest run <files>", vitest's "node
+			// (vitest)") writes it over its own argument memory, joining its
+			// arguments into fewer strings, while the kernel keeps the argc
+			// of the exec: the strings run into the environment and then out,
+			// with every string the buffer holds complete. A buffer that ends
+			// mid-string is an exec still writing it, and is refused, as is
+			// one holding no argument at all.
+			if len(rest) > 0 || i == 0 {
+				return "", fmt.Errorf("procargs2 argument %d of %d is unterminated", i, argc)
+			}
+			break
 		}
 		args = append(args, string(rest[:end]))
 		rest = rest[end+1:]

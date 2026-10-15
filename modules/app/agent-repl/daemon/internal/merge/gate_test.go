@@ -84,6 +84,36 @@ func TestTheTestingLineIsEachSuitesEdge(t *testing.T) {
 	}
 }
 
+func TestAReusedSuiteSettlesItsRowAndDrawsNoFooterEdge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = []scriptedRun{{Output: reusedLine + "\n[agent-repl-tests] e2e: starting\n[agent-repl-tests] e2e: passed in 2s\n", Code: 0}}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	var reused bool
+	h.feed.mu.Lock()
+	for _, row := range h.feed.rows {
+		for _, suite := range row.Row.GetMergeTab().GetTestsRun().GetOutput().GetSuites() {
+			if suite.GetName() == "daemon" && suite.GetReused() != nil {
+				reused = true
+			}
+		}
+	}
+	h.feed.mu.Unlock()
+	if !reused {
+		t.Fatal("the daemon suite's row never read reused")
+	}
+	for _, f := range h.footer.all() {
+		if suite := f.Line.GetTesting(); suite != nil && suite.GetName() == "daemon" {
+			t.Fatalf("a reused suite drew a footer edge %v", suite)
+		}
+	}
+}
+
 func TestTheTestsTabLinksTheRoundsLog(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -153,6 +183,7 @@ func TestSuiteEdgeReadsTheScriptsLines(t *testing.T) {
 		{line: "[agent-repl-tests] daemon: passed in 3s", name: "daemon", state: suiteStatePassed, ok: true},
 		{line: "[agent-repl-tests] ERROR: webapp failed after 4s with exit code 1", name: "webapp", state: suiteStateFailed, ok: true},
 		{line: "[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77)", name: "e2e-emacs", state: suiteStateDeclined, ok: true},
+		{line: reusedLine, name: "daemon", state: suiteStateReused, ok: true},
 		{line: "some output", ok: false},
 	}
 	for _, tt := range tests {
@@ -398,7 +429,7 @@ func TestAGatesStartIsRecordedWithItsSelection(t *testing.T) {
 
 	// Assert.
 	got := gateRecord(t, h, "the merge's test gate started")
-	if got["suites"] != "daemon,e2e,e2e-emacs" || got["speculative"] != false {
+	if got["suites"] != "daemon,repo-scans,e2e,e2e-emacs" || got["speculative"] != false {
 		t.Fatalf("start = %v, want the daemon's selection, not speculative", got)
 	}
 }

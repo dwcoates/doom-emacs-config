@@ -5,6 +5,11 @@
 // longer drift apart the way a hand-copied list did.
 package roster
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // Kind is how a suite is turned into units.
 type Kind int
 
@@ -76,6 +81,31 @@ type Suite struct {
 	// The run builds each program ONCE (Programs) and every chunk of a package
 	// named here waits for it and reads it from AGENT_REPL_TEST_PROGRAMS.
 	Programs map[string][]string
+	// Reuse marks a suite a run may skip when every input it reads is
+	// byte-identical to inputs an earlier run passed whole
+	// (agentrepl/testrun/internal/reuse). Nil means the suite ALWAYS runs: the
+	// end-to-end suites run every system for real, and a shell harness's
+	// inputs are a call graph no tool derives.
+	Reuse *Reuse
+}
+
+// Reuse is what a keyed suite reads beyond its build graph. Its units run
+// under a profile that refuses every read in the checkout outside the input
+// set, so an input missing here fails the suite; it never lets a stale pass
+// through.
+//
+// Paths are spelled as Suite.Path is: relative to the module root, or to the
+// repository root when they start with "/". A path ending in "/" is a whole
+// subtree; any other path is one file.
+type Reuse struct {
+	// Inputs are the files and subtrees the suite's tests read as data: the
+	// prompts, the vocabulary, fixtures, and the trees a source scan walks.
+	Inputs []string
+	// Generated are subtrees the suite's own run builds or installs before it
+	// reads them (a bundle the integration build writes, an npm install). They
+	// are readable and never hashed, so each one must be produced by the run
+	// itself from hashed inputs, never left over from an earlier one.
+	Generated []string
 }
 
 // Program is one binary a run builds ONCE, into its programs directory, for
@@ -161,7 +191,11 @@ var Suites = []Suite{
 	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh"},
 	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh"},
 	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh"},
-	{Name: "ert", Kind: ERT, Path: "lisp"},
+	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Inputs: []string{
+		// The Doom module files and the data the Emacs layer reads.
+		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
+		"logging-contract.md", "metaprompt.md",
+	}}},
 	{Name: "testrun", Kind: GoModule, Path: "testrun"},
 	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
 	// `--suites daemon` (or webapp, shim) run unit and integration together,
@@ -172,20 +206,67 @@ var Suites = []Suite{
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
 		IntegrationTags: "integration", IntegrationPackages: "./integration",
 		TestParallel: map[string]int{"integration": 8},
-		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git"}}},
+		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git"}},
+		Reuse: &Reuse{Inputs: []string{
+			// Source scans walk the daemon's own tree; the briefs and the
+			// vocabulary are read as data.
+			"daemon/", "prompts/", "proto/vocab/",
+			// The command-file tests run the emitter script.
+			"skills/emit-workspace-commands.sh",
+			// gitclient pins the markers the merge queue's hook spells.
+			"/.githooks/reference-transaction",
+		}}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]int{"integration": 8},
-		Programs: map[string][]string{"integration": {"shim-claude-sidecar", "shim-lock"}}},
+		Programs: map[string][]string{"integration": {"shim-claude-sidecar", "shim-lock"}},
+		Reuse: &Reuse{Inputs: []string{
+			"proto/vocab/agent-repl-tools.json", "testdata/corpus/", "testdata/projects/", "logging-contract.md",
+			"agent-shim/claude/shim-sidecar/package.json",
+			// The mocked vendor IS the shim's fake mode, bundled from the
+			// shim's sources into a directory of the suite's own after
+			// bin/ensure-deps.sh installs its packages. Never the shim's dist/,
+			// which the shim suite's own integration build rewrites.
+			"agent-shim/claude/shim/src/", "agent-shim/claude/shim/test/", "agent-shim/claude/shim/scripts/",
+			"agent-shim/claude/shim/testdata/", "agent-shim/claude/shim/build.mjs", "agent-shim/claude/shim/build-options.mjs",
+			"agent-shim/claude/shim/build-options.d.mts", "agent-shim/claude/shim/package.json",
+			"agent-shim/claude/shim/package-lock.json", "agent-shim/claude/shim/tsconfig.json",
+			"bin/ensure-deps.sh", "bin/lib-node-store.sh",
+			// What the bundle imports from outside the shim.
+			"proto/gen/ts/", "proto/ts/", "agent-shim/logging/ts/",
+		}, Generated: []string{"agent-shim/claude/shim/node_modules/"}}},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 8},
-		Programs: map[string][]string{"integration": {"shim-store"}}},
-	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
-	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},
-	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go"},
-	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
+		Programs: map[string][]string{"integration": {"shim-store"}},
+		// internal/testclose's scan walks the store's own tree.
+		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/"}}},
+	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
+	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
+	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
+	// The tests that read the whole module rather than one system's tree:
+	// the merge gate's selection checked against every suite's real
+	// dependencies, the mock-rule source scan, and the scans pinning that
+	// every Go reader goes through the proto helpers. Their own module, so no
+	// system's reuse key covers the other systems' trees; they always run.
+	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans"},
+	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts",
+		Reuse: &Reuse{Inputs: []string{
+			// What the webapp imports from outside its package, the glyph
+			// pictures its tests compare, and the scripts its npm hooks run.
+			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/ts/", "images/",
+			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
+		}, Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/"}}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
 	// `npm run test:integration` always has.
 	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts",
-		IntegrationBuild: []string{"npm", "run", "pretest:integration"}},
+		IntegrationBuild: []string{"npm", "run", "pretest:integration"},
+		Reuse: &Reuse{Inputs: []string{
+			// What the shim imports from outside its package, the lock helper
+			// its integration build compiles, the metaprompt its suite reads
+			// back, and the scripts its npm hooks run.
+			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/", "agent-shim/shim-lock/", "metaprompt.md", "testdata/",
+			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
+			// The capture script's tests run the fake git, which builds its model.
+			"bin/fake-git.sh", "bin/fake-git.go",
+		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}, VetTags: []string{"perf", "realtest"},
@@ -199,6 +280,53 @@ var Suites = []Suite{
 	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2},
 }
 
+// AlwaysRunRegions are the parts of the repository that only suites which
+// ALWAYS run read: the end-to-end suites' tree and the scripts the harnesses
+// test. Spelled as Suite.Path is; a "/" suffix is a subtree. Every file of the
+// repository is placed somewhere (a keyed suite's input set, a region here, or
+// ReadByNoSuite), or the run fails its placement check: a new directory is
+// unplaced until someone decides who tests it.
+var AlwaysRunRegions = []string{
+	// The module's scripts and what their harnesses and the e2e suites read.
+	"bin/", "scripts/", "skills/", "hooks/", "launchd/", "images/", "testdata/",
+	// The proto suite (bin/report-nonlisp-coverage.sh proto) reads the
+	// contract's sources; the keyed suites read what they import of
+	// proto/gen through their build graph, and proto/vocab as declared data.
+	"proto/",
+	// The logging module's TS half is the Vitest suites' import, and they
+	// always run.
+	"agent-shim/logging/",
+	// The Doom module files the Emacs layer loads, the metaprompt the shim
+	// suite reads, the logging contract ERT reads, the requirement manifest
+	// and timing history the harnesses read.
+	"config.el", "doctor.el", "packages.el", "metaprompt.md", "logging-contract.md",
+	"requirements.json", "test_time.csv",
+	// Outside the module: the hooks, the .claude scripts and the repository's
+	// bin/ each have their harness; the sandbox image reads .agents-sandbox.
+	"/.githooks/", "/.claude/", "/bin/", "/.agents-sandbox/",
+}
+
+// ReadByNoSuite are the files and subtrees no suite reads: prose, and the
+// owner's own Doom configuration. Each entry is reviewed: none may be broad
+// enough to take in code a suite should test.
+var ReadByNoSuite = []string{
+	// The module's prose.
+	"docs/", "plans/", "AGENTS.md", "agent-shim/AGENTS.md", ".gitattributes", ".gitignore",
+	"DESIGN-protobuf-surfaces.md", "design-agent-shim-architecture.md", "design-async-response-streaming.md",
+	"design-chessboard-widget.md", "design-progress-footer-samples.html", "design-progress-footer.md",
+	"design-shim-transport-inversion.md", "design-watcher-bubble-expansion.md", "design-workspace-sidebar-mock.html",
+	"output-navigation-assessment.md",
+	"test-coverage-autosave.md", "test-coverage-commands.md", "test-coverage-core.md", "test-coverage-history.md",
+	"test-coverage-input.md", "test-coverage-keybindings.md", "test-coverage-notifications.md",
+	"test-coverage-overlay.md", "test-coverage-panels.md", "test-coverage-sentinel.md", "test-coverage-session.md",
+	"test-coverage-status.md", "test-coverage-worktree.md",
+	// The owner's own Doom configuration, which no agent-repl suite loads.
+	"/config.el", "/init.el", "/packages.el", "/snippets/", "/modules/lang/", "/modules/config/", "/modules/app/chess/",
+	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
+	// The repository's prose.
+	"/docs/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/SIDECAR-AUDIT-1.md", "/STORE-AUDIT-1.md",
+}
+
 // NotSuites is every test-named script that is deliberately NOT a suite, with
 // why. A harness file the roster neither runs nor lists here fails
 // TestEveryHarnessScriptIsRosteredOrExcluded: test-realtest.sh and
@@ -210,6 +338,17 @@ var NotSuites = map[string]string{
 	// A container-free entry to the e2e Go suite, which the roster runs as
 	// the "e2e" suite directly (Kind E2E); rostering this would run it twice.
 	"bin/test-e2e.sh": "a manual entry to the e2e suite the roster already runs",
+}
+
+// Resolve turns a roster path into an absolute one: a path starting with "/"
+// is relative to the repository root REPO, any other to the agent-repl module
+// root MODULE. It is the one reading of the convention Suite.Path, Reuse's
+// paths and the placement lists are spelled in.
+func Resolve(repo, module, p string) string {
+	if strings.HasPrefix(p, "/") {
+		return filepath.Join(repo, filepath.FromSlash(p[1:]))
+	}
+	return filepath.Join(module, filepath.FromSlash(p))
 }
 
 // Names is the roster's names, in roster order.

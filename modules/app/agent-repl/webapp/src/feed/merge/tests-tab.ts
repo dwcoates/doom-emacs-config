@@ -13,8 +13,13 @@
  * given inside the block rather than growing the bubble without bound.
  *
  * FAILED SUITES LEAD THE LIST (owner request, 2026-10-14): the failed first,
- * then the still running, then the passed, each group in served order
- * (`suitesInListOrder`). The run's TALLY, every suite's counts summed, rides
+ * then the still running, then the passed, then the reused, each group in
+ * served order (`suitesInListOrder`).
+ *
+ * A REUSED SUITE DID NOT RUN IN THIS GATE: the runner found an earlier run
+ * that passed its exact inputs. It draws the settled green ✓ and names that
+ * run after the suite's name, as the daemon resolved it, so it never reads as
+ * a pass of this gate. The run's TALLY, every suite's counts summed, rides
  * at the right end of the run strip (`drawFeedMergeTestsRunTally`).
  *
  * THE RUN'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
@@ -22,8 +27,8 @@
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
 import { log } from "../../log.js";
-import { placeChildren, repaintMark } from "../../dom.js";
-import { requireCase } from "../../rpc/strict.js";
+import { placeChildren, placeOptional, repaintMark } from "../../dom.js";
+import { requireCase, requireMessage } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
 import { unreachableArm } from "../../rpc/strict.js";
@@ -36,6 +41,7 @@ import {
   type FeedMergeTestLog,
   type FeedMergeTestSpan,
   type FeedMergeTestSuite,
+  type FeedMergeTestSuiteReused,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderMergeTestLogLink } from "../../link.js";
 import type { AppContext } from "../../rpc/context.js";
@@ -47,6 +53,7 @@ const SUITE_GLYPHS = {
   running: "●",
   passed: "✓",
   failed: "✗",
+  reused: "✓",
 } as const satisfies Record<string, string>;
 
 /** A run's output: its suites, then its log link once the daemon has written it. */
@@ -94,11 +101,12 @@ export function drawFeedMergeTestLog(u: FeedMergeTestLog, ctx: AppContext, path:
   return el;
 }
 
-/** Where each suite state sorts in a run's list: the failed lead, the passed trail. */
+/** Where each suite state sorts in a run's list: the failed lead, the reused trail. */
 const SUITE_LIST_RANK = {
   failed: 0,
   running: 1,
   passed: 2,
+  reused: 3,
 } as const satisfies Record<keyof typeof SUITE_GLYPHS, number>;
 
 /**
@@ -112,6 +120,7 @@ export function suitesInListOrder(suites: readonly FeedMergeTestSuite[]): FeedMe
       case "failed":
       case "running":
       case "passed":
+      case "reused":
         return SUITE_LIST_RANK[state.case];
       default:
         return unreachableArm(`${PATH}.state`, armName(state));
@@ -230,9 +239,14 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
       repaintMark(glyph, "merge-suite-glyph is-failed", SUITE_GLYPHS.failed);
       el.removeAttribute("data-so-far");
       break;
+    case "reused":
+      repaintMark(glyph, "merge-suite-glyph is-succeeded", SUITE_GLYPHS.reused);
+      el.removeAttribute("data-so-far");
+      break;
     default:
       unreachableArm(`${PATH}.state`, armName(state));
   }
+  placeReusedSource(glyph.parentElement as HTMLElement, state.case === "reused" ? state.value : undefined);
 
   placeFeedMergeTestCounts(glyph.parentElement as HTMLElement, suite.counts);
 
@@ -250,6 +264,28 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
   const same =
     spans.length === pre.children.length && spans.every((span, i) => span.isEqualNode(pre.children[i] ?? null));
   if (!same) pre.replaceChildren(...spans);
+}
+
+/**
+ * Bring HEAD, a suite's head line, to the earlier run a reused suite names:
+ * drawn after the suite's name while the suite is reused, its text the
+ * daemon's, and dropped otherwise.
+ */
+function placeReusedSource(head: HTMLElement, reused: FeedMergeTestSuiteReused | undefined): void {
+  placeOptional(head, ":scope > .merge-suite-reused", reused === undefined ? null : drawReusedSource(reused), (el) => {
+    const name = head.querySelector(":scope > .merge-suite-name");
+    if (name === null) throw new Error("merge: a drawn suite lost its name");
+    name.after(el);
+  });
+}
+
+/** The earlier run a reused suite names, as the daemon resolved it. */
+function drawReusedSource(reused: FeedMergeTestSuiteReused): HTMLElement {
+  const source = requireMessage(reused.source, `${PATH}.state.reused.source`);
+  const el = document.createElement("span");
+  el.className = "merge-suite-reused";
+  el.textContent = `reused: ${source.text}`;
+  return el;
 }
 
 /** Set EL's NAME to VALUE only when it differs. */
@@ -288,11 +324,9 @@ export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElemen
  * a run's tally alike.
  */
 export function placeFeedMergeTestCounts(host: HTMLElement, counts: FeedMergeTestCounts | undefined): void {
-  const drawn = host.querySelector(":scope > .merge-suite-counts");
-  const next = counts === undefined ? null : drawFeedMergeTestCounts(counts);
-  if (next === null) drawn?.remove();
-  else if (drawn === null) host.append(next);
-  else if (drawn.textContent !== next.textContent) drawn.replaceWith(next);
+  placeOptional(host, ":scope > .merge-suite-counts", counts === undefined ? null : drawFeedMergeTestCounts(counts), (el) =>
+    host.append(el),
+  );
 }
 
 /**

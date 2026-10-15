@@ -1,9 +1,6 @@
 package storewrite
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -78,56 +75,5 @@ func TestValidateWriteBatchRequest(t *testing.T) {
 				t.Fatalf("refusal = %+v, want site %s field %s with a detail", got, tt.wantSite, tt.wantField)
 			}
 		})
-	}
-}
-
-// TestTheStoreAndEveryFakeValidateThroughThisPackage pins the call sites: the
-// store's server and every fake store a producer's suite runs against call
-// ValidateWriteBatchRequest, and no other Go file restates its rules.
-func TestTheStoreAndEveryFakeValidateThroughThisPackage(t *testing.T) {
-	// Arrange: the agent-repl root, four directories up.
-	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the agent-repl root: %v", err)
-	}
-	callers := []string{
-		"agent-shim/shim-store/internal/server/validate.go",
-		"agent-shim/claude/shim-sidecar/integration/helpers_test.go",
-	}
-	self, _ := filepath.Abs(".")
-	rule := "carries neither entries nor a cursor advance nor an agent locator"
-
-	// Act, Assert: each caller goes through this package.
-	for _, rel := range callers {
-		body, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			t.Fatalf("read %s: %v", rel, err)
-		}
-		if !strings.Contains(string(body), "storewrite.Validate") {
-			t.Errorf("%s does not validate writes through storewrite", rel)
-		}
-	}
-	// Assert: no other file restates the empty-batch rule.
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == ".git" || path == self) {
-			return filepath.SkipDir
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(body), rule) {
-			t.Errorf("%s restates the store's write validation; call storewrite instead", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk agent-repl: %v", err)
 	}
 }

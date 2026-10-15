@@ -372,6 +372,27 @@
     ;; Assert
     (should (agent-repl-test-he--logged-p "elisp.held-edit.cancel ws=ws-one turn=t-1"))))
 
+;;;; ---- The retired Release label ----
+
+(defconst agent-repl-test-he--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The directory holding the module's elisp sources and suites.")
+
+(ert-deftest agent-repl-held-edit-the-retired-release-label-is-labelled-by-no-emacs-source ()
+  "No Emacs source holds a string literal that is exactly \"Release\".
+The held prompt's Release action is retired; the suites are excluded,
+because they are not labels."
+  (let* ((sources (seq-remove (lambda (file)
+                               (string-prefix-p "test-" (file-name-nondirectory file)))
+                             (directory-files agent-repl-test-he--lisp-dir t "\\.el\\'")))
+         (holding (seq-filter (lambda (file)
+                                (with-temp-buffer
+                                  (insert-file-contents file)
+                                  (goto-char (point-min))
+                                  (re-search-forward "\\([\"'`]\\)Release\\1" nil t)))
+                              sources)))
+    (should (equal (list (> (length sources) 0) holding) (list t nil)))))
+
 (provide 'test-held-edit)
 
 ;;; test-held-edit.el ends here

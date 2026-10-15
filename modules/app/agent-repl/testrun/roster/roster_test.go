@@ -1,6 +1,12 @@
 package roster
 
-import "testing"
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestNamesAreUniqueAndInRosterOrder(t *testing.T) {
 	// Act
@@ -113,5 +119,59 @@ func TestTheWaitBoundPackagesOverlapTheirTests(t *testing.T) {
 		if s.TestParallel[pkg] < 2 {
 			t.Errorf("%s TestParallel[%q] = %d, want its wait-bound tests overlapped", s.Name, pkg, s.TestParallel[pkg])
 		}
+	}
+}
+
+func TestResolve(t *testing.T) {
+	tests := []struct {
+		name, path, want string
+	}{
+		{"a module-relative path", "daemon/go.mod", "/r/modules/app/agent-repl/daemon/go.mod"},
+		{"a repository-relative path", "/.githooks/pre-commit", "/r/.githooks/pre-commit"},
+		{"a subtree keeps no trailing slash", "prompts/", "/r/modules/app/agent-repl/prompts"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Resolve("/r", "/r/modules/app/agent-repl", tt.path)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Resolve(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRosterPathsResolveOnlyThroughResolve fails a runner file that reads the
+// leading-"/" convention itself: every reading goes through Resolve.
+func TestRosterPathsResolveOnlyThroughResolve(t *testing.T) {
+	// Arrange
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir("..", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") || filepath.Base(p) == "roster.go" {
+			return nil
+		}
+		body, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), `HasPrefix(p, "/")`) || strings.Contains(string(body), `HasPrefix(s.Path, "/")`) {
+			offenders = append(offenders, p)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("these files read the roster's path convention themselves; call roster.Resolve: %v", offenders)
 	}
 }

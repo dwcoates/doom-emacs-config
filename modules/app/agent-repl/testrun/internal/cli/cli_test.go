@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/ramdisk"
+	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -30,7 +31,7 @@ func TestParseArgs(t *testing.T) {
 		{name: "record and a suite list", argv: []string{"--module", "/m", "--record", "--record-out", "/r", "--suites", "ert,daemon"}, want: Args{Module: "/m", Record: true, RecordOut: "/r", Selected: []string{"ert", "daemon"}}},
 		{name: "coverage is explicit", argv: []string{"--module", "/m", "--coverage"}, want: Args{Module: "/m", Coverage: true}},
 		{name: "the = spelling", argv: []string{"--module", "/m", "--suites=e2e"}, want: Args{Module: "/m", Selected: []string{"e2e"}}},
-		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, or --suites <list>"},
+		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, --no-reuse, or --suites <list>"},
 		{name: "an unknown suite", argv: []string{"--module", "/m", "--suites", "nope"}, wantErr: "--suites names an unknown suite 'nope'; known suites: "},
 		{name: "an empty suite list", argv: []string{"--module", "/m", "--suites", ""}, wantErr: "--suites needs at least one suite name"},
 		{name: "an empty name in the list", argv: []string{"--module", "/m", "--suites", "ert,,daemon"}, wantErr: "--suites contains an empty suite name: 'ert,,daemon'"},
@@ -407,8 +408,45 @@ func (c *tick) Now() time.Time {
 	return c.t
 }
 
+// fakeReuser reuses the suites named in reused, reports unplaced as the
+// placement check's finding, and remembers what it was asked to record.
+type fakeReuser struct {
+	reused   map[string]bool
+	unplaced []string
+	mode     *reuse.Mode
+	recorded *[]string
+}
+
+func (f fakeReuser) Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Verdict, error) {
+	*f.mode = mode
+	var out []reuse.Verdict
+	for _, s := range selected {
+		v := reuse.Verdict{Suite: s, Why: "always runs"}
+		if f.reused[s.Name] {
+			v.Keyed = true
+			v.Reused = &reuse.Record{Suite: s.Name, Branch: "master", Commit: "0123456789abcdef"}
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (f fakeReuser) Unplaced([]reuse.Verdict) ([]string, error) { return f.unplaced, nil }
+
+func (f fakeReuser) Confine(_ []reuse.Verdict, _ string, u suites.Units) suites.Units { return u }
+
+func (f fakeReuser) Record(mode reuse.Mode, _ []reuse.Verdict, results []run.SuiteResult, _ map[string]int) error {
+	for _, r := range results {
+		if r.Outcome == run.Passed {
+			*f.recorded = append(*f.recorded, r.Name)
+		}
+	}
+	return nil
+}
+
 type harness struct {
 	deps      Deps
+	reuser    *fakeReuser
 	exec      *fakeExec
 	out       *bytes.Buffer
 	errOut    *bytes.Buffer
@@ -452,7 +490,9 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		},
 		Pid: 7,
 	}
-	return harness{deps: d, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls}
+	fr := &fakeReuser{mode: new(reuse.Mode), recorded: &[]string{}}
+	d.Reuse = fr
+	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls}
 }
 
 func (h harness) run(t *testing.T, argv ...string) int {

@@ -7906,6 +7906,9 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 .merge-suite-glyph.is-failing { color: var(--err); }
 .merge-suite-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
 .merge-suite-glyph.is-failed { color: var(--err); }
+/* A REUSED SUITE names the earlier run that passed its exact inputs, after
+   its name, quieter than the name: it did not run in this gate. */
+.merge-suite-reused { color: var(--muted); font-size: 0.85em; }
 /* The suite's counts, passed/failed/total, on the right of its head line. */
 .merge-suite-counts {
   margin-left: auto;

@@ -3521,6 +3521,9 @@ message FeedMergeTestSuite {
     FeedMergeTestSuiteRunning running = 2;
     FeedMergeTestSuitePassed passed = 3;
     FeedMergeTestSuiteFailed failed = 4;
+    // The suite did not run in this gate: every input it reads hashed to a
+    // key an earlier run passed whole. Its counts stay UNSET.
+    FeedMergeTestSuiteReused reused = 7;
   }
   // The suite's capped output as DAEMON-RESOLVED COLORED SPANS: the
   // daemon parses the terminal's ANSI escapes and ships paint classes;
@@ -3566,6 +3569,22 @@ message FeedMergeTestSuiteRunningPassing {}
 message FeedMergeTestSuiteRunningFailing {}
 message FeedMergeTestSuitePassed {}
 message FeedMergeTestSuiteFailed {}
+// A suite this gate did not run because its inputs are byte-identical to ones
+// an earlier run passed whole (the test runner's input key: every file it
+// reads, its toolchain and its environment). Drawn green, with the run that
+// passed it named, so a reader can tell it from a pass in this gate. Only a
+// system's own unit and integration suites are ever reused; the end-to-end
+// suites always run.
+message FeedMergeTestSuiteReused {
+  // The earlier run that passed these inputs, drawn after the suite's name.
+  FeedMergeTestSuiteReusedSource source = 1;
+}
+// The daemon-resolved text naming the earlier run, as the runner reported it:
+// when it passed, on which branch and commit, and "with uncommitted changes"
+// when that commit does not hold the passed bytes.
+message FeedMergeTestSuiteReusedSource {
+  string text = 1;
+}
 message FeedMergeTestSpan {
   string text = 1;
   // A paint-class name from the shared render vocabulary; empty = plain.

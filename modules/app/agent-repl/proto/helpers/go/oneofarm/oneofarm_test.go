@@ -1,8 +1,6 @@
 package oneofarm
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,44 +65,4 @@ func TestNamePanicsOnAOneofTheMessageDoesNotDeclare(t *testing.T) {
 
 	// Act.
 	Name(&frontendv1.FooterStatus{}, "nope")
-}
-
-// TestTestsNameArmsOnlyThroughOneofarm pins the call sites: a test under e2e/
-// or daemon/integration/ that reads WhichOneof by hand is a drifted copy of
-// Name.
-func TestTestsNameArmsOnlyThroughOneofarm(t *testing.T) {
-	// Arrange: the agent-repl root, four directories up.
-	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the agent-repl root: %v", err)
-	}
-	var offenders []string
-
-	// Act.
-	for _, dir := range []string{"e2e", filepath.Join("daemon", "integration")} {
-		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if strings.Contains(string(body), "WhichOneof(") {
-				offenders = append(offenders, path)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("walk %s: %v", dir, err)
-		}
-	}
-
-	// Assert.
-	if len(offenders) > 0 {
-		t.Fatalf("these tests read WhichOneof by hand; read the arm through oneofarm.Field or oneofarm.Name instead: %v", offenders)
-	}
 }

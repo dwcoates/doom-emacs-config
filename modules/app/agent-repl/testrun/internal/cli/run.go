@@ -14,6 +14,7 @@ import (
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
 	"agentrepl/testrun/internal/ramdisk"
+	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/roster"
@@ -38,6 +39,18 @@ type Deps struct {
 	Work string
 	// Pid names the run in the CSV.
 	Pid int
+	// Reuse decides which selected suites an earlier run's pass covers,
+	// confines the keyed ones, and records their passes
+	// (agentrepl/testrun/internal/reuse).
+	Reuse Reuser
+}
+
+// Reuser is the run's pass-record seam (reuse.Runner).
+type Reuser interface {
+	Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Verdict, error)
+	Unplaced(verdicts []reuse.Verdict) ([]string, error)
+	Confine(verdicts []reuse.Verdict, name string, u suites.Units) suites.Units
+	Record(mode reuse.Mode, verdicts []reuse.Verdict, results []run.SuiteResult, units map[string]int) error
 }
 
 // HostReserve is how many of the host's cores a run leaves unclaimed for the
@@ -119,6 +132,20 @@ func Run(ctx context.Context, d Deps, a Args) int {
 			log.Infof("%s: not selected by --suites, skipping", s.Name)
 		}
 	}
+	mode := a.ReuseMode()
+	verdicts, err := d.Reuse.Decide(selected, mode)
+	if err != nil {
+		log.Errorf("deciding which suites an earlier run's pass covers failed: %v", err)
+		return 1
+	}
+	reuse.Report(log, verdicts)
+	unplaced, err := d.Reuse.Unplaced(verdicts)
+	if err != nil {
+		log.Errorf("the placement check could not run: %v", err)
+		return 1
+	}
+	placed := reuse.ReportPlacement(log, unplaced)
+	selected = reuse.Remaining(verdicts)
 
 	// Building units can mean `go list`, `vitest list` and npm dependency
 	// checks, so every suite builds at once.
@@ -130,6 +157,9 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		go func() {
 			defer wg.Done()
 			built[i], buildErrs[i] = d.Build(layout, s)
+			if buildErrs[i] == nil {
+				built[i] = d.Reuse.Confine(verdicts, s.Name, built[i])
+			}
 		}()
 	}
 	wg.Wait()
@@ -146,7 +176,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 		planned = append(planned, built[i])
 	}
-	programs, err := programUnits(layout, a, selected, built, buildErrs)
+	programs, err := programUnits(layout, selected, built, buildErrs)
 	if err != nil {
 		log.Errorf("planning the run's shared programs failed: %v", err)
 		return 1
@@ -182,11 +212,23 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Errorf("recording this run's timings in the host history failed: %v", err)
 		return 1
 	}
+	unitsPerSuite := map[string]int{}
+	for _, r := range results {
+		unitsPerSuite[r.Spec.Suite]++
+	}
+	if err := d.Reuse.Record(mode, verdicts, suiteResults, unitsPerSuite); err != nil {
+		log.Errorf("recording this run's passes failed: %v", err)
+		return 1
+	}
 
 	printUnitSummary(log, results, d.Slots, start, end, p.Makespan)
 	passed, declined, failed := partition(suiteResults)
 	printSuiteSummaries(log, passed, declined, failed)
 	if len(failed) > 0 {
+		return 1
+	}
+	if !placed {
+		log.Errorf("placement: %d file(s) are read by no suite and listed nowhere; place each in testrun/roster", len(unplaced))
 		return 1
 	}
 
@@ -208,6 +250,9 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Infof("timings were not recorded, pass --record only for a canonical history run")
 	}
 	printClosing(log, a, passed, declined)
+	if names := reuse.ReusedNames(verdicts); len(names) > 0 {
+		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
+	}
 	return 0
 }
 
@@ -434,9 +479,14 @@ func printClosing(log *run.Log, a Args, passed, declined []run.SuiteResult) {
 
 // programUnits is the run's one build of every shared program a planned suite
 // runs (roster.Programs). A program is reported under its own system's suite
-// when that suite is selected, and otherwise under the first selected suite,
-// in roster order, that runs it.
-func programUnits(layout suites.Layout, a Args, selected []roster.Suite, built []suites.Units, buildErrs []error) (suites.Units, error) {
+// when that suite runs, and otherwise under the first running suite, in
+// roster order, that runs it: a suite the run reused or never selected must
+// not gain a verdict from a build it did not ask for.
+func programUnits(layout suites.Layout, selected []roster.Suite, built []suites.Units, buildErrs []error) (suites.Units, error) {
+	running := map[string]bool{}
+	for _, s := range selected {
+		running[s.Name] = true
+	}
 	var needed []string
 	firstConsumer := map[string]string{}
 	for i, s := range selected {
@@ -451,7 +501,7 @@ func programUnits(layout suites.Layout, a Args, selected []roster.Suite, built [
 		}
 	}
 	specs, err := suites.ProgramUnits(layout, needed, func(p roster.Program) string {
-		if a.Selects(p.Owner) {
+		if running[p.Owner] {
 			return p.Owner
 		}
 		return firstConsumer[p.Name]

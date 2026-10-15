@@ -1,10 +1,7 @@
 package rosterwalk
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -142,60 +139,5 @@ func TestMergedRows(t *testing.T) {
 				t.Fatalf("MergedRows = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-// TestRosterwalkIsTheOnlyChildWalk pins that no Go reader anywhere in
-// agent-repl walks RosterRow.children by hand: a hand-rolled walk is exactly
-// how one reader came to miss child workspaces while the others saw them.
-func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
-	// Arrange: the agent-repl root, four directories up.
-	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
-	if err != nil {
-		t.Fatalf("resolve the agent-repl root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "daemon", "go.mod")); err != nil {
-		t.Fatalf("%s is not the agent-repl root: %v", root, err)
-	}
-	generated := filepath.Join(root, "proto", "gen")
-	e2e := filepath.Join(root, "e2e") + string(filepath.Separator)
-	self, err := filepath.Abs(".")
-	if err != nil {
-		t.Fatalf("resolve this package: %v", err)
-	}
-	var offenders []string
-
-	// Act.
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if path == generated || path == self || d.Name() == "node_modules" || d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// The e2e suite reads live rosters, so its tests are readers too; every
-		// other _test.go builds rows rather than walking them.
-		if !strings.HasSuffix(path, ".go") || (strings.HasSuffix(path, "_test.go") && !strings.HasPrefix(path, e2e)) {
-			return nil
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(body), "GetChildren()") {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("walk agent-repl: %v", err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("these files walk RosterRow.children by hand; flatten through rosterwalk instead: %v", offenders)
 	}
 }

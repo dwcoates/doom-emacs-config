@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { type Control } from "../../src/control.js";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -2150,16 +2150,6 @@ describe("the retired Release label", () => {
     const sources = filesUnder(join(process.cwd(), "src"));
     // Act, Assert
     expect(holdingTheLabel(sources)).toEqual([]);
-  });
-
-  it("is labelled by no Emacs source", () => {
-    // Arrange — the suites are excluded: they are not labels.
-    const lisp = join(process.cwd(), "..", "lisp");
-    const sources = readdirSync(lisp)
-      .filter((name) => name.endsWith(".el") && !name.startsWith("test-"))
-      .map((name) => join(lisp, name));
-    // Act, Assert
-    expect([sources.length > 0, holdingTheLabel(sources)]).toEqual([true, []]);
   });
 });
 

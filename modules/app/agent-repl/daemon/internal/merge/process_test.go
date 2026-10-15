@@ -256,7 +256,7 @@ func TestGateSelectsSuitesFromTheLandedRange(t *testing.T) {
 		t.Fatalf("the gate ran %d times, want once", len(h.runner.argv))
 	}
 	got := strings.Join(h.runner.argv[0], " ")
-	if !strings.Contains(got, "--suites build-frontend-harness,webapp") {
+	if !strings.Contains(got, "--suites build-frontend-harness,repo-scans,webapp") {
 		t.Fatalf("the gate was invoked as %q, want the narrowed suites", got)
 	}
 }

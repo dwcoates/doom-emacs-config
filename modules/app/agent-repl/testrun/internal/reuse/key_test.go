@@ -1,0 +1,231 @@
+package reuse
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// writeTree makes files (repository-relative path -> contents) under a new
+// checkout root and answers the root, resolved through symlinks.
+func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, body := range files {
+		abs := filepath.Join(root, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func mustKey(t *testing.T, repo string, set *InputSet, facts Facts) Key {
+	t.Helper()
+	k, err := ComputeKey(repo, set, facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// baseSet places pkg flat, prompts/ as a tree and gen/ as generated.
+func baseSet(t *testing.T) *InputSet {
+	t.Helper()
+	s := NewInputSet()
+	for _, err := range []error{s.AddFlatDir("pkg"), s.AddTree("prompts"), s.AddGenerated("pkg/gen"), s.AddFile("go.mod")} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s
+}
+
+var baseFiles = map[string]string{
+	"go.mod":          "module m",
+	"pkg/a.go":        "package pkg",
+	"pkg/sub/deep.go": "package sub",
+	"pkg/gen/out.js":  "built",
+	"prompts/p.md":    "brief",
+	"other/x.go":      "package other",
+}
+
+func TestTheKeyMovesWithWhatTheSuiteReads(t *testing.T) {
+	tests := []struct {
+		name  string
+		edit  func(t *testing.T, root string)
+		facts Facts
+		moves bool
+	}{
+		{name: "a file in a flat directory changed", moves: true,
+			edit: func(t *testing.T, root string) { write(t, root, "pkg/a.go", "package pkg // edited") }},
+		{name: "a file was added to a flat directory", moves: true,
+			edit: func(t *testing.T, root string) { write(t, root, "pkg/b.go", "package pkg") }},
+		{name: "a file in a tree changed", moves: true,
+			edit: func(t *testing.T, root string) { write(t, root, "prompts/p.md", "new brief") }},
+		{name: "a placed file changed", moves: true,
+			edit: func(t *testing.T, root string) { write(t, root, "go.mod", "module m2") }},
+		{name: "a placed file became executable", moves: true,
+			edit: func(t *testing.T, root string) { chmod(t, root, "go.mod", 0o755) }},
+		{name: "the toolchain changed", moves: true, facts: Facts{Toolchain: map[string]string{"go": "go1.99"}}},
+		{name: "a keyed variable changed", moves: true, facts: Facts{Env: map[string]string{"GOFLAGS": "-race"}}},
+		{name: "the roster entry changed", moves: true, facts: Facts{Suite: "other"}},
+		{name: "a file outside the set changed", moves: false,
+			edit: func(t *testing.T, root string) { write(t, root, "other/x.go", "package other // edited") }},
+		{name: "a file in a flat directory's subdirectory changed", moves: false,
+			edit: func(t *testing.T, root string) { write(t, root, "pkg/sub/deep.go", "package sub // edited") }},
+		{name: "a generated file changed", moves: false,
+			edit: func(t *testing.T, root string) { write(t, root, "pkg/gen/out.js", "rebuilt") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := writeTree(t, baseFiles)
+			before := mustKey(t, root, baseSet(t), Facts{Suite: "s"})
+			facts := Facts{Suite: "s"}
+			if tt.facts.Suite != "" {
+				facts.Suite = tt.facts.Suite
+			}
+			facts.Toolchain, facts.Env = tt.facts.Toolchain, tt.facts.Env
+
+			// Act
+			if tt.edit != nil {
+				tt.edit(t, root)
+			}
+			after := mustKey(t, root, baseSet(t), facts)
+
+			// Assert
+			if moved := after.Digest != before.Digest; moved != tt.moves {
+				t.Fatalf("key moved = %v, want %v (changed: %v)", moved, tt.moves, after.Manifest.Changed(before.Manifest))
+			}
+		})
+	}
+}
+
+func TestTheSameBytesKeyTheSameInAnyCheckout(t *testing.T) {
+	// Arrange
+	a, b := writeTree(t, baseFiles), writeTree(t, baseFiles)
+
+	// Act
+	ka, kb := mustKey(t, a, baseSet(t), Facts{Suite: "s"}), mustKey(t, b, baseSet(t), Facts{Suite: "s"})
+
+	// Assert
+	if ka.Digest != kb.Digest {
+		t.Fatalf("two checkouts of the same bytes keyed %s and %s", ka.Short(), kb.Short())
+	}
+}
+
+func TestAMissingDeclaredInputIsAnError(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"go.mod": "module m"})
+	set := NewInputSet()
+	if err := set.AddTree("prompts"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := ComputeKey(root, set, Facts{})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "prompts") {
+		t.Fatalf("err = %v, want one naming the missing input", err)
+	}
+}
+
+func TestAHashedInputInsideAGeneratedTreeIsAnError(t *testing.T) {
+	// Arrange
+	root := writeTree(t, baseFiles)
+	set := NewInputSet()
+	for _, err := range []error{set.AddGenerated("pkg"), set.AddFile("pkg/a.go")} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act
+	_, err := ComputeKey(root, set, Facts{})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "both generated by the run and a hashed input") {
+		t.Fatalf("err = %v, want the overlap refused", err)
+	}
+}
+
+func TestChangedNamesEveryDifferingEntry(t *testing.T) {
+	// Arrange
+	before := Manifest{"a": "1", "b": "2", "gone": "3"}
+	after := Manifest{"a": "1", "b": "9", "new": "4"}
+
+	// Act
+	got := after.Changed(before)
+
+	// Assert
+	if want := []string{"b", "gone", "new"}; !slices.Equal(got, want) {
+		t.Fatalf("Changed = %v, want %v", got, want)
+	}
+}
+
+func TestAPathOutsideTheCheckoutIsRefused(t *testing.T) {
+	for _, p := range []string{"", "../x", "/abs", ".."} {
+		t.Run(p, func(t *testing.T) {
+			// Act
+			err := NewInputSet().AddFile(p)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("AddFile(%q) was accepted", p)
+			}
+		})
+	}
+}
+
+func TestContains(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"pkg/a.go", true},
+		{"pkg/sub/deep.go", false},
+		{"prompts/p.md", true},
+		{"pkg/gen/out.js", true},
+		{"go.mod", true},
+		{"other/x.go", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			// Act
+			got := baseSet(t).Contains(tt.path)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Contains(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func write(t *testing.T, root, p, body string) {
+	t.Helper()
+	abs := filepath.Join(root, filepath.FromSlash(p))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func chmod(t *testing.T, root, p string, mode os.FileMode) {
+	t.Helper()
+	if err := os.Chmod(filepath.Join(root, filepath.FromSlash(p)), mode); err != nil {
+		t.Fatal(err)
+	}
+}

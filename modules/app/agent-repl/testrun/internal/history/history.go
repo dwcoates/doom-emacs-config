@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"agentrepl/testrun/internal/atomicfile"
 )
 
 // Weight is how much of a new measurement replaces the old estimate. Half
@@ -129,20 +131,8 @@ func (s *Store) Record(measured map[string]float64) error {
 	if err != nil {
 		return fmt.Errorf("history: encode: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".test-history-*")
-	if err != nil {
-		return fmt.Errorf("history: create a temp file beside %s: %w", s.path, err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("history: write %s: %w", tmp.Name(), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("history: close %s: %w", tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), s.path); err != nil {
-		return fmt.Errorf("history: replace %s: %w", s.path, err)
+	if err := atomicfile.Replace(s.path, ".test-history-*", data); err != nil {
+		return fmt.Errorf("history: %w", err)
 	}
 	s.entries = entries
 	return nil
