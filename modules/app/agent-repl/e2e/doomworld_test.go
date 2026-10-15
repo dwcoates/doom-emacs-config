@@ -226,6 +226,12 @@ func (f *fakeDaemon) AwaitCall(method string, count int, bound time.Duration) fa
 type DoomWorld struct {
 	Emacs *Emacs
 	Fake  *fakeDaemon
+	// mu guards the roster the world last authored.
+	mu sync.Mutex
+	// registered is every workspace register onboarded, in order.
+	registered []doomWorkspace
+	// drawn is the order the world's last roster drew its rows in.
+	drawn []doomWorkspace
 }
 
 // NewDoomWorld boots a sandboxed Doom Emacs against a fake daemon it adopts.
@@ -249,7 +255,91 @@ func NewDoomWorld(t *testing.T, box sandbox) *DoomWorld {
 		StopDaemon:   fake.Stop,
 	})
 	e.EnsureDaemon()
-	return &DoomWorld{Emacs: e, Fake: fake}
+	w := &DoomWorld{Emacs: e, Fake: fake}
+	w.echoSelections(t)
+	return w
+}
+
+// echoSelections plays the daemon's answer to a selection: every
+// SelectWorkspace Emacs sends is followed by the roster naming that
+// workspace current (daemon/integration's
+// TestSelectWorkspaceStampsCurrentOnTheRoster pins the daemon doing so), in
+// the order the world last drew. Without it Emacs, which follows the
+// roster's current, would be pulled back to the last one the world named. It
+// stops before Emacs's teardown.
+func (w *DoomWorld) echoSelections(t *testing.T) {
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		echoed := 0
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+			raw, err := w.Fake.do(http.MethodGet, "/_fake/calls", nil)
+			if err != nil {
+				t.Errorf("doom: read the recorded calls to echo selections: %v", err)
+				return
+			}
+			var calls []fakeCall
+			if err := json.Unmarshal(raw, &calls); err != nil {
+				t.Errorf("doom: decode the recorded calls to echo selections: %v", err)
+				return
+			}
+			seen := 0
+			for _, c := range calls {
+				if c.Method != "SelectWorkspace" {
+					continue
+				}
+				if seen++; seen <= echoed {
+					continue
+				}
+				echoed = seen
+				var body struct {
+					Workspace struct {
+						ID string `json:"id"`
+					} `json:"workspace"`
+				}
+				if err := json.Unmarshal(c.Body, &body); err != nil {
+					t.Errorf("doom: decode a SelectWorkspace to echo: %v", err)
+					return
+				}
+				if err := w.echoCurrent(body.Workspace.ID); err != nil {
+					t.Errorf("doom: echo the selection of %s: %v", body.Workspace.ID, err)
+					return
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		<-done
+	})
+}
+
+// echoCurrent re-authors the last drawn roster with ID current.
+func (w *DoomWorld) echoCurrent(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.drawn) == 0 {
+		return nil
+	}
+	_, err := w.Fake.post("/_fake/push", map[string]any{"stream": "roster", "message": w.rosterLocked(id), "snapshot": true})
+	return err
+}
+
+// rosterLocked is the roster drawing w.drawn with CURRENT current. Called with
+// w.mu held.
+func (w *DoomWorld) rosterLocked(current string) json.RawMessage {
+	rows := make([]map[string]any, 0, len(w.drawn))
+	for _, ws := range w.drawn {
+		rows = append(rows, rosterRowJSON(ws.ID, ws.Dir, ws.Name, ws.ID == current))
+	}
+	return rosterJSON(filepath.Dir(w.drawn[0].Dir), rows, current)
 }
 
 // rosterRowJSON is one RosterRow as the daemon authors it: every
@@ -259,7 +349,7 @@ func rosterRowJSON(id, dir, name string, current bool) map[string]any {
 	return map[string]any{
 		"workspace":    map[string]any{"workspace": map[string]any{"id": id, "dir": dir}},
 		"name":         map[string]any{"text": name},
-		"idle":         map[string]any{},
+		"ready":        map[string]any{},
 		"current":      map[string]any{"current": current},
 		"when":         map[string]any{"noTurnRunning": map[string]any{}},
 		"detail":       map[string]any{},
@@ -312,4 +402,61 @@ func (w *DoomWorld) registerAs(t *testing.T, id, dir string) {
 	t.Helper()
 	ref, _ := json.Marshal(map[string]any{"success": map[string]any{"workspace": map[string]any{"id": id, "dir": dir}}})
 	w.Fake.Script("RegisterWorkspace", ref)
+}
+
+// doomWorkspace is one workspace a Doom-tier test registered: the name Emacs
+// knows it by and the ref the fake answered its registration with.
+type doomWorkspace struct {
+	Name, ID, Dir string
+}
+
+// registryNamesForm reads the names of every workspace Emacs's registry
+// holds a project directory for.
+const registryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
+
+// register onboards a fresh repository NAME through the ordinary command,
+// the fake answering with ref ws-NAME, and returns it once Emacs's registry
+// holds it and its ref has attached.
+func (w *DoomWorld) register(t *testing.T, box sandbox, name string) doomWorkspace {
+	t.Helper()
+	e := w.Emacs
+	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
+	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
+	before := e.EvalStrings(registryNamesForm)
+	w.registerAs(t, ws.ID, dir)
+	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
+	// THE ROSTER LANDS IT. Emacs holds a registration as a pending landing
+	// until the daemon's roster carries its row, which a real daemon pushes
+	// once it has registered the directory; the fake is told to, current.
+	// Its name is the directory's until Emacs's own landing names it.
+	ws.Name = filepath.Base(dir)
+	w.registered = append(w.registered, ws)
+	w.pushRoster(t, ws, w.registered...)
+	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace at "+dir+" to appear in Emacs's registry", registryNamesForm,
+		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > len(before) })
+	for _, n := range decodeStrings(raw) {
+		if !containsString(before, n) {
+			ws.Name = n
+		}
+	}
+	e.AwaitEvalFor(emacsVerbBound, "the fake's ref to attach to "+ws.Name,
+		`(plist-get (agent-repl-host-ref `+elispString(ws.Name)+`) :id)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == ws.ID })
+	// The roster named it current, and Emacs follows the roster's current
+	// once its tab is open: settled here, so no later act races the follow.
+	(&emacsWorkspaceFixture{Emacs: e}).awaitCurrent(ws.Name, "Emacs to follow the roster to "+ws.Name)
+	return ws
+}
+
+// pushRoster authors the roster the daemon would: WORKSPACES' rows in that
+// order, CURRENT current, stored for any later subscriber too. Emacs follows
+// CURRENT once its tab is open, after the view, so a test that acts next
+// awaits that follow first.
+func (w *DoomWorld) pushRoster(t *testing.T, current doomWorkspace, workspaces ...doomWorkspace) {
+	t.Helper()
+	w.mu.Lock()
+	w.drawn = append([]doomWorkspace(nil), workspaces...)
+	roster := w.rosterLocked(current.ID)
+	w.mu.Unlock()
+	w.Fake.Push("roster", roster, true)
 }
