@@ -227,9 +227,7 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *tes
 	// The stand-down SIGKILLs each shim's whole process group and waits for
 	// the reap before it returns, so nothing is left the moment the daemon has
 	// gone: ONE READ, NO POLL. The listing skips a process that has exited.
-	if left := f.d.StrayPIDs(); len(left) > 0 {
-		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim outliving its daemon holds the workspace lock that refuses the next session", len(left), left)
-	}
+	requireNoStrays(t, f.d, "the host's stop left them alive — a shim outliving its daemon holds the workspace lock that refuses the next session")
 }
 
 // TestUpdateShutdownScheduleNowAfterACompletedTurnExitsWellInsideItsOwnBound
@@ -352,9 +350,7 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	f.d.AwaitExit()
 	// ONE READ, NO POLL: the stand-down waited for every spawn's exit before
 	// the daemon did, and the listing skips a process that has exited.
-	if left := f.d.StrayPIDs(); len(left) > 0 {
-		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim spawned and not yet registered is nothing but the supervisor's to stand down", len(left), left)
-	}
+	requireNoStrays(t, f.d, "the host's stop left them alive — a shim spawned and not yet registered is nothing but the supervisor's to stand down")
 	// The bring-up its process was stood down under does not succeed, and the
 	// caller is TOLD — through the verb's own refusal arm, which is how this
 	// daemon says no. A transport error is what it must NOT be: that would be

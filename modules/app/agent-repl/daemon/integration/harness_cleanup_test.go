@@ -5,6 +5,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +38,42 @@ func TestAKilledDaemonLeavesNoProcessNamingItsStateDir(t *testing.T) {
 	// POLL: ReapStrays returns only once a listing names no live process
 	// (it awaits each SIGKILLed stray's exit event), and the listing skips a
 	// process that has exited, so anything this read names is a leak.
-	if stray := f.d.StrayPIDs(); len(stray) != 0 {
-		t.Fatalf("StrayPIDs() = %v after the sweep, want none: a killed test left processes behind", stray)
+	requireNoStrays(t, f.d, "the sweep left them behind — a killed test left processes behind")
+}
+
+// requireNoStrays fails, naming WHY, when any live process still names D's
+// state directory. ONE READ, NEVER A POLL: every caller asserts after
+// something that already awaited each process's exit event (ReapStrays, the
+// daemon's own stand-down), and the listing skips a process that has
+// exited, so anything it names is a leak rather than a slow reap.
+func requireNoStrays(t *testing.T, d *harness.Daemon, why string) {
+	t.Helper()
+	if left := d.StrayPIDs(); len(left) > 0 {
+		t.Fatalf("%d process(es) still name the state directory: %v; %s", len(left), left, why)
+	}
+}
+
+func TestEveryStrayCheckGoesThroughRequireNoStrays(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob the package's tests: %v", err)
+	}
+	for _, name := range files {
+		// Act.
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+
+		// Assert: a leak check reads StrayPIDs only through the helper (or to
+		// prove, before an act, that there is something to reclaim). The
+		// helper's own read is the one line that may.
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, "StrayPIDs(); len(") && !strings.Contains(line, "== 0") && strings.TrimSpace(line) != "if left := d.StrayPIDs(); len(left) > 0 {" {
+				t.Fatalf("%s checks for strays by hand (%q); use requireNoStrays", name, strings.TrimSpace(line))
+			}
+		}
 	}
 }
 
