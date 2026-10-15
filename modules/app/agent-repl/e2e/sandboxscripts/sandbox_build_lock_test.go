@@ -561,34 +561,14 @@ func TestE2EEmacsScriptHandsItsSlotWidthToTheSandbox(t *testing.T) {
 		{name: "the unit's width becomes the container's CPUs", extra: []string{"AGENT_REPL_UNIT_SLOTS=4"}, want: "cpus=4"},
 		{name: "a direct run leaves the sandbox default", want: "cpus=unset"},
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "..", "bin", "test-e2e-emacs.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: the suite script in a module of its own, beside a
 			// sandbox runner that reports the CPU cap it was handed.
-			module := t.TempDir()
-			for path, body := range map[string]string{
-				filepath.Join(module, "bin", "test-e2e-emacs.sh"): string(suiteScript),
-				filepath.Join(module, "e2e", "sandbox", "bin", "e2e-sandbox.sh"): "#!/usr/bin/env bash\n" +
-					"[ \"$1\" = preflight ] && exit 0\n" +
-					"printf 'cpus=%s\\n' \"${AGENT_REPL_SANDBOX_CPUS:-unset}\"\n",
-			} {
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cmd := exec.Command("bash", filepath.Join(module, "bin", "test-e2e-emacs.sh"))
+			script := sandboxSuiteModule(t, "test-e2e-emacs.sh", "[ \"$1\" = preflight ] && exit 0\n"+
+				"printf 'cpus=%s\\n' \"${AGENT_REPL_SANDBOX_CPUS:-unset}\"\n")
+			cmd := exec.Command("bash", script)
 			var env []string
 			for _, kv := range os.Environ() {
 				if !strings.HasPrefix(kv, "AGENT_REPL_UNIT_SLOTS=") && !strings.HasPrefix(kv, "AGENT_REPL_SANDBOX_CPUS=") {
@@ -697,19 +677,30 @@ func TestSandboxPreflightNamesTheStampImageWhenItIsNotBuilt(t *testing.T) {
 // sandbox runner whose behaviour is SANDBOX, and answers the script's path.
 func e2eEmacsModule(t *testing.T, sandbox string) string {
 	t.Helper()
+	return sandboxSuiteModule(t, "test-e2e-emacs.sh", sandbox)
+}
+
+// sandboxSuiteModule lays the sandboxed suite script SCRIPT, with the
+// bin/lib-sandbox-suite.sh it sources, in a module of its own beside a fake
+// sandbox runner whose behaviour is SANDBOX, and answers the script's path.
+func sandboxSuiteModule(t *testing.T, script, sandbox string) string {
+	t.Helper()
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	suiteScript, err := os.ReadFile(filepath.Join(wd, "..", "..", "bin", "test-e2e-emacs.sh"))
-	if err != nil {
-		t.Fatal(err)
+	root := t.TempDir()
+	layout := map[string]string{
+		filepath.Join(root, "e2e", "sandbox", "bin", "e2e-sandbox.sh"): "#!/usr/bin/env bash\nset -u\nhere=$(cd -- \"$(dirname -- \"$0\")\" && pwd)\n" + sandbox,
 	}
-	module := t.TempDir()
-	for path, body := range map[string]string{
-		filepath.Join(module, "bin", "test-e2e-emacs.sh"):                string(suiteScript),
-		filepath.Join(module, "e2e", "sandbox", "bin", "e2e-sandbox.sh"): "#!/usr/bin/env bash\nset -u\nhere=$(cd -- \"$(dirname -- \"$0\")\" && pwd)\n" + sandbox,
-	} {
+	for _, name := range []string{script, "lib-sandbox-suite.sh"} {
+		body, err := os.ReadFile(filepath.Join(wd, "..", "..", "bin", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		layout[filepath.Join(root, "bin", name)] = string(body)
+	}
+	for path, body := range layout {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -717,7 +708,7 @@ func e2eEmacsModule(t *testing.T, sandbox string) string {
 			t.Fatal(err)
 		}
 	}
-	return filepath.Join(module, "bin", "test-e2e-emacs.sh")
+	return filepath.Join(root, "bin", script)
 }
 
 // runE2EEmacs runs the suite script at SCRIPT, answering its output and exit.
@@ -918,5 +909,68 @@ func TestSourcingTheSandboxScriptDispatchesNothing(t *testing.T) {
 	// Assert
 	if err != nil || strings.TrimSpace(string(out)) != "sourced" {
 		t.Fatalf("sourcing the script = %v, %q; want its functions defined and nothing dispatched", err, out)
+	}
+}
+
+// TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox: both sandboxed suites
+// go through lib-sandbox-suite.sh, each running its own tests and declining
+// (77) when the sandbox is unusable.
+func TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, script, pattern, label string
+	}{
+		{name: "the Emacs client layer and the Doom tier", script: "test-e2e-emacs.sh", pattern: "TestEmacs|TestDoom", label: "e2e-emacs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" runs its tests", func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			script := sandboxSuiteModule(t, tt.script, "[ \"$1\" = preflight ] && exit 0\necho \"RAN $*\"\n")
+
+			// Act
+			out, code := runE2EEmacs(t, script)
+
+			// Assert
+			if code != 0 || !strings.Contains(out, "RAN run --dir e2e go test ./ -run "+tt.pattern+" -v\n") || !strings.Contains(out, "["+tt.label+"] running") {
+				t.Fatalf("%s exit %d, want %s run in the sandbox under [%s]:\n%s", tt.script, code, tt.pattern, tt.label, out)
+			}
+		})
+		t.Run(tt.name+" declines an unusable sandbox", func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			script := sandboxSuiteModule(t, tt.script, "[ \"$1\" = preflight ] && { echo 'docker is not running'; exit 3; }\necho RAN\n")
+
+			// Act
+			out, code := runE2EEmacs(t, script)
+
+			// Assert
+			if code != 77 || strings.Contains(out, "RAN") || !strings.Contains(out, "docker is not running") {
+				t.Fatalf("%s exit %d, want a 77 decline naming the preflight's reason and nothing run:\n%s", tt.script, code, out)
+			}
+		})
+	}
+}
+
+// TestNoSuiteScriptRunsTheSandboxItself: a suite that ran the sandbox on its
+// own would drift from the shared preflight, build and decline.
+func TestNoSuiteScriptRunsTheSandboxItself(t *testing.T) {
+	t.Parallel()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripts, err := filepath.Glob(filepath.Join(wd, "..", "..", "bin", "test-*.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range scripts {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), `"$SANDBOX" run`) || strings.Contains(string(body), "e2e-sandbox.sh run") {
+			t.Errorf("%s runs the sandbox itself; source bin/lib-sandbox-suite.sh and call run_sandbox_suite", filepath.Base(path))
+		}
 	}
 }

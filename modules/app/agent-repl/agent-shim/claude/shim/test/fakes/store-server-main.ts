@@ -17,7 +17,6 @@ if (socketPath === undefined || socketPath === "") {
 }
 
 const store = await startFakeStore(socketPath);
-process.stdout.write("ready\n");
 
 const close = (): void => {
   store.close().then(
@@ -28,5 +27,9 @@ const close = (): void => {
     },
   );
 };
+// THE HANDLERS STAND BEFORE `ready` IS SAID: a parent that signals the moment
+// it reads `ready` otherwise reached a process still on the default action,
+// which died of the signal instead of closing (2026-10-15 merge gate).
 process.once("SIGTERM", close);
 process.once("SIGINT", close);
+process.stdout.write("ready\n");

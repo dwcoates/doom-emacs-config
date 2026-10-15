@@ -46,6 +46,7 @@ Owner rule, 2026-10-14. A test lives at the cheapest tier whose fakes still let 
 - An e2e test (`e2e/`, `e2e-emacs`) is warranted only when its assertion needs several real agent-repl systems running together: a contract, an ordering or a handover that crosses a seam between two real processes.
 - A test names its seam in its doc comment (`Seam: <producer> -> <consumer>, <what crosses>`). A test that cannot name one does not belong in `e2e/`.
 - A behavior that one system computes alone is proven in that system's own tiers above. That covers a refusal the daemon formats, a row the daemon projects from frames, what the webapp draws for a view, an Emacs-local command and the fake vendor's own output.
+- What only a booted Doom shows -- a `map!` leader binding, a popup's placement, persp-mode's workspace recycling -- is Emacs's own behavior too: it is proven in the Doom tier (`TestDoom*` in `e2e/doomtier_test.go`), a sandboxed Doom Emacs against the fake daemon, never in a `TestEmacs*` full-stack world. The Doom tier runs in `e2e-emacs`'s container, which saves it a second container start.
 - A behavior that crosses systems is covered three ways:
   - the producer's tier proves what the producer emits;
   - the consumer's tier proves what the consumer does with it;

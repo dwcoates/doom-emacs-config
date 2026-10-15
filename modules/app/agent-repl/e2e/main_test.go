@@ -104,6 +104,8 @@ type layout struct {
 	storeDir   string // .../modules/app/agent-repl/agent-shim/shim-store
 	lockDir    string // .../modules/app/agent-repl/agent-shim/shim-lock
 	sidecarDir string // .../modules/app/agent-repl/agent-shim/claude/shim-sidecar
+	// fakeDaemonDir is the Doom tier's fake daemon module.
+	fakeDaemonDir string // .../modules/app/agent-repl/lisp/testsupport/fakedaemon
 }
 
 var repo layout
@@ -120,11 +122,13 @@ func resolveLayout() (layout, error) {
 	l.storeDir = filepath.Join(l.repoDir, "agent-shim", "shim-store")
 	l.lockDir = filepath.Join(l.repoDir, "agent-shim", "shim-lock")
 	l.sidecarDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim-sidecar")
+	l.fakeDaemonDir = filepath.Join(l.repoDir, "lisp", "testsupport", "fakedaemon")
 	for name, dir := range map[string]string{
 		"daemon module":  l.daemonDir,
 		"shim source":    l.shimDir,
 		"store module":   l.storeDir,
 		"sidecar module": l.sidecarDir,
+		"fake daemon":    l.fakeDaemonDir,
 	} {
 		if _, err := os.Stat(dir); err != nil {
 			return layout{}, fmt.Errorf("%s not found at %s: %w", name, dir, err)
@@ -367,51 +371,59 @@ func checkShimBundleLayout(outDir string) error {
 	return nil
 }
 
-var (
-	storeOnce sync.Once
-	storePath string
-	storeErr  error
-)
+// programOnce is one Go program this suite builds at most once per run: the
+// path the testenv prebuild names for NAME when the run handed one over
+// (testenv.ProgramOr), else BUILD's. A failure is the run's, every caller's.
+type programOnce struct {
+	name  string
+	build func() (string, error)
+	once  sync.Once
+	path  string
+	err   error
+}
+
+// fatalHelper is what programOnce.require needs of a test.
+type fatalHelper interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+// require answers the program's path, built on the first call; a program
+// that does not build fails T with WHY and the build's error.
+func (p *programOnce) require(t fatalHelper, why string) string {
+	t.Helper()
+	p.once.Do(func() {
+		p.path, p.err = testenv.ProgramOr(os.Getenv, p.name, p.build)
+	})
+	if p.err != nil {
+		t.Fatalf("e2e: %s: %v", why, p.err)
+	}
+	return p.path
+}
+
+var storeProgram = &programOnce{name: "shim-store", build: func() (string, error) {
+	return goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir(), "shim-store"))
+}}
 
 // requireStoreBinary builds the real shim-store, once per run.
 func requireStoreBinary(t *testing.T) string {
 	t.Helper()
-	storeOnce.Do(func() {
-		storePath, storeErr = testenv.ProgramOr(os.Getenv, "shim-store", func() (string, error) {
-			return goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir(), "shim-store"))
-		})
-	})
-	if storeErr != nil {
-		t.Fatalf("e2e: this suite runs against the REAL store, which does not build: %v", storeErr)
-	}
-	return storePath
+	return storeProgram.require(t, "this suite runs against the REAL store, which does not build")
 }
 
-var (
-	sidecarOnce sync.Once
-	sidecarPath string
-	sidecarErr  error
-)
+var sidecarProgram = &programOnce{name: "shim-claude-sidecar", build: func() (string, error) {
+	return goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir(), "shim-claude-sidecar"))
+}}
 
 // requireSidecarBinary builds the real shim-claude-sidecar, once per run.
 func requireSidecarBinary(t *testing.T) string {
 	t.Helper()
-	sidecarOnce.Do(func() {
-		sidecarPath, sidecarErr = testenv.ProgramOr(os.Getenv, "shim-claude-sidecar", func() (string, error) {
-			return goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir(), "shim-claude-sidecar"))
-		})
-	})
-	if sidecarErr != nil {
-		t.Fatalf("e2e: this suite runs against the REAL sidecar, which does not build: %v", sidecarErr)
-	}
-	return sidecarPath
+	return sidecarProgram.require(t, "this suite runs against the REAL sidecar, which does not build")
 }
 
-var (
-	lockOnce sync.Once
-	lockPath string
-	lockErr  error
-)
+var lockProgram = &programOnce{name: "shim-lock", build: func() (string, error) {
+	return goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir(), "shim-lock"))
+}}
 
 // requireLockBinary builds the real shim-lock, once per run.
 //
@@ -422,15 +434,7 @@ var (
 // THIS checkout built, never whatever happens to be deployed on the machine.
 func requireLockBinary(t *testing.T) string {
 	t.Helper()
-	lockOnce.Do(func() {
-		lockPath, lockErr = testenv.ProgramOr(os.Getenv, "shim-lock", func() (string, error) {
-			return goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir(), "shim-lock"))
-		})
-	})
-	if lockErr != nil {
-		t.Fatalf("e2e: this suite runs against the REAL shim, whose lock holder does not build: %v", lockErr)
-	}
-	return lockPath
+	return lockProgram.require(t, "this suite runs against the REAL shim, whose lock holder does not build")
 }
 
 // e2eSharedSub is this suite's subdirectory of a shared prebuilt directory

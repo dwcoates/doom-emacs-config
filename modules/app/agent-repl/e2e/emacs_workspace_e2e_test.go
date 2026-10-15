@@ -121,7 +121,7 @@ func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture 
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repo.Dir) + `)`)
 
 	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace to appear in Emacs's registry",
-		`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
+		workspaceRegistryNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 1 })
 	name := decodeStrings(raw)[0]
 
@@ -384,98 +384,6 @@ func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 	}
 }
 
-// TestEmacsANewProjectDoesNotRecycleTheWorkspaceBeingLeft is the other half of
-// scenario 7: a created workspace keeps its tab when the NEXT project is
-// registered.
-//
-// THE DEFECT THIS PINS. Doom's `+workspaces-switch-to-project-h` recycles the
-// workspace being LEFT -- `+workspace-rename` onto the entered project's name
-// -- whenever `+workspaces-on-switch-project-behavior` is its `non-empty`
-// default and `+workspace-buffer-list` is empty. An agent-repl workspace
-// showing its agent IS empty by that test, because the panel is a webview
-// buffer and deliberately not a `doom-real-buffer-list` member. So the
-// abandoned workspace's persp left `persp-names-cache` under its old name
-// while `agent-repl--workspaces` and the daemon's roster both kept carrying
-// it -- and since `agent-repl--ws-tabline-names` INTERSECTS those two, its tab
-// silently vanished from a bar the roster still said it belonged on.
-//
-// Every readback here is one the scenarios above already make; what is new is
-// only that they are made about the FIRST workspace AFTER a second arrived.
-func TestEmacsANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	// Assert first, in the LIVE Doom, that the policy is actually installed.
-	// `agent-repl--ws-install-persp-policy` runs from a `with-eval-after-load`
-	// on persp-mode, so a unit test can prove what the function writes but not
-	// that anything ever called it; this is the half only a booted Doom can
-	// say. And it is the value Doom's own hook branches on, read back by its
-	// own name rather than inferred from what the tab bar happened to draw.
-	if got := e.EvalString(`(format "%s" +workspaces-on-switch-project-behavior)`); got != "t" {
-		t.Fatalf("+workspaces-on-switch-project-behavior is %q in the running Doom, want t: at any other "+
-			"value `+workspaces-switch-to-project-h` may RECYCLE the workspace being left, renaming its "+
-			"perspective out from under a registry and a roster that both still carry it", got)
-	}
-
-	// Arrange: a created workspace, which the create SELECTS -- so it is the
-	// one a second registration would leave.
-	before := len(f.rosterTabOrder())
-	e.Eval(`(cl-letf (((symbol-function 'completing-read)
-                        (lambda (_prompt candidates &rest _)
-                          (car (append candidates nil))))
-                       ((symbol-function 'read-string)
-                        (lambda (prompt &rest _)
-                          (if (string-prefix-p "Initial prompt" prompt) "hello" ""))))
-               (call-interactively #'agent-repl-create-workspace)
-               t)`)
-	e.AwaitEvalFor(emacsVerbBound, "the created workspace's tab to be drawn",
-		emacsWSTablineNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before })
-	created := ""
-	for _, name := range f.tabNames() {
-		if name != f.Name {
-			created = name
-		}
-	}
-	if created == "" {
-		t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab the fixture's own %q is not",
-			f.tabNames(), f.Name)
-	}
-	// The tab is drawn BEFORE the create lands on the workspace it minted, so
-	// wait for the create's complete outcome: until it has selected the created
-	// workspace, a second registration would race the create's own landing
-	// rather than leave the workspace this test is about.
-	e.AwaitEvalFor(emacsVerbBound, "the created workspace to become current",
-		`(agent-repl--ws-current-name)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == created })
-
-	// Act: a SECOND repository registered, which switches projects out of the
-	// created workspace.
-	second := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo-second"))
-	secondName := addProjectWorkspace(t, e, second.Dir)
-
-	// Assert: the created workspace still has its perspective, and therefore
-	// still has its tab. The perspective cache is read TOO, because it is the
-	// half the intersection loses and a tab count alone would not say which
-	// half moved.
-	e.AwaitEvalFor(emacsVerbBound, "the second workspace's own tab to be drawn",
-		emacsWSTablineNamesForm,
-		func(raw json.RawMessage) bool { return containsString(decodeStrings(raw), secondName) })
-	if tabs := f.tabNames(); !containsString(tabs, created) {
-		persps := e.EvalStrings(`(if (boundp 'persp-names-cache) persp-names-cache nil)`)
-		t.Fatalf("agent-repl--ws-tabline-names = %v after registering %s; the created workspace %q lost "+
-			"its tab, and the perspective cache is %v -- Doom recycled the workspace being left instead "+
-			"of making the new project its own",
-			tabs, second.Dir, created, persps)
-	}
-	if persps := e.EvalStrings(`(if (boundp 'persp-names-cache) persp-names-cache nil)`); !containsString(persps, created) {
-		t.Fatalf("persp-names-cache = %v, want the created workspace %q still in it: its perspective was "+
-			"renamed out from under the registry, which still carries the name", persps, created)
-	}
-}
-
 func containsString(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
@@ -563,54 +471,6 @@ func TestEmacsSelectOnWorkspaceSwitch(t *testing.T) {
 			var got string
 			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got == f.RefID
 		})
-}
-
-// TestEmacsRegisteringAWorkspaceMakesItTheDaemonsCurrentRow is scenario 9's
-// other half, and it is the half nothing covered.
-//
-// Scenario 9 above drives a SWITCH to a workspace that was already
-// registered, so its perspective activation finds a daemon-minted ref and the
-// Select goes out. A REGISTRATION is the opposite order: Doom switches to the
-// new perspective and the daemon answers with the ref afterwards, so that
-// activation found no ref and skipped. Nothing came back for it, and the
-// consequence was end to end: the daemon never stamped `current`, so every
-// `RosterRow.current` it resolved was false and NO sidebar row in any webview
-// was ever drawn as the selected one.
-//
-// THE ASSERTION IS ON THE ROW'S OWN FLAG, not on Emacs's `last-selected-id`.
-// The id says Emacs got an ack; the row's flag is the field the webapp turns
-// into `data-current` (`webapp/src/sidebar/row.ts`), so it is the one that
-// says the selection actually reaches what draws it.
-//
-// COST: one fixture world and one roster dial, which is what every scenario
-// in this file already pays; it adds no wait the file does not already make.
-func TestEmacsRegisteringAWorkspaceMakesItTheDaemonsCurrentRow(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-
-	// NOTHING IS SWITCHED TO. The fixture registers and stops, which is
-	// exactly the state the defect lived in: the workspace Emacs is standing
-	// in, freshly registered, and never switched to since.
-	if got := f.Emacs.EvalString(`(format "%s" (agent-repl--ws-current-name))`); got != f.Name {
-		t.Fatalf("the current workspace is %q, want the freshly registered %q", got, f.Name)
-	}
-
-	awaitDaemonRoster(t, f.Emacs.DaemonAddr(), emacsVerbBound,
-		"the daemon's roster to mark the registered workspace's row as the current one",
-		func(r *frontendv1.WorkspaceRoster) bool { return rosterCurrentRowRefID(r) == f.RefID })
-}
-
-// rosterCurrentRowRefID answers the ref id of the row the daemon marked as
-// the selected one, or the empty string when no row carries the flag.
-func rosterCurrentRowRefID(r *frontendv1.WorkspaceRoster) string {
-	id := ""
-	walkRosterRows(r, func(row *frontendv1.RosterRow) {
-		if row.GetCurrent().GetCurrent() {
-			id = row.GetWorkspace().GetWorkspace().GetId()
-		}
-	})
-	return id
 }
 
 // ---------------------------------------------------------------------------
@@ -853,99 +713,4 @@ func (f *emacsWorkspaceFixture) pressAndLand(keys, want string, order []string) 
 	f.Emacs.Keys(keys)
 	f.awaitCurrent(want, "`"+keys+"' to land on "+want+" of the drawn bar "+
 		fmt.Sprint(order))
-}
-
-// TestEmacsWorkspaceNavigationFollowsTheDrawnTabBar is the navigation
-// scenario, and the DRAWN ORDER IS THE WHOLE ASSERTION.
-//
-// THE DEFECT THIS PINS. `s-{' / `s-}' counted along
-// `agent-repl--live-ws-names' — the registry hash's KEY ORDER — while the bar
-// is drawn from `agent-repl-roster-tab-order'. The two are different lists:
-// measured on the owner's live Emacs the registry read (main, chess960,
-// explanation-engine, first-kept, none) against a bar drawing (first-kept,
-// explanation-engine, chess960). So left went right, and off one end the
-// switch reached persp-mode's own `none' (an error) or Doom's `main' (the
-// splash screen, no tab highlighted). `M-<n>' fell through to Doom's
-// `+workspace/switch-to-(n-1)', which indexes persp-mode's perspective list
-// with `main' at slot 0, so `M-1' landed on the splash screen and `M-2' on
-// the first tab.
-//
-// Only a booted Doom can say this: both halves are about which keymap wins
-// and which list the winner walks, and a unit test can prove what our own
-// command does but not that Doom's binding no longer answers the chord.
-func TestEmacsWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	// Arrange: three workspaces, so a direction is observable (with two, left
-	// and right land on the same tab and a reversed cycle still passes).
-	second := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo-second"))
-	secondName := addProjectWorkspace(t, e, second.Dir)
-	third := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo-third"))
-	thirdName := addProjectWorkspace(t, e, third.Dir)
-
-	e.AwaitEvalFor(emacsVerbBound, "all three workspaces to be drawn on the tab bar",
-		emacsWSTablineNamesForm,
-		func(raw json.RawMessage) bool {
-			tabs := decodeStrings(raw)
-			return containsString(tabs, f.Name) &&
-				containsString(tabs, secondName) &&
-				containsString(tabs, thirdName)
-		})
-
-	// The order under test is the one the BAR is drawn from, read as data.
-	order := f.rosterTabOrder()
-	if len(order) != 3 {
-		t.Fatalf("agent-repl-roster--tab-order = %v, want exactly the three registered workspaces "+
-			"(%q, %q, %q)", order, f.Name, secondName, thirdName)
-	}
-	for _, name := range order {
-		if !containsString(f.tabNames(), name) {
-			t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab for the roster-ordered workspace %q",
-				f.tabNames(), name)
-		}
-	}
-
-	// The chords are the module's, not Doom's. `M-1' is the load-bearing one:
-	// Doom binds it to `+workspace/switch-to-0' in `global-map', and our
-	// minor-mode map has to win that lookup.
-	for keys, want := range map[string]string{
-		"s-}": "agent-repl-switch-right",
-		"s-{": "agent-repl-switch-left",
-		"M-1": "agent-repl-switch-to-workspace-1",
-		"M-2": "agent-repl-switch-to-workspace-2",
-	} {
-		if got := e.BindingFor(keys); got != want {
-			t.Fatalf("%s resolves to %q in the running Doom, want %q: Doom's own numeral "+
-				"indexes persp-mode's perspective list, whose slot 0 is its `main'", keys, got, want)
-		}
-	}
-
-	// Act + assert: `s-}' walks the bar left to right, wrapping.
-	f.standOn(order[0])
-	f.pressAndLand("s-}", order[1], order)
-	f.pressAndLand("s-}", order[2], order)
-	f.pressAndLand("s-}", order[0], order)
-
-	// And `s-{' walks it right to left, wrapping.
-	f.standOn(order[2])
-	f.pressAndLand("s-{", order[1], order)
-	f.pressAndLand("s-{", order[0], order)
-	f.pressAndLand("s-{", order[2], order)
-
-	// `M-2' is the SECOND DRAWN TAB, which is what Doom's own `M-2' was not.
-	f.standOn(order[0])
-	f.pressAndLand("M-2", order[1], order)
-
-	// `M-1' is the FIRST DRAWN TAB and never Doom's `main': that pseudo
-	// perspective is where the old binding landed, and it is read back BY ITS
-	// OWN NAME rather than inferred from the tab that ended up highlighted.
-	f.pressAndLand("M-1", order[0], order)
-	main := e.EvalString(`(format "%s" (agent-repl--ws-main-name))`)
-	if current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`); current == main {
-		t.Fatalf("`M-1' landed on %q, Doom's own startup perspective: the numerals index the drawn "+
-			"tab bar %v, which a pseudo perspective can never appear in", current, order)
-	}
 }

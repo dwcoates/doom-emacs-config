@@ -264,6 +264,19 @@ const daemonLinkBound = 1 * time.Second
 // silently move the other.
 const doomBootBound = 3500 * time.Millisecond
 
+// doomBootCPUBound is the Doom boot's PROMISE ABOUT THE PRODUCT, kept on the
+// work the boot does rather than the time it waits: the same 3.5s, as CPU
+// spent by Emacs and its reaped children. A boot starved by a host running
+// two gates at once spends little CPU and keeps waiting (2026-10-15:
+// TestEmacsHandoverTransfersAtFreeness missed the WALL bound with two merges'
+// suites running); a boot that is slow or spinning spends it and fails.
+const doomBootCPUBound = doomBootBound
+
+// doomBootWallCap is the LAST RESORT for a boot that spends no CPU and never
+// stamps -- asleep in a deadlock the CPU budget cannot see -- set far past
+// any starvation a loaded host has shown, so it only ever names a hang.
+const doomBootWallCap = 30 * time.Second
+
 // doomStageBound bounds each `cp -a` that stages one entry of Doom's
 // `.local` tree into the test's scratch.
 //
@@ -394,6 +407,8 @@ type Emacs struct {
 	// doomStageBound the same way.
 	phasesMu sync.Mutex
 	phases   []phase
+	// stopDaemon is EmacsOpts.StopDaemon: nil asks Emacs to stop its daemon.
+	stopDaemon func()
 }
 
 // phase is one measured boot step.
@@ -462,7 +477,26 @@ type EmacsOpts struct {
 	// inherited by the daemon, the shim, and everything below them. The
 	// build identity and the vendor-call prohibition ride here.
 	ExtraEnv []string
+	// StopDaemon, when set, is how teardown stops the daemon this Emacs is
+	// linked to, in place of asking Emacs to stop it: the Doom tier's fake
+	// daemon is the scenario's own, stops on its own control plane, and
+	// answers a StopDaemon without exiting. Teardown then awaits the
+	// daemon's exit exactly as it does a real one's.
+	StopDaemon func()
 }
+
+// workspaceRegistryNamesForm reads the name of every workspace Emacs's
+// registry (`agent-repl--workspaces') holds a project directory for: the ONE
+// spelling every scenario reads the registry with.
+const workspaceRegistryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
+
+// emacsRoot is a scenario's Emacs HOME: its scratch root's `emacs`.
+func emacsRoot(box sandbox) string { return filepath.Join(box.Scratch(), "emacs") }
+
+// emacsStateDir is the agent-repl state root of the Emacs at ROOT, where its
+// daemon publishes daemon.addr: known before Emacs starts, so a daemon the
+// scenario starts itself can bind it first.
+func emacsStateDir(root string) string { return filepath.Join(root, "state") }
 
 // StartEmacs brings up one sandboxed Emacs with a real tty frame, loads the
 // module's own sources into it, and arms the heartbeat.
@@ -479,7 +513,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// caller goes through NewEmacsWorld.
 	requireEmacsSlot(t)
 
-	root := filepath.Join(box.Scratch(), "emacs")
+	root := emacsRoot(box)
 	// 0o700 before anything else creates it: this root is the Emacs HOME,
 	// and Emacs 30 refuses an init tree "accessible by others" -- Doom's
 	// early-init then aborts before any readiness stamp is written.
@@ -496,12 +530,13 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		ServerSocket:       filepath.Join(root, "server"),
 		EmacsDir:           filepath.Join(root, ".emacs.d"),
 		ReadyStamp:         filepath.Join(root, "doom-ready.json"),
-		StateDir:           filepath.Join(root, "state"),
+		StateDir:           emacsStateDir(root),
 		LogFile:            filepath.Join(root, "state", "logs", "doom-agent-repl.log"),
 		DefaultConfigDir:   filepath.Join(root, "account-default"),
 		MultiRepoConfigDir: filepath.Join(root, "account-multi"),
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
 		wedged:             make(chan struct{}),
+		stopDaemon:         opts.StopDaemon,
 	}
 	// The scratch root is unique per test (os.MkdirTemp), so an argv naming
 	// it belongs to this scenario and to nothing else.
@@ -701,10 +736,35 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	serverStarted := time.Now()
 	e.awaitServer()
 	e.record("server-answers", time.Since(serverStarted))
+	if err := serverSocketDirConfined(e.EvalString(`server-socket-dir`), e.Root); err != nil {
+		t.Fatal(err)
+	}
 	e.armHeartbeat()
 	e.assertTrampolinesWerePrewarmed()
 	t.Cleanup(e.reportPhases)
 	return e
+}
+
+// serverSocketDirConfined refuses a `server-socket-dir' outside the
+// scenario's own scratch ROOT, checked on EVERY boot.
+//
+// `lisp/doom-editor.el' starts a server on a graphical frame from a
+// `with-eval-after-load' on `server', so it once fired inside the boot hook's
+// own `(require 'server)', BEFORE the hook had set `server-name'. Concurrent
+// boots then raced for /tmp/emacs<uid>/server, and the losers died with
+// "Cannot bind server socket: Address already in use" for a path in no
+// scenario's scratch root (measured 2026-09-05: 2 of 45 scenarios on a quiet
+// box). `sandbox/doom/init.el' pins both variables before anything can load
+// `server'; the boot hook asserts the name, and this asserts the directory,
+// which has no other witness: a default-named `server-start' -- Doom's own, a
+// with-editor's, an interactive M-x -- must still land inside this root.
+func serverSocketDirConfined(dir, root string) error {
+	if !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		return fmt.Errorf("`server-socket-dir' is %q, outside this scenario's scratch root %s: "+
+			"a default-named `server-start' would bind a path every scenario in this container "+
+			"shares, and concurrent boots would race for it", dir, root)
+	}
+	return nil
 }
 
 // settingsPath is the ONE elisp file this layer writes. It is not a
@@ -1204,76 +1264,201 @@ func (e *Emacs) rootListing() string {
 // as a socket that never appears.
 func (e *Emacs) awaitDoom() {
 	e.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), doomBootBound)
-	defer cancel()
+	stall := time.NewTimer(doomBootBound)
+	defer stall.Stop()
+	wallCap := time.NewTimer(doomBootWallCap)
+	defer wallCap.Stop()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+	outcome := awaitDoomStamp(doomStampWait{
+		poll:    ticker.C,
+		stalled: stall.C,
+		capped:  wallCap.C,
+		read: func() ([]byte, bool, error) {
+			body, err := os.ReadFile(e.ReadyStamp)
+			if os.IsNotExist(err) {
+				return nil, false, nil
+			}
+			return body, err == nil, err
+		},
+		exited: e.proc.Exited,
+		cpu:    func() (time.Duration, error) { return emacsCPU(e.emacsPID()) },
+		onStall: func() {
+			// A BOOT PAST THE WALL BOUND IS REPORTED, NOT FAILED: on a host
+			// running two gates at once the boot is starved rather than
+			// slow, and only its CPU says which (doomBootCPUBound).
+			e.t.Logf("Doom has not finished initializing %s in; still waiting on its readiness stamp at %s%s%s",
+				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot())
+		},
+	})
+	switch outcome.kind {
+	case doomStamped:
+		e.acceptDoomStamp(outcome.body)
+	case doomExited:
+		e.t.Fatalf("emacs exited before Doom finished initializing; pty output:\n%s", e.proc.Output())
+	case doomReadFailed:
+		e.t.Fatalf("read the Doom readiness stamp: %v", outcome.err)
+	case doomOverBudget, doomCapped:
+		// The kernel's account comes with it, because a boot that misses
+		// its budget writes NOTHING to the pty -- so the pty output alone
+		// reports an empty string and explains nothing. AND THE NATIVE
+		// STACK: such a boot is an Emacs that is ALIVE and has published no
+		// server socket, so only the debugger can say where inside it.
+		e.t.Fatalf("Doom did not finish initializing: %s (no readiness stamp at %s)%s%s%s%s; pty output:\n%s",
+			outcome.why(), e.ReadyStamp, e.bootBreadcrumb(), e.rootListing(),
+			e.processSnapshot(), e.nativeBacktrace(), e.proc.Output())
+	}
+}
+
+// acceptDoomStamp decodes a written readiness stamp and refuses one that says
+// the boot degraded.
+func (e *Emacs) acceptDoomStamp(body []byte) {
+	e.t.Helper()
+	var ready DoomReady
+	if err := json.Unmarshal(body, &ready); err != nil {
+		e.t.Fatalf("decode the Doom readiness stamp %q: %v", string(body), err)
+	}
+	if !ready.OK {
+		// THE ROOT'S OWN CONTENTS COME WITH IT. A boot error names what Emacs
+		// could not do; several of them -- a server socket that will not
+		// bind, a settings file that will not load, a Doom tree Emacs refuses
+		// as unsafe -- are explained only by what is actually sitting in the
+		// scratch root, which is deleted with the test. THE BREADCRUMB COMES
+		// WITH IT: a GUI Emacs writes its messages to the frame rather than
+		// the pty, so a failed stamp is routinely accompanied by an EMPTY pty
+		// -- measured -- and the breadcrumb is then the only record of which
+		// boot step the error came out of.
+		e.t.Fatalf("Doom failed to initialize: %s%s%s; pty output:\n%s",
+			ready.Error, e.bootBreadcrumb(), e.rootListing(), e.proc.Output())
+	}
+	// The whole reason for booting Doom rather than `-Q` is that these are
+	// real. A stamp that says otherwise means the profile silently degraded,
+	// and every keybinding and popup assertion below it would be vacuous.
+	if !ready.Doom {
+		e.t.Fatalf("Doom is not loaded in the e2e Emacs; the stamp reports %+v", ready)
+	}
+	if !ready.MapBang {
+		e.t.Fatalf("`map!' is unbound in the e2e Emacs, so no keybinding is real; the stamp reports %+v", ready)
+	}
+	if !ready.PopupRule {
+		e.t.Fatalf("`set-popup-rule!' is unbound, so config.el skipped the notes popup rule; the stamp reports %+v", ready)
+	}
+	if !ready.AgentRepl {
+		e.t.Fatalf("`:app agent-repl' did not load; the stamp reports %+v", ready)
+	}
+	e.Doom = ready
+}
+
+// doomStampWait is what awaitDoomStamp waits with: the instants it looks
+// again, reports a stall and gives up at, and how it reads the stamp, the
+// process and the process's CPU.
+type doomStampWait struct {
+	poll, stalled, capped <-chan time.Time
+	read                  func() (body []byte, written bool, err error)
+	exited                func() bool
+	cpu                   func() (time.Duration, error)
+	onStall               func()
+}
+
+// doomOutcome is how a wait for the readiness stamp ended.
+type doomOutcome struct {
+	kind doomOutcomeKind
+	body []byte
+	cpu  time.Duration
+	err  error
+}
+
+type doomOutcomeKind int
+
+const (
+	doomStamped doomOutcomeKind = iota
+	doomExited
+	doomReadFailed
+	doomOverBudget
+	doomCapped
+)
+
+// why says what ended a wait that failed by budget or cap.
+func (o doomOutcome) why() string {
+	if o.kind == doomOverBudget {
+		return fmt.Sprintf("Emacs spent %s of CPU, over the %s a Doom boot is budgeted", o.cpu, doomBootCPUBound)
+	}
+	return fmt.Sprintf("no stamp within the last-resort %s", doomBootWallCap)
+}
+
+// awaitDoomStamp waits for Doom's readiness stamp, THE LATCH: it ends when
+// the stamp is written, when Emacs exits, when the boot has spent more CPU
+// than doomBootCPUBound, or at doomBootWallCap. Wall time past doomBootBound
+// only reports a stall, once: a boot the host starved has spent little CPU,
+// and failing it would charge the product for the harness's concurrency.
+func awaitDoomStamp(w doomStampWait) doomOutcome {
 	for {
-		if e.proc.Exited() {
-			e.t.Fatalf("emacs exited before Doom finished initializing; pty output:\n%s", e.proc.Output())
+		body, written, err := w.read()
+		switch {
+		case err != nil:
+			return doomOutcome{kind: doomReadFailed, err: err}
+		case written:
+			return doomOutcome{kind: doomStamped, body: body}
+		case w.exited():
+			return doomOutcome{kind: doomExited}
 		}
-		body, err := os.ReadFile(e.ReadyStamp)
-		if err == nil {
-			var ready DoomReady
-			if jsonErr := json.Unmarshal(body, &ready); jsonErr != nil {
-				e.t.Fatalf("decode the Doom readiness stamp %q: %v", string(body), jsonErr)
-			}
-			if !ready.OK {
-				// THE ROOT'S OWN CONTENTS COME WITH IT. A boot error names
-				// what Emacs could not do; several of them -- a server socket
-				// that will not bind, a settings file that will not load, a
-				// Doom tree Emacs refuses as unsafe -- are explained only by
-				// what is actually sitting in the scratch root, which is
-				// deleted with the test.
-				// THE BREADCRUMB COMES WITH IT, exactly as it does for a boot
-				// that never stamps at all. A GUI Emacs writes its messages
-				// to the frame rather than the pty, so a failed stamp is
-				// routinely accompanied by an EMPTY pty -- measured -- and
-				// the breadcrumb is then the only record of which boot step
-				// the error came out of.
-				e.t.Fatalf("Doom failed to initialize: %s%s%s; pty output:\n%s",
-					ready.Error, e.bootBreadcrumb(), e.rootListing(), e.proc.Output())
-			}
-			// The whole reason for booting Doom rather than `-Q` is that
-			// these are real. A stamp that says otherwise means the profile
-			// silently degraded, and every keybinding and popup assertion
-			// below it would be vacuous.
-			if !ready.Doom {
-				e.t.Fatalf("Doom is not loaded in the e2e Emacs; the stamp reports %+v", ready)
-			}
-			if !ready.MapBang {
-				e.t.Fatalf("`map!' is unbound in the e2e Emacs, so no keybinding is real; the stamp reports %+v", ready)
-			}
-			if !ready.PopupRule {
-				e.t.Fatalf("`set-popup-rule!' is unbound, so config.el skipped the notes popup rule; the stamp reports %+v", ready)
-			}
-			if !ready.AgentRepl {
-				e.t.Fatalf("`:app agent-repl' did not load; the stamp reports %+v", ready)
-			}
-			e.Doom = ready
-			return
-		}
-		if !os.IsNotExist(err) {
-			e.t.Fatalf("read the Doom readiness stamp: %v", err)
+		if spent, err := w.cpu(); err == nil && spent > doomBootCPUBound {
+			return doomOutcome{kind: doomOverBudget, cpu: spent}
 		}
 		select {
-		case <-ctx.Done():
-			// The kernel's account comes with it, because a boot that
-			// misses this bound writes NOTHING to the pty -- so the pty
-			// output alone reports an empty string and explains nothing.
-			// The Emacs has no readiness stamp and therefore no pid the Go
-			// side knows, but the reaper finds it the same way it always
-			// does: by this scenario's own paths in its environment.
-			// AND THE NATIVE STACK. A boot that misses this bound is an
-			// Emacs that is ALIVE and has published no server socket, so
-			// there is nothing to ask it with: the breadcrumb says which
-			// step it was in and only the debugger can say where inside it.
-			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s%s%s; pty output:\n%s",
-				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.rootListing(),
-				e.processSnapshot(), e.nativeBacktrace(), e.proc.Output())
-		case <-ticker.C:
+		case <-w.capped:
+			return doomOutcome{kind: doomCapped}
+		case <-w.stalled:
+			w.onStall()
+		case <-w.poll:
 		}
 	}
+}
+
+// emacsCPU is the CPU process PID and its reaped children have spent (utime,
+// stime, cutime, cstime from /proc/<pid>/stat). A pid not yet known (0) has
+// spent nothing.
+func emacsCPU(pid int) (time.Duration, error) {
+	if pid == 0 {
+		return 0, nil
+	}
+	raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return 0, err
+	}
+	ticks, err := statCPUTicks(string(raw))
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(ticks) * time.Second / clockTicksPerSecond, nil
+}
+
+// clockTicksPerSecond is the kernel's USER_HZ, the unit /proc/<pid>/stat
+// counts CPU time in: 100 on every Linux the sandbox image runs.
+const clockTicksPerSecond = 100
+
+// statCPUTicks sums fields 14-17 (utime, stime, cutime, cstime) of one
+// /proc/<pid>/stat line. The command field can hold spaces and parentheses,
+// so the fields are counted from the LAST closing parenthesis.
+func statCPUTicks(stat string) (int64, error) {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return 0, fmt.Errorf("a /proc stat line with no command field: %q", stat)
+	}
+	fields := strings.Fields(stat[end+1:])
+	// fields[0] is field 3 (state); utime is field 14.
+	if len(fields) < 15 {
+		return 0, fmt.Errorf("a /proc stat line with %d fields after the command, want at least 15: %q", len(fields), stat)
+	}
+	var total int64
+	for _, f := range fields[11:15] {
+		n, err := strconv.ParseInt(f, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("a /proc stat CPU field %q: %w", f, err)
+		}
+		total += n
+	}
+	return total, nil
 }
 
 // envPrefix renders an environment as an `env` command prefix, which is how
@@ -1859,7 +2044,11 @@ func (e *Emacs) stop() {
 		// only where there is something to answer it.
 		switch e.daemonLinkState() {
 		case daemonLinkHeld:
-			e.askDaemonToStop()
+			if e.stopDaemon != nil {
+				e.stopDaemon()
+			} else {
+				e.askDaemonToStop()
+			}
 			stopAsked = true
 		case daemonStopping:
 			// THE SCENARIO STOPPED ITS OWN DAEMON, and that daemon's shutdown

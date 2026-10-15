@@ -106,7 +106,7 @@ func (f *emacsFindFileFixture) registerWorkspace(t *testing.T, dir string) strin
 	before := len(f.workspaceNames())
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
 	raw := e.AwaitEvalFor(emacsFindFileBound, "the workspace to appear in Emacs's registry",
-		`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
+		workspaceRegistryNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before })
 	names := decodeStrings(raw)
 	return names[len(names)-1]
@@ -115,7 +115,7 @@ func (f *emacsFindFileFixture) registerWorkspace(t *testing.T, dir string) strin
 func (f *emacsFindFileFixture) workspaceNames() []string {
 	f.Emacs.t.Helper()
 	return f.Emacs.EvalStrings(
-		`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`)
+		workspaceRegistryNamesForm)
 }
 
 // findFileWithRoot visits PATH the ordinary way, with root detection pointed
@@ -298,41 +298,6 @@ func TestEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
 // affordance must call, and divergence between call sites is a defect by
 // ruling. Its two documented shapes are asserted as two tests, one edge case
 // each: a file with a line, and a directory.
-
-// TestEmacsPopupOpensAFileRightSideHalfWidth is scenario 34's file case: the
-// window's side is `right', its width is about half the frame, and point is
-// on the requested (1-indexed) line.
-func TestEmacsPopupOpensAFileRightSideHalfWidth(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsFindFileFixture(t, box)
-	e := f.Emacs
-
-	repo := f.repoUnderHome(t, "popup")
-	path := f.fileIn(t, repo.Dir, "lines.txt", "one\ntwo\nthree\nfour\nfive\n")
-	const wantLine = 4
-
-	e.Eval(`(agent-repl-popup-open ` + elispString(path) + ` 4)`)
-
-	if side := f.windowSideOf(path); side != "right" {
-		t.Fatalf("the popup window's window-side = %q, want %q", side, "right")
-	}
-
-	frameWidth := e.EvalInt(`(frame-width)`)
-	popupWidth := e.EvalInt(`(window-total-width
-                               (get-buffer-window (get-file-buffer ` + elispString(path) + `) t))`)
-	floor := int(float64(frameWidth) * popupWidthFloorFraction)
-	ceiling := int(float64(frameWidth) * popupWidthCeilingFraction)
-	if popupWidth < floor || popupWidth > ceiling {
-		t.Fatalf("the popup window is %d columns of a %d-column frame, want about half (%d..%d)",
-			popupWidth, frameWidth, floor, ceiling)
-	}
-
-	if got := e.EvalInt(`(with-current-buffer (get-file-buffer ` + elispString(path) + `)
-                            (line-number-at-pos (point)))`); got != wantLine {
-		t.Fatalf("point is on line %d, want %d: the popup's LINE is 1-indexed, as HostOpenInEditor.line is", got, wantLine)
-	}
-}
 
 // TestEmacsPopupOpensADirectoryInDired is scenario 34's directory case: the
 // same one subroutine answers a directory with a DIRED buffer, in the same

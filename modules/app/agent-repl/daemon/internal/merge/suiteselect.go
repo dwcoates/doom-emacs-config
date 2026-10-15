@@ -106,12 +106,16 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: moduleRoot + "bin/test-all.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-nonlisp-coverage.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh", Full: true},
+	// The sandboxed suites' scripts and the runner they share are those
+	// suites' own, and the e2e module's sandboxscripts package tests them.
+	{Kind: matchExact, Path: moduleRoot + "bin/lib-sandbox-suite.sh", Suites: []string{"e2e", "e2e-emacs"}},
+	{Kind: matchExact, Path: moduleRoot + "bin/test-e2e-emacs.sh", Suites: []string{"e2e", "e2e-emacs"}},
 	// repo-scans reads the Go sources here too.
 	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: append(append([]string(nil), scriptHarnessSuites...), repoScans)},
 
-	// The sandbox image and its runner are the Emacs client layer's
-	// precondition and nothing else's: the containerless cross-system suite
-	// never touches them.
+	// The sandbox image and its runner are the sandboxed suite's precondition
+	// -- the Emacs client layer's and the Doom tier's, which runs in it -- and
+	// nothing else's: the containerless cross-system suite never touches them.
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
 	// Both cross-system suites live in e2e/ and share its harness.
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e", "e2e-emacs", repoScans}},
@@ -167,6 +171,8 @@ var suiteRules = []suiteRule{
 	// doctor.el) stay directly at the module root. `ert` carries Emacs's unit
 	// and integration tests both.
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert", "e2e-emacs"}},
+	// e2e-emacs carries the Doom tier too, which boots this elisp in a real
+	// Doom against the fake daemon under lisp/testsupport/.
 	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", "e2e-emacs"}},
 
 	// OUTSIDE THE MODULE, the paths a roster harness reads select exactly the

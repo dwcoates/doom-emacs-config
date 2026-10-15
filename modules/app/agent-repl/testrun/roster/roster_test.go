@@ -48,11 +48,15 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+// sandboxed are the suites that run inside the e2e sandbox
+// (bin/lib-sandbox-suite.sh): the Emacs client layer, the Doom tier with it.
+var sandboxed = map[string]bool{"e2e-emacs": true}
+
 func TestOnlyTheSandboxSuiteMayDecline(t *testing.T) {
 	// The exit-77 disposition exists for a precondition the run cannot meet
 	// (the e2e sandbox image); any other suite exiting 77 is a failure.
 	for _, s := range Suites {
-		if s.MayDecline != (s.Name == "e2e-emacs") {
+		if s.MayDecline != sandboxed[s.Name] {
 			t.Errorf("%s MayDecline = %v", s.Name, s.MayDecline)
 		}
 	}
@@ -207,7 +211,7 @@ func TestOnlyTheSandboxSuiteReadsTheWebappDist(t *testing.T) {
 	// suite reads it, and only a Script suite is handed the env that stops
 	// it building the dist itself (suites.NoWebappBuildEnv).
 	for _, s := range Suites {
-		if s.NeedsWebappDist != (s.Name == "e2e-emacs") {
+		if s.NeedsWebappDist != sandboxed[s.Name] {
 			t.Errorf("%s NeedsWebappDist = %v", s.Name, s.NeedsWebappDist)
 		}
 		if s.NeedsWebappDist && s.Kind != Script {

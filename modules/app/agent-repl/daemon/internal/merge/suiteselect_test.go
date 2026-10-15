@@ -43,12 +43,12 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans"),
 		},
 		{
-			name:  "module-root elisp selects ert and the Emacs layer",
+			name:  "module-root elisp selects ert, the Emacs layer, which carries the Doom tier",
 			paths: []string{"modules/app/agent-repl/config.el"},
 			want:  []string{"ert", "e2e-emacs"},
 		},
 		{
-			name:  "lisp/ selects ert and the Emacs layer",
+			name:  "lisp/ selects ert, the Emacs layer, which carries the Doom tier",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
 			want:  []string{"ert", "e2e-emacs"},
 		},
@@ -58,7 +58,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
-			name:  "the sandbox image selects only the Emacs client layer",
+			name:  "the sandbox image selects only the sandboxed suite",
 			paths: []string{"modules/app/agent-repl/e2e/sandbox/Dockerfile"},
 			want:  []string{"e2e-emacs"},
 		},
@@ -66,6 +66,11 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			name:  "the e2e harness selects both cross-system suites",
 			paths: []string{"modules/app/agent-repl/e2e/world_test.go"},
 			want:  []string{"e2e", "e2e-emacs", "repo-scans"},
+		},
+		{
+			name:  "the shared sandboxed-suite runner selects the suite it runs, and the tests of it",
+			paths: []string{"modules/app/agent-repl/bin/lib-sandbox-suite.sh"},
+			want:  []string{"e2e", "e2e-emacs"},
 		},
 		{
 			name:  "a shim change selects the shim suite, the sidecar's mocked vendor and the end-to-end suites",

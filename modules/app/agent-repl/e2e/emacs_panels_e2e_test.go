@@ -54,7 +54,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 		e.Eval(`(agent-repl-add-project-workspace ` + elispString(repository.Dir) + `)`)
 		want := i + 1
 		raw := e.AwaitEval("the workspace registry to hold the new workspace",
-			`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
+			workspaceRegistryNamesForm,
 			func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == want })
 		names = registryNames(raw)
 		awaitRegistrationLanding(e, repository.Dir)
@@ -177,35 +177,6 @@ func TestEmacsPanelOpensIntoTheMainArea(t *testing.T) {
 	}
 	if !sawPanel {
 		t.Fatalf("no window shows a %q buffer after the open; windows were %q", panelPrefix, after)
-	}
-}
-
-// TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone is scenario 15: the
-// close variant that only hides, pressed as `SPC o c`.
-func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
-	t.Parallel()
-	w, _ := emacsPanelWorld(t, 2)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-	orderBefore := e.EvalStrings(emacsTabOrderForm)
-
-	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
-		t.Fatalf("SPC o c resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
-	}
-	e.Leader("o c")
-
-	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
-		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
-		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
-		})
-
-	orderAfter := e.EvalStrings(emacsTabOrderForm)
-	if strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
-		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
 	}
 }
 
