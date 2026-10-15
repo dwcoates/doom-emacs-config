@@ -784,25 +784,36 @@ func TestReadPageRefusesAPointerFromAnotherBook(t *testing.T) {
 
 // ---- LinesSince ----
 
-func TestLinesSinceReplaysInWriteOrder(t *testing.T) {
-	// Arrange
+func TestLinesSinceReplaysInFirstInsertOrder(t *testing.T) {
+	// Arrange: a turn's answer row inserted, its terminal written, then the
+	// answer row rewritten. The rewrite gives the answer row the newer write
+	// ordinal, and the terminal names it, so the terminal must still follow it.
 	d, _ := newStore(t)
-	seedBook(t, d, "agent-1", 3)
+	seedBook(t, d, "agent-1", 1)
+	pin := scalar[uint64](t, d, `SELECT MAX(write_seq) FROM entry`)
+	answer := writeOK(t, d, pageEntry("w-answer", "u-answer", "agent-1", frameItem(activityFrame("agent-1", "act-answer", prose()))))
+	terminal := writeOK(t, d, pageEntry("w-terminal", "u-terminal", "agent-1", frameItem(successFrame("agent-1"))))
+	writeOK(t, d, pageEntry("w-answer-settled", "u-answer", "agent-1", frameItem(activityFrame("agent-1", "act-answer", proseSaying("the answer")))))
 
 	// Act
-	lines, err := d.LinesSince(ctx(), "agent-1", 0)
+	lines, err := d.LinesSince(ctx(), "agent-1", pin)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("LinesSince: %v", err)
 	}
-	if len(lines) != 3 {
-		t.Fatalf("lines = %d, want 3", len(lines))
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want the answer row once and the terminal", len(lines))
 	}
-	for i := 1; i < len(lines); i++ {
-		if lines[i].WriteSeq <= lines[i-1].WriteSeq {
-			t.Fatalf("write ordinals are not ascending: %d then %d", lines[i-1].WriteSeq, lines[i].WriteSeq)
-		}
+	if got, want := lines[0].Line.GetAt().GetValue(), answer.Lines[0].Line.GetAt().GetValue(); got != want {
+		t.Fatalf("first pointer = %q, want the answer row %q ahead of the terminal", got, want)
+	}
+	if got, want := lines[1].Line.GetAt().GetValue(), terminal.Lines[0].Line.GetAt().GetValue(); got != want {
+		t.Fatalf("second pointer = %q, want the terminal %q", got, want)
+	}
+	markdown := lines[0].Line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
+	if markdown != "the answer" {
+		t.Fatalf("answer row markdown = %q, want its latest write %q", markdown, "the answer")
 	}
 }
 
