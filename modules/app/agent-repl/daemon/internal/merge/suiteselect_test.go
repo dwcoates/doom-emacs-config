@@ -43,14 +43,14 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans"),
 		},
 		{
-			name:  "module-root elisp selects ert and the Emacs layer",
+			name:  "module-root elisp selects ert, the Emacs layer and the Doom tier",
 			paths: []string{"modules/app/agent-repl/config.el"},
-			want:  []string{"ert", "e2e-emacs"},
+			want:  []string{"ert", "e2e-emacs", "emacs-doom"},
 		},
 		{
-			name:  "lisp/ selects ert and the Emacs layer",
+			name:  "lisp/ selects ert, the Emacs layer and the Doom tier",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert", "e2e-emacs"},
+			want:  []string{"ert", "e2e-emacs", "emacs-doom"},
 		},
 		{
 			name:  "several regions union their selections",
@@ -58,14 +58,24 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
-			name:  "the sandbox image selects only the Emacs client layer",
+			name:  "the sandbox image selects only the sandboxed suites",
 			paths: []string{"modules/app/agent-repl/e2e/sandbox/Dockerfile"},
-			want:  []string{"e2e-emacs"},
+			want:  []string{"e2e-emacs", "emacs-doom"},
 		},
 		{
-			name:  "the e2e harness selects both cross-system suites",
+			name:  "the e2e harness selects both cross-system suites and the Doom tier",
 			paths: []string{"modules/app/agent-repl/e2e/world_test.go"},
-			want:  []string{"e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"e2e", "e2e-emacs", "emacs-doom", "repo-scans"},
+		},
+		{
+			name:  "the shared sandboxed-suite runner selects every suite it runs, and the tests of it",
+			paths: []string{"modules/app/agent-repl/bin/lib-sandbox-suite.sh"},
+			want:  []string{"e2e", "e2e-emacs", "emacs-doom"},
+		},
+		{
+			name:  "the Doom tier's script selects the Doom tier and the tests of it",
+			paths: []string{"modules/app/agent-repl/bin/test-emacs-doom.sh"},
+			want:  []string{"e2e", "emacs-doom"},
 		},
 		{
 			name:  "a shim change selects the shim suite, the sidecar's mocked vendor and the end-to-end suites",
@@ -331,7 +341,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e,e2e-emacs" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e,e2e-emacs,emacs-doom" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }

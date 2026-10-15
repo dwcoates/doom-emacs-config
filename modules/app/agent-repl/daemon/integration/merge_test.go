@@ -1311,17 +1311,16 @@ func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 
 func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 	t.Parallel()
-	// Arrange: a landed commit touching ONLY the sandbox image under e2e/,
-	// whose blast radius (internal/merge/suiteselect.go's own rule table) is
-	// exactly the single "e2e-emacs" suite. daemon/ paths no longer make a
-	// single-suite example: the rule table now widens a daemon change to
-	// {daemon, e2e, e2e-emacs} (the cross-system suites run a real
-	// agent-repld too), so a daemon-only test needs a genuinely narrow path
-	// to stay a one-suite demonstration.
+	// Arrange: a landed commit touching ONLY the whole-module scans, whose
+	// blast radius (internal/merge/suiteselect.go's own rule table) is exactly
+	// the single "repo-scans" suite. Most regions widen to several suites --
+	// a daemon change to {daemon, e2e, e2e-emacs}, the sandbox image to both
+	// sandboxed suites -- so this needs a genuinely narrow path to stay a
+	// one-suite demonstration.
 	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
-	script.SetStdout("e2e-emacs: passed in 1s\n")
-	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/e2e/sandbox/blastradius.txt", "touched\n")
+	script.SetStdout("repo-scans: passed in 1s\n")
+	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/reposcans/blastradius.txt", "touched\n")
 
 	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
 	// merged workspace's worktree down, and the feed resolves its log sink by
@@ -1346,8 +1345,8 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 		t.Fatalf("test-all.sh invocations = %d, want exactly 1", len(invocations))
 	}
 	argv := invocations[0].Argv
-	if !sameOrder(argv, []string{"--suites", "e2e-emacs"}) {
-		t.Fatalf("test-all.sh argv = %v, want it to end with [--suites e2e-emacs] (the sandbox-only blast radius)", argv)
+	if !sameOrder(argv, []string{"--suites", "repo-scans"}) {
+		t.Fatalf("test-all.sh argv = %v, want it to end with [--suites repo-scans] (the scans-only blast radius)", argv)
 	}
 }
 

@@ -72,6 +72,11 @@ type Suite struct {
 	// another suite's watch-mode driver was reading, which restarted the
 	// driver and failed tests that had nothing to do with the rebuild.
 	NeedsWebappDist bool
+	// Integration marks a Script suite that is ONE system's integration tier
+	// rather than a harness of scripts: the Doom tier (emacs-doom), a booted
+	// Emacs against the fake daemon. The run plan reports it as such
+	// (reuse.SuiteKind).
+	Integration bool
 	// TestParallel names the Go packages (by path relative to Path, "." for
 	// the root) whose chunks overlap that many of their top-level tests
 	// (-test.parallel). A package not named runs its tests one at a time.
@@ -295,6 +300,11 @@ var Suites = []Suite{
 	// boot 0.88s against its 3.5s bound (2026-10-12) -- while holding half
 	// the run's slots: 264 -> 164 slot-seconds, a fifth of a full run's.
 	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true},
+	// The Doom tier: a booted Doom Emacs against the FAKE daemon, in the same
+	// sandbox as e2e-emacs (bin/lib-sandbox-suite.sh), so it declines exactly
+	// as that suite does and holds the same two cores. The sandbox stages the
+	// webapp dist on every run, so the run builds it once for this suite too.
+	{Name: "emacs-doom", Kind: Script, Path: "bin/test-emacs-doom.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true, Integration: true},
 }
 
 // AlwaysRunRegions are the parts of the repository that only suites which

@@ -69,6 +69,8 @@ func SuiteKind(s roster.Suite) string {
 		return "unit+integration"
 	case s.Kind == roster.E2E || s.Name == "e2e-emacs":
 		return "e2e"
+	case s.Integration:
+		return "unit+integration"
 	case s.Kind == roster.Script || s.Kind == roster.SplitScript:
 		return "harness"
 	}
