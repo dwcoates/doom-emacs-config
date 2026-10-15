@@ -30,8 +30,8 @@ selection round; each decision below records the reasoning a reviewer needs.
 ### 1. `UpdateMergeQueue` gains `subscribe` and `unsubscribe` arms
 
 - **What**: `agentrepl.v1.UpdateMergeQueueRequest.action` gains
-  `subscribe` (9) and `unsubscribe` (10);
-  `UpdateMergeQueueError.cause` gains `not_subscribed` (11). The detail is a
+  `subscribe` (11) and `unsubscribe` (12), after master's racing arms (9, 10);
+  `UpdateMergeQueueError.cause` gains `not_subscribed` (13). The detail is a
   oneof of three empty arms (`every_change`, `advances`, `depletes`).
 - **Why**: subscription is queue control in the owner's framing ("new verbs,
   scoped to one repository's queue or all, like pause/resume are"), and every
@@ -87,7 +87,7 @@ selection round; each decision below records the reasoning a reviewer needs.
     own words are hidden. Accepted by the owner's framing (the notification is
     not drawn; the agent's work is the agent's).
 
-### 3. `UpdateMergeQueueError.subscriber_closed` (12)
+### 3. `UpdateMergeQueueError.subscriber_closed` (14)
 
 - **What**: `subscribe` naming a closed workspace is refused.
 - **Why**: a close is what ends a subscription, so a subscription taken by a
@@ -101,7 +101,7 @@ selection round; each decision below records the reasoning a reviewer needs.
 
 ## Non-contract decisions recorded for the implementation
 
-- **Persistence model.** Subscriptions are durable (wsm layout 53,
+- **Persistence model.** Subscriptions are durable (wsm layout 55,
   `merge_queue_subscriptions`, keyed by subscriber and repository key; the
   every-repository scope is stored as the empty key). Why durable: a landing
   in the daemon's own checkout redeploys and restarts the daemon, so a

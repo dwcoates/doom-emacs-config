@@ -521,7 +521,7 @@ started, step; paused). A change is reported by the write that made it,
 never found by diffing two looks, so a change is reported once across a
 handover; the events lock never nests with `o.mu`. Changes go to
 `Deps.QueueEvents` (`internal/mergenotice`), which never blocks the queue.
-Subscriptions are durable (wsm layout 53) and end with the workspace's close
+Subscriptions are durable (wsm layout 55) and end with the workspace's close
 (`MarkClosed` deletes them in the close's transaction; `Forget` cascades).
 
 ### rollout (`internal/rollout`)
