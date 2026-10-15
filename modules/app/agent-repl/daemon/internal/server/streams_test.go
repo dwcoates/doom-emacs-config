@@ -956,3 +956,25 @@ func TestAPerWorkspaceWatchOnARefTheRegistryRefusesIsTransportClosed(t *testing.
 		}
 	}
 }
+
+// TestANewEmacsStreamBringsNoWorkspaceUp pins that connecting an editor is not
+// a request to open anything: the editor asks with OpenTabs.
+func TestANewEmacsStreamBringsNoWorkspaceUp(t *testing.T) {
+	// Arrange: the persistent-wifi standing, which an Emacs stream carries
+	// from its opening, is the push the test waits on.
+	h := newHarness(t)
+	h.PersistentWifi.topic.Publish(joinedOn())
+	ctx, cancel := context.WithTimeout(context.Background(), openBound)
+	defer cancel()
+
+	// Act.
+	stream := emacsDaemonStream(t, h, ctx, unfocusedEditor())
+	if !stream.Receive() {
+		t.Fatalf("the Emacs stream carried no first push: %v", stream.Err())
+	}
+
+	// Assert.
+	if opens, selects := h.Verbs.opens.Load(), h.Verbs.selects.Load(); opens != 0 || selects != 0 {
+		t.Fatalf("opens = %d, selects = %d; want no bring-up from a connecting editor", opens, selects)
+	}
+}

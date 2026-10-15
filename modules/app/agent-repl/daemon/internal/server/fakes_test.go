@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -316,6 +317,9 @@ type fakeVerbs struct {
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
 	setHiddenErr error
+	// opens and selects count every Open and Select the handlers made: the
+	// two verbs that bring a workspace up.
+	opens, selects atomic.Int32
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// folds records every FoldRepository the handler resolved onto the verb,
@@ -475,6 +479,7 @@ func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string)
 // openStages records every stage the server's reporter relayed into the verb,
 // so a test can assert the rpc armed a reporter (or deliberately did not).
 func (f *fakeVerbs) Open(_ context.Context, _ ids.WorkspaceID, progress workspace.OpenProgress) error {
+	f.opens.Add(1)
 	f.openProgress = progress
 	for _, stage := range f.openStages {
 		if progress != nil {
@@ -528,6 +533,7 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 }
 
 func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID) error {
+	f.selects.Add(1)
 	if f.selectEntered != nil {
 		close(f.selectEntered)
 		<-ctx.Done()
