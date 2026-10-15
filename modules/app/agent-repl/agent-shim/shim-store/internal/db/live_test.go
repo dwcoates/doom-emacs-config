@@ -128,6 +128,24 @@ func TestLiveWorkNeverListsAWorkflowRunAmongTheDetached(t *testing.T) {
 	}
 }
 
+func TestLiveWorkListsNoWorkflowEvenAfterAWorkflowRunsOwnFrame(t *testing.T) {
+	// Arrange: the run's own workflow frame is written, and still nothing
+	// routes into the workflow table this wave.
+	d, _ := newStore(t)
+	writeOK(t, d, workflowRunEntry("w1", "u1", "run-wf"))
+
+	// Act
+	live, err := d.LiveWork(ctx(), "agent-main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	if got := len(live.GetLiveWorkflows()); got != 0 {
+		t.Fatalf("live_workflows = %d, want 0 this wave", got)
+	}
+}
+
 func TestLiveWorkAnswersAnIdleStoreWithEmptyLists(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)

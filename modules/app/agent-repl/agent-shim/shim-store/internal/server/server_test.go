@@ -1033,6 +1033,68 @@ func TestOutstandingTokensIsZeroAfterAOneTurnSessionsPageOnlyOpens(t *testing.T)
 	}
 }
 
+func TestShutdownStatesTheOutstandingTokens(t *testing.T) {
+	// Arrange: two page-only opens mint no token, so the shutdown owes none.
+	sink := &syncBuffer{}
+	srv := New(newFakeStore(), logging.New(sink, io.Discard, true), 0)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := storev1connect.NewShimStoreClient(ts.Client(), ts.URL)
+	for i := 0; i < 2; i++ {
+		if _, err := client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+			Agent: agentID("a1"), PageOnly: true,
+		})); err != nil {
+			t.Fatalf("OpenAgentSession: %v", err)
+		}
+	}
+
+	// Act.
+	ctx, cancel := context.WithTimeout(context.Background(), openBound)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// Assert.
+	rec, ok := findRecord(t, sink, "store.shutdown", "info")
+	if !ok || !strings.Contains(rec.Message, "outstanding_tokens=0") {
+		t.Fatalf("store.shutdown record = %+v (%v), want it to state outstanding_tokens=0", rec, ok)
+	}
+}
+
+func TestAWatchStreamServesOverHTTP11(t *testing.T) {
+	// Arrange: the harness's plain client speaks HTTP/1.1, and a watch with a
+	// line to replay answers its first frame at once.
+	store := newFakeStore()
+	store.since = []LineWritten{line("a1", "p1", 1)}
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithTimeout(context.Background(), openBound)
+	defer cancel()
+
+	// Act.
+	stream, err := h.client.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{
+		Watch: &storev1.AgentSessionToken{Value: token},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WatchAgentSession over HTTP/1.1 = %v", err)
+	}
+	// THE CANCEL GOES FIRST: closing an HTTP/1.1 stream drains its body, which
+	// a standing watch never ends on its own.
+	defer func() {
+		cancel()
+		stream.Close() //nolint:errcheck // test teardown
+	}()
+	if !stream.Receive() {
+		t.Fatalf("Receive over HTTP/1.1 = false: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p1" {
+		t.Fatalf("first pointer = %q, want p1", got)
+	}
+}
+
 func TestOpenAgentSessionRefusesAnAgentIdWithNoValue(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, newFakeStore(), 0)
