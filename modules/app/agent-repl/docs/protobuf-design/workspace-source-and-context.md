@@ -72,6 +72,55 @@ from one branch and merged into another, except the two forked "main into main"
 cells, which are refused only because the command file couples a fork to its
 parent.
 
+## The owner's target (2026-10-15)
+
+Fresh context: as today.
+
+Context forked from the requester itself:
+
+| branches from \ merges into | main | another branch |
+|---|---|---|
+| **main** | YES, the default | no |
+| **another branch** | yes (rare) | yes, any branch |
+
+Context forked from another workspace X:
+
+| branches from \ merges into | main | another branch |
+|---|---|---|
+| **main** | YES | no |
+| **another branch** | YES | YES, any branch |
+
+Consequences:
+
+- A fork no longer decides the branch: which workspace's transcript is forked
+  is independent of what is branched from and merged into.
+- "Another branch into main" is supported in its own right, so the contract's
+  rule that a workspace is never cut from one branch and merged into another
+  no longer holds as stated.
+- "Any branch" (open): whether "another branch into another branch" means the
+  same branch it was cut from, or may also mean a different one.
+
+## The merge queue, one-shot and async, the skill and the API
+
+What "merges into" means for each landing path:
+
+- ONE-SHOT: the workspace merges its own branch, in place, into its merge
+  target; the target is fixed when the workspace is created. So a create's
+  "merges into" is exactly what a later one-shot lands in.
+- ASYNC: a hidden merge workspace lands a named branch. Today that merge
+  workspace is itself a create in the "forked from the requester, another
+  branch into main" cell: it is cut from the branch's tip, forks the
+  requester's context, and merges into the requester's merge target.
+- Open for the owner: whether async's merge workspace counts toward "rare" in
+  that cell (async merges are common), and whether a merge's target is fixed at
+  creation or may be chosen when the merge is asked for (one-shot or async).
+- SKILL AND API: `/create-or-update-workspace` writes a command file the daemon
+  reads, and `/merge-queue` enqueues through the same ingress; neither calls the
+  daemon's RPCs directly. Every supported cell should be expressible the same
+  way at both levels, with the skill a thin caller of the API, so the skill
+  cannot refuse a mode the API supports (as the command file's fork-to-parent
+  coupling does today).
+
 ## Questions for the designing agent
 
 1. Which cells should the API support, and which should it refuse? Give the
@@ -82,3 +131,6 @@ parent.
    main, with the context forked from the requester.
 4. Which invariants change? For example the merge target is always the source,
    a fork child's inherited priority, and the merge workspace's `MergeOf` check.
+5. Against the owner's target above: what the agent API (the create skill and
+   `/merge-queue`, one-shot and async) must change to support each cell, where
+   the merge target is decided, and how the async merge workspace fits.
