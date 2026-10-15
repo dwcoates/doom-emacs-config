@@ -652,7 +652,7 @@ func TestALandedMergeRaisesOnlyItsQueuedAndLandedBanners(t *testing.T) {
 			merges = append(merges, inv.Argv)
 		}
 	}
-	if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀", "merge queued") || !bannerCarrying(merges[1:], "✅", "merge landed") {
+	if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀", "merge queued") || !bannerCarrying(merges[1:], "🎉", "merge landed", "Merged into main") {
 		t.Fatalf("merge banners %q, want the queued banner then the landed one, and nothing else", merges)
 	}
 }
