@@ -124,7 +124,8 @@ above): 240 leaf cases, 29 pinned; 117 removable under kills-only (106
 under strict), proven cheapest; case runtime 141ms total, 54ms of it saved.
 Mutants: 1445 in the reached files of internal/workspace, 496 killed, 311
 survived, 638 unreached, 0 dropped (61.5% over reached). The measurement
-cost 1h of wall and the schema compiled once.
+cost 28m27s of wall and 3m21s of CPU over 12411 processes; the schema
+compiled once.
 
 The second run (hang confirmation, coverage budget) ran under host loads of
 85-196 and was discarded; the tool now waits for load at most 32 (load.go).
