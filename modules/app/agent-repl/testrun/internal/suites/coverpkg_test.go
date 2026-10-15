@@ -229,3 +229,49 @@ func TestACoverageRunsTaggedIntegrationPassMeasuresTheSystemsItSpawns(t *testing
 		t.Fatalf("the tagged integration chunk's env %v lacks spawned coverage", chunk.Env)
 	}
 }
+
+func TestGoSuitePackagesListsBothPasses(t *testing.T) {
+	// Arrange: p is ordinary; q's tests compile only under -tags integration.
+	module := realFixture(t)
+	write(t, filepath.Join(module, "q", "q.go"), "package q\n", 0o644)
+	write(t, filepath.Join(module, "q", "q_test.go"), "//go:build integration\n\npackage q\nimport \"testing\"\nfunc TestI(t *testing.T) {}\n", 0o644)
+	s := roster.Suite{Name: "m", Path: "/", IntegrationTags: "integration", IntegrationPackages: "./q"}
+	l := Layout{Repo: module, Module: module}
+
+	// Act
+	pkgs, ipkgs, err := GoSuitePackages(l, s)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(pkgs, []string{"p"}) || !reflect.DeepEqual(ipkgs, []string{"q"}) {
+		t.Fatalf("packages %v, tagged %v", pkgs, ipkgs)
+	}
+}
+
+func TestGoSuitePackagesRefusesATagWithNoTaggedPackage(t *testing.T) {
+	// Arrange: r has no tests at all.
+	module := realFixture(t)
+	write(t, filepath.Join(module, "r", "r.go"), "package r\n", 0o644)
+	s := roster.Suite{Name: "m", Path: "/", IntegrationTags: "integration", IntegrationPackages: "./r"}
+
+	// Act
+	_, _, err := GoSuitePackages(Layout{Repo: module, Module: module}, s)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no integration-tagged tested packages") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// realFixture is goPackageFixture at its real path: go list answers real
+// paths, and a temp directory may sit behind a symlink (/var on macOS).
+func realFixture(t *testing.T) string {
+	t.Helper()
+	module, err := filepath.EvalSymlinks(goPackageFixture(t, "func TestA(t *testing.T) {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return module
+}
