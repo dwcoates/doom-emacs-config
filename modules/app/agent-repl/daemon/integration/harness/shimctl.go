@@ -571,17 +571,24 @@ type EntryStamp struct {
 	PlaceMs int64
 }
 
-// agentFrameCommand is the one push_agent_frame command every PushAgentFrame
-// variant sends: AGENT's stream (empty: the frame's own agent_id), stamped AT.
-func agentFrameCommand(agent string, at EntryStamp, payload string) controlCommand {
-	return controlCommand{Op: "push_agent_frame", Agent: agent, Pointer: at.Pointer, Turn: at.Turn, PlaceMs: at.PlaceMs, Payload: payload}
+// Ops of the two entry pushes, spelled here alone (stampedPush).
+const (
+	opPushAgentFrame = "push_agent_frame"
+	opPushUserPrompt = "push_user_prompt"
+)
+
+// stampedPush is the one command every entry push sends, a frame (OP
+// opPushAgentFrame) or a delivered prompt (opPushUserPrompt): AGENT's stream
+// (empty: the payload's own agent), stamped AT.
+func stampedPush(op, agent string, at EntryStamp, payload string) controlCommand {
+	return controlCommand{Op: op, Agent: agent, Pointer: at.Pointer, Turn: at.Turn, PlaceMs: at.PlaceMs, Payload: payload}
 }
 
 // PushAgentFrameStamped delivers one agent frame on AGENT's WatchAgent stream
 // as an entry stamped AT, every stamp at once.
 func (s *ShimControl) PushAgentFrameStamped(agent string, at EntryStamp, f *conversationv1.AgentFrame) {
 	s.t.Helper()
-	s.send(agentFrameCommand(agent, at, encode(s.t, f)))
+	s.send(stampedPush(opPushAgentFrame, agent, at, encode(s.t, f)))
 }
 
 // PushAgentFrame delivers one agent frame on the matching WatchAgent stream.
@@ -637,7 +644,15 @@ func (s *ShimControl) FileUserPrompt(agent string, p *conversationv1.AgentPrompt
 // the feed resolver. An empty agent addresses the prompt's own recipient.
 func (s *ShimControl) PushUserPrompt(agent string, p *conversationv1.AgentPrompt) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_user_prompt", Agent: agent, Payload: encode(s.t, p)})
+	s.PushUserPromptStamped(agent, EntryStamp{}, p)
+}
+
+// PushUserPromptStamped delivers one DELIVERED PROMPT as an entry stamped AT:
+// its pointer, its turn and its recorded place, as the real shim serves the
+// prompt of the turn it opens.
+func (s *ShimControl) PushUserPromptStamped(agent string, at EntryStamp, p *conversationv1.AgentPrompt) {
+	s.t.Helper()
+	s.send(stampedPush(opPushUserPrompt, agent, at, encode(s.t, p)))
 }
 
 // PushRetired delivers one RETIRED entry (WatchAgentResponse.retired) on the
