@@ -69,6 +69,27 @@ func TestOpenFeedDefaultsToTheRootFeed(t *testing.T) {
 	}
 }
 
+// TestOpenFeedCarriesTheResolversHeldSection pins that the opening answers the
+// held section the resolver opened the root feed with.
+func TestOpenFeedCarriesTheResolversHeldSection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.page = page()
+	h.Feed.held = &frontendv1.FeedHeld{}
+
+	// Act.
+	resp, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetHeld() == nil {
+		t.Fatalf("result = %v, want the held section carried", resp.Msg.GetResult())
+	}
+}
+
 // TestOpenFeedRefusesAForeignFeed pins that a feed id belonging to another
 // workspace is refused rather than served.
 func TestOpenFeedRefusesAForeignFeed(t *testing.T) {
