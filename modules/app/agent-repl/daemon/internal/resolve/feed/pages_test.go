@@ -78,6 +78,29 @@ func TestWalksArePerReader(t *testing.T) {
 	}
 }
 
+func TestANextPastTheStartServesTheWholeFeedStillAtStart(t *testing.T) {
+	// Arrange: a reader walked to the feed's start (page size 3, five rows).
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(5))
+	h.openPage(rootFeed(), "reader-1")
+	oldest := h.nextPage("reader-1")
+	if _, ok := oldest.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge().(*frontendv1.FeedPageSuccess_AtStart); !ok {
+		t.Fatalf("the second page's edge = %T, want at_start", oldest.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge())
+	}
+
+	// Act: one more next, past the page that already said at_start.
+	page := h.nextPage("reader-1")
+
+	// Assert: the whole feed as one page, still at_start, never a refusal.
+	success := page.GetResult().(*frontendv1.FeedPage_Success).Success
+	if _, ok := success.GetEdge().(*frontendv1.FeedPageSuccess_AtStart); !ok {
+		t.Fatalf("edge = %T, want at_start still set", success.GetEdge())
+	}
+	if got, want := strings.Join(rowIDs(success.GetRows()), ","), h.promptRowIDs("turn-0", "turn-1", "turn-2", "turn-3", "turn-4"); got != want {
+		t.Fatalf("page past the start = %v, want the whole feed %v", got, want)
+	}
+}
+
 func TestOpeningAgainDropsTheReadersWalk(t *testing.T) {
 	// Arrange: a reader that has paged back once.
 	h := newHarness(t)
