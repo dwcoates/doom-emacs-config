@@ -86,9 +86,10 @@ func TestServingAddressWithAnEmptyAdvertisementIsNoDaemonServing(t *testing.T) {
 
 // standingStreamBound bounds every standing-stream test: just over twice the
 // healthy open, read, and close of one stream on the loopback (measured
-// 2026-10-14 at worst ~3ms over 90 lookups). A Close that drains a standing
-// stream blocks until it runs out.
-const standingStreamBound = 7 * time.Millisecond
+// 2026-10-14 at worst 14.8ms over 200 lookups run inside the full
+// `go test ./...`, ~3ms alone). A Close that drains a standing stream blocks
+// until it runs out.
+const standingStreamBound = 30 * time.Millisecond
 
 // standingDaemon is a daemon whose roster and footer streams push one frame
 // and then stand open, never ending and never pushing 4MiB, as the real ones
