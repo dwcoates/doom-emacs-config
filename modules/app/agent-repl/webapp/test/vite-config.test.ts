@@ -175,6 +175,14 @@ describe("vite.config.ts build", () => {
     expect(holder).toMatch(/^assets\/proto-[A-Za-z0-9_-]+\.js$/);
   });
 
+  it("puts the app's own code in a layer chunk, out of the entry", () => {
+    // Act.
+    const holder = chunkHolding(clean.output, "/webapp/src/feed/feed.ts");
+
+    // Assert.
+    expect(holder).toMatch(/^assets\/app-[0-9]+-[A-Za-z0-9_-]+\.js$/);
+  });
+
   it("builds exactly one entry chunk, the one bin/build-frontend.sh fingerprints", () => {
     // Act.
     const entries = chunksOf(clean.output).filter((chunk) => chunk.isEntry);
