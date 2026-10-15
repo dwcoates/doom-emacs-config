@@ -90,8 +90,30 @@ func (m *measurer) verify(ctx context.Context, schemas []*gomut.Schema, imports 
 		sort.SliceStable(ls, func(i, j int) bool { return cost[ls[i]] < cost[ls[j]] })
 		return ls
 	}
+	// first answers the cheapest of ls that kills mu. Unit-tier leaves cost
+	// milliseconds, so they run together, one process per package, and the
+	// cheapest that failed is the answer; integration and e2e leaves cost
+	// seconds, so they run one at a time, cheapest first, to the first kill.
 	first := func(mu gomut.Mutant, ls []leaf) (leaf, bool, error) {
-		for _, l := range byCost(ls) {
+		var unit, tier []leaf
+		for _, l := range ls {
+			if len(m.suites[l.suite].Programs) == 0 {
+				unit = append(unit, l)
+			} else {
+				tier = append(tier, l)
+			}
+		}
+		if len(unit) > 0 {
+			k, anom, err := m.killers(ctx, mu, unit, healthy)
+			if err != nil {
+				return leaf{}, false, err
+			}
+			anomalies = append(anomalies, anom...)
+			if len(k) > 0 {
+				return byCost(k)[0], true, nil
+			}
+		}
+		for _, l := range byCost(tier) {
 			k, anom, err := m.killers(ctx, mu, []leaf{l}, healthy)
 			if err != nil {
 				return leaf{}, false, err

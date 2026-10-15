@@ -247,3 +247,26 @@ func TestMeasurePrebuildsAnE2ESuiteOnceAndEveryCaseReadsIt(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyRunsDeletedUnitCasesTogether(t *testing.T) {
+	// Arrange: TestA and TestB/x are deleted unit cases; only TestI kills.
+	cfg, f := verifyConfig(t, ".:TestA", ".:TestB/x")
+	script(f, map[string][]string{"1": {"TestI"}, "2": {"TestI"}})
+
+	// Act
+	v := verified(t, cfg, f)
+
+	// Assert: each mutant ran the two deleted unit cases in one process.
+	if v.SurvivedDeleted != 2 {
+		t.Fatalf("verification = %+v", v)
+	}
+	lone := 0
+	for _, call := range f.calls {
+		if strings.Contains(call, "[mutant ") && strings.HasPrefix(call, "mutants-00") && (strings.Contains(call, RunPattern("TestA")+" ") || strings.Contains(call, RunPattern("TestB/x")+" ")) {
+			lone++
+		}
+	}
+	if lone != 0 {
+		t.Fatalf("%d lone runs of a deleted unit case; calls:\n%s", lone, strings.Join(f.calls, "\n"))
+	}
+}
