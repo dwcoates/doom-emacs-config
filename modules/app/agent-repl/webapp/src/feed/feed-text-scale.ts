@@ -14,6 +14,29 @@ import { log } from "../log.js";
 /** The custom property every feed font-size multiplies into. */
 export const FEED_TEXT_SCALE_PROPERTY = "--feed-text-scale";
 
+/** The zoom before the daemon pushes one: the stylesheet's `:root` default, 100%. */
+export const FEED_TEXT_SCALE_DEFAULT = 1;
+
+/**
+ * The feed text zoom in force on DOC: the scale `applyFeedTextScale` last
+ * wrote on its document element, or the stylesheet's default before the first
+ * push. Only `applyFeedTextScale` writes it, and only a positive finite number,
+ * so anything else there is an invariant violation, recorded and thrown.
+ */
+export function feedTextScale(doc: Document): number {
+  const raw = doc.documentElement.style.getPropertyValue(FEED_TEXT_SCALE_PROPERTY);
+  if (raw === "") return FEED_TEXT_SCALE_DEFAULT;
+  const scale = Number(raw);
+  if (!Number.isFinite(scale) || scale <= 0) {
+    log.error("the document's feed text scale is not a positive number", {
+      operation: "feed.text-scale.unreadable",
+      context: { scale: raw },
+    });
+    throw new Error(`feed text scale unreadable: ${raw}`);
+  }
+  return scale;
+}
+
 /**
  * Write `scale` onto the document element's `--feed-text-scale`, re-scaling all
  * feed text at once. A non-finite or non-positive value is a defect in the
