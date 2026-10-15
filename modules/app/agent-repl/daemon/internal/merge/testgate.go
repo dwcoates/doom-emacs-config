@@ -43,6 +43,12 @@ var suiteFailed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+) failed after ([0-
 // decline is terminal and non-failing: the gate continues and may pass.
 var suiteDeclined = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): DECLINED after ([0-9]+(?:\.[0-9]+)?)s\b.*$`)
 
+// suiteReused matches the runner's line for a suite it did not run because an
+// earlier run passed its exact inputs (testrun/internal/reuse). The second
+// group is the earlier run, as the runner names it ("passed <when> on <branch>
+// <commit>[ with uncommitted changes]").
+var suiteReused = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): reused a green run \(inputs [0-9a-f]+, (passed .+)\)\s*$`)
+
 // suiteSkipped matches the line the script prints for a suite `--suites` left
 // out. A skipped suite is not a state the tab draws: it was never selected.
 var suiteSkipped = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): not selected by --suites, skipping\s*$`)
@@ -90,6 +96,7 @@ func (e *gateUnstartedError) Unwrap() error { return e.err }
 // neither of those is a pass.
 func (o *orchestrator) paintSuites(selected []string, output string) ([]*frontendv1.FeedMergeTestSuite, error) {
 	states := parseSuiteStates(output)
+	reused := parseReusedSources(output)
 	sections := splitSuiteOutput(output, selected)
 	counts := newSuiteCounts()
 	for _, line := range strings.Split(output, "\n") {
@@ -106,7 +113,7 @@ func (o *orchestrator) paintSuites(selected []string, output string) ([]*fronten
 		if err != nil {
 			return nil, err
 		}
-		row := tabSuite(name, states[name], counts.of(name))
+		row := tabSuite(name, states[name], counts.of(name), reused[name])
 		row.Output = spans
 		rows = append(rows, row)
 	}
@@ -146,6 +153,10 @@ const (
 	suiteStateDeclined
 	// suiteStateSkipped is a suite --suites left out; it draws no row.
 	suiteStateSkipped
+	// suiteStateReused is a suite the runner did not run because an earlier
+	// run passed its exact inputs. It is settled and not a failure, and the
+	// footer draws no edge for it: nothing started or ended.
+	suiteStateReused
 )
 
 // parseSuiteStates reads the script's per-suite lines. A LATER line wins, so a
@@ -162,6 +173,27 @@ func parseSuiteStates(output string) map[string]suiteState {
 		}
 	}
 	return states
+}
+
+// parseReusedSources reads, for each suite the runner reused, the earlier run
+// it names.
+func parseReusedSources(output string) map[string]string {
+	sources := map[string]string{}
+	for _, line := range strings.Split(output, "\n") {
+		if name, source, ok := reusedSuite(line); ok {
+			sources[name] = source
+		}
+	}
+	return sources
+}
+
+// reusedSuite reads one line as a reused suite and the earlier run it names.
+func reusedSuite(line string) (string, string, bool) {
+	m := suiteReused.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
 }
 
 // splitSuiteOutput attributes the run's lines to the suites they belong to.
@@ -240,9 +272,15 @@ var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (ok|FA
 // A RUNNING SUITE SAYS WHAT ITS TESTS HAVE SAID SO FAR, which its dot is drawn
 // from: failing once any unit failed, passing while every verdict is a pass,
 // unreported before the first verdict or with no counts at all.
-func tabSuite(name string, state suiteState, counts *frontendv1.FeedMergeTestCounts) *frontendv1.FeedMergeTestSuite {
+//
+// A REUSED SUITE names the earlier run that passed its inputs (source), and is
+// the only state source is read for.
+func tabSuite(name string, state suiteState, counts *frontendv1.FeedMergeTestCounts, source string) *frontendv1.FeedMergeTestSuite {
 	suite := &frontendv1.FeedMergeTestSuite{Name: name, Counts: counts}
 	switch state {
+	case suiteStateReused:
+		suite.State = &frontendv1.FeedMergeTestSuite_Reused{Reused: &frontendv1.FeedMergeTestSuiteReused{
+			Source: &frontendv1.FeedMergeTestSuiteReusedSource{Text: source}}}
 	case suiteStatePassed, suiteStateDeclined:
 		// The wire has no declined arm. Preserve the explicit DECLINED line
 		// in Output and use the existing non-failure terminal glyph.
@@ -326,6 +364,9 @@ func settledSuite(line string) (string, suiteState, bool) {
 	}
 	if m := suiteDeclined.FindStringSubmatch(line); m != nil {
 		return m[1], suiteStateDeclined, true
+	}
+	if name, _, ok := reusedSuite(line); ok {
+		return name, suiteStateReused, true
 	}
 	return "", suiteStateRunning, false
 }

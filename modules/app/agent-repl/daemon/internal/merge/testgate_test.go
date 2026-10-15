@@ -9,6 +9,11 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
+// reusedLine is the runner's line for a suite an earlier run's pass covers,
+// exactly as testrun prints it (testrun/internal/reuse.Report pins the same
+// literal).
+const reusedLine = "[agent-repl-tests] daemon: reused a green run (inputs 4ad2933f8e55, passed 2026-10-14 23:37 on master 0123456789 with uncommitted changes)"
+
 // TestParseSuiteStatesReadsTheScriptsOwnLines covers the parse contract: the
 // gate reads the per-suite lines bin/test-all.sh prints, whatever log prefix
 // decorates them.
@@ -56,6 +61,12 @@ func TestParseSuiteStatesReadsTheScriptsOwnLines(t *testing.T) {
 			line:  "[agent-repl-tests] webapp: not selected by --suites, skipping",
 			suite: "webapp",
 			want:  suiteStateSkipped,
+		},
+		{
+			name:  "a reused line",
+			line:  reusedLine,
+			suite: "daemon",
+			want:  suiteStateReused,
 		},
 		{
 			name:  "a declined line",
@@ -457,5 +468,41 @@ func TestALiveLineThatDoesNotCountIsRecordedAtWarn(t *testing.T) {
 	}
 	if !warned {
 		t.Fatal("no daemon.merge.tests WARN records the line that could not be counted")
+	}
+}
+
+func TestAReusedSuitesRowNamesTheRunThatPassedIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	rows, err := h.o.paintSuites([]string{"daemon"}, reusedLine+"\n")
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	reused := rows[0].GetReused()
+	if reused == nil {
+		t.Fatalf("state = %T, want reused", rows[0].GetState())
+	}
+	if got, want := reused.GetSource().GetText(), "passed 2026-10-14 23:37 on master 0123456789 with uncommitted changes"; got != want {
+		t.Fatalf("source = %q, want %q", got, want)
+	}
+	if rows[0].GetCounts() != nil {
+		t.Fatalf("a reused suite carries counts %v; none of its tests ran", rows[0].GetCounts())
+	}
+}
+
+func TestAReusedSuiteIsNoFailure(t *testing.T) {
+	// Arrange
+	output := reusedLine + "\n"
+
+	// Act
+	found := readFailingTests(output, "/module")
+
+	// Assert
+	if len(found.suites) != 0 {
+		t.Fatalf("failing suites = %v, want none for a reused suite", found.suites)
 	}
 }

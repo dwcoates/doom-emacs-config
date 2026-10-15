@@ -86,7 +86,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 		return r.gateNothing(ctx, round, paths, selection, begun)
 	}
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
-		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release, begun: begun}
+		states: map[string]suiteState{}, sources: map[string]string{}, counts: newSuiteCounts(), release: release, begun: begun}
 	r.setStep(ctx, footer.StepTesting, nil)
 	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
 	r.openTesting(round)
@@ -304,6 +304,8 @@ type gateRun struct {
 	suites []*frontendv1.FeedMergeTestSuite
 	// states are each started suite's standing, by name.
 	states map[string]suiteState
+	// sources are the earlier runs the reused suites name, by suite.
+	sources map[string]string
 	// counts are each suite's unit counts as the lines have reported them.
 	counts *suiteCounts
 }
@@ -396,12 +398,19 @@ func (g *gateRun) edge(line string) {
 	}
 	g.mu.Lock()
 	g.states[name] = state
+	if _, source, reused := reusedSuite(line); reused {
+		g.sources[name] = source
+	}
 	g.setTabSuite(name, state)
 	suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
 	g.mu.Unlock()
-	g.r.updateFacts(func(f *footer.MergeFacts) {
-		f.Line = suiteLine(name, state)
-	})
+	// A REUSED SUITE TAKES NO FOOTER EDGE (owner ruling, 2026-10-14): it
+	// neither started nor ended in this gate.
+	if state != suiteStateReused {
+		g.r.updateFacts(func(f *footer.MergeFacts) {
+			f.Line = suiteLine(name, state)
+		})
+	}
 	g.r.publishRun(g.round, g.round.live(), suites, g.link())
 }
 
@@ -453,7 +462,7 @@ func (g *gateRun) countLine(line string) (string, bool) {
 // setTabSuite stands a suite's tab row at its edge, with its counts so far.
 // Called with g.mu held.
 func (g *gateRun) setTabSuite(name string, state suiteState) {
-	suite := tabSuite(name, state, g.counts.of(name))
+	suite := tabSuite(name, state, g.counts.of(name), g.sources[name])
 	for i, existing := range g.suites {
 		if existing.GetName() == name {
 			g.suites[i] = suite
