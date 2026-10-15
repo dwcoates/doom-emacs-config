@@ -304,18 +304,19 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
-		Reuse:       reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
-		Log:         log,
-		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
-		Clock:       run.WallClock{},
-		Slots:       slots,
-		HistoryPath: histPath,
-		Build:       suites.Build,
-		Git:         gitinfo.Head,
-		Self:        self,
-		Work:        work,
-		Pid:         os.Getpid(),
-		RunLog:      os.Getenv(ramdisk.EnvRunLog),
+		Reuse:             reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
+		Log:               log,
+		Exec:              run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
+		Clock:             run.WallClock{},
+		Slots:             slots,
+		HistoryPath:       histPath,
+		Build:             suites.Build,
+		Git:               gitinfo.Head,
+		Self:              self,
+		Work:              work,
+		Pid:               os.Getpid(),
+		RunLog:            os.Getenv(ramdisk.EnvRunLog),
+		PrepareWebappDist: suites.PrepareWebappDist,
 	}, args)
 }
 

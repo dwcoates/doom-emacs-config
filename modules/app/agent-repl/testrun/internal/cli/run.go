@@ -46,6 +46,11 @@ type Deps struct {
 	// RunLog is the run's own log file; a coverage run writes its merged
 	// baseline beside it. "" when testrun was started directly.
 	RunLog string
+	// PrepareWebappDist builds the checkout's webapp dist when it is stale. A
+	// run calls it ONCE, before any unit starts, when a suite it runs needs
+	// the dist (roster.Suite.NeedsWebappDist): the run is then the dist's one
+	// writer, and no unit sees it change under it.
+	PrepareWebappDist func(moduleRoot string) error
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -213,6 +218,14 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	log.Infof("plan: %d units on %d core slots, predicted %.1fs; chunks: %s",
 		len(p.Specs), d.Slots, p.Makespan, strings.Join(chunkNote, " "))
 
+	if needsWebappDist(selected) {
+		log.Infof("webapp dist: building it once, before any unit starts, if it is stale")
+		if err := d.PrepareWebappDist(moduleRoot); err != nil {
+			log.Errorf("webapp dist: building it before the run failed, so no suite that reads it can run: %v", err)
+			return 1
+		}
+	}
+
 	runner := &run.Runner{Slots: d.Slots, Exec: d.Exec, Clock: d.Clock, Log: log}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
@@ -269,6 +282,17 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
 	}
 	return 0
+}
+
+// needsWebappDist reports whether a suite the run will run reads the
+// checkout's webapp dist.
+func needsWebappDist(selected []roster.Suite) bool {
+	for _, s := range selected {
+		if s.NeedsWebappDist {
+			return true
+		}
+	}
+	return false
 }
 
 // repoRoot is the checkout root a module root sits three directories under

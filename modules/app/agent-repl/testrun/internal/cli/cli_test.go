@@ -453,6 +453,14 @@ type harness struct {
 	module    string
 	recordOut string
 	git       *[]string
+	// prepared holds, per PrepareWebappDist call, its module root and how
+	// many units had started before it.
+	prepared *[]webappDistCall
+}
+
+type webappDistCall struct {
+	module      string
+	unitsBefore int
 }
 
 // newHarness is a module root with a valid test_time.csv, a history file, and
@@ -490,9 +498,16 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		},
 		Pid: 7,
 	}
+	prepared := &[]webappDistCall{}
+	d.PrepareWebappDist = func(m string) error {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		*prepared = append(*prepared, webappDistCall{module: m, unitsBefore: len(e.ran)})
+		return nil
+	}
 	fr := &fakeReuser{mode: new(reuse.Mode), recorded: &[]string{}}
 	d.Reuse = fr
-	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls}
+	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls, prepared: prepared}
 }
 
 func (h harness) run(t *testing.T, argv ...string) int {
@@ -817,6 +832,61 @@ func TestRunFailsBeforeRunningAnything(t *testing.T) {
 				t.Fatalf("units ran before the refusal: %v", h.exec.ran)
 			}
 		})
+	}
+}
+
+func TestRunBuildsTheWebappDistOnceBeforeAnyUnitWhenASuiteNeedsIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		reused map[string]bool
+		argv   []string
+		want   int
+	}{
+		{name: "every suite, e2e-emacs among them", want: 1},
+		{name: "e2e-emacs alone", argv: []string{"--suites", "e2e-emacs"}, want: 1},
+		{name: "no suite that reads the dist", argv: []string{"--suites", "ert,daemon"}, want: 0},
+		{name: "e2e-emacs covered by an earlier pass", reused: map[string]bool{"e2e-emacs": true}, argv: []string{"--suites", "e2e-emacs,ert"}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, nil, nil)
+			h.reuser.reused = tt.reused
+
+			// Act
+			code := h.run(t, tt.argv...)
+
+			// Assert
+			if code != 0 {
+				t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+			}
+			if len(*h.prepared) != tt.want {
+				t.Fatalf("PrepareWebappDist calls = %v, want %d", *h.prepared, tt.want)
+			}
+			for _, c := range *h.prepared {
+				if c.module != h.module || c.unitsBefore != 0 {
+					t.Fatalf("PrepareWebappDist call = %+v, want module %s with no unit started before it", c, h.module)
+				}
+			}
+		})
+	}
+}
+
+func TestRunWhoseWebappDistBuildFailsRunsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.PrepareWebappDist = func(string) error { return errors.New("vite build exited 1") }
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	want := "webapp dist: building it before the run failed, so no suite that reads it can run: vite build exited 1"
+	if code != 1 || !strings.Contains(h.errOut.String(), want) {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if len(h.exec.ran) != 0 {
+		t.Fatalf("units ran after the failed dist build: %v", h.exec.ran)
 	}
 }
 
