@@ -382,6 +382,45 @@ describe("markdown slots", () => {
     expect(nested.querySelector("em")?.textContent).toBe("deep");
   });
 
+  it("applies its mark to the painted markdown", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", "a b", (rendered) => {
+      rendered.querySelector("p")?.classList.add("marked");
+    });
+    // Act
+    paintBody(body, [slot]);
+    // Assert
+    expect(slot.querySelector("p.marked")).not.toBeNull();
+  });
+
+  it("keeps its mark across a repaint of the same slot", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const mark = (rendered: HTMLElement): void => {
+      rendered.querySelector("p")?.classList.add("marked");
+    };
+    const slot = markdownSlot("prose", "one", mark);
+    paintBody(body, [slot]);
+    // Act
+    paintBody(body, [markdownSlot("prose", "two", mark)]);
+    // Assert
+    expect(slot.querySelector("p.marked")?.textContent).toBe("two");
+  });
+
+  it("drops its mark when the repainting slot carries none", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", "one", (rendered) => {
+      rendered.querySelector("p")?.classList.add("marked");
+    });
+    paintBody(body, [slot]);
+    // Act
+    paintBody(body, [markdownSlot("prose", "two")]);
+    // Assert
+    expect(slot.querySelector("p.marked")).toBeNull();
+  });
+
   it("places the content's other nodes untouched, in order", () => {
     // Arrange
     const body = createBubbleBody();

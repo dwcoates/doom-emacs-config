@@ -87,6 +87,11 @@
      the same step again (owner request, 2026-10-13, "just slightly
      darker"): #ccdfff -> #b8d2ff. */
   --user: #b8d2ff;
+  /* A KNOWN SLASH COMMAND in a user prompt (src/feed/rows/known-commands.ts):
+     the purple the Emacs composer marks it in while it is typed
+     (`agent-repl-command-completion-known`), deepened so it reads on the
+     prompt blue. */
+  --known-command: #7e22ce;
   /* THE RESPONSE BUBBLE'S FILL IS THE SHARED PANEL FILL (owner ruling,
      2026-10-11, "a slightly darker background ... same color as the toolcard
      backgrounds"; narrowed by owner request, 2026-10-14, when the dark
@@ -491,6 +496,8 @@
        theme's pair takes. The same step again (owner request, 2026-10-13,
        "just slightly darker"): #086ed6 -> #0764c2. */
     --user: #0764c2;
+    /* A light purple, so a known command reads on the dark prompt blue. */
+    --known-command: #f0c4ff;
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
@@ -2240,6 +2247,8 @@ html[data-page-unshown] *::after {
 /* A link in a blue prompt bubble takes the prompt's own link color. A held
    prompt keeps --accent, since its fill is grey, not blue. */
 .bubble[data-role="prompt"]:not([data-variant="held"]) a { color: var(--prompt-link); }
+/* A known slash command the prompt names, marked as the composer marks it. */
+.bubble[data-variant="user"] .known-command { color: var(--known-command); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
 /* GFM tables: bordered and compact, their cells wrapping when the table would
    be wider than the bubble instead of forcing the bubble to grow. */
