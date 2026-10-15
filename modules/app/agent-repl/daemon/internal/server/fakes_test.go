@@ -1391,6 +1391,8 @@ type harness struct {
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
 	Focus *desktopnotify.Focus
+	// Banners is the desktop banners ClaimLiveNotification claims.
+	Banners *fakeBanners
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
 	// HiddenKeepalives is the cache keeper SendHiddenKeepalives delegates to.
@@ -1408,6 +1410,34 @@ type harness struct {
 	SlashCommands *commandcatalog.Catalogs
 	Surfaces      *fakeSurfaces
 	WebappDist    string
+}
+
+// fakeBanners answers one scripted claim and records every claim and forget.
+type fakeBanners struct {
+	mu      sync.Mutex
+	claim   desktopnotify.Claim
+	err     error
+	claims  int
+	forgets []string
+}
+
+func (b *fakeBanners) Claim(context.Context) (desktopnotify.Claim, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.claims++
+	return b.claim, b.err
+}
+
+func (b *fakeBanners) Forget(reason string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.forgets = append(b.forgets, reason)
+}
+
+func (b *fakeBanners) forgotten() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.forgets...)
 }
 
 // option customizes a harness before it is built.
@@ -1448,6 +1478,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:    &fakeSidebar{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
+		Banners:    &fakeBanners{},
 		WebappDist: dist,
 
 		PersistentWifi:   &fakePersistentWifi{},
@@ -1488,6 +1519,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:           h.Sidebar,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
+		Banners:           h.Banners,
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
 		NewsDigest:        h.NewsDigest,

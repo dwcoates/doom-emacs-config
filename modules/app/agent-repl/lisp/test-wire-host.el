@@ -788,6 +788,67 @@ composer and vendor_info arms together."
                   "{\"error\":{\"busy\":{}}}")
                  '("ReportEditorFocusError" busy "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-request-is-empty ()
+  "The claim carries nothing: the banners are the daemon's."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-claim-live-notification-request nil)))
+                 "{}")))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-request-with-fields-is-refused ()
+  "An empty message given fields never leaves Emacs."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-claim-live-notification-request '(:workspace "x"))
+                 '("ClaimLiveNotificationRequest" - "expected an empty message"))))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-decodes-live ()
+  "The live arm names the banner's workspace ref."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-claim-live-notification-response
+                  "{\"success\":{\"live\":{\"workspace\":{\"id\":\"ws1\",\"dir\":\"/work/ws1\"}}}}")
+                 '(:arm :success :value
+                   (:outcome (:arm :live :value (:workspace (:id "ws1" :dir "/work/ws1"))))))))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-decodes-none ()
+  "The none arm names nothing."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-claim-live-notification-response
+                  "{\"success\":{\"none\":{}}}")
+                 '(:arm :success :value (:outcome (:arm :none :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-live-without-workspace-is-refused ()
+  "A live answer naming no workspace is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-claim-live-notification-response
+                  "{\"success\":{\"live\":{}}}")
+                 '("ClaimLiveNotificationLive" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-decodes-editor-unfocused ()
+  "The refusal names its cause: the daemon holds Emacs unfocused."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-claim-live-notification-response
+                  "{\"error\":{\"editorUnfocused\":{}}}")
+                 '(:arm :error :value (:cause (:arm :editor-unfocused :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-unknown-cause-is-refused ()
+  "An unmodeled refusal cause is refused rather than silently dropped."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-claim-live-notification-response
+                  "{\"error\":{\"busy\":{}}}")
+                 '("ClaimLiveNotificationError" busy "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-claim-live-notification-arms-match-the-bindings ()
+  "The decoders' arm sets are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_claim_live_notification.pb.go"
+                        "ClaimLiveNotificationSuccess")
+                       #'string<)
+                 (list "live" "none")))
+  (should (equal (agent-repl-test--generated-oneof-arms
+                  "agentrepl/v1/endpoint_claim_live_notification.pb.go"
+                  "ClaimLiveNotificationError")
+                 (list "editorUnfocused"))))
+
 (ert-deftest agent-repl-test-wire-host-editor-focus-arms-match-the-bindings ()
   "The focus encoder's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms

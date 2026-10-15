@@ -1,0 +1,82 @@
+// endpoint_claim_live_notification.proto — ClaimLiveNotification: Emacs came
+// forward while a desktop banner may still be showing; which workspace does
+// the newest live one name? HOST section.
+//
+// Emacs is the only sender. It calls this once the daemon has ACCEPTED its
+// report that it gained desktop focus (ReportEditorFocus answered `success`
+// for a `focused` report that followed an unfocused one), whatever brought it
+// forward: the dock, an application switcher, a click on one of its frames.
+// On a `live` answer Emacs selects the named workspace exactly as any other
+// switch: it REQUESTS the switch (SelectWorkspace) and its frame follows the
+// roster's `current`.
+//
+// A BANNER IS LIVE while the platform still holds it: on macOS while
+// Notification Center still lists it (the banner program's own delivered
+// list), on Linux while the banner program still shows it awaiting its click.
+// A banner the user clicked or cleared is not live.
+//
+// A CLAIM CONSUMES. The daemon answers the newest live banner made since the
+// last claim it answered or the last workspace selection it served, and then
+// forgets every banner it held, live or not: each banner steers at most one
+// return to Emacs, and none made before the user last chose a workspace ever
+// steers one. A banner's own click is such a selection, so clicking an older
+// banner is never overridden by a newer one.
+//
+// NOT IDEMPOTENT, by the consumption above: a second claim with no banner
+// made since answers `none`.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The claim carries nothing: the banners are the daemon's, and the focus it
+// is claimed under is the one Emacs already reported.
+message ClaimLiveNotificationRequest {}
+
+// THE ARM IS THE OUTCOME.
+message ClaimLiveNotificationResponse {
+  oneof result {
+    ClaimLiveNotificationSuccess success = 1;
+    ClaimLiveNotificationError error = 2;
+  }
+}
+
+// The claim was answered, and every banner the daemon held is forgotten.
+message ClaimLiveNotificationSuccess {
+  // Whether a banner was live. THE ARM IS THE ANSWER: there is no workspace
+  // field to leave empty when none was.
+  oneof outcome {
+    ClaimLiveNotificationLive live = 1;
+    ClaimLiveNotificationNone none = 2;
+  }
+}
+
+// The newest live banner's workspace, which Emacs selects.
+message ClaimLiveNotificationLive {
+  // The workspace the banner was posted for. REQUIRED, never empty.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// No banner made since the last claim or selection is live: Emacs selects
+// nothing and stays where it is.
+message ClaimLiveNotificationNone {}
+
+// The claim was refused and NOTHING WAS CONSUMED. A failure to ask the
+// platform which banners it still holds is a Connect Internal error, never an
+// arm: it is a broken banner program, not an answer.
+message ClaimLiveNotificationError {
+  oneof cause {
+    // The daemon does not hold Emacs focused.
+    ClaimLiveNotificationEditorUnfocused editor_unfocused = 1;
+  }
+}
+
+// The daemon holds Emacs UNFOCUSED (Emacs lost focus again before the claim
+// arrived, or no Emacs WatchDaemon stream stands): the user is not looking at
+// Emacs, so moving its tab would move it behind their back. The banners stay
+// held for the claim the next focus gain makes.
+message ClaimLiveNotificationEditorUnfocused {}

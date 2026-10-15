@@ -1154,6 +1154,81 @@ The focus is REQUIRED."
      "ReportEditorFocusResponse"
      (agent-repl-wire-decode-report-editor-focus-response-result object))))
 
+;;;; ---- ClaimLiveNotification ----
+
+(defun agent-repl-wire-encode-claim-live-notification-request (value)
+  "Encode the ClaimLiveNotificationRequest from VALUE -- empty: the banners
+are the daemon's, and the focus the claim is made under is already reported."
+  (agent-repl-wire--encoded
+   "ClaimLiveNotificationRequest"
+   (agent-repl-wire--encode-empty "ClaimLiveNotificationRequest" value)))
+
+(defun agent-repl-wire-decode-claim-live-notification-live (value)
+  "Decode VALUE as `ClaimLiveNotificationLive', a plist (:workspace REF).
+REF is the newest live banner's workspace, which Emacs selects."
+  (let ((object (agent-repl-wire--object "ClaimLiveNotificationLive" value)))
+    (agent-repl-wire--check-keys "ClaimLiveNotificationLive" object '(workspace))
+    (agent-repl-wire--decoded
+     "ClaimLiveNotificationLive"
+     (list :workspace (agent-repl-wire--decode-message
+                       "ClaimLiveNotificationLive" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)))))
+
+(defun agent-repl-wire-decode-claim-live-notification-none (value)
+  "Decode VALUE as the empty `ClaimLiveNotificationNone'.
+No banner made since the last claim or selection is live."
+  (agent-repl-wire--decode-empty "ClaimLiveNotificationNone" value))
+
+(defun agent-repl-wire-decode-claim-live-notification-success-outcome (value)
+  "Decode `ClaimLiveNotificationSuccess''s `outcome' oneof from the object VALUE."
+  (agent-repl-wire--decode-oneof
+   "ClaimLiveNotificationSuccess" 'outcome value
+   '((live :live agent-repl-wire-decode-claim-live-notification-live)
+     (none :none agent-repl-wire-decode-claim-live-notification-none))))
+
+(defun agent-repl-wire-decode-claim-live-notification-success (value)
+  "Decode VALUE as `ClaimLiveNotificationSuccess', a plist (:outcome ONEOF).
+THE ARM IS THE ANSWER: `:live' names the workspace, `:none' names nothing."
+  (let ((object (agent-repl-wire--object "ClaimLiveNotificationSuccess" value)))
+    (agent-repl-wire--check-keys "ClaimLiveNotificationSuccess" object '(live none))
+    (agent-repl-wire--decoded
+     "ClaimLiveNotificationSuccess"
+     (list :outcome (agent-repl-wire-decode-claim-live-notification-success-outcome object)))))
+
+(defun agent-repl-wire-decode-claim-live-notification-editor-unfocused (value)
+  "Decode VALUE as the empty `ClaimLiveNotificationEditorUnfocused'."
+  (agent-repl-wire--decode-empty "ClaimLiveNotificationEditorUnfocused" value))
+
+(defun agent-repl-wire-decode-claim-live-notification-error-cause (value)
+  "Decode `ClaimLiveNotificationError''s `cause' oneof from the object VALUE."
+  (agent-repl-wire--decode-oneof
+   "ClaimLiveNotificationError" 'cause value
+   '((editorUnfocused :editor-unfocused
+                      agent-repl-wire-decode-claim-live-notification-editor-unfocused))))
+
+(defun agent-repl-wire-decode-claim-live-notification-error (value)
+  "Decode VALUE as `ClaimLiveNotificationError', a plist (:cause ONEOF)."
+  (let ((object (agent-repl-wire--object "ClaimLiveNotificationError" value)))
+    (agent-repl-wire--check-keys "ClaimLiveNotificationError" object '(editorUnfocused))
+    (agent-repl-wire--decoded
+     "ClaimLiveNotificationError"
+     (list :cause (agent-repl-wire-decode-claim-live-notification-error-cause object)))))
+
+(defun agent-repl-wire-decode-claim-live-notification-response-result (value)
+  "Decode `ClaimLiveNotificationResponse''s `result' oneof from the object VALUE."
+  (agent-repl-wire--decode-oneof
+   "ClaimLiveNotificationResponse" 'result value
+   '((success :success agent-repl-wire-decode-claim-live-notification-success)
+     (error :error agent-repl-wire-decode-claim-live-notification-error))))
+
+(defun agent-repl-wire-decode-claim-live-notification-response (value)
+  "Decode VALUE as `ClaimLiveNotificationResponse'.  THE ARM IS THE OUTCOME."
+  (let ((object (agent-repl-wire--object "ClaimLiveNotificationResponse" value)))
+    (agent-repl-wire--check-keys "ClaimLiveNotificationResponse" object '(success error))
+    (agent-repl-wire--decoded
+     "ClaimLiveNotificationResponse"
+     (agent-repl-wire-decode-claim-live-notification-response-result object))))
+
 (defun agent-repl-wire-encode-editor-instance (value)
   "Encode `EditorInstance' from the string VALUE, this Emacs process's identity.
 REQUIRED and never empty: a watch without it is refused, and an empty one

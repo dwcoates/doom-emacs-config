@@ -113,3 +113,35 @@ func TestSelectingARevealedMergeWorkspaceRevealsNothingMore(t *testing.T) {
 		t.Fatalf("reveals = %v, want none", h.Merge.reveals)
 	}
 }
+
+func TestSelectWorkspaceLetsGoOfEveryHeldBanner(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert.
+	if got := h.Banners.forgotten(); len(got) != 1 || got[0] != "a workspace was selected" {
+		t.Fatalf("forgets = %q, want the selection to let every banner go", got)
+	}
+}
+
+func TestARefusedSelectWorkspaceLetsGoOfNoBanner(t *testing.T) {
+	// Arrange.
+	h := standingDownSelect(t)
+
+	// Act.
+	if _, err := h.Client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert.
+	if got := h.Banners.forgotten(); len(got) != 0 {
+		t.Fatalf("forgets = %q, want none for a refused selection", got)
+	}
+}

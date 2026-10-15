@@ -29,6 +29,11 @@ const ClickTimeout = 60 * time.Second
 // the program's start and exit. A run past it is a hung program.
 const postBound = ClickTimeout + 10*time.Second
 
+// deliveredBound bounds one query of which banners the platform still holds.
+// A healthy terminal-notifier -list ALL answers in 40ms (measured 2026-10-15),
+// so a run past this is a hung program.
+const deliveredBound = 100 * time.Millisecond
+
 // versionBound bounds the version query a platform's minimum version is
 // checked with at boot.
 const versionBound = 10 * time.Second
@@ -81,6 +86,15 @@ type Runner interface {
 	Run(ctx context.Context, bin string, args []string, started func()) (string, error)
 }
 
+// runWithin runs one program through runner under bound: EVERY run of a
+// notifier program is bounded, so a hung program costs its bound and never
+// holds a banner's or a claim's goroutine forever.
+func runWithin(ctx context.Context, bound time.Duration, runner Runner, bin string, args []string, started func()) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	return runner.Run(ctx, bin, args, started)
+}
+
 // ExecRunner is the production Runner.
 type ExecRunner struct{}
 
@@ -116,6 +130,11 @@ type Backend interface {
 	// exited cleanly), or once a read-back program is up showing its banner.
 	// It is the one edge the notifier rings the banner's chime from.
 	Post(ctx context.Context, target Target, banner Banner, made func()) (Outcome, error)
+	// Delivered answers every workspace whose HANDED banner the platform still
+	// holds, which is what keeps a handed banner live. It is asked only of a
+	// backend that answered Handed: a read-back banner is live exactly while
+	// its Post runs, so its backend is never asked.
+	Delivered(ctx context.Context) (map[ids.WorkspaceID]bool, error)
 }
 
 // Platform names a platform's banner program and how it is spoken to.
@@ -126,6 +145,10 @@ type Platform struct {
 	args func(target Target, banner Banner) []string
 	// outcome reads the program's standard output.
 	outcome func(stdout string) Outcome
+	// deliveredArgs, set for a platform whose banners are handed, is the argv
+	// that lists the banners the platform still holds, which delivered reads.
+	deliveredArgs []string
+	delivered     func(stdout string) map[ids.WorkspaceID]bool
 	// readBack is a program that blocks, showing its banner, until the banner
 	// is clicked, dismissed or timed out: its banner is made once it is
 	// running. Any other program's banner is made once it exits cleanly.
@@ -148,11 +171,13 @@ func PlatformFor(goos string, click ClickAction) (Platform, error) {
 			panic("desktopnotify: the macOS banner needs its click action")
 		}
 		return Platform{
-			Program:     "terminal-notifier",
-			args:        func(target Target, banner Banner) []string { return terminalNotifierArgs(target, banner, click) },
-			outcome:     func(string) Outcome { return Handed },
-			minMajor:    3,
-			versionArgs: []string{"-version"},
+			Program:       "terminal-notifier",
+			args:          func(target Target, banner Banner) []string { return terminalNotifierArgs(target, banner, click) },
+			outcome:       func(string) Outcome { return Handed },
+			deliveredArgs: []string{"-list", "ALL"},
+			delivered:     terminalNotifierDelivered,
+			minMajor:      3,
+			versionArgs:   []string{"-version"},
 		}, nil
 	case "linux":
 		return Platform{Program: "notify-send", args: notifySendArgs, outcome: notifySendOutcome, readBack: true}, nil
@@ -185,8 +210,27 @@ func terminalNotifierArgs(target Target, banner Banner, click ClickAction) []str
 // literal escapes one terminal-notifier value so it is read as plain text.
 func literal(value string) string { return `\` + value }
 
+// bannerGroupPrefix opens every group a workspace's banners share.
+const bannerGroupPrefix = "agent-repl:"
+
 // bannerGroup is the group a workspace's banners share.
-func bannerGroup(ws ids.WorkspaceID) string { return "agent-repl:" + string(ws) }
+func bannerGroup(ws ids.WorkspaceID) string { return bannerGroupPrefix + string(ws) }
+
+// terminalNotifierDelivered reads terminal-notifier's -list: a header row,
+// then one tab-separated row per banner Notification Center still holds,
+// its group first. Rows of groups that are not a workspace's (another
+// program's, or agent-repl's own non-workspace notices) are not banners of
+// this notifier and are skipped. A list naming none is empty output.
+func terminalNotifierDelivered(stdout string) map[ids.WorkspaceID]bool {
+	delivered := map[ids.WorkspaceID]bool{}
+	for line := range strings.Lines(stdout) {
+		group, _, _ := strings.Cut(strings.TrimRight(line, "\n"), "\t")
+		if ws, ok := strings.CutPrefix(group, bannerGroupPrefix); ok && ws != "" {
+			delivered[ids.WorkspaceID(ws)] = true
+		}
+	}
+	return delivered
+}
 
 // notifySendAction is the action a Linux banner click invokes.
 const notifySendAction = "default"
@@ -242,9 +286,7 @@ func NewBackend(ctx context.Context, platform Platform, override string, lookPat
 // checkMajor refuses a program older than the platform's minimum major
 // version, or one whose version cannot be read.
 func checkMajor(ctx context.Context, runner Runner, bin string, platform Platform) error {
-	ctx, cancel := context.WithTimeout(ctx, versionBound)
-	defer cancel()
-	out, err := runner.Run(ctx, bin, platform.versionArgs, nil)
+	out, err := runWithin(ctx, versionBound, runner, bin, platform.versionArgs, nil)
 	if err != nil {
 		return fmt.Errorf("ask the banner program %s its version: %w", bin, err)
 	}
@@ -292,13 +334,11 @@ func (b *programBackend) Program() string { return b.bin }
 
 // Post implements Backend.
 func (b *programBackend) Post(ctx context.Context, target Target, banner Banner, made func()) (Outcome, error) {
-	ctx, cancel := context.WithTimeout(ctx, postBound)
-	defer cancel()
 	var started func()
 	if b.platform.readBack {
 		started = made
 	}
-	stdout, err := b.runner.Run(ctx, b.bin, b.platform.args(target, banner), started)
+	stdout, err := runWithin(ctx, postBound, b.runner, b.bin, b.platform.args(target, banner), started)
 	if err != nil {
 		return Unclicked, err
 	}
@@ -306,6 +346,18 @@ func (b *programBackend) Post(ctx context.Context, target Target, banner Banner,
 		made()
 	}
 	return b.platform.outcome(stdout), nil
+}
+
+// Delivered implements Backend.
+func (b *programBackend) Delivered(ctx context.Context) (map[ids.WorkspaceID]bool, error) {
+	if b.platform.delivered == nil {
+		panic("desktopnotify: a read-back banner program was asked which banners the platform holds")
+	}
+	stdout, err := runWithin(ctx, deliveredBound, b.runner, b.bin, b.platform.deliveredArgs, nil)
+	if err != nil {
+		return nil, err
+	}
+	return b.platform.delivered(stdout), nil
 }
 
 // EnvChimeCmd overrides the chime program's binary, exactly as EnvNotifierCmd
@@ -370,8 +422,6 @@ func (c *programChime) Program() string { return c.bin }
 
 // Play implements Chime.
 func (c *programChime) Play(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, chimeBound)
-	defer cancel()
-	_, err := c.runner.Run(ctx, c.bin, c.platform.Args, nil)
+	_, err := runWithin(ctx, chimeBound, c.runner, c.bin, c.platform.Args, nil)
 	return err
 }

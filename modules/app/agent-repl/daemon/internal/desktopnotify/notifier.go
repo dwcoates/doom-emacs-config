@@ -78,6 +78,11 @@ type Notifier struct {
 	// either started before Close (and joined by it) or refused after it.
 	mu     sync.Mutex
 	closed bool
+
+	// heldMu guards held: the banners made since the last claim or selection,
+	// which a focus claim chooses among (held.go).
+	heldMu sync.Mutex
+	held   held
 }
 
 // New builds a notifier. It panics on a missing collaborator, because a
@@ -93,7 +98,7 @@ func New(deps Deps) *Notifier {
 		panic("desktopnotify: New requires exactly one of Chime and ChimeErr")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Notifier{deps: deps, ctx: ctx, cancel: cancel}
+	return &Notifier{deps: deps, ctx: ctx, cancel: cancel, held: held{banners: map[ids.WorkspaceID]heldBanner{}}}
 }
 
 // Post raises one banner for ws, unless Emacs is focused, and rings the chime
@@ -177,7 +182,7 @@ func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
 }
 
 // show composes and posts one banner, rings its chime the instant it is made,
-// and relays its click.
+// holds it for a focus claim while it is live, and relays its click.
 func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	workspace, err := n.deps.Workspaces.Workspace(n.ctx, ws)
 	switch {
@@ -203,14 +208,20 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		"program": n.deps.Backend.Program(), "title": banner.Title,
 	})
 	made := false
-	outcome, err := n.deps.Backend.Post(n.ctx, Target{ID: ws, Dir: workspace.Dir}, banner, func() {
+	var seq uint64
+	target := Target{ID: ws, Dir: workspace.Dir}
+	outcome, err := n.deps.Backend.Post(n.ctx, target, banner, func() {
 		if made {
 			panic("desktopnotify: the banner backend reported one banner made twice")
 		}
 		made = true
 		log.Debug(opPost, "the desktop banner is made; ringing its chime", nil)
 		n.ring(log)
+		seq = n.hold(target, log)
 	})
+	if made {
+		n.settle(ws, seq, err == nil && outcome == Handed, log)
+	}
 	switch {
 	case standdown.CutShort(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while a banner awaited its click", dlog.Context{"cause": err.Error()})
@@ -220,6 +231,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		})
 	case outcome == Clicked:
 		log.Info(opPost, "the banner was clicked; asking Emacs to select the workspace", nil)
+		n.Forget("a banner was clicked")
 		n.deps.Clicks.NotificationClicked(ws)
 	case outcome == Handed:
 		log.Info(opPost, "the platform holds the banner; its click selects the workspace itself", nil)

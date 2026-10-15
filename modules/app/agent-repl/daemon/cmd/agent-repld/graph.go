@@ -1370,6 +1370,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Sidebar:           sidebarResolver,
 			LoudFaults:        loudFaults.Topic(),
 			Focus:             focus,
+			Banners:           notifier,
 			PersistentWifi:    wifi,
 			HiddenKeepalives:  cacheKeeper,
 			NewsDigest:        digest,

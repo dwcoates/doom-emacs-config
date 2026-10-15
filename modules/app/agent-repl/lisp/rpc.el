@@ -66,6 +66,8 @@
 (declare-function agent-repl-wire-encode-watch-daemon-request "wire-host" (request))
 (declare-function agent-repl-wire-encode-report-editor-focus-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-report-editor-focus-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-claim-live-notification-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-claim-live-notification-response "wire-host" (alist))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-wire-decode-watch-daemon-response "wire-host" (alist))
@@ -281,6 +283,18 @@ The daemon decides every desktop banner on the latest focus: a focused
 Emacs gets none.  The focus belongs to this Emacs's WatchDaemon stream, so
 a report with no stream standing is refused (`no_emacs_stream') and the
 next stream states its focus itself.  Idempotent.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-claim-live-notification
+  "ClaimLiveNotification"
+  agent-repl-wire-encode-claim-live-notification-request
+  agent-repl-wire-decode-claim-live-notification-response
+  "Ask the daemon which workspace the newest desktop banner still live names.
+Emacs calls it once the daemon has accepted its report of a focus GAIN.
+The answer is `live' naming the workspace, which Emacs then selects, or
+`none'.  The claim CONSUMES: every banner the daemon held is let go, so
+each banner steers one return to Emacs at most.  A claim while the
+daemon holds Emacs unfocused is refused (`editor_unfocused') and
+consumes nothing.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-mark-workspace-viewed
   "MarkWorkspaceViewed"
