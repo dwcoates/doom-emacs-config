@@ -3,6 +3,7 @@ package main
 import (
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -647,6 +648,109 @@ func TestTheStateRootLayoutIsCreated(t *testing.T) {
 			t.Fatalf("the layout's %s directory was not created: %v", dir, err)
 		}
 	}
+}
+
+// runLogRecords answers every record of a state root's run log.
+func runLogRecords(t *testing.T, root string) []dlog.Record {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("read daemon.run.log: %v", err)
+	}
+	var out []dlog.Record
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var record dlog.Record
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
+		}
+		out = append(out, record)
+	}
+	return out
+}
+
+func TestTheBootOpensAFreshWorkspaceStateAndLeavesTheLegacyDatabaseAlone(t *testing.T) {
+	// Arrange: a legacy database the rebuild abandons in place.
+	root := shortRoot(t)
+	legacy := filepath.Join(root, "state.db")
+	if err := os.WriteFile(legacy, []byte("legacy sqlite bytes"), 0o644); err != nil {
+		t.Fatalf("seed state.db: %v", err)
+	}
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	if got, err := os.ReadFile(legacy); err != nil || string(got) != "legacy sqlite bytes" {
+		t.Fatalf("state.db = %q (%v) after boot, want it left untouched", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "wsm.db")); err != nil {
+		t.Fatalf("stat wsm.db = %v, want the fresh database created at boot", err)
+	}
+}
+
+func TestTheBootRefusesAForeignLayoutVersionInOneErrorRecord(t *testing.T) {
+	// Arrange: a first boot stamps the layout row, which is then moved past
+	// what this build knows.
+	root := shortRoot(t)
+	_ = runIn(t, root)
+	handle, err := sql.Open("sqlite", filepath.Join(root, "wsm.db"))
+	if err != nil {
+		t.Fatalf("open wsm.db: %v", err)
+	}
+	if _, err := handle.Exec(`UPDATE layout SET version = version + 1`); err != nil {
+		t.Fatalf("bump the layout version: %v", err)
+	}
+	handle.Close()
+
+	// Act.
+	err = runIn(t, root)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a boot over a foreign layout version succeeded, want a refusal")
+	}
+	refusals := 0
+	for _, r := range runLogRecords(t, root) {
+		if r.Operation == "daemon.wsm.open" && r.Level == "error" {
+			refusals++
+		}
+	}
+	if refusals != 1 {
+		t.Fatalf("ERROR daemon.wsm.open records = %d, want exactly one", refusals)
+	}
+}
+
+func TestTheBootRefusesAStateRootTooLongForAShimSocket(t *testing.T) {
+	// Arrange: a root past the unix-socket path limit once "/sock/<name>" is
+	// appended.
+	root := filepath.Join(shortRoot(t), strings.Repeat("x", 100))
+
+	// Act.
+	err := runIn(t, root)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "sock/") {
+		t.Fatalf("run = %v, want a refusal naming the socket directory that cannot fit", err)
+	}
+}
+
+func TestTheBootRecordsHowLongItWaitedForTheClaim(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	for _, r := range runLogRecords(t, root) {
+		if r.Operation == "daemon.cmd.claim" && r.Message == "took the boot claim" {
+			if _, ok := r.Context["waited_ms"]; !ok {
+				t.Fatalf("the claim record %+v carries no waited_ms", r.Context)
+			}
+			return
+		}
+	}
+	t.Fatal("no daemon.cmd.claim record said the boot claim was taken")
 }
 
 // --- the exit joins the background loops ----------------------------------
