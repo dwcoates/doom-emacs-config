@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 
+	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -34,6 +35,42 @@ func h2cClient() *http.Client {
 			return dialer.DialContext(ctx, network, addr)
 		},
 	}}
+}
+
+// daemonStream is a server stream a verb reads from the daemon, opened on a
+// context of its own. A verb that stops reading early must END the stream
+// before closing it: connect's Close drains the response body (up to 4MiB)
+// before it closes, and a standing stream (the roster, a footer) never ends on
+// its own, so a Close on a live stream blocks until the daemon has pushed
+// 4MiB. Close here cancels the stream's context first, so the drain ends at
+// once whether the stream was read to its end or left early.
+type daemonStream[Res any] struct {
+	*connect.ServerStreamForClient[Res]
+	cancel context.CancelFunc
+}
+
+// Close ends the stream's context and then closes the stream.
+func (s daemonStream[Res]) Close() error {
+	s.cancel()
+	return s.ServerStreamForClient.Close()
+}
+
+// openDaemonStream opens a server stream with OPEN, one of the daemon
+// client's server-streaming methods, on a context of the stream's own. Every
+// server stream a verb reads is opened here, never by calling the method
+// directly, so no reader can close a live stream without ending it first.
+func openDaemonStream[Req, Res any](
+	ctx context.Context,
+	open func(context.Context, *connect.Request[Req]) (*connect.ServerStreamForClient[Res], error),
+	req *Req,
+) (daemonStream[Res], error) {
+	ctx, cancel := context.WithCancel(ctx)
+	stream, err := open(ctx, connect.NewRequest(req))
+	if err != nil {
+		cancel()
+		return daemonStream[Res]{}, err
+	}
+	return daemonStream[Res]{ServerStreamForClient: stream, cancel: cancel}, nil
 }
 
 // servingAddress answers the address the state root's daemon.addr advertises.
