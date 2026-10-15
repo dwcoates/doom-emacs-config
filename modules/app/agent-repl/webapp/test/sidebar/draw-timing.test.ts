@@ -2,12 +2,13 @@
 // What one roster push costs the rail. See src/sidebar/draw-timing.ts.
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { frameQueue, type FrameQueue } from "../frame-queue.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { ROSTER_DRAW_SLOW_MS, timeRosterDraw, type DrawTimingEnv } from "../../src/sidebar/draw-timing.js";
 
 let capture: LogCapture;
 let clock: number;
-let frames: (() => void)[];
+let frames: FrameQueue;
 let env: DrawTimingEnv;
 
 /** A rail holding ROWS rows. */
@@ -33,8 +34,8 @@ async function drawRecords(level: "info" | "debug"): Promise<{ level: string; co
 beforeEach(() => {
   capture = captureLogRecords("debug");
   clock = 0;
-  frames = [];
-  env = { now: () => clock, frame: (callback) => void frames.push(callback) };
+  frames = frameQueue();
+  env = { now: () => clock, frame: frames.frame };
 });
 
 describe("timeRosterDraw", () => {
@@ -45,7 +46,7 @@ describe("timeRosterDraw", () => {
     // Act
     timeRosterDraw(body, "webhost", () => void (clock += 10), env);
     clock += ROSTER_DRAW_SLOW_MS - 10;
-    frames.shift()?.();
+    frames.run();
 
     // Assert
     const records = await drawRecords("info");
@@ -61,7 +62,7 @@ describe("timeRosterDraw", () => {
     // Act
     timeRosterDraw(body, "page", () => void (clock += 5), env);
     clock += ROSTER_DRAW_SLOW_MS - 6;
-    frames.shift()?.();
+    frames.run();
 
     // Assert
     expect(await drawRecords("info")).toEqual([]);
@@ -77,7 +78,7 @@ describe("timeRosterDraw", () => {
 
     // Assert
     expect(drew).toBe(true);
-    expect(frames).toHaveLength(1);
+    expect(frames.pending()).toBe(1);
   });
 
   it("records each phase the draw marks as the time since the mark before it", async () => {
@@ -96,7 +97,7 @@ describe("timeRosterDraw", () => {
       },
       env,
     );
-    frames.shift()?.();
+    frames.run();
 
     // Assert
     const records = await drawRecords("info");

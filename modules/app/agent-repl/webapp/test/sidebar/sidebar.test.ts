@@ -10,7 +10,15 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { ServiceImpl } from "@connectrpc/connect";
-import { PREFS_KEY, drawRailHead, mountSidebar, mountWebhostSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import {
+  PREFS_KEY,
+  drawRailHead,
+  mountSidebar as mountSidebarNow,
+  mountWebhostSidebar as mountWebhostSidebarNow,
+  retireStoredPrefs,
+  type SidebarDeps,
+  type WebhostSidebarDeps,
+} from "../../src/sidebar/sidebar.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
@@ -26,15 +34,19 @@ import {
   SINK,
   WORKSPACE,
   fakeTicker,
-  appContext,
   fakeTimers,
   mergedSection,
   repoSection,
-  sidebarContext,
   roster,
   rosterStream,
   row,
 } from "./harness.js";
+import { frameQueue, type FrameQueue } from "../frame-queue.js";
+import { fireIntersection } from "../intersection-observer.js";
+import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
+import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
+import type { FailureSink } from "../../src/failure/sink.js";
+import { recordingFailures } from "../failure-sink.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -74,7 +86,11 @@ function throwingStorage(): Storage {
   };
 }
 
-function ctxFor(rosters = [roster()], impl: Partial<ServiceImpl<typeof AgentRepl>> = {}): AppContext {
+function ctxFor(
+  rosters = [roster()],
+  impl: Partial<ServiceImpl<typeof AgentRepl>> = {},
+  failures: FailureSink = SINK,
+): AppContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),
@@ -86,14 +102,44 @@ function ctxFor(rosters = [roster()], impl: Partial<ServiceImpl<typeof AgentRepl
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: fakeTicker(NOW),
-    failures: SINK,
+    failures,
     composerEnabled: false,
   });
 }
 
-/** Let the stream deliver its pushes. */
+/** Type QUERY into HOST's rail search. */
+function search(host: HTMLElement, query: string): void {
+  (host.querySelector("[data-search-toggle]") as HTMLElement).click();
+  const input = host.querySelector("[data-search-input]") as HTMLInputElement;
+  input.value = query;
+  input.dispatchEvent(new Event("input"));
+}
+
+/** The rail's frames, where it draws each push; run by `settle`. */
+let frames: FrameQueue;
+
+beforeEach(() => {
+  frames = frameQueue();
+});
+
+/** Mount the rail drawing on the suite's frames. */
+function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDeps = {}): ReturnType<typeof mountSidebarNow> {
+  return mountSidebarNow(host, ctx, { frame: frames.frame, ...deps });
+}
+
+/** Mount the webhost's sidebar drawing on the suite's frames. */
+function mountWebhostSidebar(
+  host: HTMLElement,
+  ctx: Parameters<typeof mountWebhostSidebarNow>[1],
+  deps: WebhostSidebarDeps = {},
+): ReturnType<typeof mountWebhostSidebarNow> {
+  return mountWebhostSidebarNow(host, ctx, { frame: frames.frame, ...deps });
+}
+
+/** Let the stream deliver its pushes, and the rail draw them. */
 async function settle(): Promise<void> {
   await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+  frames.drain();
 }
 
 async function click(control: Element): Promise<void> {
@@ -198,13 +244,6 @@ describe("mounting the rail: the view is the daemon's", () => {
 
 describe("mounting the rail: the search", () => {
   /** Open HOST's search and type QUERY into it. */
-  function search(host: HTMLElement, query: string): void {
-    (host.querySelector("[data-search-toggle]") as HTMLElement).click();
-    const input = host.querySelector("[data-search-input]") as HTMLInputElement;
-    input.value = query;
-    input.dispatchEvent(new Event("input"));
-  }
-
   const pushes = (): WorkspaceRoster[] => [
     roster({
       repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1", name: "alpha" }), row({ id: "ws-2", name: "beta" })] })],
@@ -267,8 +306,9 @@ function loopAnimation(duration: number): PhasedAnimation {
 }
 
 describe("mounting the rail: its looping animations", () => {
-  it("seeks the drawn rail's loops to the wall clock after every push", async () => {
-    // Arrange: each push draws a fresh dot, whose animation starts at 0%.
+  it("seeks the drawn rail's loops to the wall clock after every draw", async () => {
+    // Arrange: each draw makes a fresh dot, whose animation starts at 0%, and
+    // a frame per push draws each push on its own.
     const drawn: PhasedAnimation[] = [];
     const host = document.createElement("nav");
 
@@ -276,6 +316,7 @@ describe("mounting the rail: its looping animations", () => {
     mountSidebar(host, ctxFor([roster({ current: "ws-other" }), roster({ current: WORKSPACE.id })]), {
       storage: null,
       timers: fakeTimers(),
+      frame: (callback) => callback(),
       wallPhase: {
         animations: () => {
           const dot = loopAnimation(1300);
@@ -314,11 +355,11 @@ describe("mounting the rail: its looping animations", () => {
 
   it("stops re-seeking on a page shown again once disposed", async () => {
     // Arrange
-    const frames: Array<() => void> = [];
+    const frames = frameQueue();
     const handle = mountSidebar(document.createElement("nav"), ctxFor([]), {
       storage: null,
       timers: fakeTimers(),
-      wallPhase: { animations: () => [], now: () => NOW, frame: (callback) => void frames.push(callback) },
+      wallPhase: { animations: () => [], now: () => NOW, frame: frames.frame },
     });
 
     // Act
@@ -326,7 +367,7 @@ describe("mounting the rail: its looping animations", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Assert
-    expect(frames).toEqual([]);
+    expect(frames.pending()).toBe(0);
   });
 });
 
@@ -551,7 +592,7 @@ describe("the roster stream's planned ending", () => {
   it("files no failure and reopens when the daemon ends the stream as planned", async () => {
     // ARRANGE: run 1 carries a roster, then the planned ending, then ends
     // cleanly; the reopened run 2 stands, as a live daemon's stream does.
-    const reported: string[] = [];
+    const failures = recordingFailures();
     let requests = 0;
     const transport = createRouterTransport(({ service }) => {
       service(AgentRepl, {
@@ -570,7 +611,7 @@ describe("the roster stream's planned ending", () => {
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: fakeTicker(NOW),
-      failures: { report: (kind) => void reported.push(kind.kind.case ?? "unset"), retract: () => undefined },
+      failures,
       composerEnabled: false,
     });
     // ACT
@@ -578,7 +619,7 @@ describe("the roster stream's planned ending", () => {
     await settle();
     handle?.dispose();
     // ASSERT
-    expect({ reported, requests }).toEqual({ reported: [], requests: 2 });
+    expect({ reported: failures.cases, requests }).toEqual({ reported: [], requests: 2 });
   });
 });
 
@@ -879,6 +920,7 @@ describe("mounting the rail: a page no one can see", () => {
 
     // Act
     unseen.show();
+    await settle();
 
     // Assert
     expect([
@@ -1095,3 +1137,208 @@ describe("the rail under a paused merge queue", () => {
     ]);
   });
 });
+
+describe("mounting the rail: one draw per frame", () => {
+  /** Mount on a two-push stream, counting the rail's draws. */
+  async function mountCounting(host: HTMLElement, deps: SidebarDeps = {}): Promise<{ draws: () => number; handle: ReturnType<typeof mountSidebarNow> }> {
+    let draws = 0;
+    const handle = mountSidebar(
+      host,
+      ctxFor([
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] }),
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-2" })] })] }),
+      ]),
+      {
+        storage: null,
+        timers: fakeTimers(),
+        wallPhase: {
+          animations: () => {
+            draws += 1;
+            return [];
+          },
+          now: () => NOW,
+        },
+        ...deps,
+      },
+    );
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    return { draws: () => draws, handle };
+  }
+
+  it("draws nothing before the frame", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+
+    // Act
+    const { draws } = await mountCounting(host);
+
+    // Assert
+    expect([draws(), host.querySelector("[data-roster-row]")]).toEqual([0, null]);
+  });
+
+  it("draws a burst of pushes once, at the frame", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const { draws } = await mountCounting(host);
+
+    // Act
+    frames.drain();
+
+    // Assert
+    expect(draws()).toBe(1);
+  });
+
+  it("draws the newest push of the burst", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    await mountCounting(host);
+
+    // Act
+    frames.drain();
+
+    // Assert
+    expect([
+      host.querySelector("[data-roster-row='ws-1']"),
+      host.querySelector("[data-roster-row='ws-2']") === null,
+    ]).toEqual([null, false]);
+  });
+
+  it("asks for one frame for the whole burst", async () => {
+    // Act
+    await mountCounting(document.createElement("nav"));
+
+    // Assert
+    expect(frames.asked()).toBe(1);
+  });
+
+  it("draws nothing at a frame that comes after the rail is disposed", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const { draws, handle } = await mountCounting(host);
+
+    // Act
+    handle?.dispose();
+    frames.drain();
+
+    // Assert
+    expect([draws(), host.querySelector("[data-roster-row]")]).toEqual([0, null]);
+  });
+});
+
+describe("mounting the rail: a roster its frame cannot draw", () => {
+  /** Mount on PUSHES, its failures recorded. */
+  function mountRecording(pushes: WorkspaceRoster[]): { host: HTMLElement; reports: string[] } {
+    const host = document.createElement("nav");
+    const failures = recordingFailures();
+    mountSidebar(host, ctxFor(pushes, {}, failures), { storage: null, timers: fakeTimers() });
+    return { host, reports: failures.cases };
+  }
+
+  /** A roster whose repository section names no repository. */
+  const malformed = (): WorkspaceRoster => {
+    const bad = roster({ repos: [repoSection({ id: "repo-1" })] });
+    const section = bad.repository?.sections[0];
+    if (section === undefined) throw new Error("the fixture drew no section");
+    section.key = undefined;
+    return bad;
+  };
+
+  it("files the malformed roster as an undecodable frame", async () => {
+    // Act
+    const { reports } = mountRecording([malformed()]);
+    await settle();
+
+    // Assert
+    expect(reports).toEqual(["frameUndecodable"]);
+  });
+
+  it("logs the malformed roster at error with the path that refused", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+
+    // Act
+    mountRecording([malformed()]);
+    await settle();
+    capture.logger.flush();
+    await settle();
+
+    // Assert
+    const record = capture.sent.find((r) => r.operation === "sidebar.roster-draw-undecodable");
+    expect([record?.level.case, record?.context]).toEqual([
+      "error",
+      expect.objectContaining({ path: "WorkspaceRoster.repository.sections[0].key" }),
+    ]);
+  });
+
+  it("draws the next roster after one it could not draw", async () => {
+    // Arrange
+    const pushes = [malformed(), roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })];
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor(pushes), { storage: null, timers: fakeTimers(), frame: (callback) => callback() });
+
+    // Act
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-1']")).not.toBeNull();
+  });
+});
+
+describe("mounting the rail: a merged row drawn when it comes into view", () => {
+  /** A rail whose open merged band holds one row past those drawn at once, the last named NAME. */
+  async function mountLong(name: string): Promise<{ host: HTMLElement; standIn: Element }> {
+    const host = document.createElement("nav");
+    const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE }, (_, i) => row({ id: `ws-${i}`, name: "kept" }));
+    rows.push(row({ id: "ws-late", name }));
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, rows.length, false) })]), {
+      storage: null,
+      timers: fakeTimers(),
+    });
+    await settle();
+    const standIn = host.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
+    if (standIn === null) throw new Error("the band drew no stand-in");
+    return { host, standIn };
+  }
+
+  it("draws the row in its stand-in's place", async () => {
+    // Arrange
+    const { host, standIn } = await mountLong("late");
+
+    // Act
+    fireIntersection(standIn, true);
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-late']")?.hasAttribute(STAND_IN_ATTRIBUTE)).toBe(false);
+  });
+
+  it("narrows the drawn row to the search the rail already holds", async () => {
+    // Arrange
+    const { host, standIn } = await mountLong("late");
+    search(host, "kept");
+
+    // Act
+    fireIntersection(standIn, true);
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-late']")?.classList.contains("sb-search-miss")).toBe(true);
+  });
+
+  it("stops watching its stand-ins once the rail is disposed", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE + 1 }, (_, i) => row({ id: `ws-${i}` }));
+    const handle = mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, rows.length, false) })]), {
+      storage: null,
+      timers: fakeTimers(),
+    });
+    await settle();
+    const standIn = host.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
+
+    // Act
+    handle?.dispose();
+
+    // Assert
+    expect(() => fireIntersection(standIn as Element, true)).toThrow(/no IntersectionObserver/);
+  });
+});
+

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { watchShownEdge } from "../../src/host/shown-edge.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
+import { frameQueue } from "../frame-queue.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 let presence: PresenceSource | null = null;
@@ -108,19 +109,12 @@ describe("what a show costs in the page", () => {
   function timed() {
     presence = createPresence(document, true);
     const clock = { ms: 100 };
-    let frames: (() => void)[] = [];
+    const frames = frameQueue();
     watchShownEdge(presence, () => undefined, {
       now: () => clock.ms,
-      frame: (fn) => {
-        frames.push(fn);
-      },
+      frame: frames.frame,
     });
-    const runFrame = (): void => {
-      const due = frames;
-      frames = [];
-      for (const fn of due) fn();
-    };
-    return { p: presence, clock, runFrame, pending: () => frames.length };
+    return { p: presence, clock, runFrame: frames.run, pending: frames.pending };
   }
 
   it("records the time to the frame after the first painted one, at info", async () => {

@@ -38,8 +38,8 @@ export interface Dropdown {
 }
 
 export interface Dropdowns {
-  /** A new roster is being drawn: every dropdown of the last one is gone. */
-  beginDraw(): void;
+  /** The drawing under ROOT was thrown away: its dropdowns are gone, every other stays. */
+  forgetWithin(root: Node): void;
   /** DROPDOWN is open: close every other open one first. */
   opened(dropdown: Dropdown): void;
   /** The dropdown boxed by ELEMENT closed by its own gesture. */
@@ -65,8 +65,8 @@ export function createDropdowns(): Dropdowns {
   };
 
   return {
-    beginDraw(): void {
-      open = [];
+    forgetWithin(root: Node): void {
+      open = open.filter((d) => !root.contains(d.element));
     },
     opened(dropdown: Dropdown): void {
       const others = open.filter((d) => !same(d, dropdown));

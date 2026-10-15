@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
 import {
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewRequest,
@@ -16,8 +15,15 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
+import { createSidebarView } from "../../src/sidebar/view.js";
+import type { FailureSink } from "../../src/failure/sink.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
+  MERGED_DRAWN_AT_ONCE,
+  MERGED_AT_ATTRIBUTE,
+  createRosterDrawer,
+  disposeWorkspaceRoster,
   drawFoldHeader,
   drawHeadedSection,
   drawRosterRepoDivergence,
@@ -32,10 +38,12 @@ import {
   todaysMerges,
 } from "../../src/sidebar/roster.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
   appContext,
   fakeTicker,
   hiddenSection,
+  manualReveal,
   mergedBand,
   mergedGroup,
   mergedSection,
@@ -48,8 +56,8 @@ import {
   startOfToday,
   startOfTomorrow,
 } from "./harness.js";
+import { recordingFailures } from "../failure-sink.js";
 
-const UPDATE_OK = create(UpdateTaskResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
   result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
@@ -1437,3 +1445,315 @@ describe("the open workspaces section", () => {
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 });
+
+describe("the roster drawer: a push redraws only what it changed", () => {
+  /** A repository section whose one row counts a running turn, so it ticks. */
+  const ticking = (id: string, label = id): ReturnType<typeof repoSection> =>
+    repoSection({ id, label, rows: [row({ id: `ws-${id}`, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } })] });
+
+  /** The element of repository ID's section. */
+  const repoElement = (drawn: HTMLElement, id: string): Element | null =>
+    drawn.querySelector(`[data-roster-row='ws-${id}']`)?.closest(".sb-sections > *") ?? null;
+
+  it("keeps a repository section the push leaves unchanged", () => {
+    // Arrange
+    const sc = sidebarContext();
+    const drawer = createRosterDrawer(sc);
+    const first = drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+    const before = repoElement(first, "a");
+
+    // Act
+    const second = drawer.draw(roster({ repos: [ticking("a"), ticking("b", "b renamed")] }));
+
+    // Assert
+    expect(repoElement(second, "a")).toBe(before);
+  });
+
+  it("redraws a repository section the push changed", () => {
+    // Arrange
+    const sc = sidebarContext();
+    const drawer = createRosterDrawer(sc);
+    const before = repoElement(drawer.draw(roster({ repos: [ticking("a")] })), "a");
+
+    // Act
+    const after = repoElement(drawer.draw(roster({ repos: [ticking("a", "a renamed")] })), "a");
+
+    // Assert
+    expect([after === before, after?.textContent?.includes("a renamed")]).toEqual([false, true]);
+  });
+
+  it("tears down a changed section's clocks with its old drawing", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const drawer = createRosterDrawer(sc);
+    drawer.draw(roster({ repos: [ticking("a")] }));
+    const drawnOnce = ticker.subscribers();
+
+    // Act
+    drawer.draw(roster({ repos: [ticking("a", "a renamed")] }));
+
+    // Assert
+    expect(ticker.subscribers()).toBe(drawnOnce);
+  });
+
+  it("tears down a section the push no longer carries", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const drawer = createRosterDrawer(sc);
+    drawer.draw(roster({ repos: [ticking("a")] }));
+    const withA = ticker.subscribers();
+    drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("a")] }));
+
+    // Assert
+    expect([ticker.subscribers(), drawn.querySelector("[data-roster-row='ws-b']")]).toEqual([withA, null]);
+  });
+
+  it("places kept sections in the push's order", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("b"), ticking("a")] }));
+
+    // Assert
+    expect([...drawn.querySelectorAll("[data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))).toEqual([
+      "ws-b",
+      "ws-a",
+    ]);
+  });
+
+  it("keeps the repository sections when only the open section's heading changes", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = repoElement(drawer.draw(roster({ repos: [ticking("a")], openCount: 1 })), "a");
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("a")], openCount: 2 }));
+
+    // Assert
+    expect([repoElement(drawn, "a"), drawn.querySelector(`.${OPEN_COUNT_CLASS}`)?.textContent]).toEqual([before, "(2)"]);
+  });
+
+  it("keeps the recently-merged band the push leaves unchanged", () => {
+    // Arrange
+    const band = mergedSection([row({ id: "ws-m", when: { case: "merged", value: { atMs: BigInt(NOW) } } })], 1, false);
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ merged: band })).querySelector("[data-roster-row='ws-m']");
+
+    // Act
+    const after = drawer.draw(roster({ merged: band, repos: [ticking("a")] })).querySelector("[data-roster-row='ws-m']");
+
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps the hidden band the push leaves unchanged", () => {
+    // Arrange
+    const band = hiddenSection([row({ id: "ws-h" })]);
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ hidden: band })).querySelector("[data-roster-row='ws-h']");
+
+    // Act
+    const after = drawer.draw(roster({ hidden: band, repos: [ticking("a")] })).querySelector("[data-roster-row='ws-h']");
+
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps a kept section's attention marker alive across the pass", () => {
+    // Arrange
+    const sc = sidebarContext();
+    const attention = sc.attention;
+    const drawer = createRosterDrawer(sc);
+    const marked = repoSection({ id: "a", rows: [row({ id: "ws-a", attention: true })] });
+    attention.beginPass();
+    drawer.draw(roster({ repos: [marked] }));
+    attention.endPass();
+
+    // Act
+    attention.beginPass();
+    drawer.draw(roster({ repos: [marked, ticking("b")] }));
+    attention.endPass();
+
+    // Assert
+    expect(attention.stateOf("ws-a")).not.toBeNull();
+  });
+
+  it("refuses a push naming one repository twice as a malformed view", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+
+    // Act
+    const draw = (): HTMLElement => drawer.draw(roster({ repos: [ticking("a"), ticking("a", "again")] }));
+
+    // Assert
+    expect(draw).toThrow(MalformedView);
+  });
+
+  it("tears down every section when the rail is disposed", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const drawer = createRosterDrawer(sc);
+    drawer.draw(roster({ repos: [ticking("a"), ticking("b")] }));
+
+    // Act
+    drawer.dispose();
+
+    // Assert
+    expect(ticker.subscribers()).toBe(0);
+  });
+
+  it("gives each rail its own drawer, disposed with it", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext(undefined, ticker));
+    const before = repoElement(drawWorkspaceRoster(roster({ repos: [ticking("a")] }), sc), "a");
+
+    // Act
+    disposeWorkspaceRoster(sc);
+    const after = repoElement(drawWorkspaceRoster(roster({ repos: [ticking("a")] }), sc), "a");
+
+    // Assert
+    expect([after === before, ticker.subscribers()]).toEqual([false, 1]);
+  });
+});
+
+describe("the recently-merged band: rows out of view are not drawn", () => {
+  /** N merged rows, ws-0 first. */
+  const merges = (n: number, from = 0): ReturnType<typeof row>[] =>
+    Array.from({ length: n }, (_, i) => row({ id: `ws-${from + i}` }));
+
+  /** Draw a band of GROUPS through a hand-run reveal. */
+  function drawBand(groups: ReturnType<typeof mergedGroup>[], failures?: FailureSink) {
+    const reveal = manualReveal();
+    const ctx = appContext();
+    const sc = sidebarContext(
+      failures === undefined ? ctx : { ...ctx, failures },
+      undefined,
+      createSidebarView(),
+      new Set(),
+      reveal,
+    );
+    const drawer = createRosterDrawer(sc);
+    const drawn = drawer.draw(roster({ merged: mergedBand(groups, undefined, false) }));
+    return { drawn, reveal, drawer };
+  }
+
+  const standIns = (drawn: HTMLElement): string[] =>
+    [...drawn.querySelectorAll(`[${STAND_IN_ATTRIBUTE}]`)].map((el) => el.getAttribute("data-roster-row") ?? "");
+
+  it("draws the band's first rows with the band", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 3) })]);
+
+    // Assert
+    expect(drawn.querySelector(`[data-roster-row='ws-${MERGED_DRAWN_AT_ONCE - 1}']`)?.hasAttribute(STAND_IN_ATTRIBUTE)).toBe(false);
+  });
+
+  it("draws a stand-in for every row after the first ones", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 3) })]);
+
+    // Assert
+    expect(standIns(drawn)).toEqual([0, 1, 2].map((i) => `ws-${MERGED_DRAWN_AT_ONCE + i}`));
+  });
+
+  it("counts the rows drawn at once across the band's groups", () => {
+    // Act
+    const { drawn } = drawBand([
+      mergedGroup({ id: "r1", rows: merges(MERGED_DRAWN_AT_ONCE - 1) }),
+      mergedGroup({ id: "r2", rows: merges(3, 100) }),
+    ]);
+
+    // Assert
+    expect(standIns(drawn)).toEqual(["ws-101", "ws-102"]);
+  });
+
+  it("gives a stand-in the row's name on a line, as the fit and the search read it", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+
+    // Assert
+    const standIn = drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
+    expect(standIn?.querySelector(":scope > .row > .name")?.textContent).toBe(`ws-${MERGED_DRAWN_AT_ONCE}`);
+  });
+
+  it("stamps a stand-in with the row's merged instant", () => {
+    // Act
+    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+
+    // Assert
+    expect(drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`)?.getAttribute(MERGED_AT_ATTRIBUTE)).toBe(
+      String(1_000_000_000 - MERGED_DRAWN_AT_ONCE * 60_000),
+    );
+  });
+
+  it("draws the row in its stand-in's place once it comes into view", () => {
+    // Arrange
+    const { drawn, reveal } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+    const [standIn] = reveal.waiting();
+
+    // Act
+    reveal.show(standIn);
+
+    // Assert
+    const shown = drawn.querySelector(`[data-roster-row='ws-${MERGED_DRAWN_AT_ONCE}']`);
+    expect([shown?.hasAttribute(STAND_IN_ATTRIBUTE), shown?.getAttribute(MERGED_AT_ATTRIBUTE), standIn.parentElement !== null]).toEqual([
+      false,
+      String(1_000_000_000 - MERGED_DRAWN_AT_ONCE * 60_000),
+      false,
+    ]);
+  });
+
+  it("stops waiting on a stand-in whose band is drawn anew", () => {
+    // Arrange
+    const { reveal, drawer } = drawBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE + 1) })]);
+
+    // Act
+    drawer.draw(roster({ merged: mergedBand([mergedGroup({ id: "r", rows: merges(MERGED_DRAWN_AT_ONCE) })], undefined, false) }));
+
+    // Assert
+    expect(reveal.waiting()).toEqual([]);
+  });
+
+  it("files a row it finds malformed when it comes into view, leaving the stand-in", () => {
+    // Arrange
+    const failures = recordingFailures();
+    const bad = row({ id: "ws-bad" });
+    bad.status = { case: undefined };
+    const { reveal } = drawBand([mergedGroup({ id: "r", rows: [...merges(MERGED_DRAWN_AT_ONCE), bad] })], failures);
+    const [standIn] = reveal.waiting();
+
+    // Act
+    reveal.show(standIn);
+
+    // Assert
+    expect([failures.cases, standIn.parentElement !== null]).toEqual([["frameUndecodable"], true]);
+  });
+
+  it("logs a row it finds malformed when it comes into view", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const bad = row({ id: "ws-bad" });
+    bad.status = { case: undefined };
+    const { reveal } = drawBand([mergedGroup({ id: "r", rows: [...merges(MERGED_DRAWN_AT_ONCE), bad] })]);
+
+    // Act
+    reveal.show(reveal.waiting()[0]);
+
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.row.reveal-undecodable");
+    expect([record.level.case, record.context?.path]).toEqual([
+      "error",
+      `WorkspaceRoster.recently_merged.groups[0].rows.rows[${MERGED_DRAWN_AT_ONCE}].status`,
+    ]);
+  });
+});
+

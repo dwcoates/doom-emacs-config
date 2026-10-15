@@ -67,7 +67,7 @@ import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
 import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
 import { toneClass } from "../vocab.js";
-import { guardMalformed } from "../rpc/guard.js";
+import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
 import { clampBeside } from "../topbar/clamp.js";
 import {
   buildSelectWorkspaceRequest,
@@ -315,16 +315,84 @@ export function drawRosterRow(
   // the row into it without it closing.
   installHoverPanel(ws, line, duration, detail, sc, workspace.id);
 
-  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
-  if (visibleChildren.length > 0) {
-    const kids = document.createElement("div");
-    kids.className = "kids";
-    for (const child of visibleChildren) {
-      kids.appendChild(drawRosterRow(child.row, sc, child.path, place));
-    }
-    ws.appendChild(kids);
-  }
+  appendRowKids(ws, u, path, (child, childPath) => drawRosterRow(child, sc, childPath, place));
   return ws;
+}
+
+/** The attribute a row's stand-in carries until the row is drawn in its place. */
+export const STAND_IN_ATTRIBUTE = "data-stand-in";
+
+/**
+ * A row's STAND-IN: the row's box, its line and its name, and its visible
+ * children's stand-ins, and nothing else (`reveal.ts`). It is as tall as the
+ * row wherever the row's line height is pinned (the Recently Merged band's
+ * is), and it is what the band's fit counts and the search narrows, so
+ * neither can tell it from the row. Only the parts it reads are validated;
+ * the rest of the row is validated when it is drawn.
+ */
+export function drawRosterRowStandIn(u: RosterRow, path: string): HTMLElement {
+  const workspace = drawRosterRowWorkspace(requireMessage(u.workspace, `${path}.workspace`), `${path}.workspace`);
+  const ws = document.createElement("div");
+  ws.className = "ws";
+  ws.setAttribute("data-roster-row", workspace.id);
+  ws.setAttribute(STAND_IN_ATTRIBUTE, "");
+  const line = document.createElement("div");
+  line.className = "row";
+  const label = document.createElement("span");
+  label.className = "name";
+  label.textContent = drawRosterRowName(requireMessage(u.name, `${path}.name`), `${path}.name`);
+  line.appendChild(label);
+  ws.appendChild(line);
+  appendRowKids(ws, u, path, drawRosterRowStandIn);
+  return ws;
+}
+
+/**
+ * Append U's visible children to its box WS, each drawn by DRAW, in the one
+ * `.kids` box the search and the stylesheet look for a nested row in. A row
+ * with no visible child draws no box.
+ */
+export function appendRowKids(
+  ws: HTMLElement,
+  u: RosterRow,
+  path: string,
+  draw: (child: RosterRow, childPath: string) => HTMLElement,
+): void {
+  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
+  if (visibleChildren.length === 0) return;
+  const kids = document.createElement("div");
+  kids.className = "kids";
+  for (const child of visibleChildren) kids.appendChild(draw(child.row, child.path));
+  ws.appendChild(kids);
+}
+
+/**
+ * Draw U's stand-in into REGION, and the row in its place the first time the
+ * stand-in comes into view (`reveal.ts`), FINISH run on the drawn row. The wait
+ * is the section's: its scope stops it when the section's drawing goes.
+ */
+export function drawRosterRowWhenShown(
+  region: HTMLElement,
+  u: RosterRow,
+  sc: SidebarContext,
+  path: string,
+  place: RowPlace,
+  finish: (row: HTMLElement) => void,
+): void {
+  const standIn = drawRosterRowStandIn(u, path);
+  finish(standIn);
+  region.appendChild(standIn);
+  sc.onDispose(
+    sc.reveal.whenShown(standIn, () => {
+      // The push that carried the row was drawn frames ago, so a row found
+      // malformed now is filed here (`guardMalformedNow`).
+      guardMalformedNow(sc.ctx, "sidebar.row.reveal", () => {
+        const row = drawRosterRow(u, sc, path, place);
+        finish(row);
+        standIn.replaceWith(row);
+      });
+    }),
+  );
 }
 
 /** The workspace the row IS — the echo token every gesture travels back with. */
@@ -933,7 +1001,7 @@ function tickMergedToday(row: HTMLElement, sc: SidebarContext, mergedAtMs: numbe
   });
 }
 
-/** Run PAINT now and on every tick of the shared ticker, until the next push. */
+/** Run PAINT now and on every tick of the shared ticker, until the row's section is drawn anew. */
 export function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));

@@ -50,6 +50,7 @@ import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoin
 import { WebWorkspaceSessionIdentitySchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import { ForwardingLogger, bindLogContext, log, resetLoggingForTests, setLogger } from "../../src/log.js";
 import { WebappBuildUnknown } from "../../src/webapp-build.js";
+import { recordingFailures, type RecordingFailures } from "../failure-sink.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -1038,10 +1039,7 @@ describe("the unknown arm", () => {
 
 describe("announceShutdown", () => {
   /** A sink that cannot mute a window, which the announcement must survive. */
-  const sinkWithoutSuppress = (): FailureSink & { reported: FailureKind[] } => {
-    const reported: FailureKind[] = [];
-    return { reported, report: (kind) => reported.push(kind), retract: () => undefined };
-  };
+  const sinkWithoutSuppress = (): RecordingFailures => recordingFailures();
 
   it("still draws the restarting notice when the sink cannot mute the outage", () => {
     // ARRANGE

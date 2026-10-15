@@ -13,6 +13,7 @@ import {
 } from "../../src/host/unshown-animations.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { frameQueue } from "../frame-queue.js";
 
 /** One animation, recording whether the pause stood each time its time was set. */
 class FakeAnimation implements FrozenAnimation {
@@ -61,8 +62,7 @@ function start(shown: boolean, animations: FakeAnimation[] = []): Page {
   if (shown) presence.setShown(true);
   const clock = { ms: 1000 };
   let observer: (() => void) | null = null;
-  let frames: (() => void)[] = [];
-  let asked = 0;
+  const frames = frameQueue();
   const env: UnshownAnimationsEnv = {
     doc: document,
     presence,
@@ -74,10 +74,7 @@ function start(shown: boolean, animations: FakeAnimation[] = []): Page {
         observer = null;
       };
     },
-    frame: (fn) => {
-      asked += 1;
-      frames.push(fn);
-    },
+    frame: frames.frame,
   };
   const stop = pauseAnimationsWhileUnshown(env);
   page = {
@@ -85,12 +82,8 @@ function start(shown: boolean, animations: FakeAnimation[] = []): Page {
     clock,
     animations,
     mutate: () => observer?.(),
-    runFrames: () => {
-      const due = frames;
-      frames = [];
-      for (const fn of due) fn();
-    },
-    framesAsked: () => asked,
+    runFrames: frames.run,
+    framesAsked: frames.asked,
     stop,
   };
   return page;

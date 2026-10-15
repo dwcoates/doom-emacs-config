@@ -11,9 +11,9 @@
  * NEXT push drew that row open, long after the pointer had gone (the "old
  * hovers come back" defect, 2026-10-14). Here the timers and the pointer's
  * whereabouts are the page's, keyed by `WorkspaceRef.id`, and
- * every open or close acts only on the copies the CURRENT draw registered
- * (`drawn`, cleared by `beginDraw`), so a thrown-away row can never be acted
- * on.
+ * every open or close acts only on the copies still drawn (`drawn`, each
+ * dropped by `forgetWithin` when its section's drawing is thrown away), so a
+ * thrown-away row can never be acted on.
  *
  * WHERE THE POINTER IS, ACROSS A REDRAW. A row's trigger and panel report their
  * own `mouseenter`/`mouseleave`. A row drawn under a resting pointer never
@@ -61,8 +61,8 @@ export interface DrawnRow {
 type HoverPart = "trigger" | "panel";
 
 export interface RowHover {
-  /** A new roster is being drawn: every copy of the last one is gone. */
-  beginDraw(): void;
+  /** The drawing under ROOT was thrown away: its row copies are gone, every other stays. */
+  forgetWithin(root: Node): void;
   /** The current draw drew a copy of workspace ID's row. */
   drawn(id: string, row: DrawnRow): void;
   /** The pointer arrived on PART of workspace ID's row. */
@@ -155,8 +155,12 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
     (copies.get(id) ?? []).some((row) => row.trigger.contains(node) || row.detail.contains(node));
 
   return {
-    beginDraw(): void {
-      copies = new Map();
+    forgetWithin(root: Node): void {
+      for (const [id, rows] of [...copies]) {
+        const kept = rows.filter((row) => !root.contains(row.trigger));
+        if (kept.length === 0) copies.delete(id);
+        else copies.set(id, kept);
+      }
     },
     drawn(id: string, row: DrawnRow): void {
       const list = copies.get(id);

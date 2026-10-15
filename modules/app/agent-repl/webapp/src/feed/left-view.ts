@@ -28,6 +28,7 @@
  * Absent `IntersectionObserver` (a bare jsdom), there is no watch at all
  * (null).
  */
+import { pageIntersectionObserver } from "../dom.js";
 
 /** What a watcher hears about the one element it watches. */
 export interface LeftViewHandlers {
@@ -57,9 +58,8 @@ interface Watched {
 
 /** Build the watch rooted on the feed's scroll BOX, or null with no observer. */
 export function createLeftViewWatch(box: HTMLElement): LeftViewWatch | null {
-  const Ctor = (globalThis as { IntersectionObserver?: typeof IntersectionObserver })
-    .IntersectionObserver;
-  if (Ctor === undefined) return null;
+  const Ctor = pageIntersectionObserver();
+  if (Ctor === null) return null;
   const watched = new Map<Element, Watched>();
   const observer = new Ctor(
     (entries) => {

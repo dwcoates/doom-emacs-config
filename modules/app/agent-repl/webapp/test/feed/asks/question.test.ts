@@ -38,6 +38,7 @@ import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { ASK_WAITING_WORD } from "../../../src/feed/asks/ask-words.js";
 import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-card-head-shape.js";
 import { orderFor } from "../../feed-order.js";
+import { recordingFailures } from "../../failure-sink.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
 type InitDraft = { chosen?: string[]; otherText?: { text: string }; answered?: boolean };
@@ -607,15 +608,15 @@ describe("drawFeedQuestion malformed input", () => {
  * daemon set actually reaches the renderer.
  */
 function unalteredDraft(answer: UpdateQuestionDraftResponse): { rc: RowContext; filed: FailureKind[] } {
-  const filed: FailureKind[] = [];
+  const failures = recordingFailures();
   return {
-    filed,
+    filed: failures.reports,
     rc: {
       ctx: testAppContext({
         client: { updateQuestionDraft: () => Promise.resolve(answer) } as unknown as AgentReplClient,
         workspace: WORKSPACE,
         ticker: createTicker(1000),
-        failures: { report: (kind) => filed.push(kind), retract: () => {} },
+        failures,
         composerEnabled: false,
       }),
       feed: "root",

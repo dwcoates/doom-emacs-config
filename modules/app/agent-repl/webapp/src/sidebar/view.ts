@@ -58,10 +58,8 @@ export function paintTriangle(triangle: HTMLElement, folded: boolean): void {
   triangle.textContent = folded ? "▸" : "▾";
 }
 
-/** The page's view of the daemon-held view state, with its asks in flight. */
-export interface SidebarView {
-  /** A new roster is being drawn: the copies drawn from the last one are gone. */
-  beginDraw(): void;
+/** What a drawn section reaches of the view: its copies, and the page's asks. */
+export interface DrawnView {
   /**
    * The value KEY draws, given what the wire says, and track PAINT as one
    * copy of it (a repository's fold has two copies: its section and its
@@ -76,6 +74,31 @@ export interface SidebarView {
   abandon(key: string, token: number): void;
 }
 
+/**
+ * The page's view of the daemon-held view state, with its asks in flight.
+ *
+ * EVERY COPY BELONGS TO A SCOPE (2026-10-15): the copies one drawn section
+ * tracks live exactly as long as that section's drawing (`scope.ts`), so a
+ * section a push leaves unchanged keeps its copies while a replaced one drops
+ * its own. There is no copy outside a scope to drop wholesale.
+ */
+export interface SidebarView {
+  /** `DrawnView.ask`. */
+  ask<T extends ViewValue>(key: string, value: T): number;
+  /** `DrawnView.abandon`. */
+  abandon(key: string, token: number): void;
+  /** A scope for the copies one drawn section tracks. */
+  scope(): ViewScope;
+}
+
+/** The copies one drawn section tracks, dropped together. */
+export interface ViewScope {
+  /** `DrawnView.track`, the copy belonging to this scope. */
+  track<T extends ViewValue>(key: string, wire: T, paint: ViewPaint<T>): T;
+  /** Drop every copy this scope tracked. */
+  dispose(): void;
+}
+
 /** A value asked for and not yet carried by a push. */
 interface HeldAsk {
   token: number;
@@ -85,32 +108,39 @@ interface HeldAsk {
 export function createSidebarView(): SidebarView {
   const wire = new Map<string, ViewValue>();
   const held = new Map<string, HeldAsk>();
-  const copies = new Map<string, Array<ViewPaint<ViewValue>>>();
+  const copies = new Map<string, Array<{ scope: number; paint: ViewPaint<ViewValue> }>>();
   let nextToken = 1;
+  let nextScope = 1;
 
   const paintCopies = (key: string, value: ViewValue): void => {
-    for (const paint of copies.get(key) ?? []) paint(value);
+    for (const copy of copies.get(key) ?? []) copy.paint(value);
+  };
+
+  const dropScope = (scope: number): void => {
+    for (const [key, list] of copies) {
+      const kept = list.filter((copy) => copy.scope !== scope);
+      if (kept.length === 0) copies.delete(key);
+      else copies.set(key, kept);
+    }
+  };
+
+  const trackIn = <T extends ViewValue>(scope: number, key: string, value: T, paint: ViewPaint<T>): T => {
+    wire.set(key, value);
+    copies.set(key, [...(copies.get(key) ?? []), { scope, paint: paint as ViewPaint<ViewValue> }]);
+    const ask = held.get(key);
+    if (ask === undefined) return value;
+    if (ask.value === value) {
+      held.delete(key);
+      log.debug("a roster push carried the view this page asked for", {
+        operation: "sidebar.view.reconciled",
+        context: { key, value },
+      });
+      return value;
+    }
+    return ask.value as T;
   };
 
   return {
-    beginDraw(): void {
-      copies.clear();
-    },
-    track<T extends ViewValue>(key: string, value: T, paint: ViewPaint<T>): T {
-      wire.set(key, value);
-      copies.set(key, [...(copies.get(key) ?? []), paint as ViewPaint<ViewValue>]);
-      const ask = held.get(key);
-      if (ask === undefined) return value;
-      if (ask.value === value) {
-        held.delete(key);
-        log.debug("a roster push carried the view this page asked for", {
-          operation: "sidebar.view.reconciled",
-          context: { key, value },
-        });
-        return value;
-      }
-      return ask.value as T;
-    },
     ask<T extends ViewValue>(key: string, value: T): number {
       const token = nextToken++;
       held.set(key, { token, value });
@@ -132,6 +162,13 @@ export function createSidebarView(): SidebarView {
         throw new Error(`sidebar view: no wire value is recorded for ${key}`);
       }
       paintCopies(key, value);
+    },
+    scope(): ViewScope {
+      const id = nextScope++;
+      return {
+        track: (key, value, paint) => trackIn(id, key, value, paint),
+        dispose: () => dropScope(id),
+      };
     },
   };
 }

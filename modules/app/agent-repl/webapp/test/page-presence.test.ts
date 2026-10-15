@@ -3,6 +3,7 @@
 // repaint measured after each show or resize. See src/page-presence.ts.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { frameQueue, type FrameQueue } from "./frame-queue.js";
 import { captureLogRecords, type LogCapture } from "./log-capture.js";
 import { installPagePresenceLog, type PagePresence } from "../src/page-presence.js";
 import { createPresence } from "../src/presence.js";
@@ -10,11 +11,11 @@ import { createPresence } from "../src/presence.js";
 let capture: LogCapture;
 let presence: PagePresence;
 let clock: number;
-let frames: (() => void)[];
+let frames: FrameQueue;
 
 /** Run every queued animation frame, including ones queued while running. */
 function runFrames(): void {
-  while (frames.length > 0) frames.shift()?.();
+  frames.drain();
 }
 
 function setVisibility(state: "visible" | "hidden"): void {
@@ -36,15 +37,13 @@ async function operations(): Promise<string[]> {
 beforeEach(() => {
   capture = captureLogRecords();
   clock = 0;
-  frames = [];
+  frames = frameQueue();
   setSize(800, 600);
   presence = installPagePresenceLog({
     doc: document,
     win: window,
     now: () => clock,
-    frame: (callback) => {
-      frames.push(callback);
-    },
+    frame: frames.frame,
   });
 });
 
@@ -84,9 +83,7 @@ describe("page presence log", () => {
       doc: document,
       win: window,
       now: () => clock,
-      frame: (callback) => {
-        frames.push(callback);
-      },
+      frame: frames.frame,
       presence: hosted,
     });
     hosted.setShown(true);

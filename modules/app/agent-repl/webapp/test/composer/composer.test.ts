@@ -17,7 +17,6 @@ import { FeedIdSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../../src/clock.js";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
-import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
@@ -30,15 +29,10 @@ import {
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { DROPPED_EVENT } from "../../src/held/held-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { recordingFailures } from "../failure-sink.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const FEED = create(FeedIdSchema, { value: "feed-9" });
-/** A sink that keeps what was filed, so a test can read the arm it carried. */
-function recordingSink(): FailureSink & { reports: FailureKind[] } {
-  const reports: FailureKind[] = [];
-  return { reports, report: (kind) => reports.push(kind), retract: () => undefined };
-}
-
 const turnSuccess = (turn = "turn-1"): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, {
     result: {
@@ -144,7 +138,7 @@ function mount(
 ): Harness {
   const seen: SubmitPromptRequest[] = [];
   const panels: SubmitPromptCommandPanel[] = [];
-  const sink = recordingSink();
+  const sink = recordingFailures();
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       submitPrompt: (request) => {

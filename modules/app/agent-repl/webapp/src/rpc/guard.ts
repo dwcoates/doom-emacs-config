@@ -1,6 +1,7 @@
 /**
  * guardMalformed — the one place a fire-and-forget click handler's
- * `MalformedView` stops.
+ * `MalformedView` stops, and `guardMalformedNow` its sibling for a deferred
+ * draw.
  *
  * EVERY CLICK IS AN RPC, and a click handler cannot be awaited: the DOM
  * listener returns before the answer arrives, so the submission runs as a
@@ -47,12 +48,34 @@ export async function guardMalformed(
     await work;
     return false;
   } catch (err) {
-    if (!isMalformedView(err)) throw err;
-    log.error(`the daemon's answer could not be read: ${err.message}`, {
-      operation: `${operation}-undecodable`,
-      context: { path: err.path, cause: err.detail },
-    });
-    ctx.failures.report(frameUndecodable(err.detail, err.path));
-    return true;
+    return absorbMalformed(ctx, operation, err);
   }
+}
+
+/**
+ * `guardMalformed` for WORK that runs now, outside any caller that could
+ * catch: a push drawn on a later animation frame, a row drawn when it scrolls
+ * into view. The push's stream has long returned, so the draw's own
+ * `MalformedView` is filed here exactly as the stream files one
+ * (`src/rpc/streams.ts`), never thrown into a frame callback that nothing
+ * catches.
+ */
+export function guardMalformedNow(ctx: GuardContext, operation: string, work: () => void): boolean {
+  try {
+    work();
+    return false;
+  } catch (err) {
+    return absorbMalformed(ctx, operation, err);
+  }
+}
+
+/** Log and file ERR when it is a `MalformedView`, answering true; rethrow anything else. */
+function absorbMalformed(ctx: GuardContext, operation: string, err: unknown): true {
+  if (!isMalformedView(err)) throw err;
+  log.error(`the daemon's answer could not be read: ${err.message}`, {
+    operation: `${operation}-undecodable`,
+    context: { path: err.path, cause: err.detail },
+  });
+  ctx.failures.report(frameUndecodable(err.detail, err.path));
+  return true;
 }

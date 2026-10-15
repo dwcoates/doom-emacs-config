@@ -16,44 +16,51 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
-import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
-import type {
-  RosterCurrentWorkspace,
-  RosterHiddenSection,
-  RosterLabel,
-  RosterMergedRepoGroup,
-  RosterMergedRepoGroupHeader,
-  RosterMergedSection,
-  RosterOpenCount,
-  RosterOpenSection,
-  RosterRepoDivergence,
-  RosterRepoKey,
-  RosterRepoSection,
-  RosterRepositoryView,
-  RosterRows,
-  RosterSectionCount,
-  RosterSectionHeader,
-  WorkspaceRoster,
+import { BAND_CAP, HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
+import {
+  RosterHiddenSectionSchema,
+  RosterMergedSectionSchema,
+  RosterOpenSectionSchema,
+  RosterRepoSectionSchema,
+  type RosterCurrentWorkspace,
+  type RosterHiddenSection,
+  type RosterLabel,
+  type RosterMergedRepoGroup,
+  type RosterMergedRepoGroupHeader,
+  type RosterMergedSection,
+  type RosterOpenCount,
+  type RosterOpenSection,
+  type RosterRepoDivergence,
+  type RosterRepoKey,
+  type RosterRepoSection,
+  type RosterRows,
+  type RosterSectionCount,
+  type RosterSectionHeader,
+  type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import type { MessageInitShape } from "@bufbuild/protobuf";
+import { equals, type MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { MalformedView } from "../rpc/malformed.js";
 import {
   HIDDEN_FOLD_KEY,
   MERGED_FOLD_KEY,
   OPEN_FOLD_KEY,
   repoFoldKey,
+  type RailContext,
   type SidebarContext,
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
 import { changeView } from "./view-change.js";
+import { openScope, type DrawScope } from "./scope.js";
 import { foldViewKey, paintSectionFold, paintTriangle } from "./view.js";
 import {
   drawRosterRow,
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
+  drawRosterRowWhenShown,
   expandVisibleRows,
   mergedToday,
   tickPaint,
@@ -61,44 +68,187 @@ import {
 } from "./row.js";
 import { countNoun } from "../count-noun.js";
 
-/** The whole roster. */
-export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTMLElement {
-  const path = "WorkspaceRoster";
-  const repository = requireMessage(u.repository, `${path}.repository`);
-  const merged = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
-  const hidden = requireMessage(u.hidden, `${path}.hidden`);
-  const open = requireMessage(u.open, `${path}.open`);
-  const current =
-    u.current === undefined
-      ? null
-      : drawRosterCurrentWorkspace(u.current, `${path}.current`);
-  log.debug("drawing the workspace roster", {
-    operation: "sidebar.roster",
-    context: {
-      repo_sections: repository.sections.length,
-      merged_groups: merged.groups.length,
-      hidden_rows: hidden.rows?.rows.length ?? 0,
-      current,
-    },
-  });
+/**
+ * The whole roster, drawn through RAIL's one roster drawer (`createRosterDrawer`):
+ * a section the push leaves unchanged is the one already drawn.
+ */
+export function drawWorkspaceRoster(u: WorkspaceRoster, rail: RailContext): HTMLElement {
+  let drawer = drawers.get(rail);
+  if (drawer === undefined) {
+    drawer = createRosterDrawer(rail);
+    drawers.set(rail, drawer);
+  }
+  return drawer.draw(u);
+}
 
-  // The copies drawn from the last roster are about to be thrown away.
-  sc.view.beginDraw();
-  sc.dropdowns.beginDraw();
-  sc.rowHover.beginDraw();
+/** Tear down everything RAIL's roster drawer drew. */
+export function disposeWorkspaceRoster(rail: RailContext): void {
+  drawers.get(rail)?.dispose();
+  drawers.delete(rail);
+}
 
+/** Each rail's one roster drawer. */
+const drawers = new WeakMap<RailContext, RosterDrawer>();
+
+/** One rail's roster, drawn push after push. */
+export interface RosterDrawer {
+  /** Draw U, keeping every section it leaves unchanged; answers the rail's one roster root. */
+  draw(u: WorkspaceRoster): HTMLElement;
+  /** Tear down every section's registrations. */
+  dispose(): void;
+}
+
+/** What drawing a section made: its element, and whatever else the drawer reaches into. */
+interface Drawn {
+  element: HTMLElement;
+}
+
+/** A drawn section, the wire it was drawn from, and what it registered. */
+interface DrawnSection<W, D extends Drawn = Drawn> {
+  wire: W;
+  drawn: D;
+  scope: DrawScope;
+}
+
+/**
+ * The rail's roster drawer.
+ *
+ * A PUSH REDRAWS ONLY WHAT IT CHANGED (2026-10-15). Every push used to throw
+ * the whole rail away and rebuild it: 45ms and more of script for a push that
+ * changed one row, and pushes come in bursts. A section — a repository's, the
+ * hidden band, the recently-merged band, the open section's heading — whose
+ * wire is equal to the one it was drawn from is kept, DOM, view copies, clocks
+ * and all (`scope.ts`); a changed one is drawn anew and the old one's scope
+ * disposed. Equality is the wire's own, so nothing here decides what changed.
+ *
+ * A KEPT SECTION WAS VALIDATED when it was drawn: its wire is equal to one
+ * that was, so a malformed push still fails at the section it breaks.
+ */
+export function createRosterDrawer(rail: RailContext): RosterDrawer {
+  const roster = document.createElement("div");
+  roster.className = "sb-roster";
   // ONE COPY OF EVERY SECTION (owner ruling, 2026-10-15): the open workspaces
   // by repository, then the hidden workspaces, then the recently-merged band.
   // The pane is the box band-fit.ts fits the two bands' viewports in.
-  const roster = document.createElement("div");
-  roster.className = "sb-roster";
   const pane = document.createElement("div");
   pane.className = "sb-pane";
-  pane.appendChild(drawRosterOpenSection(open, drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, `${path}.open`));
-  pane.appendChild(drawRosterHiddenSection(hidden, sc, `${path}.hidden`));
-  pane.appendChild(drawRosterMergedSection(merged, sc, `${path}.recently_merged`));
   roster.appendChild(pane);
-  return roster;
+  let repos = new Map<string, DrawnSection<RosterRepoSection>>();
+  /** The open section, and the box its repository sections are placed in. */
+  let open: DrawnSection<{ open: RosterOpenSection; count: number }, Drawn & { body: HTMLElement }> | null = null;
+  let hidden: DrawnSection<RosterHiddenSection> | null = null;
+  let merged: DrawnSection<RosterMergedSection> | null = null;
+
+  /** SECTION kept when WIRE equals what it was drawn from, else drawn anew by DRAW. */
+  const keepOrDraw = <W, D extends Drawn>(
+    section: DrawnSection<W, D> | null,
+    wire: W,
+    same: (a: W, b: W) => boolean,
+    draw: (scoped: SidebarContext) => D,
+    discarded: Array<DrawnSection<unknown>>,
+  ): DrawnSection<W, D> => {
+    if (section !== null && same(section.wire, wire)) {
+      section.scope.remark(rail.attention);
+      return section;
+    }
+    if (section !== null) discarded.push(section);
+    const scope = openScope(rail);
+    return { wire, drawn: draw(scope.context), scope };
+  };
+
+  return {
+    draw(u: WorkspaceRoster): HTMLElement {
+      const path = "WorkspaceRoster";
+      const repository = requireMessage(u.repository, `${path}.repository`);
+      const mergedWire = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
+      const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
+      const openWire = requireMessage(u.open, `${path}.open`);
+      const current =
+        u.current === undefined
+          ? null
+          : drawRosterCurrentWorkspace(u.current, `${path}.current`);
+      const openCount = drawRosterOpenCount(
+        requireMessage(repository.openCount, `${path}.repository.open_count`),
+        `${path}.repository.open_count`,
+      );
+      const discarded: Array<DrawnSection<unknown>> = [];
+
+      const nextRepos = new Map<string, DrawnSection<RosterRepoSection>>();
+      for (const [index, section] of repository.sections.entries()) {
+        const sectionPath = `${path}.repository.sections[${index}]`;
+        const key = drawRosterRepoKey(requireMessage(section.key, `${sectionPath}.key`), `${sectionPath}.key`).id;
+        if (nextRepos.has(key)) {
+          throw new MalformedView(`${sectionPath}.key`, `repository ${key} has two sections`);
+        }
+        const kept = repos.get(key) ?? null;
+        repos.delete(key);
+        nextRepos.set(
+          key,
+          keepOrDraw(
+            kept,
+            section,
+            (a, b) => equals(RosterRepoSectionSchema, a, b),
+            (scoped) => ({ element: drawRosterRepoSection(section, scoped, sectionPath) }),
+            discarded,
+          ),
+        );
+      }
+      for (const gone of repos.values()) discarded.push(gone);
+      repos = nextRepos;
+
+      open = keepOrDraw(
+        open,
+        { open: openWire, count: openCount },
+        (a, b) => a.count === b.count && equals(RosterOpenSectionSchema, a.open, b.open),
+        (scoped) => {
+          const body = document.createElement("div");
+          body.className = "sb-sections";
+          return { element: drawRosterOpenSection(openWire, { body, openCount }, scoped, `${path}.open`), body };
+        },
+        discarded,
+      );
+      open.drawn.body.replaceChildren(...[...repos.values()].map((section) => section.drawn.element));
+
+      hidden = keepOrDraw(
+        hidden,
+        hiddenWire,
+        (a, b) => equals(RosterHiddenSectionSchema, a, b),
+        (scoped) => ({ element: drawRosterHiddenSection(hiddenWire, scoped, `${path}.hidden`) }),
+        discarded,
+      );
+      merged = keepOrDraw(
+        merged,
+        mergedWire,
+        (a, b) => equals(RosterMergedSectionSchema, a, b),
+        (scoped) => ({ element: drawRosterMergedSection(mergedWire, scoped, `${path}.recently_merged`) }),
+        discarded,
+      );
+      pane.replaceChildren(open.drawn.element, hidden.drawn.element, merged.drawn.element);
+
+      // Disposed only once every kept section has moved into the new drawing,
+      // so a discarded box's teardown never reaches a kept section's rows.
+      for (const section of discarded) section.scope.dispose(section.drawn.element);
+      log.debug("drew the workspace roster", {
+        operation: "sidebar.roster",
+        context: {
+          repo_sections: repository.sections.length,
+          merged_groups: mergedWire.groups.length,
+          hidden_rows: hiddenWire.rows?.rows.length ?? 0,
+          redrawn_sections: discarded.length,
+          current,
+        },
+      });
+      return roster;
+    },
+    dispose(): void {
+      const drawn: Array<DrawnSection<unknown>> = [...repos.values()];
+      for (const section of [open, hidden, merged]) if (section !== null) drawn.push(section);
+      for (const section of drawn) section.scope.dispose(section.drawn.element);
+      repos = new Map();
+      open = hidden = merged = null;
+      pane.replaceChildren();
+    },
+  };
 }
 
 /** The open workspaces' drawn repository sections and the count of the rows they list. */
@@ -115,20 +265,6 @@ export interface DrawnGroupingView {
  */
 export function drawRosterCurrentWorkspace(u: RosterCurrentWorkspace, path: string): string {
   return requireMessage(u.workspace, `${path}.workspace`).id;
-}
-
-/** The open workspaces: one section per repository, in the resolver's order. */
-export function drawRosterRepositoryView(
-  u: RosterRepositoryView,
-  sc: SidebarContext,
-  path: string,
-): DrawnGroupingView {
-  const view = document.createElement("div");
-  view.className = "sb-sections";
-  for (const [index, section] of u.sections.entries()) {
-    view.appendChild(drawRosterRepoSection(section, sc, `${path}.sections[${index}]`));
-  }
-  return { body: view, openCount: drawRosterOpenCount(requireMessage(u.openCount, `${path}.open_count`), `${path}.open_count`) };
 }
 
 /** How many rows the open-workspaces section lists, exactly as the daemon resolved it. */
@@ -375,7 +511,10 @@ export function drawRosterMergedSection(
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  const groups = u.groups.map((group, index) => drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`));
+  const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
+  const groups = u.groups.map((group, index) =>
+    drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`, drawnNow),
+  );
   const section = drawHeadedBox(
     u,
     sc,
@@ -404,6 +543,14 @@ export function drawRosterMergedSection(
   );
   return section;
 }
+
+/**
+ * How many of the band's rows are drawn with the band; every later one is a
+ * stand-in until it comes into view (`reveal.ts`, owner ruling 2026-10-15:
+ * a row scrolled out of the band's viewport is not drawn). Twice the band's
+ * capped viewport, so a band opened or fitted shows drawn rows at once.
+ */
+export const MERGED_DRAWN_AT_ONCE = BAND_CAP * 2;
 
 /** The class of one repository's group inside the band, and of its header. */
 export const MERGED_GROUP_CLASS = "merged-group";
@@ -447,6 +594,7 @@ export function drawRosterMergedRepoGroup(
   u: RosterMergedRepoGroup,
   sc: SidebarContext,
   path: string,
+  drawnNow: { left: number },
 ): DrawnMergedRepoGroup {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const rows = requireMessage(u.rows, `${path}.rows`);
@@ -465,8 +613,20 @@ export function drawRosterMergedRepoGroup(
   group.className = MERGED_GROUP_CLASS;
   group.setAttribute("data-repository", key.id);
   group.appendChild(drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`));
-  const region = drawRosterRows(rows, sc, `${path}.rows`, false, "merged");
-  [...region.children].forEach((row, i) => row.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs)));
+  const region = document.createElement("div");
+  region.className = "rows";
+  rows.rows.forEach((row, i) => {
+    const rowPath = `${path}.rows.rows[${i}]`;
+    const stamp = (drawn: HTMLElement): void => drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs));
+    if (drawnNow.left > 0) {
+      drawnNow.left -= 1;
+      const drawn = drawRosterRow(row, sc, rowPath, "merged");
+      stamp(drawn);
+      region.appendChild(drawn);
+      return;
+    }
+    drawRosterRowWhenShown(region, row, sc, rowPath, "merged", stamp);
+  });
   group.appendChild(region);
   const collapsed = sc.view.track(foldViewKey(repoFoldKey(key.id)), wireCollapsed, (folded) =>
     paintMergedRepoGroup(group, folded),
