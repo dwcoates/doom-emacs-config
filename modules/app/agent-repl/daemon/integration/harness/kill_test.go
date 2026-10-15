@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -373,10 +374,12 @@ func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 	d := &Daemon{t: t, StateDir: stateDir}
 	var respawnerState processState
 	var stateErr, exitErr error
+	var frozenView string
 	d.afterStraysFrozen = func() {
 		// The child dies first, as it did under a snapshot-then-kill sweep.
 		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
 			exitErr = err
+			frozenView = strayView(d, respawner.Process.Pid)
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
@@ -390,11 +393,32 @@ func TestReapStraysFreezesEveryStrayBeforeKillingAny(t *testing.T) {
 
 	// Assert
 	if exitErr != nil || stateErr != nil {
-		t.Fatalf("killing the child first: exit %v, reading the respawner %v", exitErr, stateErr)
+		// A child already gone at the freeze ended before the sweep began
+		// (merge gate 2026-10-15, once, not reproduced alone or in its
+		// package): the view says whether the respawner had started a
+		// replacement, i.e. whether the child died while its respawner ran.
+		t.Fatalf("killing the child %d first: exit %v, reading the respawner %v; at the freeze %s", child, exitErr, stateErr, frozenView)
 	}
 	if respawnerState.name != "stopped" {
 		t.Fatalf("the respawner was %s when its child died, want stopped", respawnerState.name)
 	}
+}
+
+// strayView is what a stray sweep saw: every process naming the state
+// directory, with its kernel state, and the respawner's.
+func strayView(d *Daemon, respawner int) string {
+	strays, err := d.listStrays()
+	if err != nil {
+		return fmt.Sprintf("(listing failed: %v)", err)
+	}
+	var b strings.Builder
+	for _, s := range strays {
+		st, err := readProcessState(s.pid)
+		fmt.Fprintf(&b, "\n  %d %q state %s (err %v)", s.pid, s.args, st.name, err)
+	}
+	st, err := readProcessState(respawner)
+	fmt.Fprintf(&b, "\n  respawner %d state %s (err %v)", respawner, st.name, err)
+	return b.String()
 }
 
 // TestReapStraysLeavesNoReplacementOfAStrayKilledFirst is the leak as the
