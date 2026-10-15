@@ -24,6 +24,11 @@ type fakeNpx struct {
 	failRun bool
 	report  string
 	calls   []string
+	// dirty is git status's answer on its nth call (0 before Stryker, 1
+	// after); gitFail fails it.
+	dirty   []string
+	gitFail bool
+	gits    int
 }
 
 func (f *fakeNpx) exec(_ context.Context, c proc.Cmd) (proc.Result, error) {
@@ -47,6 +52,16 @@ func (f *fakeNpx) exec(_ context.Context, c proc.Cmd) (proc.Result, error) {
 			b.Write(append(line, '\n'))
 		}
 		return proc.Result{}, os.WriteFile(path, b.Bytes(), 0o644)
+	case c.Path == "git":
+		n := f.gits
+		f.gits++
+		if f.gitFail {
+			return proc.Result{Exit: 128, Lines: []proc.Line{{Text: "fatal: not a git repository"}}}, nil
+		}
+		if n < len(f.dirty) && f.dirty[n] != "" {
+			return proc.Result{Lines: []proc.Line{{Text: f.dirty[n]}}}, nil
+		}
+		return proc.Result{}, nil
 	case c.Path == "npx" && c.Args[0] == "stryker":
 		var cfg struct {
 			JSONReporter struct {
@@ -213,5 +228,66 @@ func TestTheTraceConfigAddsTheTracerToThePackagesOwn(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("the trace config lacks %q:\n%s", want, b)
 		}
+	}
+}
+
+func TestStrykerMutatesThePackageInPlace(t *testing.T) {
+	// Arrange
+	cfg, f := fakePackage(t)
+
+	// Act
+	if _, err := Measure(context.Background(), cfg, f.exec, quiet()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	b, err := os.ReadFile(filepath.Join(cfg.Scratch, "stryker.config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		InPlace bool `json:"inPlace"`
+	}
+	if err := json.Unmarshal(b, &c); err != nil || !c.InPlace {
+		t.Fatalf("config %s: want inPlace (err %v)", b, err)
+	}
+	if f.gits != 2 {
+		t.Fatalf("%d clean-tree checks, want one each side of Stryker", f.gits)
+	}
+}
+
+func TestMeasureRefusesATreeThatIsNotClean(t *testing.T) {
+	tests := []struct {
+		name    string
+		dirty   []string
+		gitFail bool
+		want    string
+		stryker bool
+	}{
+		{name: "an edit before Stryker", dirty: []string{" M src/a.ts"}, want: "has tracked changes before Stryker", stryker: false},
+		{name: "a mutant left after Stryker", dirty: []string{"", " M src/a.ts"}, want: "has tracked changes after Stryker", stryker: true},
+		{name: "git status failing", gitFail: true, want: "git status in", stryker: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			cfg, f := fakePackage(t)
+			f.dirty, f.gitFail = tt.dirty, tt.gitFail
+
+			// Act
+			_, err := Measure(context.Background(), cfg, f.exec, quiet())
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), cfg.Package) {
+				t.Fatalf("err = %v, want %q naming the package", err, tt.want)
+			}
+			ran := false
+			for _, c := range f.calls {
+				ran = ran || strings.HasPrefix(c, "npx stryker")
+			}
+			if ran != tt.stryker {
+				t.Fatalf("Stryker ran: %t, want %t", ran, tt.stryker)
+			}
+		})
 	}
 }

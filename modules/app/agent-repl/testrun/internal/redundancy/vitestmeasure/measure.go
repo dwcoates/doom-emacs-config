@@ -30,6 +30,9 @@ const (
 	// it is reported, and the bound is resized from what the first real run
 	// measures.
 	StrykerTimeout = 6 * time.Hour
+	// GitTimeout bounds the clean-tree check: twice its measured 10ms in
+	// either package, plus the 500ms a process start can take under load.
+	GitTimeout = 520 * time.Millisecond
 )
 
 // TraceEnv names the file redundancy-trace.mjs appends to.
@@ -312,6 +315,11 @@ func (m *measurer) strykerConfig(report string) (string, error) {
 		"reporters":        []string{"json"},
 		"jsonReporter":     map[string]any{"fileName": report},
 		"concurrency":      1,
+		// IN PLACE: a sandbox copy breaks every import out of the package
+		// (vitest.config.ts's ../../../bin/require-background.mjs), so Stryker
+		// mutates the package's own sources and restores them; the clean-tree
+		// check on both sides of the run makes a leftover mutant loud.
+		"inPlace":          true,
 		"cleanTempDir":     true,
 		"tempDirName":      ".stryker-tmp",
 		"thresholds":       map[string]any{"break": nil},
@@ -328,6 +336,24 @@ func (m *measurer) strykerConfig(report string) (string, error) {
 	return path, nil
 }
 
+// cleanTree refuses a package whose tracked files differ from HEAD, when
+// Stryker mutates it in place: before the run, the mutants would be laid
+// over an edit (or a killed run's leftover mutant); after it, Stryker left a
+// mutant in the sources.
+func (m *measurer) cleanTree(ctx context.Context, when string) error {
+	res, err := m.run(ctx, proc.Cmd{Dir: m.cfg.Package, Path: "git", Args: []string{"status", "--porcelain", "--untracked-files=no", "--", "."}, Timeout: GitTimeout})
+	if err != nil {
+		return err
+	}
+	if res.Exit != 0 || res.TimedOut {
+		return fmt.Errorf("vitestmeasure: git status in %s failed (exit %d, timed out %t):\n%s", m.cfg.Package, res.Exit, res.TimedOut, res.Text())
+	}
+	if dirty := strings.TrimSpace(res.Text()); dirty != "" {
+		return fmt.Errorf("vitestmeasure: %s has tracked changes %s Stryker mutates it in place; run in a worktree nothing else edits:\n%s", m.cfg.Package, when, dirty)
+	}
+	return nil
+}
+
 // stryker runs Stryker and reads its report.
 func (m *measurer) stryker(ctx context.Context) (*Matrix, error) {
 	if err := m.cfg.Gate.AwaitQuiet(ctx, "Stryker"); err != nil {
@@ -338,8 +364,14 @@ func (m *measurer) stryker(ctx context.Context) (*Matrix, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := m.cleanTree(ctx, "before"); err != nil {
+		return nil, err
+	}
 	res, err := m.run(ctx, proc.Cmd{Dir: m.cfg.Package, Path: "npx", Args: []string{"stryker", "run", cfgPath}, Timeout: StrykerTimeout})
 	if err != nil {
+		return nil, err
+	}
+	if err := m.cleanTree(ctx, "after"); err != nil {
 		return nil, err
 	}
 	if res.Exit != 0 || res.TimedOut {
