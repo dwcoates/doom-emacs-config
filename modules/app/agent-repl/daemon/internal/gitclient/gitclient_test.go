@@ -3,7 +3,6 @@ package gitclient
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 // commitLine renders one line of commitFormat output.
@@ -2784,31 +2784,11 @@ func TestFormattedRecordsRefusesALineWithAnotherFieldCount(t *testing.T) {
 // TestEveryFormattedOutputIsSplitByFormattedRecords holds the call sites to
 // the one parser: no other code in the package splits a line by fieldSep.
 func TestEveryFormattedOutputIsSplitByFormattedRecords(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("listing the package: %v", err)
-	}
-
-	// Act.
-	var splits []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-		for i, line := range strings.Split(string(src), "\n") {
-			if strings.Contains(line, ", fieldSep)") && strings.Contains(line, "strings.Split(") {
-				splits = append(splits, fmt.Sprintf("%s:%d", file, i+1))
-			}
-		}
-	}
+	// Arrange, Act.
+	n := sourcescan.Count(t, "strings.Split(line, fieldSep)")
 
 	// Assert.
-	if len(splits) != 1 {
-		t.Fatalf("lines split by fieldSep at %v, want exactly one: formattedRecords's own", splits)
+	if n != 1 {
+		t.Fatalf("lines split by fieldSep %d times in the package, want exactly one: formattedRecords's own", n)
 	}
 }
