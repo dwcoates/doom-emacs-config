@@ -1546,6 +1546,18 @@ who wrote it, and no person's value is a default.
   - Dated reports under `docs/` are a historical record and are not rewritten.
   - A skill's `lineage_root:` line is the GNS address it was first published under, and stays as published.
 
+## Nothing in this repository is ever published to GNS (owner ruling, 2026-10-14)
+
+No skill, plugin, document or other artifact of this repository is published to
+GNS, ever, by any agent, at any scope (personal, team, org or public).
+
+- A skill workflow that offers to publish (`/create-or-update-skill`'s publish
+  and `--promote-to-gns` steps) is declined without asking the owner.
+- Skills here live in the repository and are committed with it; they reach
+  master through the merge queue like any other change.
+- An existing `lineage_root:` line is left as it stands (see the section
+  above); it records history, not a reason to publish again.
+
 ## Requirements: the manifests are the one record of what a machine needs
 
 Everything agent-repl needs on a machine is an entry in a requirement
