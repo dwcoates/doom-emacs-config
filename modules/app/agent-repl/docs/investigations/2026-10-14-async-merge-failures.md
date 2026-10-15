@@ -12,7 +12,7 @@ the log records that show it, so the failures can be fixed at their source.
 | 1 | 2026-10-14 23:29 | `test-tier-rule` | `test-tier-rule-land` | waiting in line (not failed); an error record on every rebase, see entry 1 |
 | 2 | 2026-10-14 23:41 | `test-fixture-table-rules` | `test-fixture-table-rules-land` | FAILED: the merge workspace could not be forked |
 | 3 | 2026-10-15 | `cross-product-additions` (from `test-cross-product-audit-psv`, tip `44eee96334`) | `xprod-additions-merge` | requested, pending; a first request was refused `name_taken`, see entry 3 |
-| 4 | 2026-10-15 (approved) | step 1 of `test-tier-audit-integration-nzx` (41 additive commits) | requested by the child itself | pending |
+| 4 | 2026-10-15 | `test-tier-audit-integration-step1` (tip `3e73dfd165`, 41 additive commits) | `tier-step1-units` | requested, pending |
 
 ## 1. `test-tier-rule` (waiting in line)
 
