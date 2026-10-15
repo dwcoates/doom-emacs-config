@@ -1,0 +1,1534 @@
+test/integration/bubble-selection.integration.test.ts:a click on a bubble > asks the daemon to select a user prompt
+test/integration/bubble-selection.integration.test.ts:a click on a bubble > asks nothing for a response still arriving
+test/integration/bubble-selection.integration.test.ts:a click on a bubble > names the selected bubble to the daemon when it is clicked, never a clear
+test/integration/bubble-selection.integration.test.ts:the daemon's selection push > moves the mark off a bubble when another is selected
+test/integration/client-log.integration.test.ts:the level arms > names every level arm the record declares
+test/integration/client-log.integration.test.ts:a warning > carries the warn level arm
+test/integration/client-log.integration.test.ts:a warning > carries the call site's operation
+test/integration/client-log.integration.test.ts:a warning > carries the message verbatim
+test/integration/client-log.integration.test.ts:a warning > echoes the page's own workspace
+test/integration/client-log.integration.test.ts:a warning > carries the call site's evidence in the record's context
+test/integration/client-log.integration.test.ts:a warning > waits for the throttle's window rather than calling per record
+test/integration/client-log.integration.test.ts:an error > carries the error level arm
+test/integration/client-log.integration.test.ts:an error > does not wait for the throttle's window
+test/integration/client-log.integration.test.ts:an error > carries its own operation
+test/integration/client-log.integration.test.ts:an error > echoes the page's own workspace
+test/integration/client-log.integration.test.ts:an info record > carries the info level arm
+test/integration/client-log.integration.test.ts:an info record > carries the client instant from before the throttle window
+test/integration/client-log.integration.test.ts:an info record > marks a normal record non-verbose
+test/integration/client-log.integration.test.ts:an info record > marks a verbose record verbose
+test/integration/client-log.integration.test.ts:a debug record > carries the debug level arm
+test/integration/client-log.integration.test.ts:the app's own diagnostics > echo the workspace the page was addressed to
+test/integration/client-log.integration.test.ts:the session identity > stamps the session the link stream named on a later record
+test/integration/client-log.integration.test.ts:the session identity > stamps the vendor conversation the same frame named
+test/integration/client-log.integration.test.ts:the session identity > re-stamps a rotation's new session without a page reload
+test/integration/client-log.integration.test.ts:the session identity > leaves a record raised before the frame unattributed
+test/integration/feed-reveal.integration.test.ts:the caret on the booted app > keeps a reader following the tail at the grown tail instead of centering
+test/integration/feed-reveal.integration.test.ts:the caret on the booted app > keeps the follow standing through the expansion
+test/integration/feed-tail.integration.test.ts:the docked footer and the feed's tail > leaves a reader who scrolled up where they are when the footer grows
+test/integration/feed-tail.integration.test.ts:the docked footer and the feed's tail > leaves a reader who scrolled up where they are when the content grows
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > hides the bubble's tabs while the question stands
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > focuses Cancel
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > sends the evict answer
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > sends the prioritize answer
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > sends the cancel answer
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > closes the question once answered
+test/integration/merge-queue-offer.integration.test.ts:the merge-queue question in the pinned bubble > keeps the pinned bubble open on a head click
+test/integration/news-digest.integration.test.ts:the news digest overlay > dismisses with the served id
+test/integration/news-digest.integration.test.ts:the news digest overlay > takes the digest down on the daemon's none
+test/integration/news-digest.integration.test.ts:the news digest overlay > opens an item's link through OpenExternal
+test/integration/feed-routing.integration.test.ts:upsert by FeedId > does not duplicate the row on a re-push
+test/integration/feed-routing.integration.test.ts:upsert by FeedId > preserves ordering when an earlier row is re-pushed
+test/integration/feed-routing.integration.test.ts:upsert by FeedId > draws late rows at their keys, not below the rows that arrived before them
+test/integration/feed-routing.integration.test.ts:upsert by FeedId > refuses a pushed row without an order key as an undecodable frame
+test/integration/feed-routing.integration.test.ts:upsert by FeedId > drops the old text when a row is replaced whole
+test/integration/feed-routing.integration.test.ts:presentation nesting > draws a row with a parent inside its container
+test/integration/feed-routing.integration.test.ts:presentation nesting > draws a row with no parent at the top level
+test/integration/feed-routing.integration.test.ts:paging > asks GetFeedPage for `next`, never for a cursor
+test/integration/feed-routing.integration.test.ts:breadcrumbs > draws the crumbs a page carries
+test/integration/feed-routing.integration.test.ts:breadcrumbs > draws no breadcrumb line when the list is empty
+test/integration/feed-routing.integration.test.ts:the final answer > marks exactly the response row that turn_ended names as the answer
+test/integration/feed-routing.integration.test.ts:the final answer > leaves the earlier response rows unmarked
+test/integration/feed-routing.integration.test.ts:paging a sub-feed > addresses GetFeedPage to the bubble's own FeedId
+test/integration/feed-routing.integration.test.ts:paging a sub-feed > asks for `next`, never for a cursor
+test/integration/held.integration.test.ts:a classifying hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a interject hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a afterToolCall hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a holdForTurnEnd hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a uninterruptibleTurn hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a classificationError hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a daemonHeld hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:a awaitingDelivery hold > draws the held prompt's own text verbatim
+test/integration/held.integration.test.ts:classification detail > draws the interject rationale verbatim
+test/integration/held.integration.test.ts:classification detail > draws the afterToolCall rationale verbatim
+test/integration/held.integration.test.ts:classification detail > draws the holdForTurnEnd rationale verbatim
+test/integration/held.integration.test.ts:classification detail > draws the classificationError rationale verbatim
+test/integration/held.integration.test.ts:classification detail > draws the uninterruptible turn's daemon-named note verbatim under the hold's badge
+test/integration/held.integration.test.ts:hold reasons draw distinctly > titles the shutdown hold's badge with its own schedule id
+test/integration/held.integration.test.ts:the queued-at clock > ages the held prompt as time passes
+test/integration/held.integration.test.ts:release and drop > calls UpdateHeldPrompt with the drop arm
+test/integration/held.integration.test.ts:release and drop > echoes the held prompt's own TurnId
+test/integration/held.integration.test.ts:release and drop > echoes the workspace
+test/integration/held.integration.test.ts:release and drop > draws a refusal at the tray row rather than losing the prompt
+test/integration/held.integration.test.ts:release and drop > leaves the row drawn when the action is refused
+test/integration/held.integration.test.ts:the fold above button > is not drawn on an entry the daemon offers no fold
+test/integration/held.integration.test.ts:the fold above button > calls FoldHeldPrompt echoing the entry's own TurnId and the served entry ahead
+test/integration/held.integration.test.ts:the fold above button > draws a refusal at the tray row, naming the arm
+test/integration/held.integration.test.ts:the update classifier button > says the daemon's commit at the form
+test/integration/held.integration.test.ts:an empty tray > draws nothing at all, so the region collapses
+test/integration/held.integration.test.ts:an empty tray > draws no held rows
+test/integration/held.integration.test.ts:whole-list replacement > drops an item the next push omits
+test/integration/composer.integration.test.ts:production runs composer-less > draws no composer without the dev flag
+test/integration/composer.integration.test.ts:production runs composer-less > mounts no composer input without the dev flag
+test/integration/composer.integration.test.ts:the dev composer > draws when the dev flag is on
+test/integration/composer.integration.test.ts:the dev composer > sends the text as a UserSaid text block
+test/integration/composer.integration.test.ts:the dev composer > clears the input on a successful send
+test/integration/composer.integration.test.ts:the dev composer > sends nothing for an empty input
+test/integration/composer.integration.test.ts:the required workspace > carries the context's workspace on every submission
+test/integration/composer.integration.test.ts:the required origin > sends the webapp user-sent origin from the dev composer
+test/integration/composer.integration.test.ts:the required origin > sends the webapp user-sent origin from a bubble composer
+test/integration/composer.integration.test.ts:the required origin > never sends the unspecified origin
+test/integration/composer.integration.test.ts:the idempotency key > mints a key for every submission
+test/integration/composer.integration.test.ts:the idempotency key > mints a FRESH key per distinct submission
+test/integration/composer.integration.test.ts:the idempotency key > reuses the SAME key when the same submission is retried
+test/integration/composer.integration.test.ts:the idempotency key > mints a new key after a successful send
+test/integration/composer.integration.test.ts:a command refusal answer > clears the composer text
+test/integration/composer.integration.test.ts:a command refusal answer > draws no composer refusal, since this is a success arm
+test/integration/composer.integration.test.ts:command panels > hands the todos panel to the composer's callback
+test/integration/composer.integration.test.ts:command panels > hands the agents panel to the composer's callback
+test/integration/composer.integration.test.ts:command panels > hands the mcp panel to the composer's callback
+test/integration/composer.integration.test.ts:command panels > hands the context panel to the composer's callback
+test/integration/composer.integration.test.ts:command panels > hands the help panel to the composer's callback
+test/integration/composer.integration.test.ts:command panels > draws the todos panel
+test/integration/composer.integration.test.ts:command panels > draws the agents panel
+test/integration/composer.integration.test.ts:command panels > draws the mcp panel
+test/integration/composer.integration.test.ts:command panels > draws the context panel
+test/integration/composer.integration.test.ts:command panels > draws the help panel
+test/integration/composer.integration.test.ts:command panels > draws the status panel's thin label/value rows
+test/integration/composer.integration.test.ts:command panels > draws every status panel row
+test/integration/composer.integration.test.ts:command panels > draws the todos panel's pending glyph arm
+test/integration/composer.integration.test.ts:command panels > draws the todos panel's running glyph arm
+test/integration/composer.integration.test.ts:command panels > draws the todos panel's completed glyph arm
+test/integration/composer.integration.test.ts:command panels > draws the todos panel's subjects verbatim
+test/integration/composer.integration.test.ts:command panels > draws the agents panel's names and descriptions
+test/integration/composer.integration.test.ts:command panels > draws the mcp panel's connected badge arm
+test/integration/composer.integration.test.ts:command panels > draws the mcp panel's failed badge arm
+test/integration/composer.integration.test.ts:command panels > draws the mcp panel's needsAuth badge arm
+test/integration/composer.integration.test.ts:command panels > draws the mcp panel's pending badge arm
+test/integration/composer.integration.test.ts:command panels > draws the mcp panel's disabled badge arm
+test/integration/composer.integration.test.ts:command panels > draws the mcp failure's own detail verbatim
+test/integration/composer.integration.test.ts:command panels > composes the header line from the daemon's own parts
+test/integration/composer.integration.test.ts:command panels > colors only the percent, and echoes the daemon's figure verbatim
+test/integration/composer.integration.test.ts:command panels > draws a section that has detail as a fold closed by default
+test/integration/composer.integration.test.ts:command panels > nests a sub-fold beneath the section that carries it
+test/integration/composer.integration.test.ts:command panels > draws a section with no detail as a bare row rather than a fold
+test/integration/composer.integration.test.ts:command panels > draws the auto-compaction line the resolver composed, verbatim
+test/integration/composer.integration.test.ts:command panels > draws the context panel's auto-compact line verbatim
+test/integration/composer.integration.test.ts:command panels > draws the help panel's commands verbatim
+test/integration/composer.integration.test.ts:an ask-answered answer > clears the draft
+test/integration/composer.integration.test.ts:an ask-answered answer > draws no refusal and no feed row of its own
+test/integration/composer.integration.test.ts:a command-acted answer > clears the draft
+test/integration/composer.integration.test.ts:a command-acted answer > draws no refusal
+test/integration/composer.integration.test.ts:a command-acted answer > draws no panel
+test/integration/composer.integration.test.ts:a command-acted answer > hands the composer no panel to draw
+test/integration/composer.integration.test.ts:a duplicate submission > retried with the same idempotency key
+test/integration/composer.integration.test.ts:a duplicate submission > draws the refusal at the composer
+test/integration/composer.integration.test.ts:a duplicate submission > says the prompt was already submitted
+test/integration/composer.integration.test.ts:a duplicate submission > keeps the text in the box
+test/integration/lifecycle.integration.test.ts:the transfer > sends nothing at all to the successor
+test/integration/lifecycle.integration.test.ts:the transfer > does not adopt on the successor
+test/integration/lifecycle.integration.test.ts:the transfer > adopted once at boot, on the daemon the page was addressed to
+test/integration/lifecycle.integration.test.ts:the transfer > echoed the workspace on the boot adoption
+test/integration/lifecycle.integration.test.ts:the drain banner > draws the operator's own note verbatim
+test/integration/lifecycle.integration.test.ts:the drain banner > counts down to the served instant
+test/integration/lifecycle.integration.test.ts:the drain banner > removes the banner on a cancellation
+test/integration/lifecycle.integration.test.ts:the drain banner > draws no banner before any drain is scheduled
+test/integration/lifecycle.integration.test.ts:the announced outage window > suppresses the unreachable overlay during the quiet window
+test/integration/lifecycle.integration.test.ts:the announced outage window > reports the failure once the quiet window lapses
+test/integration/lifecycle.integration.test.ts:the announced outage window > shortens the window by the time since the announcement was minted
+test/integration/lifecycle.integration.test.ts:the announced outage window > retracts the report once a push lands again
+test/integration/lifecycle.integration.test.ts:a plain bounce > draws the restarting notice when the announcement carries no address
+test/integration/lifecycle.integration.test.ts:a plain bounce > does not open a second transport for an address-less announcement
+test/integration/lifecycle.integration.test.ts:a plain bounce > clears the restarting notice once the streams are back
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > raises the page-wide moved notice
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > names the successor's address in the notice
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > goes quiet
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > cancels the view streams
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > cancels the feed's tail
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > cancels the global roster stream
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > cancels its own web-link stream
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > reports no transport failure, because the page cancelled them
+test/integration/lifecycle.integration.test.ts:'AnswerPermission (a feed card)' refused as transferring_away > does not reopen a stream after the move
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > raises the page-wide moved notice
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > names the successor's address in the notice
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > goes quiet
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > cancels the view streams
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > cancels the feed's tail
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > cancels the global roster stream
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > cancels its own web-link stream
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > reports no transport failure, because the page cancelled them
+test/integration/lifecycle.integration.test.ts:'UpdateHeldPrompt (the hold tray)' refused as transferring_away > does not reopen a stream after the move
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > raises the page-wide moved notice
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > names the successor's address in the notice
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > goes quiet
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > cancels the view streams
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > cancels the feed's tail
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > cancels the global roster stream
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > cancels its own web-link stream
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > reports no transport failure, because the page cancelled them
+test/integration/lifecycle.integration.test.ts:'CloseWorkspace (a sidebar verb)' refused as transferring_away > does not reopen a stream after the move
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > raises the page-wide moved notice
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > names the successor's address in the notice
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > goes quiet
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > cancels the view streams
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > cancels the feed's tail
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > cancels the global roster stream
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > cancels its own web-link stream
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > reports no transport failure, because the page cancelled them
+test/integration/lifecycle.integration.test.ts:'SetModel (the topbar picker)' refused as transferring_away > does not reopen a stream after the move
+test/integration/streams.integration.test.ts:'WatchTopbar' > refuses a frame carrying an unknown field
+test/integration/streams.integration.test.ts:'WatchTopbar' > skips the undecodable frame rather than drawing it
+test/integration/streams.integration.test.ts:'WatchTopbar' > renders the next frame after an undecodable one
+test/integration/streams.integration.test.ts:'WatchWorkspaceRoster' > refuses a frame carrying an unknown field
+test/integration/streams.integration.test.ts:'WatchWorkspaceRoster' > skips the undecodable frame rather than drawing it
+test/integration/streams.integration.test.ts:'WatchWorkspaceRoster' > renders the next frame after an undecodable one
+test/integration/streams.integration.test.ts:'WatchFeed (the held section)' > refuses a frame carrying an unknown field
+test/integration/streams.integration.test.ts:'WatchFeed (the held section)' > skips the undecodable frame rather than drawing it
+test/integration/streams.integration.test.ts:'WatchFeed (the held section)' > renders the next frame after an undecodable one
+test/integration/streams.integration.test.ts:'WatchFeed' > refuses a frame carrying an unknown field
+test/integration/streams.integration.test.ts:'WatchFeed' > skips the undecodable frame rather than drawing it
+test/integration/streams.integration.test.ts:'WatchFeed' > renders the next frame after an undecodable one
+test/integration/streams.integration.test.ts:'WatchTopbar' > reports the daemon unreachable when the stream dies with no terminal frame
+test/integration/streams.integration.test.ts:'WatchTopbar' > reopens the stream after a transport death
+test/integration/streams.integration.test.ts:'WatchTopbar' > retracts the unreachable report on the next successful push
+test/integration/streams.integration.test.ts:'WatchWorkspaceRoster' > reports the daemon unreachable when the stream dies with no terminal frame
+test/integration/streams.integration.test.ts:'WatchWorkspaceRoster' > reopens the stream after a transport death
+test/integration/streams.integration.test.ts:'WatchWorkspaceRoster' > retracts the unreachable report on the next successful push
+test/integration/streams.integration.test.ts:'WatchFeed (the held section)' > reports the daemon unreachable when the stream dies with no terminal frame
+test/integration/streams.integration.test.ts:'WatchFeed (the held section)' > reopens the stream after a transport death
+test/integration/streams.integration.test.ts:'WatchFeed (the held section)' > retracts the unreachable report on the next successful push
+test/integration/streams.integration.test.ts:'WatchFeed' > reports the daemon unreachable when the stream dies with no terminal frame
+test/integration/streams.integration.test.ts:'WatchFeed' > reopens the stream after a transport death
+test/integration/streams.integration.test.ts:'WatchFeed' > retracts the unreachable report on the next successful push
+test/integration/streams.integration.test.ts:'WatchFooter''s incomplete frame > refuses a frame with a required field unset
+test/integration/streams.integration.test.ts:'WatchFooter''s incomplete frame > skips the incomplete frame rather than drawing it
+test/integration/streams.integration.test.ts:'WatchFooter''s incomplete frame > renders the next frame after an incomplete one
+test/integration/streams.integration.test.ts:WatchWebWorkspace > reports the daemon unreachable when it dies with no terminal frame
+test/integration/streams.integration.test.ts:WatchWebWorkspace > reopens after a transport death
+test/integration/streams.integration.test.ts:WatchWebWorkspace > refuses a transfer push carrying an unknown field
+test/integration/streams.integration.test.ts:WatchWebWorkspace > raises no moved notice from an undecodable transfer push
+test/integration/streams.integration.test.ts:WatchWebWorkspace > does not quiesce on an undecodable transfer push
+test/integration/streams.integration.test.ts:WatchWebWorkspace > acts on the next transfer push after an undecodable one
+test/integration/streams.integration.test.ts:WatchDaemon > decodes a drain push into the banner verbatim
+test/integration/streams.integration.test.ts:WatchDaemon > refuses a daemon push carrying an unknown field
+test/integration/streams.integration.test.ts:WatchDaemon > renders the next daemon push after an undecodable one
+test/integration/streams.integration.test.ts:WatchDaemon > reopens after a transport death
+test/integration/streams.integration.test.ts:the feed's own tail > replaces the rows with the fresh page after a reconnect
+test/integration/streams.integration.test.ts:the feed's own tail > drops a row the fresh page omits
+test/integration/streams.integration.test.ts:watch acceptance > registers 'WatchFooter' before any frame is pushed
+test/integration/streams.integration.test.ts:watch acceptance > registers 'WatchTopbar' before any frame is pushed
+test/integration/streams.integration.test.ts:watch acceptance > registers 'WatchWorkspaceRoster' before any frame is pushed
+test/integration/streams.integration.test.ts:watch acceptance > registers 'WatchFeed (the held section)' before any frame is pushed
+test/integration/streams.integration.test.ts:watch acceptance > registers 'WatchFeed' before any frame is pushed
+test/integration/streams.integration.test.ts:watch acceptance > registers the web-link watch before any frame
+test/integration/streams.integration.test.ts:watch acceptance > registers the daemon watch before any frame
+test/integration/streams.integration.test.ts:watch cancellation > drops 'WatchTopbar' when the app disposes its mount
+test/integration/streams.integration.test.ts:watch cancellation > drops 'WatchWorkspaceRoster' when the app disposes its mount
+test/integration/streams.integration.test.ts:watch cancellation > drops 'WatchFeed (the held section)' when the app disposes its mount
+test/integration/streams.integration.test.ts:watch cancellation > drops 'WatchFeed' when the app disposes its mount
+test/integration/streams.integration.test.ts:watch cancellation > drops the web-link watch on dispose
+test/integration/streams.integration.test.ts:watch cancellation > drops the daemon watch on dispose
+test/integration/streams.integration.test.ts:watch cancellation > does not reopen a stream the app cancelled
+test/integration/streams.integration.test.ts:watch cancellation > reports no failure for a stream the app cancelled
+test/integration/sidebar.integration.test.ts:arm coverage > covers every roster status arm
+test/integration/sidebar.integration.test.ts:the groupings > shows the maturity grouping when the daemon says every page shows it
+test/integration/sidebar.integration.test.ts:the groupings > draws the maturity stages' headers verbatim, in the daemon's order
+test/integration/sidebar.integration.test.ts:the groupings > renders the repository grouping by default
+test/integration/sidebar.integration.test.ts:the groupings > hides the grouping the daemon does not show
+test/integration/sidebar.integration.test.ts:the groupings > shows the grouping the daemon says every page shows
+test/integration/sidebar.integration.test.ts:the groupings > switches which grouping renders at once on a pick
+test/integration/sidebar.integration.test.ts:the groupings > asks the daemon to show the picked grouping in every page
+test/integration/sidebar.integration.test.ts:the groupings > draws the repository section header verbatim
+test/integration/sidebar.integration.test.ts:the groupings > draws the task section header verbatim
+test/integration/sidebar.integration.test.ts:maturity stage folds > draws the fold the daemon pushes
+test/integration/sidebar.integration.test.ts:task folds > folds a task section at once on click
+test/integration/sidebar.integration.test.ts:task folds > asks the daemon to fold the task section in every page
+test/integration/sidebar.integration.test.ts:task folds > keeps the asked fold across a push that does not carry it yet
+test/integration/sidebar.integration.test.ts:task folds > draws the fold another page asked for, from the push
+test/integration/sidebar.integration.test.ts:repository folds > asks the daemon to collapse an expanded repository on click
+test/integration/sidebar.integration.test.ts:repository folds > asks the daemon to expand a collapsed repository on click
+test/integration/sidebar.integration.test.ts:repository folds > folds the section at once, ahead of the daemon's push
+test/integration/sidebar.integration.test.ts:repository folds > draws the fold the daemon pushes
+test/integration/sidebar.integration.test.ts:the open workspaces section's fold > starts unfolded, as the daemon's default is
+test/integration/sidebar.integration.test.ts:the open workspaces section's fold > asks the daemon to fold it in every page
+test/integration/sidebar.integration.test.ts:the recently-merged band's fold > starts folded, as the daemon's default is
+test/integration/sidebar.integration.test.ts:the recently-merged band's fold > asks the daemon to unfold it in every page
+test/integration/sidebar.integration.test.ts:the recently-merged band's fold > draws it unfolded when another page unfolded it
+test/integration/sidebar.integration.test.ts:a submitting row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a thinking row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a clearing row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a compacting row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a permission row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a question row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a done row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a interrupted row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a turnFailed row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a ready row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a idleAsync row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a vendorBlocked row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a vendorFault row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a networkFault row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a init row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a severed row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a startFailed row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a degraded row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a dead row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a turnDied row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a merging row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a mergeQueued row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a mergeFailed row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a merged row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a none row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a inactive row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a apiRetrying row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a closing row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a daemonImpaired row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a waiting row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:a coldGate row > paints the color the vocabulary assigns
+test/integration/sidebar.integration.test.ts:the merging merge arm > draws the glyph the vocabulary names
+test/integration/sidebar.integration.test.ts:the mergeQueued merge arm > draws the glyph the vocabulary names
+test/integration/sidebar.integration.test.ts:the mergeFailed merge arm > draws the glyph the vocabulary names
+test/integration/sidebar.integration.test.ts:the merged merge arm > draws the glyph the vocabulary names
+test/integration/sidebar.integration.test.ts:row decoration > marks the current row
+test/integration/sidebar.integration.test.ts:row decoration > draws the priority badge's label verbatim
+test/integration/sidebar.integration.test.ts:row decoration > draws no priority badge when none is served
+test/integration/sidebar.integration.test.ts:row decoration > draws the detail branch verbatim
+test/integration/sidebar.integration.test.ts:row decoration > omits the detail lines when the row carries none
+test/integration/sidebar.integration.test.ts:row decoration > drops a closed row from the rail rather than receding it
+test/integration/sidebar.integration.test.ts:row decoration > hoists a closed row's live child into its place
+test/integration/sidebar.integration.test.ts:row decoration > does not mark an open row closed
+test/integration/sidebar.integration.test.ts:row decoration > nests a child row inside its parent
+test/integration/sidebar.integration.test.ts:row decoration > draws the recently merged section
+test/integration/sidebar.integration.test.ts:row decoration > draws a merged row in the merged section
+test/integration/sidebar.integration.test.ts:row decoration > draws a merged row inside its repository's group
+test/integration/sidebar.integration.test.ts:row decoration > leaves a collapsed repository's merges out of the band
+test/integration/sidebar.integration.test.ts:the when column > draws the running turn's elapsed time from the turn_running arm
+test/integration/sidebar.integration.test.ts:the when column > draws a relative age from the merged arm
+test/integration/sidebar.integration.test.ts:the when column > counts a running turn up as time passes
+test/integration/sidebar.integration.test.ts:the attention blink cadence > draws the attention marker when the marker is present
+test/integration/sidebar.integration.test.ts:the attention blink cadence > draws no attention marker when it is absent
+test/integration/sidebar.integration.test.ts:the attention blink cadence > goes dark after the first 500 ms
+test/integration/sidebar.integration.test.ts:the attention blink cadence > lights again for the second blink
+test/integration/sidebar.integration.test.ts:the attention blink cadence > goes dark again ending the second blink
+test/integration/sidebar.integration.test.ts:the attention blink cadence > settles steady after exactly two blinks
+test/integration/sidebar.integration.test.ts:selecting a workspace > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:selecting a workspace > makes no other call for a cross-workspace click
+test/integration/sidebar.integration.test.ts:the 'open' verb > calls its own rpc
+test/integration/sidebar.integration.test.ts:the 'open' verb > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the 'close' verb > calls its own rpc
+test/integration/sidebar.integration.test.ts:the 'close' verb > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the 'nuke' verb > calls its own rpc
+test/integration/sidebar.integration.test.ts:the 'nuke' verb > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the 'merge' verb > calls its own rpc
+test/integration/sidebar.integration.test.ts:the 'merge' verb > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the 'restart' verb > calls its own rpc
+test/integration/sidebar.integration.test.ts:the 'restart' verb > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the 'priority' verb > calls its own rpc
+test/integration/sidebar.integration.test.ts:the 'priority' verb > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the merge verb's source > asks to merge the row's own branch, closing it once it lands
+test/integration/sidebar.integration.test.ts:the task verbs > calls UpdateTask with the set_title change
+test/integration/sidebar.integration.test.ts:the task verbs > calls UpdateTask with the set_done change
+test/integration/sidebar.integration.test.ts:the task verbs > calls UpdateTask with the set_open change
+test/integration/sidebar.integration.test.ts:the task verbs > echoes the task's own TaskRef on an update
+test/integration/sidebar.integration.test.ts:the task verbs > calls AssignWorkspaceTask with a task when one is picked
+test/integration/sidebar.integration.test.ts:the task verbs > calls AssignWorkspaceTask with no task to unassign
+test/integration/sidebar.integration.test.ts:the task verbs > echoes the workspace on an assignment
+test/integration/sidebar.integration.test.ts:the restart > calls RestartWorkspace
+test/integration/sidebar.integration.test.ts:the restart > echoes the row's own WorkspaceRef
+test/integration/sidebar.integration.test.ts:the preferences a page once stored > never pick the grouping: the daemon's is drawn
+test/integration/sidebar.integration.test.ts:the preferences a page once stored > are dropped from storage
+test/integration/sidebar.integration.test.ts:the preferences a page once stored > still let the rail draw when reading storage throws
+test/integration/sidebar.integration.test.ts:a roster with no current workspace > highlights no row
+test/integration/sidebar.integration.test.ts:a roster with no current workspace > still highlights the row whose own flag says it is current
+test/integration/sidebar.integration.test.ts:a task section's done check > draws the done state the header carries
+test/integration/sidebar.integration.test.ts:a task section's done check > offers the reopen change on a done task
+test/integration/sidebar.integration.test.ts:a task section's done check > offers the complete change on an open task
+test/integration/topbar.integration.test.ts:the connectivity glyph's session dropdown > opens agent-repl's session below the strip from the glyph
+test/integration/topbar.integration.test.ts:the connectivity glyph's session dropdown > states what began the session
+test/integration/topbar.integration.test.ts:the connectivity glyph's session dropdown > carries a newer push's session into the dropdown the reader has open
+test/integration/topbar.integration.test.ts:the connectivity glyph's session dropdown > opens the account options from a glyph that carries no session
+test/integration/topbar.integration.test.ts:the title and session line > reveals the session line below the strip
+test/integration/topbar.integration.test.ts:the title and session line > keeps the whole line on the glass when the account root is long
+test/integration/topbar.integration.test.ts:the title and session line > opens the session reveal downward, below the strip
+test/integration/topbar.integration.test.ts:the title and session line > carries the rotated session identity into a reveal the reader already had open
+test/integration/topbar.integration.test.ts:the title and session line > does not leave the pre-rotation session identity in the open reveal
+test/integration/topbar.integration.test.ts:the title and session line > does not open the session reveal above the strip
+test/integration/topbar.integration.test.ts:the account chip > draws the email when logged in
+test/integration/topbar.integration.test.ts:the account chip > carries the logged-in arm
+test/integration/topbar.integration.test.ts:the account chip > carries the logged-out arm
+test/integration/topbar.integration.test.ts:the account chip > draws logged out as a warning state
+test/integration/topbar.integration.test.ts:the account chip > does not draw the logged-in chip as a warning
+test/integration/topbar.integration.test.ts:connectivity > draws the served tone verbatim
+test/integration/topbar.integration.test.ts:connectivity > draws the served glyph verbatim
+test/integration/topbar.integration.test.ts:connectivity > draws the served title verbatim
+test/integration/topbar.integration.test.ts:connectivity > refuses a tone the vocabulary does not declare
+test/integration/topbar.integration.test.ts:connectivity > accepts the none tone the vocabulary declares
+test/integration/topbar.integration.test.ts:connectivity > accepts the blue tone the vocabulary declares
+test/integration/topbar.integration.test.ts:connectivity > accepts the purple tone the vocabulary declares
+test/integration/topbar.integration.test.ts:connectivity > accepts the red tone the vocabulary declares
+test/integration/topbar.integration.test.ts:connectivity > accepts the yellow tone the vocabulary declares
+test/integration/topbar.integration.test.ts:connectivity > accepts the green tone the vocabulary declares
+test/integration/topbar.integration.test.ts:the model selector > draws the selected option's display name
+test/integration/topbar.integration.test.ts:the model selector > names the model in force by the served AgentModel, not by the label drawn
+test/integration/topbar.integration.test.ts:the model selector > marks the offered row that the served selection names
+test/integration/topbar.integration.test.ts:the model selector > lists exactly the options the view carries
+test/integration/topbar.integration.test.ts:the model selector > draws each option's description verbatim
+test/integration/topbar.integration.test.ts:the model selector > echoes the workspace on the model call
+test/integration/topbar.integration.test.ts:the model selector > draws the refusal at the picker
+test/integration/topbar.integration.test.ts:the model selector > carries the refused arm at the picker
+test/integration/topbar.integration.test.ts:the model selector > reports a malformed view for an error with no cause
+test/integration/topbar.integration.test.ts:the model selector > draws no refusal for an error with no cause
+test/integration/topbar.integration.test.ts:the model selector > opens the model reveal downward
+test/integration/topbar.integration.test.ts:the effort selector > is drawn between the model selector and the permission-mode picker
+test/integration/topbar.integration.test.ts:the effort selector > draws the level in force by its display name
+test/integration/topbar.integration.test.ts:the effort selector > lists exactly the levels the view carries
+test/integration/topbar.integration.test.ts:the effort selector > calls SetEffort echoing the option's own level
+test/integration/topbar.integration.test.ts:the effort selector > puts no row in the feed for a pick
+test/integration/topbar.integration.test.ts:the effort selector > carries the refused arm at the selector
+test/integration/topbar.integration.test.ts:the effort selector > draws a dash with no dropdown for a model that takes no level
+test/integration/topbar.integration.test.ts:the effort selector > draws the no-session dash when the view carries no selector
+test/integration/topbar.integration.test.ts:the effort selector > carries the owner's hover copy on both selectors
+test/integration/topbar.integration.test.ts:the permission-mode picker > draws the current mode's display name
+test/integration/topbar.integration.test.ts:the permission-mode picker > lists exactly the options the view carries
+test/integration/topbar.integration.test.ts:the permission-mode picker > offers no default option
+test/integration/topbar.integration.test.ts:the permission-mode picker > lists auto first
+test/integration/topbar.integration.test.ts:the permission-mode picker > draws a live default as the current mode without offering it
+test/integration/topbar.integration.test.ts:the permission-mode picker > draws each option's display name verbatim
+test/integration/topbar.integration.test.ts:the permission-mode picker > calls SetPermissionMode echoing the option's own mode string
+test/integration/topbar.integration.test.ts:the permission-mode picker > draws the refusal at the mode button
+test/integration/topbar.integration.test.ts:the permission-mode picker > carries the refused arm at the mode button
+test/integration/topbar.integration.test.ts:the permission-mode picker > reports a malformed view for an error with no cause
+test/integration/topbar.integration.test.ts:the context chip > draws the served figure verbatim
+test/integration/topbar.integration.test.ts:the context chip > paints the figure by its window fill with the REAL stylesheet over the whole strip
+test/integration/topbar.integration.test.ts:the context chip > reveals the breakdown's section heading verbatim
+test/integration/topbar.integration.test.ts:the context chip > reveals every breakdown row's label verbatim
+test/integration/topbar.integration.test.ts:the context chip > draws the share when the row carries one
+test/integration/topbar.integration.test.ts:the context chip > omits the share when the row carries none
+test/integration/topbar.integration.test.ts:the context chip > marks the emphasized row
+test/integration/topbar.integration.test.ts:the context chip > indents a row by its served depth
+test/integration/topbar.integration.test.ts:the warning strip > draws no strip for an empty warning list
+test/integration/topbar.integration.test.ts:the warning strip > draws the strip once a warning arrives
+test/integration/topbar.integration.test.ts:the warning strip > draws the accounting warning's line verbatim
+test/integration/topbar.integration.test.ts:the warning strip > draws the unmodeledTool warning's line verbatim
+test/integration/topbar.integration.test.ts:the warning strip > draws the detachedUnmodeled warning's line verbatim
+test/integration/topbar.integration.test.ts:the warning strip > draws the sessionFault warning's line verbatim
+test/integration/topbar.integration.test.ts:the warning strip > draws the degradedWindow warning's line verbatim
+test/integration/topbar.integration.test.ts:the warning strip > draws the deployFailed warning's line verbatim
+test/integration/topbar.integration.test.ts:the warning strip > carries the accounting arm on its list row
+test/integration/topbar.integration.test.ts:the warning strip > carries the unmodeledTool arm on its list row
+test/integration/topbar.integration.test.ts:the warning strip > carries the detachedUnmodeled arm on its list row
+test/integration/topbar.integration.test.ts:the warning strip > carries the sessionFault arm on its list row
+test/integration/topbar.integration.test.ts:the warning strip > carries the degradedWindow arm on its list row
+test/integration/topbar.integration.test.ts:the warning strip > carries the deployFailed arm on its list row
+test/integration/topbar.integration.test.ts:the warning strip > draws every warning in the list
+test/integration/topbar.integration.test.ts:the warning strip > draws the reveal below the strip
+test/integration/topbar.integration.test.ts:the 'accounting' warning's detail > opens on the list row
+test/integration/topbar.integration.test.ts:the 'accounting' warning's detail > draws its own evidence verbatim
+test/integration/topbar.integration.test.ts:the 'unmodeledTool' warning's detail > opens on the list row
+test/integration/topbar.integration.test.ts:the 'unmodeledTool' warning's detail > draws its own evidence verbatim
+test/integration/topbar.integration.test.ts:the 'detachedUnmodeled' warning's detail > opens on the list row
+test/integration/topbar.integration.test.ts:the 'detachedUnmodeled' warning's detail > draws its own evidence verbatim
+test/integration/topbar.integration.test.ts:the 'sessionFault' warning's detail > opens on the list row
+test/integration/topbar.integration.test.ts:the 'sessionFault' warning's detail > draws its own evidence verbatim
+test/integration/topbar.integration.test.ts:the 'degradedWindow' warning's detail > opens on the list row
+test/integration/topbar.integration.test.ts:the 'degradedWindow' warning's detail > draws its own evidence verbatim
+test/integration/topbar.integration.test.ts:the 'deployFailed' warning's detail > opens on the list row
+test/integration/topbar.integration.test.ts:the 'deployFailed' warning's detail > draws its own evidence verbatim
+test/integration/topbar.integration.test.ts:the session-fault detail > draws the faulted component verbatim beside the detail
+test/integration/topbar.integration.test.ts:the failed-deploy detail > draws what became of the install beside the step
+test/integration/topbar.integration.test.ts:the failed-deploy detail > is logged to the daemon at ERROR when it first appears on the page
+test/integration/topbar.integration.test.ts:the unmodeled-tool detail > draws every argument line verbatim
+test/integration/topbar.integration.test.ts:the degraded-window detail > ticks while the window is open
+test/integration/topbar.integration.test.ts:the degraded-window detail > draws a settled extent rather than ticking once closed
+test/integration/topbar.integration.test.ts:the degraded-window detail > draws the closed window's dropped count verbatim
+test/integration/topbar.integration.test.ts:the login terminal > calls OpenLogin when a root with no login is picked
+test/integration/topbar.integration.test.ts:the login terminal > calls no OpenLogin for the cell's own click
+test/integration/topbar.integration.test.ts:the login terminal > opens the options dropdown from the cell's own click
+test/integration/topbar.integration.test.ts:the login terminal > opens the overlay
+test/integration/topbar.integration.test.ts:the login terminal > does not open the overlay for a root that holds a login
+test/integration/topbar.integration.test.ts:the login terminal > echoes the picked root's config dir verbatim
+test/integration/topbar.integration.test.ts:the login terminal > opens the login flow for a picked root that holds none
+test/integration/topbar.integration.test.ts:the login terminal > draws the replayed scrollback into the terminal
+test/integration/topbar.integration.test.ts:the login terminal > draws a live byte push into the terminal
+test/integration/topbar.integration.test.ts:the login terminal > sends a keystroke as SendLoginInput's keystrokes arm
+test/integration/topbar.integration.test.ts:the login terminal > sends a resize as SendLoginInput's resize arm
+test/integration/topbar.integration.test.ts:the login terminal > echoes the workspace on every login input
+test/integration/topbar.integration.test.ts:the login terminal > closes the overlay on the terminal's closed frame
+test/integration/topbar.integration.test.ts:the login terminal > reports no transport failure for a closed frame
+test/integration/topbar.integration.test.ts:the login terminal > calls CloseLogin when the close button is clicked
+test/integration/topbar.integration.test.ts:the login terminal > hides the overlay when the close button is clicked
+test/integration/topbar.integration.test.ts:the login terminal > cancels the terminal stream when the overlay closes
+test/integration/topbar.integration.test.ts:the warning strip's omission > removes the strip when the next push carries no warnings
+test/integration/topbar.integration.test.ts:the warning strip's omission > drops a warning the next push omits
+test/integration/topbar.integration.test.ts:the warning strip's omission > closes the reveal along with the strip it belonged to
+test/integration/topbar.integration.test.ts:the warning strip's omission > draws the strip again when a warning comes back
+test/integration/topbar.integration.test.ts:the warning strip's omission > reports no failure for an empty warning list
+test/integration/topbar.integration.test.ts:the model selector with nothing selected > draws the placeholder
+test/integration/topbar.integration.test.ts:the model selector with nothing selected > marks the chip as unselected
+test/integration/topbar.integration.test.ts:the model selector with nothing selected > names no model at all
+test/integration/topbar.integration.test.ts:the model selector with nothing selected > still lists every option the view carries
+test/integration/topbar.integration.test.ts:the model selector with nothing selected > does not mark a selected chip as unselected
+test/integration/topbar.integration.test.ts:the detached-unmodeled detail > names the tool that is still running
+test/integration/topbar.integration.test.ts:the detached-unmodeled detail > reads its age from the served start instant
+test/integration/topbar.integration.test.ts:the detached-unmodeled detail > ticks the age while the detail stands open
+test/integration/topbar.integration.test.ts:the strip's spacing > sizes each flank track to its own group
+test/integration/topbar.integration.test.ts:the strip's spacing > gives the title the space between the two groups and no more
+test/integration/topbar.integration.test.ts:the strip's spacing > centers the title's text inside that middle track
+test/integration/topbar.integration.test.ts:the strip's spacing > draws the title between the two flank groups
+test/integration/topbar.integration.test.ts:the strip's spacing > lets the wide right group compress into its track
+test/integration/failures.integration.test.ts:the client-local failure vocabulary > names exactly the arms the failure schema declares as client-local
+test/integration/failures.integration.test.ts:the client-local failure vocabulary > assigns the client-local side a color the palette declares
+test/integration/failures.integration.test.ts:the workspaceGone failure > lists its own arm in the topbar's warning chip
+test/integration/failures.integration.test.ts:the workspaceGone failure > retracts when the arm is retracted
+test/integration/failures.integration.test.ts:the bootFailed failure > lists its own arm in the topbar's warning chip
+test/integration/failures.integration.test.ts:the bootFailed failure > retracts when the arm is retracted
+test/integration/failures.integration.test.ts:the controlPlaneFailed failure > lists its own arm in the topbar's warning chip
+test/integration/failures.integration.test.ts:the controlPlaneFailed failure > retracts when the arm is retracted
+test/integration/failures.integration.test.ts:the frameUndecodable failure > lists its own arm in the topbar's warning chip
+test/integration/failures.integration.test.ts:the frameUndecodable failure > retracts when the arm is retracted
+test/integration/failures.integration.test.ts:the staleBundle failure > lists its own arm in the topbar's warning chip
+test/integration/failures.integration.test.ts:the staleBundle failure > retracts when the arm is retracted
+test/integration/failures.integration.test.ts:failure evidence > draws the controlPlaneFailed arm's evidence verbatim
+test/integration/failures.integration.test.ts:failure evidence > draws the frameUndecodable arm's evidence verbatim
+test/integration/failures.integration.test.ts:turn error arms > covers every arm the contract declares
+test/integration/failures.integration.test.ts:turn error arms > draws the rateLimited arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the overloaded arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the authenticationFailed arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the permissionDenied arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the invalidRequest arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the requestTooLarge arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the notFound arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the vendorUnmodeled arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the maxTokens arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the refusal arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the queryDied arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the billingError arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the modelNotFound arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the oauthOrgNotAllowed arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the maxOutputTokens arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the maxTurns arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the maxBudget arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the executionError arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the turnFailed arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the stopHookPrevented arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the agentProcessDied arm distinctly
+test/integration/failures.integration.test.ts:turn error arms > draws the rateLimited arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the overloaded arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the authenticationFailed arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the permissionDenied arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the invalidRequest arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the requestTooLarge arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the notFound arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the internal arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the vendorUnmodeled arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the maxTokens arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the refusal arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the billingError arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the modelNotFound arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the oauthOrgNotAllowed arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the maxOutputTokens arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the maxTurns arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the maxBudget arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the executionError arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the turnFailed arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the stopHookPrevented arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > draws the agentProcessDied arm as the outcome marker the daemon composed
+test/integration/failures.integration.test.ts:turn error arms > carries the rateLimited arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the overloaded arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the authenticationFailed arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the permissionDenied arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the invalidRequest arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the requestTooLarge arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the notFound arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the internal arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the vendorUnmodeled arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the maxTokens arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the refusal arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the billingError arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the modelNotFound arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the oauthOrgNotAllowed arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the maxOutputTokens arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the maxTurns arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the maxBudget arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the executionError arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:turn error arms > carries the turnFailed arm's vendor message verbatim in the marker's expansion
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the rateLimited ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the overloaded ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the authenticationFailed ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the permissionDenied ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the invalidRequest ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the requestTooLarge ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the notFound ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the internal ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the vendorUnmodeled ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the maxTokens ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the refusal ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the queryDied ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the billingError ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the modelNotFound ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the oauthOrgNotAllowed ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the maxOutputTokens ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the maxTurns ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the maxBudget ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the executionError ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the turnFailed ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the stopHookPrevented ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws no bubble for the agentProcessDied ending
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the rateLimited ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the overloaded ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the authenticationFailed ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the permissionDenied ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the invalidRequest ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the requestTooLarge ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the notFound ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the internal ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the vendorUnmodeled ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the maxTokens ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the refusal ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the queryDied ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the billingError ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the modelNotFound ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the oauthOrgNotAllowed ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the maxOutputTokens ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the maxTurns ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the maxBudget ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the executionError ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the turnFailed ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the stopHookPrevented ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > paints the agentProcessDied ending's marker with its family
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws the neutral interrupted marker for an interrupted turn
+test/integration/failures.integration.test.ts:the outcome marker replaces the ended-turn bubble (owner ruling 2026-10-06) > draws nothing for a normal completed turn
+test/integration/failures.integration.test.ts:the rateLimited arm's retry countdown > counts down to the served instant in the marker's expansion
+test/integration/failures.integration.test.ts:the rateLimited arm's retry countdown > draws no countdown when the vendor stated no wait
+test/integration/failures.integration.test.ts:the overloaded arm's retry countdown > counts down to the served instant in the marker's expansion
+test/integration/failures.integration.test.ts:the overloaded arm's retry countdown > ticks the countdown down as time passes
+test/integration/failures.integration.test.ts:the overloaded arm's retry countdown > draws no countdown when the vendor stated no wait
+test/integration/failures.integration.test.ts:the two token-limit arms > draws max_tokens (mid-arrival truncation) distinctly
+test/integration/failures.integration.test.ts:the two token-limit arms > draws max_output_tokens (an outright refusal) distinctly
+test/integration/failures.integration.test.ts:the two token-limit arms > reads the two arms differently because the DAEMON worded them differently
+test/integration/failures.integration.test.ts:the unmodeled vendor arm > draws the vendor's own type string verbatim
+test/integration/failures.integration.test.ts:page errors > draws the page error's composed headline verbatim
+test/integration/failures.integration.test.ts:page errors > draws the truncation's own evidence verbatim
+test/integration/footer.integration.test.ts:the status cell > carries the working arm
+test/integration/footer.integration.test.ts:the status cell > carries the waiting arm
+test/integration/footer.integration.test.ts:the status cell > carries the permission arm
+test/integration/footer.integration.test.ts:the status cell > carries the question arm
+test/integration/footer.integration.test.ts:the status cell > carries the interrupted arm
+test/integration/footer.integration.test.ts:the status cell > carries the merging arm
+test/integration/footer.integration.test.ts:the status cell > carries the background arm
+test/integration/footer.integration.test.ts:the status cell > carries the vendorFault arm
+test/integration/footer.integration.test.ts:the status cell > carries the agentReplFault arm
+test/integration/footer.integration.test.ts:the status cell > carries the starting arm
+test/integration/footer.integration.test.ts:the status cell > carries the networkFault arm
+test/integration/footer.integration.test.ts:the status cell > carries the closing arm
+test/integration/footer.integration.test.ts:the status cell > carries the loading arm
+test/integration/footer.integration.test.ts:the status cell > carries the mergeFailed arm
+test/integration/footer.integration.test.ts:the status cell > carries the merged arm
+test/integration/footer.integration.test.ts:the status cell > carries the turnFailed arm
+test/integration/footer.integration.test.ts:the status cell > carries the degraded arm
+test/integration/footer.integration.test.ts:the status cell > paints the idle arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the working arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the waiting arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the permission arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the question arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the interrupted arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the merging arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the background arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the vendorFault arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the agentReplFault arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the starting arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the networkFault arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the closing arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the loading arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the mergeFailed arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the merged arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the turnFailed arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > paints the degraded arm the vocabulary's color
+test/integration/footer.integration.test.ts:the status cell > reads a single-word arm lowercase
+test/integration/footer.integration.test.ts:the status cell > reads a compound substatus arm as lowercase words separated by spaces
+test/integration/footer.integration.test.ts:the status cell > reads the conflict resolution merging substatus as two words
+test/integration/footer.integration.test.ts:the status cell > reads the host-shutdown interrupt substatus as words
+test/integration/footer.integration.test.ts:substatuses > draws 'idle'/'ready'
+test/integration/footer.integration.test.ts:substatuses > draws 'idle'/'done'
+test/integration/footer.integration.test.ts:substatuses > draws 'idle'/'turnFailed'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'submitting'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'thinking'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'clearing'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'compacting'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'executing'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'reading'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'writing'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'searching'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'fetching'
+test/integration/footer.integration.test.ts:substatuses > draws 'working'/'delegating'
+test/integration/footer.integration.test.ts:substatuses > draws 'waiting'/'wakeup'
+test/integration/footer.integration.test.ts:substatuses > draws 'waiting'/'coldGate'
+test/integration/footer.integration.test.ts:substatuses > draws 'waiting'/'interrupting'
+test/integration/footer.integration.test.ts:substatuses > draws 'interrupted'/'byUser'
+test/integration/footer.integration.test.ts:substatuses > draws 'interrupted'/'hostShutdown'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'enqueued'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'preprocessing'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'rebasing'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'conflictResolution'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'testing'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'fixing'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'committing'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'updatingMain'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'postprocessing'
+test/integration/footer.integration.test.ts:substatuses > draws 'merging'/'waitingOnUser'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'auth'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'usageLimit'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'vendorError'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'billing'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'queryDied'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'vendorRetry'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'vendorRejection'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'vendorFailed'
+test/integration/footer.integration.test.ts:substatuses > draws 'vendorFault'/'apiRetrying'
+test/integration/footer.integration.test.ts:substatuses > draws 'agentReplFault'/'degraded'
+test/integration/footer.integration.test.ts:substatuses > draws 'agentReplFault'/'severed'
+test/integration/footer.integration.test.ts:substatuses > draws 'agentReplFault'/'dead'
+test/integration/footer.integration.test.ts:substatuses > draws 'agentReplFault'/'startFailed'
+test/integration/footer.integration.test.ts:substatuses > draws 'agentReplFault'/'daemonImpaired'
+test/integration/footer.integration.test.ts:substatuses > draws 'networkFault'/'offline'
+test/integration/footer.integration.test.ts:substatuses > draws 'closing'/'blocked'
+test/integration/footer.integration.test.ts:substatuses > draws 'loading'/'memory'
+test/integration/footer.integration.test.ts:substatuses > draws 'loading'/'invoked'
+test/integration/footer.integration.test.ts:substatuses > draws 'loading'/'discovered'
+test/integration/footer.integration.test.ts:substatuses > draws 'loading'/'listing'
+test/integration/footer.integration.test.ts:substatuses > draws 'mergeFailed'/'conflicts'
+test/integration/footer.integration.test.ts:substatuses > draws 'mergeFailed'/'tests'
+test/integration/footer.integration.test.ts:substatuses > draws 'mergeFailed'/'other'
+test/integration/footer.integration.test.ts:substatuses > draws 'degraded'/'observation'
+test/integration/footer.integration.test.ts:substatuses > draws 'degraded'/'stateUnreported'
+test/integration/footer.integration.test.ts:substatuses > merges the status into the status cell when the arm has no substatus
+test/integration/footer.integration.test.ts:substatuses > still names the status when there is no substatus to merge
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'enqueued' as ''enqueued 2/5''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'preprocessing' as ''preprocessing''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'rebasing' as ''rebasing 3/7''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'conflictResolution' as ''conflict resolution''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'testing' as ''testing''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'fixing' as ''fixing attempt 2/3''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'committing' as ''committing''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'updatingMain' as ''updating main''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'postprocessing' as ''postprocessing''
+test/integration/footer.integration.test.ts:substatuses > reads 'merging'/'waitingOnUser' as ''waiting on user''
+test/integration/footer.integration.test.ts:substatuses > reads 'mergeFailed'/'conflicts' as ''conflicts''
+test/integration/footer.integration.test.ts:substatuses > reads 'mergeFailed'/'tests' as ''tests''
+test/integration/footer.integration.test.ts:substatuses > reads 'mergeFailed'/'other' as ''merge''
+test/integration/footer.integration.test.ts:substatuses > reads merge failed as its status word
+test/integration/footer.integration.test.ts:substatuses > paints merge failed green, the workspace back with the user
+test/integration/footer.integration.test.ts:the merge step line > draws the 'enqueued' step's line as ''fix-reconnect: testing''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'preprocessing' step's line as ''update the changelog''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'rebasing' step's line as ''git rebase --continue''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'conflictResolution' step's line as ''fix the reconnect loop: 3 files''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'fixing' step's line as ''daemon unit, webapp''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'committing' step's line as ''Merge branch \'ws-1\' into master''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'updatingMain' step's line as ''fast-forwarding to 4f2a1c9''
+test/integration/footer.integration.test.ts:the merge step line > draws the 'postprocessing' step's line as ''deploy it''
+test/integration/footer.integration.test.ts:the merge step line > draws a suite's 'started' edge as ''▶ webapp''
+test/integration/footer.integration.test.ts:the merge step line > draws a suite's 'passed' edge as ''✓ webapp''
+test/integration/footer.integration.test.ts:the merge step line > draws a suite's 'failed' edge as ''✗ webapp''
+test/integration/footer.integration.test.ts:the merge step line > paints a suite's 'passed' edge 'tone-green'
+test/integration/footer.integration.test.ts:the merge step line > paints a suite's 'failed' edge 'tone-red'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'queryDied' salient line under 'idle'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'idle'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'compaction' salient line under 'working'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'retrying' salient line under 'working'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'working'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'working'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'wakeup' salient line under 'waiting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'blockedOnUser' salient line under 'waiting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'coldGateCost' salient line under 'waiting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'interrupting' salient line under 'waiting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'waiting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'waiting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'gatedCall' salient line under 'permission'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'permission'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'permission'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'questionLead' salient line under 'question'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'question'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'question'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'interrupted'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'interrupted'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'mergeStep' salient line under 'merging'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'gatedCall' salient line under 'merging'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'questionLead' salient line under 'merging'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'merging'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'merging'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'background'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'background'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'authenticating' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'fault' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'retrying' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'vendorStart' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'turnEnded' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'vendorFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'startFailed' salient line under 'agentReplFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'fault' salient line under 'agentReplFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'agentReplFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'turnEnded' salient line under 'agentReplFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'agentReplFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'startFailed' salient line under 'starting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'fault' salient line under 'starting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'starting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'starting'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'offline' salient line under 'networkFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'networkFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'networkFault'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'closeBlocked' salient line under 'closing'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'closing'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'closing'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'loading'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'loading'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'mergeStep' salient line under 'mergeFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'gatedCall' salient line under 'mergeFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'questionLead' salient line under 'mergeFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'mergeFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'mergeFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'mergeStep' salient line under 'merged'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'gatedCall' salient line under 'merged'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'questionLead' salient line under 'merged'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'merged'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'merged'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'queryDied' salient line under 'turnFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'turnFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'turnFailed'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'queryDied' salient line under 'degraded'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'update' salient line under 'degraded'
+test/integration/footer.integration.test.ts:the activity cell > draws the 'notification' salient line under 'degraded'
+test/integration/footer.integration.test.ts:the activity cell > draws the task transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the hook transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the contextInjected transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the fault transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the daemonWarning transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the daemonError transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the sessionChange transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the updated transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the networkResume transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the compactionConcluded transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the apiRestored transient over the enduring line
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under idle when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under working when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under interrupted when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under merging when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under background when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under vendorFault when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under agentReplFault when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under starting when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under networkFault when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under closing when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under loading when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under mergeFailed when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under merged when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under turnFailed when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > draws the enduring line under degraded when nothing else stands
+test/integration/footer.integration.test.ts:the activity cell > marks a salient line's tier on the cell
+test/integration/footer.integration.test.ts:the activity cell > marks a live transient's tier on the cell
+test/integration/footer.integration.test.ts:the activity cell > gives way to the enduring line when the transient's expiry passes
+test/integration/footer.integration.test.ts:the activity cell > draws a transient that already lapsed as the enduring line
+test/integration/footer.integration.test.ts:the activity cell > prefixes a subagent's transient with its label
+test/integration/footer.integration.test.ts:the activity cell > draws a failed deploy on the activity line
+test/integration/footer.integration.test.ts:the activity cell > takes a failed deploy off the activity line when the fault closes
+test/integration/footer.integration.test.ts:the activity cell > draws the notification's composed text verbatim
+test/integration/footer.integration.test.ts:the activity cell > draws the dead-query sentence under the turn_failed arm
+test/integration/footer.integration.test.ts:the activity cell > draws the hook's own name verbatim
+test/integration/footer.integration.test.ts:the activity cell > colors the commit updating main fast-forwards to as a typed datum
+test/integration/footer.integration.test.ts:the activity cell > colors a conflict's file count as a typed datum
+test/integration/footer.integration.test.ts:the activity cell > colors the retry attempt as a typed datum
+test/integration/footer.integration.test.ts:the activity cell > paints no tone on the allowed allowance, whose percentage alone is colored
+test/integration/footer.integration.test.ts:the activity cell > paints no tone on the allowedWarning allowance, whose percentage alone is colored
+test/integration/footer.integration.test.ts:the activity cell > paints no tone on the rejected allowance, whose percentage alone is colored
+test/integration/footer.integration.test.ts:the activity cell > draws the allowed allowance verdict as its own arm
+test/integration/footer.integration.test.ts:the activity cell > draws the allowedWarning allowance verdict as its own arm
+test/integration/footer.integration.test.ts:the activity cell > draws the rejected allowance verdict as its own arm
+test/integration/footer.integration.test.ts:the activity cell > draws an allowance with no verdict yet, figures and all
+test/integration/footer.integration.test.ts:the activity cell > gives an unset verdict no arm class at all
+test/integration/footer.integration.test.ts:the activity cell > reports no malformed frame for an unset verdict
+test/integration/footer.integration.test.ts:the activity cell > draws both the session and the weekly allowance
+test/integration/footer.integration.test.ts:the activity cell > marks the session allowance apart from the weekly one
+test/integration/footer.integration.test.ts:the activity cell > counts down the wakeup activity from its served instant
+test/integration/footer.integration.test.ts:the activity cell > draws the wakeup reason verbatim
+test/integration/footer.integration.test.ts:the agents chip's waiting-for-the-API glyph > draws the glyph with the daemon's waiting count
+test/integration/footer.integration.test.ts:the agents chip's waiting-for-the-API glyph > draws no glyph while no agent waits
+test/integration/footer.integration.test.ts:the agents panel's waiting row > draws an agent waiting for the API with its give-up countdown
+test/integration/footer.integration.test.ts:the clock > ticks up from the served turn start
+test/integration/footer.integration.test.ts:the clock > reads as not live when no turn is running
+test/integration/footer.integration.test.ts:the clock > offers no stop control when no turn is running
+test/integration/footer.integration.test.ts:the tokens cell > draws the served figure verbatim
+test/integration/footer.integration.test.ts:the tokens cell > draws the alarm glyph when the alarm marker is present
+test/integration/footer.integration.test.ts:the tokens cell > draws no alarm glyph when the marker is absent
+test/integration/footer.integration.test.ts:the tokens cell > draws the complete verdict badge
+test/integration/footer.integration.test.ts:the tokens cell > draws no badge for the incomplete verdict
+test/integration/footer.integration.test.ts:the tokens cell > draws no badge for the invalid verdict
+test/integration/footer.integration.test.ts:the tokens cell > draws no verdict badge when none is served
+test/integration/footer.integration.test.ts:the live-work chips > draws the agents chip when it is set
+test/integration/footer.integration.test.ts:the live-work chips > draws the tasks chip when it is set
+test/integration/footer.integration.test.ts:the live-work chips > draws the shells chip when it is set
+test/integration/footer.integration.test.ts:the live-work chips > draws the monitors chip when it is set
+test/integration/footer.integration.test.ts:the live-work chips > draws the crons chip when it is set
+test/integration/footer.integration.test.ts:the live-work chips > draws no agents chip when it is unset
+test/integration/footer.integration.test.ts:the live-work chips > draws no tasks chip when it is unset
+test/integration/footer.integration.test.ts:the live-work chips > draws no shells chip when it is unset
+test/integration/footer.integration.test.ts:the live-work chips > draws no monitors chip when it is unset
+test/integration/footer.integration.test.ts:the live-work chips > draws no crons chip when it is unset
+test/integration/footer.integration.test.ts:the live-work chips > draws the agents count verbatim
+test/integration/footer.integration.test.ts:the live-work chips > draws the tasks chip as done over total
+test/integration/footer.integration.test.ts:the live-work chips > does not derive a chip count from the feed's rows
+test/integration/footer.integration.test.ts:the expanded panels > opens the tasks panel when its chip is selected
+test/integration/footer.integration.test.ts:the expanded panels > opens the shells panel when its chip is selected
+test/integration/footer.integration.test.ts:the expanded panels > opens the monitors panel when its chip is selected
+test/integration/footer.integration.test.ts:the expanded panels > opens the crons panel when its chip is selected
+test/integration/footer.integration.test.ts:the expanded panels > opens ONLY the agents panel
+test/integration/footer.integration.test.ts:the expanded panels > opens ONLY the tasks panel
+test/integration/footer.integration.test.ts:the expanded panels > opens ONLY the shells panel
+test/integration/footer.integration.test.ts:the expanded panels > opens ONLY the monitors panel
+test/integration/footer.integration.test.ts:the expanded panels > opens ONLY the crons panel
+test/integration/footer.integration.test.ts:the expanded panels > costs no round trip to open a panel
+test/integration/footer.integration.test.ts:the expanded panels > draws no panel before a chip is selected
+test/integration/footer.integration.test.ts:the expanded panels > names every panel the strip can open
+test/integration/footer.integration.test.ts:the expanded panels > draws every tokens line verbatim
+test/integration/footer.integration.test.ts:the expanded panels > draws the tokens panel's context growth verbatim
+test/integration/footer.integration.test.ts:the expanded panels > draws every agent's share in the tokens panel
+test/integration/footer.integration.test.ts:the expanded panels > opens the tokens panel from the idle cell's stated dash
+test/integration/footer.integration.test.ts:the expanded panels > draws the tokens panel's verdict text verbatim
+test/integration/footer.integration.test.ts:the expanded panels > draws every agents row
+test/integration/footer.integration.test.ts:the expanded panels > draws every task row's status arm
+test/integration/footer.integration.test.ts:the expanded panels > draws the running task's active form verbatim
+test/integration/footer.integration.test.ts:the expanded panels > draws the shells panel's command verbatim
+test/integration/footer.integration.test.ts:the expanded panels > draws the monitors panel's description verbatim
+test/integration/footer.integration.test.ts:the expanded panels > draws the crons panel's schedule and prompt verbatim
+test/integration/footer.integration.test.ts:the expanded panels > counts the cron's next fire down as time passes
+test/integration/footer.integration.test.ts:the expanded panels > counts the monitor's runtime up as time passes
+test/integration/footer.integration.test.ts:panel jump rows > makes the agents row a jump target for its served FeedId
+test/integration/footer.integration.test.ts:panel jump rows > makes the shells row a jump target for its served FeedId
+test/integration/footer.integration.test.ts:panel jump rows > says not on screen when an unplaced monitor's row is clicked
+test/integration/footer.integration.test.ts:panel jump rows > makes no jump target of a cron row
+test/integration/footer.integration.test.ts:panel jump rows > makes no jump target of a task row
+test/integration/footer.integration.test.ts:the turn stop > echoes the page's own workspace
+test/integration/footer.integration.test.ts:the turn stop > draws the interrupted-turn outcome as a note, not a refusal
+test/integration/footer.integration.test.ts:the turn stop > draws no refusal for an interrupted turn
+test/integration/footer.integration.test.ts:the turn stop > draws the nothing-running outcome as a note
+test/integration/footer.integration.test.ts:the turn stop > draws no refusal for a nothing-running answer
+test/integration/footer.integration.test.ts:the turn stop > draws no refusal for a merge-queue-question answer
+test/integration/footer.integration.test.ts:the turn stop > covers every Interrupt success outcome
+test/integration/footer.integration.test.ts:the agents panel's stop-all > draws the count the daemon reported
+test/integration/footer.integration.test.ts:the agents panel's stop-all > draws no refusal for an interrupted-detached answer
+test/integration/footer.integration.test.ts:the agents panel's stop-all > keeps the count on the control when the next footer push lands
+test/integration/footer.integration.test.ts:the agents panel's stop-all > keeps a refusal on the control when the next footer push lands
+test/integration/footer.integration.test.ts:the agents panel's stop-all > offers no confirm step on the fan-wide target
+test/integration/footer.integration.test.ts:the agents panel's stop-all > draws the challenge arm as an ordinary refusal on the fan-wide target
+test/integration/footer.integration.test.ts:the remembered panel > stores the panel a chip opened
+test/integration/footer.integration.test.ts:the remembered panel > forgets the panel when it is closed again
+test/integration/footer.integration.test.ts:the remembered panel > re-opens the stored panel on a fresh mount
+test/integration/footer.integration.test.ts:the remembered panel > opens no panel on a fresh mount with nothing stored
+test/integration/footer.integration.test.ts:the remembered panel > discards a stored value that is not a panel name
+test/integration/footer.integration.test.ts:the remembered panel > still draws the strip when reading storage throws
+test/integration/footer.integration.test.ts:the remembered panel > still opens a panel when writing storage throws
+test/integration/footer.integration.test.ts:the agents panel's runtime clock > counts up from the served start instant
+test/integration/footer.integration.test.ts:the agents panel's runtime clock > grows as time passes
+test/integration/footer.integration.test.ts:the shells panel's runtime clock > counts up from the served start instant
+test/integration/footer.integration.test.ts:the shells panel's runtime clock > grows as time passes
+test/integration/footer.integration.test.ts:the activity line's relative age > reads the age since the served instant
+test/integration/footer.integration.test.ts:the activity line's relative age > grows into minutes as time passes
+test/integration/footer.integration.test.ts:the activity line's relative age > truncates rather than rounding the second level
+test/integration/footer.integration.test.ts:a jump into a rendered shell row > lands on the row that is already drawn
+test/integration/footer.integration.test.ts:a jump into a rendered shell row > asks the daemon nothing to get there
+test/integration/footer.integration.test.ts:a jump into a monitor's tool-call card > lands on the monitor's card
+test/integration/footer.integration.test.ts:a jump into a monitor's tool-call card > rings the monitor's card with the selected-entry mark
+test/integration/footer.integration.test.ts:a jump into a monitor's tool-call card > draws no not-on-screen notice for a card it reached
+test/integration/footer.integration.test.ts:a jump whose target is not drawn > leaves the feed as it was
+test/integration/footer.integration.test.ts:a jump whose target is not drawn > says so at the row rather than doing nothing
+test/integration/footer.integration.test.ts:the usage line the strip cannot fit > draws no reading age on the enduring line
+test/integration/footer.integration.test.ts:the usage line the strip cannot fit > draws no usage-unread cell any more
+test/integration/footer.integration.test.ts:the usage line the strip cannot fit > leads the strip's figures with the newsworthy window
+test/integration/footer.integration.test.ts:the usage line the strip cannot fit > titles the activity cell with the whole line
+test/integration/footer.integration.test.ts:the usage line the strip cannot fit > carries the weekly window into the tokens sheet
+test/integration/refusals.integration.test.ts:SubmitPrompt refused while merging > preserves the submitted text so nothing is lost
+test/integration/refusals.integration.test.ts:SubmitPrompt refused by the cold gate > labels the refusal with the cold-gate arm
+test/integration/refusals.integration.test.ts:SubmitPrompt refused by the cold gate > says the session is parked at its gate rather than missing
+test/integration/refusals.integration.test.ts:SubmitPrompt refused by the cold gate > preserves the submitted text so nothing is lost
+test/integration/refusals.integration.test.ts:Interrupt refused for confirmation > names the live agent count the daemon reported
+test/integration/refusals.integration.test.ts:Interrupt refused for confirmation > resends with confirm_agents set when the confirmation is taken
+test/integration/refusals.integration.test.ts:Interrupt refused for confirmation > sends the first interrupt without confirm_agents
+test/integration/refusals.integration.test.ts:'SetModel''s unset error cause > draws no refusal at the call site
+test/integration/refusals.integration.test.ts:'AnswerPermission''s unset error cause > reports a malformed view rather than inventing a refusal
+test/integration/refusals.integration.test.ts:'AnswerPermission''s unset error cause > draws no refusal at the call site
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s unset error cause > reports a malformed view rather than inventing a refusal
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s unset error cause > draws no refusal at the call site
+test/integration/refusals.integration.test.ts:a response with no result arm > is a malformed view rather than a refusal
+test/integration/refusals.integration.test.ts:a response with no result arm > draws no refusal for a malformed response
+test/integration/refusals.integration.test.ts:a transport failure on a unary call > recovers on the next click
+test/integration/refusals.integration.test.ts:'SubmitPrompt''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'SubmitPrompt''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'SubmitPrompt''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'Interrupt''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'Interrupt''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'Interrupt''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerPermission''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerPermission''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerPermission''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'UpdateQuestionDraft''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'UpdateQuestionDraft''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'UpdateQuestionDraft''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerColdGate''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerColdGate''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerColdGate''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerMergeQueueOffer''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerMergeQueueOffer''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'AnswerMergeQueueOffer''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'CloseWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'CloseWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'CloseWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'KillWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'KillWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'KillWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'NukeWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'NukeWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'NukeWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'MergeWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'MergeWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'MergeWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'RestartWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'RestartWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'RestartWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'OpenWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'OpenWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'OpenWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'SetWorkspacePriority''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'SetWorkspacePriority''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'SetWorkspacePriority''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'SelectWorkspace''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'SelectWorkspace''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'SelectWorkspace''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'AssignWorkspaceTask''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'AssignWorkspaceTask''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'AssignWorkspaceTask''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'SetModel''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'SetModel''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'SetModel''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'SetPermissionMode''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'SetPermissionMode''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'SetPermissionMode''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'OpenLogin''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'OpenLogin''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'OpenLogin''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'SelectAccount''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'SelectAccount''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'SelectAccount''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'OpenExternal''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'OpenExternal''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'OpenExternal''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'OpenInEditor''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'OpenInEditor''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'OpenInEditor''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'RequestCommandSupport''s typed refusals > draws the workspaceRefMismatch arm at its call site
+test/integration/refusals.integration.test.ts:'RequestCommandSupport''s typed refusals > draws the transferringAway arm at its call site
+test/integration/refusals.integration.test.ts:'RequestCommandSupport''s typed refusals > draws the notYetAdopted arm at its call site
+test/integration/refusals.integration.test.ts:'SubmitPrompt''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'Interrupt''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'AnswerPermission''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'UpdateQuestionDraft''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'AnswerColdGate''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'AnswerMergeQueueOffer''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'CloseWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'KillWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'NukeWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'MergeWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'RestartWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'OpenWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'SetWorkspacePriority''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'SelectWorkspace''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'AssignWorkspaceTask''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'SetModel''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'SetPermissionMode''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'OpenLogin''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'SelectAccount''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'OpenExternal''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'OpenInEditor''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'RequestCommandSupport''s typed refusals > draws the registry dir the ref-mismatch arm carries
+test/integration/refusals.integration.test.ts:'SubmitPrompt''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'Interrupt''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'AnswerPermission''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'UpdateQuestionDraft''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'AnswerColdGate''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'AnswerMergeQueueOffer''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'CloseWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'KillWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'NukeWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'MergeWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'RestartWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'OpenWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'SetWorkspacePriority''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'SelectWorkspace''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'AssignWorkspaceTask''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'SetModel''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'SetPermissionMode''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'OpenLogin''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'SelectAccount''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'OpenExternal''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'OpenInEditor''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'RequestCommandSupport''s typed refusals > draws the address the transferring-away arm carries
+test/integration/refusals.integration.test.ts:'Interrupt''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'AnswerPermission''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'UpdateQuestionDraft''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'AnswerColdGate''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'UpdateHeldPrompt''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'AnswerMergeQueueOffer''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'CloseWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'KillWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'NukeWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'MergeWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'RestartWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'OpenWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'SetWorkspacePriority''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'SelectWorkspace''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'AssignWorkspaceTask''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'SetModel''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'SetPermissionMode''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'OpenLogin''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'SelectAccount''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'OpenExternal''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'OpenInEditor''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:'RequestCommandSupport''s typed refusals > draws no refusal in the feed for a control outside it
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'merging' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'feedNotInWorkspace' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'feedUndecodable' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'duplicateSubmission' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'bubbleRefused' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'coldGate' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'modelNotInCatalog' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'modelRefused' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SubmitPrompt''s 'askNotStanding' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'Interrupt''s 'confirmRequired' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'Interrupt''s 'notDetachedWork' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'Interrupt''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'Interrupt''s 'shimRefused' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'Interrupt''s 'notMergeTab' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerPermission''s 'askNotStanding' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerPermission''s 'noStandingOffer' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerPermission''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateQuestionDraft''s 'askNotStanding' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateQuestionDraft''s 'unservedValue' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateQuestionDraft''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerColdGate''s 'noColdGate' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerColdGate''s 'unservedRemediation' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerColdGate''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerColdGate''s 'reopenFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateHeldPrompt''s 'noSuchHold' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateHeldPrompt''s 'alreadyDelivered' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateHeldPrompt''s 'releaseRefused' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'UpdateHeldPrompt''s 'beingDelivered' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AnswerMergeQueueOffer''s 'noOfferStanding' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'CloseWorkspace''s 'blocked' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'NukeWorkspace''s 'gitFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'noLayoutFacts' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'sessionDeleted' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'alreadyQueued' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'alreadyMerging' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'unknownOneShotWorkspace' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'unknownBranch' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'nameTaken' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'branchCheckedOutInRequester' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'versionIncrementRequired' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'MergeWorkspace''s 'versionIncrementUnexpected' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'RestartWorkspace''s 'relaunchFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenWorkspace''s 'sessionDeleted' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenWorkspace''s 'transcriptMissing' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenWorkspace''s 'spawnFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenWorkspace''s 'vendorStartFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenWorkspace''s 'lockHolderUnavailable' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenWorkspace''s 'worktreeUnrestorable' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'AssignWorkspaceTask''s 'unknownTask' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetModel''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetModel''s 'notInCatalog' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetModel''s 'vendorRefused' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetModel''s 'cold' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetPermissionMode''s 'modeNotServed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetPermissionMode''s 'ungatedWithoutConsent' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetPermissionMode''s 'noSession' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SetPermissionMode''s 'vendorRefused' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenLogin''s 'spawnFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'SelectAccount''s 'unknownAccount' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenExternal''s 'invalidUrl' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenExternal''s 'noBrowserConfigured' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenExternal''s 'launchFailed' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenInEditor''s 'pathEscapesWorkspace' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'OpenInEditor''s 'unknownMergeTestLog' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'RequestCommandSupport''s 'blankCommand' arm at its call site
+test/integration/refusals.integration.test.ts:per-rpc refusal arms > draws 'RequestCommandSupport''s 'briefMissing' arm at its call site
+test/integration/refusals.integration.test.ts:SelectWorkspace's standing_down arm > draws nothing at the row, the next daemon taking the selection
+test/integration/refusals.integration.test.ts:a bubble composer's refusal > draws the refusal inside the bubble
+test/integration/refusals.integration.test.ts:a bubble composer's refusal > keeps the bubble's own text
+test/integration/refusals.integration.test.ts:a bubble composer's refusal > draws a cross-cutting arm inside the bubble too
+test/integration/refusals.integration.test.ts:the create-workspace form > echoes the section's own repository
+test/integration/refusals.integration.test.ts:the create-workspace form > sends the standard form by default
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the noSlug arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the forkParentHasNoConversation arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the briefMissing arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the unknownRepository arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the unknownParent arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the baseRefUnresolved arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the worktreeCreationFailed arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the spawnFailed arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the oneShotPolicyMissing arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the namingFailed arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the insideTemporaryDirectory arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the baseRefOffPrimaryBranch arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the unknownForkSource arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the forkSourceHasNoConversation arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > draws the nameReserved arm at the form
+test/integration/refusals.integration.test.ts:the create-workspace form > names the unresolved base ref the arm carries
+test/integration/refusals.integration.test.ts:the create-workspace form > closes the form on a success
+test/integration/refusals.integration.test.ts:the create-workspace form > keeps the form open on a refusal
+test/integration/refusals.integration.test.ts:the task verbs' refusals > draws CreateTask's blankTitle arm at its control
+test/integration/refusals.integration.test.ts:the task verbs' refusals > draws UpdateTask's blankTitle arm at its control
+test/integration/refusals.integration.test.ts:the task verbs' refusals > draws UpdateTask's noChange arm at its control
+test/integration/refusals.integration.test.ts:the task verbs' refusals > draws UpdateTask's unknownTask arm at its control
+test/integration/feed-kinds.integration.test.ts:prompts > draws the user prompt's text verbatim
+test/integration/feed-kinds.integration.test.ts:prompts > draws the agent prompt's address verbatim
+test/integration/feed-kinds.integration.test.ts:a update response > carries its result arm as the state
+test/integration/feed-kinds.integration.test.ts:a update response > draws the usage stamp verbatim
+test/integration/feed-kinds.integration.test.ts:a success response > carries the response unit hook
+test/integration/feed-kinds.integration.test.ts:a success response > carries its result arm as the state
+test/integration/feed-kinds.integration.test.ts:a success response > draws the usage stamp verbatim
+test/integration/feed-kinds.integration.test.ts:a error response > carries the response unit hook
+test/integration/feed-kinds.integration.test.ts:a error response > carries its result arm as the state
+test/integration/feed-kinds.integration.test.ts:a error response > draws the usage stamp verbatim
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > marks the bubble as a notice
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > draws the daemon-composed heading verbatim
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > still draws the prose beneath the heading
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > draws whatever heading the daemon serves
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > carries the notice register on a update response too
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > carries the notice register on a success response too
+test/integration/feed-kinds.integration.test.ts:a response in the notice register > carries the notice register on a error response too
+test/integration/feed-kinds.integration.test.ts:a running tool call > draws the composed input line verbatim
+test/integration/feed-kinds.integration.test.ts:a running tool call > ticks the quiet-for figure from last_progress
+test/integration/feed-kinds.integration.test.ts:a running tool call > grows the quiet-for figure as time passes
+test/integration/feed-kinds.integration.test.ts:a returned tool call with text output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with text output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:a returned tool call with code output > carries the returned outcome
+test/integration/feed-kinds.integration.test.ts:a returned tool call with code output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with code output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:a returned tool call with diff output > carries the returned outcome
+test/integration/feed-kinds.integration.test.ts:a returned tool call with diff output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with diff output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:a returned tool call with lines output > carries the returned outcome
+test/integration/feed-kinds.integration.test.ts:a returned tool call with lines output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with lines output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:a returned tool call with links output > carries the returned outcome
+test/integration/feed-kinds.integration.test.ts:a returned tool call with links output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with links output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:a returned tool call with image output > carries the returned outcome
+test/integration/feed-kinds.integration.test.ts:a returned tool call with image output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with image output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:a returned tool call with none output > carries the returned outcome
+test/integration/feed-kinds.integration.test.ts:a returned tool call with none output > heads with the stopped clock's span rather than ticking
+test/integration/feed-kinds.integration.test.ts:a returned tool call with none output > draws the omission note when the output was capped
+test/integration/feed-kinds.integration.test.ts:an MCP server's tool call > draws through the ordinary tool card
+test/integration/feed-kinds.integration.test.ts:an MCP server's tool call > draws the qualified tool name as the head, verbatim
+test/integration/feed-kinds.integration.test.ts:an MCP server's tool call > draws the arguments' JSON as the input line, verbatim
+test/integration/feed-kinds.integration.test.ts:an MCP server's tool call > draws what the tool returned
+test/integration/feed-kinds.integration.test.ts:an MCP server's tool call > draws a failed call's own account
+test/integration/feed-kinds.integration.test.ts:a tool call that answered with an image > carries the image form
+test/integration/feed-kinds.integration.test.ts:a tool call that answered with an image > draws the picture as an image element
+test/integration/feed-kinds.integration.test.ts:a tool call that answered with an image > loads the daemon's resolved src verbatim
+test/integration/feed-kinds.integration.test.ts:a tool call that answered with an image > names the picture with the daemon's resolved alt
+test/integration/feed-kinds.integration.test.ts:a tool call that answered with an image > sits in the card's output section like every other form
+test/integration/feed-kinds.integration.test.ts:a tool call that answered with an image > still draws its verdict when the call failed
+test/integration/feed-kinds.integration.test.ts:a tool call that returned no output > carries the none form
+test/integration/feed-kinds.integration.test.ts:a tool call that returned no output > draws no output section at all
+test/integration/feed-kinds.integration.test.ts:a tool call that returned no output > still draws its input line
+test/integration/feed-kinds.integration.test.ts:a tool call that returned no output > still draws its verdict
+test/integration/feed-kinds.integration.test.ts:a tool call that returned no output > still heads with its clock
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a command > carries its form as the treatment
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a command > gives the line a treatment class of its own
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a command > draws the composed line verbatim regardless of the treatment
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a path > carries its form as the treatment
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a path > gives the line a treatment class of its own
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a path > draws the composed line verbatim regardless of the treatment
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a query > carries its form as the treatment
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a query > gives the line a treatment class of its own
+test/integration/feed-kinds.integration.test.ts:an input line drawn as a query > draws the composed line verbatim regardless of the treatment
+test/integration/feed-kinds.integration.test.ts:an input line with no form > draws as plain text
+test/integration/feed-kinds.integration.test.ts:an input line with no form > still draws the composed line verbatim
+test/integration/feed-kinds.integration.test.ts:a denied tool call > carries the denied outcome
+test/integration/feed-kinds.integration.test.ts:paint-class spans > draws 'const ' with the class the vocabulary assigns
+test/integration/feed-kinds.integration.test.ts:paint-class spans > draws 'red ' with the class the vocabulary assigns
+test/integration/feed-kinds.integration.test.ts:paint-class spans > draws 'plain ' with the class the vocabulary assigns
+test/integration/feed-kinds.integration.test.ts:paint-class spans > draws 'alien ' with the class the vocabulary assigns
+test/integration/feed-kinds.integration.test.ts:paint-class spans > still draws the text of a span whose class is unknown
+test/integration/feed-kinds.integration.test.ts:a header diff line > carries its own kind
+test/integration/feed-kinds.integration.test.ts:a added diff line > carries its own kind
+test/integration/feed-kinds.integration.test.ts:a removed diff line > carries its own kind
+test/integration/feed-kinds.integration.test.ts:a context diff line > carries its own kind
+test/integration/feed-kinds.integration.test.ts:a text output's drawing > draws a shell's unified diff as the classic diff, with no marker on a changed line
+test/integration/feed-kinds.integration.test.ts:a text output's drawing > draws a markdown answer from a call that is not a shell formatted
+test/integration/feed-kinds.integration.test.ts:a text output's drawing > draws the same markdown a shell printed verbatim
+test/integration/feed-kinds.integration.test.ts:a running skill > draws the invocation verbatim
+test/integration/feed-kinds.integration.test.ts:a loaded skill > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a loaded skill > draws the invocation verbatim
+test/integration/feed-kinds.integration.test.ts:a failed skill > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a failed skill > draws the invocation verbatim
+test/integration/feed-kinds.integration.test.ts:a denied skill > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a denied skill > draws the invocation verbatim
+test/integration/feed-kinds.integration.test.ts:a blocked hook > draws the composed headline verbatim
+test/integration/feed-kinds.integration.test.ts:a failed hook > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a failed hook > draws the composed headline verbatim
+test/integration/feed-kinds.integration.test.ts:a publishing artifact > draws the heading verbatim
+test/integration/feed-kinds.integration.test.ts:a published artifact > carries its state
+test/integration/feed-kinds.integration.test.ts:a published artifact > draws the heading verbatim
+test/integration/feed-kinds.integration.test.ts:a failed artifact > carries its state
+test/integration/feed-kinds.integration.test.ts:a failed artifact > draws the heading verbatim
+test/integration/feed-kinds.integration.test.ts:a planned plan > carries its state
+test/integration/feed-kinds.integration.test.ts:a failed plan > carries its state
+test/integration/feed-kinds.integration.test.ts:a subagent's returned result > draws uncapped, like a final answer
+test/integration/feed-kinds.integration.test.ts:a subagent's returned result > draws an undelivered result's reason in the quiet line
+test/integration/feed-kinds.integration.test.ts:findings > draws the location text verbatim
+test/integration/feed-kinds.integration.test.ts:findings > draws each verdict arm
+test/integration/feed-kinds.integration.test.ts:findings > draws each outcome arm
+test/integration/feed-kinds.integration.test.ts:chess board > draws a preparing board's step
+test/integration/feed-kinds.integration.test.ts:chess board > draws an unavailable board's reason
+test/integration/feed-kinds.integration.test.ts:a live subagent > draws the served token figure verbatim
+test/integration/feed-kinds.integration.test.ts:a settling subagent > carries the settling state
+test/integration/feed-kinds.integration.test.ts:a settling subagent > says its outcome is on its way
+test/integration/feed-kinds.integration.test.ts:a settled (succeeded) subagent > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a settled (failed) subagent > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a settled (cancelled) subagent > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a settled (lost) subagent > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a settled (restarted) subagent > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a detached subagent > draws the same subagent component its synchronous form uses
+test/integration/feed-kinds.integration.test.ts:a settled (completed) detached shell head > draws the exit code as a badge rather than a failure
+test/integration/feed-kinds.integration.test.ts:a settled (cancelled) detached shell head > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a settled (cancelled) detached shell head > draws the exit code as a badge rather than a failure
+test/integration/feed-kinds.integration.test.ts:a settled (lost) detached shell head > carries its outcome as the state
+test/integration/feed-kinds.integration.test.ts:a settled (lost) detached shell head > draws the exit code as a badge rather than a failure
+test/integration/feed-kinds.integration.test.ts:a live detached shell head > carries the live state
+test/integration/feed-kinds.integration.test.ts:a peer message > draws the sender label the daemon composed, verbatim
+test/integration/feed-kinds.integration.test.ts:a peer message > starts collapsed to its header alone, so the body is not revealed
+test/integration/feed-kinds.integration.test.ts:a peer message > reveals the body when its label is clicked, through the one toggle
+test/integration/feed-kinds.integration.test.ts:a subagent hand-back > draws the label the daemon composed, verbatim
+test/integration/feed-kinds.integration.test.ts:a subagent hand-back > carries no body: the report is not drawn in the main feed
+test/integration/feed-kinds.integration.test.ts:a removal > drops the row it keys rather than drawing anything
+test/integration/feed-kinds.integration.test.ts:a removal > leaves every other row standing
+test/integration/feed-kinds.integration.test.ts:a detached shell's spool body > draws no head facts, which live on the head row
+test/integration/feed-kinds.integration.test.ts:turn ended > draws the interrupted arm as its own state
+test/integration/feed-kinds.integration.test.ts:a cleared separation > draws the composed label verbatim
+test/integration/feed-kinds.integration.test.ts:a compacted separation > carries its arm
+test/integration/feed-kinds.integration.test.ts:a compacted separation > draws the composed label verbatim
+test/integration/feed-kinds.integration.test.ts:a worktreeEntered separation > carries its arm
+test/integration/feed-kinds.integration.test.ts:a worktreeEntered separation > draws the composed label verbatim
+test/integration/feed-kinds.integration.test.ts:a worktreeLeft separation > carries its arm
+test/integration/feed-kinds.integration.test.ts:a worktreeLeft separation > draws the composed label verbatim
+test/integration/feed-kinds.integration.test.ts:a compactionFailed separation > carries its arm
+test/integration/feed-kinds.integration.test.ts:a compactionFailed separation > draws its outcome marker, and no label (owner ruling 2026-10-06)
+test/integration/feed-kinds.integration.test.ts:the one separation renderer > draws every arm with identical element structure
+test/integration/feed-kinds.integration.test.ts:the one separation renderer > draws the worktree-removed outcome through the same renderer
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > draws the model name verbatim
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > ticks the lapse since the last request
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > lists every compact model the menu offers
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > lists every compact scope the menu offers
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > offers a pay button
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > offers a clear button
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > offers a compact button
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > calls AnswerColdGate with the pay arm
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > echoes the gate's own FeedId on the answer
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > echoes the served model on a compact answer
+test/integration/feed-kinds.integration.test.ts:a standing cold gate > draws the served token count and not a computed one
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by compacting > draws the scope the resolution carries
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by compacting > draws the model the resolution carries
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by compacting > draws a different scope when a different one was chosen
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by pay > carries the resolution as its state
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by pay > offers no buttons once resolved
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by clear > carries the resolution as its state
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by clear > offers no buttons once resolved
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by compact > carries the resolution as its state
+test/integration/feed-kinds.integration.test.ts:a cold gate resolved by compact > offers no buttons once resolved
+test/integration/feed-kinds.integration.test.ts:an open permission > draws the composed headline verbatim
+test/integration/feed-kinds.integration.test.ts:an open permission > draws every argument line verbatim
+test/integration/feed-kinds.integration.test.ts:an open permission > offers the standing-allow button when the marker is present
+test/integration/feed-kinds.integration.test.ts:an open permission > omits the standing-allow button when the marker is absent
+test/integration/feed-kinds.integration.test.ts:an open permission > calls AnswerPermission with the allow-once arm
+test/integration/feed-kinds.integration.test.ts:an open permission > calls AnswerPermission with the deny arm
+test/integration/feed-kinds.integration.test.ts:an open permission > echoes the card's own FeedId
+test/integration/feed-kinds.integration.test.ts:a permission answered allowedOnce > carries the answer as its state
+test/integration/feed-kinds.integration.test.ts:a permission answered allowedOnce > offers no buttons once answered
+test/integration/feed-kinds.integration.test.ts:a permission answered allowedStanding > carries the answer as its state
+test/integration/feed-kinds.integration.test.ts:a permission answered allowedStanding > offers no buttons once answered
+test/integration/feed-kinds.integration.test.ts:a permission answered deniedByUser > carries the answer as its state
+test/integration/feed-kinds.integration.test.ts:a permission answered deniedByUser > offers no buttons once answered
+test/integration/feed-kinds.integration.test.ts:a permission answered deniedByPolicy > carries the answer as its state
+test/integration/feed-kinds.integration.test.ts:a permission answered deniedByPolicy > offers no buttons once answered
+test/integration/feed-kinds.integration.test.ts:a permission answered deniedUndecidable > carries the answer as its state
+test/integration/feed-kinds.integration.test.ts:a permission answered deniedUndecidable > offers no buttons once answered
+test/integration/feed-kinds.integration.test.ts:an abandoned permission > carries the abandoned state
+test/integration/feed-kinds.integration.test.ts:a policy denial > draws the policy's own text verbatim
+test/integration/feed-kinds.integration.test.ts:an undecidable denial > carries its own verdict value, apart from the policy denial's
+test/integration/feed-kinds.integration.test.ts:an open question > draws every option label verbatim
+test/integration/feed-kinds.integration.test.ts:an open question > has no text field: a typed answer is the editor's
+test/integration/feed-kinds.integration.test.ts:an open question > draws one shared feed tab per question
+test/integration/feed-kinds.integration.test.ts:an open question > sends an option click as one UpdateQuestionDraft pick, echoing the served values
+test/integration/feed-kinds.integration.test.ts:an open question > sends a tab click as a show of that question
+test/integration/feed-kinds.integration.test.ts:an open question > sends a multi-select's confirm as a confirm of that question
+test/integration/feed-kinds.integration.test.ts:an open question > draws the daemon's draft: the shown question, its choices and what was typed
+test/integration/feed-kinds.integration.test.ts:an answered question > carries the answered state
+test/integration/feed-kinds.integration.test.ts:an answered question > draws the given answers verbatim
+test/integration/feed-kinds.integration.test.ts:an expired question > draws as expired rather than pending
+test/integration/feed-kinds.integration.test.ts:an expired question > offers no controls
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the queue tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the prePrompt tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebasing tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebaseCommit tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the tests tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the testsRun tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the testsRunFixing tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the committing tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the updatingMain tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the postPrompt tab with its kind
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'resolving' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'resolving' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'queue' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'queue' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'prePrompt' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'prePrompt' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'rebasing' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'rebasing' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'rebaseCommit' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'rebaseCommit' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'tests' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'tests' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'testsRun' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'testsRun' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'testsRunFixing' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'testsRunFixing' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'committing' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'committing' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'updatingMain' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'updatingMain' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'postPrompt' tab in its 'live' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the 'postPrompt' tab in its 'settled' state
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebaseCommit tab pending with no glyph
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the testsRun tab waiting for its test turn with a hollow dot
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the resolving tab waiting on the user with a ❓
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebasing tab waiting on the user with a ❓
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebaseCommit tab waiting on the user with a ❓
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the tests tab waiting on the user with a ❓
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the testsRunFixing tab waiting on the user with a ❓
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the label with its round
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the queue tab's own snapshot
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebasing tab's progress as the daemon's figures
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the rebasing tab's narration lines verbatim
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a commit's narration lines verbatim
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a commit's conflicted files in its conflict section
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a lone run as its tests view, with no strip of its own
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the committing tab's merge commit subject
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws the updating main tab's step
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a fixing attempt's attempt
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a suite's counts on the right of its row
+test/integration/feed-kinds.integration.test.ts:merge tabs > breathes a running suite's dot green while every test so far passed
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a run's log link with the daemon's label
+test/integration/feed-kinds.integration.test.ts:merge tabs > wears the response bubble's link class on the test log link
+test/integration/feed-kinds.integration.test.ts:merge tabs > opens the test log in the editor by the token the bubble served
+test/integration/feed-kinds.integration.test.ts:merge tabs > echoes the workspace on the test log's editor call
+test/integration/feed-kinds.integration.test.ts:merge tabs > draws a run's suites
+test/integration/feed-kinds.integration.test.ts:merge tabs > paints a run's spans from the vocabulary
+test/integration/feed-kinds.integration.test.ts:a status command panel row > draws the panel arm
+test/integration/feed-kinds.integration.test.ts:a todos command panel row > carries the command-panel row kind
+test/integration/feed-kinds.integration.test.ts:a todos command panel row > draws the panel arm
+test/integration/feed-kinds.integration.test.ts:a mcp command panel row > carries the command-panel row kind
+test/integration/feed-kinds.integration.test.ts:a mcp command panel row > draws the panel arm
+test/integration/feed-kinds.integration.test.ts:a context command panel row > carries the command-panel row kind
+test/integration/feed-kinds.integration.test.ts:a context command panel row > draws the panel arm
+test/integration/feed-kinds.integration.test.ts:a refused command card > draws the command verbatim
+test/integration/feed-kinds.integration.test.ts:a refused command card > draws the composed reason verbatim
+test/integration/feed-kinds.integration.test.ts:a refused command card > offers the add-support button when the marker is present
+test/integration/feed-kinds.integration.test.ts:a refused command card > omits the add-support button when the marker is absent
+test/integration/feed-kinds.integration.test.ts:an earlier-steps fold > draws the fold's label
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 0n as the ruled 0
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 999n as the ruled 999
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 1000n as the ruled 1k
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 1200n as the ruled 1.2k
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 12340n as the ruled 12.3k
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 182000n as the ruled 182k
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 999949n as the ruled 999.9k
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 999950n as the ruled 1M
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > formats 1200000n as the ruled 1.2M
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > draws the daemon's own usage stamp verbatim, whatever its scale
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > does not rescale a daemon usage stamp into its own convention
+test/integration/feed-kinds.integration.test.ts:token formatting across surfaces > carries the call site's own suffix, not the formatter's
+test/integration/feed-kinds.integration.test.ts:a live detached subagent's stop > echoes the row's own FeedId as the target
+test/integration/feed-kinds.integration.test.ts:a live detached subagent's stop > marks the control with the row's own FeedId
+test/integration/feed-kinds.integration.test.ts:a live detached subagent's stop > draws no refusal for an interrupted-detached answer
+test/integration/feed-kinds.integration.test.ts:a live detached shell head's stop > sends the detached target
+test/integration/feed-kinds.integration.test.ts:a live detached shell head's stop > echoes the shell row's own FeedId
+test/integration/feed-kinds.integration.test.ts:a live detached shell head's stop > offers no stop on a settled shell
+test/integration/feed-kinds.integration.test.ts:a merge bubble's fold > records the reader's open with FoldMergeBubble on the head row
+test/integration/feed-kinds.integration.test.ts:a merge bubble's fold > records the reader's close with FoldMergeBubble on the head row
+test/integration/feed-kinds.integration.test.ts:a compaction divider's summary > is drawn under the bar even where the wire said folded
+test/integration/feed-kinds.integration.test.ts:a compaction divider's summary > carries no summary disclosure
+test/integration/feed-kinds.integration.test.ts:a compaction divider's summary > starts in its collapsed bubble form
+test/integration/feed-kinds.integration.test.ts:a skill document's fold > starts folded
+test/integration/feed-kinds.integration.test.ts:a skill document's fold > hides the document until the reader opens the card
+test/integration/feed-kinds.integration.test.ts:a skill document's fold > reveals the document when the card is clicked
+test/integration/feed-kinds.integration.test.ts:a finding's scenario fold > starts folded
+test/integration/feed-kinds.integration.test.ts:a finding's scenario fold > keeps one finding's toggle without opening its neighbours
+test/integration/feed-kinds.integration.test.ts:a merge queue entry's jump > calls SelectWorkspace exactly once
+test/integration/feed-kinds.integration.test.ts:a merge queue entry's jump > echoes that entry's own WorkspaceRef
+test/integration/feed-kinds.integration.test.ts:a merge queue entry's jump > makes no other call for the jump
+test/integration/feed-kinds.integration.test.ts:a merge queue entry's jump > echoes the behind entry's own ref rather than the current one
+test/integration/feed-kinds.integration.test.ts:an answered permission card > stays open until the daemon pushes the answer
+test/integration/feed-kinds.integration.test.ts:an answered permission card > closes when the daemon pushes the answered row
+test/integration/feed-kinds.integration.test.ts:an answered permission card > draws no refusal for a successful answer
+test/integration/feed-kinds.integration.test.ts:an answered permission card > draws the state the daemon pushed even when it is not the answer clicked
+test/integration/feed-kinds.integration.test.ts:the editor link on a plan > wears the shared editor-link hook
+test/integration/feed-kinds.integration.test.ts:the editor link on a plan > calls OpenInEditor with the served path as a workspace_file target
+test/integration/feed-kinds.integration.test.ts:the editor link on a plan > echoes the workspace on the editor call
+test/integration/feed-kinds.integration.test.ts:the editor link on a finding's location > wears the shared editor-link hook on every location
+test/integration/feed-kinds.integration.test.ts:the editor link on a finding's location > calls OpenInEditor with the served path as a workspace_file target
+test/integration/feed-kinds.integration.test.ts:the editor link on a finding's location > carries the served line in its target rather than one parsed off the text
+test/integration/feed-kinds.integration.test.ts:the editor link on a finding's location > omits the target's line where the location carries none
+test/integration/feed-kinds.integration.test.ts:the editor link on a finding's location > names the path the third location carries in its target
+test/integration/feed-kinds.integration.test.ts:the editor link on a worktree divider > wears the shared editor-link hook
+test/integration/feed-kinds.integration.test.ts:the editor link on a worktree divider > calls OpenInEditor with the served worktree path as a workspace_file target
+test/integration/feed-kinds.integration.test.ts:the editor link on a worktree divider > sends no target line for a directory
+test/integration/feed-kinds.integration.test.ts:a file link in a response bubble > opens a bare file name through feed_link, echoing the href
+test/integration/feed-kinds.integration.test.ts:a file link in a response bubble > names the bubble's own row as the link's source row
+test/integration/feed-kinds.integration.test.ts:a file link in a response bubble > keeps a web link on OpenExternal
+test/integration/feed-kinds.integration.test.ts:a live subagent's head clock > counts up from the served start instant
+test/integration/feed-kinds.integration.test.ts:a live subagent's head clock > grows as time passes
+test/integration/feed-kinds.integration.test.ts:a live subagent's head clock > reads the quiet-for figure from the live arm's last progress
+test/integration/feed-kinds.integration.test.ts:a live subagent's head clock > stops the clock where a settled arm says it stopped
+test/integration/feed-kinds.integration.test.ts:a detached subagent's head clock > counts up from the served start instant
+test/integration/feed-kinds.integration.test.ts:a live detached shell's head clock > counts up from the served start instant
+test/integration/feed-kinds.integration.test.ts:a live detached shell's head clock > grows as time passes
+test/integration/feed-kinds.integration.test.ts:a live detached shell's head clock > reads the quiet-for figure from the live arm's last progress
+test/integration/feed-kinds.integration.test.ts:a live merge head's clock > counts up from the served enqueue instant
+test/integration/feed-kinds.integration.test.ts:a live merge head's clock > grows as time passes
+test/integration/feed-kinds.integration.test.ts:a live merge head's clock > stops where the settled arm says it stopped
+test/integration/feed-kinds.integration.test.ts:an open permission's head clock > counts from the instant the ask was posed, as the wire states it
+test/integration/feed-kinds.integration.test.ts:an open permission's head clock > ticks up while the card stands
+test/integration/feed-kinds.integration.test.ts:an open permission's head clock > stops at the span the answered push states
+test/integration/feed-kinds.integration.test.ts:an open permission's head clock > stops at the span the abandoned push states
+test/integration/feed-kinds.integration.test.ts:an http(s) link in a tool call's output > calls OpenExternal when clicked
+test/integration/feed-kinds.integration.test.ts:an http(s) link in a tool call's output > sends the url the view carried, verbatim
+test/integration/feed-kinds.integration.test.ts:an http(s) link in a tool call's output > echoes the page's own workspace
+test/integration/feed-kinds.integration.test.ts:an http(s) link in a tool call's output > cancels the click rather than navigating the webview
+test/integration/feed-kinds.integration.test.ts:an http(s) link in a tool call's output > draws nothing at the link on success
+test/integration/feed-kinds.integration.test.ts:an http(s) link in a tool call's output > draws the link's own text rather than the url
