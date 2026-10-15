@@ -92,3 +92,9 @@ the log records that show it, so the failures can be fixed at their source.
 - Six fixes were missing, found with `git cherry`: real-path `FindRoot`, integration-tier pins, the ruled pin clauses, the daemon scratch-repository race fix, naming every case that fails with no mutant, and the per-package overlay fix.
 - Not a queue defect as such. A waiting async merge pins its branch at fork time, which is reasonable. But nothing told the requester that its later commits were left out. Possible source fix: when a merge lands and the branch has moved past what landed, report the commits left behind.
 - The child cut `redundancy-tool-fixes` from master with the six fixes and requested it as entry 15.
+
+## `ert-and-dist-fixes` (FAILED 2026-10-15 12:35: merge workspace had no live session)
+
+- Branch `fix-ert-and-dist-land` (from `test-tier-audit-e2e`). The queue reported: workspace `6fc59458a3ed456d` "has no live session to await turn `76ef7e9a4d394225` on". The gate never ran.
+- Daemon at 12:35:25: `daemon.merge.fault` "a merge could not continue past an error; it fails", then `ReadHistory refused: unknown_agent: no session has been started on this shim and the workspace holds no persisted main agent`.
+- So the merge workspace's shim came up with no session started, and the queue tried to drive a turn on it. Not traced further. Re-requested under a new name.
