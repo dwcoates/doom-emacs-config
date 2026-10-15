@@ -254,7 +254,13 @@ func runPinned(m *testing.M, module, parent string) int {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
-	return m.Run()
+	code := m.Run()
+	// The suite's shared fixtures end after its last test and before the run
+	// root they live under is removed (suite.go).
+	if failed := finishSuite(); code == 0 {
+		code = failed
+	}
+	return code
 }
 
 // newPinnedCheckout lays out the checkout root every daemon in this suite
