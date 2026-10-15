@@ -1646,7 +1646,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     expect(el.querySelector(".mp-tree")).toBe(tree);
   });
 
-  it("re-measures against the new containing block when the row is moved", async () => {
+  it("re-measures against the new containing block when the row is moved", () => {
     // Arrange
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
@@ -1654,12 +1654,9 @@ describe("a tree's first paint waits for the body to join the document", () => {
     );
     mount(el);
     const before = lineWidths(el).length;
-    // Act — moved into a narrower column. The re-measure is the attach's batch,
-    // a microtask, so every row an attach moves is measured in one layout,
-    // still ahead of the next paint.
+    // Act — moved into a narrower column.
     staged.layout.containingPx = 500;
     mount(el);
-    await Promise.resolve();
     // Assert
     expect(lineWidths(el).length).toBeGreaterThan(before);
   });

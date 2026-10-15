@@ -3,18 +3,13 @@
  * body — the one bubble body: the custom element that knows when it joins the
  * document, the cap measurement a metaprompt tree wraps to, and its refusals.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BODY_INVARIANT,
-  BREADTH_MEASURING_ATTRIBUTE,
   BUBBLE_BODY_TAG,
-  HELD_BREADTH_ATTRIBUTE,
-  HELD_BREADTH_PROPERTY,
   MARKDOWN_SLOT_ATTRIBUTE,
-  TREE_FONT_PROBE_CLASS,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
-  drawsChange,
   isBubbleBody,
   markdownSlot,
   measureTreeCols,
@@ -23,22 +18,18 @@ import {
   proseNeedsWidth,
   revealSlot,
   slotText,
-  treeFontProbe,
   whenSlotPainted,
   type BubbleBody,
 } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
-import { FEED_TEXT_SCALE_PROPERTY, applyFeedTextScale } from "../../src/feed/feed-text-scale.js";
-import { stopTicking } from "../../src/feed/ticking.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
-import { WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
+import { useTreeLayout } from "../tree-layout.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   document.body.replaceChildren();
-  document.documentElement.style.removeProperty(FEED_TEXT_SCALE_PROPERTY);
 });
 
 /** Place a drawn bubble in the document under its own containing block. */
@@ -335,14 +326,13 @@ describe("the bubble body", () => {
   });
 
   it("runs its hooks every time it joins the document", () => {
-    // Arrange — inside its bubble, where every connected body lives: the body
-    // watches its bubble's column from the moment it joins.
-    const { bubble, body } = drawBubble({ role: "response", variant: "response", content: [], capLines: "feed" });
+    // Arrange
+    const body = createBubbleBody();
     let runs = 0;
     body.onConnect(() => runs++);
     // Act
-    document.body.append(bubble);
-    document.body.prepend(bubble);
+    document.body.append(body);
+    document.body.prepend(body);
     // Assert — an attach and a move.
     expect(runs).toBe(2);
   });
@@ -515,347 +505,6 @@ describe("a slot holding a tree paints once the bubble is laid out", () => {
     // Assert
     expect(() => vi.runOnlyPendingTimers()).not.toThrow();
     vi.useRealTimers();
-  });
-});
-
-/**
- * THE FEED TEXT ZOOM RE-WRAPS A TREE (owner request, 2026-10-15): a zoom moves
- * only the tree font's column width, never the column, so the page's standing
- * tree-font probe is the second box every painter watches. A zoom must re-wrap
- * a tree to the columns the cap now holds, so the bubble keeps the cap's width
- * and only its text changes size.
- */
-describe("the page's tree-font probe", () => {
-  useTreeLayout();
-
-  it("is one standing probe per page", () => {
-    // Arrange / Act
-    const first = treeFontProbe(document);
-    const second = treeFontProbe(document);
-    // Assert
-    expect([second === first, document.querySelectorAll(`.${TREE_FONT_PROBE_CLASS}`).length]).toEqual([true, 1]);
-  });
-
-  it("stands in the document in the tree font", () => {
-    // Arrange / Act
-    const probe = treeFontProbe(document);
-    // Assert
-    expect([probe.isConnected, probe.classList.contains("mp-tree")]).toEqual([true, true]);
-  });
-
-  it("is hidden from sight, the pointer and assistive technology", () => {
-    // Arrange / Act
-    const probe = treeFontProbe(document);
-    // Assert
-    expect([probe.style.visibility, probe.style.pointerEvents, probe.getAttribute("aria-hidden")]).toEqual([
-      "hidden",
-      "none",
-      "true",
-    ]);
-  });
-
-  it("holds one unwrapped run of a hundred columns", () => {
-    // Arrange / Act
-    const probe = treeFontProbe(document);
-    // Assert
-    expect([probe.textContent, probe.style.whiteSpace]).toEqual(["0".repeat(100), "pre"]);
-  });
-
-  it("is replaced by a fresh one once it has left the document", () => {
-    // Arrange
-    const gone = treeFontProbe(document);
-    document.body.replaceChildren();
-    // Act
-    const fresh = treeFontProbe(document);
-    // Assert
-    expect([fresh === gone, fresh.isConnected]).toEqual([false, true]);
-  });
-});
-
-describe("a painted tree follows the tree font's column width", () => {
-  const staged = useTreeLayout();
-
-  /** A response bubble holding WIDE_TREE, attached and painted at the default layout. */
-  function paintedWideTree(): HTMLElement {
-    const { bubble, slot } = slotted(WIDE_TREE);
-    mount(bubble);
-    return slot;
-  }
-
-  /** Move the tree font's column width to CHARPX and deliver the probe's resize. */
-  function zoomTreeFont(charPx: number): void {
-    staged.layout.charPx = charPx;
-    fireResize(treeFontProbe(document));
-    vi.runOnlyPendingTimers();
-  }
-
-  it.each([
-    ["a smaller font, into more columns", 6],
-    ["a larger font, into fewer columns", 16],
-  ] as const)("re-wraps to %s", (_label, charPx) => {
-    // Arrange
-    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
-    const slot = paintedWideTree();
-    // Act
-    zoomTreeFont(charPx);
-    vi.useRealTimers();
-    // Assert — the lines a tree first painted at the new font draws.
-    expect(treeLineWidths(slot)).toEqual(treeLineWidths(paintedWideTree()));
-  });
-
-  it("wraps no line past the new budget after a zoom in", () => {
-    // Arrange
-    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
-    const slot = paintedWideTree();
-    // Act
-    zoomTreeFont(16);
-    vi.useRealTimers();
-    // Assert — floor(742 / 16) = 46 columns.
-    expect(Math.max(...treeLineWidths(slot))).toBeLessThanOrEqual(stagedCols(staged.layout));
-  });
-
-  it("keeps every line's node when the font moved but the budget did not", () => {
-    // Arrange — 8.01px still floors 742px to 92 columns.
-    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
-    const slot = paintedWideTree();
-    const before = [...slot.querySelectorAll(".mp-line")];
-    // Act
-    zoomTreeFont(8.01);
-    vi.useRealTimers();
-    // Assert
-    expect([...slot.querySelectorAll(".mp-line")]).toEqual(before);
-  });
-
-  it("stops following the font once the body is discarded", () => {
-    // Arrange
-    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
-    const slot = paintedWideTree();
-    const body = slot.closest(".bubble-body");
-    if (!isBubbleBody(body)) throw new Error("no bubble body");
-    const probe = treeFontProbe(document);
-    stopTicking(body);
-    // Act + Assert — nothing is left watching the probe.
-    expect(() => fireResize(probe)).toThrow(/no ResizeObserver is watching/);
-    vi.useRealTimers();
-  });
-});
-
-/**
- * THE FEED TEXT ZOOM CHANGES ONLY THE TEXT (owner ruling, 2026-10-15): under
- * any zoom but 100% the painter holds a bubble at the breadth its content has
- * at 100%, and its trees wrap inside that breadth.
- */
-describe("a zoom holds a bubble at its 100% breadth", () => {
-  const staged = useTreeLayout();
-
-  /** A response bubble of MARKDOWN, attached and painted at 100%. */
-  function attached(markdown: string): { bubble: HTMLElement; slot: HTMLElement } {
-    const drawn = slotted(markdown);
-    mount(drawn.bubble);
-    return drawn;
-  }
-
-  /** Zoom the page to SCALE and deliver the tree-font probe's resize. */
-  function zoomTo(scale: number): void {
-    applyFeedTextScale(scale);
-    fireResize(treeFontProbe(document));
-    vi.runOnlyPendingTimers();
-  }
-
-  /** BUBBLE's held breadth, or null when nothing holds it. */
-  function heldOf(bubble: HTMLElement): string | null {
-    return bubble.hasAttribute(HELD_BREADTH_ATTRIBUTE) ? bubble.style.getPropertyValue(HELD_BREADTH_PROPERTY) : null;
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("holds nothing at 100%", () => {
-    // Arrange / Act
-    const { bubble } = attached("**done**");
-    // Assert
-    expect(heldOf(bubble)).toBeNull();
-  });
-
-  it.each([0.7, 1.6])("holds the breadth the bubble has at 100%, at %sx", (scale) => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    // Act
-    zoomTo(scale);
-    // Assert — the staged 400px natural breadth, not 400px times the zoom.
-    expect(heldOf(bubble)).toBe("400px");
-  });
-
-  it("leaves no 100% read behind on the bubble", () => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    // Act
-    zoomTo(1.6);
-    // Assert
-    expect([bubble.style.getPropertyValue(FEED_TEXT_SCALE_PROPERTY), bubble.hasAttribute(BREADTH_MEASURING_ATTRIBUTE)]).toEqual(["", false]);
-  });
-
-  it("lets the bubble fit its text again back at 100%", () => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    zoomTo(1.6);
-    // Act
-    zoomTo(1);
-    // Assert
-    expect([heldOf(bubble), bubble.style.getPropertyValue(HELD_BREADTH_PROPERTY)]).toEqual([null, ""]);
-  });
-
-  it("wraps a tree to the columns the held breadth holds at the zoomed size", () => {
-    // Arrange — the tree reaches the cap at 100%, so the breadth is the 770px cap.
-    staged.layout.naturalPx = 2000;
-    const { slot } = attached(WIDE_TREE);
-    // Act
-    zoomTo(1.6);
-    // Assert — floor((770 - 20 - 8) / (8 x 1.6)) = 57 columns.
-    expect(Math.max(...treeLineWidths(slot))).toBeLessThanOrEqual(57);
-  });
-
-  it("wraps a tree no narrower than the held breadth allows at the zoomed size", () => {
-    // Arrange
-    staged.layout.naturalPx = 2000;
-    const { slot } = attached(WIDE_TREE);
-    // Act
-    zoomTo(0.7);
-    // Assert — floor(742 / 5.6) = 132 columns hold each of its three branches on one line.
-    expect(treeLineWidths(slot)).toHaveLength(3);
-  });
-
-  it("re-holds the breadth when the content changes", async () => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    zoomTo(1.6);
-    const body = bubble.querySelector(".bubble-body");
-    if (!isBubbleBody(body)) throw new Error("no bubble body");
-    staged.layout.naturalPx = 300;
-    // Act
-    paintBody(body, [markdownSlot("prose", "**done and more**")]);
-    await Promise.resolve();
-    // Assert
-    expect(heldOf(bubble)).toBe("300px");
-  });
-
-  it("follows no content while nothing is held", async () => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    const body = bubble.querySelector(".bubble-body");
-    if (!isBubbleBody(body)) throw new Error("no bubble body");
-    // Act
-    paintBody(body, [markdownSlot("prose", "**done and more**")]);
-    await Promise.resolve();
-    // Assert
-    expect(heldOf(bubble)).toBeNull();
-  });
-
-  it("records the held breadth at debug", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    attached("**done**");
-    // Act
-    zoomTo(1.6);
-    // Assert
-    const record = await forwardedRecord(capture, "bubble.body.breadth-held");
-    expect(record.context).toMatchObject({ bubbles: 1, scale: 1.6, breadths_px: [400] });
-  });
-
-  it("records the release at debug", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    attached("**done**");
-    zoomTo(1.6);
-    // Act
-    zoomTo(1);
-    // Assert
-    const record = await forwardedRecord(capture, "bubble.body.breadth-released");
-    expect(record.context).toMatchObject({ bubbles: 1 });
-  });
-
-  it("holds every bubble of a batch in one fit", () => {
-    // Arrange
-    const first = attached("**one**").bubble;
-    const second = attached("**two**").bubble;
-    // Act
-    zoomTo(1.6);
-    // Assert
-    expect([heldOf(first), heldOf(second)]).toEqual(["400px", "400px"]);
-  });
-
-  it("holds a bubble that joins the feed while zoomed", async () => {
-    // Arrange
-    applyFeedTextScale(1.6);
-    // Act
-    const { bubble } = attached("**done**");
-    await Promise.resolve();
-    // Assert
-    expect(heldOf(bubble)).toBe("400px");
-  });
-
-  it("ignores a change the wave makes to the bubble's own style", async () => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    zoomTo(1.6);
-    staged.layout.naturalPx = 300;
-    // Act
-    bubble.style.backgroundPositionX = "40%";
-    await Promise.resolve();
-    // Assert — still the breadth held before the write.
-    expect(heldOf(bubble)).toBe("400px");
-  });
-
-  it("refuses a bubble whose 100% breadth measures no width, and records it", async () => {
-    // Arrange
-    const capture = captureLogRecords("error");
-    attached("**done**");
-    staged.layout.naturalPx = 0;
-    // Act
-    applyFeedTextScale(1.6);
-    fireResize(treeFontProbe(document));
-    // Assert
-    expect(() => vi.runOnlyPendingTimers()).toThrow(/unmeasurable/);
-    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
-    expect(record.context).toMatchObject({ reason: "the bubble's breadth at 100% zoom measured no width", breadth_px: 0 });
-  });
-
-  it("leaves no breadth held when the 100% read refuses", () => {
-    // Arrange
-    const { bubble } = attached("**done**");
-    staged.layout.naturalPx = 0;
-    applyFeedTextScale(1.6);
-    fireResize(treeFontProbe(document));
-    // Act
-    expect(() => vi.runOnlyPendingTimers()).toThrow(/unmeasurable/);
-    // Assert
-    expect([heldOf(bubble), bubble.style.getPropertyValue(FEED_TEXT_SCALE_PROPERTY)]).toEqual([null, ""]);
-  });
-});
-
-describe("drawsChange", () => {
-  const bubble = document.createElement("div");
-  const inner = document.createElement("span");
-  bubble.append(inner);
-
-  it.each([
-    ["the wave's or the hold's style on the bubble", "attributes", bubble, "style", false],
-    ["the held breadth mark on the bubble", "attributes", bubble, HELD_BREADTH_ATTRIBUTE, false],
-    ["the 100% read's mark on the bubble", "attributes", bubble, BREADTH_MEASURING_ATTRIBUTE, false],
-    ["another attribute on the bubble", "attributes", bubble, "data-state", true],
-    ["a style inside the bubble", "attributes", inner, "style", true],
-    ["a node added or removed", "childList", inner, null, true],
-    ["a text change", "characterData", inner, null, true],
-  ] as const)("answers whether %s changes what the bubble draws", (_label, type, target, attributeName, want) => {
-    // Arrange
-    const record = { type, target, attributeName } as unknown as MutationRecord;
-    // Act / Assert
-    expect(drawsChange(record, bubble)).toBe(want);
   });
 });
 

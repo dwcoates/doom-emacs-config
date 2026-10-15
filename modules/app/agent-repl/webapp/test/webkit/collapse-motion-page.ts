@@ -3,9 +3,10 @@
  * the real easing over a real laid-out bubble.
  */
 import { easeIntoLook } from "../../src/bubble/collapse-motion.js";
-import { installPageLogger } from "./page-logger";
+import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 
-installPageLogger("collapse-motion");
+setLogger(new ForwardingLogger(() => Promise.resolve("accepted"), () => undefined, {}, "debug"));
+bindLogContext({ connection_id: "webkit-collapse-motion-page" });
 
 /** What the test calls, on `window.collapseMotion`. */
 export interface CollapseMotionPage {

@@ -14,7 +14,7 @@ import { create, type DescMessage, type Message } from "@bufbuild/protobuf";
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mountFeed } from "../../src/feed/feed.js";
 import { createRowRenderers } from "../../src/feed/renderers.js";
-import { installPageLogger } from "./page-logger";
+import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { orderFor } from "../feed-order.js";
 import { harness, openSuccess, page } from "../feed/harness.js";
 import {
@@ -185,7 +185,18 @@ declare global {
 }
 
 const written: string[] = [];
-installPageLogger("containment", { written });
+setLogger(
+  new ForwardingLogger(
+    () => Promise.resolve("accepted"),
+    (level, line) => {
+      const { operation } = JSON.parse(line) as { operation: string };
+      written.push(`${level} ${operation}`);
+    },
+    {},
+    "debug",
+  ),
+);
+bindLogContext({ connection_id: "webkit-containment-page" });
 
 let served: FeedRow[] = [];
 
