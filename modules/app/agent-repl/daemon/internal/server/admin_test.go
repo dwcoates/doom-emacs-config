@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -400,6 +401,45 @@ func TestUnhealthyDaemonIsAnAnswer(t *testing.T) {
 	}
 	if len(resp.Msg.GetSuccess().GetUnhealthy().GetFaults()) != 1 {
 		t.Fatalf("faults = %v, want one", resp.Msg.GetSuccess().GetUnhealthy())
+	}
+}
+
+// TestDaemonHealthRendersItsReportsErrorByItsCause pins that a report the
+// caller withdrew (recorded by the reporter, where it decided so) keeps its
+// Connect code and adds no ERROR, while any other report error is an internal
+// failure recorded at ERROR.
+func TestDaemonHealthRendersItsReportsErrorByItsCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantCode  connect.Code
+		wantError bool
+	}{
+		{name: "the caller withdrew the ask", err: fmt.Errorf("health: self-check: %w", context.Canceled), wantCode: connect.CodeCanceled, wantError: false},
+		{name: "the report failed", err: errors.New("health: broke"), wantCode: connect.CodeInternal, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			h.Health.daemonErr = tt.err
+
+			// Act.
+			_, err := h.Client.DaemonHealth(context.Background(), connect.NewRequest(&agentreplv1.DaemonHealthRequest{}))
+
+			// Assert.
+			if connect.CodeOf(err) != tt.wantCode {
+				t.Fatalf("DaemonHealth err = %v (code %v), want code %v", err, connect.CodeOf(err), tt.wantCode)
+			}
+			recorded := false
+			for _, r := range log.Records() {
+				recorded = recorded || (r.Level == dlog.LevelError && r.Operation == "DaemonHealth")
+			}
+			if recorded != tt.wantError {
+				t.Fatalf("an ERROR was recorded = %v, want %v: %+v", recorded, tt.wantError, log.Records())
+			}
+		})
 	}
 }
 

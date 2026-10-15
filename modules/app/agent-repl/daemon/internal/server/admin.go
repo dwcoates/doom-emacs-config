@@ -193,7 +193,9 @@ func (s *server) DaemonHealth(
 	const rpc = "DaemonHealth"
 	report, err := s.deps.Health.Daemon(ctx)
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		// The reporter's one error is its caller withdrawing the ask, which it
+		// recorded where it decided so: it keeps its code and adds no ERROR.
+		return nil, failResolution(s.log, rpc, err)
 	}
 	s.log.Debug("daemon.server.daemon_health", "answered the daemon's health", nil)
 	return connect.NewResponse(report), nil

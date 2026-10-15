@@ -564,11 +564,11 @@ func (s *server) registryWorkspace(ctx context.Context, id ids.WorkspaceID) (wsm
 	return record, ended, err
 }
 
-// failResolution renders a failed workspace RESOLUTION. The two endings that
-// are not failures -- the daemon shutting down under the request, and the
-// request's own context ending -- were already recorded at INFO where they
-// were decided, so they keep their Connect code and add no ERROR. Everything
-// else is a failure and goes through fail.
+// failResolution renders a failed workspace RESOLUTION, or a health report the
+// caller withdrew. The two endings that are not failures -- the daemon
+// shutting down under the request, and the request's own context ending --
+// were already recorded where they were decided, so they keep their Connect
+// code and add no ERROR. Everything else is a failure and goes through fail.
 func failResolution(log dlog.Logger, rpc string, err error) *connect.Error {
 	if errors.Is(err, errServingEnded) || ctxend.Is(err) {
 		var coded *connect.Error
