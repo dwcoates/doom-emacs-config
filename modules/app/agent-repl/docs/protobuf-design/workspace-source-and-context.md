@@ -26,22 +26,40 @@ defaults:
 
 ## The modes
 
-Rows are the source; columns are the context. Each cell gives a proposed name,
-whether it is supported today (from agent-repl-skill-migration's report of
-2026-10-15), and whether we want it (open, for the owner's ruling).
+Three binary dimensions, each against the main branch:
 
-| source \ context | fresh | fork of the requester | fork of another workspace X |
-|---|---|---|---|
-| **main** | name: fresh workspace. Today: yes (`SPC TAB n/N`, `--master`, one-shot). Want: yes (rare). | name: fork. Today: partly (`SPC TAB f`; the async merge workspace); the skill cannot ask for it. Want: yes, the DEFAULT. | name: fork of X. Today: RPC only (`fork_source`), unverified. Want: open. |
-| **the requester's branch** | name: child. Today: yes (the skill's default from any workspace that is not on main). Want: yes, explicit opt-in. | name: forked child. Today: yes (`SPC TAB c/C`, `CreateWorkspaceParent.fork`). Want: yes, explicit opt-in. | name: child forked from X. Today: no (a fork must come from the parent). Want: open. |
-| **another workspace X's branch** | name: child of X. Today: RPC (`parent` = X), not from the skill. Want: open. | name: child of X, forked from the requester. Today: no. Want: open. | name: forked child of X. Today: yes through the RPC (`parent` = X with `fork`). Want: open. |
+- **BRANCHES FROM**: main, or another branch.
+- **MERGES INTO**: main, or another branch.
+- **CONTEXT**: fresh, or forked from another workspace's transcript.
+
+Each cell says whether it is supported today (from agent-repl-skill-migration's
+report of 2026-10-15). "Another branch" in both of the first two dimensions
+means the same other branch; from one other branch into a different one is not
+supported anywhere.
+
+Fresh context:
+
+| branches from \ merges into | main | another branch |
+|---|---|---|
+| **main** | yes (`SPC TAB n/N`, `--master`, a one-shot) | no |
+| **another branch** | no | yes (a child: the skill's default from any workspace not on main) |
+
+Forked context:
+
+| branches from \ merges into | main | another branch |
+|---|---|---|
+| **main** | partly (`SPC TAB f`; the skill cannot ask for it) | no |
+| **another branch** | internal only (the async merge workspace: the branch's tip, into the requester's target, forked from the requester) | yes (a forked child, `SPC TAB c/C`; the fork must come from that same branch's workspace) |
+
+The "no" cells are refused by the contract's rule that a workspace is never cut
+from one branch and merged into another; the async merge workspace is the one
+exception, and it is internal.
 
 ## Questions for the designing agent
 
 1. Which cells should the API support, and which should it refuse? Give the
    reason for each refusal (a real invariant, not cost).
-2. Are the proposed names right? A name should say both axes or be the agreed
-   default.
+2. What should each supported cell be called?
 3. What are the defaults per entry point (the skill, `SPC TAB`, the webapp form,
    the async merge workspace)? The owner's principles above say: source main,
    context fork of the requester.
