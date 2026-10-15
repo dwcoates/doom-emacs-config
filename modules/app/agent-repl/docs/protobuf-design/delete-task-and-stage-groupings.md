@@ -57,12 +57,29 @@ merged workspaces, the merged ones static.
 - CONSEQUENCES: a merge leaves the band when a 101st newer one lands, which a
   roster push already carries, so no timer exists.
 
+## Implementation consequences
+
+- The webapp rail draws one pane per push (open repository sections, then
+  hidden, then recently merged), one copy each, instead of three panes each
+  carrying both bands. The grouping picker is gone; view state is folds only
+  (`webapp/src/sidebar/view.ts`, `ViewValue` is a boolean).
+- The rail's task controls went with the task grouping: the task section's
+  done check and menu, the new-task control, and the row menu's
+  assign-to-task entry (`webapp/src/sidebar/verbs.ts`), whose choices were
+  read off the task view.
+- The Emacs roster decoder refuses unknown fields, so it drops `task`,
+  `maturity` and `shown` in the same landing (`lisp/wire-roster.el`).
+- The daemon stops reading and writing the grouping, the stage folds and
+  `tasks.folded`; the columns stay until a later breaking migration
+  (`daemon/internal/wsm/sidebarview.go`, `retiredGroupingColumn`).
+
 ## Open for the owner's ruling: the task feature beyond its grouping
 
-The task grouping was the task feature's only drawn surface. Still in the
-contract, now with no drawn surface:
+The task grouping was the task feature's only drawn surface, and the rail's
+task controls went with it. Still in the contract, now with no drawn
+surface:
 
 - `agentrepl.v1.CreateTask`, `agentrepl.v1.UpdateTask`,
   `agentrepl.v1.AssignWorkspaceTask` and `agentrepl.v1.TaskRef`.
-- The workspace's task assignment in the daemon's registry.
-- `workspace.v1.MaturityStage`, if nothing but the maturity grouping reads it.
+- The workspace's task assignment in the daemon's registry, and the
+  roster resolver's `Registry.Tasks`, which nothing reads any more.
