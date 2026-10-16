@@ -23,7 +23,15 @@ message SelectWorkspaceResponse {
   }
 }
 // Selected; the roster stream carries the new `current`.
-message SelectWorkspaceSuccess {}
+message SelectWorkspaceSuccess {
+  // THE ROSTER REVISION THE SELECTION IS IN (frontend.v1
+  // WorkspaceRoster.revision): every roster at this revision or later carries
+  // it. The answer and the roster ride separate streams, so a roster resolved
+  // before the selection can arrive after the answer; a client that moved on
+  // the selection judges the roster's `current` only once it holds a roster at
+  // this revision, and is never moved back by one from before it.
+  uint64 roster_revision = 1;
+}
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message SelectWorkspaceError {

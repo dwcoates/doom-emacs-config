@@ -30,6 +30,13 @@ func (r *resolver) Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 	return cloned, r.last.GetRevision(), true
 }
 
+// Revision implements Resolver.
+func (r *resolver) Revision() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last.GetRevision()
+}
+
 // findRow answers WS's row in ROSTER, nil when it carries none. Each
 // workspace is in exactly one of the repository sections, the hidden section
 // and the recently-merged band.

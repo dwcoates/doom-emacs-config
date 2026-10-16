@@ -156,9 +156,16 @@ func (*SelectWorkspaceResponse_Error) isSelectWorkspaceResponse_Result() {}
 
 // Selected; the roster stream carries the new `current`.
 type SelectWorkspaceSuccess struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE ROSTER REVISION THE SELECTION IS IN (frontend.v1
+	// WorkspaceRoster.revision): every roster at this revision or later carries
+	// it. The answer and the roster ride separate streams, so a roster resolved
+	// before the selection can arrive after the answer; a client that moved on
+	// the selection judges the roster's `current` only once it holds a roster at
+	// this revision, and is never moved back by one from before it.
+	RosterRevision uint64 `protobuf:"varint,1,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SelectWorkspaceSuccess) Reset() {
@@ -189,6 +196,13 @@ func (x *SelectWorkspaceSuccess) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SelectWorkspaceSuccess.ProtoReflect.Descriptor instead.
 func (*SelectWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_select_workspace_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SelectWorkspaceSuccess) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -544,8 +558,9 @@ const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
 	"\x17SelectWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.SelectWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.SelectWorkspaceErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\x18\n" +
-	"\x16SelectWorkspaceSuccess\"\xee\x03\n" +
+	"\x06result\"A\n" +
+	"\x16SelectWorkspaceSuccess\x12'\n" +
+	"\x0froster_revision\x18\x01 \x01(\x04R\x0erosterRevision\"\xee\x03\n" +
 	"\x14SelectWorkspaceError\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.SelectWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.SelectWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
