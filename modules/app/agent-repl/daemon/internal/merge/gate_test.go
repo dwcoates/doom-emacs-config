@@ -389,6 +389,39 @@ func TestAGateWhosePathsReadIsCutByTheRunsEndRunsNothing(t *testing.T) {
 	}
 }
 
+func TestAGateWhosePathsReadIsCutByTheMergeAheadMovingRunsNothingAndRestarts(t *testing.T) {
+	// Arrange: the run goes on, but its speculative gate is cut because the
+	// merge ahead moved, and its git diff answers the cut.
+	h := newHarness(t)
+	r := failingTestsRun(t, h)
+	r.ctx, r.cancel = context.WithCancelCause(context.Background())
+	t.Cleanup(func() { r.cancel(nil) })
+	ctx, cancel := context.WithCancelCause(r.ctx)
+	cancel(errBaseMoved)
+	h.git.changedErr = fmt.Errorf("git diff was cancelled: %w", context.Canceled)
+	round := r.openTab(context.Background(), TabTests)
+
+	// Act.
+	_, err := r.gate(ctx, round, "tip", "head", nil)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("gate err = %v, want the cut answered", err)
+	}
+	h.runner.mu.Lock()
+	started := len(h.runner.argv)
+	h.runner.mu.Unlock()
+	if started != 0 {
+		t.Fatalf("the runner was started %d times for a cut gate, want none", started)
+	}
+	if rec, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.tests"); ok {
+		t.Fatalf("the cut was recorded as a warning: %+v", rec)
+	}
+	if got := gateRecord(t, h, "cut before its verdict by the merge ahead moved"); got["round"] != round.n {
+		t.Fatalf("cut record = %v, want round %d", got, round.n)
+	}
+}
+
 // gateRecord answers the first INFO record of the gate whose message holds
 // message.
 func gateRecord(t *testing.T, h *harness, message string) map[string]any {
