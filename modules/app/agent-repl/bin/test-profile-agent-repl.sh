@@ -102,10 +102,11 @@ if [ ! -e "$W/root/armed/store-202" ]; then
 else
     fail "start removes the marker of a process that is gone"
 fi
-if grep -q 'skipped sidecar-303: pid 303 is zsh, not shim-claude-sidecar' "$W/root/$session/control.log"; then
-    pass "start skips a marker whose pid is another program, and says so"
+if [ ! -e "$W/root/armed/sidecar-303" ] &&
+    grep -q 'removed sidecar-303: the process is gone; pid 303 is now zsh' "$W/root/$session/control.log"; then
+    pass "start removes a marker whose pid is now another program, and says so"
 else
-    fail "start skips a marker whose pid is another program, and says so" "$(cat "$W/root/$session/control.log")"
+    fail "start removes a marker whose pid is now another program, and says so" "$(cat "$W/root/$session/control.log")"
 fi
 if grep -q 'agent-repl-profiling-reconcile' "$W/log" && grep -q '^emacs: "started"' "$W/root/$session/control.log"; then
     pass "start asks Emacs to reconcile and records its answer"
@@ -392,6 +393,17 @@ else
 fi
 
 # --- switch-bench ----------------------------------------------------------------
+# --- status of stale markers ---------------------------------------------------
+fresh_world status-stale
+out="$(collector status)"
+if grep -q 'stale: store-202 (the process is gone)' <<<"$out" &&
+    grep -q 'stale: sidecar-303 (the process is gone; its pid is now zsh)' <<<"$out" &&
+    grep -q 'armed: daemon-101 (agent-repld)' <<<"$out"; then
+    pass "status names a marker whose pid is now another program as stale, not armed"
+else
+    fail "status names a marker whose pid is now another program as stale, not armed" "$out"
+fi
+
 # A stub Emacs that answers each form the bench sends: whether it has a tour,
 # its pid (one per line of $STUB_EMACS_PIDS, the last repeated), the tour's
 # acceptance, its state ($STUB_TOUR_STATE, default idle), and the reconcile.
@@ -420,6 +432,7 @@ chmod +x "$BENCH_STUBS/emacsclient"
 # bench ARGS... -- run switch-bench in a fresh world, its answer in $out and $rc.
 bench() {
     fresh_world "bench-$RANDOM"
+    [ -z "${BENCH_STALE_DAEMON:-}" ] || : >"$W/root/armed/daemon-$BENCH_STALE_DAEMON"
     printf '999\n' >"$W/pids"
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >%q\ncat %q\n' "$W/logs-args" "$R/logs.jsonl" >"$W/logs.sh"
     chmod +x "$W/logs.sh"
@@ -483,6 +496,15 @@ if [ "$rc" -ne 0 ] && grep -q 'INVALID RUN: a rollout replaced a runtime' <<<"$o
 else
     fail "switch-bench fails a run during which a rollout replaced a runtime, and closes its session" "rc=$rc out=$out"
 fi
+
+for stale in 77 303; do
+    BENCH_STALE_DAEMON=$stale bench --slow 1:0.05 --fast 1:0.05
+    if [ "$rc" -eq 0 ] && grep -q '"before":"daemon=101 emacs=999"' "$W/root/$BENCH_SESSION/bench.json"; then
+        pass "switch-bench reads only the live daemon, past a stale daemon-$stale marker"
+    else
+        fail "switch-bench reads only the live daemon, past a stale daemon-$stale marker" "rc=$rc out=$out $(cat "$W/root/$BENCH_SESSION/bench.json" 2>&1)"
+    fi
+done
 
 STUB_TOUR_STATE="running slow 1" bench --slow 1:0.05 --fast 1:0.05
 if [ "$rc" -ne 0 ] && grep -q 'past its deadline; cancelled' <<<"$out" && grep -q 'switch-tour-cancel' "$W/log" && [ ! -e "$W/root/active" ]; then
