@@ -3,10 +3,17 @@ package workspace
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"slices"
 	"strings"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -191,4 +198,77 @@ func TestRepublishRegistryLogsItsCompletionAtInfo(t *testing.T) {
 	if level != "info" {
 		t.Fatalf("the roster republish completion is %q, want info", level)
 	}
+}
+
+func TestDeferredBriefIsDeferred(t *testing.T) {
+	// Arrange, Act.
+	got := deferredBrief("w1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
+
+	// Assert.
+	if got.Delivery != wsm.DeliveryDeferred {
+		t.Fatalf("delivery = %v, want deferred", got.Delivery)
+	}
+}
+
+func TestDeferredBriefCarriesItsWorkspaceOriginAndText(t *testing.T) {
+	// Arrange, Act.
+	got := deferredBrief("w1", "the brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
+
+	// Assert.
+	if got.WS != "w1" || got.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT || submittedText(got.Said) != "the brief" {
+		t.Fatalf("submission = %+v, want w1's MERGE_REVERT brief saying the brief", got)
+	}
+}
+
+func TestDeferredBriefMintsAFreshTurnEachTime(t *testing.T) {
+	// Arrange, Act.
+	first := deferredBrief("w1", "a", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
+	second := deferredBrief("w1", "a", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
+
+	// Assert.
+	if first.Turn == "" || first.Turn == second.Turn {
+		t.Fatalf("turns = %q, %q, want two distinct minted turns", first.Turn, second.Turn)
+	}
+}
+
+// TestOnlyDeferredBriefDefersASubmission pins deferredBrief as the one place
+// this package composes a deferred submission: a verb hand-rolling one would
+// be free to drift from it.
+func TestOnlyDeferredBriefDefersASubmission(t *testing.T) {
+	// Arrange, Act.
+	got := functionsReferencing(t, "DeliveryDeferred")
+
+	// Assert.
+	if !slices.Equal(got, []string{"deferredBrief"}) {
+		t.Fatalf("functions naming DeliveryDeferred = %v, want only deferredBrief", got)
+	}
+}
+
+// functionsReferencing names, sorted and once each, every function of this
+// package's production sources whose body names the identifier NAME, bare or
+// as a selector's field.
+func functionsReferencing(t *testing.T, name string) []string {
+	t.Helper()
+	files := token.NewFileSet()
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		parsed, err := parser.ParseFile(files, file.Name, file.Source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file.Name, err)
+		}
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				if ident, ok := node.(*ast.Ident); ok && ident.Name == name && !slices.Contains(found, fn.Name.Name) {
+					found = append(found, fn.Name.Name)
+				}
+				return true
+			})
+		}
+	}
+	slices.Sort(found)
+	return found
 }

@@ -208,6 +208,17 @@ func daemonSubmission(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.
 	return promptqueue.Submission{WS: ws, Turn: turn, Said: said, Origin: origin}
 }
 
+// deferredBrief composes a daemon brief as a DEFERRED submission of ORIGIN,
+// under a fresh turn: it never interjects a turn the session is running, it
+// runs as the next turn, and it wakes an idle agent. Every brief the workspace
+// verbs queue into a session they have just opened is composed here, so none
+// of them can interrupt the work it lands beside.
+func deferredBrief(ws ids.WorkspaceID, text string, origin conversationv1.PromptOrigin) promptqueue.Submission {
+	submission := daemonSubmission(ws, wsm.NewTurnID(), SaidText(text), origin)
+	submission.Delivery = wsm.DeliveryDeferred
+	return submission
+}
+
 // rootFeed is the workspace's top-level feed, which is where every
 // daemon-synthesized row this package produces lands.
 func rootFeed() feedid.Feed { return feedid.Feed{Root: true} }

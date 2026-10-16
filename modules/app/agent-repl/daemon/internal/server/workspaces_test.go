@@ -1922,3 +1922,72 @@ func TestMergeWorkspaceAnswersTheVersionRefusalsOnTheirArms(t *testing.T) {
 		})
 	}
 }
+
+// TestOpenWorkspaceRoutesTheOpenItAsks pins which verb an open reaches: a
+// request carrying revert_merge reaches OpenToRevertMerge alone, and one
+// without it reaches Open alone.
+func TestOpenWorkspaceRoutesTheOpenItAsks(t *testing.T) {
+	tests := []struct {
+		name        string
+		revert      *agentreplv1.OpenWorkspaceRevertMerge
+		wantOpens   int32
+		wantReverts int32
+	}{
+		{name: "an ordinary open", revert: nil, wantOpens: 1, wantReverts: 0},
+		{name: "an open that reverts the merge", revert: &agentreplv1.OpenWorkspaceRevertMerge{}, wantOpens: 0, wantReverts: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.OpenWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref(), RevertMerge: tc.revert}))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("OpenWorkspace = (%v, %v), want success", resp, err)
+			}
+			if got := h.Verbs.opens.Load(); got != tc.wantOpens {
+				t.Fatalf("opens = %d, want %d", got, tc.wantOpens)
+			}
+			if got := h.Verbs.revertOpens.Load(); got != tc.wantReverts {
+				t.Fatalf("revert opens = %d, want %d", got, tc.wantReverts)
+			}
+		})
+	}
+}
+
+// TestOpenWorkspaceAnswersTheRevertRefusalsByTheirArms pins that the revert's
+// own refusals reach the client as their typed arms.
+func TestOpenWorkspaceAnswersTheRevertRefusalsByTheirArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		arm   string
+		check func(*agentreplv1.OpenWorkspaceError) bool
+	}{
+		{name: "not merged", arm: workspace.ArmNotMerged, check: func(e *agentreplv1.OpenWorkspaceError) bool {
+			return e.GetNotMerged() != nil
+		}},
+		{name: "brief missing", arm: workspace.ArmBriefMissing, check: func(e *agentreplv1.OpenWorkspaceError) bool {
+			return e.GetBriefMissing().GetDetail() == "the brief is gone"
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.revertErr = &workspace.Refusal{Arm: tc.arm, Reason: "the brief is gone"}
+
+			// Act.
+			resp, err := h.Client.OpenWorkspace(context.Background(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{
+				Workspace: ref(), RevertMerge: &agentreplv1.OpenWorkspaceRevertMerge{}}))
+
+			// Assert.
+			if err != nil || !tc.check(resp.Msg.GetError()) {
+				t.Fatalf("OpenWorkspace = (%v, %v), want the %s arm", resp, err, tc.arm)
+			}
+		})
+	}
+}

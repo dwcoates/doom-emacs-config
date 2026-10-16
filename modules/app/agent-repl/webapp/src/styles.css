@@ -5927,6 +5927,7 @@ ar-button.outcome-marker-pill {
    clip off the top of the rail; it caps its height and scrolls if the rail is
    short. Delimited by the shared `.list-rows` rule, like every other list. */
 #ws-sidebar .sb-menu,
+#ws-sidebar .sb-band-choices,
 #ws-sidebar .sb-submenu {
   margin: 0.15rem 0.7rem 0.3rem 2rem;
   border: 1px solid var(--border);

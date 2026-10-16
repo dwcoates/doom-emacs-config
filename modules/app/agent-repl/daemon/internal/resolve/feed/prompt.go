@@ -347,6 +347,8 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED:
 		return "Merge"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT:
+		return "Merge revert"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART:
 		return "Resumed after restart"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:

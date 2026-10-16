@@ -396,8 +396,14 @@ The top bar's effort selector sits between the model selector and the permission
 ## Reopening a merged workspace
 
 - **A merged workspace can be opened again, from the sidebar or from Emacs.**
-  - Clicking its row under Recently Merged opens it and switches to it.
-  - `SPC p p`, `SPC p P` and the row menu's Open do the same.
+  - Clicking its row under Recently Merged offers two choices, and either one opens it and switches to it.
+  - **Reopen** brings it back as it was, to ask it about what it landed or to revise it.
+  - **Reopen and revert the merge** also hands its agent a brief to revert the merge and land the revert; follow the revert from the workspace's feed.
+  - `SPC p p`, `SPC p P` and the row menu's Open reopen it without reverting.
+- **Reverting asks the agent to undo exactly what the merge brought in.**
+  - The brief names the branch, the branch it landed on, and the commit the branch held when it landed.
+  - The agent reverts on the workspace's own branch and lands the revert through the merge queue, like any other work.
+  - When the reopened conversation is large enough to stop at the cold-cache choice, the brief waits there; the choice you make decides it, as it does for any prompt waiting at that choice.
 - **It comes back as an ordinary open workspace.**
   - Its worktree is checked out again from its branch, and its conversation comes back.
   - It leaves Recently Merged and returns to its groupings and the tab bar.

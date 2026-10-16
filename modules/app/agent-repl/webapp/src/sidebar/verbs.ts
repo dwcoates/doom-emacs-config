@@ -176,7 +176,7 @@ async function runSimpleVerb(
 ): Promise<void> {
   switch (verb) {
     case "open":
-      await runOpenWorkspace(button, target.sc, target.workspace);
+      await runOpenWorkspace(button, target.sc, buildOpenWorkspaceRequest(target.workspace));
       return;
     case "close":
       await runVerb(button, {
@@ -543,15 +543,17 @@ type CauseOf<E extends { cause: { case?: string | undefined } }> = NonNullable<E
 };
 
 /**
- * Issue OpenWorkspace for WORKSPACE, saying a refusal at CONTROL. The ONE
- * spelling of the open: the menu's Open and the Recently Merged row click
- * both run it. Answers whether the daemon opened the workspace.
+ * Issue the OpenWorkspace REQUEST, saying a refusal at CONTROL. The ONE
+ * spelling of the open: the menu's Open and both of the Recently Merged row's
+ * choices run it, the revert as a request that carries `revertMerge`
+ * (`buildRevertMergeRequest`). Answers whether the daemon opened the
+ * workspace.
  */
-export function runOpenWorkspace(control: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef): Promise<boolean> {
+export function runOpenWorkspace(control: HTMLElement, sc: SidebarContext, request: OpenWorkspaceRequest): Promise<boolean> {
   return runVerb(control, {
     sc,
     rpc: "OpenWorkspace",
-    call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(workspace)),
+    call: (client) => client.openWorkspace(request),
     schema: OpenWorkspaceResponseSchema,
     refusalText: (cause) => openWorkspaceRefusal(cause as CauseOf<OpenWorkspaceError>),
   });
@@ -594,6 +596,12 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
       // merged. The daemon's own sentence names which, with the directory and
       // branch, so it is drawn as it came -- the same sentence Emacs shows.
       return cause.value.detail;
+    case "notMerged":
+      return "this workspace has no landed merge to revert";
+    case "briefMissing":
+      // The daemon's own sentence names the brief and why it would not
+      // compose; nothing was opened.
+      return `the merge could not be reverted: ${cause.value.detail}`;
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }
@@ -746,6 +754,14 @@ export function buildSelectWorkspaceRequest(workspace: WorkspaceRef): SelectWork
 /** OpenWorkspace: bring a registered-but-closed workspace back up. */
 export function buildOpenWorkspaceRequest(workspace: WorkspaceRef): OpenWorkspaceRequest {
   return create(OpenWorkspaceRequestSchema, { workspace });
+}
+
+/**
+ * OpenWorkspace that also reverts the merge: the daemon reopens the merged
+ * workspace and queues the brief that has its agent revert the merge.
+ */
+export function buildRevertMergeRequest(workspace: WorkspaceRef): OpenWorkspaceRequest {
+  return create(OpenWorkspaceRequestSchema, { workspace, revertMerge: {} });
 }
 
 /** CloseWorkspace: the soft close, which refuses while work is in flight. */

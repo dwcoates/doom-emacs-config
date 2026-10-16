@@ -343,6 +343,10 @@ type fakeVerbs struct {
 	// openProgress is the reporter itself so a test can assert its absence.
 	openStages   []workspace.OpenStage
 	openProgress workspace.OpenProgress
+	// revertOpens counts every OpenToRevertMerge the handler made, and
+	// revertErr is what each answers.
+	revertOpens atomic.Int32
+	revertErr   error
 
 	// listTranscripts is what ListTranscripts answers, and
 	// listTranscriptsErr the refusal it answers instead.
@@ -488,6 +492,12 @@ func (f *fakeVerbs) Open(_ context.Context, _ ids.WorkspaceID, progress workspac
 		}
 	}
 	return f.openErr
+}
+
+// OpenToRevertMerge counts the revert-merge opens the rpc routed here.
+func (f *fakeVerbs) OpenToRevertMerge(context.Context, ids.WorkspaceID, workspace.OpenProgress) error {
+	f.revertOpens.Add(1)
+	return f.revertErr
 }
 
 func (f *fakeVerbs) ListTranscripts(context.Context, ids.WorkspaceID) ([]*agentreplv1.WorkspaceTranscript, error) {

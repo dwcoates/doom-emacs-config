@@ -705,6 +705,80 @@ func TestSubmitDoesNotReviveAColdGatedWorkspace(t *testing.T) {
 	}
 }
 
+// ---- the merge-revert brief waits out a standing cold gate ---------------
+
+// mergeRevertSubmission is the merge-revert brief's submission.
+func mergeRevertSubmission(turn ids.TurnID) Submission {
+	sub := submission(turn, "revert the merge")
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT
+	sub.Delivery = wsm.DeliveryDeferred
+	return sub
+}
+
+func TestSubmitHoldsAMergeRevertBriefAtAStandingColdGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	got, err := h.q.Submit(context.Background(), mergeRevertSubmission("t1"))
+	// Assert
+	if err != nil || !got.Parked() {
+		t.Fatalf("Submit = (%+v, %v), want the brief held, not refused", got, err)
+	}
+}
+
+func TestAMergeRevertBriefHeldAtAColdGateStandsOnTheGatesHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	if _, err := h.q.Submit(context.Background(), mergeRevertSubmission("t1")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	held, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if len(held) != 1 || held[0].Hold == nil || *held[0].Hold != wsm.HoldColdGate {
+		t.Fatalf("held = %+v, want the brief on the cold gate's hold", held)
+	}
+}
+
+func TestAMergeRevertBriefHeldAtAColdGateStartsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.coldGate = "the conversation is cold at 101600 context tokens"
+	// Act
+	_, _ = h.q.Submit(context.Background(), mergeRevertSubmission("t1"))
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing delivered into a gated session", started)
+	}
+}
+
+func TestOnlyTheMergeRevertBriefWaitsOutAColdGate(t *testing.T) {
+	tests := []struct {
+		origin conversationv1.PromptOrigin
+		want   bool
+	}{
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.origin.String(), func(t *testing.T) {
+			// Act
+			got := waitsOutColdGate(tt.origin)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("waitsOutColdGate(%s) = %v, want %v", tt.origin, got, tt.want)
+			}
+		})
+	}
+}
+
 // cutRecordedBeforeTheWatcherKnows records a context cut as runContextCut does
 // in its first step, before the watcher has been told of the turn.
 func cutRecordedBeforeTheWatcherKnows(h *harness) {

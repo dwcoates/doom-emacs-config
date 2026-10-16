@@ -127,10 +127,9 @@ func (v *verbs) deliverCreateFailure(ctx context.Context, log dlog.Logger, spec 
 		log.Error(opCreateFailedReport, "could not open the main-worktree workspace to report a failed create to", dlog.Context{"open": err.Error()})
 		return
 	}
-	submission := daemonSubmission(target.ID, wsm.NewTurnID(), SaidText(request), conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED)
 	// DEFERRED: the report waits behind a turn the main worktree is running
 	// and wakes it when idle; it never interrupts work.
-	submission.Delivery = wsm.DeliveryDeferred
+	submission := deferredBrief(target.ID, request, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED)
 	disposition, err := v.deps.Queue.Submit(ctx, submission)
 	if err != nil {
 		log.Error(opCreateFailedReport, "the main-worktree workspace's queue did not accept the failed create's report", dlog.Context{"submit": err.Error()})

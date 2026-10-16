@@ -684,7 +684,8 @@ no client ever sends them.")
   '("PROMPT_ORIGIN_VENDOR_STARTED" "PROMPT_ORIGIN_LINK_UNRESOLVED"
     "PROMPT_ORIGIN_MERGE_HANDBACK" "PROMPT_ORIGIN_WORKSPACE_RETARGETED"
     "PROMPT_ORIGIN_MERGE_PICK" "PROMPT_ORIGIN_MERGE_COMPACT_AFTER"
-    "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED" "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE")
+    "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED" "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE"
+    "PROMPT_ORIGIN_MERGE_REVERT")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
@@ -697,8 +698,9 @@ changes.  MERGE_COMPACT_AFTER is the daemon's /compact of a requester whose
 async merge landed and asked to compact after it.  WORKSPACE_CREATE_FAILED
 is the daemon's request that a repository's main-worktree workspace analyze
 why a workspace create in it failed.  MERGE_QUEUE_NOTICE is the daemon's
-notice to a merge queue subscriber that the queue changed.  None has an
-elisp spelling at all.")
+notice to a merge queue subscriber that the queue changed.  MERGE_REVERT
+is the daemon's brief asking a reopened merged workspace to revert its
+merge.  None has an elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.

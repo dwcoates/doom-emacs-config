@@ -18,7 +18,22 @@ message OpenWorkspaceRequest {
   // (workspace_mutation_progress.proto), so a client can report the wait
   // rather than only its outcome. An open with no op_id emits no stages.
   string op_id = 2;
+  // PRESENT = reopen a MERGED workspace in order to REVERT the merge it
+  // landed: the open runs exactly as it does without this (the worktree is
+  // checked out again from the branch when its directory is gone, the
+  // branch advances to its parent's tip, the session comes back), and then
+  // the daemon queues the merge-revert brief into the workspace's session
+  // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_REVERT), so the agent
+  // reverts the merge and the user follows it from the workspace. UNSET =
+  // an ordinary open. A workspace whose merge has not landed is refused
+  // `not_merged`, before anything is opened.
+  optional OpenWorkspaceRevertMerge revert_merge = 3;
 }
+
+// The ask to revert a merged workspace's landed merge as part of its open.
+// Presence is the whole ask; the daemon knows the branch, its parent, and
+// the commit that landed, so the client states nothing more.
+message OpenWorkspaceRevertMerge {}
 
 // THE ARM IS THE OUTCOME.
 message OpenWorkspaceResponse {
@@ -69,7 +84,23 @@ message OpenWorkspaceError {
     // (WorkspaceOpenStage.restoring_worktree) and proceeds. A user picking a
     // row that cannot be restored is an ordinary answer, not a fault.
     OpenWorkspaceWorktreeUnrestorable worktree_unrestorable = 10;
+    // `revert_merge` was asked of a workspace whose merge has not landed (or
+    // that was reopened since it landed), so there is no merge to revert.
+    // Nothing was opened.
+    OpenWorkspaceNotMerged not_merged = 11;
+    // `revert_merge` was asked and the merge-revert brief could not be
+    // composed (the prompts directory does not hold it, or it will not
+    // splice). Nothing was opened: the brief is composed before the open.
+    OpenWorkspaceBriefMissing brief_missing = 12;
   }
+}
+// The refusal of a revert asked of a workspace with no landed merge. Carries
+// nothing: the workspace's own row already says it is not merged.
+message OpenWorkspaceNotMerged {}
+message OpenWorkspaceBriefMissing {
+  // The daemon's sentence naming the brief and why it could not be
+  // composed, for a human and for logs; never switched on.
+  string detail = 1;
 }
 message OpenWorkspaceWorktreeUnrestorable {
   // The recorded directory, which is gone.

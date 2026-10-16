@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_open_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJUChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBW9wX2lkGAIgASgJIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyKPBgoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAEksKE3ZlbmRvcl9zdGFydF9mYWlsZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkSAASUwoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYCSABKAsyMC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAElAKFXdvcmt0cmVlX3VucmVzdG9yYWJsZRgKIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3RyZWVVbnJlc3RvcmFibGVIAEIHCgVjYXVzZSJQCiFPcGVuV29ya3NwYWNlV29ya3RyZWVVbnJlc3RvcmFibGUSCwoDZGlyGAEgASgJEg4KBmJyYW5jaBgCIAEoCRIOCgZkZXRhaWwYAyABKAkidwoiT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZRIzCgdmYWlsdXJlGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkxvY2tIb2xkZXJGYWlsdXJlSgQIARACSgQIAhADUgZiaW5hcnlSCG9zX2Vycm9yIjAKHk9wZW5Xb3Jrc3BhY2VWZW5kb3JTdGFydEZhaWxlZBIOCgZkZXRhaWwYASABKAkiHwodT3BlbldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOQohT3BlbldvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGk9wZW5Xb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIh0KG09wZW5Xb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZCJTCh5PcGVuV29ya3NwYWNlVHJhbnNjcmlwdE1pc3NpbmcSGQoRdmVuZG9yX3Nlc3Npb25faWQYASABKAkSFgoOc2VhcmNoZWRfcGF0aHMYAiADKAkiKgoYT3BlbldvcmtzcGFjZVNwYXduRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_conversation_v1_session, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSKoAQoUT3BlbldvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhINCgVvcF9pZBgCIAEoCRJBCgxyZXZlcnRfbWVyZ2UYAyABKAsyJi5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVJldmVydE1lcmdlSACIAQFCDwoNX3JldmVydF9tZXJnZSIaChhPcGVuV29ya3NwYWNlUmV2ZXJ0TWVyZ2UiiwEKFU9wZW5Xb3Jrc3BhY2VSZXNwb25zZRI1CgdzdWNjZXNzGAEgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTdWNjZXNzSAASMQoFZXJyb3IYAiABKAsyIC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhYKFE9wZW5Xb3Jrc3BhY2VTdWNjZXNzIo0HChJPcGVuV29ya3NwYWNlRXJyb3ISSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJRChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi8uYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkgKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASQwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASRAoPc2Vzc2lvbl9kZWxldGVkGAUgASgLMikuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZEgAEkoKEnRyYW5zY3JpcHRfbWlzc2luZxgGIAEoCzIsLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNjcmlwdE1pc3NpbmdIABI+CgxzcGF3bl9mYWlsZWQYByABKAsyJi5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVNwYXduRmFpbGVkSAASSwoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgIIAEoCzIsLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVmVuZG9yU3RhcnRGYWlsZWRIABJTChdsb2NrX2hvbGRlcl91bmF2YWlsYWJsZRgJIAEoCzIwLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTG9ja0hvbGRlclVuYXZhaWxhYmxlSAASUAoVd29ya3RyZWVfdW5yZXN0b3JhYmxlGAogASgLMi8uYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VXb3JrdHJlZVVucmVzdG9yYWJsZUgAEjoKCm5vdF9tZXJnZWQYCyABKAsyJC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZU5vdE1lcmdlZEgAEkAKDWJyaWVmX21pc3NpbmcYDCABKAsyJy5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUJyaWVmTWlzc2luZ0gAQgcKBWNhdXNlIhgKFk9wZW5Xb3Jrc3BhY2VOb3RNZXJnZWQiKwoZT3BlbldvcmtzcGFjZUJyaWVmTWlzc2luZxIOCgZkZXRhaWwYASABKAkiUAohT3BlbldvcmtzcGFjZVdvcmt0cmVlVW5yZXN0b3JhYmxlEgsKA2RpchgBIAEoCRIOCgZicmFuY2gYAiABKAkSDgoGZGV0YWlsGAMgASgJIncKIk9wZW5Xb3Jrc3BhY2VMb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvciIwCh5PcGVuV29ya3NwYWNlVmVuZG9yU3RhcnRGYWlsZWQSDgoGZGV0YWlsGAEgASgJIh8KHU9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIU9wZW5Xb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodT3BlbldvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpPcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtPcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWQiUwoeT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhYKDnNlYXJjaGVkX3BhdGhzGAIgAygJIioKGE9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_session, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceRequest
@@ -38,6 +38,21 @@ export type OpenWorkspaceRequest = Message<"agentrepl.v1.OpenWorkspaceRequest"> 
    * @generated from field: string op_id = 2;
    */
   opId: string;
+
+  /**
+   * PRESENT = reopen a MERGED workspace in order to REVERT the merge it
+   * landed: the open runs exactly as it does without this (the worktree is
+   * checked out again from the branch when its directory is gone, the
+   * branch advances to its parent's tip, the session comes back), and then
+   * the daemon queues the merge-revert brief into the workspace's session
+   * (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_REVERT), so the agent
+   * reverts the merge and the user follows it from the workspace. UNSET =
+   * an ordinary open. A workspace whose merge has not landed is refused
+   * `not_merged`, before anything is opened.
+   *
+   * @generated from field: optional agentrepl.v1.OpenWorkspaceRevertMerge revert_merge = 3;
+   */
+  revertMerge?: OpenWorkspaceRevertMerge | undefined;
 };
 
 /**
@@ -46,6 +61,23 @@ export type OpenWorkspaceRequest = Message<"agentrepl.v1.OpenWorkspaceRequest"> 
  */
 export const OpenWorkspaceRequestSchema: GenMessage<OpenWorkspaceRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_workspace, 0);
+
+/**
+ * The ask to revert a merged workspace's landed merge as part of its open.
+ * Presence is the whole ask; the daemon knows the branch, its parent, and
+ * the commit that landed, so the client states nothing more.
+ *
+ * @generated from message agentrepl.v1.OpenWorkspaceRevertMerge
+ */
+export type OpenWorkspaceRevertMerge = Message<"agentrepl.v1.OpenWorkspaceRevertMerge"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenWorkspaceRevertMerge.
+ * Use `create(OpenWorkspaceRevertMergeSchema)` to create a new message.
+ */
+export const OpenWorkspaceRevertMergeSchema: GenMessage<OpenWorkspaceRevertMerge> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 1);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -76,7 +108,7 @@ export type OpenWorkspaceResponse = Message<"agentrepl.v1.OpenWorkspaceResponse"
  * Use `create(OpenWorkspaceResponseSchema)` to create a new message.
  */
 export const OpenWorkspaceResponseSchema: GenMessage<OpenWorkspaceResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 1);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 2);
 
 /**
  * Done; every visible effect arrives on the streams.
@@ -91,7 +123,7 @@ export type OpenWorkspaceSuccess = Message<"agentrepl.v1.OpenWorkspaceSuccess"> 
  * Use `create(OpenWorkspaceSuccessSchema)` to create a new message.
  */
 export const OpenWorkspaceSuccessSchema: GenMessage<OpenWorkspaceSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 2);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 3);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -197,6 +229,26 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
      */
     value: OpenWorkspaceWorktreeUnrestorable;
     case: "worktreeUnrestorable";
+  } | {
+    /**
+     * `revert_merge` was asked of a workspace whose merge has not landed (or
+     * that was reopened since it landed), so there is no merge to revert.
+     * Nothing was opened.
+     *
+     * @generated from field: agentrepl.v1.OpenWorkspaceNotMerged not_merged = 11;
+     */
+    value: OpenWorkspaceNotMerged;
+    case: "notMerged";
+  } | {
+    /**
+     * `revert_merge` was asked and the merge-revert brief could not be
+     * composed (the prompts directory does not hold it, or it will not
+     * splice). Nothing was opened: the brief is composed before the open.
+     *
+     * @generated from field: agentrepl.v1.OpenWorkspaceBriefMissing brief_missing = 12;
+     */
+    value: OpenWorkspaceBriefMissing;
+    case: "briefMissing";
   } | { case: undefined; value?: undefined };
 };
 
@@ -205,7 +257,43 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
  * Use `create(OpenWorkspaceErrorSchema)` to create a new message.
  */
 export const OpenWorkspaceErrorSchema: GenMessage<OpenWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 4);
+
+/**
+ * The refusal of a revert asked of a workspace with no landed merge. Carries
+ * nothing: the workspace's own row already says it is not merged.
+ *
+ * @generated from message agentrepl.v1.OpenWorkspaceNotMerged
+ */
+export type OpenWorkspaceNotMerged = Message<"agentrepl.v1.OpenWorkspaceNotMerged"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenWorkspaceNotMerged.
+ * Use `create(OpenWorkspaceNotMergedSchema)` to create a new message.
+ */
+export const OpenWorkspaceNotMergedSchema: GenMessage<OpenWorkspaceNotMerged> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.OpenWorkspaceBriefMissing
+ */
+export type OpenWorkspaceBriefMissing = Message<"agentrepl.v1.OpenWorkspaceBriefMissing"> & {
+  /**
+   * The daemon's sentence naming the brief and why it could not be
+   * composed, for a human and for logs; never switched on.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenWorkspaceBriefMissing.
+ * Use `create(OpenWorkspaceBriefMissingSchema)` to create a new message.
+ */
+export const OpenWorkspaceBriefMissingSchema: GenMessage<OpenWorkspaceBriefMissing> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceWorktreeUnrestorable
@@ -240,7 +328,7 @@ export type OpenWorkspaceWorktreeUnrestorable = Message<"agentrepl.v1.OpenWorksp
  * Use `create(OpenWorkspaceWorktreeUnrestorableSchema)` to create a new message.
  */
 export const OpenWorkspaceWorktreeUnrestorableSchema: GenMessage<OpenWorkspaceWorktreeUnrestorable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceLockHolderUnavailable
@@ -260,7 +348,7 @@ export type OpenWorkspaceLockHolderUnavailable = Message<"agentrepl.v1.OpenWorks
  * Use `create(OpenWorkspaceLockHolderUnavailableSchema)` to create a new message.
  */
 export const OpenWorkspaceLockHolderUnavailableSchema: GenMessage<OpenWorkspaceLockHolderUnavailable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceVendorStartFailed
@@ -277,7 +365,7 @@ export type OpenWorkspaceVendorStartFailed = Message<"agentrepl.v1.OpenWorkspace
  * Use `create(OpenWorkspaceVendorStartFailedSchema)` to create a new message.
  */
 export const OpenWorkspaceVendorStartFailedSchema: GenMessage<OpenWorkspaceVendorStartFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 9);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceUnknownWorkspace
@@ -290,7 +378,7 @@ export type OpenWorkspaceUnknownWorkspace = Message<"agentrepl.v1.OpenWorkspaceU
  * Use `create(OpenWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenWorkspaceUnknownWorkspaceSchema: GenMessage<OpenWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 10);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
@@ -309,7 +397,7 @@ export type OpenWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.OpenWorksp
  * Use `create(OpenWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenWorkspaceWorkspaceRefMismatchSchema: GenMessage<OpenWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 11);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceTransferringAway
@@ -328,7 +416,7 @@ export type OpenWorkspaceTransferringAway = Message<"agentrepl.v1.OpenWorkspaceT
  * Use `create(OpenWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const OpenWorkspaceTransferringAwaySchema: GenMessage<OpenWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 12);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceNotYetAdopted
@@ -341,7 +429,7 @@ export type OpenWorkspaceNotYetAdopted = Message<"agentrepl.v1.OpenWorkspaceNotY
  * Use `create(OpenWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenWorkspaceNotYetAdoptedSchema: GenMessage<OpenWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 13);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceSessionDeleted
@@ -354,7 +442,7 @@ export type OpenWorkspaceSessionDeleted = Message<"agentrepl.v1.OpenWorkspaceSes
  * Use `create(OpenWorkspaceSessionDeletedSchema)` to create a new message.
  */
 export const OpenWorkspaceSessionDeletedSchema: GenMessage<OpenWorkspaceSessionDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 14);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceTranscriptMissing
@@ -380,7 +468,7 @@ export type OpenWorkspaceTranscriptMissing = Message<"agentrepl.v1.OpenWorkspace
  * Use `create(OpenWorkspaceTranscriptMissingSchema)` to create a new message.
  */
 export const OpenWorkspaceTranscriptMissingSchema: GenMessage<OpenWorkspaceTranscriptMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 15);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceSpawnFailed
@@ -399,5 +487,5 @@ export type OpenWorkspaceSpawnFailed = Message<"agentrepl.v1.OpenWorkspaceSpawnF
  * Use `create(OpenWorkspaceSpawnFailedSchema)` to create a new message.
  */
 export const OpenWorkspaceSpawnFailedSchema: GenMessage<OpenWorkspaceSpawnFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 13);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 16);
 

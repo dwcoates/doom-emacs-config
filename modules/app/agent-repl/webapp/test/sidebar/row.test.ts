@@ -15,6 +15,7 @@ import { heatColor } from "../../src/heat.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
 import {
   BAND_RETURNS,
+  drawBandChoices,
   MERGED_TODAY_CLASS,
   drawRosterRow,
   returnFromBand,
@@ -770,6 +771,7 @@ describe("returnFromBand", () => {
   const ws = create(WorkspaceRefSchema, { id: "ws-1" });
   function band(answer: boolean, calls: string[]): BandReturn {
     return {
+      label: "Test",
       operation: "sidebar.row.test-band",
       message: "returning a workspace from a test band",
       bringBack: (_line, _sc, workspace) => {
@@ -823,20 +825,29 @@ describe("returnFromBand", () => {
 });
 
 describe("the row click in the recently-merged band", () => {
-  // OWNER REQUEST, 2026-10-14: a merged workspace is taken back to revise
-  // what it landed, so the click reopens it and then selects it.
+  // OWNER REQUESTS, 2026-10-14 and 2026-10-15: the click offers reopening the
+  // merged workspace, to ask it about what it landed, or reopening it and
+  // reverting its merge; either one reopens it and then selects it.
   const OPEN_OK = create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } });
   const OPEN_REFUSED = create(OpenWorkspaceResponseSchema, {
     result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
   });
+  const REOPEN = '[data-band-return="sidebar.row.reopen"]';
+  const REVERT = '[data-band-return="sidebar.row.revert-merge"]';
 
-  it("reopens the workspace, then selects it", async () => {
-    const calls: string[] = [];
-    const sc = sidebarContext(
+  /** A merged row drawn against SC, and its choice list. */
+  function mergedRow(sc: ReturnType<typeof sidebarContext>): { drawn: HTMLElement; choices: HTMLElement } {
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+    return { drawn, choices: drawn.querySelector(":scope > .sb-band-choices") as HTMLElement };
+  }
+
+  /** An app context recording each open (and whether it asked the revert) and each select. */
+  function recording(calls: string[], open = OPEN_OK) {
+    return sidebarContext(
       appContext({
         openWorkspace: (request) => {
-          calls.push(`open:${request.workspace?.id ?? ""}`);
-          return OPEN_OK;
+          calls.push(`${request.revertMerge === undefined ? "open" : "revert"}:${request.workspace?.id ?? ""}`);
+          return open;
         },
         selectWorkspace: (request) => {
           calls.push(`select:${request.workspace?.id ?? ""}`);
@@ -844,32 +855,69 @@ describe("the row click in the recently-merged band", () => {
         },
       }),
     );
-    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+  }
+
+  it("draws its choices hidden", () => {
+    const { choices } = mergedRow(recording([]));
+    expect(choices.hidden).toBe(true);
+  });
+
+  it("offers reopening and reopening to revert the merge, in that order", () => {
+    const { choices } = mergedRow(recording([]));
+    expect([...choices.querySelectorAll(".sb-menu-item")].map((e) => e.textContent)).toEqual([
+      "Reopen",
+      "Reopen and revert the merge",
+    ]);
+  });
+
+  it("reveals its choices on the click and opens nothing", async () => {
+    const calls: string[] = [];
+    const { drawn, choices } = mergedRow(recording(calls));
     await click(drawn.querySelector("[data-select]") as Element);
+    expect([choices.hidden, calls]).toEqual([false, []]);
+  });
+
+  it("hides its choices on a second click", async () => {
+    const { drawn, choices } = mergedRow(recording([]));
+    await click(drawn.querySelector("[data-select]") as Element);
+    await click(drawn.querySelector("[data-select]") as Element);
+    expect(choices.hidden).toBe(true);
+  });
+
+  it("reopens the workspace, then selects it, on Reopen", async () => {
+    const calls: string[] = [];
+    const { drawn } = mergedRow(recording(calls));
+    await click(drawn.querySelector("[data-select]") as Element);
+    await click(drawn.querySelector(REOPEN) as Element);
     expect(calls).toEqual(["open:ws-1", "select:ws-1"]);
   });
 
-  it("selects nothing when the open is refused", async () => {
-    const selected: string[] = [];
-    const sc = sidebarContext(
-      appContext({
-        openWorkspace: () => OPEN_REFUSED,
-        selectWorkspace: (request) => {
-          selected.push(request.workspace?.id ?? "");
-          return SELECT_OK;
-        },
-      }),
-    );
-    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
+  it("reopens the workspace asking the revert, then selects it, on the revert", async () => {
+    const calls: string[] = [];
+    const { drawn } = mergedRow(recording(calls));
     await click(drawn.querySelector("[data-select]") as Element);
-    expect(selected).toEqual([]);
+    await click(drawn.querySelector(REVERT) as Element);
+    expect(calls).toEqual(["revert:ws-1", "select:ws-1"]);
+  });
+
+  it("hides its choices once one is picked", async () => {
+    const { drawn, choices } = mergedRow(recording([]));
+    await click(drawn.querySelector("[data-select]") as Element);
+    await click(drawn.querySelector(REVERT) as Element);
+    expect(choices.hidden).toBe(true);
+  });
+
+  it("selects nothing when the open is refused", async () => {
+    const calls: string[] = [];
+    const { drawn } = mergedRow(recording(calls, OPEN_REFUSED));
+    await click(drawn.querySelector(REVERT) as Element);
+    expect(calls).toEqual(["revert:ws-1"]);
   });
 
   it("says a refused open at the row itself", async () => {
-    const sc = sidebarContext(appContext({ openWorkspace: () => OPEN_REFUSED }));
     const capture = captureLogRecords();
-    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
-    await click(drawn.querySelector("[data-select]") as Element);
+    const { drawn } = mergedRow(recording([], OPEN_REFUSED));
+    await click(drawn.querySelector(REOPEN) as Element);
     const record = await forwardedRecord(capture, "sidebar.verbs.refused");
     expect([drawn.querySelector(":scope > .sb-refusal")?.textContent, record.level.case]).toEqual([
       "the daemon does not know this workspace",
@@ -877,13 +925,37 @@ describe("the row click in the recently-merged band", () => {
     ]);
   });
 
-  it("records the reopen at info", async () => {
-    const sc = sidebarContext(appContext({ openWorkspace: () => OPEN_OK, selectWorkspace: () => SELECT_OK }));
+  it.each([
+    ["the reopen", REOPEN, "sidebar.row.reopen"],
+    ["the revert", REVERT, "sidebar.row.revert-merge"],
+  ])("records %s at info", async (_name, choice, operation) => {
     const capture = captureLogRecords();
-    const drawn = drawRosterRow(row({ id: "ws-1", closed: true }), sc, "R", "merged");
-    await click(drawn.querySelector("[data-select]") as Element);
-    const record = await forwardedRecord(capture, "sidebar.row.reopen");
+    const { drawn } = mergedRow(recording([]));
+    await click(drawn.querySelector(choice) as Element);
+    const record = await forwardedRecord(capture, operation);
     expect(record.level.case).toBe("info");
+  });
+});
+
+describe("the band choice list", () => {
+  it("is drawn only for a band with several returns", () => {
+    const sc = sidebarContext(appContext({}));
+    const hidden = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    const merged = drawRosterRow(row({ id: "ws-2", closed: true }), sc, "R", "merged");
+    expect([
+      hidden.querySelector(":scope > .sb-band-choices"),
+      merged.querySelector(":scope > .sb-band-choices") !== null,
+    ]).toEqual([null, true]);
+  });
+
+  // EVERY CHOICE IS A BAND RETURN: the list draws one entry per return the
+  // band names, so an entry spelled some other way fails here.
+  it("draws one entry per return, each tagged with its return's operation", () => {
+    const sc = sidebarContext(appContext({}));
+    const choices = drawBandChoices(BAND_RETURNS.merged, document.createElement("div"), sc, create(WorkspaceRefSchema, { id: "ws-1" }));
+    expect([...choices.querySelectorAll("[data-band-return]")].map((e) => e.getAttribute("data-band-return"))).toEqual(
+      BAND_RETURNS.merged.map((band) => band.operation),
+    );
   });
 });
 
