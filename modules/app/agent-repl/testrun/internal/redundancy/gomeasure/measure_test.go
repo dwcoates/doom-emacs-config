@@ -56,6 +56,9 @@ type fakeGo struct {
 	coverFail string
 	// baselineFail fails a leaf in the schema with no mutant active.
 	baselineFail string
+	// discoveryNeeds is how long a discovery run takes: a -test.timeout
+	// under it times the run out.
+	discoveryNeeds time.Duration
 	// baselineNeeds is how long the schema's no-mutant run takes: a
 	// -test.timeout under it times the run out.
 	baselineNeeds time.Duration
@@ -190,6 +193,9 @@ func (f *fakeGo) exec(_ context.Context, c Cmd) (Result, error) {
 		prof := fmt.Sprintf("mode: atomic\n%s 1 %d\n", fakeBlock, count)
 		return Result{}, os.WriteFile(out, []byte(prof), 0o644)
 	case strings.HasPrefix(base, "cover-"):
+		if bound, err := time.ParseDuration(argAfter(c.Args, "-test.timeout")); err == nil && bound < f.discoveryNeeds {
+			return Result{Exit: 2, Lines: lines("panic: test timed out after " + bound.String())}, nil
+		}
 		// An instrumented binary writes its meta file into its counter
 		// directory as it exits.
 		// A plain binary's spawned systems write theirs under the coverage
@@ -933,5 +939,24 @@ func TestMeasureBoundsTheNoMutantRunByTheHangBound(t *testing.T) {
 	// Assert
 	if err != nil {
 		t.Fatalf("a slow no-mutant run read as a changed one: %v", err)
+	}
+}
+
+func TestMeasureDiscoversATestWhoseSerialSubtestsRunPastHalfAMinute(t *testing.T) {
+	// Arrange: under -test.parallel=1 a parallel test's subtests run one
+	// after another; TestRosterAndFooterAgreeOnBlocked's sixteen took 32s.
+	cfg, dir := fakeConfig(t)
+	f := &fakeGo{dir: dir, reaches: map[string]bool{"TestA": true},
+		schemaErr:      filepath.Join(dir, "p.go") + ":3:29: cannot use x\n",
+		discoveryNeeds: 32 * time.Second}
+	f.mutant = map[string]func(string) Result{}
+	log, _ := quietLog()
+
+	// Act
+	_, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("a slow healthy test read as a broken one: %v", err)
 	}
 }
