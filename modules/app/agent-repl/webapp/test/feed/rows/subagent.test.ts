@@ -49,9 +49,13 @@ function drawRow(
   return { el: drawFeedSubagent(subagent, rowContext(h.ctx, row)), h };
 }
 
-/** Let the scripted answer land. */
+/**
+ * Let the scripted answer land. One async advance drains the whole promise
+ * chain the scripted call resolves through; the thirty it once ran did nothing
+ * more and cost a CPU-starved gate run past the case timeout.
+ */
 async function settle(): Promise<void> {
-  for (let i = 0; i < 30; i += 1) await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
 }
 
 describe("drawFeedSubagent: the head's parts", () => {
