@@ -10,6 +10,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -1300,3 +1301,66 @@ func TestAGateStandsWithNoSession(t *testing.T) {
 
 // ptrTo answers a pointer to v, for a table's optional arrangement.
 func ptrTo[T any](v T) *T { return &v }
+
+// ---- the standing ask -----------------------------------------------------
+
+// standingPermissionAsk is a host-view ask naming a consent card.
+func standingPermissionAsk(row string) *agentreplv1.HostAsk {
+	return &agentreplv1.HostAsk{
+		Row:  &frontendv1.FeedId{Value: row},
+		Kind: &agentreplv1.HostAsk_Permission{Permission: &agentreplv1.HostAskPermission{}},
+	}
+}
+
+// TestTheHostViewCarriesTheFeedsStandingAsk pins the ask onto the wire:
+// absent when the feed names none, the feed's own value when it does.
+func TestTheHostViewCarriesTheFeedsStandingAsk(t *testing.T) {
+	tests := []struct {
+		name string
+		ask  *agentreplv1.HostAsk
+	}{
+		{"no ask standing leaves the field absent", nil},
+		{"a standing ask is carried as the feed states it", standingPermissionAsk("row-perm")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.hostAsks = map[ids.WorkspaceID]*agentreplv1.HostAsk{testWorkspaceID: tt.ask}
+
+			// Act.
+			view := composeHost(t, h)
+
+			// Assert.
+			if !proto.Equal(view.GetAsk(), tt.ask) || (view.Ask == nil) != (tt.ask == nil) {
+				t.Fatalf("ask = %v, want %v", view.GetAsk(), tt.ask)
+			}
+		})
+	}
+}
+
+// TestAnAskMoveRepublishesTheHostView pins the edge: the feed announcing a
+// moved ask is what puts it on the host stream, with no other publish site.
+func TestAnAskMoveRepublishesTheHostView(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	surface.PublishHostWorkspace(ctx, testWorkspaceID)
+	views := surface.hostStateTopic(testWorkspaceID).Subscribe(ctx)
+	<-views
+
+	// Act.
+	h.Feed.setHostAsk(testWorkspaceID, standingPermissionAsk("row-perm"))
+
+	// Assert.
+	select {
+	case got := <-views:
+		if got.GetAsk().GetRow().GetValue() != "row-perm" {
+			t.Fatalf("the republished view = %v, want the standing ask", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the ask's move never reached the host stream")
+	}
+}

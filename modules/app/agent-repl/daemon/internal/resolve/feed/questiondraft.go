@@ -171,6 +171,7 @@ func (r *resolver) EditQuestionDraft(ws ids.WorkspaceID, ask string, edit Questi
 		}
 	}
 	r.publishOpenQuestion(s, served)
+	r.refreshHostAsk(s)
 	_, numbered := optionNumbers(edit.Text)
 	log.Info("daemon.feed.question_draft", "applied a draft edit", dlog.Context{
 		"question": index, "active": served.active, "deliver": outcome.Deliver != nil,
@@ -196,6 +197,7 @@ func (r *resolver) ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string) {
 		return
 	}
 	served.delivering = false
+	r.refreshHostAsk(s)
 	r.logger(ws).Info("daemon.feed.question_draft_release", "released a failed delivery's claim on the batch",
 		dlog.Context{"ask": ask})
 }

@@ -1029,9 +1029,14 @@ func (f *fakeLogin) Close(context.Context, ids.WorkspaceID) error { return f.clo
 // fakeFeed answers the page and tail seams.
 type fakeFeed struct {
 	feed.Resolver
-	page    *frontendv1.FeedPage
-	token   *agentreplv1.FeedWatchToken
-	openErr error
+	// hostAsks is each workspace's standing ask HostAsk answers, and
+	// askMoves the stream WatchHostAsks hands the server.
+	hostAsksMu sync.Mutex
+	hostAsks   map[ids.WorkspaceID]*agentreplv1.HostAsk
+	askMoves   publish.Events[ids.WorkspaceID]
+	page       *frontendv1.FeedPage
+	token      *agentreplv1.FeedWatchToken
+	openErr    error
 	// held is the held section OpenPage answers with.
 	held      *frontendv1.FeedHeld
 	olderPage *frontendv1.FeedPage
@@ -1105,6 +1110,28 @@ type fakeFeed struct {
 }
 
 // LoadOlder loads the next scripted older page, false when none is left.
+func (f *fakeFeed) HostAsk(ws ids.WorkspaceID) *agentreplv1.HostAsk {
+	f.hostAsksMu.Lock()
+	defer f.hostAsksMu.Unlock()
+	return f.hostAsks[ws]
+}
+
+func (f *fakeFeed) WatchHostAsks(ctx context.Context) <-chan ids.WorkspaceID {
+	return f.askMoves.Subscribe(ctx)
+}
+
+// setHostAsk stands ASK (nil: none) for WS and announces the move, as the
+// feed resolver does on a card's draw.
+func (f *fakeFeed) setHostAsk(ws ids.WorkspaceID, ask *agentreplv1.HostAsk) {
+	f.hostAsksMu.Lock()
+	if f.hostAsks == nil {
+		f.hostAsks = map[ids.WorkspaceID]*agentreplv1.HostAsk{}
+	}
+	f.hostAsks[ws] = ask
+	f.hostAsksMu.Unlock()
+	f.askMoves.Emit(ws)
+}
+
 func (f *fakeFeed) LoadOlder(context.Context, ids.WorkspaceID) (bool, error) {
 	f.loadOlderCalls++
 	if f.loadOlderErr != nil {

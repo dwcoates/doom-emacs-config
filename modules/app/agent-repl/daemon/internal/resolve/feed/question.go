@@ -15,6 +15,8 @@ import (
 
 // drawQuestion draws the choice card.
 func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion) {
+	// THE HOST VIEW'S ASK follows every draw of a card, whichever way it ends.
+	defer r.refreshHostAsk(s)
 	log := r.logger(s.id)
 	askID := q.GetId().GetValue()
 	if askID == "" {

@@ -273,6 +273,15 @@ type Resolver interface {
 	// addresses (the root when target is nil, else the sub-feed headed by
 	// target) — the ask a user's typed send answers.
 	StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (StandingAsk, bool)
+	// HostAsk answers the root feed's oldest standing ask as the host view
+	// carries it (agentrepl.v1.HostWorkspace.ask), nil when none stands. It
+	// never takes the feed's lock, so the host view's composition can read it
+	// from anywhere (hostask.go).
+	HostAsk(ws ids.WorkspaceID) *agentreplv1.HostAsk
+	// WatchHostAsks yields every workspace whose HostAsk moved, from this call
+	// on, until ctx is cancelled. Every emission follows the move it
+	// announces, so a reader that recomposes on it reads the moved value.
+	WatchHostAsks(ctx context.Context) <-chan ids.WorkspaceID
 
 	// FinalResponses answers the workspace's ordered selectable final-response
 	// rows — the ones drawn with the green final-answer border, oldest first —

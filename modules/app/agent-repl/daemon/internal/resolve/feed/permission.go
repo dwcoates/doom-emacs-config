@@ -20,6 +20,8 @@ import (
 // shim when the answer verb picks standing; the row carries only the fact that
 // an "always allow" button is drawable.
 func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *conversationv1.AgentPermission) {
+	// THE HOST VIEW'S ASK follows every draw of a card, whichever way it ends.
+	defer r.refreshHostAsk(s)
 	log := r.logger(s.id)
 	askID := p.GetId().GetValue()
 	if askID == "" {

@@ -119,6 +119,8 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 	fresh.stallSeq = old.stallSeq
 	r.workspaces[ws] = fresh
 	r.forgetDurable(ws)
+	// The emptied feed has no card standing, so the host view loses its ask.
+	r.refreshHostAsk(fresh)
 
 	log.Info(opWorkspaceReset,
 		"a workspace's feed was emptied: every row was retired and every accumulation dropped",
