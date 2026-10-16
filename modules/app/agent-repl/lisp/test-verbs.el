@@ -2064,7 +2064,8 @@ current workspace rides as the fork source, and no parent is sent."
     agent-repl-fork-workspace-static
     agent-repl-fork-workspace-into-primary
     agent-repl-fork-workspace-into-primary-static
-    agent-repl-create-oneshot)
+    agent-repl-create-oneshot
+    agent-repl-create-oneshot-for-current-workspace)
   "Every interactive creation command.")
 
 (defun agent-repl-test-verbs--quits-p (command)
@@ -2108,7 +2109,8 @@ A fork that left no trace was indistinguishable from one never run."
                   (agent-repl-fork-workspace-static name)
                   (agent-repl-fork-workspace-into-primary prompt)
                   (agent-repl-fork-workspace-into-primary-static name)
-                  (agent-repl-create-oneshot prompt)))
+                  (agent-repl-create-oneshot prompt)
+                  (agent-repl-create-oneshot-for-current-workspace prompt)))
     (pcase-let ((`(,command ,read) case))
       (ert-info ((symbol-name command))
         (let (logs)
@@ -2228,6 +2230,124 @@ because what happens on completion is the repository's own directive."
               ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
       (agent-repl-create-oneshot t)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))
+
+;;;; ---- Create: the one-shot about the current workspace ----
+
+(defmacro agent-repl-test-verbs--with-oneshot-reads (prompts &rest body)
+  "Run BODY with the one-shot\='s repository and commission reads stubbed.
+Every prompt label the commission read is offered is pushed onto PROMPTS."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+              (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+             ((symbol-function 'agent-repl-verbs--read-prompt)
+              (lambda (label &optional _history-file _unseeded) (push label ,prompts) "fix its feed")))
+     ,@body))
+
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-names-it-as-the-context ()
+  "`SPC TAB C-o\=' sends the current workspace\='s ref as the one-shot\='s context."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        ;; Act.
+        (agent-repl-create-oneshot-for-current-workspace nil)
+        ;; Assert.
+        (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :value)))
+          (should (equal (plist-get one-shot :context) (agent-repl-test-verbs--ref)))
+          (should (plist-get one-shot :prompt)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-stays-top-level ()
+  "The context one-shot is no child and no fork: neither a parent nor a fork source rides."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        ;; Act.
+        (agent-repl-create-oneshot-for-current-workspace nil)
+        ;; Assert.
+        (let ((request (agent-repl-test-verbs--request :create)))
+          (should-not (plist-get request :parent))
+          (should-not (plist-get request :fork-source)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-prompt-names-the-workspace ()
+  "The commission prompt names the workspace the commission is about."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        ;; Act.
+        (agent-repl-create-oneshot-for-current-workspace nil)
+        ;; Assert.
+        (should (equal prompts '("One-shot fix for ws-one: ")))))))
+
+(ert-deftest agent-repl-verbs-oneshot-sends-no-context ()
+  "`SPC TAB o\=' names no context workspace: its commission stands on its own words."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        ;; Act.
+        (agent-repl-create-oneshot nil)
+        ;; Assert.
+        (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :value)))
+          (should-not (plist-get one-shot :context))
+          (should (equal prompts '("One-shot commission: "))))))))
+
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-without-a-ref-sends-nothing ()
+  "A current workspace with no daemon identity refuses the create before any send."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
+                  ((symbol-function 'agent-repl-verbs--roster-ref) (lambda (_ws) nil)))
+          ;; Act.
+          (let ((err (should-error (agent-repl-create-oneshot-for-current-workspace nil)
+                                   :type 'user-error)))
+            ;; Assert.
+            (should (string-match-p "has no daemon identity" (cadr err)))
+            (should-not agent-repl-test-verbs--sent)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-prefix-arg-picks-a-model ()
+  "A prefix argument threads the chosen model onto the context one-shot too."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
+          ;; Act.
+          (agent-repl-create-oneshot-for-current-workspace t)
+          ;; Assert.
+          (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))))
+
+(ert-deftest agent-repl-verbs-oneshot-commands-share-the-one-shot-composition ()
+  "Both one-shot commands compose through `agent-repl-verbs--create-oneshot\='."
+  (let (calls prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        (cl-letf (((symbol-function 'agent-repl-verbs--create-oneshot)
+                   (lambda (command pick-model about-current)
+                     (push (list command pick-model about-current) calls))))
+          ;; Act.
+          (agent-repl-create-oneshot nil)
+          (agent-repl-create-oneshot-for-current-workspace t)
+          ;; Assert.
+          (should (equal (reverse calls)
+                         '((agent-repl-create-oneshot nil nil)
+                           (agent-repl-create-oneshot-for-current-workspace t t)))))))))
+
+;;;; ---- Create: the shared one-shot composition ----
+
+(ert-deftest agent-repl-verbs-create-oneshot-helper-logs-its-command-and-sends-a-one-shot ()
+  "The shared one-shot composition logs the COMMAND it was handed and sends a one-shot."
+  ;; Arrange.
+  (let (logs)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
+        ;; Act.
+        (agent-repl-verbs--create-oneshot 'some-oneshot-command nil nil)
+        ;; Assert.
+        (should (member "elisp.verbs.create-invoked command=some-oneshot-command" logs))
+        (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :arm)
+                    :one-shot))))))
 
 ;;;; ---- Create: the required-prompt reader ----
 

@@ -49,6 +49,12 @@ type CreateSpec struct {
 	InitialPrompt string
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
+	// ContextWorkspace, set only on a one-shot, is the registered workspace
+	// the commission is about: the one-shot's first message opens with the
+	// one-shot context note naming it as the workspace the cited issue
+	// corresponds to. It is no parent and no fork source; nothing of it is
+	// carried into the one-shot but its identity.
+	ContextWorkspace *ids.WorkspaceID
 	// BaseRef is the base to cut from. Empty is the repository's default
 	// branch for a top-level workspace and the parent's tip for a child. A
 	// top-level workspace's base must already lie on the primary branch

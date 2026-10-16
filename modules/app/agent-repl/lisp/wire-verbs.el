@@ -315,16 +315,33 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
   "Encode CreateWorkspaceOneShot's `prompt' use site from SAID."
   (agent-repl-wire-encode-user-said said))
 
+(defun agent-repl-wire-encode-create-workspace-one-shot-context-workspace (ref)
+  "Encode CreateWorkspaceOneShotContext's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-create-workspace-one-shot-context (ref)
+  "Encode CreateWorkspaceOneShotContext from the context workspace\='s REF."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-create-workspace-one-shot-context-workspace
+               (agent-repl-wire-verbs--require "CreateWorkspaceOneShotContext" "workspace" ref)))))
+
 (defun agent-repl-wire-encode-create-workspace-one-shot (value)
   "Encode CreateWorkspaceOneShot from plist VALUE.
-VALUE is (:prompt SAID).  A one-shot IS its prompt, so the prompt is
-required and it is the whole form: there is no finish choice, because what
+VALUE is (:prompt SAID :context WORKSPACE-REF).  A one-shot IS its prompt,
+so the prompt is required: there is no finish choice, because what
 happens on completion is the REPOSITORY\='s own directive, which the daemon
-appends to the commission and the agent carries out."
+appends to the commission and the agent carries out.  CONTEXT, when
+present, is the workspace the commission is about; the daemon opens the
+commission with a note naming it."
   (let ((message "CreateWorkspaceOneShot"))
-    (list (cons 'prompt
-                (agent-repl-wire-encode-create-workspace-one-shot-prompt
-                 (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt)))))))
+    (append
+     (list (cons 'prompt
+                 (agent-repl-wire-encode-create-workspace-one-shot-prompt
+                  (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt)))))
+     (when (plist-get value :context)
+       (list (cons 'context
+                   (agent-repl-wire-encode-create-workspace-one-shot-context
+                    (plist-get value :context))))))))
 
 (defun agent-repl-wire-encode-create-workspace-merge-actions-before-ws-merge (said)
   "Encode CreateWorkspaceMergeActions's `before_ws_merge' use site from SAID."
@@ -575,6 +592,23 @@ The fork source workspace is not in the daemon's registry."
                       message 'workspace json
                       #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
 
+(defun agent-repl-wire-decode-create-workspace-unknown-context-workspace-ref (json)
+  "Decode CreateWorkspaceUnknownContextWorkspace's `workspace' use site from JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-create-workspace-unknown-context-workspace (json)
+  "Decode CreateWorkspaceUnknownContextWorkspace from JSON into (:workspace REF).
+The one-shot\='s context workspace is not in the daemon\='s registry."
+  (let ((message "CreateWorkspaceUnknownContextWorkspace"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-verbs--decode-optional-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-create-workspace-unknown-context-workspace-ref))))
+
+(defun agent-repl-wire-decode-create-workspace-error-unknown-context-workspace (json)
+  "Decode CreateWorkspaceError's `unknown_context_workspace' cause arm."
+  (agent-repl-wire-decode-create-workspace-unknown-context-workspace json))
+
 (defun agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation (json)
   "Decode CreateWorkspaceForkSourceHasNoConversation from JSON into
 \(:workspace REF).  The fork source workspace has no conversation to copy."
@@ -718,7 +752,7 @@ temporary directory; JSON carries the canonical `dir' and `temporary_root'."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation nameReserved))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -737,7 +771,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'baseRefOffPrimaryBranch :base-ref-off-primary-branch #'agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch)
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
          (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
-         (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved))))))
+         (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved)
+         (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."

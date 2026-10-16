@@ -436,6 +436,15 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		return fmt.Errorf("create: the merge workspace of %s for request %s has no landing (target %q, parent branch %q)",
 			spec.MergeOf.Requester, spec.MergeOf.Request, spec.MergeOf.TargetDir, spec.MergeOf.ParentBranch)
 	}
+	// ONLY A ONE-SHOT NAMES A CONTEXT WORKSPACE: the rpc carries it inside the
+	// one-shot arm, so a spec with one on any other form is a defect in its
+	// caller, not a request to refuse.
+	if spec.ContextWorkspace != nil && !spec.OneShot {
+		log.Error(opCreate, "a create spec names a context workspace outside a one-shot", dlog.Context{
+			"context_workspace": string(*spec.ContextWorkspace),
+		})
+		return fmt.Errorf("create: only a one-shot names a context workspace, and this create is not one (context %s)", *spec.ContextWorkspace)
+	}
 	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == \"\""})
 		return refuse(log, "CreateWorkspace", ArmNoSlug,
@@ -673,6 +682,13 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 		}
 		text = decorated
 	}
+	if spec.ContextWorkspace != nil {
+		decorated, err := v.decorateOneShotContext(ctx, log, text, *spec.ContextWorkspace)
+		if err != nil {
+			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
+		}
+		text = decorated
+	}
 	if spec.OneShot {
 		decorated, err := v.decorateOneShot(text, policy)
 		if err != nil {
@@ -754,20 +770,53 @@ const BriefForkIntoPrimary = "workspace-fork-into-primary-preamble"
 // will not load or splice fails the create loudly rather than sending the
 // prompt undecorated.
 func (v *verbs) decorateForkIntoPrimary(ctx context.Context, log dlog.Logger, raw string, from ids.WorkspaceID) (string, error) {
-	origin, err := v.deps.DB.Workspace(ctx, from)
+	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefForkIntoPrimary, from,
+		func(origin wsm.Workspace) map[string]string { return map[string]string{"origin": origin.Name} })
+}
+
+// BriefOneShotContext is the note a one-shot asked for from inside another
+// workspace opens its commission with: the cited issue is that workspace's.
+const BriefOneShotContext = "workspace-oneshot-context-preamble"
+
+// decorateOneShotContext opens a one-shot's commission with the
+// BriefOneShotContext note naming the workspace the commission concerns, by
+// name, worktree and branch. It runs before the one-shot decoration, so the
+// note sits between the autonomous preamble and the user's words.
+func (v *verbs) decorateOneShotContext(ctx context.Context, log dlog.Logger, raw string, about ids.WorkspaceID) (string, error) {
+	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefOneShotContext, about,
+		func(concerned wsm.Workspace) map[string]string {
+			return map[string]string{"context": concerned.Name, "context_dir": concerned.Dir, "context_branch": concerned.Branch}
+		})
+}
+
+// decorateWithWorkspaceNote opens raw with the meta-wrapped note BRIEF, spliced
+// from the registered workspace SUBJECT the note names. It is the one
+// composition every create note about another workspace shares: the record is
+// read, the brief is loaded from the daemon's own corpus, the values are
+// spliced, and any failure is logged once here and returned, so a create never
+// sends its prompt without the note it owes.
+func (v *verbs) decorateWithWorkspaceNote(
+	ctx context.Context,
+	log dlog.Logger,
+	raw, brief string,
+	subject ids.WorkspaceID,
+	values func(wsm.Workspace) map[string]string,
+) (string, error) {
+	fields := dlog.Context{"brief": brief, "workspace": string(subject)}
+	record, err := v.deps.DB.Workspace(ctx, subject)
 	if err != nil {
-		log.Error(opCreate, "could not read the workspace a fork into the primary branch copies", dlog.Context{"fork_from": string(from), "cause": err.Error()})
-		return "", fmt.Errorf("read the fork source %q: %w", from, err)
+		log.Error(opCreate, "could not read the workspace a create's note names", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the workspace %q the %s brief names: %w", subject, brief, err)
 	}
-	brief, err := v.load(v.deps.PromptsDir, BriefForkIntoPrimary)
+	loaded, err := v.load(v.deps.PromptsDir, brief)
 	if err != nil {
-		log.Error(opCreate, "could not read the fork-into-primary brief", dlog.Context{"brief": BriefForkIntoPrimary, "cause": err.Error()})
-		return "", fmt.Errorf("read the %s brief: %w", BriefForkIntoPrimary, err)
+		log.Error(opCreate, "could not read a create note's brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the %s brief: %w", brief, err)
 	}
-	note, err := v.splice(brief, map[string]string{"origin": origin.Name})
+	note, err := v.splice(loaded, values(record))
 	if err != nil {
-		log.Error(opCreate, "could not splice the fork-into-primary brief", dlog.Context{"brief": BriefForkIntoPrimary, "cause": err.Error()})
-		return "", fmt.Errorf("splice the %s brief: %w", BriefForkIntoPrimary, err)
+		log.Error(opCreate, "could not splice a create note's brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("splice the %s brief: %w", brief, err)
 	}
 	return prompts.Wrap(note) + raw, nil
 }

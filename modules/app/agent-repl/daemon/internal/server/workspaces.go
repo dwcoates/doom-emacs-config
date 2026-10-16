@@ -125,6 +125,17 @@ func (s *server) CreateWorkspace(
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
 		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
+		if about := oneShot.GetContext(); about != nil {
+			// The context must be a registered workspace this daemon serves; a
+			// refusal names it on the create's own arm.
+			subject, refused, done := s.resolveNaming(ctx, rpc, resp, about.GetWorkspace(),
+				map[string]string{workspace.ArmUnknownWorkspace: "unknown_context_workspace"})
+			if done {
+				return answer(resp, refused)
+			}
+			id := subject.Record.ID
+			spec.ContextWorkspace = &id
+		}
 	}
 	if parent := req.Msg.GetParent(); parent != nil {
 		id := ids.WorkspaceID(parent.GetWorkspace().GetId())
