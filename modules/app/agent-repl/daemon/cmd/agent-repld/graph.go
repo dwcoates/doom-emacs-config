@@ -730,7 +730,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: resolve this daemon's own binary: %w", err)
 	}
 	focus := desktopnotify.NewFocus(log)
-	backend, backendErr := resolveBannerBackend(ctx, log, selectWorkspaceClick(selfExe, p.Layout.Dir()))
+	listBound, err := resolveNotifierListBound(os.Getenv(envNotifierListBound))
+	if err != nil {
+		log.Error(graphOperation, "the banner query bound was refused", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil, err
+	}
+	backend, backendErr := resolveBannerBackend(ctx, log, selectWorkspaceClick(selfExe, p.Layout.Dir()), listBound)
 	chime, chimeErr := resolveChime(log)
 	clicks := &clickForwarder{}
 	notifier := desktopnotify.New(desktopnotify.Deps{

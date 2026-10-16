@@ -55,8 +55,9 @@ func fakeEmacsBinary(t *testing.T, dir, source string) string {
 
 // startFakeEmacs runs one stand-in Emacs with this scenario's HOME, in a
 // process group of its own -- which is what `script' gives the real one, and
-// what the escalation signals.
-func startFakeEmacs(t *testing.T, root, bin string, args ...string) *exec.Cmd {
+// what the escalation signals. The channel closes once the stand-in has
+// exited and been reaped.
+func startFakeEmacs(t *testing.T, root, bin string, args ...string) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Env = []string{"HOME=" + root, "PATH=/usr/bin:/bin"}
@@ -79,7 +80,7 @@ func startFakeEmacs(t *testing.T, root, bin string, args ...string) *exec.Cmd {
 		<-waited
 	})
 	awaitFindable(t, root, cmd.Process.Pid)
-	return cmd
+	return cmd, waited
 }
 
 // teardownFixture is an Emacs reduced to what teardown needs: the scenario
@@ -107,14 +108,14 @@ func TestEmacsTeardownWaitsForTheProcessToExit(t *testing.T) {
 	// leaving room for the arrange step's own /proc read. An implementation
 	// that does not wait returns in microseconds, so the margin is ample.
 	const minimumWait = 250 * time.Millisecond
-	startFakeEmacs(t, root, bin, "0.35")
+	_, _ = startFakeEmacs(t, root, bin, "0.35")
 	if len(e.emacsProcs()) != 1 {
 		t.Fatalf("arrange: want exactly one stand-in emacs before teardown, got %d", len(e.emacsProcs()))
 	}
 
 	// Act.
 	started := time.Now()
-	e.awaitEmacsExit(true)
+	e.awaitEmacsExit(true, e.emacsGroups())
 	took := time.Since(started)
 
 	// Assert: it returned only after the process was actually gone.
@@ -124,6 +125,53 @@ func TestEmacsTeardownWaitsForTheProcessToExit(t *testing.T) {
 	if took < minimumWait {
 		t.Fatalf("awaitEmacsExit returned after %s, well before the process's own 350ms lifetime: it did not wait",
 			took.Round(time.Millisecond))
+	}
+}
+
+func TestEmacsTeardownWaitsForTheGroupOfAnEmacsAlreadyGone(t *testing.T) {
+	requireProcfs(t)
+	// Arrange: a stand-in Emacs that leaves a child in its process group --
+	// as the real one leaves its WebKit processes -- and exits once released.
+	// The groups are read while it is alive, as teardown reads them before
+	// `(kill-emacs)'; then it is released and reaped, so by the time the wait
+	// begins the group has no Emacs left to name it. The child's own exit is
+	// a clock (a `sleep'), so nothing teardown does brings it forward.
+	e, root := teardownFixture(t)
+	bin := fakeEmacsBinary(t, root, "/bin/sh")
+	childPID := filepath.Join(root, "child.pid")
+	release := filepath.Join(root, "release.fifo")
+	if err := syscall.Mkfifo(release, 0o600); err != nil {
+		t.Fatalf("make the release fifo: %v", err)
+	}
+	holdScript := filepath.Join(root, "child.sh")
+	if err := os.WriteFile(holdScript, []byte("echo $$ > "+childPID+"\nexec /bin/sleep 0.3\n"), 0o755); err != nil {
+		t.Fatalf("write the child script: %v", err)
+	}
+	script := filepath.Join(root, "leader.sh")
+	if err := os.WriteFile(script, []byte("/bin/sh "+holdScript+" &\nread _ < "+release+"\n"), 0o755); err != nil {
+		t.Fatalf("write the leader script: %v", err)
+	}
+	_, exited := startFakeEmacs(t, root, bin, script)
+	child := awaitPIDFile(t, childPID)
+	groups := e.emacsGroups()
+	if len(groups) != 1 {
+		t.Fatalf("arrange: want the stand-in's one process group, got %v", groups)
+	}
+	fifo, err := os.OpenFile(release, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open the release fifo: %v", err)
+	}
+	if err := fifo.Close(); err != nil {
+		t.Fatalf("release the stand-in: %v", err)
+	}
+	<-exited
+
+	// Act.
+	e.awaitEmacsExit(true, groups)
+
+	// Assert: the wait held for the child the departed Emacs left behind.
+	if state := liveProcessState(child); state != "" {
+		t.Fatalf("awaitEmacsExit returned with the departed Emacs's child pid %d still alive (state %s)", child, state)
 	}
 }
 
@@ -156,11 +204,11 @@ func TestEmacsTeardownEscalatesToTheProcessGroup(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the refusing script: %v", err)
 	}
-	startFakeEmacs(t, root, bin, script)
+	_, _ = startFakeEmacs(t, root, bin, script)
 	child := awaitPIDFile(t, childPID)
 
 	// Act.
-	e.awaitEmacsExit(true)
+	e.awaitEmacsExit(true, e.emacsGroups())
 
 	// Assert: the leader is gone, and so is the child that only a group
 	// signal could have reached.
@@ -189,7 +237,7 @@ func TestEmacsTeardownReportsAStrayAsAFailure(t *testing.T) {
 	e.fail = func(format string, args ...any) { failures = append(failures, fmt.Sprintf(format, args...)) }
 	e.noteTeardownStep("emacs exited on (kill-emacs) within 51ms")
 	bin := fakeEmacsBinary(t, root, "/bin/sleep")
-	cmd := startFakeEmacs(t, root, bin, "60")
+	cmd, _ := startFakeEmacs(t, root, bin, "60")
 	pid := cmd.Process.Pid
 
 	// Act.
@@ -371,7 +419,7 @@ func TestEmacsTeardownDoesNotCountASparedProcessAsAStray(t *testing.T) {
 	// matches it -- that the TEST owns and declares as its own.
 	e, root := teardownFixture(t)
 	bin := fakeEmacsBinary(t, root, "/bin/sleep")
-	cmd := startFakeEmacs(t, root, bin, "60")
+	cmd, _ := startFakeEmacs(t, root, bin, "60")
 	if len(e.findStrays()) != 1 {
 		t.Fatalf("arrange: want the undeclared process to be found as a stray, got %s", pidList(e.findStrays()))
 	}
@@ -395,7 +443,7 @@ func TestEmacsTeardownDaemonExitDoesNotWaitOutTheBoundOnASparedProcess(t *testin
 	// for.
 	e, root := teardownFixture(t)
 	bin := fakeEmacsBinary(t, root, "/bin/sleep")
-	cmd := startFakeEmacs(t, root, bin, "60")
+	cmd, _ := startFakeEmacs(t, root, bin, "60")
 	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
 
 	// Act.

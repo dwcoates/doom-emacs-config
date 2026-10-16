@@ -2,6 +2,7 @@ package sidebar_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,11 +24,12 @@ import (
 
 // ONE STATUS, EVERY SURFACE (owner ruling, 2026-09-28). The footer strip, the
 // roster row and the tab bar that paints the roster row's arm must ALWAYS make
-// the same coarse claim about a workspace. This suite is what makes that
-// structural: it walks the fact combinations both resolvers observe — merge
-// state x link state x turn state x parked x read — through the REAL footer
-// and roster resolvers, fed the same facts, and requires the footer's status
-// and the roster's arm to project onto one ladder claim (resolve/ladder).
+// the same coarse claim about a workspace. This suite drives the facts both
+// resolvers observe (merge state, link state, turn state, parked, read)
+// through the REAL footer and roster resolvers, fed the same facts, and
+// requires the footer's status and the roster's arm to project onto one
+// ladder claim (resolve/ladder). Its rows are CHOSEN, never enumerated: one
+// per distinct outcome the facts reach (walkRows).
 
 // repoVocabDir is the checked-in vocabulary, which both resolvers assert
 // their arms against at construction.
@@ -356,48 +358,165 @@ func requireOneClaim(t *testing.T, s *surfaces) string {
 	return rArm
 }
 
+// walkRow is one chosen combination of the facts both resolvers observe,
+// each fact named by its case above.
+type walkRow struct {
+	merge, link, turn string
+	parked, read      bool
+}
+
+// walkRows holds one row per distinct (footer status, roster arm) outcome
+// the merge, link and turn cases reach, each labeled with that outcome. The
+// full product of the facts (5040 rows) reached exactly these 44 outcomes
+// (docs/investigations/2026-10-14-test-cross-product-audit-psv.md, section 5):
+// the roster derives every arm above idle from the footer's status
+// (statusArm, projectArm), and the two share one ladder walk, so the claim
+// depends on the outcome a row reaches, not on how many other rows reach it.
+// A fact case added above that reaches a NEW outcome gets a row here. The
+// arms these facts never reach are TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches's.
+var walkRows = []walkRow{
+	// footer idle/ready (unpinned/enduring), roster none
+	{merge: "none", link: "no session", turn: "no turn", parked: false, read: false},
+	// footer idle/ready (unpinned/enduring), roster ready
+	{merge: "none", link: "session record", turn: "no turn", parked: false, read: false},
+	// footer starting (unpinned/enduring), roster init
+	{merge: "none", link: "no session", turn: "submitting", parked: false, read: false},
+	// footer working/submitting (unpinned/enduring), roster submitting
+	{merge: "none", link: "connected", turn: "submitting", parked: false, read: false},
+	// footer working/thinking (unpinned/enduring), roster thinking
+	{merge: "none", link: "connected", turn: "thinking", parked: false, read: false},
+	// footer permission (salient/at), roster permission
+	{merge: "none", link: "connected", turn: "permission", parked: false, read: false},
+	// footer idle/done (unpinned/enduring), roster none
+	{merge: "none", link: "no session", turn: "completed", parked: false, read: false},
+	// footer idle/done (unpinned/enduring), roster done
+	{merge: "none", link: "session record", turn: "completed", parked: false, read: false},
+	// footer interrupted/by_user (unpinned/enduring), roster none
+	{merge: "none", link: "no session", turn: "interrupted", parked: false, read: false},
+	// footer interrupted/by_user (unpinned/enduring), roster interrupted
+	{merge: "none", link: "session record", turn: "interrupted", parked: false, read: false},
+	// footer vendor_fault/auth (salient/at), roster vendor_blocked
+	{merge: "none", link: "no session", turn: "vendor refused", parked: false, read: false},
+	// footer vendor_fault/vendor_error (salient/at), roster vendor_blocked
+	{merge: "none", link: "no session", turn: "the turn's own failure", parked: false, read: false},
+	// footer idle/done (salient/at), roster none
+	{merge: "none", link: "no session", turn: "the query died mid-turn", parked: false, read: false},
+	// footer idle/done (salient/at), roster turn_failed
+	{merge: "none", link: "session record", turn: "the query died mid-turn", parked: false, read: false},
+	// footer idle/done (unpinned/enduring), roster turn_failed
+	{merge: "none", link: "session record", turn: "the agent process died with the turn", parked: false, read: false},
+	// footer vendor_fault/usage_limit (unpinned/enduring), roster vendor_blocked
+	{merge: "none", link: "no session", turn: "the allowance rejected", parked: false, read: false},
+	// footer vendor_fault/api_retrying (salient/at), roster api_retrying
+	{merge: "none", link: "connected", turn: "the vendor retrying the turn's call", parked: false, read: false},
+	// footer starting (unpinned/transient), roster init
+	{merge: "none", link: "no session", turn: "the retried call answered", parked: false, read: false},
+	// footer working/thinking (unpinned/transient), roster thinking
+	{merge: "none", link: "connected", turn: "the retried call answered", parked: false, read: false},
+	// footer agent_repl_fault/turn_died (salient/at), roster turn_died
+	{merge: "none", link: "connected", turn: "the query died mid-turn", parked: false, read: false},
+	// footer agent_repl_fault/severed (unpinned/enduring), roster severed
+	{merge: "none", link: "redialing", turn: "no turn", parked: false, read: false},
+	// footer agent_repl_fault/severed (salient/at), roster severed
+	{merge: "none", link: "redialing", turn: "the query died mid-turn", parked: false, read: false},
+	// footer agent_repl_fault/severed (unpinned/transient), roster severed
+	{merge: "none", link: "redialing", turn: "the retried call answered", parked: false, read: false},
+	// footer agent_repl_fault/dead (unpinned/enduring), roster dead
+	{merge: "none", link: "dead after serving", turn: "no turn", parked: false, read: false},
+	// footer agent_repl_fault/dead (salient/at), roster dead
+	{merge: "none", link: "dead after serving", turn: "the query died mid-turn", parked: false, read: false},
+	// footer agent_repl_fault/dead (unpinned/transient), roster dead
+	{merge: "none", link: "dead after serving", turn: "the retried call answered", parked: false, read: false},
+	// footer agent_repl_fault/start_failed (unpinned/enduring), roster start_failed
+	{merge: "none", link: "dead before serving", turn: "no turn", parked: false, read: false},
+	// footer agent_repl_fault/start_failed (salient/at), roster start_failed
+	{merge: "none", link: "dead before serving", turn: "the query died mid-turn", parked: false, read: false},
+	// footer agent_repl_fault/start_failed (unpinned/transient), roster start_failed
+	{merge: "none", link: "dead before serving", turn: "the retried call answered", parked: false, read: false},
+	// footer degraded/observation (unpinned/enduring), roster degraded
+	{merge: "none", link: "degraded", turn: "no turn", parked: false, read: false},
+	// footer degraded/observation (unpinned/transient), roster degraded
+	{merge: "none", link: "degraded", turn: "the retried call answered", parked: false, read: false},
+	// footer vendor_fault/vendor_retry (salient/at), roster vendor_fault
+	{merge: "none", link: "a vendor start being retried", turn: "no turn", parked: false, read: false},
+	// footer vendor_fault/vendor_failed (salient/at), roster vendor_fault
+	{merge: "none", link: "a vendor start that stopped, over the link its stop killed", turn: "no turn", parked: false, read: false},
+	// footer network_fault/offline (salient/at), roster network_fault
+	{merge: "none", link: "the network unreachable", turn: "no turn", parked: false, read: false},
+	// footer degraded/state_unreported (unpinned/enduring), roster degraded
+	{merge: "none", link: "state unreported after a take-back", turn: "no turn", parked: false, read: false},
+	// footer degraded/state_unreported (unpinned/transient), roster degraded
+	{merge: "none", link: "state unreported after a take-back", turn: "the retried call answered", parked: false, read: false},
+	// footer merging/enqueued (unpinned/enduring), roster merge_queued
+	{merge: "queued", link: "no session", turn: "no turn", parked: false, read: false},
+	// footer merging/enqueued (unpinned/transient), roster merge_queued
+	{merge: "queued", link: "no session", turn: "the retried call answered", parked: false, read: false},
+	// footer merging/testing (unpinned/enduring), roster merging
+	{merge: "merging", link: "no session", turn: "no turn", parked: false, read: false},
+	// footer merging/testing (unpinned/transient), roster merging
+	{merge: "merging", link: "no session", turn: "the retried call answered", parked: false, read: false},
+	// footer merge_failed/conflicts (unpinned/enduring), roster merge_failed
+	{merge: "failed", link: "no session", turn: "no turn", parked: false, read: false},
+	// footer merge_failed/conflicts (unpinned/transient), roster merge_failed
+	{merge: "failed", link: "connected", turn: "the retried call answered", parked: false, read: false},
+	// footer merged (unpinned/enduring), roster merged
+	{merge: "merged", link: "no session", turn: "no turn", parked: false, read: false},
+	// footer merged (unpinned/transient), roster merged
+	{merge: "merged", link: "connected", turn: "the retried call answered", parked: false, read: false},
+}
+
 func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
-	for merge, mergeFacts := range mergeStates {
-		for _, lc := range linkCases {
-			for _, tc := range turnCases {
-				for _, parked := range []bool{false, true} {
-					for _, read := range []bool{false, true} {
-						name := fmt.Sprintf("merge=%s/link=%s/turn=%s/parked=%v/read=%v", merge, lc.name, tc.name, parked, read)
-						t.Run(name, func(t *testing.T) {
-							// Arrange: a parked session is a hibernated
-							// session record the roster reads, and the
-							// footer's own park, which a later link edge
-							// would lift, so it is stated last.
-							var session *wsm.Session
-							if lc.session || parked {
-								session = &wsm.Session{Workspace: theWS}
-							}
-							if parked {
-								session.Terminal = &wsm.SessionTerminal{Kind: "hibernated", At: epoch}
-							}
-							s := newSurfaces(t, session)
-							lc.apply(s)
-							tc.apply(s)
-							facts := mergeFacts
-							s.footer.SetMerge(theWS, facts)
-							s.roster.SetMerge(theWS, facts)
-							if parked {
-								s.footer.SetParked(theWS, true)
-							}
-
-							// Act
-							if read {
-								s.roster.SetViewed(theWS)
-							}
-
-							// Assert
-							requireOneClaim(t, s)
-						})
-					}
-				}
+	for _, row := range walkRows {
+		name := fmt.Sprintf("merge=%s/link=%s/turn=%s/parked=%v/read=%v", row.merge, row.link, row.turn, row.parked, row.read)
+		t.Run(name, func(t *testing.T) {
+			// Arrange: a parked session is a hibernated session record the
+			// roster reads, and the footer's own park, which a later link edge
+			// would lift, so it is stated last.
+			mergeFacts, ok := mergeStates[row.merge]
+			if !ok {
+				t.Fatalf("walk row names merge state %q, which mergeStates does not hold", row.merge)
 			}
+			lc := caseNamed(t, "link", linkCases, func(c linkCase) string { return c.name }, row.link)
+			tc := caseNamed(t, "turn", turnCases, func(c turnCase) string { return c.name }, row.turn)
+			var session *wsm.Session
+			if lc.session || row.parked {
+				session = &wsm.Session{Workspace: theWS}
+			}
+			if row.parked {
+				session.Terminal = &wsm.SessionTerminal{Kind: "hibernated", At: epoch}
+			}
+			s := newSurfaces(t, session)
+			lc.apply(s)
+			tc.apply(s)
+			s.footer.SetMerge(theWS, mergeFacts)
+			s.roster.SetMerge(theWS, mergeFacts)
+			if row.parked {
+				s.footer.SetParked(theWS, true)
+			}
+
+			// Act
+			if row.read {
+				s.roster.SetViewed(theWS)
+			}
+
+			// Assert
+			requireOneClaim(t, s)
+		})
+	}
+}
+
+// caseNamed answers the case of CASES whose nameOf is NAME; a walk row
+// naming none is a broken table and fails, naming KIND.
+func caseNamed[C any](t testing.TB, kind string, cases []C, nameOf func(C) string, name string) C {
+	t.Helper()
+	for _, c := range cases {
+		if nameOf(c) == name {
+			return c
 		}
 	}
+	t.Fatalf("walk row names %s case %q, which no case holds", kind, name)
+	var none C
+	return none
 }
 
 // TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches covers the roster
@@ -520,4 +639,45 @@ func (s *surfaces) ackedTurn() {
 	s.startTurn()
 	s.footer.AckTurn(theWS)
 	s.roster.AckTurn(theWS)
+}
+
+// fatalRecorder is a testing.TB that records a Fatalf and stops the caller
+// there, as the real one does, by panicking with itself.
+type fatalRecorder struct {
+	testing.TB
+	fatal string
+}
+
+func (f *fatalRecorder) Helper() {}
+
+func (f *fatalRecorder) Fatalf(format string, args ...any) {
+	f.fatal = fmt.Sprintf(format, args...)
+	panic(f)
+}
+
+func TestCaseNamedAnswersTheCaseItNames(t *testing.T) {
+	// Act
+	got := caseNamed(t, "turn", turnCases, func(c turnCase) string { return c.name }, "thinking")
+
+	// Assert
+	if got.name != "thinking" {
+		t.Fatalf("caseNamed answered %q, want thinking", got.name)
+	}
+}
+
+func TestCaseNamedFailsNamingTheKindAndTheMissingName(t *testing.T) {
+	// Arrange
+	rec := &fatalRecorder{TB: t}
+	defer func() {
+		// Assert
+		if recover() != rec {
+			t.Fatal("caseNamed returned for a name no case holds, want a fatal")
+		}
+		if !strings.Contains(rec.fatal, "link") || !strings.Contains(rec.fatal, `"no such link"`) {
+			t.Fatalf("fatal = %q, want it to name the kind and the missing name", rec.fatal)
+		}
+	}()
+
+	// Act
+	caseNamed(rec, "link", linkCases, func(c linkCase) string { return c.name }, "no such link")
 }

@@ -7,6 +7,22 @@ production code was read (and, for two tables, probed), but no mutation run has
 confirmed that a dropped row loses no killed mutant. Each proposal is to be
 confirmed with test-redundancy-measure's tool once it lands on master.
 
+## Applied (2026-10-16)
+
+The net-unique daemon cuts landed on the coverage-check path (no mutation
+prover), after the gap additions merged as 3841cbba64:
+
+| Table | Rows before | Rows after | Evidence |
+|---|---|---|---|
+| `TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim` | 5040 | 44 chosen (`walkRows`, one per outcome) | the sidebar package's coverage of `internal/resolve/...` unchanged, 2290 of 3789 statements before and after |
+| `adopted_turns_test.go` (boot, handover) | 2 + 2 | 1 + 1 | the takeover keeps the finished-unwatched witness |
+| `TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes` | 4 | 2 | `daemonaddr` `TestVerify` pins each file's loss |
+| `TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits` | 8 | 4 (covering set) | per-stream endings unit-pinned |
+| `TestRegistryReadsAcrossTheSuccessorsPromotionAreServed` | 6 workspaces | 2 | the reproductions are one layer down |
+
+The webapp `main.test.ts` gate rows (`removals-webapp.txt`) stay until
+webapp coverage is measured across every tier.
+
 ## What was audited, and how
 
 - Candidate tables: a scan for nested `range` / `for…of` / `dolist` loops

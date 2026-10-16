@@ -2036,6 +2036,14 @@ func (e *Emacs) stop() {
 	// is exactly why the kill below is unconditional.
 	asked := false
 	stopAsked := false
+	// THE GROUP IS TAKEN BEFORE EMACS IS ASKED TO EXIT, while it is still
+	// alive to name it. `(kill-emacs)' below returns once Emacs has gone, so
+	// a group read after it finds no Emacs at all whenever Emacs exits fast,
+	// and nothing then waits for the WebKit processes its group still holds.
+	// MEASURED, merge gate 2026-10-16: TestEmacsSubmitWithNoDaemonIsRefusedLoudly
+	// recorded `emacs-exit took 1ms` and the reaper then found its
+	// WebKitNetworkProcess and WebKitWebProcess alive.
+	groups := e.emacsGroups()
 	if !e.isWedged() {
 		e.assertTheScenarioBuiltNoTrampoline()
 		// ONLY A WORLD WITH A DAEMON IS ASKED TO STOP ONE. Several worlds in
@@ -2078,7 +2086,7 @@ func (e *Emacs) stop() {
 		asked = true
 	}
 	// AND THEN WAIT FOR IT. Asking is not stopping.
-	e.awaitEmacsExit(asked)
+	e.awaitEmacsExit(asked, groups)
 	e.proc.Kill()
 	e.awaitDaemonExit(stopAsked)
 }
@@ -2273,7 +2281,13 @@ func (e *Emacs) awaitDaemonExit(asked bool) {
 // was never asked anything, so it skips the polite wait and goes straight to
 // the signals: waiting out a bound for an answer nobody requested would only
 // hold this scenario's parallelism slot.
-func (e *Emacs) awaitEmacsExit(asked bool) {
+//
+// groups are the process groups this scenario's Emacsen led (emacsGroups),
+// read by the caller BEFORE Emacs was asked to exit. Once the process is gone
+// its /proc entry is gone with it, and the children it left cannot be tied to
+// it by anything else: they carry the scenario's HOME, which says whose
+// scenario they are, and their process group, which says whose EMACS they are.
+func (e *Emacs) awaitEmacsExit(asked bool, groups []int) {
 	started := time.Now()
 	// Logged here rather than through `record'/`reportPhases': t.Cleanup
 	// unwinds LIFO, so reportPhases -- registered last -- has already run by
@@ -2285,15 +2299,9 @@ func (e *Emacs) awaitEmacsExit(asked bool) {
 			time.Since(started).Round(time.Millisecond), emacsExitBound)
 	}()
 
-	// THE GROUP IS TAKEN FIRST, WHILE EMACS IS STILL ALIVE TO NAME IT. Once
-	// the process is gone its /proc entry is gone with it, and the children
-	// it left cannot be tied to it by anything else: they carry the
-	// scenario's HOME, which says whose scenario they are, and their process
-	// group, which says whose EMACS they are.
-	groups := e.emacsGroups()
 	if len(groups) == 0 {
-		// Emacs was already gone before teardown reached this. Nothing was
-		// left to wait for, and there is no group to escalate against.
+		// Emacs was already gone before teardown asked it anything. Nothing
+		// was left to wait for, and there is no group to escalate against.
 		return
 	}
 

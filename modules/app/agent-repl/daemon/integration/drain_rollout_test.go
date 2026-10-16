@@ -747,9 +747,9 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 // `unknown_workspace`, the page failed its boot, and the host's adopt waited
 // 10s for a web participant that never came.
 //
-// Registry reads run without pause on the other workspaces from the
+// Registry reads run without pause on the second workspace from the
 // announcement until the first workspace is adopted, so they straddle the
-// promotion; then every other workspace's participants adopt. The harness's
+// promotion; then the second workspace's participants adopt. The harness's
 // warning sweep holds the run to no ERROR, and every read and every adoption
 // must be served.
 //
@@ -763,9 +763,13 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 // false unknown_workspace).
 func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 	t.Parallel()
-	// Arrange: several idle workspaces, each with its host and web streams
-	// open at the announcement, so each is an expected two-party rendezvous.
-	const workspaces = 6
+	// Arrange: two idle workspaces, each with its host and web streams open
+	// at the announcement, so each is an expected two-party rendezvous. TWO
+	// IS EVERY PARTY THE ASSERTIONS NEED: one adopts first while the other
+	// reads the registry across the promotion and adopts after it. More
+	// readers only change the race's odds, which this guard does not depend
+	// on (the reproductions above do not either).
+	const workspaces = 2
 	selfRepo, d := drainSelfRepoDaemon(t)
 	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	fixtures := make([]*fixture, workspaces)

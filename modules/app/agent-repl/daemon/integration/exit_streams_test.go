@@ -54,15 +54,22 @@ type streamEnd struct {
 // their last push first, so a client reads the end as planned.
 func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) {
 	t.Parallel()
-	transports := []struct {
+	type transport struct {
 		name string
 		dial func(d *harness.Daemon) agentreplv1connect.AgentReplClient
-	}{
-		{name: "h2c", dial: func(d *harness.Daemon) agentreplv1connect.AgentReplClient { return d.Client() }},
-		{name: "HTTP/1.1, as Emacs speaks", dial: func(d *harness.Daemon) agentreplv1connect.AgentReplClient { return d.DialHTTP1() }},
 	}
+	h2c := transport{name: "h2c", dial: func(d *harness.Daemon) agentreplv1connect.AgentReplClient { return d.Client() }}
+	http1 := transport{name: "HTTP/1.1, as Emacs speaks", dial: func(d *harness.Daemon) agentreplv1connect.AgentReplClient { return d.DialHTTP1() }}
+	// EACH STREAM ONCE, EACH TRANSPORT TWICE: a covering set, not the
+	// product (AGENTS.md, "A table's cases are chosen, never enumerated").
+	// How a stream ends is its own (server's endStandingStream, unit-pinned
+	// per stream by streams_test.go's
+	// TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame); what a
+	// transport does to a standing stream at exit is server-wide and the same
+	// for every stream on it.
 	streams := []struct {
 		name string
+		over transport
 		open func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd
 		// wantEnding is whether the stream's contract carries the planned
 		// ending arm, which a planned exit must send as its last frame.
@@ -70,6 +77,7 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 	}{
 		{
 			name: "WatchHostWorkspace",
+			over: http1,
 			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchHostOn(client, f.ws)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the host stream")
@@ -82,6 +90,7 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 		},
 		{
 			name: "WatchWorkspaceRoster",
+			over: h2c,
 			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchRosterFramesOn(client)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the roster stream")
@@ -94,6 +103,7 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 		},
 		{
 			name: "WatchDaemon",
+			over: http1,
 			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchDaemonStreamOn(client)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the daemon stream")
@@ -106,6 +116,7 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 		},
 		{
 			name: "WatchWebWorkspace",
+			over: h2c,
 			open: func(f *fixture, client agentreplv1connect.AgentReplClient) func() streamEnd {
 				s := f.d.WatchWebOn(client, f.ws)
 				s.AwaitHeaders(f.t, f.d.Ctx(), "the web stream")
@@ -116,36 +127,35 @@ func TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits(t *testing.T) 
 			},
 		},
 	}
-	for _, transport := range transports {
-		for _, stream := range streams {
-			t.Run(stream.name+" over "+transport.name, func(t *testing.T) {
-				t.Parallel()
-				// Arrange
-				f := newRegistered(t, harness.Opts{})
-				ended := stream.open(f, transport.dial(f.d))
+	for _, stream := range streams {
+		transport := stream.over
+		t.Run(stream.name+" over "+transport.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			f := newRegistered(t, harness.Opts{})
+			ended := stream.open(f, transport.dial(f.d))
 
-				// Act
-				if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-					Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
-						Reason: drainReasonOperator("the exit under test"),
-					}},
-				})); err != nil {
-					t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
-				}
-				if code := f.d.AwaitExit(); code != 0 {
-					t.Fatalf("the daemon's exit code = %d, want an orderly 0", code)
-				}
+			// Act
+			if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+				Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+					Reason: drainReasonOperator("the exit under test"),
+				}},
+			})); err != nil {
+				t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
+			}
+			if code := f.d.AwaitExit(); code != 0 {
+				t.Fatalf("the daemon's exit code = %d, want an orderly 0", code)
+			}
 
-				// Assert
-				end := ended()
-				if end.err != nil {
-					t.Fatalf("the %s stream ended with %v, want its end frame", stream.name, end.err)
-				}
-				if end.ending != stream.wantEnding {
-					t.Fatalf("the %s stream's last push was the planned ending = %v, want %v",
-						stream.name, end.ending, stream.wantEnding)
-				}
-			})
-		}
+			// Assert
+			end := ended()
+			if end.err != nil {
+				t.Fatalf("the %s stream ended with %v, want its end frame", stream.name, end.err)
+			}
+			if end.ending != stream.wantEnding {
+				t.Fatalf("the %s stream's last push was the planned ending = %v, want %v",
+					stream.name, end.ending, stream.wantEnding)
+			}
+		})
 	}
 }

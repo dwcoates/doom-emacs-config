@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"time"
 
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -21,15 +22,30 @@ const opDesktopNotify = "daemon.cmd.desktop_notify"
 
 // resolveBannerBackend resolves the platform's banner program once, at boot.
 // click is the command a banner the platform holds runs when it is clicked.
-func resolveBannerBackend(ctx context.Context, log dlog.Logger, click desktopnotify.ClickAction) (desktopnotify.Backend, error) {
+// deliveredBound bounds each query of which banners the platform still holds
+// (resolveNotifierListBound).
+func resolveBannerBackend(ctx context.Context, log dlog.Logger, click desktopnotify.ClickAction, deliveredBound time.Duration) (desktopnotify.Backend, error) {
 	return resolveNotifyProgram(log, "banner", desktopnotify.EnvNotifierCmd,
 		func(goos, override string) (desktopnotify.Backend, error) {
 			platform, err := desktopnotify.PlatformFor(goos, click)
 			if err != nil {
 				return nil, err
 			}
-			return desktopnotify.NewBackend(ctx, platform, override, exec.LookPath, desktopnotify.ExecRunner{})
+			return desktopnotify.NewBackend(ctx, platform, override, exec.LookPath, desktopnotify.ExecRunner{}, deliveredBound)
 		})
+}
+
+// envNotifierListBound overrides desktopnotify.DefaultDeliveredBound. It
+// exists for the integration suite, whose banner program is a recorder
+// writing to a throttled RAM disk rather than the platform's program the
+// default is measured against.
+const envNotifierListBound = "AGENT_REPL_NOTIFIER_LIST_BOUND"
+
+// resolveNotifierListBound reads the banner query bound's override. Empty is
+// desktopnotify.DefaultDeliveredBound; a malformed or non-positive value is a
+// REFUSAL, as every duration knob's is.
+func resolveNotifierListBound(value string) (time.Duration, error) {
+	return resolveDurationKnob(envNotifierListBound, value, desktopnotify.DefaultDeliveredBound)
 }
 
 // selectWorkspaceClick is the click a banner the platform holds runs: this

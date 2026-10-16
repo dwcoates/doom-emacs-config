@@ -30,11 +30,13 @@ func TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes(t *testing.T) {
 		// want is the loss the exit must name.
 		want string
 	}{
-		{
-			name:   "the whole state root",
-			remove: func(d *harness.Daemon) string { return d.StateDir },
-			want:   "is gone",
-		},
+		// TWO LOSSES, CHOSEN (AGENTS.md, "A table's cases are chosen, never
+		// enumerated"). The root watch (cmd/agent-repld/rootwatch.go) does
+		// not depend on which file went; which loss the claim names is
+		// daemonaddr's Claim.Verify, pinned per file by TestVerify (a removed
+		// root, daemon.lock and daemon.addr alike). The served workspace's
+		// root removal is the bare root's removal plus the shim it stops,
+		// and the lock removal is the one loss that leaves the root intact.
 		{
 			name:   "the whole state root under a served workspace",
 			open:   true,
@@ -45,11 +47,6 @@ func TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes(t *testing.T) {
 			name:   "daemon.lock",
 			remove: func(d *harness.Daemon) string { return filepath.Join(d.StateDir, "daemon.lock") },
 			want:   "daemon.lock",
-		},
-		{
-			name:   "daemon.addr",
-			remove: func(d *harness.Daemon) string { return d.AddrFile() },
-			want:   "daemon.addr",
 		},
 	}
 	for _, tc := range cases {

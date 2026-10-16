@@ -1021,9 +1021,11 @@ func (c *client) diedUnder(err error) (ExitInfo, bool) {
 }
 
 // transportCut answers whether err is the link breaking under a call rather
-// than anything the shim answered: `unavailable`, or a response the peer cut
-// partway through an envelope, which connect reports as invalid_argument
-// "protocol error: incomplete envelope" wrapping io.ErrUnexpectedEOF.
+// than anything the shim answered: `unavailable`; a streamed response the
+// peer cut partway through an envelope, which connect reports as
+// invalid_argument "protocol error: incomplete envelope" wrapping
+// io.ErrUnexpectedEOF; or a unary response cut partway through its body,
+// which connect reports as unknown "read message" wrapping the same.
 //
 // AN ANSWER THE SHIM SENT CAN NEVER WRAP io.ErrUnexpectedEOF: a refusal that
 // crossed the wire is rebuilt on this side from its code and message alone,
@@ -1032,12 +1034,15 @@ func (c *client) diedUnder(err error) (ExitInfo, bool) {
 // TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt caught
 // `daemon.shimclient.watch_agent` ERROR "shim stream refused {error=
 // invalid_argument: protocol error: incomplete envelope: unexpected EOF}" for
-// the shim it had SIGKILLed.
+// the shim it had SIGKILLed. MEASURED, merge gate 2026-10-16:
+// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt caught
+// `daemon.shimclient.gather_title_digest` ERROR "shim call failed {error=
+// unknown: read message: unexpected EOF}" for a shim dying under the call.
 func transportCut(err error) bool {
 	switch connect.CodeOf(err) {
 	case connect.CodeUnavailable:
 		return true
-	case connect.CodeInvalidArgument:
+	case connect.CodeInvalidArgument, connect.CodeUnknown:
 		return errors.Is(err, io.ErrUnexpectedEOF)
 	}
 	return false
