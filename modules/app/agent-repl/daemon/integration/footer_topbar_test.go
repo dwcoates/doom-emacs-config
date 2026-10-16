@@ -676,6 +676,11 @@ func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testin
 	awaitRow(t, f, tail, "the answered (denied) permission card", func(r *frontendv1.FeedRow) bool {
 		return r.GetId().GetValue() == row.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
 	})
+	// The settled ask resumes the turn's prompt: it re-pushes still working and
+	// no longer awaiting the user, and is consumed here for the same reason.
+	awaitRow(t, f, tail, "the prompt resumed after the deny", func(r *frontendv1.FeedRow) bool {
+		return r.GetUserPrompt().GetWorking() && !r.GetUserPrompt().GetAwaitingUser()
+	})
 
 	// Assert: the footer stays thinking (a deny does not end the turn) and no
 	// turn_ended row is drawn until the fake pushes the turn's own terminal.
