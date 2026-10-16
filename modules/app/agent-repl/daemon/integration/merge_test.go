@@ -367,7 +367,16 @@ func mergeCleanRepo(t *testing.T) (f *fixture, d *harness.Daemon, repo *harness.
 // landing's one deploy.
 // ---------------------------------------------------------------------------
 
-func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing.T) {
+// TestALandedMergeIsSeenByEveryObserver lands one clean one-shot merge and
+// reads it from every place a landing shows: the feed's success row, the
+// footer, the roster, the desktop banners and the removed worktree.
+//
+// ONE ACT, SEVERAL OBSERVERS (AGENTS.md "A case may share an expensive
+// fixture, never a slice another case reads"): each observation is its own
+// named case, so one that fails reports without hiding the others. The waits
+// bound to the daemon (the landing's deploy, the banner settling, the
+// worktree's removal) run in the test itself, around the observers.
+func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
@@ -375,96 +384,73 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	script.SetStdout("daemon: passed in 1s\n")
 	dir := f.ws.GetDir()
 	// EVERY STREAM THIS TEST READS IS OPENED BEFORE THE MERGE IS ENQUEUED.
-	// The feed's reason is below; the footer's and the roster's is that both
-	// facts this test asserts are MOMENTS the landing passes through. The
-	// footer's merged substatus is a momentary status the daemon's own
+	// The footer's merged substatus is a momentary status the daemon's own
 	// successor push retires after footer.DefaultMomentaryDwell, and the
 	// merged roster row is closed out right behind it — so a watch opened
 	// after the terminal feed row has already arrived is a watch that opens
-	// on the state AFTER the one it is waiting for, and it then waits out its
-	// whole bound for a push that has already happened.
+	// on the state AFTER the one it is waiting for.
+	//
+	// THE TEARDOWN'S ORDER IS NOT ASSERTED FROM HERE. Publishing the terminal
+	// row and removing the worktree are both the daemon's, in that order, and
+	// internal/merge's TestTerminalIsPublishedBeforeTheWorktreeIsRemoved holds
+	// that ordering deterministically.
 	root := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 
-	// THE TEARDOWN'S ORDER IS NOT ASSERTED FROM HERE. Publishing the terminal
-	// row and removing the worktree are both the daemon's, in that order, and
-	// internal/merge's TestTerminalIsPublishedBeforeTheWorktreeIsRemoved holds
-	// that ordering deterministically against the feed and git the run itself
-	// drives. What a CLIENT sees is the row's arrival, which is a stream
-	// delivery this test cannot order against a teardown that spawns git: a
-	// poller racing the arrival measures how fast the push reached this
-	// process, not what the daemon did first, and lost that race under load.
-
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-
-	// Assert: FeedMergeSuccess{commit}.
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 	d.AwaitLandingDeployed()
-	if mergeRow.GetActivity().GetMerge().GetSuccess().GetCommit() == "" {
-		t.Fatalf("FeedMergeSuccess = %v, want a landed commit", mergeRow.GetActivity().GetMerge().GetSuccess())
-	}
-
-	// Assert: footer merged, roster merged + recently_merged.
-	awaitFooter(t, f, footer, "the footer's merged status", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerged() != nil
+	d.AwaitLogRecord(d.RunLogPath(), "the landed merge's banner", func(r harness.LogRecord) bool {
+		return bannerSettled(r) && r.Context["kind"] == "merge_resolved"
 	})
-	// THE STATUS IS PART OF THE PREDICATE, NOT A SECOND READ OF WHATEVER
-	// SNAPSHOT THE FIRST ONE MATCHED. The row enters recently_merged as
-	// MERGED and is closed out a moment later, so matching only on its
-	// presence and then reading the status off that same view asserted
-	// whichever of the two snapshots happened to arrive first — and read
-	// `inactive` whenever the close had already landed.
-	awaitRoster(t, f.d, roster, "the merged workspace under recently_merged, stated merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range rosterwalk.MergedRows(r) {
-			if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
-				return row.GetMerged() != nil
+
+	// Assert
+	t.Run("the feed's success row carries the landed commit", func(t *testing.T) {
+		if mergeRow.GetActivity().GetMerge().GetSuccess().GetCommit() == "" {
+			t.Errorf("FeedMergeSuccess = %v, want a landed commit", mergeRow.GetActivity().GetMerge().GetSuccess())
+		}
+	})
+	t.Run("the footer reads merged", func(t *testing.T) {
+		awaitFooter(t, f, footer, "the footer's merged status", func(v *frontendv1.FooterView) bool {
+			return v.GetStrip().GetStatus().GetMerged() != nil
+		})
+	})
+	t.Run("the roster lists it under recently merged, stated merged", func(t *testing.T) {
+		// THE STATUS IS PART OF THE PREDICATE: the row enters recently_merged
+		// as MERGED and is closed out a moment later, so matching on presence
+		// alone would read whichever snapshot arrived first.
+		awaitRoster(t, f.d, roster, "the merged workspace under recently_merged, stated merged", func(r *frontendv1.WorkspaceRoster) bool {
+			for _, row := range rosterwalk.MergedRows(r) {
+				if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
+					return row.GetMerged() != nil
+				}
+			}
+			return false
+		})
+	})
+	t.Run("only the queued and landed banners rose", func(t *testing.T) {
+		var merges [][]string
+		for _, inv := range bannerRuns(f) {
+			argv := [][]string{inv.Argv}
+			if bannerCarrying(argv, "merge queued") || bannerCarrying(argv, "merge landed") ||
+				bannerCarrying(argv, "merge failed") || bannerCarrying(argv, "merge abandoned") {
+				merges = append(merges, inv.Argv)
 			}
 		}
-		return false
+		if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀", "merge queued") || !bannerCarrying(merges[1:], "🎉", "merge landed", "Merged into main") {
+			t.Errorf("merge banners %q, want the queued banner then the landed one, and nothing else", merges)
+		}
 	})
 
 	// Assert: the worktree is removed once the terminal state has settled.
 	d.AwaitFileGone(dir)
-}
-
-// TestALandedMergeRaisesOnlyItsQueuedAndLandedBanners pins the merge queue's
-// two desktop banners: one as the merge is put in line, one as it lands, and
-// none for any step between.
-func TestALandedMergeRaisesOnlyItsQueuedAndLandedBanners(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f, d, _, script := mergeCleanRepo(t)
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-
-	// Act
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-
-	// Assert
-	d.AwaitLogRecord(d.RunLogPath(), "the landed merge's banner", func(r harness.LogRecord) bool {
-		return bannerSettled(r) && r.Context["kind"] == "merge_resolved"
-	})
-	var merges [][]string
-	for _, inv := range bannerRuns(f) {
-		argv := [][]string{inv.Argv}
-		if bannerCarrying(argv, "merge queued") || bannerCarrying(argv, "merge landed") ||
-			bannerCarrying(argv, "merge failed") || bannerCarrying(argv, "merge abandoned") {
-			merges = append(merges, inv.Argv)
-		}
-	}
-	if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀", "merge queued") || !bannerCarrying(merges[1:], "🎉", "merge landed", "Merged into main") {
-		t.Fatalf("merge banners %q, want the queued banner then the landed one, and nothing else", merges)
-	}
 }
 
 func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
