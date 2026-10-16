@@ -858,3 +858,60 @@ func TestEveryLedgerARedriveSettlesIsTakenThroughTakeAll(t *testing.T) {
 		})
 	}
 }
+
+func TestLockDeliveryIdleWaitsOutAStandingCall(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	idle := make(chan bool, 1)
+	h.sender.startHook = func() {
+		h.sender.startHook = nil
+		go func() {
+			d, err := h.q.lockDeliveryIdle(context.Background(), theWorkspace, h.log.Global(), "test")
+			if err != nil {
+				idle <- false
+				return
+			}
+			_, standing := h.q.standingCall(theWorkspace)
+			d.unlock()
+			idle <- !standing
+		}()
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if !<-idle {
+		t.Fatal("lockDeliveryIdle answered the lock with the start call still standing")
+	}
+}
+
+func TestLockDeliveryIdleAnswersTheContextWhenItEndsFirst(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	var waitErr error
+	h.sender.startHook = func() {
+		h.sender.startHook = nil
+		_, waitErr = h.q.lockDeliveryIdle(cancelled, theWorkspace, h.log.Global(), "test")
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if !errors.Is(waitErr, context.Canceled) {
+		t.Fatalf("lockDeliveryIdle() error = %v, want the context's", waitErr)
+	}
+	if !logged(h.log.Records(), "info", opCall, "the decision stopped waiting for the shim call to settle") {
+		t.Fatalf("records = %+v, want the abandoned wait recorded", h.log.Records())
+	}
+	if !lockFree(h) {
+		t.Fatal("the delivery lock was left held after the abandoned wait")
+	}
+}

@@ -641,10 +641,11 @@ type RefusalNoter interface {
 	NoteRefusal(ws ids.WorkspaceID)
 }
 
-// RevivalTurns is the queue's answer to a turn stop that lands while a
-// workspace's session is still coming up. It is kept apart from Queue so the
-// interrupt verb depends on this one call alone.
-type RevivalTurns interface {
+// TurnStops is the queue's part in a turn stop: the accepted turn a stop
+// lands on may still be the queue's, waiting on a bring-up or on its way to
+// the shim. It is kept apart from Queue so the interrupt verb depends on these
+// calls alone.
+type TurnStops interface {
 	// WithdrawRevivalTurn is a turn stop that lands while the workspace's
 	// session is still coming up: it retires the accepted turn the status
 	// surfaces already show (the first prompt held for the revival), so the
@@ -653,13 +654,18 @@ type RevivalTurns interface {
 	// is in flight or nothing waits on it, which is when the turn (if any) is
 	// already the session's own to kill.
 	WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// AwaitTurnStarted returns once no call that opens TURN on WS stands: the
+	// shim has the turn, or its start failed. A kill for the turn waits on it,
+	// so the kill can never reach the shim ahead of the start and find no
+	// turn open. It answers ctx's error when ctx ends first.
+	AwaitTurnStarted(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 }
 
-// Service is everything the built queue answers: the delivery path and the
-// revival-turn withdrawal.
+// Service is everything the built queue answers: the delivery path and its
+// part in a turn stop.
 type Service interface {
 	Queue
-	RevivalTurns
+	TurnStops
 }
 
 // New builds the queue.

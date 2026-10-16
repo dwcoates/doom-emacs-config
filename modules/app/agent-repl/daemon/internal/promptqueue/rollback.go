@@ -42,7 +42,8 @@ func heldSince(standing []wsm.HeldPrompt, since time.Time) []ids.TurnID {
 // are the held prompts DROP retired, so a refused rollback leaves the queue as
 // it was. Every prompt in DROP must still be standing: the caller planned
 // against the queue, and a hold that vanished means the plan no longer
-// describes it (ErrHoldsChanged, nothing performed).
+// describes it (ErrHoldsChanged, nothing performed). A shim call standing on
+// the workspace is waited out first (lockDeliveryIdle).
 func (q *queue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Time, drop []ids.TurnID, perform func(context.Context) error) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -50,7 +51,13 @@ func (q *queue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Tim
 	}
 	log = log.With(dlog.Context{"drop": len(drop)})
 
-	d := q.lockDelivery(ws)
+	// A STANDING CALL IS WAITED OUT, never run beside: a stop that lands while
+	// its turn's StartTurn is in flight rolls that turn back once the shim has
+	// it, rather than reaching the shim ahead of the start.
+	d, err := q.lockDeliveryIdle(ctx, ws, log, "rollback")
+	if err != nil {
+		return fmt.Errorf("roll back %q: %w", ws, err)
+	}
 	defer d.unlock()
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)

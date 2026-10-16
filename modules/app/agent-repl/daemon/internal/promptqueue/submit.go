@@ -516,6 +516,38 @@ func (q *queue) WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bo
 	return true, nil
 }
 
+// AwaitTurnStarted implements TurnStops.
+//
+// THE QUEUE MARKS A TURN IN FLIGHT BEFORE THE SHIM HAS IT: delivery claims the
+// StartTurn call, releases the delivery lock, and only then calls, and the
+// call itself first waits for the main agent's watch to serve. A kill sent in
+// that window reached the shim ahead of the start, found no turn open, and the
+// turn then ran on unstopped. Waiting on the claim's settle orders the kill
+// behind the start.
+func (q *queue) AwaitTurnStarted(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error {
+	call, standing := q.standingCall(ws)
+	if !standing || !call.opensTurn || call.turn != turn {
+		return nil
+	}
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return err
+	}
+	began := q.deps.Now()
+	select {
+	case <-call.settled:
+		log.Info(opCall, "a turn stop waited for its turn's start to reach the shim", dlog.Context{
+			"call": call.what, "turn": string(turn), "waited_ms": q.deps.Now().Sub(began).Milliseconds(),
+		})
+		return nil
+	case <-ctx.Done():
+		log.Info(opCall, "a turn stop stopped waiting for its turn's start", dlog.Context{
+			"call": call.what, "turn": string(turn), "cause": ctx.Err().Error(),
+		})
+		return fmt.Errorf("await the start of %q on %q: %w", turn, ws, ctx.Err())
+	}
+}
+
 // ReleaseReconnectHolds implements Queue.
 func (q *queue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
 	ctx := context.Background()

@@ -1359,3 +1359,98 @@ func TestWithdrawRevivalTurnFailsWhenTheDurableRetireFails(t *testing.T) {
 		t.Fatalf("footer was told %d more turns, want none after a failed withdrawal", got-turnsBefore)
 	}
 }
+
+// awaitDuringStart submits T1 and, from inside its StartTurn call, asks
+// AwaitTurnStarted for TURN under CTX, answering what the ask returned.
+func awaitDuringStart(t *testing.T, h *harness, ctx context.Context, turn ids.TurnID) error {
+	t.Helper()
+	var during error
+	h.sender.startHook = func() {
+		h.sender.startHook = nil
+		during = h.q.AwaitTurnStarted(ctx, theWorkspace, turn)
+	}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	return during
+}
+
+func TestAwaitTurnStarted(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name    string
+		turn    ids.TurnID
+		wantErr error
+		// wantMessage is the record the ask leaves, empty for none.
+		wantMessage string
+	}{
+		{"a stop of the turn being started waits for its start", "t1", context.Canceled,
+			"a turn stop stopped waiting for its turn's start"},
+		{"a stop of another turn does not wait", "t9", nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act — the cancelled context answers at once only if the ask
+			// would otherwise have waited.
+			err := awaitDuringStart(t, h, cancelled, tc.turn)
+
+			// Assert
+			if !errors.Is(err, tc.wantErr) || (tc.wantErr == nil) != (err == nil) {
+				t.Fatalf("AwaitTurnStarted() = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantMessage == "" {
+				return
+			}
+			record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opCall, Message: tc.wantMessage})
+			if !ok {
+				t.Fatalf("records = %+v, want %q", h.log.Records(), tc.wantMessage)
+			}
+			if record.Context["turn"] != string(tc.turn) || record.Context["call"] != "start_turn" {
+				t.Fatalf("record context = %v, want the turn and its start call", record.Context)
+			}
+		})
+	}
+}
+
+func TestAwaitTurnStartedReturnsOnceTheStartSettles(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	returned := make(chan bool, 1)
+	h.sender.startHook = func() {
+		h.sender.startHook = nil
+		go func() {
+			err := h.q.AwaitTurnStarted(context.Background(), theWorkspace, "t1")
+			_, standing := h.q.standingCall(theWorkspace)
+			returned <- err == nil && !standing
+		}()
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if !<-returned {
+		t.Fatal("AwaitTurnStarted returned while the start still stood, or failed")
+	}
+}
+
+func TestAwaitTurnStartedWithNoCallStandingAnswersAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	err := h.q.AwaitTurnStarted(cancelled, theWorkspace, "t1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AwaitTurnStarted() = %v, want nil with no call standing", err)
+	}
+}

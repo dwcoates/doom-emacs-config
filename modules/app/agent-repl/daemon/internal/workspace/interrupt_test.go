@@ -1183,3 +1183,69 @@ func TestInterruptRollingBackFailureIsTheStopsError(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure recorded at ERROR", f.log.logger.Records())
 	}
 }
+
+// TestInterruptTurnKillsOnlyOnceItsTurnHasStarted covers the ordering a turn
+// stop keeps with its turn's StartTurn: the queue marks the turn in flight
+// before the shim has it, so the kill waits for the start before it is sent.
+func TestInterruptTurnKillsOnlyOnceItsTurnHasStarted(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	killsBeforeAwait := -1
+	f.queue.onStartAwait = func() { killsBeforeAwait = len(f.shim.killedTurns) }
+
+	// Act.
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	if len(f.queue.startAwaits) != 1 || f.queue.startAwaits[0] != "t1" {
+		t.Fatalf("start awaits = %v, want one for t1", f.queue.startAwaits)
+	}
+	if killsBeforeAwait != 0 {
+		t.Fatalf("kills sent before the start was awaited = %d, want 0", killsBeforeAwait)
+	}
+	if len(f.shim.killedTurns) != 1 {
+		t.Fatalf("killed turns = %+v, want one kill after the start", f.shim.killedTurns)
+	}
+}
+
+func TestInterruptTurnSurfacesAFailedStartWaitAndKillsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.queue.startAwaitErr = context.Canceled
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Interrupt() error = %v, want the wait's failure", err)
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none after a failed wait", f.shim.killedTurns)
+	}
+	if f.footer.interrupting["w1"] {
+		t.Fatal("the footer's interrupting status was left raised after a failed wait")
+	}
+}
+
+func TestInterruptTurnWithNothingRunningAwaitsNoStart(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	if len(f.queue.startAwaits) != 0 {
+		t.Fatalf("start awaits = %v, want none with no turn open", f.queue.startAwaits)
+	}
+}
