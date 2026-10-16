@@ -2229,6 +2229,25 @@ because what happens on completion is the repository's own directive."
       (agent-repl-create-oneshot t)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))
 
+;;;; ---- Create: the shared one-shot composition ----
+
+(ert-deftest agent-repl-verbs-create-oneshot-helper-logs-its-command-and-sends-a-one-shot ()
+  "The shared one-shot composition logs the COMMAND it was handed and sends a one-shot."
+  ;; Arrange.
+  (let (logs)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
+        ;; Act.
+        (agent-repl-verbs--create-oneshot 'some-oneshot-command nil)
+        ;; Assert.
+        (should (member "elisp.verbs.create-invoked command=some-oneshot-command" logs))
+        (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :arm)
+                    :one-shot))))))
+
 ;;;; ---- Create: the required-prompt reader ----
 
 (ert-deftest agent-repl-verbs-read-required-prompt-returns-the-text-as-read ()

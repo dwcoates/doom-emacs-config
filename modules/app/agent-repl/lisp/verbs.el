@@ -2472,9 +2472,15 @@ out itself.
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
-  (agent-repl-verbs--create-invoked 'agent-repl-create-oneshot)
-  (let* ((command 'agent-repl-create-oneshot)
-         (repository (agent-repl-verbs--read-for
+  (agent-repl-verbs--create-oneshot 'agent-repl-create-oneshot pick-model))
+
+(defun agent-repl-verbs--create-oneshot (command pick-model)
+  "Create a one-shot for COMMAND, asking for the model when PICK-MODEL.
+The one composition every one-shot command shares: the repository is the
+current workspace\='s, the commission is read UNSEEDED into the one-shot
+history, and the model is asked for only under a prefix argument."
+  (agent-repl-verbs--create-invoked command)
+  (let* ((repository (agent-repl-verbs--read-for
                       command 'repository
                       (lambda () (agent-repl-verbs--dynamic-repository "a one-shot"))))
          (prompt (agent-repl-verbs--read-for
