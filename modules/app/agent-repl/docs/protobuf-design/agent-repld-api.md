@@ -149,3 +149,4 @@ invariant), how common it is, and example situations.
 | 3 | self | self | main | DEFERRED (owner leans no: it can carry the requester's unfinished work to main prematurely, and any useful case could branch from main instead; revisit) | rare | handing off the landing of finished work |
 | 4 | self | other | main | yes | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
 | 5 | self | other (X) | the same other (X) | yes | rare | sending a fix the requester found into X's unlanded branch; handing X a piece it needs; unblocking X on a problem the requester already understands |
+| 5b | self | other (B) | a different other (C) | NO: a workspace merges only into the branch it was cut from, or into main | never | none |
