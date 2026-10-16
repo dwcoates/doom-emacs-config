@@ -27,6 +27,8 @@
 #                            (`"retired": true`: our link is removed instead)
 #   git_hook                 a managed git hook in the repository's hooks dir
 #   launchd_service          a launchd user agent built, installed and running
+#   download                 files unpacked from a zip at a URL into the cache,
+#                            each pinned by its sha256
 #
 # Profiles: `run` entries are needed to use agent-repl, `dev` entries to build
 # and test it. `--profile all` (the default) selects both.
@@ -152,6 +154,10 @@ validate_entries() {
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
        elif $e.kind == "git_hook" then need($e; ["hook", "source", "markers"])
        elif $e.kind == "launchd_service" then need($e; ["label", "plist", "build_target", "binary", "platforms"])
+       elif $e.kind == "download" then need($e; ["url", "archive", "dest", "files"]),
+         (select($e.archive != null and $e.archive != "zip") | "\($e._file): \($e.id): download archive must be zip, not \($e.archive)"),
+         ($e.files // [] | .[] | select(.from == null or .to == null or .sha256 == null)
+           | "\($e._file): \($e.id): every download file needs \"from\", \"to\" and \"sha256\"")
        else "\($e._file): \($e.id): unknown kind \($e.kind)" end)),
     (group_by(.id)[] | select((map(del(._system, ._file)) | unique | length) > 1)
       | "\(.[0].id): declared differently by \(map(._file) | join(" and ")); a shared requirement must be declared identically")')"
@@ -433,6 +439,35 @@ check_launchd_service() {
   fi
 }
 
+# download_dir ENTRY: the cache dir a download entry's files are unpacked into.
+download_dir() { printf '%s/%s\n' "$CACHE_ROOT" "$(field "$1" .dest)"; }
+
+# download_files ENTRY: one "FROM<tab>TO<tab>SHA256" line per pinned file.
+download_files() { printf '%s\n' "$1" | jq -r '.files[] | "\(.from)\t\(.to)\t\(.sha256)"'; }
+
+# sha256_of FILE: FILE's sha256, as the manifests pin it.
+sha256_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+
+check_download() {
+  local e="$1" dir from to want missing="" stale=""
+  dir="$(download_dir "$e")"
+  FIX="download $(field "$e" .url), check each file's sha256, and unpack it into $dir"
+  while IFS=$'\t' read -r from to want; do
+    if [ ! -f "$dir/$to" ]; then
+      missing="$missing $to"
+    elif [ "$(sha256_of "$dir/$to")" != "$want" ]; then
+      stale="$stale $to"
+    fi
+  done < <(download_files "$e")
+  if [ -n "$missing" ]; then
+    STATUS=missing; DETAIL="$dir lacks$missing"
+  elif [ -n "$stale" ]; then
+    STATUS=outdated; DETAIL="$dir holds another copy of$stale than the entry pins"
+  else
+    STATUS=ok; DETAIL="$dir holds every pinned file"
+  fi
+}
+
 check_entry() {
   STATUS=""; DETAIL=""; FIX=""
   "check_$(field "$1" .kind)" "$1"
@@ -520,13 +555,54 @@ install_launchd_service() {
   "$LAUNCHCTL" kickstart -k "gui/$uid/$label"
 }
 
+# fetch_download ENTRY WORK: download and unzip the entry's archive into WORK,
+# and check every pinned file's sha256 there. Nothing reaches the cache unless
+# every file is the one the entry pins: a changed upstream copy is an entry to
+# re-pin, never a file to install.
+fetch_download() {
+  local e="$1" work="$2" id url from to want have
+  id="$(field "$e" .id)"
+  url="$(field "$e" .url)"
+  if ! curl -fsSL --retry 2 -o "$work/archive.zip" "$url"; then
+    err "install: $id: downloading $url failed"; return 1
+  fi
+  if ! unzip -q "$work/archive.zip" -d "$work/unpacked"; then
+    err "install: $id: $url is not a zip unzip can unpack"; return 1
+  fi
+  while IFS=$'\t' read -r from to want; do
+    if [ ! -f "$work/unpacked/$from" ]; then
+      err "install: $id: $url holds no $from; fix the entry's files"; return 1
+    fi
+    have="$(sha256_of "$work/unpacked/$from")"
+    if [ "$have" != "$want" ]; then
+      err "install: $id: $from from $url has sha256 $have, not the pinned $want; the upstream copy changed, so re-pin the entry"; return 1
+    fi
+  done < <(download_files "$e")
+}
+
+install_download() {
+  local e="$1" dir work from to want rc=0
+  dir="$(download_dir "$e")"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-download.XXXXXX")"
+  if fetch_download "$e" "$work"; then
+    mkdir -p "$dir"
+    while IFS=$'\t' read -r from to want; do
+      mv -f "$work/unpacked/$from" "$dir/$to"
+    done < <(download_files "$e")
+  else
+    rc=1
+  fi
+  rm -rf "$work"
+  return "$rc"
+}
+
 # ---------------------------------------------------------------------------
 # Uninstall: only what this script itself put in place (links, hooks,
-# services). Shared programs are never removed.
+# services, downloads). Shared programs are never removed.
 # ---------------------------------------------------------------------------
 
 uninstall_entry() {
-  local e="$1" kind dest src label uid
+  local e="$1" kind dest src label uid dir from to want
   kind="$(field "$e" .kind)"
   case "$kind" in
     skill_link)
@@ -553,6 +629,12 @@ uninstall_entry() {
       if [ -f "$CACHE_ROOT/bin/$(field "$e" .binary)" ]; then
         rm -f "$CACHE_ROOT/bin/$(field "$e" .binary)"; say "uninstall: removed $CACHE_ROOT/bin/$(field "$e" .binary)"
       fi ;;
+    download)
+      dir="$(download_dir "$e")"
+      while IFS=$'\t' read -r from to want; do
+        if [ -f "$dir/$to" ]; then rm -f "$dir/$to"; say "uninstall: removed $dir/$to"; fi
+      done < <(download_files "$e")
+      if [ -d "$dir" ]; then rmdir "$dir" 2>/dev/null || true; fi ;;
   esac
 }
 
