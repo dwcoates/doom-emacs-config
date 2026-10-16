@@ -108,3 +108,4 @@ the log records that show it, so the failures can be fixed at their source.
 - `e2e-step-d-land`, from `test-tier-audit-e2e`: LANDED as `0c312d41fa`. It deletes 51 host e2e tests and 22 e2e-emacs tests, with no coverage loss.
 - `test-shared-setup`'s shared-World work (22 commits): LANDED as `615c85c01a`. No system lost coverage beyond 0.07 points.
 - `redundancy-procs-land` (merge workspace `redundancy-procs`), from `test-redundancy-measure`: LANDED as `6c98fa4ca2`.
+- `test-shared-setup-d1-land`, from `test-shared-setup`: LANDED as `a159524c28`. Two identical merge tests became one act with an observer subtest each.
