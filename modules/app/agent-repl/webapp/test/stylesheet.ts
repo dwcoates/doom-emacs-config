@@ -41,6 +41,20 @@ export function cascadedValue(el: Element, property: string): string {
 }
 
 /**
+ * The declaration the cascade hands `property` on an element of CHILD-CLASS
+ * placed inside an element of PARENT-CLASS, mounted through `inDocument` so
+ * both the pair and the stylesheet come down afterwards.
+ */
+export function cascadedValueIn(parentClass: string, childClass: string, property: string): string {
+  const parent = document.createElement("div");
+  parent.className = parentClass;
+  const child = document.createElement("span");
+  child.className = childClass;
+  parent.append(child);
+  return inDocument(parent, () => cascadedValue(child, property));
+}
+
+/**
  * Run CHECK against DRAWN mounted in the sidebar rail (`#ws-sidebar`) with the
  * real stylesheet installed, and take both down afterwards, even when CHECK
  * throws. Every sidebar paint assertion goes through this, so a test cannot
