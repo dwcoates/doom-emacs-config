@@ -129,6 +129,23 @@ fire-and-forget command file whose result arrives later as a prompt.
 - Whether the command-file ingress is retired entirely, which needs its other
   writers (Emacs) moved onto RPCs.
 
+## Rules the combinations reduce to (owner, 2026-10-16)
+
+- A BRANCH OWNED BY A WORKSPACE W LANDS ONLY INTO W. Branching from W and
+  landing anywhere else (main included) is refused: landing W's work elsewhere
+  is W's responsibility.
+- WHO LANDS INTO W: when the new workspace's context is forked from W, it has
+  W's whole context and may land itself (land when done allowed). Otherwise W
+  arbitrates and lands it: the request carries a required plain-English notice,
+  forwarded to W with the daemon's addendum that landing is W's
+  responsibility; land when done is refused; a closed W is reopened first.
+- A BRANCH NO WORKSPACE OWNS (a subagent's) may land on main.
+- MAIN LANDS ONLY INTO MAIN: branching from main and landing into any other
+  branch is refused.
+- NOTICES: every workspace that is branched from or forked from gets a brief
+  notice when the derived workspace is created and when it lands; one combined
+  notice when it is both.
+
 ## The combinations
 
 Three axes, each with three values, from the requester's point of view:
@@ -146,12 +163,12 @@ invariant), how common it is, and example situations.
 |---|---|---|---|---|---|---|
 | 1 | self | main | main | yes | common | tangential fix landed while work goes on; parallel subtask; trying a second approach; handing the work off with its context |
 | 2 | self | self | self | yes | common | splitting a feature still in progress into pieces that land back into it; addressing review findings on the feature before it lands on main |
-| 3 | self | self | main | DEFERRED (owner leans no: it can carry the requester's unfinished work to main prematurely, and any useful case could branch from main instead; revisit) | rare | handing off the landing of finished work |
-| 4 | self | other | main | yes | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
+| 3 | self | self | main | NO: a workspace's branch lands only into that workspace (owner, 2026-10-16) | never | none |
+| 4 | self | a branch no workspace owns (e.g. a subagent's) | main | yes; a branch an open workspace owns may not be the source here, since it lands only into that workspace (owner, 2026-10-16) | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
 | 5 | self | other (X) | the same other (X) | yes, but never with "land when done": the request must carry a plain-English NOTICE, which the daemon forwards to X with a guaranteed addendum saying that landing the work into X is X's responsibility; X lands it (`workspace merge <child>`); a closed X is reopened automatically first; the created workspace is told to communicate with X (owner, 2026-10-16) | rare | sending a fix the requester found into X's unlanded branch; handing X a piece it needs; unblocking X on a problem the requester already understands |
 | 5b | self | other (B) | a different other (C) | NO: not for lack of any use, but its value is lower than the risk of encouraging workspaces to conflate their responsibilities through cross talk between unrelated workspaces (owner, 2026-10-16). A judgment for this cell only, not a general rule. | never | none |
 | O1 | other (Y) | main | main | yes: to use Y's context to fix a problem on main, fork Y and branch from main (owner, 2026-10-16) | to settle | to settle |
-| O2 | other (Y) | Y | Y | yes, with combination 5's rules: a required notice forwarded to Y with the daemon's addendum, Y lands it, a closed Y is reopened first (owner, 2026-10-16) | to settle | to settle |
-| O3 | other (Y) | Y | main | NO: landing Y's changes on main is Y's responsibility; O1 covers "Y's context, fix on main" (owner, 2026-10-16) | never | none |
+| O2 | other (Y) | Y | Y | yes, and it may land itself: forked from Y, it has Y's whole context, so Y need not arbitrate; Y is notified on creation and on landing (owner, 2026-10-16) | to settle | to settle |
+| O3 | other (Y) | Y | main | NO: a workspace's branch lands only into that workspace (owner, 2026-10-16) | never | none |
 | O4 | other (Y) | any branch | a different branch | NO: with another workspace's context, branch source and merge target never differ, except main into main (owner, 2026-10-16) | never | none |
 | O5 | other (Y) | main | any other branch | NO (owner, 2026-10-16) | never | none |
