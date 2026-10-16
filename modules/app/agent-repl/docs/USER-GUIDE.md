@@ -8,8 +8,8 @@ user guide"). Controls that predate this guide are not all listed yet.
 
 Run `bash .claude/install.sh` from this repository, or ask an agent to run
 `/install-agent-repl`. It installs everything agent-repl needs that is missing:
-Emacs with xwidgets, the Go and Node toolchains, `terminal-notifier`, the
-Claude Code skills, the git hook, and the store and sidecar services. It then
+Emacs with xwidgets, the Go and Node toolchains, `terminal-notifier`,
+`hunspell` and the input window's spelling dictionary, the Claude Code skills, the git hook, and the store and sidecar services. It then
 lists what only you can provide. `bash .claude/install.sh check` reports the
 same thing without changing anything, and `doom doctor` reports it too.
 
@@ -302,6 +302,26 @@ When Emacs quits, each workspace's input window is saved to that workspace's pro
 - Text you cleared with `C-c C-c` and never sent comes back the same way.
   - It stops coming back once you send it, or once you send any other prompt after it.
   - Only the most recent such text comes back.
+
+## Spellchecking the input window
+
+The input window underlines misspelled words as you type.
+
+- Misspellings are checked against SCOWL's size-80 American English dictionary.
+  - It is the largest size SCOWL recommends for spellchecking.
+  - The installer downloads it into `~/.cache/agent-repl/dictionaries`, and `hunspell` checks against it.
+- To fix a misspelling, put point on it and press `z=` in normal state.
+  - `C-.` also corrects the word at point.
+  - `]s` and `[s` jump to the next and the previous misspelling.
+  - `C-,` jumps to the next misspelling too.
+- A word you save from the `z=` menu goes in hunspell's personal dictionary, `~/.hunspell_en_US-scowl80`.
+- Text that is not prose is never checked.
+  - That covers fenced code blocks, inline `code` spans, paths, URLs, slash commands, identifiers and email addresses.
+- Pasted text, recalled history and restored input are checked as soon as they arrive.
+- Setting `agent-repl-input-spellcheck` to `nil` turns spellchecking off for input windows opened after the change.
+- If `hunspell` or the dictionary is missing, the input window is not spellchecked.
+  - The agent-repl log names what is missing, once.
+  - `bash .claude/install.sh` installs both.
 
 ## A one-shot that fixes the current workspace
 

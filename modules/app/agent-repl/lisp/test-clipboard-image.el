@@ -11,7 +11,7 @@
 ;; (osascript/sips) for the macOS branches -- the PNG flavor, the
 ;; TIFF-plus-conversion fallback, and an empty clipboard -- and
 ;; `agent-repl--image-call-process-to-file' plus
-;; `agent-repl--image-executable-find' for the Linux branches, where the
+;; `agent-repl--executable-find' for the Linux branches, where the
 ;; display server and what is installed on PATH are both stated by the test.
 ;;
 ;; The behavior under test is the one the overhaul changed: the captured file
@@ -300,7 +300,7 @@ reader gets a successful capture unless it says otherwise."
          (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
                    ((symbol-function 'agent-repl--ws-dir)
                     (lambda (_ws) agent-repl-test-image--dir))
-                   ((symbol-function 'agent-repl--image-executable-find)
+                   ((symbol-function 'agent-repl--executable-find)
                     (lambda (program)
                       (when (member program agent-repl-test-image--installed)
                         (concat "/usr/bin/" program))))

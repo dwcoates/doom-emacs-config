@@ -2260,6 +2260,25 @@ answers.  BODY runs with the other window selected; `input-buf' is bound."
             (should (eq (agent-repl--ws-get "test-ws" :input-buffer) buf)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+(ert-deftest agent-repl-test-initialize-input-buffer-spellchecks-before-filling ()
+  "initialize-input-buffer turns spellchecking on for WS after the mode and before history fills it."
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *init-input-spell*"))
+          (calls nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--create-buffer)
+                     (lambda (_ws &optional _s) buf))
+                    ((symbol-function 'agent-repl-input-mode)
+                     (lambda () (push 'mode calls)))
+                    ((symbol-function 'agent-repl-spell-enable)
+                     (lambda (ws) (push (list 'spell ws (current-buffer)) calls)))
+                    ((symbol-function 'agent-repl--history-restore)
+                     (lambda (_ws) (push 'history calls))))
+            (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
+            (agent-repl--initialize-input-buffer "test-ws")
+            (should (equal (reverse calls) (list 'mode (list 'spell "test-ws" buf) 'history))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 (ert-deftest agent-repl-test-initialize-input-buffer-draws-the-held-prompt-waiting-line ()
   "A composer born after an Emacs restart re-reads the held-prompt ingress."
   (agent-repl-test--with-clean-state

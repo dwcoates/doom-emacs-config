@@ -820,6 +820,10 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 ;; before modules/app/agent-repl/config.el loads, which is why it is here.
 (setq agent-repl-frontend-auto-start nil)
 
+;; Composers are born unspellchecked: spellchecking runs hunspell, a program
+;; outside our systems, which no e2e run starts for real.
+(setq agent-repl-input-spellcheck nil)
+
 ;; NOTHING IN THIS LAYER CAN ANSWER A QUESTION.
 ;;
 ;; A y-or-n-p nobody answers does not fail, it HANGS: the reader enters a

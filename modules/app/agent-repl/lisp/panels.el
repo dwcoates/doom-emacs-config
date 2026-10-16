@@ -64,6 +64,7 @@
 (declare-function agent-repl-frontend-running-p-fn "frontends")
 (declare-function agent-repl-frontend-show-fn "frontends")
 (declare-function agent-repl-input-mode "input")
+(declare-function agent-repl-spell-enable "spell" (ws))
 (declare-function agent-repl-window--delete-buffer-windows "window")
 (declare-function agent-repl-window--delete-or-neutralize "window")
 (declare-function agent-repl-window--delete-where "window")
@@ -1437,6 +1438,10 @@ Errors if the buffer is already initialized (already in
                             ws (buffer-name input-buf))
           (error "agent-repl--initialize-input-buffer: already initialized ws=%s" ws))
         (agent-repl-input-mode)
+        ;; Spellchecking starts BEFORE the composer is filled, so the
+        ;; history's unsent head and a restored draft are checked as they
+        ;; arrive (spell.el).
+        (agent-repl-spell-enable ws)
         (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
                           ws (buffer-name input-buf))
         (agent-repl--history-restore ws))

@@ -434,6 +434,112 @@ test_uninstall_removes_the_service() {
 }
 
 # ---------------------------------------------------------------------------
+# download.
+# ---------------------------------------------------------------------------
+
+# download_case [PIN]: a download entry whose zip holds words.dic, pinned to
+# PIN (the real sha256 of words.dic when absent), served by a curl stub that
+# copies the case's fixture zip to its -o path.
+download_case() {
+  new_case
+  mkdir -p "$CASE/zip"
+  printf 'hello\nworld\n' >"$CASE/zip/words.dic"
+  (cd "$CASE/zip" && /usr/bin/zip -q fixture.zip words.dic)
+  local pin="${1:-$(shasum -a 256 "$CASE/zip/words.dic" | cut -d' ' -f1)}"
+  manifest "[{\"id\": \"dict\", \"kind\": \"download\", \"why\": \"w\", \"profile\": \"run\", \"url\": \"https://example.test/dict.zip\", \"archive\": \"zip\", \"dest\": \"dictionaries\", \"files\": [{\"from\": \"words.dic\", \"to\": \"en-test.dic\", \"sha256\": \"$pin\"}]}]"
+  write_stub curl 'while [ "$#" -gt 0 ]; do [ "$1" = -o ] && { cp "$STUB_DIR/../zip/fixture.zip" "$2"; exit 0; }; shift; done; exit 7'
+}
+
+DICT_FILE() { printf '%s\n' "$CASE/home/.cache/agent-repl/dictionaries/en-test.dic"; }
+
+test_a_missing_download_fails_the_check_with_its_fix() {
+  download_case
+  run check
+  if [ "$RC" -eq 1 ] && has "missing     dict:" && has "lacks en-test.dic" && has "Fix: download https://example.test/dict.zip"; then
+    pass "a missing download fails the check and names its URL"
+  else fail "missing download" "rc=$RC" "$OUT"; fi
+}
+
+test_install_downloads_checks_and_unpacks_a_download() {
+  download_case
+  run install
+  if [ "$RC" -eq 0 ] && ran "curl -fsSL --retry 2 -o" && ran "https://example.test/dict.zip" \
+     && [ "$(cat "$(DICT_FILE)")" = "$(printf 'hello\nworld')" ] && has "ok          dict:"; then
+    pass "install downloads the zip and unpacks each pinned file under its cache name"
+  else fail "download install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_download_that_differs_from_its_pin_is_outdated_and_replaced() {
+  download_case
+  mkdir -p "$(dirname "$(DICT_FILE)")"
+  printf 'stale\n' >"$(DICT_FILE)"
+  run check
+  local checked="$OUT" checked_rc="$RC"
+  run install
+  if [ "$checked_rc" -eq 1 ] && grep -qF "outdated    dict:" <<<"$checked" && [ "$RC" -eq 0 ] \
+     && [ "$(cat "$(DICT_FILE)")" = "$(printf 'hello\nworld')" ]; then
+    pass "a downloaded file unlike its pin is outdated, and install replaces it"
+  else fail "outdated download" "rc=$RC" "$checked" "$OUT"; fi
+}
+
+test_install_refuses_a_download_unlike_its_pin() {
+  download_case 0000000000000000000000000000000000000000000000000000000000000000
+  run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: dict: words.dic from https://example.test/dict.zip has sha256" \
+     && has "re-pin the entry" && [ ! -e "$(DICT_FILE)" ]; then
+    pass "install refuses an upstream copy unlike its pin and installs nothing"
+  else fail "pin mismatch" "rc=$RC" "$OUT"; fi
+}
+
+test_install_refuses_an_archive_lacking_a_pinned_file() {
+  download_case
+  (cd "$CASE/zip" && rm fixture.zip && printf 'x\n' >other.txt && /usr/bin/zip -q fixture.zip other.txt)
+  run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: dict: https://example.test/dict.zip holds no words.dic" && [ ! -e "$(DICT_FILE)" ]; then
+    pass "install refuses an archive that lacks a pinned file"
+  else fail "archive lacks file" "rc=$RC" "$OUT"; fi
+}
+
+test_install_reports_a_failed_download() {
+  download_case
+  write_stub curl 'exit 22'
+  run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: dict: downloading https://example.test/dict.zip failed" && [ ! -e "$(DICT_FILE)" ]; then
+    pass "a failed download is reported and installs nothing"
+  else fail "failed download" "rc=$RC" "$OUT"; fi
+}
+
+test_install_reports_an_archive_unzip_cannot_unpack() {
+  download_case
+  printf 'not a zip\n' >"$CASE/zip/fixture.zip"
+  run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: dict: https://example.test/dict.zip is not a zip unzip can unpack" && [ ! -e "$(DICT_FILE)" ]; then
+    pass "an archive unzip cannot unpack is reported and installs nothing"
+  else fail "bad zip" "rc=$RC" "$OUT"; fi
+}
+
+test_uninstall_removes_a_download() {
+  download_case
+  run install
+  run uninstall
+  if [ "$RC" -eq 0 ] && [ ! -e "$(DICT_FILE)" ] && [ ! -d "$CASE/home/.cache/agent-repl/dictionaries" ] && has "uninstall: removed"; then
+    pass "uninstall removes the downloaded files and their emptied dir"
+  else fail "download uninstall" "rc=$RC" "$OUT"; fi
+}
+
+test_a_download_with_a_bad_archive_or_file_is_refused() {
+  local bad=""
+  new_case
+  manifest '[{"id": "d", "kind": "download", "why": "w", "profile": "run", "url": "u", "archive": "tar", "dest": "x", "files": []}]'
+  run list; [ "$RC" -eq 2 ] && has "download archive must be zip, not tar" || bad="$bad archive"
+  manifest '[{"id": "d", "kind": "download", "why": "w", "profile": "run", "url": "u", "archive": "zip", "dest": "x", "files": [{"from": "a", "to": "b"}]}]'
+  run list; [ "$RC" -eq 2 ] && has 'every download file needs "from", "to" and "sha256"' || bad="$bad file"
+  manifest '[{"id": "d", "kind": "download", "why": "w", "profile": "run", "archive": "zip", "dest": "x", "files": []}]'
+  run list; [ "$RC" -eq 2 ] && has 'download needs "url"' || bad="$bad url"
+  if [ -z "$bad" ]; then pass "a download entry with a bad archive, file or field is refused"; else fail "download validation:$bad" "$OUT"; fi
+}
+
+# ---------------------------------------------------------------------------
 # Output and usage.
 # ---------------------------------------------------------------------------
 

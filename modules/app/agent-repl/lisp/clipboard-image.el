@@ -47,7 +47,7 @@
 ;; Every shell-out and every PATH lookup goes through an external-boundary
 ;; wrapper -- `agent-repl--image-call-process',
 ;; `agent-repl--image-call-process-to-file' and
-;; `agent-repl--image-executable-find' -- each registered in
+;; `agent-repl--executable-find' -- each registered in
 ;; `agent-repl--external-boundary-functions' (core.el) so the batch test
 ;; harness stubs the boundary instead of shelling out.
 
@@ -60,6 +60,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--executable-find "agent-repl-core" (program))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
 (declare-function agent-repl-input-attach-image "agent-repl-input" (path media-type))
@@ -96,14 +97,6 @@ stdout rather than writing a file themselves, so this boundary exists to
 land those bytes.  Registered in `agent-repl--external-boundary-functions'
 (core.el) so tests stub it rather than shelling out."
   (apply #'call-process program nil (list :file dest) nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
-
-(defun agent-repl--image-executable-find (program)
-  "Return the absolute path of PROGRAM on PATH, or nil when it is absent.
-A PATH lookup is external state, so it is a boundary of its own and is
-registered in `agent-repl--external-boundary-functions' (core.el): a test
-decides which clipboard tools the host has rather than inheriting the
-host's real PATH."
-  (executable-find program)) ;; ALLOW-EXTERNAL-BOUNDARY
 
 ;;;; ---- Capture --------------------------------------------------------------
 
@@ -202,7 +195,7 @@ the display server wanted."
   (let* ((display (agent-repl--image-display-type ws))
          (candidates (cdr (assq display agent-repl--image-linux-readers)))
          (reader (seq-find (lambda (candidate)
-                             (agent-repl--image-executable-find (car candidate)))
+                             (agent-repl--executable-find (car candidate)))
                            candidates)))
     (agent-repl--log ws
                      "clipboard-image: linux reader selection display=%s candidates=%s chosen=%s"

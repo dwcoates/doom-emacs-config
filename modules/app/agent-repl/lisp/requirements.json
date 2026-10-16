@@ -1,0 +1,41 @@
+{
+  "system": "agent-repl-emacs",
+  "about": "What the Emacs layer (lisp/) needs on a machine beyond Emacs itself. lisp/spell.el reads the spell-dictionary entry for the dictionary's dir and name, so this file sits beside the code that reads it. bin/requirements.sh reads it through the root manifest's includes; see the Requirements section of AGENTS.md.",
+  "requirements": [
+    {
+      "id": "hunspell",
+      "kind": "program",
+      "why": "the composer's spellchecker (lisp/spell.el) runs it with the spell-dictionary below",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "hunspell",
+      "install": {
+        "brew": "hunspell"
+      }
+    },
+    {
+      "id": "spell-dictionary",
+      "kind": "download",
+      "why": "the composer's spellchecker (lisp/spell.el) checks against this hunspell dictionary: SCOWL size 80, the largest size SCOWL recommends for spellchecking (size 95 adds words obscure enough to hide real misspellings), American spelling with common variants, accented forms, hacker words and roman numerals",
+      "profile": "run",
+      "url": "https://app.aspell.net/create?max_size=80&spelling=US&max_variant=1&diacritic=both&special=hacker&special=roman-numerals&download=hunspell&encoding=utf-8&format=inline",
+      "archive": "zip",
+      "dest": "dictionaries",
+      "files": [
+        {
+          "from": "en_US-custom.aff",
+          "to": "en_US-scowl80.aff",
+          "sha256": "f272dbc2528af36bb51d2dcf87fbedc044cb07c253d5a43a823b4654c5268de4"
+        },
+        {
+          "from": "en_US-custom.dic",
+          "to": "en_US-scowl80.dic",
+          "sha256": "ed356f00d0731262c8f12edc676cc5e48564e65ded657820bac5c979e0a3b1fe"
+        }
+      ]
+    }
+  ]
+}
