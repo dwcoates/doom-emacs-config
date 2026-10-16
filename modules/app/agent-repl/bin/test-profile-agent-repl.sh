@@ -312,6 +312,11 @@ if grep -q '^## Switch tour fast (2 each way, 0.25s apart)' <<<"$fast" && grep -
 else
     fail "a switch tour's section counts its keys, switches, passes run and superseded, and pages shown" "$tour_report"
 fi
+if grep -q 'Records per key: 7 in all (emacs 5, webapp 2).' <<<"$fast"; then
+    pass "a switch tour's section gives the records each runtime wrote per key"
+else
+    fail "a switch tour's section gives the records each runtime wrote per key" "$tour_report"
+fi
 if grep -q 'Main-thread stalls: 1, 120ms blocked in all, the longest 120ms.' <<<"$fast"; then
     pass "a switch tour's stalls are only those inside its window"
 else

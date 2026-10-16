@@ -745,7 +745,9 @@ func switchTourTables(w io.Writer, records []record) {
 		}
 		var keys, switches, won, superseded, told, frames int
 		var stalls, drawMs []time.Duration
+		perRuntime := map[string]int{}
 		for _, x := range inside {
+			perRuntime[x.Runtime]++
 			switch {
 			case tourKey(x, label):
 				keys++
@@ -783,9 +785,38 @@ func switchTourTables(w io.Writer, records []record) {
 			fmt.Fprintln(w, "Rail draws: none.")
 		}
 		fmt.Fprintln(w)
+		recordsPerKey(w, perRuntime, keys)
 		took, incomplete := switchPhaseDurations(inside)
 		printPhaseRows(w, took, incomplete)
 	}
+}
+
+// recordsPerKey prints how many log records each runtime wrote per key the
+// tour pressed, most first: the log volume a switch costs, at the session's
+// level.
+func recordsPerKey(w io.Writer, perRuntime map[string]int, keys int) {
+	if keys == 0 {
+		fmt.Fprintln(w, "Records per key: no keys were pressed.")
+		fmt.Fprintln(w)
+		return
+	}
+	names := make([]string, 0, len(perRuntime))
+	total := 0
+	for name, n := range perRuntime {
+		names = append(names, name)
+		total += n
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if perRuntime[names[i]] != perRuntime[names[j]] {
+			return perRuntime[names[i]] > perRuntime[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s %d", name, perRuntime[name]/keys))
+	}
+	fmt.Fprintf(w, "Records per key: %d in all (%s).\n\n", total/keys, strings.Join(parts, ", "))
 }
 
 // contextMillis answers a record's context number KEY as milliseconds; zero
