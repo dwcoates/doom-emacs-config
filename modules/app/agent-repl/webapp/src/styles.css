@@ -913,13 +913,16 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo.folded .rows { display: none; }
 /* THE FOLDED COUNT "(N)" (frontend.v1.RosterSectionHeader.count): between the
    label and the add control, a step smaller than the label and in its color,
-   and present only while the section is folded (owner request, 2026-10-02). */
+   and present only while the section is folded (owner request, 2026-10-02).
+   A repository section under OPEN shows its count folded or not (owner
+   request, 2026-10-15). */
 #ws-sidebar .repo-head .sb-count {
   display: none;
   font-size: 0.85em;
   color: inherit;
 }
-#ws-sidebar .repo.folded > .repo-head .sb-count { display: inline; }
+#ws-sidebar .repo.folded > .repo-head .sb-count,
+#ws-sidebar .repo.repo-section > .repo-head .sb-count { display: inline; }
 /* THE OPEN RECENTLY MERGED BAND'S COUNT "(K today)": the merges that landed today,
    hidden rows included (src/sidebar/roster.ts drawMergedTodayCount), sized as
    the folded count and drawn grey, present only while the band is unfolded,
