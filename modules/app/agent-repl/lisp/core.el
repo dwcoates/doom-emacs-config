@@ -3840,6 +3840,15 @@ mock this function via `cl-letf' rather than signal a real OS process
 \(see AGENTS.md \"No External Processes or External State in Tests\")."
   (signal-process pid sig)) ;; ALLOW-EXTERNAL-BOUNDARY
 
+(defun agent-repl--executable-find (program)
+  "Return the absolute path of PROGRAM on PATH, or nil when it is absent.
+A PATH lookup is external state, so it is a boundary of its own and is
+registered in `agent-repl--external-boundary-functions': a test decides
+which programs the host has rather than inheriting the host's real PATH.
+THE ONE PATH LOOKUP every module makes for a program it runs (the
+clipboard readers, the composer's spellchecker)."
+  (executable-find program)) ;; ALLOW-EXTERNAL-BOUNDARY
+
 (defun agent-repl--make-process-git (name args sentinel)
   "Async git via `make-process'.
 NAME is the process name (a string); ARGS is the git subcommand
@@ -3921,7 +3930,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-uri
     agent-repl--image-call-process
     agent-repl--image-call-process-to-file
-    agent-repl--image-executable-find
+    agent-repl--executable-find
     agent-repl--prompt-summary-process-start
     agent-repl--prompt-summary-process-send-input
     agent-repl-connect--open-socket)

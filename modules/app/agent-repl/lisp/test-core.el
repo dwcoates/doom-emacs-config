@@ -6611,6 +6611,43 @@ A stale entry guards nothing and hides that the wrapper it named is gone."
       ;; Assert
       (should (equal stale nil)))))
 
+;;;; ---- Tests: the one PATH lookup ----
+
+(ert-deftest agent-repl-test-core-executable-find-is-a-registered-boundary ()
+  "The shared PATH lookup is registered, so the harness guards every caller."
+  ;; Arrange / Act / Assert
+  (should (memq 'agent-repl--executable-find agent-repl--external-boundary-functions)))
+
+(ert-deftest agent-repl-test-core-executable-find-answers-the-path-lookup ()
+  "The shared PATH lookup answers exactly what `executable-find' answers."
+  ;; Arrange: the real wrapper, captured before the harness guarded it.
+  (let ((real (cdr (assq 'agent-repl--executable-find
+                         agent-repl-test--external-original-functions)))
+        (asked nil))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (program &rest _) (setq asked program) "/opt/bin/tool")))
+      ;; Act
+      (let ((answer (funcall real "tool")))
+        ;; Assert
+        (should (equal asked "tool"))
+        (should (equal answer "/opt/bin/tool"))))))
+
+(ert-deftest agent-repl-test-core-no-module-looks-up-path-itself ()
+  "Only core.el's wrapper calls `executable-find'; every module calls the wrapper.
+A module with a PATH lookup of its own is a boundary the harness cannot guard."
+  ;; Arrange
+  (let ((offenders nil))
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (unless (equal (file-name-nondirectory file) "core.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          ;; Act
+          (when (re-search-forward "(executable-find " nil t)
+            (push (file-name-nondirectory file) offenders)))))
+    ;; Assert
+    (should (equal offenders nil))))
+
 ;;;; ---- Tests: a record nobody will read costs nearly nothing ----
 ;;
 ;; A dropped debug record (below `agent-repl-log-file-level', no message) is
