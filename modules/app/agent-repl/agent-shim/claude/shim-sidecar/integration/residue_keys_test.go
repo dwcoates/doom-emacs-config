@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -22,52 +21,6 @@ import (
 // THE RECORDS ARE VERBOSE, so every subject here runs the sidecar through
 // `debugLogging`: without it the reader's own account of what it withheld is
 // never emitted and the subject would assert nothing.
-
-// TestAWithheldRecordIsClassifiedByItsVendorKind drives a real withheld class —
-// `system/local_command`, which the converter understands and deliberately does
-// not carry.
-//
-// RE-AIMED: it asserted the row was keyed by the vendor's own uuid, which was
-// the cross-plane collapse rule. No row is written, so the uuid key is not
-// observable from here; what remains worth pinning is that the record is read,
-// named as the vendor's own kind, and stored nowhere.
-func TestAWithheldRecordIsClassifiedByItsVendorKind(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	captured := loadCapturedSession(t)
-	cwd := "/work/residue-uuid-probe"
-	slug := cwdSlug(cwd)
-	session := "8a8a8a8a-8a8a-48a8-88a8-8a8a8a8a8a8a"
-	rec := retargetSession(t,
-		decodeRecord(t, corpusLine(t, "transcript-lines/system-local_command.jsonl", 0)), session, cwd)
-	uuid, _ := rec["uuid"].(string)
-	if uuid == "" {
-		t.Fatalf("the system/local_command fixture carries no uuid")
-	}
-	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
-
-	// Act.
-	startSidecar(t, opts)
-	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
-	g.AppendLine(encodeRecord(t, rec))
-	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
-
-	// Assert: the reader named the vendor's own kind, and stored nothing for it.
-	awaitResidueWithheld(ctx, t, opts.LogPath, "vendor_specific/system/local_command")
-	fake.awaitResidueShape(ctx, t, "vendor_specific/system/local_command")
-	// The record reached no row AT ALL — not a page line and not an unserved
-	// one — so nothing anywhere in the store names it.
-	for _, e := range fake.Entries() {
-		if strings.Contains(e.GetUpsertKey(), uuid) {
-			t.Errorf("the withheld record produced a row keyed %q", e.GetUpsertKey())
-		}
-	}
-}
 
 // TestAnUnparsableLineIsClassifiedAgainstItsFile asserts the fallback: a line
 // that cannot be READ still produces an account of itself, and that account

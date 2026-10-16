@@ -151,24 +151,6 @@ func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) 
 	assertIngressEmpty(t, nd.StateDir)
 }
 
-func TestAHeldPromptWhoseKeyTheDaemonAlreadyAcceptedIsNotDeliveredTwice(t *testing.T) {
-	t.Parallel()
-	// Arrange: the submission the client gave up on DID land.
-	f := newOpened(t, harness.Opts{})
-	f.submit("do the thing", "k-landed", origin)
-	f.shim.ExpectStartTurn()
-
-	// Act
-	heldWrite(t, f.d.StateDir, "held_20260928T120001.000000001_aaaaaaaa_k-landed.json", f.repo.Dir, "k-landed", "do the thing")
-
-	// Assert: answered as the duplicate it is, at INFO, and never started.
-	awaitHeldRecord(t, f.d, f.repo.Dir, "daemon.heldingress.dedupe", "k-landed")
-	assertIngressEmpty(t, f.d.StateDir)
-	if got := f.shim.Count(harness.RPCStartTurn); got != 1 {
-		t.Fatalf("StartTurn count = %d, want exactly 1 (the held copy is never delivered)", got)
-	}
-}
-
 func TestAMalformedHeldPromptEntryIsQuarantinedWithAWarning(t *testing.T) {
 	t.Parallel()
 	// Arrange

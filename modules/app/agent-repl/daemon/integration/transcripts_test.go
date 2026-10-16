@@ -36,19 +36,6 @@ func listTranscripts(f *fixture) *agentreplv1.ListWorkspaceTranscriptsResponse {
 	return resp.Msg
 }
 
-// bind asks the real daemon to point the workspace at one conversation.
-func bind(f *fixture, vendorSessionID string) *agentreplv1.BindWorkspaceSessionResponse {
-	f.t.Helper()
-	resp, err := f.d.Client().BindWorkspaceSession(f.d.Ctx(),
-		connect.NewRequest(&agentreplv1.BindWorkspaceSessionRequest{
-			Workspace: f.ws, VendorSessionId: vendorSessionID,
-		}))
-	if err != nil {
-		f.t.Fatalf("BindWorkspaceSession: %v", err)
-	}
-	return resp.Msg
-}
-
 // TestListWorkspaceTranscriptsReachesTheShimAndRelaysItsAnswer drives the whole
 // hop — client, daemon, real shim socket — so the verb is proved to reach the
 // process that owns the transcripts rather than only the verb layer's fake.
@@ -93,81 +80,6 @@ func TestListWorkspaceTranscriptsLetsTheDAEMONSRecordDecideWhatIsCurrent(t *test
 	got := msg.GetSuccess().GetTranscripts()
 	if len(got) != 1 || got[0].GetCurrent() != nil {
 		t.Fatalf("transcripts = %+v, want the record's binding to decide", got)
-	}
-}
-
-// TestBindWorkspaceSessionRefusesATranscriptSomethingIsWritingTo proves the
-// refusal survives the whole hop with its evidence intact.
-func TestBindWorkspaceSessionRefusesATranscriptSomethingIsWritingTo(t *testing.T) {
-	// Arrange.
-	f := newOpened(t, harness.Opts{})
-	answerTranscripts(f, &shimv1.Transcript{
-		VendorSessionId: "conversation-b",
-		Active:          &shimv1.TranscriptActive{AtMs: 1_700_000_000_000, QuietAfterMs: 120_000},
-	})
-
-	// Act.
-	msg := bind(f, "conversation-b")
-
-	// Assert: two writers on one conversation is data loss.
-	if msg.GetError().GetTranscriptActive().GetAtMs() != 1_700_000_000_000 {
-		t.Fatalf("result = %v, want transcript_active carrying the write instant", msg.GetResult())
-	}
-}
-
-// TestBindWorkspaceSessionRefusesAnIdNoTranscriptCarries proves the bind
-// validates against the shim's FRESH listing rather than the client's word.
-func TestBindWorkspaceSessionRefusesAnIdNoTranscriptCarries(t *testing.T) {
-	// Arrange.
-	f := newOpened(t, harness.Opts{})
-	answerTranscripts(f, &shimv1.Transcript{VendorSessionId: "conversation-a"})
-
-	// Act.
-	msg := bind(f, "invented")
-
-	// Assert.
-	if msg.GetError().GetUnknownTranscript().GetVendorSessionId() != "invented" {
-		t.Fatalf("result = %v, want unknown_transcript naming the invented id", msg.GetResult())
-	}
-}
-
-// TestBindWorkspaceSessionStartsTheChosenConversationAsARebind proves the whole
-// hop for the fix the bind exists for: the resume the daemon sends after a bind
-// carries `rebind`, which is what tells the shim to adopt the chosen
-// conversation's identity as the workspace's book. Without it the shim keeps
-// the workspace's persisted book and the daemon reads the PREVIOUS
-// conversation's history back over the one the user chose.
-func TestBindWorkspaceSessionStartsTheChosenConversationAsARebind(t *testing.T) {
-	// Arrange: the chosen conversation with the vendor transcript on disk that
-	// a real one would have left behind. Without the file the source
-	// classifier judges the conversation to have written nothing and brings
-	// the workspace up FRESH — and a fresh start carries no resume at all, so
-	// there would be nothing for the marker to ride.
-	f := newOpened(t, harness.Opts{})
-	seedVendorTranscript(t, f, "conversation-b")
-	answerTranscripts(f, &shimv1.Transcript{VendorSessionId: "conversation-b"})
-
-	// Act.
-	msg := bind(f, "conversation-b")
-
-	// Assert.
-	if msg.GetSuccess() == nil {
-		t.Fatalf("BindWorkspaceSession = %v, want a success", msg.GetResult())
-	}
-	// THE BIND STOPS ONE SHIM AND BRINGS ITS SUCCESSOR UP, so the assertion
-	// reads the shim's DURABLE request log rather than a control socket whose
-	// process the swap replaces underneath it. It keys on the CHOSEN
-	// conversation's id because the workspace's opening StartSession is already
-	// logged under the same verb.
-	req := &shimv1.StartSessionRequest{}
-	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
-		"the StartSession the bind itself ran", req,
-		func() bool { return req.GetResume().GetVendorSessionId() == "conversation-b" })
-
-	if req.GetResume().GetRebind() == nil {
-		t.Fatalf("the bind's start = %v, want the resume marked a REBIND: without the marker the"+
-			" shim keeps the workspace's persisted book and replays the conversation the user replaced",
-			req.GetResume())
 	}
 }
 

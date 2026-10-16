@@ -256,17 +256,6 @@ func awaitCursorForFileID(ctx context.Context, t *testing.T, c storev1connect.Sh
 	}
 }
 
-// unitsInBook indexes the activity ids a book currently holds.
-func unitsInBook(store *fakeStore, agent string) map[string]int {
-	seen := map[string]int{}
-	for _, line := range store.Book(agent) {
-		if a := activityOf(line); a != nil {
-			seen[a.GetActivityId().GetValue()]++
-		}
-	}
-	return seen
-}
-
 // renameFile moves a file on disk, which is the vendor's own rotation: the
 // INODE is unchanged, so the cursor's identity survives while its path does not.
 func renameFile(t *testing.T, from, to string) {

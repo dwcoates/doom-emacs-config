@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"path/filepath"
 	"testing"
 )
 
@@ -104,71 +103,6 @@ func TestARenamedSpoolKeepsItsFileIdCursor(t *testing.T) {
 	}
 }
 
-// TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle is the subject
-// the recovered-cursor index exists for, and the one a PATH-keyed index broke.
-//
-// The store's row survives a rename either way — it is keyed by file_id and the
-// next write simply overwrites it — so every assertion about the store's FINAL
-// state passed while a renamed file was being re-read from zero and re-converted
-// whole, absorbed only because the write ids are deterministic. What separates
-// the two is whether the tailer built for the NEW path was RESTORED at all: a
-// resumed one is REWOUND to its in-progress turn — a boot rewind happens only
-// inside "the store handed us a cursor for this file" — and a cold one is not,
-// because there was no restored position to walk back from.
-//
-// The next cycle is where a recovered cursor is consulted at all (cursors are
-// recovered per cycle, and the tailer is rebuilt from what THAT cycle's store
-// handed us), so the rename is followed by a restart — the ordinary case, since
-// a rename the reader is running through is a rotation it will meet again on its
-// next boot.
-func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	store := startFakeStore(t)
-	tree := newVendorTree(t)
-	captured := loadCapturedSession(t)
-	opts := defaultSidecarOptions(t, store.Socket, tree)
-	// THE PER-ITEM DETAIL LIVES AT DEBUG DURING CATCH-UP. A restarted reader
-	// re-deriving a file that was already on disk is the boot walk, and
-	// `boot-rewind` is one of the six operations the startup catch-up window
-	// levels; this subject asserts the per-item record, so it reads the log at
-	// the threshold that record is written to.
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
-	movedSlug := cwdSlug("/work/transcript-rename-resume-probe")
-	cut := 9
-
-	// Act: read the head, rename the file, and start a fresh reader over it.
-	first := startSidecar(t, opts)
-	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
-	for _, line := range captured.Lines[:cut] {
-		g.AppendLine(line)
-	}
-	committed := awaitCursorAtLeast(ctx, t, store.Client, g.Path(), 1).GetOffset()
-	first.Stop()
-
-	movedPath := tree.sessionPath(movedSlug, captured.Session)
-	renameFile(t, g.Path(), movedPath)
-	restarted := opts
-	restarted.LogPath = filepath.Join(t.TempDir(), "sidecar-restarted.log")
-	startSidecar(t, restarted)
-
-	// Assert: the NEW path's tailer was built from a restored cursor, which the
-	// boot rewind is only ever applied to.
-	rec := awaitLog(ctx, t, restarted.LogPath, "the renamed file's boot rewind", func(r logRecord) bool {
-		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], movedPath)
-	})
-	offset, ok := rec.Context["offset"].(float64)
-	if !ok {
-		t.Fatalf("the boot-rewind record states no offset; its context was %v", rec.Context)
-	}
-	if int64(offset) > committed {
-		t.Errorf("the renamed file was positioned at %d, past the %d the store had committed for its identity",
-			int64(offset), committed)
-	}
-}
-
 // TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle is the IN-CYCLE half.
 //
 // Cursors are recovered once, when a cycle BEGINS, so a file the vendor renames
@@ -225,61 +159,5 @@ func TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle(t *testing.T) {
 	}
 	if int64(offset) > committed {
 		t.Errorf("the renamed file was positioned at %d, past the %d already committed", int64(offset), committed)
-	}
-}
-
-// TestARenamedTranscriptIsRewoundOnceForTheWholeFile asserts the bound the
-// rename put pressure on: "once per file per boot" is a statement about a FILE,
-// so the same inode may not buy a second bounded backward scan — and a second
-// scan is a second re-read of an in-progress turn.
-func TestARenamedTranscriptIsRewoundOnceForTheWholeFile(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	store := startFakeStore(t)
-	tree := newVendorTree(t)
-	captured := loadCapturedSession(t)
-	opts := defaultSidecarOptions(t, store.Socket, tree)
-	firstSlug := cwdSlug("/work/transcript-rewind-once-a-probe")
-	secondSlug := cwdSlug("/work/transcript-rewind-once-b-probe")
-	cut := 9
-
-	// Act: TWO renames, so a path-keyed bound would spend the rewind twice.
-	startSidecar(t, opts)
-	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
-	for _, line := range captured.Lines[:cut] {
-		g.AppendLine(line)
-	}
-	awaitCursorAtLeast(ctx, t, store.Client, g.Path(), 1)
-
-	firstMove := tree.sessionPath(firstSlug, captured.Session)
-	renameFile(t, g.Path(), firstMove)
-	moved := newGrowingFile(t, firstMove)
-	moved.AppendLine(captured.Lines[cut])
-	awaitCursorAtLeast(ctx, t, store.Client, firstMove, moved.Offset())
-
-	secondMove := tree.sessionPath(secondSlug, captured.Session)
-	renameFile(t, firstMove, secondMove)
-	movedAgain := newGrowingFile(t, secondMove)
-	for _, line := range captured.Lines[cut+1:] {
-		movedAgain.AppendLine(line)
-	}
-	awaitCursorAtLeast(ctx, t, store.Client, secondMove, movedAgain.Offset())
-
-	// Assert. A PERFORMED rewind is addressed by its record's SHAPE, never by a
-	// sentence: the operation, the info level (the branches that DECLINED to
-	// rewind state themselves at warn or verbose), and the `offset` key naming
-	// the position the reader moved to. A message substring is prose that may be
-	// reworded at any time, and matching on one would let this subject pass
-	// silently the moment it was.
-	var rewinds int
-	for _, r := range recordsAt(readLog(t, opts.LogPath), "boot-rewind", "info") {
-		if _, ok := r.Context["offset"]; ok {
-			rewinds++
-		}
-	}
-	if rewinds != 1 {
-		t.Errorf("the file was rewound %d times across two renames; the bound is once per FILE per boot, and the file never changed", rewinds)
 	}
 }

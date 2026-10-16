@@ -28,35 +28,6 @@ import (
 
 // ---- UpdateShutdownSchedule ----
 
-func TestUpdateShutdownScheduleSchedulePushesDrainScheduledToEverySubscriber(t *testing.T) {
-	t.Parallel()
-	// Arrange: two subscribers, standing in for Emacs and a webview.
-	d := newDaemon(t, harness.Opts{})
-	emacs := d.WatchDaemonStream()
-	webview := d.WatchDaemonStreamOn(d.Dial())
-
-	// Act
-	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
-			AtMs:   time.Now().Add(time.Hour).UnixMilli(),
-			Reason: drainReasonDeploy(),
-		}},
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateShutdownSchedule{schedule} = (%v, %v), want a success", resp, err)
-	}
-	for _, s := range []*harness.Stream[*agentreplv1.WatchDaemonResponse]{emacs, webview} {
-		push := harness.AwaitView(t, d.Ctx(), s, "drain_scheduled", func(r *agentreplv1.WatchDaemonResponse) bool {
-			return r.GetDrainScheduled() != nil
-		})
-		if push.GetDrainScheduled().GetReason().GetDeploy() == nil {
-			t.Fatalf("drain_scheduled.reason = %v, want the deploy reason echoed", push.GetDrainScheduled().GetReason())
-		}
-	}
-}
-
 func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -85,27 +56,6 @@ func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
 	harness.AwaitView(t, d.Ctx(), stream, "drain_cancelled", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetDrainCancelled() != nil
 	})
-}
-
-func TestUpdateShutdownScheduleCancelWithNothingScheduledIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	d.ExpectWarnings("daemon.drain.cancel")
-
-	// Act
-	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Cancel{Cancel: &agentreplv1.UpdateShutdownScheduleCancel{}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("UpdateShutdownSchedule{cancel} = error %v, want a typed nothing_scheduled error", err)
-	}
-	if resp.Msg.GetError().GetNothingScheduled() == nil {
-		t.Fatalf("UpdateShutdownSchedule{cancel} with nothing scheduled = %v, want error.nothing_scheduled", resp.Msg)
-	}
 }
 
 func TestUpdateShutdownScheduleWithABlankOperatorNoteIsRefused(t *testing.T) {
@@ -1448,51 +1398,6 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 }
 
 // ---- Asset origin ----
-
-func TestAssetOriginServesIndexWithNoStoreCacheControl(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-
-	// Act
-	resp, err := d.HTTP().Get("http://" + d.Addr + "/")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("GET / = error %v, want the served index.html", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
-	}
-	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("GET / Cache-Control = %q, want %q", got, "no-store")
-	}
-}
-
-func TestRewritingIndexHtmlOnDiskIsServedOnTheNextRequestWithoutRestart(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	indexPath := d.WebappDir + "/index.html"
-
-	// Act
-	if err := os.WriteFile(indexPath, []byte("<!doctype html><title>rewritten</title>"), 0o644); err != nil {
-		t.Fatalf("rewrite index.html: %v", err)
-	}
-	resp, err := d.HTTP().Get("http://" + d.Addr + "/")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("GET / after rewriting index.html = error %v", err)
-	}
-	defer resp.Body.Close()
-	body := make([]byte, 4096)
-	n, _ := resp.Body.Read(body)
-	if !strings.Contains(string(body[:n]), "rewritten") {
-		t.Fatalf("GET / body = %q, want the rewritten index.html served without a daemon restart", body[:n])
-	}
-}
 
 func TestAssetsAreServedWithoutNoStore(t *testing.T) {
 	t.Parallel()

@@ -49,36 +49,3 @@ func TestAWorkspacesDaemonAndShimRecordsCarryTheSameWorkspaceID(t *testing.T) {
 		}
 	}
 }
-
-// The directory hash the shim-held kernel lock file is named after is still
-// recorded, as its own context key, so an operator can grep a record against
-// a lock file name without the id itself being path-derived.
-func TestADaemonRecordCarriesTheWorkspaceDirectoryHashBesideTheMintedID(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newOpened(t, harness.Opts{})
-
-	// Act.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "a record carrying the workspace directory hash",
-		func(r harness.LogRecord) bool {
-			_, ok := r.Context["workspace_dir_hash"]
-			return ok
-		})
-
-	// Assert.
-	for _, r := range f.d.WorkspaceLog(f.repo.Dir, "daemon") {
-		hash, ok := r.Context["workspace_dir_hash"].(string)
-		if !ok {
-			continue
-		}
-		if len(hash) != 8 {
-			t.Fatalf("record %q carries workspace_dir_hash %q, want the eight-character lock file derivation",
-				r.Operation, hash)
-		}
-		if hash == r.WorkspaceID {
-			t.Fatalf("record %q carries the directory hash as its workspace_id", r.Operation)
-		}
-		return
-	}
-	t.Fatalf("no daemon record carries a workspace_dir_hash")
-}

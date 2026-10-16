@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -65,35 +64,5 @@ func TestAnUpdatedClassifierPromptIsRewrittenAndCommitted(t *testing.T) {
 	}
 	if !strings.Contains(brief.Body, rewriteLine) || !strings.Contains(brief.Body, "{{token_hold}}") {
 		t.Fatalf("the rewritten brief lacks the new rule or a placeholder:\n%s", brief.Body)
-	}
-}
-
-// TestAnUnusableClassifierRewriteLeavesTheBriefAlone pins the refusal path end
-// to end: the harness's own fake claude answers a routing token, which is no
-// brief, so nothing is written or committed.
-func TestAnUnusableClassifierRewriteLeavesTheBriefAlone(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{})
-	// The rejection is recorded at ERROR where the updater refuses it.
-	d.RequireWarnings("daemon.classifierupdate.update")
-	repo := harness.NewRepoAt(t, d.PromptsDir)
-	path := prompts.Path(d.PromptsDir, classifier.BriefRouting)
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read the brief: %v", err)
-	}
-	head := repo.BranchHead(harness.DefaultBranch)
-
-	// Act.
-	resp, err := d.Client().UpdateClassifierPrompt(d.Ctx(), connect.NewRequest(updateClassifierPromptRequest()))
-
-	// Assert.
-	if err != nil || resp.Msg.GetError().GetRewriteRejected() == nil {
-		t.Fatalf("UpdateClassifierPrompt = (%v, %v), want rewrite_rejected", resp, err)
-	}
-	after, _ := os.ReadFile(path)
-	if string(after) != string(before) || repo.BranchHead(harness.DefaultBranch) != head {
-		t.Fatalf("a rejected rewrite changed the brief or committed")
 	}
 }

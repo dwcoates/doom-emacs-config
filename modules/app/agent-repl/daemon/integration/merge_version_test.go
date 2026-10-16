@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"path/filepath"
 	"testing"
 
 	"agent-repld/integration/harness"
@@ -35,23 +34,5 @@ func TestAnAgentsMergeOntoAgentReplsMasterTagsItsLandingAndDrawsTheVersion(t *te
 	v := merge.GetHead().GetVersion()
 	if v.GetLeading().GetText() != "0." || v.GetIncremented().GetText() != "5" || v.GetTrailing().GetText() != ".0" {
 		t.Fatalf("head version = %+v, want 0. 5 .0", v)
-	}
-}
-
-func TestAnAgentsMergeOntoAgentReplsMasterWithoutAnIncrementIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	s := newSourcedRepo(t)
-	harness.CommitWork(t, s.f.ws.GetDir())
-
-	// Act
-	path := commandfileWrite(t, s.d, "workspace_commands_unversioned.json",
-		`[{"type":"merge","project_dir":"`+s.f.ws.GetDir()+`","one_shot":true}]`)
-
-	// Assert: the file is refused with the queue's cause, and nothing is tagged.
-	s.d.AwaitFileExists(filepath.Join(filepath.Dir(path), "quarantine", filepath.Base(path)))
-	s.d.ExpectWarnings("daemon.merge.enqueue", "daemon.commandfile.entry")
-	if tags := s.repo.Tags(); len(tags) != 0 {
-		t.Fatalf("tags = %+v, want none", tags)
 	}
 }

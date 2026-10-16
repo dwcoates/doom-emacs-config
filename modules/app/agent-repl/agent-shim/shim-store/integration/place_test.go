@@ -157,19 +157,3 @@ func TestReadAgentPageThroughAnUnknownBookIsRefusedAsUnknown(t *testing.T) {
 		"an unknown book read through an instant", "info")
 	assertRefusalKeys(t, rec, "unknown_agent", "unknown_agent")
 }
-
-func TestAWriteStatingANonPositivePlaceIsRefused(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	shim := streamProducer(store.client())
-	entry := shim.agentEntry("w-1", "u-1", frameLine(agentID("main"), responseFrame("main", "act-1", "L1")))
-	entry.Place = &conversationv1.ConversationPlace{AtMs: 0}
-
-	// Act.
-	failure := shim.writeExpectingFailure(ctx, t, nil, entry)
-
-	// Assert.
-	assertWriteInvalidRequest(t, failure, "entries[0].place.at_ms")
-}

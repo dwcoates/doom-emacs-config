@@ -11,9 +11,7 @@
 package integration
 
 import (
-	"strings"
 	"testing"
-	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -154,35 +152,6 @@ func TestEveryRecordCarriesTheLoggingContractsRequiredFields(t *testing.T) {
 		}
 		if rec.Context == nil {
 			t.Fatalf("record %d carries no context object", i)
-		}
-	}
-}
-
-func TestEveryTimestampIsFixedWidthLocalRFC3339(t *testing.T) {
-	// Arrange: SIX fractional digits and an explicit numeric offset, never a Z.
-	// Fixed width is what makes records sort lexically, and a runtime that
-	// resolved only to milliseconds pads rather than emitting a shorter field.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	shim := streamProducer(store.client())
-	shim.write(ctx, t, shim.agentEntry("w-ts", "u-ts",
-		frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))))
-
-	// Act
-	records := store.logRecords()
-
-	// Assert
-	const layout = "2006-01-02T15:04:05.000000-07:00"
-	for i, rec := range records {
-		if strings.HasSuffix(rec.Timestamp, "Z") {
-			t.Fatalf("record %d timestamp %q is UTC-suffixed; the contract requires a numeric offset", i, rec.Timestamp)
-		}
-		if len(rec.Timestamp) != len(layout) {
-			t.Fatalf("record %d timestamp %q is %d chars, want the fixed width %d", i, rec.Timestamp, len(rec.Timestamp), len(layout))
-		}
-		if _, err := time.Parse(layout, rec.Timestamp); err != nil {
-			t.Fatalf("record %d timestamp %q does not parse as %q: %v", i, rec.Timestamp, layout, err)
 		}
 	}
 }

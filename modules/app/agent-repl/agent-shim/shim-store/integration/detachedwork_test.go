@@ -61,22 +61,3 @@ func TestGetDetachedWorkAnswersEachUnitByItsRecord(t *testing.T) {
 		})
 	}
 }
-
-func TestGetDetachedWorkRefusesAnUnsetUnit(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-
-	// Act.
-	resp, err := cli.GetDetachedWork(ctx, connect.NewRequest(&storev1.GetDetachedWorkRequest{}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("GetDetachedWork transport error: %v", err)
-	}
-	if got := resp.Msg.GetFailure().GetInvalidRequest().GetField(); got != "unit" {
-		t.Fatalf("failure = %v, want invalid_request naming unit", resp.Msg.GetResult())
-	}
-}

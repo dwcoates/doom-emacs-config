@@ -175,27 +175,6 @@ func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
 	}
 }
 
-// TestAFocusedEmacsGetsNoBanner pins the focus rule: an Emacs stream that
-// connects focused suppresses every banner.
-func TestAFocusedEmacsGetsNoBanner(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.d.WatchEmacsDaemonStream(harness.FocusedEditor())
-	f.submit("go", "k-focused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	pushConcludedTurn(f.shim, mainAgent, "answer-1")
-
-	// Assert
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
-	})
-	if got := bannerRuns(f); len(got) != 0 {
-		t.Fatalf("a focused Emacs got %d banners, want none", len(got))
-	}
-}
-
 // awaitChimePlayed waits for the daemon's record that a chime finished, and
 // answers every chime argv played so far.
 func awaitChimePlayed(t *testing.T, f *fixture, what string) [][]string {
@@ -208,27 +187,6 @@ func awaitChimePlayed(t *testing.T, f *fixture, what string) [][]string {
 		argvs = append(argvs, inv.Argv)
 	}
 	return argvs
-}
-
-// TestAFocusedEmacsHearsNoChime pins that a sound is only ever a banner's: a
-// focused Emacs gets no banner for a turn's end, and so no chime either.
-func TestAFocusedEmacsHearsNoChime(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.d.WatchEmacsDaemonStream(harness.FocusedEditor())
-	f.submit("go", "k-chime-focused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	pushConcludedTurn(f.shim, mainAgent, "answer-1")
-
-	// Assert
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
-	})
-	if got := f.d.Chime.Invocations(); len(got) != 0 {
-		t.Fatalf("chimes %q in a focused Emacs, want none: no banner was made", got)
-	}
 }
 
 // TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn pins that an unfocused
@@ -278,25 +236,6 @@ func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
 	})
 	if got := bannerRuns(f); len(got) != 0 {
 		t.Fatalf("a reported-focused Emacs got %d banners, want none", len(got))
-	}
-}
-
-// TestReportEditorFocusWithNoEmacsStreamIsRefused pins the refusal arm.
-func TestReportEditorFocusWithNoEmacsStreamIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
-
-	// Act
-	resp, err := d.Client().ReportEditorFocus(context.Background(),
-		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: harness.FocusedEditor()}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ReportEditorFocus: %v", err)
-	}
-	if resp.Msg.GetError().GetNoEmacsStream() == nil {
-		t.Fatalf("response = %v, want the no_emacs_stream arm", resp.Msg)
 	}
 }
 

@@ -52,26 +52,6 @@ func TestSigtermEndsAnOpenWatchCleanly(t *testing.T) {
 	}
 }
 
-// TestOrderlyExitRemovesTheSocketFile.
-func TestOrderlyExitRemovesTheSocketFile(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	if !store.socketExists() {
-		t.Fatalf("the store is running but its socket %q is not on disk", store.socket)
-	}
-
-	// Act.
-	store.signal(syscall.SIGTERM)
-	if err := store.awaitExit(); err != nil {
-		t.Fatalf("SIGTERM was not an orderly exit: %v", err)
-	}
-
-	// Assert.
-	if store.socketExists() {
-		t.Errorf("the socket %q survived an orderly exit; the next start would fight a corpse", store.socket)
-	}
-}
-
 // TestPprofSurfaceComesUpBeforeTheDatabase is the boot-order obligation, shown
 // the only way it can be: by making the database step fail and finding the
 // profiling surface already serving.

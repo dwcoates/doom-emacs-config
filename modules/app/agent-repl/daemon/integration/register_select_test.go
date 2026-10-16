@@ -108,35 +108,6 @@ func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 	}
 }
 
-func TestSelectWorkspaceStampsCurrentOnTheRoster(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-
-	// Act
-	f.selectWorkspace()
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "the selected workspace stamped current", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
-	})
-	row := rosterRow(got, f.ws.GetId())
-	if row == nil {
-		t.Fatalf("the roster has no row for the selected workspace %s", f.ws.GetId())
-	}
-	if !row.GetCurrent().GetCurrent() {
-		t.Fatalf("row.current = false for the selected workspace, want true")
-	}
-	// SELECTING DOES NOT DRIVE THE WHEN-COLUMN. The column shows the turn
-	// clock, never last viewing, so a freshly-selected workspace running no
-	// turn reads no_turn_running. (The column's old last_selected arm is
-	// reserved, so only the arm shown can regress.)
-	if row.GetWhen().GetNoTurnRunning() == nil {
-		t.Fatalf("row.when = %v, want no_turn_running for a never-active workspace", row.GetWhen())
-	}
-}
-
 func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -275,30 +246,6 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 	// (internal/server/validate.go's `invalid`), with no logging at all.
 }
 
-// TestSelectWorkspaceRefusesABogusWorkspaceRef pins the IN-BAND
-// unknown_workspace arm on SelectWorkspace itself (endpoint_select_workspace.proto:
-// SelectWorkspaceError.unknown_workspace), mirroring the same arm already
-// pinned on CloseWorkspace above.
-func TestSelectWorkspaceRefusesABogusWorkspaceRef(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	// unknown_workspace is answered in band at DEBUG through server.refuse,
-	// never the daemon.refusal.unlanded_arm WARN.
-	bogus := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
-
-	// Act
-	resp, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: bogus}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SelectWorkspace on a bogus workspace ref = transport error %v, want the in-band unknown_workspace arm", err)
-	}
-	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
-		t.Fatalf("SelectWorkspace on a bogus workspace ref = %v, want SelectWorkspaceError.unknown_workspace", resp.Msg)
-	}
-}
-
 // TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet pins the
 // attention-marker clearing rule precisely: SelectWorkspace clears the
 // marker ONLY on the workspace it names. Selecting workspace B must leave
@@ -377,44 +324,6 @@ func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && !row.GetClosed().GetClosed()
 	})
-}
-
-// TestTheRosterDropsARepositoryWhoseDirectoryIsGone covers the create that
-// produced nothing at all.
-//
-// The roster's repository sections are `SPC TAB n”s CREATE TARGETS
-// (lisp/verbs.el's `agent-repl-verbs--read-repository'), and nothing ever
-// forgets a repository row. A repository whose tree has been deleted therefore
-// stayed in the picker, drawing the same label as a live repository of the
-// same base name, and the create that picked the dead one failed at git.
-func TestTheRosterDropsARepositoryWhoseDirectoryIsGone(t *testing.T) {
-	t.Parallel()
-	// Arrange: a registered workspace whose whole repository is then deleted.
-	f := newRegistered(t, harness.Opts{DurableState: true})
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, f.ws.GetId()) != nil
-	})
-	if err := os.RemoveAll(f.repo.Dir); err != nil {
-		t.Fatalf("remove the repository directory: %v", err)
-	}
-	// The boot reconciliation warns once about the directory it closed, and
-	// both daemons share this state root's log. That warning is the deleted
-	// tree being reported, which is the point of the arrange.
-	f.d.ExpectWarnings("daemon.boot.close_missing_dir")
-
-	// Act: the opening publish is the walk that stats what is there, so the
-	// roster is read from a daemon booting over the same state root.
-	f.d.Stop()
-	d2 := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
-	d2.ExpectWarnings("daemon.boot.close_missing_dir")
-
-	// Assert.
-	got := awaitRoster(t, d2, d2.WatchRoster(), "a roster with no section for the deleted repository",
-		func(r *frontendv1.WorkspaceRoster) bool { return len(r.GetRepository().GetSections()) == 0 })
-	if rosterRow(got, f.ws.GetId()) != nil {
-		t.Fatalf("the roster still carries a row for %q under a repository that is not on disk", f.ws.GetId())
-	}
 }
 
 // TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck pins the fix

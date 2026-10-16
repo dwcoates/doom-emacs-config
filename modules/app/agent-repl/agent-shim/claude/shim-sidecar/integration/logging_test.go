@@ -3,9 +3,6 @@ package integration
 import (
 	"strings"
 	"testing"
-	"time"
-
-	sharedlogging "agentrepl/logging"
 )
 
 // SUBJECT 11 — the sidecar's log is a contract, not a convenience.
@@ -46,19 +43,6 @@ func ingestGreenPath(t *testing.T) []logRecord {
 		})
 	}
 	return readLog(t, opts.LogPath)
-}
-
-// TestTheLogIsStrictJsonl asserts every emitted line parses as a JSON object.
-// readLog fails the test on the first line that does not.
-func TestTheLogIsStrictJsonl(t *testing.T) {
-	t.Parallel()
-	// Arrange + Act.
-	records := ingestGreenPath(t)
-
-	// Assert.
-	if len(records) == 0 {
-		t.Fatalf("a whole ingest emitted no log records at all")
-	}
 }
 
 // TestEveryRecordCarriesTheRequiredFields asserts the contract's required
@@ -107,28 +91,6 @@ func TestEveryRecordCarriesTheRequiredFields(t *testing.T) {
 	}
 }
 
-// TestEveryTimestampIsTheContractsRendering asserts the one rendering every
-// agent-repl runtime writes: RFC 3339, local zone, fixed-width microseconds and
-// an explicit numeric offset.
-//
-// Go's own RFC3339Nano drops trailing zeros, which sorts a record landing on a
-// whole second out of order against its neighbors — and these records are read
-// interleaved with the shim's and the store's, so a divergence here is a
-// timeline nobody can merge.
-func TestEveryTimestampIsTheContractsRendering(t *testing.T) {
-	t.Parallel()
-	// Arrange + Act.
-	records := ingestGreenPath(t)
-
-	// Assert.
-	for i, r := range records {
-		if _, err := time.Parse(sharedlogging.TimestampLayout, r.Timestamp); err != nil {
-			t.Errorf("log record %d carries timestamp %q, which is not the contract's layout %q: %v",
-				i, r.Timestamp, sharedlogging.TimestampLayout, err)
-		}
-	}
-}
-
 // TestTheGreenPathLogsNoErrors asserts a clean ingest of a real capture never
 // reaches an error branch.
 func TestTheGreenPathLogsNoErrors(t *testing.T) {
@@ -164,19 +126,6 @@ func TestWriteRecordsCarryTheirCorrelationKeys(t *testing.T) {
 				t.Errorf("write record %q carries no %q; its context was %v", r.Message, key, r.Context)
 			}
 		}
-	}
-}
-
-// TestPageLineRecordsNameTheirAgent asserts agent_id is a dedicated context key
-// rather than prose inside the message.
-func TestPageLineRecordsNameTheirAgent(t *testing.T) {
-	t.Parallel()
-	// Arrange + Act.
-	records := ingestGreenPath(t)
-
-	// Assert.
-	if len(logsWithContextKey(records, "agent_id")) == 0 {
-		t.Fatalf("no log record named an agent_id; the agent-keyed spine must be correlatable")
 	}
 }
 

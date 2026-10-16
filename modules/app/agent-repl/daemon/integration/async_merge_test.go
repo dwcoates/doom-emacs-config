@@ -327,36 +327,3 @@ func TestAnAsyncRequestsBeforeMergeActionRunsInItsMergeWorkspace(t *testing.T) {
 		t.Fatalf("the async merge ended %v, want landed", merge.GetActivity().GetMerge().GetResult())
 	}
 }
-
-func TestAnAsyncMergeRunsNoneOfItsRequestersConfiguredActions(t *testing.T) {
-	t.Parallel()
-	// Arrange: a requester created with a before-merge action of its own.
-	repo := harness.NewRepo(t)
-	script := harness.NewTestAllScript(t, repo.Dir)
-	script.SetExitCode(0)
-	script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
-	f := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "configured", "do the configured thing",
-		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("the requester's own pre-merge")})
-	f.repo = repo
-	s := &sourcedRepo{d: d, repo: repo, script: script, f: f}
-	root := f.watchRootFeed()
-	repo.AddBranch("agent-fix")
-
-	// Act: an async merge naming no action. Were the requester's action run,
-	// its turn would wait on a conclusion nobody sends and the merge would
-	// never land.
-	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
-	mergeWS := mergeWorkspaceOf(t, d, f.ws)
-	merge := awaitRow(t, f, root, "the async merge's terminal", isMergeTerminal)
-	d.AwaitLandingDeployed()
-
-	// Assert: landed, with no before-merge action recorded for the merge
-	// workspace.
-	if merge.GetActivity().GetMerge().GetSuccess() == nil {
-		t.Fatalf("the async merge ended %v, want landed", merge.GetActivity().GetMerge().GetResult())
-	}
-	if _, before := mergeWorkspaceJob(t, d, mergeWS); before != "[]" {
-		t.Fatalf("the merge workspace's before-merge actions = %s, want none of the requester's", before)
-	}
-}

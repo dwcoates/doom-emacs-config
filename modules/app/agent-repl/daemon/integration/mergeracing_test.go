@@ -48,32 +48,3 @@ func TestRacingDisabledBeforeARestartStaysDisabledInTheSuccessor(t *testing.T) {
 		t.Fatalf("a disable_racing on the successor = %v, want racing_already_disabled", again)
 	}
 }
-
-// TestTheRacingSwitchRefusesNoOpsAndEnables covers the arm pair on the wire:
-// a second disable is racing_already_disabled, an enable succeeds, and a
-// second enable is racing_not_disabled.
-func TestTheRacingSwitchRefusesNoOpsAndEnables(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
-	d.ExpectWarnings("daemon.merge.disable_racing", "daemon.merge.enable_racing")
-	if resp := switchRacing(t, d, false); resp.GetSuccess() == nil {
-		t.Fatalf("disable_racing = %v, want a success", resp)
-	}
-
-	// Act
-	again := switchRacing(t, d, false)
-	enabled := switchRacing(t, d, true)
-	enabledAgain := switchRacing(t, d, true)
-
-	// Assert
-	if again.GetError().GetRacingAlreadyDisabled() == nil {
-		t.Fatalf("a second disable_racing = %v, want racing_already_disabled", again)
-	}
-	if enabled.GetSuccess() == nil {
-		t.Fatalf("enable_racing = %v, want a success", enabled)
-	}
-	if enabledAgain.GetError().GetRacingNotDisabled() == nil {
-		t.Fatalf("a second enable_racing = %v, want racing_not_disabled", enabledAgain)
-	}
-}

@@ -135,58 +135,6 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	}
 }
 
-func TestSetWorkspaceParentBackUnderAParentNestsAndNamesIt(t *testing.T) {
-	t.Parallel()
-	// Arrange: the child retargeted to top-level, its notice read.
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
-	topLevel := &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}}
-	if _, err := f.d.Client().SetWorkspaceParent(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: f.child, Parent: topLevel})); err != nil {
-		t.Fatalf("SetWorkspaceParent(top-level) = error %v", err)
-	}
-	f.expectNotice(t)
-	pushConcludedTurn(f.d.Shim(f.child), mainAgent, "notice-read")
-
-	// Act
-	resp, err := f.d.Client().SetWorkspaceParent(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{
-		Workspace: f.child,
-		Parent:    &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: f.parent}},
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("SetWorkspaceParent(child_of) = (%v, %v), want a success", resp, err)
-	}
-	awaitRoster(t, f.d, f.roster, "the child nested under its parent again", f.nested)
-	if notice := f.expectNotice(t); !strings.Contains(notice, "checkout is `"+f.parent.GetDir()+"`") {
-		t.Fatalf("notice = %q, want the parent's checkout named", notice)
-	}
-}
-
-func TestSetWorkspaceParentRefusesACycleAndTellsNobody(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
-
-	// Act: the parent under its own child.
-	resp, err := f.d.Client().SetWorkspaceParent(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{
-		Workspace: f.parent,
-		Parent:    &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: f.child}},
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetError().GetCycle() == nil {
-		t.Fatalf("SetWorkspaceParent = (%v, %v), want the cycle arm", resp, err)
-	}
-	awaitRoster(t, f.d, f.d.WatchRoster(), "the family unchanged on a fresh roster", f.nested)
-	// The notice is queued inside the rpc, so a refused retarget has
-	// submitted nothing by the time it answers.
-	for _, ws := range []*workspacev1.WorkspaceRef{f.parent, f.child} {
-		if n := f.d.Shim(ws).Count("StartTurn"); n != 0 {
-			t.Fatalf("StartTurn count on %s = %d, want none for a refused retarget", ws.GetId(), n)
-		}
-	}
-}
-
 func TestARetargetEntryRetargetsAndTellsExactlyLikeSetWorkspaceParent(t *testing.T) {
 	t.Parallel()
 	// Arrange

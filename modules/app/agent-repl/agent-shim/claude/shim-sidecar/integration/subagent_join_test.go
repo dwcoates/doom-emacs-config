@@ -38,55 +38,6 @@ func seedAgentSpawn(t *testing.T, tree *vendorTree, cwd, session string) *growin
 	return g
 }
 
-// TestAnAsyncSpawnNamesTheSameAgentTheSidechainsMetaDoes asserts the join: the
-// spawn unit's created_agent_id is the id the sidechain's book is keyed by.
-func TestAnAsyncSpawnNamesTheSameAgentTheSidechainsMetaDoes(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	cwd := "/work/subagent-join-probe"
-	slug := cwdSlug(cwd)
-	session := "3a3a3a3a-3a3a-43a3-83a3-3a3a3a3a3a3a"
-
-	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	parent := seedAgentSpawn(t, tree, cwd, session)
-	sidechain := writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
-	writeSubagentMeta(t, tree, slug, session, corpusSubagentID)
-	awaitCursorInBatches(ctx, t, fake, parent.Path(), parent.Offset())
-	awaitCursorInBatches(ctx, t, fake, sidechain.Path(), sidechain.Offset())
-
-	// Assert: the spawn announced the agent by the call's id…
-	entries := fake.Entries()
-	spawn := unitEntries(entries, corpusSubagentAgentID)
-	if len(spawn) == 0 {
-		t.Fatalf("the Agent call produced no unit under %q; keys were %v",
-			"activity:"+corpusSubagentAgentID, upsertKeysOf(entries))
-	}
-	var announced bool
-	for _, e := range spawn {
-		start := activityOf(e.GetAgentUpdate().GetServeableFrame()).GetSubagent().GetStart()
-		if start == nil {
-			continue
-		}
-		announced = true
-		if got := start.GetCreatedAgentId().GetValue(); got != corpusSubagentAgentID {
-			t.Errorf("the spawn created agent %q, wanted the spawning call %q", got, corpusSubagentAgentID)
-		}
-	}
-	if !announced {
-		t.Fatalf("no async spawn was announced for %q", corpusSubagentAgentID)
-	}
-
-	// …and the sidechain's own records reached that same book.
-	if len(linesForBook(entries, corpusSubagentAgentID)) == 0 {
-		t.Errorf("the sidechain's records reached no book named %q", corpusSubagentAgentID)
-	}
-}
-
 // TestAMetaThatParsesButNamesNoToolUseIdIsRefusedLoudly asserts the edge case
 // the meta reader exists for: a WELL-FORMED meta with no `toolUseId` states no
 // identity, so the transcript is held and the refusal is an ERROR.

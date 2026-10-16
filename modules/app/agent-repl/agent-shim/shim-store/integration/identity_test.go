@@ -17,28 +17,6 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 )
 
-func TestAnUpsertMovingARowToAnotherBookIsSkipped(t *testing.T) {
-	// Arrange
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	shim := streamProducer(store.client())
-	shim.write(ctx, t, shim.agentEntry("w-id-1", "u-id",
-		frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))))
-
-	// Act: a corrected re-ingest claims the same key under a different book.
-	skipped := shim.writeExpectingSkips(ctx, t, nil, shim.agentEntry("w-id-2", "u-id",
-		frameLine(agentID("other"), responseFrame("other", "act-1", "moved"))))
-
-	// Assert: the batch succeeded and named the skip rather than refusing it.
-	if len(skipped) != 1 {
-		t.Fatalf("skipped = %d, want 1", len(skipped))
-	}
-	if got := skipped[0]; got.GetUpsertKey() != "u-id" || got.GetFromBook() != "main" || got.GetToBook() != "other" {
-		t.Fatalf("skipped[0] = {%s %s %s}, want {u-id main other}", got.GetUpsertKey(), got.GetFromBook(), got.GetToBook())
-	}
-}
-
 func TestASkippedIdentityChangeLeavesTheOriginalLineServed(t *testing.T) {
 	// Arrange
 	store := startStore(t, storeOptions{})

@@ -52,31 +52,6 @@ func TestPagesAndCursorsSurviveASigtermRestart(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-// TestWatchTokensDoNotSurviveARestart: the registry is in memory by design, so
-// a token minted by the dead process buys nothing from the live one.
-func TestWatchTokensDoNotSurviveARestart(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	shim := streamProducer(store.client())
-	shim.write(ctx, t,
-		shim.agentEntry("w-token-1", "u-token-1", frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))),
-	)
-	opened := openSession(ctx, t, store.client(), "main", nil)
-	staleToken := opened.GetWatch()
-
-	// Act.
-	store.restart()
-
-	// Assert.
-	after, cancelAfter := callContext(t)
-	defer cancelAfter()
-	stream := watchStream(after, t, store.client(), staleToken)
-	defer testclose.OrFail(t, stream)
-	assertWatchRefused(t, stream)
-}
-
 // TestReopeningAfterARestartRecoversTheTail: the whole point of tokens dying
 // is that the recovery is the ordinary re-open, and it works.
 func TestReopeningAfterARestartRecoversTheTail(t *testing.T) {

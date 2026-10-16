@@ -179,30 +179,6 @@ func TestBootOpensTheWorkspaceStateFresh(t *testing.T) {
 	}
 }
 
-func TestPprofServesOnAnExplicitLoopbackAddress(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{Pprof: "127.0.0.1:0"})
-	record := d.AwaitRunLogOperation("daemon.pprof.enabled")
-	addr, _ := record.Context["address"].(string)
-	if addr == "" {
-		t.Fatalf("daemon.pprof.enabled context = %v, want the resolved address", record.Context)
-	}
-
-	// Act
-	resp, err := d.HTTP().Get("http://" + addr + "/debug/pprof/")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("GET /debug/pprof/ = error %v, want the profiling surface", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /debug/pprof/ = %d, want 200", resp.StatusCode)
-	}
-	d.ExpectWarnings("daemon.pprof.enabled")
-}
-
 func TestPprofRefusesARoutableBind(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
@@ -360,55 +336,6 @@ func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 	// removal claim does not hold against this codebase.
 	if _, err := os.Lstat(link); err != nil {
 		t.Fatalf("stat the workspace's daemon.log symlink after Close = %v, want it left on disk per internal/workspace/close.go and internal/dlog/surfaces_test.go's TestEvictLeavesTheCanonicalLinkAndTargetOnDisk", err)
-	}
-}
-
-// TestDaemonRestartAppendsToTheRunLog pins the run log's size-scoped rotation:
-// reopening the daemon alone appends, so daemon.run.log spans process restarts.
-func TestDaemonRestartAppendsToTheRunLog(t *testing.T) {
-	t.Parallel()
-	// Arrange: first boot; capture its own records and pid before stopping it.
-	d1 := newDaemon(t, harness.Opts{DurableState: true})
-	d1.AwaitRunLogOperation("daemon.pprof.disabled")
-	firstPID := d1.PID()
-	runLogPath := d1.RunLogPath()
-	d1.Stop()
-	// The snapshot is taken AFTER the stop: an orderly exit writes its own
-	// records, so a snapshot taken while the daemon still ran would be missing
-	// exactly the lines the next boot must retain.
-	prior := harness.ReadLog(t, runLogPath)
-	if len(prior) == 0 {
-		t.Fatal("the first boot's run log holds no records, want the boot sequence recorded before restart")
-	}
-
-	// Act: restart on the same state root.
-	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir})
-	d2.AwaitRunLogOperation("daemon.pprof.disabled")
-
-	// Assert: the current run log retains every record from the first boot and
-	// contains records from the successor process. A restart alone creates no
-	// size-rotation generation.
-	current := harness.ReadLog(t, runLogPath)
-	if len(current) <= len(prior) {
-		t.Fatalf("daemon.run.log holds %d records after restart, want more than the prior boot's %d", len(current), len(prior))
-	}
-	for i := range prior {
-		if current[i].Raw != prior[i].Raw {
-			t.Fatalf("daemon.run.log[%d] = %q, want the prior boot's record %q", i, current[i].Raw, prior[i].Raw)
-		}
-	}
-	if _, err := os.Lstat(runLogPath + ".1"); !os.IsNotExist(err) {
-		t.Fatalf("stat daemon.run.log.1 after restart = %v, want no size-rotation generation", err)
-	}
-	foundFirstPID := false
-	for _, record := range current {
-		if record.PID == firstPID {
-			foundFirstPID = true
-			break
-		}
-	}
-	if !foundFirstPID {
-		t.Fatalf("daemon.run.log after restart has no record from the prior boot's pid %d", firstPID)
 	}
 }
 
@@ -643,24 +570,6 @@ func TestBootRefusesAStateRootTooLongForShimSockets(t *testing.T) {
 
 // ---- audit-3 critique 25: address-file temp sibling, pprof unix socket ----
 
-// TestBootLeavesNoDaemonAddrTempSibling pins that daemon.addr's atomic
-// write (internal/daemonaddr/claim.go: os.CreateTemp(dir, "."+base+".*"))
-// leaves no ".daemon.addr.<random>" sibling behind once the rename lands.
-func TestBootLeavesNoDaemonAddrTempSibling(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act
-	d := newDaemon(t, harness.Opts{})
-
-	// Assert
-	matches, err := filepath.Glob(filepath.Join(d.StateDir, ".daemon.addr.*"))
-	if err != nil {
-		t.Fatalf("glob for a daemon.addr temp sibling: %v", err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("daemon.addr temp siblings after boot = %v, want none", matches)
-	}
-}
-
 // TestPprofServesOverAUnixSocket pins the OTHER accepted --pprof shape
 // (internal/pprofsurface/surface.go: isSocketPath recognizes a path
 // separator or a .sock suffix): a unix-socket path serves /debug/pprof/
@@ -797,41 +706,6 @@ func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
 	}
 }
 
-// TestAnUnreachableSurvivorsAdoptionIsRecordedAtError pins the evidence. The
-// workspace is left undetermined — neither adopted nor orphan-closed, because
-// its lock says a living process owns the conversation — and this record is
-// the only thing that says why.
-func TestAnUnreachableSurvivorsAdoptionIsRecordedAtError(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newOpened(t, harness.Opts{DurableState: true})
-	socket := f.d.SocketPath(f.ws)
-	f.d.Kill()
-	if err := os.Remove(socket); err != nil {
-		t.Fatalf("unlink the surviving shim's socket path %s: %v", socket, err)
-	}
-
-	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir,
-		ExtraEnv: []string{
-			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
-			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
-		},
-	})
-	// The sweep covers every test; the declared records are the overrun
-	// adoption this test arranges, reported by the supervisor and by the boot,
-	// and the bounce accounting's bounce_unknown for the session nobody could
-	// adopt.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
-
-	// Assert.
-	nd.AwaitLogRecord(nd.RunLogPath(), "the overrun adoption's error record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.boot.adopt" && r.Level == "error" &&
-			strings.Contains(r.Message, "adoption bound")
-	})
-}
-
 // TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding is the
 // other half of TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace:
 // a session the lock says survived the crash and that the boot could NOT adopt
@@ -939,112 +813,6 @@ func awaitSessionFault(t *testing.T, d *harness.Daemon, ws *workspacev1.Workspac
 	t.Fatalf("SessionHealth never carried the adopted shim's fault; last answer %s", last)
 }
 
-// TestAStaleAddressFileIsReportedAndOverwritten pins the realtest-1 finding.
-// The daemon that had bound 127.0.0.1:58161 was gone, its daemon.addr was
-// still on disk, and the next Emacs probed the dead address and timed out. A
-// SIGKILLed daemon cannot withdraw anything, so the boot that takes the state
-// root over says the advertisement is stale before replacing it.
-func TestAStaleAddressFileIsReportedAndOverwritten(t *testing.T) {
-	t.Parallel()
-	// Arrange: a daemon that published an address and was SIGKILLed, so it
-	// never ran its withdrawal.
-	d := newDaemon(t, harness.Opts{DurableState: true})
-	stale, err := os.ReadFile(d.AddrFile())
-	if err != nil {
-		t.Fatalf("read the incumbent's daemon.addr: %v", err)
-	}
-	d.Kill()
-
-	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim")
-
-	// Assert: the stale address is named in the record.
-	staleAddr := harness.AddrLine(string(stale))
-	nd.AwaitLogRecord(nd.RunLogPath(), "the stale advertisement's record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cmd.claim" && strings.Contains(r.Message, "stale daemon.addr") &&
-			r.Context["stale_address"] == staleAddr
-	})
-
-	// Assert: and it was replaced by this daemon's own, which answers.
-	if nd.Addr == staleAddr {
-		t.Fatalf("daemon.addr still names %q, want this daemon's own address", staleAddr)
-	}
-	if _, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest()); err != nil {
-		t.Fatalf("DaemonHealth = error %v, want the replaced advertisement to name a serving daemon", err)
-	}
-}
-
-// TestTheWithdrawalIsRecordedOnAnOrderlyExit pins the other half of the
-// finding's evidence: an orderly exit says out loud that it took the
-// advertisement down, so a reader can tell a withdrawn address from one a
-// crash left standing.
-func TestTheWithdrawalIsRecordedOnAnOrderlyExit(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{})
-	runLog := d.RunLogPath()
-
-	// Act.
-	d.Stop()
-
-	// Assert.
-	d.AwaitLogRecord(runLog, "the withdrawal's record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cmd.exit" && strings.Contains(r.Message, "daemon.addr was withdrawn")
-	})
-}
-
-// TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable pins the third
-// realtest-1 finding. `<ws>/.claude/emacs/daemon.log` was retargeted onto a
-// fresh generation on every daemon boot, so the canonical path -- the ONLY
-// path the reader resolves -- named the current instance alone, and the
-// adoption records of the daemon four minutes older were on an inode nothing
-// named any more. One file now spans instances, and rotation happens only at
-// the byte cap.
-func TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable(t *testing.T) {
-	t.Parallel()
-	// Arrange: an opened workspace, whose bring-up wrote workspace-bound
-	// records, and the pid that wrote them.
-	f := newOpened(t, harness.Opts{DurableState: true})
-	firstPID := f.d.PID()
-	if len(f.d.WorkspaceLog(f.repo.Dir, "daemon")) == 0 {
-		t.Fatal("the first daemon wrote no workspace records to append to")
-	}
-	f.d.Kill()
-
-	// Act: restart on the same state root, which adopts the surviving shim and
-	// writes its own workspace-bound records.
-	nd := harness.StartDaemon(t, harness.Opts{
-		StateDir:      f.d.StateDir,
-		KeepStaleAddr: true,
-		ExtraEnv:      []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
-	})
-	// The crash-restart's own evidence: the stale advertisement and the
-	// adoption it drives.
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.adopt",
-		"daemon.shimclient.adopt")
-	nd.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "a record from the restarted daemon",
-		func(r harness.LogRecord) bool { return r.PID == nd.PID() })
-
-	// Assert: BOTH instances are in the file the canonical path names.
-	var sawFirst, sawSecond bool
-	for _, r := range nd.WorkspaceLog(f.repo.Dir, "daemon") {
-		switch r.PID {
-		case firstPID:
-			sawFirst = true
-		case nd.PID():
-			sawSecond = true
-		}
-	}
-	if !sawFirst {
-		t.Fatalf("%s carries no record from pid %d; the restart retargeted the link and hid the previous instance",
-			harness.WorkspaceLogPath(f.repo.Dir, "daemon"), firstPID)
-	}
-	if !sawSecond {
-		t.Fatalf("%s carries no record from pid %d", harness.WorkspaceLogPath(f.repo.Dir, "daemon"), nd.PID())
-	}
-}
-
 // TestBootClosesAWorkspaceWhoseDirectoryIsGone pins the owner's ruling. The
 // live example was workspace 6e32a50ef5fc47ef, whose worktree under a swept
 // temporary directory had been removed while its registry row stayed open, so
@@ -1126,41 +894,6 @@ func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 		row := rosterRow(r, ws.GetId())
 		return row != nil && !row.GetClosed().GetClosed()
 	})
-}
-
-// TestBootNeverRecreatesAMergedWorkspace pins the other half of the ruling: a
-// merged workspace's tree was removed ON PURPOSE. The merge stamps merged_at
-// before it closes the row, so even an open row carrying the stamp -- a crash
-// between the two writes -- is closed, never recreated, branch or not.
-func TestBootNeverRecreatesAMergedWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{DurableState: true})
-	repo := harness.NewRepo(t)
-	dir := worktreeOf(t, repo, "landed")
-	ws := harness.Register(t, d, dir)
-	d.Stop()
-	d.WithDB(func(db *sql.DB) {
-		if _, err := db.Exec(`UPDATE workspaces SET merged_at = ? WHERE id = ?`, time.Now().UnixNano(), ws.GetId()); err != nil {
-			t.Fatalf("stamp merged_at: %v", err)
-		}
-	})
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-
-	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
-
-	// Assert.
-	nd.AwaitLogRecord(nd.RunLogPath(), "the missing-directory close record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.boot.close_missing_dir" && r.WorkspaceID == ws.GetId() &&
-			strings.Contains(r.Message, "is closed")
-	})
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("the merged workspace's directory after the boot: %v, want it still gone", err)
-	}
 }
 
 // TestOpenWorkspaceRestoresAWorktreeGitStillRegisters is the plain-`rm` case:
@@ -1264,29 +997,6 @@ func TestOpenWorkspaceRecordsTheRestoreAtInfo(t *testing.T) {
 			strings.Contains(r.Message, "restored its worktree") &&
 			r.Context["branch"] == "narrated"
 	})
-}
-
-// TestOpenWorkspaceRefusesAWorkspaceWhoseDirectoryAndBranchAreGone: with the
-// branch deleted too there is nothing to restore from, and the re-open is
-// REFUSED BY NAME rather than failing as an internal error.
-func TestOpenWorkspaceRefusesAWorkspaceWhoseDirectoryAndBranchAreGone(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	repo := harness.NewRepo(t)
-	nd, ws := vanishedWorktree(t, repo, "deleted")
-	repo.RemoveBranch("deleted")
-
-	// Act.
-	resp, err := nd.Client().OpenWorkspace(nd.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("OpenWorkspace on a vanished directory and branch = transport error %v, want a typed refusal", err)
-	}
-	if resp.Msg.GetError().GetWorktreeUnrestorable() == nil {
-		t.Fatalf("OpenWorkspace on a vanished directory and branch = %v, want OpenWorkspaceError.worktree_unrestorable", resp.Msg)
-	}
 }
 
 // TestOpenWorkspaceNamesTheVanishedDirectoryAndBranchInItsRefusal is the

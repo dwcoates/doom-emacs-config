@@ -61,15 +61,8 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	// producerSidecar is the WriteBatchRequest.producer string the sidecar must
-	// use (endpoint_write_batch.proto: "shim-claude-sidecar").
-	producerSidecar = "shim-claude-sidecar"
-
 	// keepaliveMarker prefixes the first text block of a keep-alive user prompt.
 	keepaliveMarker = "<!--agent-repl:keepalive-->"
-
-	// vendorSpecificUserPrompt is the kind R15 pins for a file-plane user prompt.
-	vendorSpecificUserPrompt = "user_prompt"
 
 	// spoolUID is the uid segment of the vendor's spool root (claude-<uid>).
 	spoolUID = "501"
@@ -89,14 +82,6 @@ const (
 	// in the package exceeds 0.87s, so the number was ~50x its own premise and
 	// a single red burned 50s of the suite's wall time proving nothing.
 	waitBudget = 10 * time.Second
-
-	// snapshotBudget bounds watchBashRun's read of an UNFINISHED run. The
-	// endpoint follows until the terminal, so a snapshot of a live run has no
-	// other way to end; it is a bound on a stream that is deliberately still
-	// open, never a sleep standing in for a signal. 1s: this is a single RPC
-	// against a store that is already up (no process boot in the wait), so it
-	// does not need waitBudget's headroom for a real vendor/sidecar/store boot.
-	snapshotBudget = 1 * time.Second
 
 	// pollTick is the re-read cadence of the bounded store-polling helpers. It
 	// is a POLL of a durable surface, never a sleep standing in for a signal.
@@ -1018,10 +1003,6 @@ func storeClientOver(hc *http.Client) storev1connect.ShimStoreClient {
 // Reading a book back out of the real store.
 // ---------------------------------------------------------------------------
 
-func agentID(value string) *conversationv1.AgentId {
-	return &conversationv1.AgentId{Value: value}
-}
-
 // cursorByPath reads the sidecar's persisted cursors and returns the one for a
 // path. Looking a cursor up by PATH rather than by a locally computed file_id
 // keeps the assertion independent of the store's dev:inode spelling.
@@ -1894,17 +1875,6 @@ func (f *fakeStore) ownerOfUnitLocked(unit string) *conversationv1.AgentId {
 	return nil
 }
 
-// claimShellRun records a claim the shim wrote, with the book holding its
-// run's launching call.
-func (f *fakeStore) claimShellRun(taskID, run, owner string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.shellRunClaims = append(f.shellRunClaims, &storev1.ShellRunClaimed{
-		Claim: &storev1.ShellRunClaim{VendorTaskId: taskID, Run: &conversationv1.AgentActivityId{Value: run}},
-		Owner: &conversationv1.AgentId{Value: owner},
-	})
-}
-
 func (f *fakeStore) GetAgentByVendorTask(context.Context, *connect.Request[storev1.GetAgentByVendorTaskRequest]) (*connect.Response[storev1.GetAgentByVendorTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
 }
@@ -2015,97 +1985,6 @@ func (f *fakeStore) awaitEntry(ctx context.Context, t *testing.T, what string, m
 // which is exactly what the per-row key space exists for. Reading them back is
 // the assertion; the raw envelopes are only how a failure is explained.
 // ---------------------------------------------------------------------------
-
-// watchBashRun takes a SNAPSHOT of one run: the rows the store holds for it
-// right now, in the order the store replays them.
-//
-// IT IS BOUNDED, AND THAT IS THE POINT. WatchBashRun replays the stored rows
-// and then FOLLOWS, ending only after the terminal — so a run that has not
-// finished leaves the stream open indefinitely, which is correct behavior and
-// exactly what a snapshot must not wait for. The snapshot therefore ends on the
-// terminal row OR on its own short deadline, whichever comes first. A subject
-// that wants the terminal uses awaitBashRunTerminal, which follows ONE stream
-// to the end.
-//
-// A run the store holds no row for is a REFUSED OPEN — the endpoint's own
-// convention — reported as ok=false rather than as an empty stream that would
-// read as "the run produced nothing".
-//
-// A GENUINE STREAM FAILURE IS FATAL, never quietly reported as a snapshot: a
-// read path that dies partway through a replay is precisely what these subjects
-// exist to catch, and returning the rows it managed to send first would let it
-// pass every assertion that only looked at those.
-//
-// WHAT ENDS THE SNAPSHOT IS A COUNT THE CALLER READ OFF THE WIRE, not the
-// budget. The producer's rows are already durable by the time these subjects
-// read a run back — every one of them waited for the cursor covering the writes
-// first — so the store replays them from one snapshot taken at stream open,
-// back to back. wantRows is what the caller counted in the batches the producer
-// sent, so reaching it means the replay is complete AND that the read verb
-// agrees with the wire about how many rows there are. A run with FEWER rows
-// than the wire carried, or an unfinished run whose caller wants whatever is
-// there (wantRows 0), still ends on snapshotBudget, which is a failure bound
-// again rather than an unconditional cost paid on every healthy call.
-func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string, wantRows int) ([]*conversationv1.AgentBash, bool) {
-	t.Helper()
-	snapshot, cancel := context.WithTimeout(ctx, snapshotBudget)
-	defer cancel()
-	stream, err := c.WatchBashRun(snapshot, connect.NewRequest(&storev1.WatchBashRunRequest{
-		Run: &conversationv1.AgentActivityId{Value: run},
-	}))
-	if err != nil {
-		return nil, false
-	}
-	defer func() {
-		// THE STREAM IS ENDED BY CANCELLING ITS CONTEXT, NEVER BY CLOSING IT
-		// FIRST. A server-streaming Close waits for the server to finish the
-		// call, and this server finishes only when the run terminates or the
-		// deadline expires — so a caller that already had every row it came for
-		// still paid the WHOLE snapshotBudget on the way out, on every healthy
-		// call. Defers run last-registered-first, so this one has to do both in
-		// the right order rather than leave it to two separate defers.
-		cancel()
-		_ = stream.Close()
-	}()
-	var out []*conversationv1.AgentBash
-	for stream.Receive() {
-		row := stream.Msg().GetRow()
-		if got := row.GetRun().GetValue(); got != run {
-			t.Fatalf("WatchBashRun(%s) sent a row for run %q", run, got)
-		}
-		out = append(out, row.GetFrame())
-		if isTerminalFrame(row.GetFrame()) {
-			return out, true
-		}
-		if wantRows > 0 && len(out) >= wantRows {
-			return out, true
-		}
-	}
-	if err := stream.Err(); err != nil {
-		// A REFUSED OPEN ARRIVES HERE, not from the call above: Connect reports a
-		// server-side stream error lazily, on the first Receive. NotFound is the
-		// endpoint's own convention for a run it holds no row for, and it is an
-		// answer rather than a fault.
-		if connect.CodeOf(err) == connect.CodeNotFound {
-			return nil, false
-		}
-		// The snapshot window closing on an unfinished run is the ordinary end
-		// of a snapshot, not a failure: the run has simply not said anything
-		// more yet. Anything else — and any expiry of the CALLER's own deadline,
-		// which means the subject itself ran out of time — is a real failure.
-		if snapshot.Err() != nil && ctx.Err() == nil {
-			if len(out) == 0 {
-				return nil, false
-			}
-			return out, true
-		}
-		t.Fatalf("WatchBashRun(%s) delivered %d row(s) and then failed: %v", run, len(out), err)
-	}
-	if len(out) == 0 {
-		return nil, false
-	}
-	return out, true
-}
 
 // awaitBashRunTerminal follows ONE stream of a run until its terminal row
 // arrives, and returns every row of it in write order.
@@ -2371,10 +2250,6 @@ func contextCutOf(line *storev1.StorePageLine) *conversationv1.ContextCut {
 	return frameOf(line).GetUpdate().GetContextCut()
 }
 
-func apiErrorOf(line *storev1.StorePageLine) *conversationv1.ApiRequestFailed {
-	return frameOf(line).GetUpdate().GetApiError()
-}
-
 // ---------------------------------------------------------------------------
 // The sidecar's structured log.
 // ---------------------------------------------------------------------------
@@ -2491,13 +2366,6 @@ func awaitCatchupEnd(ctx context.Context, t *testing.T, path string) logRecord {
 	})
 }
 
-func awaitFirstProductionCycle(ctx context.Context, t *testing.T, path string) logRecord {
-	t.Helper()
-	return awaitLog(ctx, t, path, "the first production cycle", func(r logRecord) bool {
-		return r.Operation == "recover-cursors"
-	})
-}
-
 // ---------------------------------------------------------------------------
 // Small assertion helpers.
 // ---------------------------------------------------------------------------
@@ -2507,43 +2375,10 @@ func testContext(t *testing.T) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), waitBudget)
 }
 
-// requireFilePlane states the envelope duty every sidecar write owes: the file
-// plane arm, a non-empty write_id, and a non-empty upsert_key.
-func requireFilePlane(t *testing.T, e *storev1.StoreEntry) {
-	t.Helper()
-	if e.GetPlane().GetFile() == nil {
-		t.Errorf("entry %q is not on the file plane: %v", e.GetUpsertKey(), e.GetPlane())
-	}
-	if e.GetWriteId() == "" {
-		t.Errorf("entry %q carries no write_id", e.GetUpsertKey())
-	}
-	if e.GetUpsertKey() == "" {
-		t.Errorf("entry with write_id %q carries no upsert_key", e.GetWriteId())
-	}
-}
-
-func requireProducer(t *testing.T, batches []*storev1.WriteBatchRequest) {
-	t.Helper()
-	for i, b := range batches {
-		if b.GetProducer() != producerSidecar {
-			t.Errorf("batch %d names producer %q, wanted %q", i, b.GetProducer(), producerSidecar)
-		}
-	}
-}
-
 func sortedStrings(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
-}
-
-func containsString(in []string, want string) bool {
-	for _, s := range in {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -2808,31 +2643,6 @@ func samePathAny(v any, path string) bool {
 		return false
 	}
 	return samePath(s, path)
-}
-
-// awaitAnyCursorFor waits until the sidecar has DURABLY advanced a path's
-// cursor at all — the signal that the file is discovered and its first bytes
-// are committed, used where the interesting state is a PARTIAL read rather than
-// a byte count.
-//
-// IT COUNTS ONLY ACKED BATCHES, like awaitCursorInBatches and for the same
-// reason: a refused WriteBatch committed NOTHING, so a cursor inside one is an
-// offer the store rejected. Waiting on offers made every "and then it wrote"
-// assertion satisfiable by a write that FAILED.
-func awaitAnyCursorFor(ctx context.Context, t *testing.T, f *fakeStore, path string) {
-	t.Helper()
-	tick := time.NewTicker(pollTick)
-	defer tick.Stop()
-	for {
-		if latestCursorFor(f.AckedBatches(), path) != nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("the sidecar never offered a cursor for %s within the deadline", path)
-		case <-tick.C:
-		}
-	}
 }
 
 // awaitCursorPast waits until the sidecar's DURABLE cursor for a path moves

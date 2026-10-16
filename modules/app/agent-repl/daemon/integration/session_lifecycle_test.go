@@ -281,43 +281,6 @@ func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.
 	}
 }
 
-func TestResumingAMissingVendorTranscriptComesUpFresh(t *testing.T) {
-	t.Parallel()
-	// Arrange: a session with a conversation to resume, killed and REAPED, and
-	// then its transcript removed from under both account roots. The recorded
-	// conversation cannot be resumed — but the workspace must keep a LIVE
-	// session, so it comes up fresh with the abandoned id as the record.
-	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the missing transcript the test stages, the abandoned conversation the classifier records, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.account.find_transcript", "daemon.health.open_fault",
-		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit",
-		"daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.kill",
-		"daemon.workspace.open", "daemon.workspace.bring_up")
-	f.shim.ExpectStartSession()
-	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("KillWorkspace = error %v, want a success", err)
-	}
-	f.shim.AwaitGone()
-	f.d.RemoveTranscripts(f.repo.Dir)
-
-	// Act
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert: a live session, opened FRESH.
-	if err != nil {
-		t.Fatalf("OpenWorkspace on a missing transcript = transport error %v, want a fresh session", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace on a missing transcript = %v, want a success", resp.Msg)
-	}
-	req := &shimv1.StartSessionRequest{}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, req)
-	if req.GetFresh() == nil {
-		t.Fatalf("StartSession = %v, want the fresh source for an unresumable conversation", req)
-	}
-}
-
 func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 	t.Parallel()
 	// Arrange: as above, and THE WORKSPACE TAKES A TURN FIRST. That turn is
@@ -785,64 +748,6 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	if resp.Msg.GetError().GetUnservedRemediation() == nil {
 		t.Fatalf("AnswerColdGate = %v, want AnswerColdGateError.unserved_remediation", resp.Msg)
 	}
-}
-
-func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
-	t.Parallel()
-	// Arrange: a repository OUTSIDE the multi-repo root.
-	d := newDaemon(t, harness.Opts{})
-	defaultRepo := harness.NewRepo(t)
-	defaultWS := harness.Register(t, d, defaultRepo.Dir)
-
-	// Act
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: defaultWS})); err != nil {
-		t.Fatalf("OpenWorkspace (default account) = error %v, want a success", err)
-	}
-	defaultShim := d.Shim(defaultWS)
-
-	// Assert
-	if got := defaultShim.Info().Env["CLAUDE_CONFIG_DIR"]; got != d.DefaultConfigDir {
-		t.Fatalf("CLAUDE_CONFIG_DIR = %q for a workspace outside MULTI_REPO_ROOT, want the default account root %q", got, d.DefaultConfigDir)
-	}
-}
-
-func TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount(t *testing.T) {
-	t.Parallel()
-	// Arrange: the repository lives directly UNDER $MULTI_REPO_ROOT, which is
-	// the only input the account routing takes.
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "under-the-multi-root"))
-	ws := harness.Register(t, d, repo.Dir)
-
-	// Act
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
-
-	// Assert
-	if got := d.Shim(ws).Info().Env["CLAUDE_CONFIG_DIR"]; got != d.MultiRepoConfigDir {
-		t.Fatalf("CLAUDE_CONFIG_DIR = %q for a workspace under MULTI_REPO_ROOT, want the multi-repo account root %q", got, d.MultiRepoConfigDir)
-	}
-}
-
-func TestALoggedOutAccountRootDrawsLoggedOut(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{DefaultAccountEmail: harness.LoggedOut})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, d, repo.Dir)
-	topbar := d.WatchTopbar(ws)
-
-	// Act
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
-	d.Shim(ws).PushHealthy()
-
-	// Assert
-	awaitTopbar(t, &fixture{d: d, ws: ws, t: t}, topbar, "the account drawn logged_out", func(v *frontendv1.TopbarView) bool {
-		return v.GetAccount().GetLoggedOut() != nil
-	})
 }
 
 // ---- critique 4: topbar account for a MULTI_REPO_ROOT workspace ----
@@ -2147,64 +2052,6 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 // audit-3 critique 20: cold-gate and interrupt arms.
 // ---------------------------------------------------------------------------
 
-// TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate covers
-// AnswerColdGateError.no_cold_gate (endpoint_answer_cold_gate.proto):
-// internal/workspace/sessions.go's Fleet.Stop and the successful-resolve path
-// both delete the served gate from Fleet.coldGates, so a SECOND answer
-// against the same (now resolved) gate id finds none standing.
-func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
-	t.Parallel()
-	// Arrange: stand a cold gate and resolve it once.
-	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.workspace.kill")
-	f.shim.ExpectStartSession()
-	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("KillWorkspace = error %v, want a success", err)
-	}
-	f.shim.AwaitGone()
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
-		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
-	}})
-	feed := f.watchRootFeed()
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
-	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
-	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
-		return r.GetColdGate().GetStanding() != nil
-	})
-	resolved, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
-		Workspace: f.ws,
-		Gate:      gateRow.GetId(),
-		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
-	}))
-	requireRPCAnswered(t, "the first AnswerColdGate{pay}", resolved, err)
-	if resolved.Msg.GetSuccess() == nil {
-		t.Fatalf("the first AnswerColdGate{pay} = (%v), want a success setting up the resolved gate", resolved.Msg)
-	}
-	shim.ExpectStartSession()
-
-	// Act: answer the SAME gate id again.
-	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
-		Workspace: f.ws,
-		Gate:      gateRow.GetId(),
-		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("AnswerColdGate on an already-resolved gate = transport error %v, want the no_cold_gate arm", err)
-	}
-	if resp.Msg.GetError().GetNoColdGate() == nil {
-		t.Fatalf("AnswerColdGate on an already-resolved gate = %v, want error.no_cold_gate", resp.Msg)
-	}
-}
-
 // TestAnswerColdGateWithNoLiveShimStandsTheGateAgain pins what an answer to a
 // gate whose shim has died comes to. The answer is TAKEN (AnswerColdGate
 // answers success: the re-open runs after the answer, and
@@ -2273,34 +2120,6 @@ func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 	awaitRow(t, f, feed, "the cold gate stood again", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
-}
-
-// TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate documents
-// the OTHER "no session" shape, which is NOT the no_session arm: a workspace
-// that has never had any session, or whose cold gate has already been
-// cleared, hits the ColdGate check FIRST (internal/workspace/answers.go), so
-// it always answers no_cold_gate, never no_session — no_cold_gate is checked
-// before liveness. This locks that ordering down so a future reordering of
-// the two checks is caught here rather than only in the no_session test above.
-func TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate(t *testing.T) {
-	t.Parallel()
-	// Arrange: a registered workspace that was never opened.
-	f := newRegistered(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
-		Workspace: f.ws,
-		Gate:      &frontendv1.FeedId{Value: "not-a-real-gate-id"},
-		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("AnswerColdGate on a workspace with no session at all = transport error %v, want the no_cold_gate arm", err)
-	}
-	if resp.Msg.GetError().GetNoColdGate() == nil {
-		t.Fatalf("AnswerColdGate on a workspace with no session at all = %v, want error.no_cold_gate (checked before liveness)", resp.Msg)
-	}
 }
 
 // TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession targets

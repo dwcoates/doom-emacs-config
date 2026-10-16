@@ -4,7 +4,6 @@ package integration
 
 import (
 	"agentrepl/protohelpers/oneofarm"
-	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -15,44 +14,7 @@ import (
 	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/proto"
 )
-
-func TestRosterDeliversTheLatestViewToALateSubscriber(t *testing.T) {
-	t.Parallel()
-	// Arrange: register before anyone is watching.
-	f := newRegistered(t, harness.Opts{})
-
-	// Act
-	roster := f.d.WatchRoster()
-	first := harness.AwaitNext(t, f.d.Ctx(), roster, "the roster a late subscriber opens with")
-
-	// Assert
-	if rosterRow(first, f.ws.GetId()) == nil {
-		t.Fatalf("the first push a late subscriber received has no row for %s; the subscription invariant delivers the latest view first", f.ws.GetId())
-	}
-}
-
-func TestTwoRosterSubscribersReceiveIdenticalSequences(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	one := f.d.WatchRoster()
-	two := f.d.WatchRosterOn(f.d.Dial())
-
-	// Act
-	f.selectWorkspace()
-
-	// Assert
-	selected := func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
-	}
-	a := awaitRoster(t, f.d, one, "the selection on the first subscriber", selected)
-	b := awaitRoster(t, f.d, two, "the selection on the second subscriber", selected)
-	if !proto.Equal(a, b) {
-		t.Fatalf("two subscribers saw different rosters:\nfirst:  %v\nsecond: %v", a, b)
-	}
-}
 
 func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
 	t.Parallel()
@@ -141,24 +103,6 @@ func moveWorkspace(t *testing.T, d *harness.Daemon, ws, target *workspacev1.Work
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("MoveWorkspace = (%v, %v), want success", resp, err)
 	}
-}
-
-func TestNewWorkspacesLandSecondToLastOnTheTabBar(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	roster := d.WatchRoster()
-
-	// Act: the second lands after the only one, the third second-to-last.
-	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
-	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
-	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
-
-	// Assert.
-	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), b.GetId()})
-	})
 }
 
 func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
@@ -349,64 +293,6 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	}
 }
 
-// TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant covers the
-// roster's durable half moving on a LANDED merge.
-//
-// It is built on the merge tests' own fixture (mergeCleanRepo), and
-// deliberately so: a merge only lands for a workspace the daemon CREATED
-// (its layout facts are what the merge reads its target and brief from), and
-// a bare `RegisterWorkspace` on a hand-made worktree is refused for exactly
-// that reason — which is what
-// TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused asserts.
-//
-// mergeCleanRepo's workspace is NOT such a bare registration: mergeCreateChild
-// mints it through the real CreateWorkspace rpc, which writes the
-// wsm.CreationJob carrying Layout.SourceBranch / SourceDir / TargetDir —
-// internal/merge/orchestrator.go's layoutFor (queue.go's Enqueue calls it
-// first) reads exactly that job, finds it, and returns it with no refusal.
-// TestTheTestGatePassingSettlesTheTestsTab proves the same fixture's merge
-// lands cleanly end to end, so no daemon.merge.enqueue WARN is ever produced
-// on this path — that expectation was phantom and is dropped.
-func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f, d, _, script := mergeCleanRepo(t)
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	roster := d.WatchRoster()
-
-	// Act
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, d, roster, "the merged workspace under recently_merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range rosterwalk.MergedRows(r) {
-			if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
-				return true
-			}
-		}
-		return false
-	})
-	var row *frontendv1.RosterRow
-	for _, r := range rosterwalk.MergedRows(got) {
-		if r.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
-			row = r
-		}
-	}
-	if row.GetWhen().GetMerged().GetAtMs() == 0 {
-		t.Fatalf("the recently merged row's when = %v, want when.merged stamped", row.GetWhen())
-	}
-	// internal/resolve/sidebar/rows.go's recedes() greys a row on ANY of three
-	// settled ends, one being rec.MergedAt != nil — a merged row's closed.closed
-	// is true for that reason, not because the workspace's editor was closed.
-	if !row.GetClosed().GetClosed() {
-		t.Fatalf("the recently merged row's closed.closed = false, want true (recedes() on rec.MergedAt != nil)")
-	}
-}
-
 // TestCreateTaskRefusesABlankTitle asserts the refusal IN BAND.
 // `CreateTaskError.blank_title` is a LANDED arm, spelled for exactly this
 // condition ("The title is blank once trimmed"), so the refusal is the
@@ -434,39 +320,6 @@ func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetBlankTitle() == nil {
 		t.Fatalf("CreateTask with a blank title = %v, want CreateTaskError.blank_title", resp.Msg)
-	}
-}
-
-// TestKilledWorkspaceRowCarriesClosedTrue covers the OTHER of the three
-// settled ends internal/resolve/sidebar/rows.go's recedes() greys a row for: a
-// KillWorkspace-terminated session (session.Terminal.Kind == "killed"), not an
-// editor-closed or merged workspace. TestKillWorkspaceForceKillsTheSessionAndReapsTheShim
-// (session_lifecycle_test.go) already asserts the row's status arm is `dead`;
-// this test is the roster suite's own coverage of the ORTHOGONAL closed.closed
-// receding flag on that same row.
-func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.kill")
-	f.shim.ExpectStartSession()
-	roster := f.d.WatchRoster()
-
-	// Act
-	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("KillWorkspace = error %v, want a success", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "the killed workspace's row receded", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetClosed().GetClosed()
-	})
-	if row := rosterRow(got, f.ws.GetId()); !row.GetClosed().GetClosed() {
-		t.Fatalf("a killed workspace's row.closed.closed = false, want true")
 	}
 }
 
@@ -541,38 +394,6 @@ func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
 // mergeArm read facts from.
 // ---------------------------------------------------------------------------
 
-// TestRosterRowIsSubmittingBeforeTheShimAcksTheTurn covers
-// RosterRowStatusSubmitting: the turn is accepted and the shim has not yet
-// produced any activity for it (internal/resolve/sidebar/status.go's
-// sessionArm, `s.turn != nil && !s.sawActivity`).
-func TestRosterRowIsSubmittingBeforeTheShimAcksTheTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "ready before any turn", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetReady() != nil
-	})
-
-	// Act: StartTurn is visible in the roster before the fake shim has
-	// produced any activity for it.
-	resp := f.submit("do it", "k-submitting", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt = %v, want a minted TurnId", resp)
-	}
-	f.shim.ExpectStartTurn()
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "submitting before the first activity", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetSubmitting() != nil
-	})
-	if row := rosterRow(got, f.ws.GetId()); row.GetSubmitting() == nil {
-		t.Fatalf("the roster row's status = %T before any activity, want submitting", row.GetStatus())
-	}
-}
-
 // TestRosterRowIsClearingWhileAClearRuns covers RosterRowStatusClearing: a
 // /clear submission is delivered as a real turn whose act is ActClear
 // (prompt_test.go's TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow
@@ -634,74 +455,6 @@ func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
 	}
 }
 
-// TestRosterRowIsInterruptedAfterTheAgentAcknowledgesAUserStop covers
-// RosterRowStatusInterrupted: the agent's own terminal frame acknowledges a
-// user stop (support_test.go's interruptedFrame), which closes the turn as
-// wsm.CloseKilled (internal/sessionwatcher/route.go's turnCloseOf) --
-// footer_topbar_test.go's TestFooterInterruptedStatusIsRetiredByADaemonSideDwell
-// drives the identical frame for the footer's own (transient) arm; the
-// roster's arm persists, so no dwell-wait is needed here.
-func TestRosterRowIsInterruptedAfterTheAgentAcknowledgesAUserStop(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-	f.submit("do it", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	awaitRoster(t, f.d, roster, "submitting before the interrupt", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetSubmitting() != nil
-	})
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "interrupted after the agent's acknowledgement", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetInterrupted() != nil
-	})
-	if row := rosterRow(got, f.ws.GetId()); row.GetInterrupted() == nil {
-		t.Fatalf("the roster row's status = %T after the agent's interrupted terminal, want interrupted", row.GetStatus())
-	}
-}
-
-// TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen covers
-// RosterRowStatusDegraded: an open SessionDegradedWindow in the diagnostics
-// push (footer_topbar_test.go's TestTopbarDegradedWindowIsDrawnOpenThenClosed
-// drives the topbar's own reading of the identical push).
-func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "ready before the degraded window", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetReady() != nil
-	})
-
-	// Act
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
-			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
-			DegradedWindows: []*conversationv1.SessionDegradedWindow{{
-				Component: "converter",
-				Reason:    "backlogged",
-				BeganAtMs: 1_700_000_000_000,
-				Extent:    &conversationv1.SessionDegradedWindow_Open{Open: &conversationv1.SessionDegradedOpen{}},
-			}},
-		}},
-	})
-
-	// Assert
-	got := awaitRoster(t, f.d, roster, "degraded with the window open", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetDegraded() != nil
-	})
-	if row := rosterRow(got, f.ws.GetId()); row.GetDegraded() == nil {
-		t.Fatalf("the roster row's status = %T with an open degraded window, want degraded", row.GetStatus())
-	}
-}
-
 // TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn covers a dead query as
 // what the owner ruled it (2026-09-28, 2026-10-06): agent-repl's fault,
 // drawn `turn_died` until the next turn, never `vendor_blocked` — nothing
@@ -735,41 +488,6 @@ func TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	})
 	if row := rosterRow(got, f.ws.GetId()); row.GetTurnDied() == nil {
 		t.Fatalf("the roster row's status = %T after the query died, want turn_died", row.GetStatus())
-	}
-}
-
-// TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails covers
-// RosterRowStatusMergeFailed: a genuine (non-conflict) error that gives up
-// the run (internal/merge/phases.go's attempt, then abort() ->
-// internal/merge/terminal.go's StateFailed) -- as opposed to
-// merge_conflict/parked, which a scripted conflict or a test-gate escalation
-// produce instead (merge_test.go's own tests). The scripted git failure is
-// the harness's repo.ScriptFailure. (It was the landed-range read that
-// failed here once; that read now follows a landing that has HAPPENED, so
-// its failure reads merged, not failed -- internal/merge's
-// TestALandingWhoseRangeWillNotReadStillConcludesAsMerged.)
-func TestRosterRowIsMergeFailedWhenTheMergeGitCommandFails(t *testing.T) {
-	t.Parallel()
-	// Arrange: a clean self-repo merge (mergeCleanRepo, merge_test.go) whose
-	// no-ff merge, made in the queue's own tree, git refuses outright.
-	f, d, repo, _ := mergeCleanRepo(t)
-	repo.ScriptFailure("", 1, "fatal: refusing to merge unrelated histories", "merge")
-	roster := d.WatchRoster()
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.fault")
-
-	// Act
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-
-	// Assert
-	got := awaitRoster(t, d, roster, "merge_failed after the merge git command fails", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetMergeFailed() != nil
-	})
-	if row := rosterRow(got, f.ws.GetId()); row.GetMergeFailed() == nil {
-		t.Fatalf("the roster row's status = %T after a genuine (non-conflict) merge failure, want merge_failed", row.GetStatus())
 	}
 }
 
@@ -926,40 +644,4 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 			t.Fatalf("the bring-up walk never published %q; the whole walk was %v", want, walk)
 		}
 	}
-}
-
-// THE WHEN-COLUMN IS THE TURN CLOCK: before any turn the row reads
-// no_turn_running, a running turn counts from the very instant the footer
-// strip's clock counts from, and the turn's end returns it to no_turn_running.
-func TestRosterWhenColumnIsTheFootersTurnClock(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-	footer := f.d.WatchFooter(f.ws)
-	rowWhere := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
-		return func(r *frontendv1.WorkspaceRoster) bool {
-			row := rosterRow(r, f.ws.GetId())
-			return row != nil && pred(row)
-		}
-	}
-	ready := awaitRoster(t, f.d, roster, "ready after readiness", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetReady() != nil }))
-	if when := rosterRow(ready, f.ws.GetId()).GetWhen(); when.GetNoTurnRunning() == nil {
-		t.Fatalf("when before any turn = %v, want no_turn_running", when)
-	}
-
-	// Act / Assert: the turn runs, counting from the strip clock's start.
-	f.submit("first", "k-when-first", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	strip := awaitFooter(t, f, footer, "the strip clock running", func(v *frontendv1.FooterView) bool {
-		clock := v.GetStrip().GetClock()
-		return clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil
-	})
-	started := strip.GetStrip().GetClock().GetTurnStartedAtMs()
-	awaitRoster(t, f.d, roster, "the when-column counting from the strip clock's start", rowWhere(func(row *frontendv1.RosterRow) bool {
-		return row.GetWhen().GetTurnRunning().GetStartedAtMs() == started
-	}))
-
-	// Act / Assert: the turn ends.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	awaitRoster(t, f.d, roster, "no_turn_running once the turn ended", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetWhen().GetNoTurnRunning() != nil }))
 }

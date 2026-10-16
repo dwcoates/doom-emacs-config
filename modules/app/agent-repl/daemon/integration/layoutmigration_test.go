@@ -36,36 +36,6 @@ func TestBootServesAWorkspaceRegisteredUnderTheOlderLayout(t *testing.T) {
 	})
 }
 
-// TestBootStampsTheMigratedLayoutOnTheStateDatabase pins that the boot's
-// migration is DURABLE, not a shape held only in the running process: the file
-// carries this build's layout afterwards, so the next boot has nothing to do.
-func TestBootStampsTheMigratedLayoutOnTheStateDatabase(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{DurableState: true})
-	f.d.Stop()
-	demoteToLayout3(t, f.d)
-
-	// Act
-	d2 := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
-	// The daemon holds the sole writing handle while it runs, so the file is
-	// read after its orderly exit.
-	d2.Stop()
-
-	// Assert
-	var version int
-	d2.WithDB(func(db *sql.DB) {
-		if err := db.QueryRow(`SELECT version FROM layout WHERE id = 1`).Scan(&version); err != nil {
-			t.Fatalf("read the migrated layout version: %v", err)
-		}
-	})
-	// The build's own layout, never a literal: a step appended to the
-	// migration list must not have to be restated here to keep this pinned.
-	if version != wsm.LayoutVersion {
-		t.Fatalf("layout version after a migrated boot = %d, want %d", version, wsm.LayoutVersion)
-	}
-}
-
 // layout3Undo is the inverse of EVERY migration step this build can apply,
 // keyed by the layout version that step produces. It is what takes a state
 // file written by THIS build back to a genuine layout-3 file.

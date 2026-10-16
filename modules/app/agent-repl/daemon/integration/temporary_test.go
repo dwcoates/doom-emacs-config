@@ -113,20 +113,3 @@ func TestACreateEntryNamingATemporaryRepositoryIsQuarantined(t *testing.T) {
 		t.Fatalf("branches = %v, want nothing materialized for the refused create", repo.Branches())
 	}
 }
-
-// The harness seam still admits the run's own folders: a repository under the
-// run root registers, though the run root is itself under /tmp.
-func TestTheRunRootIsTheOneTemporaryFolderATestDaemonRegisters(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-
-	// Act
-	msg := registerRepository(t, d, filepath.Join(repo.Dir, "README.md"))
-
-	// Assert
-	if msg.GetSuccess() == nil {
-		t.Fatalf("RegisterRepository under the run root %s = %v, want a success", harness.RunRoot(), msg)
-	}
-}

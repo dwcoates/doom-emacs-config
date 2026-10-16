@@ -164,35 +164,3 @@ func (r *liveRoot) hold(t *testing.T, key string) {
 	}
 	r.held[key] = file
 }
-
-// release drops a workspace's lock, which is what a shim's death looks like.
-func (r *liveRoot) release(t *testing.T, key string) {
-	t.Helper()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	file, ok := r.held[key]
-	if !ok {
-		t.Fatalf("workspace %s's lock is not held", key)
-	}
-	delete(r.held, key)
-	if err := file.Close(); err != nil {
-		t.Fatalf("releasing workspace %s's lock: %v", key, err)
-	}
-}
-
-// holdEveryRecordedWorkspace holds the lock of every workspace a shim left an
-// agent-id.json for under this root — what a tree the REAL mocked vendor wrote
-// needs, since that shim is gone by the time the sidecar reads it.
-func (r *liveRoot) holdEveryRecordedWorkspace(t *testing.T) {
-	t.Helper()
-	records, err := filepath.Glob(filepath.Join(r.state, "shim", "*", "agent-id.json"))
-	if err != nil {
-		t.Fatalf("listing the identity records under %s: %v", r.state, err)
-	}
-	if len(records) == 0 {
-		t.Fatalf("the mocked vendor left no identity record under %s, so no workspace of it can be live", r.state)
-	}
-	for _, record := range records {
-		r.hold(t, filepath.Base(filepath.Dir(record)))
-	}
-}

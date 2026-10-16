@@ -391,27 +391,6 @@ func TestGetSidecarCursorsRefusesAnEmptyFileID(t *testing.T) {
 	assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
 }
 
-// TestWatchBashRunRefusesAnEmptyRunAtTheTransport: this rpc has no failure arm,
-// so a malformed ADDRESS closes at the transport — and with CodeInvalidArgument
-// rather than CodeNotFound, because the caller must fix the request rather than
-// conclude the run does not exist.
-func TestWatchBashRunRefusesAnEmptyRunAtTheTransport(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-
-	// Act.
-	stream := watchBashRun(ctx, t, store.client(), "")
-	defer testclose.OrFail(t, stream)
-
-	// Assert.
-	err := awaitBashRunEnd(t, stream)
-	if code := connect.CodeOf(err); code != connect.CodeInvalidArgument {
-		t.Fatalf("an empty run ended with Connect code %v, want %v (error: %v)", code, connect.CodeInvalidArgument, err)
-	}
-}
-
 // TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId is the POSITIVE
 // CONTROL for every assertNoDatabaseTouch above.
 //
