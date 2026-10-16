@@ -59,7 +59,11 @@ message RollBackSessionResponse {
   }
 }
 
-// The vendor conversation now ends just before the prompt.
+// THE CUT IS MADE: the open turn is stopped, the files are restored when they
+// were asked to be, and the vendor restarts at the fork point AFTER this
+// answer. The vendor judges the cut at that restart, so the conversation ends
+// just before the prompt once conversation.v1.SessionRollbackSettled says
+// `resumed_at_cut`; every call needing the vendor waits for it.
 message RollBackSessionSuccess {
   // What happened to the files: present exactly when `restore_files` was
   // asked.
@@ -75,6 +79,8 @@ message RollBackSessionFilesRestored {
 // Not rolled back. THE ARM IS WHY. Every arm leaves the vendor conversation
 // as it was, except that an open turn may already have been interrupted.
 message RollBackSessionFailure {
+  reserved 5;
+  reserved "vendor_refused";
   oneof cause {
     // No session is open on this shim.
     RollBackSessionNoSession no_session = 1;
@@ -87,8 +93,9 @@ message RollBackSessionFailure {
     // The transcript after the cut point holds a prompt of a turn not in
     // `dropped_turns`.
     RollBackSessionUnseenPrompt unseen_prompt = 4;
-    // The vendor refused the cut at resume; the session was resumed whole.
-    RollBackSessionVendorRefused vendor_refused = 5;
+    // 5 (vendor_refused) is reserved: the vendor judges the cut at the
+    // restart, which runs after the answer, and states its verdict on
+    // conversation.v1.SessionRollbackSettled.
     // `restore_files` was asked and the vendor cannot restore the files to
     // that prompt (checkpointing was off when it was sent, or its checkpoint
     // is gone). Nothing was changed: the files are checked before the
@@ -110,10 +117,6 @@ message RollBackSessionUnseenPrompt {
   string vendor_prompt_uuid = 1;
 }
 // The vendor refused the cut.
-message RollBackSessionVendorRefused {
-  // The vendor's refusal, verbatim.
-  string vendor_message = 1;
-}
 // The files cannot be restored to the prompt.
 message RollBackSessionFilesNotRestorable {
   // The vendor's reason, verbatim.

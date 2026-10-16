@@ -37,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_roll_back_session.proto.
  */
 export const file_shim_v1_endpoint_roll_back_session: GenFile = /*@__PURE__*/
-  fileDesc("CihzaGltL3YxL2VuZHBvaW50X3JvbGxfYmFja19zZXNzaW9uLnByb3RvEgdzaGltLnYxIvUBChZSb2xsQmFja1Nlc3Npb25SZXF1ZXN0EioKCXRvX2JlZm9yZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSLgoNZHJvcHBlZF90dXJucxgCIAMoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSNwoKa2VlcF9maWxlcxgDIAEoCzIhLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uS2VlcEZpbGVzSAASPQoNcmVzdG9yZV9maWxlcxgEIAEoCzIkLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uUmVzdG9yZUZpbGVzSABCBwoFZmlsZXMiGgoYUm9sbEJhY2tTZXNzaW9uS2VlcEZpbGVzIh0KG1JvbGxCYWNrU2Vzc2lvblJlc3RvcmVGaWxlcyKLAQoXUm9sbEJhY2tTZXNzaW9uUmVzcG9uc2USMgoHc3VjY2VzcxgBIAEoCzIfLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uU3VjY2Vzc0gAEjIKB2ZhaWx1cmUYAiABKAsyHy5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvbkZhaWx1cmVIAEIICgZyZXN1bHQibwoWUm9sbEJhY2tTZXNzaW9uU3VjY2VzcxJCCg5maWxlc19yZXN0b3JlZBgBIAEoCzIlLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uRmlsZXNSZXN0b3JlZEgAiAEBQhEKD19maWxlc19yZXN0b3JlZCItChxSb2xsQmFja1Nlc3Npb25GaWxlc1Jlc3RvcmVkEg0KBXBhdGhzGAEgAygJIr0DChZSb2xsQmFja1Nlc3Npb25GYWlsdXJlEjcKCm5vX3Nlc3Npb24YASABKAsyIS5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvbk5vU2Vzc2lvbkgAEkgKE3Byb21wdF9ub3RfcmVjb3JkZWQYAiABKAsyKS5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvblByb21wdE5vdFJlY29yZGVkSAASOwoMZmlyc3RfcHJvbXB0GAMgASgLMiMuc2hpbS52MS5Sb2xsQmFja1Nlc3Npb25GaXJzdFByb21wdEgAEj0KDXVuc2Vlbl9wcm9tcHQYBCABKAsyJC5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvblVuc2VlblByb21wdEgAEj8KDnZlbmRvcl9yZWZ1c2VkGAUgASgLMiUuc2hpbS52MS5Sb2xsQmFja1Nlc3Npb25WZW5kb3JSZWZ1c2VkSAASSgoUZmlsZXNfbm90X3Jlc3RvcmFibGUYBiABKAsyKi5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvbkZpbGVzTm90UmVzdG9yYWJsZUgAEg4KBmRldGFpbBgHIAEoCUIHCgVjYXVzZSIaChhSb2xsQmFja1Nlc3Npb25Ob1Nlc3Npb24iIgogUm9sbEJhY2tTZXNzaW9uUHJvbXB0Tm90UmVjb3JkZWQiHAoaUm9sbEJhY2tTZXNzaW9uRmlyc3RQcm9tcHQiOQobUm9sbEJhY2tTZXNzaW9uVW5zZWVuUHJvbXB0EhoKEnZlbmRvcl9wcm9tcHRfdXVpZBgBIAEoCSI2ChxSb2xsQmFja1Nlc3Npb25WZW5kb3JSZWZ1c2VkEhYKDnZlbmRvcl9tZXNzYWdlGAEgASgJIjsKIVJvbGxCYWNrU2Vzc2lvbkZpbGVzTm90UmVzdG9yYWJsZRIWCg52ZW5kb3JfbWVzc2FnZRgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_turn]);
+  fileDesc("CihzaGltL3YxL2VuZHBvaW50X3JvbGxfYmFja19zZXNzaW9uLnByb3RvEgdzaGltLnYxIvUBChZSb2xsQmFja1Nlc3Npb25SZXF1ZXN0EioKCXRvX2JlZm9yZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSLgoNZHJvcHBlZF90dXJucxgCIAMoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSNwoKa2VlcF9maWxlcxgDIAEoCzIhLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uS2VlcEZpbGVzSAASPQoNcmVzdG9yZV9maWxlcxgEIAEoCzIkLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uUmVzdG9yZUZpbGVzSABCBwoFZmlsZXMiGgoYUm9sbEJhY2tTZXNzaW9uS2VlcEZpbGVzIh0KG1JvbGxCYWNrU2Vzc2lvblJlc3RvcmVGaWxlcyKLAQoXUm9sbEJhY2tTZXNzaW9uUmVzcG9uc2USMgoHc3VjY2VzcxgBIAEoCzIfLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uU3VjY2Vzc0gAEjIKB2ZhaWx1cmUYAiABKAsyHy5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvbkZhaWx1cmVIAEIICgZyZXN1bHQibwoWUm9sbEJhY2tTZXNzaW9uU3VjY2VzcxJCCg5maWxlc19yZXN0b3JlZBgBIAEoCzIlLnNoaW0udjEuUm9sbEJhY2tTZXNzaW9uRmlsZXNSZXN0b3JlZEgAiAEBQhEKD19maWxlc19yZXN0b3JlZCItChxSb2xsQmFja1Nlc3Npb25GaWxlc1Jlc3RvcmVkEg0KBXBhdGhzGAEgAygJIpIDChZSb2xsQmFja1Nlc3Npb25GYWlsdXJlEjcKCm5vX3Nlc3Npb24YASABKAsyIS5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvbk5vU2Vzc2lvbkgAEkgKE3Byb21wdF9ub3RfcmVjb3JkZWQYAiABKAsyKS5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvblByb21wdE5vdFJlY29yZGVkSAASOwoMZmlyc3RfcHJvbXB0GAMgASgLMiMuc2hpbS52MS5Sb2xsQmFja1Nlc3Npb25GaXJzdFByb21wdEgAEj0KDXVuc2Vlbl9wcm9tcHQYBCABKAsyJC5zaGltLnYxLlJvbGxCYWNrU2Vzc2lvblVuc2VlblByb21wdEgAEkoKFGZpbGVzX25vdF9yZXN0b3JhYmxlGAYgASgLMiouc2hpbS52MS5Sb2xsQmFja1Nlc3Npb25GaWxlc05vdFJlc3RvcmFibGVIABIOCgZkZXRhaWwYByABKAlCBwoFY2F1c2VKBAgFEAZSDnZlbmRvcl9yZWZ1c2VkIhoKGFJvbGxCYWNrU2Vzc2lvbk5vU2Vzc2lvbiIiCiBSb2xsQmFja1Nlc3Npb25Qcm9tcHROb3RSZWNvcmRlZCIcChpSb2xsQmFja1Nlc3Npb25GaXJzdFByb21wdCI5ChtSb2xsQmFja1Nlc3Npb25VbnNlZW5Qcm9tcHQSGgoSdmVuZG9yX3Byb21wdF91dWlkGAEgASgJIjsKIVJvbGxCYWNrU2Vzc2lvbkZpbGVzTm90UmVzdG9yYWJsZRIWCg52ZW5kb3JfbWVzc2FnZRgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_turn]);
 
 /**
  * The rollback to perform.
@@ -157,7 +157,11 @@ export const RollBackSessionResponseSchema: GenMessage<RollBackSessionResponse> 
   messageDesc(file_shim_v1_endpoint_roll_back_session, 3);
 
 /**
- * The vendor conversation now ends just before the prompt.
+ * THE CUT IS MADE: the open turn is stopped, the files are restored when they
+ * were asked to be, and the vendor restarts at the fork point AFTER this
+ * answer. The vendor judges the cut at that restart, so the conversation ends
+ * just before the prompt once conversation.v1.SessionRollbackSettled says
+ * `resumed_at_cut`; every call needing the vendor waits for it.
  *
  * @generated from message shim.v1.RollBackSessionSuccess
  */
@@ -246,14 +250,9 @@ export type RollBackSessionFailure = Message<"shim.v1.RollBackSessionFailure"> &
     case: "unseenPrompt";
   } | {
     /**
-     * The vendor refused the cut at resume; the session was resumed whole.
-     *
-     * @generated from field: shim.v1.RollBackSessionVendorRefused vendor_refused = 5;
-     */
-    value: RollBackSessionVendorRefused;
-    case: "vendorRefused";
-  } | {
-    /**
+     * 5 (vendor_refused) is reserved: the vendor judges the cut at the
+     * restart, which runs after the answer, and states its verdict on
+     * conversation.v1.SessionRollbackSettled.
      * `restore_files` was asked and the vendor cannot restore the files to
      * that prompt (checkpointing was off when it was sent, or its checkpoint
      * is gone). Nothing was changed: the files are checked before the
@@ -348,26 +347,6 @@ export const RollBackSessionUnseenPromptSchema: GenMessage<RollBackSessionUnseen
 
 /**
  * The vendor refused the cut.
- *
- * @generated from message shim.v1.RollBackSessionVendorRefused
- */
-export type RollBackSessionVendorRefused = Message<"shim.v1.RollBackSessionVendorRefused"> & {
-  /**
-   * The vendor's refusal, verbatim.
-   *
-   * @generated from field: string vendor_message = 1;
-   */
-  vendorMessage: string;
-};
-
-/**
- * Describes the message shim.v1.RollBackSessionVendorRefused.
- * Use `create(RollBackSessionVendorRefusedSchema)` to create a new message.
- */
-export const RollBackSessionVendorRefusedSchema: GenMessage<RollBackSessionVendorRefused> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_roll_back_session, 11);
-
-/**
  * The files cannot be restored to the prompt.
  *
  * @generated from message shim.v1.RollBackSessionFilesNotRestorable
@@ -386,5 +365,5 @@ export type RollBackSessionFilesNotRestorable = Message<"shim.v1.RollBackSession
  * Use `create(RollBackSessionFilesNotRestorableSchema)` to create a new message.
  */
 export const RollBackSessionFilesNotRestorableSchema: GenMessage<RollBackSessionFilesNotRestorable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_roll_back_session, 12);
+  messageDesc(file_shim_v1_endpoint_roll_back_session, 11);
 

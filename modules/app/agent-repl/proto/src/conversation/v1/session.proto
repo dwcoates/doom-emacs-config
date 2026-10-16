@@ -304,7 +304,50 @@ message SessionUpdate {
     // keep-alives are HELD (shim.v1.SetKeepalive). See SessionCacheLapse,
     // which carries the arm's whole contract.
     SessionCacheLapse cache_lapse = 36;
+    // HOW A ROLLBACK'S RESTART SETTLED (shim.v1.RollBackSession). The shim
+    // answers a rollback once its cut is made and restarts the vendor at the
+    // fork point after answering; this states, once, how that restart
+    // settled. See SessionRollbackSettled.
+    SessionRollbackSettled rollback_settled = 37;
   }
+}
+
+// HOW A ROLLBACK'S RESTART SETTLED. shim.v1.RollBackSession answers once the
+// open turn is stopped and the cut is made, and restarts the vendor at the
+// fork point after it has answered, so the caller is not held while a vendor
+// process boots (some 1.7s, measured 2026-10-16). The vendor judges the cut at
+// that boot, so whether the conversation really ends before the prompt is
+// known only here. Stated once per rollback, after its RollBackSession answer.
+// Every call to the shim that needs the vendor waits until the restart has
+// settled.
+message SessionRollbackSettled {
+  // The turns the rollback dropped (RollBackSessionRequest.dropped_turns),
+  // oldest first.
+  repeated TurnId dropped_turns = 1;
+  // THE ARM IS THE OUTCOME. Exactly one is set.
+  oneof outcome {
+    // The vendor resumed the conversation at the fork point: the dropped
+    // turns are gone from it.
+    SessionRollbackResumedAtCut resumed_at_cut = 2;
+    // The vendor refused the cut; the session was resumed whole, so the
+    // dropped turns are still in the conversation.
+    SessionRollbackRefused refused = 3;
+    // The restart failed; the session was resumed whole, so the dropped
+    // turns are still in the conversation.
+    SessionRollbackFailed failed = 4;
+  }
+}
+// The vendor resumed at the fork point.
+message SessionRollbackResumedAtCut {}
+// The vendor refused the cut.
+message SessionRollbackRefused {
+  // The vendor's own words.
+  string vendor_message = 1;
+}
+// The restart failed.
+message SessionRollbackFailed {
+  // The shim's account of the failure.
+  string detail = 1;
 }
 
 // ---- The prompt cache's projected lapse, while keep-alives are held ----
