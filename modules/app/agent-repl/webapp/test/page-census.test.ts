@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { captureLogRecords, type LogCapture } from "./log-capture.js";
 import { CENSUS_EVERY_MS, installPageCensus } from "../src/page-census.js";
+import type { BusyProbe, BusyReport } from "../src/busy-probe.js";
 import type { After } from "../src/every.js";
 
 let capture: LogCapture;
@@ -55,5 +56,22 @@ describe("installPageCensus", () => {
 
     // Assert
     expect(await censusRecords()).toEqual([]);
+  });
+
+  it("states the busy probe's tally beside the size when the page runs one", async () => {
+    // Arrange
+    const report: BusyReport = {
+      busy_ms: 7,
+      kinds: { timer: { count: 2, ms: 7 }, frame: { count: 0, ms: 0 }, mutation: { count: 0, ms: 0 }, resize: { count: 0, ms: 0 } },
+      top: [{ kind: "timer", label: "step", count: 2, ms: 7 }],
+    };
+    const busy: BusyProbe = { take: () => report, stop: () => undefined };
+    installPageCensus(document, after, busy);
+
+    // Act
+    fire();
+
+    // Assert
+    expect(await censusRecords()).toEqual([expect.objectContaining({ busy: report })]);
   });
 });
