@@ -990,7 +990,7 @@ changes no editor state."
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
                                              merge-actions
-                                             prompt
+                                             prompt context
                                              parent fork fork-source model priority
                                              allow-ungated)
   "Create a workspace in REPOSITORY under FORM.
@@ -1005,9 +1005,11 @@ it, because a caller at a keybinding writes facts, not nested oneofs.
     name, no configured merge actions.  MERGE-ACTIONS is spelled in plain
     text too: `(:before-ws-merge TEXT :postprocessing-prompt TEXT)\',
     either half optional, each wrapped as a `UserSaid\' here.
-  `:one-shot\' takes PROMPT and nothing else (required -- a one-shot IS
-    its prompt).  THERE IS NO FINISH CHOICE: what happens on completion is
-    the repository\='s own directive, which the daemon appends to the
+  `:one-shot\' takes PROMPT (required -- a one-shot IS its prompt) and
+    CONTEXT, the optional `WorkspaceRef\' of the workspace the commission
+    is about, which the daemon names in a note opening the commission.
+    THERE IS NO FINISH CHOICE: what happens on completion is the
+    repository\='s own directive, which the daemon appends to the
     commission and the agent carries out.
 
 PARENT is the parent\'s `WorkspaceRef\' and FORK the presence-only fork
@@ -1076,7 +1078,7 @@ and the new workspace\'s tab arrives through the roster push."
            :form (agent-repl-verbs--create-form
                   form :initial-prompt initial-prompt :base-ref base-ref :name name
                   :merge-actions merge-actions
-                  :prompt prompt)
+                  :prompt prompt :context context)
            :parent (when parent
                      (append (list :workspace parent) (when fork (list :fork fork))))
            :fork-source fork-source
@@ -1449,7 +1451,7 @@ pending ref is cleared before the landing runs or is withdrawn."
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-verbs--pending-landing-fire)
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
-                                              merge-actions prompt)
+                                              merge-actions prompt context)
   "Return the creation-form oneof for the bare arm keyword FORM.
 The two forms take disjoint facts, so each arm reads only its own."
   (pcase form
@@ -1462,7 +1464,8 @@ The two forms take disjoint facts, so each arm reads only its own."
                         :merge-actions (agent-repl-verbs--merge-actions merge-actions))))
     (:one-shot
      (list :arm :one-shot
-           :value (list :prompt (and prompt (agent-repl-verbs--said prompt)))))
+           :value (list :prompt (and prompt (agent-repl-verbs--said prompt))
+                        :context context)))
     (_ (user-error "agent-repl: unknown creation form %S" form))))
 
 (defun agent-repl-verbs--merge-actions (actions)
@@ -2472,30 +2475,58 @@ out itself.
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
-  (agent-repl-verbs--create-oneshot 'agent-repl-create-oneshot pick-model))
+  (agent-repl-verbs--create-oneshot 'agent-repl-create-oneshot pick-model nil))
 
-(defun agent-repl-verbs--create-oneshot (command pick-model)
+(defun agent-repl-create-oneshot-for-current-workspace (&optional pick-model)
+  "Create a ONE-SHOT that fixes something wrong with the CURRENT workspace.
+Bound to `SPC TAB C-o\='.  Exactly `agent-repl-create-oneshot\=', except
+the commission is ABOUT the workspace this runs from: the request names it
+as the one-shot\='s context (`CreateWorkspaceOneShot.context\='), and the
+daemon opens the commission with a note saying the issue it cites -- a bug
+in \"the feed\", say -- is that workspace\='s, by name, worktree and
+branch.  The one-shot is still top-level, cut from and merging into the
+primary branch; nothing of the current workspace\='s conversation or
+worktree is carried over.
+
+A prefix argument PICK-MODEL asks for the model."
+  (interactive "P")
+  (agent-repl-verbs--create-oneshot
+   'agent-repl-create-oneshot-for-current-workspace pick-model t))
+
+(defun agent-repl-verbs--create-oneshot (command pick-model about-current)
   "Create a one-shot for COMMAND, asking for the model when PICK-MODEL.
 The one composition every one-shot command shares: the repository is the
 current workspace\='s, the commission is read UNSEEDED into the one-shot
-history, and the model is asked for only under a prefix argument."
+history, and the model is asked for only under a prefix argument.
+
+ABOUT-CURRENT names the current workspace as the one-shot\='s context, the
+workspace the commission is about; its prompt names that workspace so the
+user knows which one the commission will be read against."
   (agent-repl-verbs--create-invoked command)
   (let* ((repository (agent-repl-verbs--read-for
                       command 'repository
                       (lambda () (agent-repl-verbs--dynamic-repository "a one-shot"))))
+         (about (and about-current (agent-repl--ws-current-name)))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()
                     (agent-repl-verbs--read-required-prompt
-                     "One-shot commission: " "a one-shot IS its prompt"
+                     (if about
+                         (format "One-shot fix for %s: " about)
+                       "One-shot commission: ")
+                     "a one-shot IS its prompt"
                      (agent-repl-verbs--oneshot-history-file) 'unseeded))))
          (model (and pick-model
                      (agent-repl-verbs--read-for
-                      command 'model #'agent-repl-verbs--read-model))))
-    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-one-shot mode=dynamic model=%S" model)
+                      command 'model #'agent-repl-verbs--read-model)))
+         (context (and about (agent-repl-verbs--ref about))))
+    (agent-repl--info agent-repl-verbs--create-log-scope
+                      "elisp.verbs.create-one-shot mode=dynamic model=%S context=%S"
+                      model about)
     (agent-repl-verb-create
      repository :one-shot
      :prompt prompt
+     :context context
      :model model)))
 
 ;;;; ---- The help workspace (`SPC o h') ----------------------------------

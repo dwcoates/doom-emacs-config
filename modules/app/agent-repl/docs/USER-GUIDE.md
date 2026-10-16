@@ -288,9 +288,23 @@ When Emacs quits, each workspace's input window is saved to that workspace's pro
   - It stops coming back once you send it, or once you send any other prompt after it.
   - Only the most recent such text comes back.
 
+## A one-shot that fixes the current workspace
+
+`SPC TAB C-o` makes a one-shot about the workspace you press it in.
+
+- Describe what is wrong with this workspace, for example a bug in its feed.
+  - The prompt names the workspace, so you can see which one the commission is about.
+- The daemon opens the one-shot's commission with a note naming this workspace.
+  - The note gives its name, worktree and branch.
+  - It tells the agent that the issue you describe is this workspace's, not the one-shot's own.
+- Otherwise it is an ordinary `SPC TAB o` one-shot.
+  - It is cut from the primary branch and merges back into it.
+  - It copies nothing from this workspace's conversation or worktree.
+  - `SPC u SPC TAB C-o` asks for the model too.
+
 ## One-shot commissions across a crash
 
-The one-shot commission prompt (`SPC TAB o`) saves what you type to its history on every keystroke.
+The one-shot commission prompt (`SPC TAB o` and `SPC TAB C-o`) saves what you type to its history on every keystroke.
 
 - The prompt always starts empty.
   - Unlike the other creation prompts, it never copies in the text of your current workspace's input window.

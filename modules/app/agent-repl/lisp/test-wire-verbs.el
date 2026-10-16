@@ -218,6 +218,18 @@ form."
       (should (equal (json-serialize one-shot)
                      "{\"prompt\":{\"said\":\"ship it\"}}")))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-one-shot-carries-its-context-workspace ()
+  "A one-shot's context workspace encodes inside the one-shot arm, beside the prompt."
+  (agent-repl-test-wire-verbs--with-common
+    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
+                          :form '(:arm :one-shot
+                                  :value (:prompt (:text "fix its feed")
+                                          :context (:id "ws-2" :dir "/w/two")))))
+           (one-shot (cdr (assq 'oneShot
+                                (agent-repl-wire-encode-create-workspace-request request)))))
+      (should (equal (json-serialize one-shot)
+                     "{\"prompt\":{\"said\":\"fix its feed\"},\"context\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}")))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-prompt-refused ()
   "A one-shot IS its prompt: a one-shot without one never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
@@ -1850,7 +1862,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-off-primary-branch-arm ()
@@ -1870,6 +1882,15 @@ and the primary branch."
                     (agent-repl-test-wire-verbs--parse
                      "{\"unknownForkSource\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :unknown-fork-source
+                             :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-context-workspace-arm ()
+  "CreateWorkspaceError's `unknown_context_workspace' arm decodes the ref it names."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"unknownContextWorkspace\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :unknown-context-workspace
                              :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-fork-source-has-no-conversation-arm ()
