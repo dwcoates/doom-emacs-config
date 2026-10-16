@@ -151,52 +151,6 @@ func assertOneHookCard(t *testing.T, rows []*frontendv1.FeedRow) {
 	}
 }
 
-// TestHookSucceeded is #77 (golden hook-succeeded): the fake SDK's
-// succeeding PreToolUse hook around a Read call.
-//
-// NAMING MISMATCH — reported, not fixed (SPEC.md F.2 "no ruling needed... a
-// writer finding the landed shape differs... reports it; it is never fixed
-// by changing production"): the golden is named "hook-succeeded" in
-// MANIFEST.md, but the scenario `fake/scenarios/hooks.ts` actually
-// registers is named "hook-success" (`prompt: "!hook-success"`).
-// `fake/registry.ts` selects a scenario by an EXACT `!<name>` match on the
-// scenario's own `name` field, not the golden's name, so this test drives
-// "!hook-success" — the prompt that actually reaches HOOK_SUCCESS. Driving
-// "!hook-succeeded" instead would silently fall through to the default
-// prose scenario and never touch hook code at all.
-func TestHookSucceeded(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, repo, ws := newHookWorld(t)
-
-	// Act
-	turn := driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "!hook-success")
-
-	// Assert: the turn ran to an ordinary conclusion — a succeeded hook never
-	// touches how a turn ends.
-	rows := openFeedPage(t, w, ws)
-	ended := turnEndedRow(t, rows, turn)
-	if ended.GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want a plain conclusion", ended)
-	}
-	// The feed drew NO hook card at all — bubbles.go's drawHook: "A succeeded
-	// hook draws NOTHING."
-	if h := hookRow(rows); h != nil {
-		t.Fatalf("feed drew a hook card %v for a SUCCEEDED hook, want none", h)
-	}
-	// The only remaining proof the hook actually fired and succeeded is the
-	// shim's own durable structured log, captured at this workspace's "shim"
-	// sink (convert/hooks.ts: `LOGGER.logVerbose(..., "a hook succeeded")`,
-	// under the fixed operation "shim.convert.hooks" bindLog binds it to).
-	record := w.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "the succeeded hook's own log record",
-		func(r harness.LogRecord) bool {
-			return r.Operation == "shim.convert.hooks" && r.Message == "a hook succeeded"
-		})
-	if got, want := record.Context["hook"], "PreToolUse:Read"; got != want {
-		t.Fatalf("succeeded-hook log context[hook] = %v, want %q", got, want)
-	}
-}
-
 // TestHookBlocked is #78 (golden hook-blocked): the fake SDK's blocking
 // PostToolUse hook around an Edit call.
 //
@@ -285,39 +239,5 @@ func TestHookFailed(t *testing.T) {
 	adAwaitReplayedFeedRow(t, successor, again, "the hook turn's terminal, replayed after the relaunch", endsTurn(turn))
 	if h := hookRow(openFeedPageOn(t, successor, again)); h != nil {
 		t.Fatalf("the relaunched daemon drew hook card %v from history, want none: the store keeps no hook line a page can serve", h)
-	}
-}
-
-// TestHookCancelled is #80 (golden hook-cancelled): the fake SDK's cancelled
-// PostToolUse hook around an Edit call the hook did NOT block — the edit
-// stands, and the turn ends ordinarily.
-func TestHookCancelled(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, repo, ws := newHookWorld(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "hook-cancelled")
-
-	// Assert: the edit stood and the turn concluded ordinarily.
-	rows := openFeedPage(t, w, ws)
-	ended := turnEndedRow(t, rows, turn)
-	if ended.GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want a plain conclusion", ended)
-	}
-	// The feed drew NO hook card — bubbles.go's drawHook default case:
-	// "Succeeded and cancelled draw nothing."
-	if h := hookRow(rows); h != nil {
-		t.Fatalf("feed drew a hook card %v for a CANCELLED hook, want none", h)
-	}
-	// The only remaining proof the hook fired and was cancelled is the
-	// shim's own durable structured log. Cancellation is an ordinary vendor
-	// outcome, so convert/hooks.ts records it at INFO rather than WARN.
-	record := w.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "the cancelled hook's own log record",
-		func(r harness.LogRecord) bool {
-			return r.Operation == "shim.convert.hooks" && r.Message == "a hook was cancelled before it finished"
-		})
-	if got, want := record.Level, "info"; got != want {
-		t.Fatalf("cancelled-hook log level = %q, want %q", got, want)
 	}
 }

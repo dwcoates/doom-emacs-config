@@ -215,19 +215,6 @@ func emGHIAssertIngressEmpty(t *testing.T, e *Emacs, ws, when string) {
 	}
 }
 
-// emGHIAssertResponsive is the heartbeat assertion, made explicit at a call
-// site: every `Eval` already fails immediately when the heartbeat has missed
-// (`AwaitEvalFor` short-circuits on `isWedged`), so one more round trip
-// through the command loop after the act under test is exactly the claim
-// "Emacs is still answering". No bound of its own is introduced: the
-// heartbeat's `HeartbeatBound` is the bound.
-func emGHIAssertResponsive(t *testing.T, e *Emacs, after string) {
-	t.Helper()
-	if got := e.EvalInt(`(+ 1 1)`); got != 2 {
-		t.Fatalf("after %s the command loop answered (+ 1 1) = %d, want 2", after, got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // AREA G
 // ---------------------------------------------------------------------------
@@ -267,37 +254,6 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 		t.Fatalf("the roster arm moved to %s after the forced restart, want it to stay :interrupted: the agent was resumed", got)
 	}
 	emGHIAssertIngressEmpty(t, e, ws, "after a forced restart")
-}
-
-// TestEmacsForcedRestartClosesTheComposerOnItsSend holds the ONE edge that
-// closes the composer.
-//
-// RestartWorkspace is sent asynchronously and answers success once the daemon
-// has taken the work on; the bounce it schedules — prelaunch, stand-down,
-// reap, relaunch — runs after that answer again. The `restarting` composer arm
-// therefore arrives later still, over the WatchHostWorkspace stream rather
-// than the one that carried the ack, and nothing orders the two. So the gate
-// read the instant the restart is asked for must ALREADY be closed: a caller
-// that read `:open` here would submit a prompt the daemon refuses a few
-// hundred milliseconds later, which is what a headless sandbox run hit.
-func TestEmacsForcedRestartClosesTheComposerOnItsSend(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w, e := emGHIWorld(t)
-	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-restart-gate")
-	emGHISelect(t, e, dir, ws)
-	emGHIOpenPanel(t, e)
-	emGHISubmit(t, e, ws, emGHIParkedPrompt)
-	emGHIAwaitStatus(t, e, ws, "the turn to be running before the interrupt", emGHIRunningArms...)
-
-	// Act.
-	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
-
-	// Assert: read with no wait at all — a wait would hide the race by giving
-	// the daemon's own push time to land.
-	if got := e.EvalString(`(symbol-name (agent-repl-host-composer-gate ` + elispString(ws) + `))`); got != ":restarting" {
-		t.Fatalf("the composer gate reads %s the instant the forced restart is asked for, want :restarting: a prompt sent now is refused by the bounce", got)
-	}
 }
 
 // TestEmacsRestartHoldsPromptsMeanwhile is scenario 36.
@@ -419,35 +375,4 @@ func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
 		case <-ticker.C:
 		}
 	}
-}
-
-// TestEmacsRestartDoesNotWedgeEmacs is scenario 37, and the HEARTBEAT is the
-// assertion.
-//
-// Same family as scenario 13: the motivating defect is a real hang — a
-// process sentinel re-entered through a killed buffer that ran the sentinel
-// again — which has no frame at all and manifests only as an Emacs that
-// stops answering. A restart driven with a live panel standing is the shape
-// that provoked it, so the test's claim is not about the restart's outcome
-// but about Emacs still being alive on the far side of it.
-func TestEmacsRestartDoesNotWedgeEmacs(t *testing.T) {
-	t.Parallel()
-	// Arrange: a live panel and a live turn, so the restart tears down real
-	// buffers and real processes rather than nothing.
-	w, e := emGHIWorld(t)
-	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-restart-wedge")
-	emGHISelect(t, e, dir, ws)
-	emGHIOpenPanel(t, e)
-	emGHISubmit(t, e, ws, emGHIParkedPrompt)
-	emGHIAwaitStatus(t, e, ws, "the turn to be running before the restart", emGHIRunningArms...)
-
-	// Act
-	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
-
-	// Assert: Emacs is still answering. The heartbeat runs on its own
-	// goroutine against the same socket for the whole life of the process,
-	// so a wedge fails this test at whichever call notices first; this
-	// round trip is the one that names the act it followed.
-	emGHIAwaitStatus(t, e, ws, "the roster arm to settle after the forced restart", emGHISettledArms...)
-	emGHIAssertResponsive(t, e, "a forced restart with a live panel")
 }

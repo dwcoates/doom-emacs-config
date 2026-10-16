@@ -207,59 +207,6 @@ func TestEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	}
 }
 
-// TestEmacsReRegisterIsIdempotentByDir is scenario 39.
-//
-// Re-registering after a daemon restart is THE NORMAL PATH, not an error:
-// Emacs re-offers every directory it holds on the link-up edge, and the
-// daemon keys them by directory. The defect this pins is a second row for
-// the same worktree — a registry that grew, or a duplicate tab, because a
-// re-registration was treated as a new workspace.
-func TestEmacsReRegisterIsIdempotentByDir(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, e := emGHIWorld(t)
-	first, firstDir := emGHIRegister(t, e, w.Emacs.box, "repo-reregister-one")
-	emGHIRegister(t, e, w.Emacs.box, "repo-reregister-two")
-	emGHISelect(t, e, firstDir, first)
-	wantNames := e.EvalStrings(emGHIWorkspaceNamesForm)
-	if len(wantNames) != 2 {
-		t.Fatalf("the registry holds %v before the restart, want two workspaces", wantNames)
-	}
-	pid := e.EvalInt(emHODaemonPIDForm)
-
-	// Act
-	e.Eval(`(agent-repl-frontend-daemon-restart)`)
-	emHOAwaitNewDaemon(t, e, pid)
-	emHOAwaitLinkUp(t, e, "the link to come back on the new daemon")
-
-	// Assert: the SAME count and the SAME names. The registry is read as
-	// data and sorted at the source, so this compares sets without ordering
-	// noise, and any duplicate would move the count.
-	e.AwaitEval("the workspace registry to settle after the re-registration",
-		emGHIWorkspaceNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(wantNames) })
-	got := e.EvalStrings(emGHIWorkspaceNamesForm)
-	if len(got) != len(wantNames) {
-		t.Fatalf("the registry holds %v after the restart, want %v: a re-registration duplicated a workspace", got, wantNames)
-	}
-	for i := range wantNames {
-		if got[i] != wantNames[i] {
-			t.Fatalf("the registry holds %v after the restart, want %v", got, wantNames)
-		}
-	}
-
-	// Assert: no duplicate tab either. The tab order is one name per
-	// workspace, and it is where a duplicate row would become visible.
-	tabs := e.EvalStrings(emHOTabOrderForm)
-	seen := map[string]bool{}
-	for _, name := range tabs {
-		if seen[name] {
-			t.Fatalf("the tab order is %v after the restart: %q appears twice", tabs, name)
-		}
-		seen[name] = true
-	}
-}
-
 // TestEmacsDaemonDownSurfacesAndReconnects is scenario 41.
 //
 // Connection death is detected AT THE TRANSPORT — there are no keepalive

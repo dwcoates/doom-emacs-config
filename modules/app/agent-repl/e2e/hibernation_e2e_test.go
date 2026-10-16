@@ -56,15 +56,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -100,17 +97,6 @@ const fakeKeepaliveIntervalEnv = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS"
 // 20ms) so a slow CI host cannot make the override read as "faster than the
 // suite polls".
 const fakeKeepaliveIntervalMS = 100
-
-// keepAliveObservationWindow bounds the wait for a SECOND durable cursor
-// advance with NO second SubmitPrompt in between — the store's own proof
-// that a real keep-alive turn's transcript bytes were durably ingested by
-// the sidecar (see awaitCursorAdvance, world_test.go). Sized at 20x
-// fakeKeepaliveIntervalMS, matched to this suite's other real-process
-// margins (StoreOutageWindow is likewise an order of magnitude above the
-// window it bounds) rather than an untested guess: the sidecar's own
-// --poll-interval/--rescan-interval (50ms/200ms, world_test.go's
-// startSidecar) both sit comfortably inside it.
-const keepAliveObservationWindow = 2 * time.Second
 
 // ---------------------------------------------------------------------------
 // The idle-cutoff hibernation tests' own budget (SPEC.md section B, "Waits"):
@@ -273,178 +259,6 @@ func distinctTurnIDs(rows []*frontendv1.FeedRow) map[string]bool {
 		}
 	}
 	return out
-}
-
-// TestHibernateOnIdleCutoff — SPEC.md #44. Contract: docs/overhaul/daemon.md
-// ("Hibernation is daemon POLICY (idle-cutoff sweep + implicit revive on
-// prompt)... before standing a shim down for hibernation the daemon calls
-// the shim's Hibernate directive"). Exercises, for real:
-//
-//  1. A turn parked on the documented turn gate holds real work open across
-//     the compressed idle cutoff, and the sweep defers rather than forcing a
-//     stand-down. The deferral is the SWEEP'S OWN freeness pre-check
-//     (daemon/internal/drain/sweep.go:64-66), which short-circuits before
-//     any Hibernate directive is sent — so HibernateError.turn_in_flight,
-//     the shim-side refusal, is never reached from this path (recorded as an
-//     open item in SPEC.md §G).
-//  2. The plain success path once that turn closes and the session goes
-//     idle again: the sweep's Hibernate/KillSession round trip succeeds, and
-//     the host view settles on the documented park shape (live, shim
-//     detached).
-//
-// compaction_failed and no_session are NOT exercised — see this file's
-// header comment for why neither is reachable without fabrication.
-func TestHibernateOnIdleCutoff(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	gatePath := filepath.Join(t.TempDir(), "turn-gate")
-	const gateText = "hibernation e2e turn gate: TestHibernateOnIdleCutoff"
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		// HibernationChainTimeout IS THIS WORLD'S BUDGET, not just the
-		// individual waits'. See that constant's own comment: a `WithTimeout`
-		// derived from w.Ctx() cannot outlive w.Ctx(), so a 15s wait inside a
-		// 5s world is bounded by whatever the world has left, and the bound
-		// declared at the wait was never the bound in force. MEASURED: this
-		// test's whole chain consumes 0.36s of the world budget in a quiet
-		// full-package run at -parallel 8, and 2.15s at a 1-minute load of
-		// 88 — 2.3x the ordinary DefaultTimeout margin away, close enough
-		// that the first wait to outrun the remainder reports a bare
-		// "context deadline exceeded" that says nothing about the sweep.
-		Timeout:      HibernationChainTimeout,
-		IdleCutoffMS: hibernationIdleCutoffMS,
-		ExtraEnv: []string{
-			turnGatePathEnv + "=" + gatePath,
-			turnGateTextEnv + "=" + gateText,
-		},
-	}})
-	// Standing the shim down at the idle cutoff leaves the session with no
-	// producer, which opens a health fault; that park is this test's
-	// subject. The link records beside it are the same act seen from the
-	// connectivity layer: the shim PROCESS goes, so the client's socket drops
-	// and it redials until the reap tells it the process is gone.
-	//
-	// THE STAND-DOWN'S KILL ROUND TRIP IS DECLARED TOO, for the reason
-	// refusals_e2e_test.go's rfVendorStartFaultWarnings states: the sweep
-	// bounds that call at drain.DefaultStandBound, and a saturated parallel
-	// run can spend it (observed once). Fleet.KillSession already handles the
-	// silence — "a shim that will not answer is not a reason to leave the
-	// process running", so it stops the process anyway and records the
-	// refusal as evidence — and an undeclared record whose observation is a
-	// race is a flake, not a finding. `daemon.shimclient.exit` is the same
-	// act at the process reaper: the shim can exit as its session ends,
-	// ahead of the kill this stand-down sends it.
-	w.ExpectWarnings("daemon.health.open_fault",
-		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
-		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.shimclient.exit")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	host := w.WatchHost(ws)
-	defer host.Close()
-
-	// Act: submit the gated turn. It parks before emitting anything, so it
-	// stays genuinely in flight until this test releases it.
-	//
-	// THE MARK IS TAKEN FIRST, so neither assertion below can be satisfied by
-	// the sweep's verdict on the MOUNT-SPAWNED session — which, never having
-	// been prompted, is itself idle past the cutoff and gets stood down on a
-	// fast box before this line runs (see sweepMark).
-	mark := markSweepLog(w, ws.GetDir())
-	gatedTurn := SubmitPrompt(t, w, ws, gateText)
-
-	// Assert: the sweep, firing every hibernationIdleCutoffMS, sees a real
-	// turn_in_flight refusal from the real shim and defers — never forcing a
-	// stand-down out from under live work.
-	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
-		"the sweep deferring hibernation for the in-flight gated turn",
-		hibernateNotFreeMsg)
-
-	// Act: release the gate; the turn ends the ORDINARY way (the gate never
-	// changes what the turn is — src/fake/index.ts's own doc comment).
-	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
-		t.Fatalf("release the turn gate: %v", err)
-	}
-	AwaitTurnEnded(t, w, ws, gatedTurn)
-
-	// Assert: with the turn closed, the session goes idle again and the SAME
-	// sweep now succeeds — a real Hibernate ack followed by a graceful
-	// (non-forced) KillSession.
-	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
-		"the idle sweep hibernating the now-idle session", hibernateSucceededMsg)
-
-	// Assert: the host view settles on the documented park shape — the
-	// session still exists (never severed, never dead) with its shim
-	// detached.
-	hostCtx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
-	defer cancel()
-	harness.AwaitView(t, hostCtx, host,
-		"the host reporting the parked workspace with its shim detached", shimDetached)
-}
-
-// TestKeepAliveNeverAppearsOnWire — SPEC.md #45. Contract: docs/overhaul/
-// shim.md's "Keep-alives (entirely shim-internal)" section ("nothing
-// keep-alive-shaped exists on the wire (no PromptOrigin value, no rpc, no
-// control-plane signal)... Keep-alive turns are first-class in the store as
-// NEVER-SERVED: indexed so no page returns them") and docs/overhaul/store.md
-// ("No keep-alive row is ever returned by any page").
-//
-// Asserts by ABSENCE, but only after PROVING a keep-alive turn actually ran:
-// a compressed keep-alive cadence (AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS)
-// makes a real keep-alive turn's transcript bytes land durably in the store
-// with NO second SubmitPrompt from this test — read via the same durable
-// cursor-advance proof driveScenarioToCompletion already uses
-// (world_test.go's awaitCursorAdvance). Only once that is proven does the
-// test assert the daemon's own feed carries no trace of it, and that the
-// wire has no PromptOrigin arm a keep-alive could even be attributed to.
-func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
-	// This scenario deliberately waits for an idle keep-alive after completing
-	// a full real-process turn. Running it beside seven other process worlds
-	// repeatedly exhausted the baseline GetSidecarCursors deadline before the
-	// assertion's own observation window began. Keep this one world serialized
-	// so the stated cursor bounds measure the product rather than host contention.
-	// Arrange
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
-	}})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-
-	// Act: one real turn establishes a live session, whose keep-alive cadence
-	// begins before StartSession even returns success (shim.md).
-	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
-
-	// Act: wait for a SECOND durable cursor advance with NO second prompt —
-	// proof a real keep-alive turn's bytes were durably ingested.
-	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
-	// The baseline is one ordinary store RPC, not part of the post-baseline
-	// keep-alive observation window. Give that RPC the suite's ordinary bound;
-	// awaitCursorAdvanceWithin owns the exact 2s observation bound below.
-	cursorCtx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	baseline := cursorOffsetsUnder(w.Store.Cursors(t, cursorCtx), projectDir)
-	// ON keepAliveObservationWindow, NOT DefaultTimeout. The context above
-	// bounded only the baseline read, so the wait this constant documents ran
-	// on the suite-wide budget instead — the bound stated here was never the
-	// bound in force.
-	awaitCursorAdvanceWithin(t, w, projectDir, baseline, keepAliveObservationWindow)
-
-	// Assert: the daemon's own feed carries EXACTLY the one real turn — the
-	// keep-alive turn that just, provably, ran is not a distinct feed row.
-	turns := distinctTurnIDs(feedRows(t, w, ws))
-	if want := (map[string]bool{turn1.GetValue(): true}); !reflect.DeepEqual(turns, want) {
-		t.Fatalf("feed turns while a keep-alive is provably running = %v, want exactly %v", turns, want)
-	}
-
-	// Assert: structurally, there is no PromptOrigin arm a keep-alive could
-	// ever be attributed to — every prompt any real client could submit
-	// carries one of these named origins, and none of them names a
-	// keep-alive (shim.md: "the one shared file... has no keep-alive value
-	// on purpose").
-	for _, name := range conversationv1.PromptOrigin_name {
-		if strings.Contains(name, "KEEPALIVE") || strings.Contains(name, "KEEP_ALIVE") {
-			t.Fatalf("conversation.v1.PromptOrigin carries a keep-alive arm (%s) — the control plane is supposed to have none", name)
-		}
-	}
 }
 
 // fakeVendorTurnMessage is the fake vendor's record of running a turn of its

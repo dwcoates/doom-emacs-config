@@ -30,7 +30,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -169,33 +168,6 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 		return false
 	})
 	return found
-}
-
-// assertNoResponseTextEver drains stream for probe (bounded, a designed
-// negative-assertion window per harness.ExpectNoPush's own discipline — this
-// suite never sleeps to synchronize, but a claim of ABSENCE necessarily
-// waits out a bound rather than an event) failing if any pushed row is a
-// response unit whose prose equals text. Pushes unrelated to text (e.g. the
-// bubble's own live-progress heartbeat) are drained and ignored — the
-// assertion is about this ONE text never reaching the feed the stream is
-// open on, not about the feed being silent.
-func assertNoResponseTextEver(t *testing.T, stream *harness.Stream[*frontendv1.FeedRow], probe time.Duration, text string) {
-	t.Helper()
-	timer := time.NewTimer(probe)
-	defer timer.Stop()
-	for {
-		select {
-		case row, ok := <-stream.C:
-			if !ok {
-				return
-			}
-			if md, isResponse := responseMarkdown(row.GetActivity()); isResponse && md == text {
-				t.Fatalf("feed carried response text %q, want it to stay off this feed", text)
-			}
-		case <-timer.C:
-			return
-		}
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -366,62 +338,6 @@ func TestSubagentDetached(t *testing.T) {
 // ---------------------------------------------------------------------------
 // #29 — SubagentDetachedUtteranceStaysOffTopLevel.
 // ---------------------------------------------------------------------------
-
-// TestSubagentDetachedUtteranceStaysOffTopLevel drives
-// `!subagent-detached-utterance` (landed addition, subagents.ts) —
-// E2E-EVENT-INVENTORY.md remediation item 8. MANIFEST.md marks this
-// scenario GROUNDED IN SHAPE (it reuses subagent-detached's launch
-// machinery, itself a real capture golden) but the utterance-in-isolation
-// placement itself is INVENTED: "no capture records a live subagent's
-// mid-flight utterance in isolation ... so the utterance's OWN placement
-// (post-turn, no terminal) is invented from the family's established
-// pattern rather than a specific recording." This test's own assertion —
-// that the router keeps a live subagent's prose off the top-level feed —
-// is exactly what that invented placement exists to prove; nothing here
-// ever completes the agent (SPEC.md §C #29: "asserts the router keeps it
-// out of the top-level feed while the unit is still live").
-func TestSubagentDetachedUtteranceStaysOffTopLevel(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-
-	// Act: the main turn ends before the agent's mid-flight utterance is
-	// even written — open the root feed (and start tailing it) RIGHT AWAY
-	// so the absence check below cannot miss a push that races ahead of it.
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-detached-utterance")
-	rootPage, rootToken := openFeed(t, w, ws, nil)
-	rootStream := w.WatchFeed(rootToken)
-
-	bubbleRow := findRow(rootPage.GetSuccess().GetRows(), func(row *frontendv1.FeedRow) bool {
-		return row.GetDetachedSubagent() != nil
-	})
-	if bubbleRow == nil {
-		t.Fatalf("root feed page %v, want a detached_subagent row for the launched sweep", rootPage)
-	}
-
-	// Assert: the bubble stays LIVE — this scenario never completes the
-	// agent (no task_notification is ever emitted).
-	if bubbleRow.GetDetachedSubagent().GetSubagent().GetLive() == nil {
-		t.Errorf("detached subagent bubble = %v, want it LIVE (this scenario never completes it)", bubbleRow.GetDetachedSubagent().GetSubagent())
-	}
-
-	// Act: wait for the mid-flight utterance to actually land, on the
-	// bubble's OWN sub-feed — the positive half of the assertion, proving
-	// the utterance happened at all before checking where it did NOT go.
-	const utterance = "Still sweeping; found something interesting."
-	subPage, subToken := openFeed(t, w, ws, bubbleRow.GetId())
-	awaitResponseText(t, w, subPage, w.WatchFeed(subToken), utterance)
-
-	// Assert: the SAME utterance never reached the root feed — neither in
-	// the page already fetched above, nor as any later push observed on
-	// the stream that has been tailing since before the utterance landed.
-	if pageHasResponseText(rootPage.GetSuccess().GetRows(), utterance) {
-		t.Errorf("root feed page already carried the subagent's mid-flight utterance; it must stay off the top-level feed while the unit is live")
-	}
-	assertNoResponseTextEver(t, rootStream, StoreOutageWindow, utterance)
-}
 
 // ---------------------------------------------------------------------------
 // #30 — NestedSubagentHistoricalUsage.

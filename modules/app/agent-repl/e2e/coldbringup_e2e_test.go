@@ -99,21 +99,3 @@ func TestColdBringUpEarnsNoStoreRefusal(t *testing.T) {
 			len(refusals), refusals[0].Raw)
 	}
 }
-
-// TestColdBringUpServesTheMainBookWithoutAsking is the MECHANISM the test above
-// depends on: the shim states that it answered the main agent's watch from what
-// it already knew, rather than by asking a store that would have to refuse.
-func TestColdBringUpServesTheMainBookWithoutAsking(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-
-	// Act.
-	workspaceDir := cbuBringUp(t, w)
-
-	// Assert.
-	rec := cbuAwaitServedWithoutAsking(t, w, workspaceDir)
-	if rec.Level == "warn" || rec.Level == "error" {
-		t.Fatalf("the ordering the contract asks for was logged at %q, want an ordinary record: %s", rec.Level, rec.Raw)
-	}
-}

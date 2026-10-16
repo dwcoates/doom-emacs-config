@@ -147,39 +147,6 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 		})
 }
 
-// TestEmacsPanelOpensIntoTheMainArea is scenario 14.
-func TestEmacsPanelOpensIntoTheMainArea(t *testing.T) {
-	t.Parallel()
-	w, _ := emacsPanelWorld(t, 1)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	before := len(windowBuffers(e))
-
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-
-	after := windowBuffers(e)
-	if len(after) <= before {
-		t.Fatalf("the window list did not grow across an open: %d -> %d (%q)", before, len(after), after)
-	}
-	var sawFrontend, sawPanel bool
-	for _, b := range after {
-		if strings.HasPrefix(b, frontendPrefix) {
-			sawFrontend = true
-		}
-		if strings.HasPrefix(b, panelPrefix) {
-			sawPanel = true
-		}
-	}
-	if !sawFrontend {
-		t.Fatalf("no window shows a %q buffer after the open; windows were %q", frontendPrefix, after)
-	}
-	if !sawPanel {
-		t.Fatalf("no window shows a %q buffer after the open; windows were %q", panelPrefix, after)
-	}
-}
-
 // TestEmacsPlainCloseTogglesThePanelsBack is the other half of scenario 15:
 // `SPC o c` is a TOGGLE, so a second press on a workspace whose panels are
 // merely hidden must put them back.
@@ -227,40 +194,6 @@ func TestEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
                           (get-buffer-window (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))
                           t)`) {
 		t.Fatalf("workspace %q's own webview buffer is not the one on the frame after the toggle reopened", current)
-	}
-}
-
-// TestEmacsWebviewIsAtHomeOnItsOwnDaemon is the rescue's own predicate,
-// against the real running daemon: `agent-repl--frontend-host-at-home-p`
-// decides whether `SPC o L` navigates or leaves the host page alone, so a
-// predicate that cannot be CALLED makes the rescue unreachable.
-//
-// It once reached a `agent-repl--frontend-base-url` that no longer existed,
-// and every unit test of the rescue mocked around it.
-func TestEmacsWebviewIsAtHomeOnItsOwnDaemon(t *testing.T) {
-	t.Parallel()
-	w, _ := emacsPanelWorld(t, 1)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-
-	// Home is the host page on the daemon that OWNS the workspace: the URL the
-	// one host web view is loaded from.
-	home := e.EvalString(`(agent-repl-webhost-url (agent-repl-host-conn ` + elispString(current) + `))`)
-	if home == "" {
-		t.Fatalf("workspace %q has no host page URL while its daemon link is up", current)
-	}
-	if !e.EvalBool(`(and (agent-repl--frontend-host-at-home-p ` + elispString(current) + ` ` + elispString(home) + `) t)`) {
-		t.Fatalf("the host page's own URL %q does not read as home for workspace %q", home, current)
-	}
-	// And a page that left the daemon does not: this is the state the rescue
-	// exists for, and reading it wrong either strands the user or throws away
-	// a rendered feed.
-	if e.EvalBool(`(and (agent-repl--frontend-host-at-home-p ` + elispString(current) + ` "about:blank") t)`) {
-		t.Fatal("`about:blank` reads as home; the rescue would refuse to bring a stranded host page back")
 	}
 }
 

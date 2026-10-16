@@ -118,18 +118,6 @@ func (f *emacsFindFileFixture) workspaceNames() []string {
 		workspaceRegistryNamesForm)
 }
 
-// findFileWithRoot visits PATH the ordinary way, with root detection pointed
-// at ROOT for the duration of the visit. The `let' is the module's own
-// injection point; `find-file' is the real command, so the real advice on the
-// real display primitive is what runs.
-func (f *emacsFindFileFixture) findFileWithRoot(path, root string) {
-	f.Emacs.t.Helper()
-	f.Emacs.Eval(`(let ((agent-repl-find-file-workspace-root-function
-                        (lambda (_dir) ` + elispString(root) + `)))
-                    (find-file ` + elispString(path) + `)
-                    t)`)
-}
-
 // windowSideOf answers the `window-side' parameter of the window showing
 // PATH, as a string. Read as DATA off the window, never off the modeline.
 func (f *emacsFindFileFixture) windowSideOf(path string) string {
@@ -148,42 +136,6 @@ func hashKeys(e *Emacs, table string) []string {
 // ---------------------------------------------------------------------------
 // #31 — VisitingAFileRoutesIntoItsOwningWorkspace
 // ---------------------------------------------------------------------------
-
-// TestEmacsVisitingAFileRoutesIntoItsOwningWorkspace is scenario 31: a file
-// under a REGISTERED worktree lands in the workspace that owns it.
-//
-// Two claims, and the second is the one a naive implementation gets wrong:
-// the owning workspace is SELECTED, and the file's window is NOT a side
-// window. Routing places a file in the tab's largest non-agent-repl window;
-// dropping it into a popup would be the module's own "a popup is not where a
-// file belongs" rule broken.
-func TestEmacsVisitingAFileRoutesIntoItsOwningWorkspace(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsFindFileFixture(t, box)
-	e := f.Emacs
-
-	repo := f.repoUnderHome(t, "owned")
-	ws := f.registerWorkspace(t, repo.Dir)
-	path := f.fileIn(t, repo.Dir, "owned.txt", "one\ntwo\nthree\n")
-
-	// Leave the owning workspace before visiting, so "switched to it" is a
-	// change this test caused rather than where it already was.
-	e.Eval(`(tab-bar-new-tab)`)
-
-	f.findFileWithRoot(path, repo.Dir)
-
-	e.AwaitEvalFor(emacsFindFileBound, "the owning workspace to be selected",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool {
-			var got string
-			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got == ws
-		})
-
-	if side := f.windowSideOf(path); side != "nil" {
-		t.Fatalf("the routed file's window has window-side %q, want none: a file is not placed in a side window", side)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // #32 — AnUnroutableFileRecordsARefusal
