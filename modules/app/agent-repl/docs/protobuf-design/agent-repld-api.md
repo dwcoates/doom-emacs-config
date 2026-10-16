@@ -43,8 +43,10 @@ contract yet: each section says what the owner has ruled and what is open.
 
 ## Topology (ruled; see workspace-source-and-context.md)
 
-- A create has three independent fields: branches from, merges into, and an
-  optional fork source (unset is a fresh context).
+- A create has three independent fields: branches from, merges into, and its
+  context origin. Under "No defaults" the context origin is REQUIRED, naming
+  fresh or the workspace forked; the earlier "optional, unset is fresh"
+  wording is superseded.
 - An async merge is a create with "land when done" attached; it needs no shape
   of its own.
 - `workspace merge` names no target: the daemon lands in the target recorded
@@ -142,3 +144,4 @@ invariant), how common it is, and example situations.
 
 | # | context | branch source | merge target | supported | prevalence | example situations |
 |---|---|---|---|---|---|---|
+| 1 | self | main | main | yes | common | tangential fix landed while work goes on; parallel subtask; trying a second approach; handing the work off with its context |
