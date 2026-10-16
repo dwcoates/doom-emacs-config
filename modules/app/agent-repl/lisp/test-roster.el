@@ -3330,3 +3330,35 @@ Each element is (WS LINE)."
       (agent-repl-roster-last-turn-ended-ms "w")
       ;; Assert
       (should (equal read '(:last-turn-ended :last-selected))))))
+
+(ert-deftest agent-repl-test-roster-move-frame-switches-as-a-follow-and-lands-in-the-input ()
+  "The frame moves bound as a follow, so the activation is never counted as
+a second switch, and lands in the destination's input window."
+  ;; Arrange
+  (let (switched-following landed)
+    (cl-letf (((symbol-function 'agent-repl--ws-switch)
+               (lambda (_ws) (setq switched-following agent-repl-roster-following)))
+              ((symbol-function 'agent-repl--maybe-autoselect-input)
+               (lambda (ws) (setq landed ws))))
+      ;; Act
+      (agent-repl-roster-move-frame "alpha")
+      ;; Assert
+      (should (equal (list switched-following landed) '(t "alpha"))))))
+
+(ert-deftest agent-repl-test-roster-every-move-to-a-selected-workspace-goes-through-move-frame ()
+  "The roster's follow and Emacs's own switch request move the frame
+through `agent-repl-roster-move-frame', and neither switches on its own."
+  (dolist (spec '(("roster.el" . "agent-repl-roster-apply-current")
+                  ("host.el" . "agent-repl-host--move-on-request")))
+    (with-temp-buffer
+      ;; Arrange
+      (insert-file-contents (expand-file-name (car spec) agent-repl-test--module-dir))
+      (emacs-lisp-mode)
+      (goto-char (point-min))
+      (re-search-forward (concat "^(defun " (regexp-quote (cdr spec)) " "))
+      (beginning-of-defun)
+      ;; Act
+      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
+        ;; Assert
+        (should (string-match-p "(agent-repl-roster-move-frame " body))
+        (should-not (string-match-p "(agent-repl--ws-switch " body))))))

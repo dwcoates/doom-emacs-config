@@ -510,6 +510,8 @@ has already moved past is never sent, because the daemon would stamp it
 settled `:superseded' so its caller is not left waiting.")
 
 (declare-function agent-repl-roster-apply-current "roster" ())
+(declare-function agent-repl-roster-move-frame "roster" (name))
+(declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl-link-up-p "daemon-link" ())
 
 (defun agent-repl-host-pending-selection ()
@@ -720,10 +722,17 @@ ORIGIN is the request trigger or `activation', for the record."
                     ws origin agent-repl-host--editor-switches))
 
 (defun agent-repl-host-request-switch (ws trigger)
-  "Ask the daemon to make WS the current workspace; move nothing here.
+  "Ask the daemon to make WS the current workspace, and move the frame now.
 TRIGGER names what the user did (a symbol such as `cycle', `slot',
-`picker', `notification'), for the record.  The frame follows when the
-roster's `current' names WS (`agent-repl-roster-apply-current').
+`picker', `notification'), for the record.
+
+THE FRAME MOVES ON THE REQUEST, not after the daemon's answer and roster
+push, which took some 50ms of every switch (2026-10-15 switch-bench).  The
+roster stays the selection's one source: while the request is pending
+every push is deferred (`agent-repl-roster-apply-current'), and its answer
+re-applies the roster, which moves the frame back if the daemon refused.
+A workspace with no tab yet is not moved to here; the roster's follow
+lands on it once its tab opens.
 
 Every trigger but `startup' is a switch the user made in Emacs and is
 counted (`agent-repl-host--editor-switches'); the startup\='s selection of
@@ -750,11 +759,28 @@ Answers t when the request was sent or queued, nil otherwise."
       (message "[agent-repl] Cannot switch to %s: no daemon connection" ws)
       nil)
      (t
-      (agent-repl-host-select
-       ws (lambda (outcome)
-            (unless (eq outcome :success)
-              (agent-repl--info ws "elisp.host.switch-request-settled ws=%s outcome=%S"
-                                ws outcome))))))))
+      (prog1
+          (agent-repl-host-select
+           ws (lambda (outcome)
+                (unless (eq outcome :success)
+                  (agent-repl--info ws "elisp.host.switch-request-settled ws=%s outcome=%S"
+                                    ws outcome))))
+        (agent-repl-host--move-on-request ws shown))))))
+
+(defun agent-repl-host--move-on-request (ws shown)
+  "Move the frame to WS for Emacs\='s own switch request, unless it cannot.
+SHOWN is the workspace on screen when the request was made.  Every
+decision is recorded at INFO, as the roster's follow records its own."
+  (let ((id (plist-get (agent-repl-host-ref ws) :id)))
+    (cond
+     ((equal ws shown)
+      (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=already-shown" ws))
+     ((or (agent-repl-open-tabs-holds-p id)
+          (not (equal (agent-repl--ws-by-ref-id id) ws)))
+      (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=no-tab-yet" ws))
+     (t
+      (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s" ws shown)
+      (agent-repl-roster-move-frame ws)))))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
@@ -804,8 +830,9 @@ yet: an unregistered workspace has no row to mark."
   "Tell the daemon about a perspective activation Emacs made on its own.
 Registered on workspace.el's perspective-activation boundary.  The user's
 switch triggers never land here first -- they REQUEST the switch
-\(`agent-repl-host-request-switch') and the frame follows the roster, an
-activation this hook leaves alone (`agent-repl-roster-following').  What
+\(`agent-repl-host-request-switch'), which moves the frame as a follow
+would, and the roster's follow moves it too: activations this hook leaves
+alone (`agent-repl-roster-following').  What
 remains is a switch Emacs made itself, which the daemon is told about
 after the fact so its `current' matches the frame.
 
