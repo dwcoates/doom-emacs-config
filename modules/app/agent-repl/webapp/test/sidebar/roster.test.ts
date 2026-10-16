@@ -847,12 +847,17 @@ describe("a section's folded count", () => {
     expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("inline");
   });
 
-  it("hides the count while a repository section is unfolded", () => {
+  it("shows the count while a repository section is unfolded", () => {
     const drawn = drawWorkspaceRoster(
       roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: false })] }),
       sidebarContext(),
     );
-    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("none");
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("inline");
+  });
+
+  it("hides the count while the hidden workspaces section is unfolded", () => {
+    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("none");
   });
 
   it("draws Recently Merged's count beside its label", () => {
