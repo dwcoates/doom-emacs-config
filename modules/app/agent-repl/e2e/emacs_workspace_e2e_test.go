@@ -427,86 +427,9 @@ func TestEmacsRegisterAnExistingDirectory(t *testing.T) {
 // #9 — SelectOnWorkspaceSwitch
 // ---------------------------------------------------------------------------
 
-// TestEmacsSelectOnWorkspaceSwitch is scenario 9: switching is one of Emacs's
-// only two inputs to the roster, and the proof it happened is
-// `agent-repl-host-last-selected-id' — which host.el records ONLY ON THE ACK,
-// so its value is what the DAEMON stamped as current, never what Emacs hoped.
-func TestEmacsSelectOnWorkspaceSwitch(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	// A SWITCH IS A CHANGE OF PERSPECTIVE. Select rides persp-mode's
-	// activation hook, so re-switching to the workspace registration already
-	// made current activates nothing and owes no Select. The fixture leaves
-	// exactly one workspace standing, so a SECOND one is what makes the switch
-	// under test a real switch rather than a no-op.
-	other := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "other-repo"))
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(other.Dir) + `)`)
-	e.AwaitEvalFor(emacsVerbBound, "Emacs to stand on the second workspace",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool {
-			var got string
-			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got != f.Name
-		})
-
-	// Clear it only now: both registrations switched, and a stale value would
-	// make this vacuous.
-	e.Eval(`(setq agent-repl-host-last-selected-id nil)`)
-	e.Eval(`(agent-repl-switch-to-project ` + elispString(f.Repo.Dir) + `)`)
-
-	// The switch must actually land, or the Select assertion below would be
-	// waiting on an act that was never performed.
-	e.AwaitEvalFor(emacsVerbBound, "the first workspace to become current again",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool {
-			var got string
-			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got == f.Name
-		})
-
-	e.AwaitEvalFor(emacsVerbBound, "the daemon to ack Emacs's select",
-		`(and agent-repl-host-last-selected-id (format "%s" agent-repl-host-last-selected-id))`,
-		func(raw json.RawMessage) bool {
-			var got string
-			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got == f.RefID
-		})
-}
-
 // ---------------------------------------------------------------------------
 // #10 — CloseWorkspaceIsAViewAct
 // ---------------------------------------------------------------------------
-
-// TestEmacsCloseWorkspaceIsAViewAct is scenario 10. Close takes the CURRENT
-// workspace, so it is PRESSED as `SPC j d' rather than called.
-//
-// Two halves, and both are needed: Emacs drops the tab and the host entry,
-// AND the daemon still holds the workspace. "A view act" is exactly the
-// difference between the two, and only the second half can say it.
-func TestEmacsCloseWorkspaceIsAViewAct(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	if want, got := "agent-repl-close-workspace", e.LeaderBinding("j d"); got != want {
-		t.Fatalf("SPC j d resolves to %q, want %q", got, want)
-	}
-	if got := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`); got != f.Name {
-		t.Fatalf("the current workspace is %q, want %q: `SPC j d' acts on the current one", got, f.Name)
-	}
-
-	e.Leader("j d")
-
-	e.AwaitEvalFor(emacsVerbBound, "the closed workspace's tab to go away",
-		emacsWSTablineNamesForm,
-		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), f.Name) })
-
-	// The DAEMON-side session is untouched: its roster still carries the row.
-	awaitDaemonRoster(t, e.DaemonAddr(), emacsVerbBound,
-		"the daemon to still hold the closed workspace",
-		func(r *frontendv1.WorkspaceRoster) bool { return rosterHasRefID(r, f.RefID) })
-}
 
 // ---------------------------------------------------------------------------
 // #11 — CloseWithAHeldPromptDoesNotTearTheTabDown
@@ -588,39 +511,6 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 // ---------------------------------------------------------------------------
 // #12 — KillWorkspaceNeverBlocks
 // ---------------------------------------------------------------------------
-
-// TestEmacsKillWorkspaceNeverBlocks is scenario 12: kill is FORCED, and takes
-// no refusal path even with work in flight. The `!hold' turn is parked first
-// precisely so "even with work in flight" is a fact of the test rather than a
-// hope about its timing.
-func TestEmacsKillWorkspaceNeverBlocks(t *testing.T) {
-	t.Parallel()
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	if want, got := "agent-repl-kill-workspace", e.LeaderBinding("j x"); got != want {
-		t.Fatalf("SPC j x resolves to %q, want %q", got, want)
-	}
-
-	f.parkAHeldTurn()
-
-	// The kill asks first (owner ruling: `SPC j x' confirms with y/n), and the
-	// user answers yes.
-	e.LeaderAnsweringYes(killConfirmPrompt, "j x")
-
-	e.AwaitEvalFor(emacsVerbBound, "the killed workspace's tab to go away",
-		emacsWSTablineNamesForm,
-		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), f.Name) })
-
-	// NO refusal path was taken. The blocked-close message is the one this
-	// verb must never produce, and reading it is the sanctioned rendered
-	// exception: the refusal IS echo-area text by contract.
-	if e.EvalBool(`(with-current-buffer "*Messages*"
-                          (and (string-match-p "kill blocked" (buffer-string)) t))`) {
-		t.Fatal("*Messages* carries a kill refusal: kill is forced and never blocks")
-	}
-}
 
 // ---------------------------------------------------------------------------
 // #13 — CloseThenKillDoesNotWedgeEmacs

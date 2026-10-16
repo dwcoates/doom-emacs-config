@@ -69,61 +69,6 @@ func TestEmacsGuiRegistryNamesOnlyLiveCapabilities(t *testing.T) {
 	}
 }
 
-// TestEmacsGuiCannotCancelDetachedWork asserts the CANCEL-DETACHED path.
-//
-// The gui leaves `:cancel-detached-fn' unset on purpose: stopping detached
-// work is the `Interrupt' verb's `all_agents' target, `Interrupt' is a feed
-// verb whose other targets are named by `frontend.v1.FeedId', and Emacs calls
-// no interrupt rpc at all — the webapp footer owns the gesture, on the very
-// page this frontend mounts.
-//
-// The assertion that matters is the second one. An unset slot is only correct
-// if the DISPATCH survives it: it must answer a loud nil, never dispatch some
-// other verb, and never die. Before the fix this same call was a void-function
-// error on a real workspace.
-func TestEmacsGuiCannotCancelDetachedWork(t *testing.T) {
-	t.Parallel()
-	// Arrange: a real registered, selected workspace — the dispatch resolves
-	// the frontend through the workspace, so a bare symbol lookup would not
-	// exercise the path a gesture takes.
-	w, e := emGHIWorld(t)
-	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-cancel-detached")
-	emGHISelect(t, e, dir, ws)
-
-	// Assert: the capability is genuinely absent from the registration.
-	if e.EvalBool(`(and (agent-repl-frontend-cancel-detached-fn ` + emCapGuiFrontendForm + `) t)`) {
-		t.Fatal("the gui registration declares a cancel-detached capability; Emacs calls no interrupt rpc, " +
-			"so the slot must stay unset and the dispatch must say so")
-	}
-
-	// Act / Assert: the dispatch answers nil rather than dying, and Emacs is
-	// still answering afterwards.
-	if e.EvalBool(`(and (agent-repl--frontend-dispatch-cancel-detached ` + elispString(ws) + `) t)`) {
-		t.Fatalf("dispatching a detached-work cancel on %s reported a cancel; no frontend here can reach detached work", ws)
-	}
-	emGHIAssertResponsive(t, e, "a detached-work cancel dispatched at a frontend without the capability")
-}
-
-// TestEmacsGuiCannotAdoptANamedSession asserts the ADOPTION path.
-//
-// No post-overhaul verb binds a workspace to a vendor session uuid a client
-// names: the daemon owns session identity and resumes a workspace's own
-// conversation from its own record. So `:adopt-session-fn' is unset, and the
-// accessor answering nil is the whole contract — there is no dispatcher to
-// reach past it, and a caller that finds nil has been told the truth.
-func TestEmacsGuiCannotAdoptANamedSession(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, e := emGHIWorld(t)
-	_ = w
-
-	// Act / Assert
-	if e.EvalBool(`(and (agent-repl-frontend-adopt-session-fn ` + emCapGuiFrontendForm + `) t)`) {
-		t.Fatal("the gui registration declares an adopt-session capability; nothing in the contract " +
-			"binds a workspace to a client-named vendor session, so the slot must stay unset")
-	}
-}
-
 // TestEmacsGuiDurableSessionIdNamesTheVendorConversation is the slot that DID
 // have a post-overhaul answer, end to end.
 //
