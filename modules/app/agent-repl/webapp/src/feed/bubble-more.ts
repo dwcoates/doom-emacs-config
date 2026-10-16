@@ -239,11 +239,6 @@ export function refreshHasMore(box: HTMLElement): void {
   if (clamp !== null && more) applyEllipsisTrim(clamp);
 }
 
-/** True when BOX draws a `…` whose place follows its text (see `refreshHasMore`). */
-function writesEllipsis(box: HTMLElement): boolean {
-  return (kindOf(box)?.clamp(box) ?? null) !== null;
-}
-
 /** The content a bubble's scroll box holds: its body, never the corner beside it. */
 export function bubbleBodyOf(scroll: HTMLElement): Element | null {
   return scroll.querySelector(BODY_SELECTOR);
@@ -293,9 +288,17 @@ export function installHasMore(
   // painter rewrite a clamp's text without resizing it, and the `…`'s place
   // moves with the text. A fade bubble's text is not followed, so a
   // streaming response re-measures only on resize, as before.
-  const mutated = (): void => {
+  //
+  // ONLY THE CLAMP'S OWN TEXT MOVES THE `…`. A change elsewhere in the box
+  // (the usage corner's ticking age, rewritten every second) leaves the
+  // clamp's line as it was, and re-measuring it a character at a time on
+  // every tick of every bubble was the largest share of an idle page's
+  // callback time (busy-probe census, 2026-10-16). A size change the corner
+  // makes reaches the ResizeObserver above.
+  const mutated = (records: readonly MutationRecord[]): void => {
     retarget();
-    if (writesEllipsis(scroll)) refresh(scroll);
+    const clamp = kindOf(scroll)?.clamp(scroll) ?? null;
+    if (clamp !== null && records.some((record) => clamp.contains(record.target))) refresh(scroll);
   };
   const children = typeof view.MutationObserver === "function" ? new view.MutationObserver(mutated) : null;
   children?.observe(scroll, { childList: true, subtree: true, characterData: true });

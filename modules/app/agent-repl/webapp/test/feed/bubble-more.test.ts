@@ -437,6 +437,39 @@ describe("installHasMore: a box that writes an ellipsis follows its text", () =>
     expect(seen).toEqual([scroll]);
   });
 
+  it("leaves an ellipsis bubble unmeasured when only text outside its clamp changed", async () => {
+    // Arrange -- a ticking age in the box's usage corner, outside the body.
+    const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+    const corner = document.createElement("span");
+    corner.className = "usage-ago";
+    corner.textContent = "5s ago";
+    scroll.prepend(corner);
+    const seen: HTMLElement[] = [];
+    installHasMore(scroll, (b) => seen.push(b), bubbleBodyOf);
+
+    // Act
+    (corner.firstChild as Text).data = "6s ago";
+    await flushMutations();
+
+    // Assert
+    expect(seen).toEqual([]);
+  });
+
+  it("re-measures an ellipsis bubble whose body was replaced", async () => {
+    // Arrange
+    const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+    const body = ellipsisBody(scroll);
+    const seen: HTMLElement[] = [];
+    installHasMore(scroll, (b) => seen.push(b), bubbleBodyOf);
+
+    // Act
+    body.replaceWith(body.cloneNode(true));
+    await flushMutations();
+
+    // Assert
+    expect(seen).toEqual([scroll]);
+  });
+
   it("leaves a fade bubble's text unfollowed, so a streaming response re-measures only on resize", async () => {
     // Arrange
     const scroll = clampedBox(BUBBLE_MORE_FADE, 3);
