@@ -32,6 +32,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { create } from "@bufbuild/protobuf";
+import { ClientLogResponseSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
 /** One `ClientLog` call the installed logger forwarded. */
@@ -209,7 +211,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
         // something the footer can draw.
         return rec.clientLogFails
           ? Promise.reject(new Error("no route to the daemon"))
-          : Promise.resolve({});
+          : Promise.resolve(create(ClientLogResponseSchema, { result: { case: "success", value: {} } }));
       },
       watchPage: async function* (_request: unknown, options: { signal: AbortSignal }) {
         await new Promise<void>((resolve) => {
