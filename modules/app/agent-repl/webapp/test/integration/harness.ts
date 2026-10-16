@@ -74,6 +74,7 @@ import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v
 import { resetPageState } from "../page-state";
 import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
+import { quietMarkupOf } from "./quiet-markup";
 
 /** Where the page's clock starts: just after the fixtures' own timestamps. */
 export const HARNESS_EPOCH_MS = 10_000;
@@ -713,11 +714,7 @@ async function mountApp(
    * asserts a clock moved still reads the live DOM, and any OTHER change — a
    * redraw, a new row, an attribute — still counts as the DOM moving.
    */
-  const quietMarkup = (): string => {
-    const clone = document.body.cloneNode(true) as HTMLElement;
-    for (const clock of clone.querySelectorAll("[data-ticking]")) clock.textContent = "";
-    return clone.innerHTML;
-  };
+  const quietMarkup = (): string => quietMarkupOf(document.body);
 
   /**
    * A MUTATION OBSERVER IN FRONT OF THE MARKUP DIFF, purely as a fast path.

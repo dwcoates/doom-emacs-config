@@ -39,6 +39,14 @@ function fullOf(node: Text): string {
 }
 
 /**
+ * NODE's whole text, whether a reveal has truncated it or not: what it reads
+ * once its type-out ends.
+ */
+export function wholeTextOf(node: Text): string {
+  return fullOf(node);
+}
+
+/**
  * Show the first SHOWN characters of ROOT's rendered text and hide the rest.
  * Answers the full length of ROOT's text, which is what a reveal paces toward.
  */

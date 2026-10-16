@@ -695,3 +695,71 @@ describe("the webhost's log level", () => {
     expect(shape).toEqual({ applies: true, handRolls: false });
   });
 });
+
+describe("a hidden page keeps the size it was hidden at", () => {
+  const made: Host[] = [];
+  afterEach(() => {
+    for (const each of made.splice(0)) each.dispose();
+  });
+
+  /** A host whose frames measure at whatever SIZE holds, recording that each was laid out when measured. */
+  function sizedHost(size: { width: number; height: number }): { host: Host; detached: string[] } {
+    const detached: string[] = [];
+    const sized = createHost({
+      doc: document,
+      win: window,
+      level: LevelWindow.fixed("info"),
+      measure: (element) => {
+        if (!element.isConnected) detached.push(element.getAttribute(FRAME_WORKSPACE_ATTRIBUTE) ?? "?");
+        return { ...size };
+      },
+    });
+    made.push(sized);
+    return { host: sized, detached };
+  }
+  const frameOf = (id: string): HTMLIFrameElement =>
+    document.querySelector<HTMLIFrameElement>(`iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`)!;
+
+  it("fixes a frame created hidden at the size it fills, measured once it is in the document", () => {
+    // Arrange
+    const { host: sized, detached } = sizedHost({ width: 800, height: 600 });
+
+    // Act
+    sized.ensure("a", "http://a.example/");
+
+    // Assert
+    expect([frameOf("a").style.width, frameOf("a").style.height, detached]).toEqual(["800px", "600px", []]);
+  });
+
+  it("lets the shown frame fill the view, and fixes the one it replaced at its size then", () => {
+    // Arrange
+    const size = { width: 800, height: 600 };
+    const { host: sized } = sizedHost(size);
+    sized.ensure("a", "http://a.example/");
+    sized.ensure("b", "http://b.example/");
+    sized.show("a");
+    size.height = 700;
+
+    // Act
+    sized.show("b");
+
+    // Assert
+    expect([frameOf("b").style.width, frameOf("b").style.height]).toEqual(["", ""]);
+    expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual(["800px", "700px"]);
+  });
+
+  it("lets a frame shown again fill the view at whatever size it is now", () => {
+    // Arrange
+    const { host: sized } = sizedHost({ width: 800, height: 600 });
+    sized.ensure("a", "http://a.example/");
+    sized.ensure("b", "http://b.example/");
+    sized.show("a");
+    sized.show("b");
+
+    // Act
+    sized.show("a");
+
+    // Assert
+    expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual(["", ""]);
+  });
+});

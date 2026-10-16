@@ -52,6 +52,8 @@ export interface HostEnv {
   readonly level: LevelWindow;
   /** Epoch ms now; the default is the document's clock. */
   readonly now?: () => number;
+  /** An element's laid-out box; `getBoundingClientRect` when omitted. */
+  readonly measure?: (element: Element) => { width: number; height: number };
 }
 
 /**
@@ -268,9 +270,32 @@ export function createHost(env: HostEnv): Host {
   };
   win.addEventListener("message", onMessage);
 
+  const measure = env.measure ?? ((element: Element) => element.getBoundingClientRect());
+
+  /**
+   * Show FRAME, or hide it.
+   *
+   * A HIDDEN PAGE KEEPS THE SIZE IT WAS HIDDEN AT. Every frame fills the web
+   * view, and a hidden one is only invisible, so a web view resize (Emacs
+   * giving the view a gated workspace's input space) re-laid out every
+   * workspace's page: fifteen pages for the one on screen, and a switch into
+   * or out of a gated workspace took twice as long (2026-10-16). A frame is
+   * fixed at its laid-out size when hidden, and fills the view again when
+   * shown, so a resize reaches the page on screen alone, and a page shown at
+   * another size takes it as it is shown.
+   */
   const applyShown = (frame: Frame, shown: boolean): void => {
-    if (shown) frame.iframe.setAttribute(FRAME_SHOWN_ATTRIBUTE, "");
-    else frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
+    const style = frame.iframe.style;
+    if (shown) {
+      frame.iframe.setAttribute(FRAME_SHOWN_ATTRIBUTE, "");
+      style.removeProperty("width");
+      style.removeProperty("height");
+      return;
+    }
+    const box = measure(frame.iframe);
+    style.width = `${box.width}px`;
+    style.height = `${box.height}px`;
+    frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
   };
 
   const create = (id: string, url: string): Frame => {
@@ -293,9 +318,10 @@ export function createHost(env: HostEnv): Host {
       editing: false,
       gateBand: 0,
     };
-    applyShown(frame, id === shownId);
     frames.set(id, frame);
     frameParent.append(iframe);
+    // Laid out first, so a frame created hidden is fixed at the size it fills.
+    applyShown(frame, id === shownId);
     return frame;
   };
 
