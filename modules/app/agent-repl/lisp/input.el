@@ -854,7 +854,6 @@ to the oldest."
     (:prompt-not-recorded . "the conversation holds no record of that prompt")
     (:first-prompt . "the first prompt can't be rolled back; /clear starts over")
     (:unseen-prompt . "a later prompt the feed never showed would be dropped")
-    (:vendor-refused . "the vendor refused")
     (:files-not-restorable . "files can't be restored to that prompt"))
   "Each PlanRollback / RollBack / ListRollbackPrompts refusal arm, in plain words.")
 

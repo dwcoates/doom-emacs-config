@@ -4869,13 +4869,14 @@ The prompt is REQUIRED: it is what the composer holds again."
 
 (defun agent-repl-wire-decode-roll-back-error (json)
   "Decode RollBackError from JSON into (:cause (:arm ARM :value V)).
-THE ARM IS WHY.  `vendor_refused' and `files_not_restorable' carry the
-vendor's message as (:vendor-message STRING)."
+THE ARM IS WHY.  `files_not_restorable' carries the vendor's message as
+\(:vendor-message STRING).  A cut the vendor refuses is no refusal here: it
+is judged after the answer, and the daemon draws the prompts back."
   (let ((message "RollBackError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
                     planStale noSession promptNotRecorded firstPrompt unseenPrompt
-                    vendorRefused filesNotRestorable))
+                    filesNotRestorable))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4885,10 +4886,7 @@ vendor's message as (:vendor-message STRING)."
                       (list (nth 0 arm) (nth 1 arm)
                             (agent-repl-wire-verbs--empty-arm (nth 2 arm))))
                     agent-repl-wire-roll-back-error-own-arms)
-            (list (list 'vendorRefused :vendor-refused
-                        (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
-                                     "RollBackVendorRefused" v)))
-                  (list 'filesNotRestorable :files-not-restorable
+            (list (list 'filesNotRestorable :files-not-restorable
                         (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
                                      "RollBackFilesNotRestorable" v)))))))))
 
