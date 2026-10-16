@@ -168,7 +168,7 @@ func TestResolveBannerBackendTakesTheOverride(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	backend, err := resolveBannerBackend(context.Background(), log, selectWorkspaceClick("/bin/agent-repld", "/state"))
+	backend, err := resolveBannerBackend(context.Background(), log, selectWorkspaceClick("/bin/agent-repld", "/state"), desktopnotify.DefaultDeliveredBound)
 
 	// Assert
 	if err != nil {

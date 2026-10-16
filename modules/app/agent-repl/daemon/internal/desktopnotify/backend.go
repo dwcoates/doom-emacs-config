@@ -29,13 +29,23 @@ const ClickTimeout = 60 * time.Second
 // the program's start and exit. A run past it is a hung program.
 const postBound = ClickTimeout + 10*time.Second
 
-// deliveredBound bounds one query of which banners the platform still holds.
-// A healthy terminal-notifier -list ALL answers in 40ms on a quiet machine
-// (measured 2026-10-15), and in 54ms median, 76ms worst of 20 at load 22
-// (2026-10-16), the load this machine sits at while tests run. The bound is
-// just over twice that worst healthy run, so a run past it is a hung
-// program; the 100ms it was killed healthy runs, failing the focus-gain claim.
-const deliveredBound = 160 * time.Millisecond
+// DefaultDeliveredBound bounds one query of which banners the platform still
+// holds. A healthy terminal-notifier -list ALL answers in 40ms on a quiet
+// machine (measured 2026-10-15), in 54ms median, 76ms worst of 20 at load 22
+// (2026-10-16), the load this machine sits at while tests run, and in 56ms
+// median, 61ms worst of 15 at load 16 (2026-10-16). The bound is just over
+// twice that worst healthy run, so a run past it is a hung program; the 100ms
+// it was killed healthy runs, failing the focus-gain claim.
+//
+// IT BOUNDS THE PLATFORM'S PROGRAM, NOT A STAND-IN. The integration suite's
+// banner program is a recorder that appends each run to its record on the
+// run's RAM disk, where a small write at background I/O priority costs up to
+// 330ms under load (skills/write-tests pitfall 6), so it passed this bound
+// with nothing hung (merge gate 2026-10-16,
+// TestAFocusGainClaimsTheBannerThePlatformStillHolds). That suite sets its own
+// bound through the daemon's knob (NewBackend's deliveredBound), sized for its
+// recorder.
+const DefaultDeliveredBound = 160 * time.Millisecond
 
 // versionBound bounds the version query a platform's minimum version is
 // checked with at boot.
@@ -267,13 +277,20 @@ type programBackend struct {
 	bin      string
 	platform Platform
 	runner   Runner
+	// deliveredBound bounds one Delivered query (DefaultDeliveredBound).
+	deliveredBound time.Duration
 }
 
 // NewBackend resolves the platform's banner program: $AGENT_REPL_NOTIFIER_CMD
 // when set (override), else the platform's program on PATH. An error names a
 // platform with no banner program, a program that is not installed, or one
-// older than the platform's minimum version.
-func NewBackend(ctx context.Context, platform Platform, override string, lookPath func(string) (string, error), runner Runner) (Backend, error) {
+// older than the platform's minimum version. deliveredBound bounds each query
+// of which banners the platform still holds: DefaultDeliveredBound, unless the
+// daemon's knob set it, and never zero, which would kill every query.
+func NewBackend(ctx context.Context, platform Platform, override string, lookPath func(string) (string, error), runner Runner, deliveredBound time.Duration) (Backend, error) {
+	if deliveredBound <= 0 {
+		panic(fmt.Sprintf("desktopnotify: NewBackend was handed a delivered bound of %s; the daemon's knob refuses a non-positive one", deliveredBound))
+	}
 	bin, err := resolveProgram("banner", platform.Program, override, lookPath)
 	if err != nil {
 		return nil, err
@@ -283,7 +300,7 @@ func NewBackend(ctx context.Context, platform Platform, override string, lookPat
 			return nil, err
 		}
 	}
-	return &programBackend{bin: bin, platform: platform, runner: runner}, nil
+	return &programBackend{bin: bin, platform: platform, runner: runner, deliveredBound: deliveredBound}, nil
 }
 
 // checkMajor refuses a program older than the platform's minimum major
@@ -356,7 +373,7 @@ func (b *programBackend) Delivered(ctx context.Context) (map[ids.WorkspaceID]boo
 	if b.platform.delivered == nil {
 		panic("desktopnotify: a read-back banner program was asked which banners the platform holds")
 	}
-	stdout, err := runWithin(ctx, deliveredBound, b.runner, b.bin, b.platform.deliveredArgs, nil)
+	stdout, err := runWithin(ctx, b.deliveredBound, b.runner, b.bin, b.platform.deliveredArgs, nil)
 	if err != nil {
 		return nil, err
 	}

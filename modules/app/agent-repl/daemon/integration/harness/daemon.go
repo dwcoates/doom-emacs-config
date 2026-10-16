@@ -799,6 +799,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,
 		"AGENT_REPL_LAUNCHCTL="+d.Launchctl.Path,
 		"AGENT_REPL_NOTIFIER_CMD="+d.Notifier.Path,
+		NotifierListBoundEnv,
 		"AGENT_REPL_CHIME_CMD="+d.Chime.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,

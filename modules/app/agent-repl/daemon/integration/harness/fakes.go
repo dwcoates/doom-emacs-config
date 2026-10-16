@@ -165,6 +165,18 @@ func NewRecorderExecutable(t testing.TB, dir, name string) *Recorder {
 	return r
 }
 
+// NotifierListBoundEnv sizes the daemon's bound on asking the banner program
+// which banners it still holds (AGENT_REPL_NOTIFIER_LIST_BOUND) for this
+// suite's recorder, not for the platform's program the daemon's default is
+// measured against. The recorder spawns nothing on its common path, but it
+// appends each run to its record on the run's RAM disk, where a small write at
+// background I/O priority costs up to 330ms p99 under a full run
+// (skills/write-tests pitfall 6). 750ms is just over twice that, and it is a
+// fixture: no test asserts the bound itself (merge gate 2026-10-16,
+// TestAFocusGainClaimsTheBannerThePlatformStillHolds, killed at the 160ms
+// platform default with nothing hung).
+const NotifierListBoundEnv = "AGENT_REPL_NOTIFIER_LIST_BOUND=750ms"
+
 // NewTestAllScript installs a fake bin/test-all.sh inside a repository, the
 // executable the merge orchestrator's tests tab runs.
 func NewTestAllScript(t testing.TB, repoDir string) *Recorder {
