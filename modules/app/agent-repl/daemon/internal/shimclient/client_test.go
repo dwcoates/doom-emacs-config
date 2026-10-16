@@ -2160,6 +2160,9 @@ func TestTransportCut(t *testing.T) {
 		{name: "a response cut partway through an envelope",
 			err: connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("protocol error: incomplete envelope: %w", io.ErrUnexpectedEOF)), want: true},
 		{name: "an invalid_argument with no cut beneath it", err: connect.NewError(connect.CodeInvalidArgument, errors.New("bad request")), want: false},
+		{name: "a unary response cut partway through its body",
+			err: connect.NewError(connect.CodeUnknown, fmt.Errorf("read message: %w", io.ErrUnexpectedEOF)), want: true},
+		{name: "an unknown naming an unexpected EOF with no cut beneath it", err: connect.NewError(connect.CodeUnknown, errors.New("read message: unexpected EOF")), want: false},
 		{name: "a refusal the shim answered", err: connect.NewError(connect.CodeInternal, errors.New("the fold came apart")), want: false},
 		{name: "not found", err: connect.NewError(connect.CodeNotFound, io.ErrUnexpectedEOF), want: false},
 	}
@@ -2190,6 +2193,24 @@ func TestACutEnvelopeOnADyingShimIsItsDeath(t *testing.T) {
 	// Assert
 	if !died {
 		t.Fatal("a cut envelope on an exiting shim was not attributed to its death")
+	}
+}
+
+// TestACutUnaryBodyOnADyingShimIsItsDeath pins that a unary response the
+// dying shim cut partway through its body is attributed to the death, as a
+// cut stream envelope is.
+func TestACutUnaryBodyOnADyingShimIsItsDeath(t *testing.T) {
+	// Arrange
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "", defaultBackoff, nil, nil)
+	stageDeath(c, exitingUnreaped)
+	cut := connect.NewError(connect.CodeUnknown, fmt.Errorf("read message: %w", io.ErrUnexpectedEOF))
+
+	// Act
+	_, died := c.diedUnder(cut)
+
+	// Assert
+	if !died {
+		t.Fatal("a cut unary body on an exiting shim was not attributed to its death")
 	}
 }
 
