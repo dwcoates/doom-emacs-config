@@ -112,23 +112,28 @@ fire-and-forget command file whose result arrives later as a prompt.
 
 ## Open
 
-- Which workspace events `workspace subscribe` offers (proposed: turn started,
-  turn ended, needs input, landed, closed), delivered as prompts in the
-  subscriber's session.
-- Whether a workspace's merge target may change after creation (`workspace
-  set`), given that `SetWorkspaceParent` retargets today.
-- Whether a create always cuts a new worktree from the branch tip, never taking
-  over an existing worktree (recommended: always cut).
-- Whether "merge me" lands at the end of the agent's turn (recommended) or
-  immediately.
-- `/agent-repl-install`'s description change: run on its own when a dependency
-  is missing, or update its manifests when a change adds one, or both.
-- What `SPC o h` becomes once `/agent-repl-help` is removed.
-- Whether the command-file ingress is retired entirely, which needs its other
-  writers (Emacs) moved onto RPCs.
-- How common O1 and O2 are, and their example situations.
+- Nothing ruled open; the contract design comes next.
 
 ## Settled along the way (owner, 2026-10-16)
+
+- `workspace subscribe` offers: turn started, turn ended, needs input, landed,
+  closed; each delivered as a prompt in the subscriber's session.
+- A merge target may change after creation only through `workspace set`,
+  which re-applies the ownership and landing rules (replacing today's
+  `SetWorkspaceParent` retarget).
+- A create always cuts a NEW worktree from the tip of the branch it names as
+  its source (main's, W's, or the unowned branch's), read when the create
+  runs; it never takes over an existing worktree.
+- "Merge me" (`workspace merge`) lands when the agent's turn ends.
+- `/agent-repl-install`'s description says both: run it when a dependency is
+  missing, and update its manifests when a change adds or changes one.
+- The command-file ingress is retired entirely; Emacs and `runtime-eval-code`
+  move onto RPCs.
+- The skill renames update every reference: the metaprompt's merge-queue rule,
+  the `agent-repl-merge-queue-guard` hook, the requirement manifests and the
+  memory notes.
+- `/agent-repl-help` and `SPC o h` are removed; a fuller help system comes
+  later.
 
 - A fork cuts at the forked workspace's last concluded turn; leaving out a
   turn in flight is acceptable.
@@ -174,8 +179,8 @@ invariant), how common it is, and example situations.
 | 4 | self | a branch no workspace owns (e.g. a subagent's) | main | yes; a branch an open workspace owns may not be the source here, since it lands only into that workspace (owner, 2026-10-16) | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
 | 5 | self | other (X) | the same other (X) | yes, but never with "land when done": the request must carry a plain-English NOTICE, which the daemon forwards to X with a guaranteed addendum saying that landing the work into X is X's responsibility; X lands it (`workspace merge <child>`); a closed X is reopened automatically first; the created workspace is told to communicate with X (owner, 2026-10-16) | rare | sending a fix the requester found into X's unlanded branch; handing X a piece it needs; unblocking X on a problem the requester already understands |
 | 5b | self | other (B) | a different other (C) | NO: not for lack of any use, but its value is lower than the risk of encouraging workspaces to conflate their responsibilities through cross talk between unrelated workspaces (owner, 2026-10-16). A judgment for this cell only, not a general rule. | never | none |
-| O1 | other (Y) | main | main | yes: to use Y's context to fix a problem on main, fork Y and branch from main (owner, 2026-10-16) | to settle | to settle |
-| O2 | other (Y) | Y | Y | yes, and it may land itself: forked from Y, it has Y's whole context, so Y need not arbitrate; Y is notified on creation and on landing (owner, 2026-10-16) | to settle | to settle |
+| O1 | other (Y) | main | main | yes: to use Y's context to fix a problem on main, fork Y and branch from main (owner, 2026-10-16) | uncommon | one workspace finds a problem another workspace is already looking at, and fires off a one-shot forked from that workspace, from main onto main |
+| O2 | other (Y) | Y | Y | yes, and it may land itself: forked from Y, it has Y's whole context, so Y need not arbitrate; Y is notified on creation and on landing (owner, 2026-10-16) | common | the subagent pattern with full workspaces: pieces of Y's work done in workspaces forked from Y, each landing into Y's branch |
 | O3 | other (Y) | Y | main | NO: a workspace's branch lands only into that workspace (owner, 2026-10-16) | never | none |
 | O4 | other (Y) | any branch | a different branch | NO: with another workspace's context, branch source and merge target never differ, except main into main (owner, 2026-10-16) | never | none |
 | O5 | other (Y) | main | any other branch | NO (owner, 2026-10-16) | never | none |
