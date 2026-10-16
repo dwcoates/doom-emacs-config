@@ -82,16 +82,6 @@ First %s is the repo name, second %s is the commit SHA."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-magit-show-tags-in-log nil
-  "Whether magit commit listings include tag refs alongside branches.
-When nil (the default), `tag: ...' entries are stripped from the refs
-string fed to `magit-format-ref-labels' so the recent-commits, unpushed,
-and other status log sections show only branches and HEAD pointers.
-Toggle interactively with `agent-repl-magit-toggle-tags-in-log' (bound to
-`g T' in `magit-status-mode-map')."
-  :type 'boolean
-  :group 'agent-repl)
-
 (defcustom agent-repl-magit-merge-base-ref nil
   "Base ref the magit-status merge-base section computes against, or nil.
 When nil, the merge-base is computed against the repository's main
@@ -106,56 +96,6 @@ base ref."
   :group 'agent-repl)
 
 ;;;; --- magit settings and keybindings ---------------------------------------
-
-(defun agent-repl--magit-strip-tag-refs (args)
-  "Return ARGS with `tag: NAME' entries stripped from the refs string.
-ARGS is the argument list passed to `magit-format-ref-labels'; its
-sole element is the comma-separated refs string git emitted via `%D'.
-When `agent-repl-magit-show-tags-in-log' is non-nil, ARGS is returned
-unchanged; otherwise both `tag: NAME, ' (leading) and `, tag: NAME'
-\(trailing) patterns are removed so tag decorations disappear from
-commit lists in magit-status and magit-log buffers while branches,
-HEAD pointers, and remote refs remain intact.
-
-Used as `:filter-args' advice on `magit-format-ref-labels' rather than
-a `--decorate-refs-exclude' git arg so the filter applies uniformly to
-every section that decorates commits (status, log, diff inline) without
-having to thread args through each call site."
-  (let ((ws (agent-repl--ws-current-name)))
-    (if (or agent-repl-magit-show-tags-in-log
-            (null args)
-            (not (stringp (car args))))
-        (progn
-          (agent-repl--log-verbose
-           ws "magit-strip-tag-refs: ws=%s branch=unchanged tags-shown=%s args=%S"
-           ws agent-repl-magit-show-tags-in-log args)
-          args)
-      (let* ((original (car args))
-             (s (replace-regexp-in-string
-                 "\\(?:tag: [^,]+\\(?:, \\)?\\|, tag: [^,]+\\)"
-                 "" original)))
-        (agent-repl--log-verbose
-         ws "magit-strip-tag-refs: ws=%s branch=stripped original=%s result=%s"
-         ws original s)
-        (cons s (cdr args))))))
-
-(defun agent-repl-magit-toggle-tags-in-log ()
-  "Toggle whether magit commit listings include tag refs.
-Flips `agent-repl-magit-show-tags-in-log' and refreshes the current
-magit buffer (status, log, etc.) when invoked from a `magit-mode'
-buffer so the change becomes visible immediately."
-  (interactive)
-  (setq agent-repl-magit-show-tags-in-log
-        (not agent-repl-magit-show-tags-in-log))
-  (let ((ws (agent-repl--ws-current-name))
-        (in-magit-mode (derived-mode-p 'magit-mode)))
-    (agent-repl--log ws "magit-toggle-tags: ws=%s shown=%s magit-mode=%s"
-                      ws agent-repl-magit-show-tags-in-log in-magit-mode)
-    (when in-magit-mode
-      (magit-refresh)
-      (agent-repl--log ws "magit-toggle-tags: ws=%s branch=refreshed" ws)))
-  (message "magit commit-list tags %s"
-           (if agent-repl-magit-show-tags-in-log "shown" "hidden")))
 
 ;;;; --- magit-status merge-base section --------------------------------------
 
@@ -244,10 +184,6 @@ runs `magit-show-commit'.  Inserts nothing when
         '((unpushed . show)
           (stashes  . show)
           (untracked . show)))
-
-  ;; Strip tag refs from commit-list decorations by default (toggle via `g T').
-  (advice-add 'magit-format-ref-labels :filter-args
-              #'agent-repl--magit-strip-tag-refs)
 
   ;; Show the current branch's merge-base with the base ref (the fork
   ;; point) as a status section, just after the unpushed/recent commits.
@@ -597,8 +533,7 @@ transitions `:repl-state' to :inactive)."
 
 (map! :map magit-status-mode-map
       "g c" #'agent-repl-magit-copy-commit-link
-      "g C" #'agent-repl-magit-open-commit-in-github
-      "g T" #'agent-repl-magit-toggle-tags-in-log)
+      "g C" #'agent-repl-magit-open-commit-in-github)
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
