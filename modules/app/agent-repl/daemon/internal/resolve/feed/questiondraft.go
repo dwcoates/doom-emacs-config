@@ -214,6 +214,18 @@ func (r *resolver) StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (Standing
 		return StandingAsk{}, false
 	}
 
+	best, found := r.oldestStandingAsk(s, addressed)
+	r.logger(ws).Debug("daemon.feed.standing_ask", "looked for a standing ask on the addressed feed",
+		dlog.Context{"feed": addressed, "found": found, "ask": best.ID})
+	return best, found
+}
+
+// oldestStandingAsk answers the OLDEST ask standing on the feed keyed
+// addressed: an open consent card, or an open question batch that is drawn and
+// not claimed by a delivery in flight. It is the one rule for which ask a
+// user's answer goes to, read by the typed-answer routing (StandingAsk) and
+// the host view's numbered answer (hostask.go) alike.
+func (r *resolver) oldestStandingAsk(s *wsState, addressed string) (StandingAsk, bool) {
 	var best StandingAsk
 	var bestOpened uint64
 	found := false
@@ -232,8 +244,6 @@ func (r *resolver) StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (Standing
 			consider(AskQuestion, id, q.opened)
 		}
 	}
-	r.logger(ws).Debug("daemon.feed.standing_ask", "looked for a standing ask on the addressed feed",
-		dlog.Context{"feed": addressed, "found": found, "ask": best.ID})
 	return best, found
 }
 
