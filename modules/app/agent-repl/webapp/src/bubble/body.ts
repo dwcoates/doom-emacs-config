@@ -16,7 +16,7 @@ import { createConnectHookElement, type ConnectHookElement } from "../connect-ho
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
-import { computedPx, pageResizeObserver, placeChildren, scrollbarWidthPx } from "../dom.js";
+import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
@@ -460,7 +460,7 @@ function armPainter(body: BubbleBody): Painter {
     return cols;
   };
   const slots = (): HTMLElement[] => [
-    ...body.querySelectorAll<HTMLElement>(`[${MARKDOWN_SLOT_ATTRIBUTE}]`),
+    ...queryAll<HTMLElement>(body, `[${MARKDOWN_SLOT_ATTRIBUTE}]`),
   ];
   const draw = (targets: readonly HTMLElement[]): void => {
     for (const slot of targets) {

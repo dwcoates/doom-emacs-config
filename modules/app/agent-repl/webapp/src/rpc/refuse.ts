@@ -36,6 +36,7 @@ import { isMalformedView } from "./malformed.js";
 import { workspaceMoved } from "./moved.js";
 import { refusalSentence } from "./refusal.js";
 import { requireCase, unreachableArm } from "./strict.js";
+import { queryAll } from "../dom.js";
 
 /** How a caller words the arms that are its own verb's alone. */
 export type SentenceTable = Record<string, (value: never) => string>;
@@ -74,7 +75,8 @@ export function drawRefusalAfter(anchor: Element | null, kind: string, arm: stri
 
 /** Remove every KIND refusal note drawn beside ANCHOR (`drawRefusalAfter`). */
 export function clearRefusalsAfter(anchor: Element | null, kind: string): void {
-  anchor?.parentElement?.querySelectorAll(`.${kind}`).forEach((node) => node.remove());
+  const parent = anchor?.parentElement ?? null;
+  if (parent !== null) for (const node of queryAll(parent, `.${kind}`)) node.remove();
 }
 
 /** The one wording for a call that never landed. */
@@ -117,7 +119,7 @@ export function callFailure(err: unknown): { arm: string; text: string } {
  * control the user just clicked again reads as an answer to the NEW click.
  */
 export function clearRefusals(host: HTMLElement): void {
-  for (const stale of host.querySelectorAll(".refusal")) stale.remove();
+  for (const stale of queryAll(host, ".refusal")) stale.remove();
 }
 
 /**

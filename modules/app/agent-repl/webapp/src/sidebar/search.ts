@@ -22,7 +22,7 @@
  * page no longer shows.
  */
 import { createControl, type Control } from "../control.js";
-import { SVG_NS } from "../dom.js";
+import { childrenMatching, queryAll, SVG_NS } from "../dom.js";
 import { log } from "../log.js";
 
 /** The class a row the query does not match wears. */
@@ -73,7 +73,7 @@ function rowName(ws: HTMLElement): string {
  */
 function markRow(ws: HTMLElement, pattern: RegExp | null): boolean {
   let kept = pattern === null || pattern.test(rowName(ws));
-  for (const kid of ws.querySelectorAll<HTMLElement>(":scope > .kids > [data-roster-row]")) {
+  for (const kid of childrenMatching(ws, ".kids").flatMap((kids) => childrenMatching<HTMLElement>(kids, "[data-roster-row]"))) {
     if (markRow(kid, pattern)) kept = true;
   }
   ws.classList.toggle(SEARCH_MISS_CLASS, !kept);
@@ -94,16 +94,16 @@ export interface SearchOutcome {
  */
 export function applySearch(root: ParentNode, query: string): SearchOutcome {
   const pattern = searchPattern(query);
-  for (const region of root.querySelectorAll<HTMLElement>(".rows")) {
-    for (const ws of region.querySelectorAll<HTMLElement>(":scope > [data-roster-row]")) markRow(ws, pattern);
+  for (const region of queryAll<HTMLElement>(root, ".rows")) {
+    for (const ws of childrenMatching<HTMLElement>(region, "[data-roster-row]")) markRow(ws, pattern);
   }
-  for (const box of root.querySelectorAll<HTMLElement>(".repo, .merged-group")) {
+  for (const box of queryAll<HTMLElement>(root, ".repo, .merged-group")) {
     const empty =
       pattern !== null && box.querySelector(`[data-roster-row]:not(.${SEARCH_MISS_CLASS})`) === null;
     box.classList.toggle(SEARCH_EMPTY_CLASS, empty);
   }
-  const rows = root.querySelectorAll("[data-roster-row]").length;
-  const missed = root.querySelectorAll(`[data-roster-row].${SEARCH_MISS_CLASS}`).length;
+  const rows = queryAll(root, "[data-roster-row]").length;
+  const missed = queryAll(root, `[data-roster-row].${SEARCH_MISS_CLASS}`).length;
   return { kept: rows - missed, missed };
 }
 

@@ -36,6 +36,7 @@ import { guardMalformed } from "../rpc/guard.js";
 import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+import { queryAll } from "../dom.js";
 
 /** The refusal card. */
 export function drawFeedCommandRefused(u: FeedCommandRefused, rc: RowContext): HTMLElement {
@@ -222,7 +223,5 @@ function drawRefusal(row: HTMLElement, arm: string, message: string): void {
 }
 
 function clearNotes(row: HTMLElement): void {
-  row
-    .querySelectorAll(".command-refused-refusal, .command-refused-note")
-    .forEach((node) => node.remove());
+  for (const node of queryAll(row, ".command-refused-refusal, .command-refused-note")) node.remove();
 }

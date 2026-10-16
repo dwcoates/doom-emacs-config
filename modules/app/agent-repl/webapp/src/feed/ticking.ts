@@ -23,6 +23,7 @@
  * `stopTicking` — a leak of one closure rather than a leak of the whole subtree.
  */
 import type { Ticker } from "../clock.js";
+import { queryAll } from "../dom.js";
 
 /** The attribute marking an element that holds clock subscriptions. */
 export const TICKING_ATTRIBUTE = "data-ticking";
@@ -131,7 +132,7 @@ export function onDiscard(el: Element, dispose: () => void): void {
 export function stopTicking(el: Element): number {
   const stopped = releaseAcross(el, ALL_KINDS);
   releaseDiscards(el);
-  for (const descendant of el.querySelectorAll(`[${DISCARD_ATTRIBUTE}]`)) {
+  for (const descendant of queryAll(el, `[${DISCARD_ATTRIBUTE}]`)) {
     releaseDiscards(descendant);
   }
   return stopped;
@@ -156,7 +157,7 @@ const WORK_ONLY: ReadonlySet<ClockKind> = new Set(["work"]);
 /** Release KINDS on EL and every ticking descendant; count elements released. */
 function releaseAcross(el: Element, kinds: ReadonlySet<ClockKind>): number {
   let stopped = release(el, kinds);
-  for (const descendant of el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)) {
+  for (const descendant of queryAll(el, `[${TICKING_ATTRIBUTE}]`)) {
     stopped += release(descendant, kinds);
   }
   return stopped;

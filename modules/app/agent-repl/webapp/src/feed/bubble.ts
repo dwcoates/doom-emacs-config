@@ -79,6 +79,7 @@ import { stopTicking } from "./ticking.js";
 import { MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import type { TailFollow } from "../scroll.js";
+import { queryAll } from "../dom.js";
 
 export interface BubbleOptions {
   ctx: AppContext;
@@ -741,7 +742,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
 
   /** Dispose the child controller, its rows and the composer: nothing remains. */
   function discardSubFeed(): void {
-    const rows = child === null ? 0 : panel.querySelectorAll("[data-feed-row]").length;
+    const rows = child === null ? 0 : queryAll(panel, "[data-feed-row]").length;
     composer?.dispose();
     composer = null;
     child?.dispose();
@@ -764,7 +765,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   }
 
   function clearRefusal(): void {
-    for (const stale of headLine.querySelectorAll(".refusal")) stale.remove();
+    for (const stale of queryAll(headLine, ".refusal")) stale.remove();
   }
 
   function dispose(): void {

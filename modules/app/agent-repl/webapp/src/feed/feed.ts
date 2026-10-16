@@ -109,6 +109,7 @@ import {
 } from "../held/section.js";
 import { tick, stopTicking } from "./ticking.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
+import { queryAll } from "../dom.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1500;
@@ -1205,9 +1206,9 @@ export function createFeedTail(box: HTMLElement, rows: Element | (() => Element)
  *   and may be the hidden one, so the group's own bubble stands for it.
  */
 export function latestEntry(box: Element): Element | null {
-  const held = box.querySelectorAll(HELD_ENTRY_SELECTOR);
+  const held = queryAll(box, HELD_ENTRY_SELECTOR);
   if (held.length > 0) return held[held.length - 1] ?? null;
-  const rows = box.querySelectorAll(FEED_ROW_SELECTOR);
+  const rows = queryAll(box, FEED_ROW_SELECTOR);
   let row = rows[rows.length - 1] ?? null;
   if (row === null) return null;
   const outer = (el: Element): Element | null =>

@@ -112,6 +112,7 @@ import {
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { promptWaves, setPromptWave } from "../breathing.js";
+import { childrenMatching, queryAll } from "../dom.js";
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -1930,7 +1931,7 @@ export function createFeedController(
 
   /** Drop whatever a previous walk's refusal left beside the control. */
   function clearRefusals(): void {
-    for (const stale of opts.host.querySelectorAll(":scope > .refusal"))
+    for (const stale of childrenMatching(opts.host, ".refusal"))
       stale.remove();
   }
 
@@ -1952,7 +1953,7 @@ export function createFeedController(
       const state = states.get(id);
       if (state?.row.row.case === "userPrompt") latest = state.element;
     }
-    for (const el of opts.host.querySelectorAll<HTMLElement>(
+    for (const el of queryAll<HTMLElement>(opts.host,
       "[data-latest-prompt]",
     )) {
       if (el !== latest) el.removeAttribute("data-latest-prompt");

@@ -42,6 +42,7 @@ import {
   PROMPT_WAVE_WORKING,
   bubbleWave,
 } from "./breathing.js";
+import { queryAll } from "./dom.js";
 
 /**
  * The flag the driver stamps on the document root WHILE THE PAGE IS HIDDEN, and
@@ -111,7 +112,7 @@ export function createPromptWaveDriver(options: PromptWaveDriverOptions = {}): P
 
   function workingBubbles(): HTMLElement[] {
     return [
-      ...root.querySelectorAll<HTMLElement>(
+      ...queryAll<HTMLElement>(root,
         `.bubble.user[${PROMPT_WAVE_ATTRIBUTE}="${PROMPT_WAVE_WORKING}"]`,
       ),
     ];

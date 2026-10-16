@@ -5,15 +5,18 @@ import { join, relative } from "node:path";
 import {
   SVG_NS,
   ancestorMatching,
+  childrenMatching,
   computedPx,
   nodeLabel,
   pageIntersectionObserver,
   pageResizeObserver,
   placeChildren,
   placeOptional,
+  queryAll,
   repaintMark,
   scrollbarWidthPx,
 } from "../src/dom.js";
+import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf } from "./source-text.js";
 import { filesUnder } from "./files-under.js";
 
@@ -464,5 +467,150 @@ describe("nodeLabel", () => {
 
     // Assert
     expect(copies).toEqual([]);
+  });
+});
+
+/** A tree to query: an outer box around ROOT, which holds rows, a nest and a list. */
+function queryTree(): { outer: HTMLElement; root: HTMLElement } {
+  document.body.replaceChildren();
+  const outer = document.createElement("section");
+  outer.className = "outer";
+  outer.innerHTML = `
+    <div class="root row" id="root">
+      <div class="row" id="a"><span class="row" id="a1"></span></div>
+      <div class="nest" id="b"><div class="row" id="b1"></div></div>
+      <ul id="c"><li class="row" id="c1"></li><li id="c2"></li></ul>
+    </div>`;
+  document.body.append(outer);
+  return { outer, root: outer.querySelector<HTMLElement>("#root")! };
+}
+
+const ids = (els: readonly Element[]): string[] => els.map((el) => el.id);
+
+describe("queryAll", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it.each([
+    ["a class", ".row"],
+    ["every element", "*"],
+    ["a descendant combinator", ".nest .row"],
+    ["a child combinator", "ul > li"],
+    ["an ancestor outside the root", ".outer .row"],
+    ["a selector list", "#c2, .nest"],
+    ["an attribute", "[id^=c]"],
+    ["nothing", ".absent"],
+  ])("answers what querySelectorAll answers for %s", (_label, selector) => {
+    // Arrange
+    const { root } = queryTree();
+    // Act
+    const found = queryAll(root, selector);
+    // Assert
+    expect(ids(found)).toEqual(ids([...root.querySelectorAll(selector)]));
+  });
+
+  it("answers in document order, nested matches after their ancestor", () => {
+    const { root } = queryTree();
+    expect(ids(queryAll(root, ".row"))).toEqual(["a", "a1", "b1", "c1"]);
+  });
+
+  it("never answers the root itself, even when it matches", () => {
+    const { root } = queryTree();
+    expect(ids(queryAll(root, ".root"))).toEqual([]);
+  });
+
+  it("answers the whole document, its root element included, from a Document", () => {
+    queryTree();
+    expect(queryAll(document, "html")).toEqual([document.documentElement]);
+  });
+
+  it("answers under a DocumentFragment root", () => {
+    // Arrange
+    const fragment = document.createDocumentFragment();
+    const row = document.createElement("p");
+    row.className = "row";
+    fragment.append(row);
+    // Act / Assert
+    expect(queryAll(fragment, ".row")).toEqual([row]);
+  });
+
+  it("throws the SyntaxError querySelectorAll throws for a malformed selector, even under an empty root", () => {
+    // Arrange
+    const empty = document.createElement("div");
+    let thrown: unknown = null;
+    // Act
+    try {
+      queryAll(empty, "[[");
+    } catch (err) {
+      thrown = err;
+    }
+    // Assert
+    expect(thrown).toBeInstanceOf(DOMException);
+    expect((thrown as DOMException).name).toBe("SyntaxError");
+  });
+
+  it("refuses a :scope selector, which matches() would read as the tested element", () => {
+    const { root } = queryTree();
+    expect(() => queryAll(root, ":scope > .row")).toThrow(/":scope" selectors are refused/);
+  });
+
+  it("records the refused :scope selector through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { root } = queryTree();
+    // Act
+    expect(() => queryAll(root, ":scope .row")).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "dom.query-scope-refused");
+    expect([record.level.case, record.context]).toEqual([
+      "error",
+      expect.objectContaining({ helper: "queryAll", selector: ":scope .row" }),
+    ]);
+  });
+});
+
+describe("childrenMatching", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("answers the parent's own matching children, in order, and no deeper element", () => {
+    const { root } = queryTree();
+    expect(ids(childrenMatching(root, ".row, ul"))).toEqual(["a", "c"]);
+  });
+
+  it("answers what querySelectorAll answers for the same :scope > selector", () => {
+    const { root } = queryTree();
+    expect(ids(childrenMatching(root, "div"))).toEqual(ids([...root.querySelectorAll(":scope > div")]));
+  });
+
+  it("answers no children when none match", () => {
+    const { root } = queryTree();
+    expect(childrenMatching(root, ".absent")).toEqual([]);
+  });
+
+  it("refuses a :scope selector and records it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { root } = queryTree();
+    // Act
+    expect(() => childrenMatching(root, ":scope > .row")).toThrow(/":scope" selectors are refused/);
+    // Assert
+    const record = await forwardedRecord(capture, "dom.query-scope-refused");
+    expect(record.context).toEqual(expect.objectContaining({ helper: "childrenMatching", selector: ":scope > .row" }));
+  });
+
+});
+
+describe("querySelectorAll", () => {
+  it("is the one way the webapp queries: no source calls querySelectorAll, whose answer WebKit caches", () => {
+    // Arrange — every source under src/, comments stripped.
+    const src = join(process.cwd(), "src");
+    const code = filesUnder(src).map((path) => [relative(src, path), codeOf(readFileSync(path, "utf8"))] as const);
+    // Act
+    const direct = code.filter(([, text]) => /\bquerySelectorAll\b/.test(text)).map(([path]) => path);
+    // Assert
+    expect(direct).toEqual([]);
   });
 });

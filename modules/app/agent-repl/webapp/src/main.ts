@@ -73,6 +73,7 @@ import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor } from "./vocab.js";
+import { childrenMatching } from "./dom.js";
 
 export async function boot(): Promise<void> {
   let failures: LocalFailures | null = null;
@@ -240,7 +241,7 @@ export async function boot(): Promise<void> {
     // panel answers one submission, not the conversation. The feed's own
     // `command_panel` rows are the daemon's, and travel the ordinary row path.
     const showPanel = (panel: SubmitPromptCommandPanel): void => {
-      for (const stale of shell.composer.querySelectorAll(":scope > [data-panel]")) stale.remove();
+      for (const stale of childrenMatching(shell.composer, "[data-panel]")) stale.remove();
       shell.composer.append(drawCommandPanel(panel, ctx));
     };
     const login = mountLoginOverlay(shell.loginOverlay, ctx);

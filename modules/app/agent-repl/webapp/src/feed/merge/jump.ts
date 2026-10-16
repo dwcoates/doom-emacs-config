@@ -29,6 +29,7 @@ import {
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
+import { childrenMatching } from "../../dom.js";
 
 /** Where one kind of jump is recorded and how its refusal is drawn. */
 export interface JumpSite {
@@ -47,7 +48,7 @@ export async function jumpToWorkspace(
   workspace: WorkspaceRef,
   site: JumpSite,
 ): Promise<void> {
-  for (const stale of host.querySelectorAll(`:scope > .${site.refusalClass}`)) stale.remove();
+  for (const stale of childrenMatching(host, `.${site.refusalClass}`)) stale.remove();
   log.info(`selecting a workspace from ${site.describe}`, {
     operation: site.operation,
     context: { workspace: workspace.id },

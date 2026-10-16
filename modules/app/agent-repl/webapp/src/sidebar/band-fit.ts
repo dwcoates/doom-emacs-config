@@ -39,7 +39,7 @@
  * as drawn, every line shown, and fitted the moment they lay out (the rail
  * observes its scroller and its panes).
  */
-import { computedPx } from "../dom.js";
+import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
 
 /** The classes the two bands' sections are drawn with. */
@@ -146,7 +146,7 @@ function contentHeight(el: HTMLElement): number {
  */
 export function regionStops(region: HTMLElement): number[] {
   const origin = region.getBoundingClientRect().top + region.clientTop - region.scrollTop;
-  const bottoms = [...region.querySelectorAll<HTMLElement>(".row")]
+  const bottoms = [...queryAll<HTMLElement>(region, ".row")]
     .map((line) => line.getBoundingClientRect())
     .filter((rect) => rect.height > 0)
     .map((rect) => rect.bottom - origin);
@@ -246,7 +246,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement): BandLines | 
 
 /** Fit the bands of every pane in SCROLLER (the shown one lays out; the other is left). */
 export function fitAllBands(scroller: HTMLElement): void {
-  for (const pane of scroller.querySelectorAll<HTMLElement>(".sb-pane")) fitBands(scroller, pane);
+  for (const pane of queryAll<HTMLElement>(scroller, ".sb-pane")) fitBands(scroller, pane);
 }
 
 /** The rail's re-fit: on every draw, and whenever the scroller or a pane changes size. */
@@ -270,7 +270,7 @@ export function installBandFit(scroller: HTMLElement): BandFit {
   return {
     refit(): void {
       for (const pane of panes) observer.unobserve(pane);
-      panes = [...scroller.querySelectorAll<HTMLElement>(".sb-pane")];
+      panes = [...queryAll<HTMLElement>(scroller, ".sb-pane")];
       for (const pane of panes) observer.observe(pane);
       fitAllBands(scroller);
     },

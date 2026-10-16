@@ -44,7 +44,7 @@ import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
-import { placeChildren } from "../dom.js";
+import { placeChildren, queryAll } from "../dom.js";
 import { stopTicking } from "../feed/ticking.js";
 import { createDrawnStatusLog, type DrawnStatus } from "../drawn-status.js";
 import { log } from "../log.js";
@@ -425,7 +425,7 @@ function drawnRowKeys(panel: HTMLElement | null): ReadonlySet<string> {
   const keys = new Set<string>();
   if (panel === null) return keys;
   const name = panel.getAttribute("data-panel") ?? "";
-  for (const row of panel.querySelectorAll(`[${WORK_ID_ATTRIBUTE}]`)) {
+  for (const row of queryAll(panel, `[${WORK_ID_ATTRIBUTE}]`)) {
     keys.add(`${name}:${row.getAttribute(WORK_ID_ATTRIBUTE) ?? ""}`);
   }
   return keys;

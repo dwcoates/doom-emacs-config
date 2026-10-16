@@ -48,6 +48,7 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { contextPercentColor, contextSectionColor } from "./context-colors.js";
+import { queryAll } from "../dom.js";
 
 /**
  * The panel a submission answered with, drawn.
@@ -556,7 +557,7 @@ export function drawContextSection(
 
 /** Paint both spans of a label/value row one color, for a colored leaf row. */
 function colorRowSpans(row: HTMLElement, color: string): void {
-  for (const span of row.querySelectorAll<HTMLElement>(".panel-row-label, .panel-row-value")) {
+  for (const span of queryAll<HTMLElement>(row, ".panel-row-label, .panel-row-value")) {
     span.style.color = color;
   }
 }

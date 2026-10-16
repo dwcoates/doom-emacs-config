@@ -21,7 +21,7 @@
  * (cards/response.ts), since it streams far more often than anything else.
  */
 import { log } from "../log.js";
-import { placeChildren } from "../dom.js";
+import { placeChildren, queryAll } from "../dom.js";
 import { HAS_MORE_CLASS } from "./bubble-more.js";
 import { DISCARD_ATTRIBUTE, TICKING_ATTRIBUTE, stopTicking } from "./ticking.js";
 
@@ -57,7 +57,7 @@ export function keepScrolled(live: HTMLElement, fresh: HTMLElement): boolean {
  */
 function scrolledPath(root: HTMLElement): Set<Element> {
   const path = new Set<Element>();
-  for (const el of [root, ...root.querySelectorAll("*")]) {
+  for (const el of [root, ...queryAll(root, "*")]) {
     if (el.scrollTop <= 0 && el.scrollLeft <= 0) continue;
     for (let node: Element | null = el; node !== null; node = node.parentElement) {
       path.add(node);

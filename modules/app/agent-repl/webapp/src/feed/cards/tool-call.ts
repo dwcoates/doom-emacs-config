@@ -67,6 +67,7 @@ import { drawMarkdownOutput, isMarkdownOutput } from "./markdown-output.js";
 import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import type { RowContext } from "./context.js";
+import { queryAll } from "../../dom.js";
 
 /**
  * How many diagnostics rows draw before the rest go behind a toggle.
@@ -814,7 +815,7 @@ export function drawFeedToolCallDiagnostics(
     event.preventDefault();
     event.stopPropagation();
     open = !open;
-    const rows = [...list.querySelectorAll<HTMLElement>(".tool-diagnostic")];
+    const rows = [...queryAll<HTMLElement>(list, ".tool-diagnostic")];
     rows.forEach((row, index) => {
       row.hidden = !open && index >= DIAGNOSTICS_VISIBLE;
     });

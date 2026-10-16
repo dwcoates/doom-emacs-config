@@ -20,7 +20,7 @@
  */
 import { createPresence, pagePresence, type Presence } from "./presence.js";
 import { CONTROL_SELECTOR } from "./control.js";
-import { ancestorMatching } from "./dom.js";
+import { ancestorMatching, queryAll } from "./dom.js";
 import { log } from "./log.js";
 import { selectedText } from "./selection.js";
 import { collapseClicked } from "./scroll.js";
@@ -248,7 +248,7 @@ export function expandedKeys(sections: ArrayLike<Section>): string[] {
  * root counts.
  */
 export function cappedSectionsOf(root: HTMLElement): HTMLElement[] {
-  const nested = [...root.querySelectorAll<HTMLElement>(CAPPED_SELECTOR)];
+  const nested = [...queryAll<HTMLElement>(root, CAPPED_SELECTOR)];
   return isCappedSection(root.classList) ? [root, ...nested] : nested;
 }
 

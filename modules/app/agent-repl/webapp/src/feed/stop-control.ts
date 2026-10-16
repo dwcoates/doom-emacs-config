@@ -42,6 +42,7 @@ import { release, whileInFlight } from "./cards/controls.js";
 import { armName } from "./renderers.js";
 import type { RowContext } from "./renderers.js";
 import { stopTicking, tick } from "./ticking.js";
+import { queryAll } from "../dom.js";
 
 /** How long a stop's own answer stays on the control before it clears. */
 export const INTERRUPT_OUTCOME_MS = 4000;
@@ -167,7 +168,7 @@ function errorNote(error: { kind: { case?: string; value?: unknown } }, site: St
 
 /** Drop whatever the previous click left beside the control. */
 function clearOutcome(wrap: HTMLElement, site: StopSite): void {
-  for (const stale of wrap.querySelectorAll(`.${site.prefix}-outcome`)) stale.remove();
+  for (const stale of queryAll(wrap, `.${site.prefix}-outcome`)) stale.remove();
   clearRefusals(wrap);
 }
 

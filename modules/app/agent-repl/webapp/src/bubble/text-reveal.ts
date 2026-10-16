@@ -26,6 +26,7 @@
  * text, keeps every unchanged node, and the reveal is applied again after.
  */
 import { revealSlice } from "../reveal-pace.js";
+import { queryAll } from "../dom.js";
 
 /** The attribute an element wears while none of its text is revealed. */
 export const UNREVEALED_ATTRIBUTE = "data-unrevealed";
@@ -63,7 +64,7 @@ export function clearTextReveal(root: Element): void {
     if (node.data !== full) node.data = full;
     fullTexts.delete(node);
   }
-  for (const hidden of Array.from(root.querySelectorAll(`[${UNREVEALED_ATTRIBUTE}]`))) {
+  for (const hidden of Array.from(queryAll(root, `[${UNREVEALED_ATTRIBUTE}]`))) {
     hidden.removeAttribute(UNREVEALED_ATTRIBUTE);
   }
 }

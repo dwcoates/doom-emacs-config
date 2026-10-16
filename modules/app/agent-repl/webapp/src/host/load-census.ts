@@ -26,6 +26,7 @@ import { pageSize, type PageSize } from "../page-size.js";
 import { CENSUS_EVERY_MS } from "../page-census.js";
 import { every, pageAfter, type After } from "../every.js";
 import { FRAME_SHOWN_ATTRIBUTE, FRAME_WORKSPACE_ATTRIBUTE } from "./host.js";
+import { queryAll } from "../dom.js";
 
 export { CENSUS_EVERY_MS };
 
@@ -43,7 +44,7 @@ export interface CensusSummary {
 
 /** The census of the webhost's DOC. */
 export function summarize(doc: Document): CensusSummary {
-  const frames = doc.querySelectorAll<HTMLIFrameElement>(`iframe[${FRAME_WORKSPACE_ATTRIBUTE}]`);
+  const frames = queryAll<HTMLIFrameElement>(doc, `iframe[${FRAME_WORKSPACE_ATTRIBUTE}]`);
   const shown = doc.querySelector<HTMLIFrameElement>(`iframe[${FRAME_WORKSPACE_ATTRIBUTE}][${FRAME_SHOWN_ATTRIBUTE}]`);
   return {
     pages: frames.length,

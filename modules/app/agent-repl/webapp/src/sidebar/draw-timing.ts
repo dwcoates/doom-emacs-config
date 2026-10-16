@@ -11,6 +11,7 @@
  */
 import { log } from "../log.js";
 import { nextFrame } from "../frame.js";
+import { queryAll } from "../dom.js";
 
 /** A draw at or past one frame's budget is recorded at INFO. */
 export const ROSTER_DRAW_SLOW_MS = 16;
@@ -64,8 +65,8 @@ export function timeRosterDraw(rail: ParentNode, placement: string, draw: (mark:
       ...phases,
       frame_ms: Math.round(settled - drawn),
       total_ms: totalMs,
-      rows: rail.querySelectorAll(".row").length,
-      rail_nodes: rail.querySelectorAll("*").length,
+      rows: queryAll(rail, ".row").length,
+      rail_nodes: queryAll(rail, "*").length,
     };
     const message = `drew the workspace roster in ${drawMs}ms, ${totalMs}ms to the next frame`;
     if (totalMs >= ROSTER_DRAW_SLOW_MS) log.info(message, { operation: "sidebar.roster-draw", context });

@@ -41,6 +41,7 @@ import type { SentenceTable } from "../rpc/refuse.js";
 import { drawNoSessionCell } from "./no-session.js";
 import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
+import { queryAll } from "../dom.js";
 
 /**
  * The selector's hover (owner, 2026-10-01; design record 2026-10-02 decision
@@ -169,7 +170,7 @@ export function routeToColdGate(doc: Document): "gate" | "notice" {
     // is this page having no footer at all, not a missing notice.
     throw new Error("the page has neither a cold gate row nor a footer to notice on");
   }
-  for (const stale of footer.querySelectorAll(`[${COLD_NOTICE_ATTRIBUTE}]`)) stale.remove();
+  for (const stale of queryAll(footer, `[${COLD_NOTICE_ATTRIBUTE}]`)) stale.remove();
   const notice = document.createElement("div");
   notice.className = "footer-notice";
   notice.setAttribute(COLD_NOTICE_ATTRIBUTE, COLD_ATTENTION_VALUE);

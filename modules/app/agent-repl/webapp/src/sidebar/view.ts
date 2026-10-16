@@ -25,6 +25,7 @@
  * through here.
  */
 import { log } from "../log.js";
+import { childrenMatching } from "../dom.js";
 
 /** A piece of view state's value: a fold, collapsed or not. */
 export type ViewValue = boolean;
@@ -47,7 +48,7 @@ export function foldViewKey(sectionKey: string): string {
  */
 export function paintSectionFold(section: HTMLElement, folded: boolean): void {
   section.classList.toggle("folded", folded);
-  for (const triangle of section.querySelectorAll<HTMLElement>(":scope > * > [data-section-fold]")) {
+  for (const triangle of [...section.children].flatMap((child) => childrenMatching<HTMLElement>(child, "[data-section-fold]"))) {
     paintTriangle(triangle, folded);
   }
 }

@@ -80,6 +80,7 @@ import {
   type VerbTarget,
 } from "./verbs.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
+import { queryAll } from "../dom.js";
 
 /** A row that survived the closed filter, carrying its own message path. */
 export interface VisibleRow {
@@ -851,7 +852,7 @@ export function placeRowDetail(ws: HTMLElement): void {
  * panel does not travel with the row that anchors it.
  */
 export function placeOpenRowDetails(root: ParentNode): void {
-  for (const ws of root.querySelectorAll<HTMLElement>(".ws.open")) placeRowDetail(ws);
+  for (const ws of queryAll<HTMLElement>(root, ".ws.open")) placeRowDetail(ws);
 }
 
 /** The "…" control that opens the verb menu, and the right-click's twin. */
