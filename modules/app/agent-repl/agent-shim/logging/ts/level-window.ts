@@ -155,4 +155,30 @@ export class LevelWindow {
   level(): WindowLevel {
     return this.current;
   }
+
+  /**
+   * Raise a running runtime to LEVEL for LASTINGMS from now: the window the
+   * startup setting opens, opened live (a profiling session asking for one).
+   * Answers the window's end, epoch ms. Info, or a window longer than
+   * WINDOW_SECONDS, is refused: a level other than info is a window, never a
+   * standing setting. An open window is replaced.
+   */
+  open(level: WindowLevel, lastingMs: number): number {
+    if (level === "info") throw new Error("logging: a level window opens a level other than info");
+    if (!(lastingMs > 0) || lastingMs > WINDOW_SECONDS * 1000) {
+      throw new Error(`logging: a level window lasts more than nothing and at most ${WINDOW_SECONDS}s, not ${lastingMs}ms`);
+    }
+    this.current = level;
+    this.untilMs = this.now() + lastingMs;
+    return this.untilMs;
+  }
+
+  /** End an open window now; answers its expiry, or null when none was open. */
+  close(): LevelExpiry | null {
+    if (this.untilMs === null) return null;
+    const closed = { from: this.current, untilMs: this.now() };
+    this.current = "info";
+    this.untilMs = null;
+    return closed;
+  }
 }

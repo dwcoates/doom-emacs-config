@@ -15,7 +15,8 @@ import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../feed/gate-doc
 
 /** The id of the page's docked gate band (index.html). */
 const GATE_DOCK_ID = "gate-dock";
-import { log } from "../log.js";
+import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
+import type { LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
@@ -28,6 +29,10 @@ export interface EmbedEnv {
   readonly presence: PresenceSource;
   /** Where the webhost's own failures are listed for this page's warning chip. */
   readonly webhostFailures: WebhostFailureView;
+  /** The page's live log threshold, which the host raises (`logLevel`). */
+  readonly levelWindow: LevelWindow;
+  /** Epoch ms now; the default is the page's clock. */
+  readonly now?: () => number;
 }
 
 /**
@@ -48,7 +53,8 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures } = env;
+  const { doc, win, presence, webhostFailures, levelWindow } = env;
+  const now = env.now ?? Date.now;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -86,6 +92,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
       case "webhostFailures":
         webhostFailures.set(message.failures);
         return;
+      case "logLevel":
+        applyLogLevel(message.level, message.untilMs);
+        return;
       case "dismissDigest": {
         // Escape in Emacs's composer (or a sent prompt) closing the digest is
         // a person's action, recorded at INFO; a page with none standing has
@@ -104,6 +113,41 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       }
     }
+  };
+
+  /** Raise the page to LEVEL until UNTILMS, or back to info. */
+  const applyLogLevel = (level: WindowLevel, untilMs: number | null): void => {
+    if (level === "info") {
+      const closed = levelWindow.close();
+      if (closed !== null) {
+        log.info("the host closed this page's log level window; back at info", {
+          operation: LEVEL_WINDOW_OPERATION,
+          context: { from_level: closed.from, outcome: "window_closed" },
+        });
+      }
+      return;
+    }
+    const lastingMs = (untilMs ?? 0) - now();
+    if (lastingMs <= 0) {
+      log.debug("the host's log level window had already ended when it arrived", {
+        operation: LEVEL_WINDOW_OPERATION,
+        context: { level, until_ms: untilMs, outcome: "expired" },
+      });
+      return;
+    }
+    try {
+      levelWindow.open(level, lastingMs);
+    } catch (err) {
+      log.error("the host asked for a log level window the page refused", {
+        operation: LEVEL_WINDOW_OPERATION,
+        context: { level, until_ms: untilMs, cause: (err as Error).message },
+      });
+      return;
+    }
+    log.info("the host raised this page's log level for its window", {
+      operation: LEVEL_WINDOW_OPERATION,
+      context: { level, until: Math.floor((untilMs ?? 0) / 1000), outcome: "window_opened" },
+    });
   };
 
   const onMessage = (event: MessageEvent): void => {

@@ -62,7 +62,7 @@ import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { configureLog } from "./log.js";
+import { configureLog, logLevelWindow } from "./log.js";
 import { armRuntimeProfiling } from "./profiling.js";
 import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
 import { READY_FD, reportReady } from "./ready.js";
@@ -1118,6 +1118,7 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
     pid: process.pid,
     onSignal: (signal, handler) => process.on(signal, handler),
     onExit: (handler) => process.on("exit", handler),
+    level: logLevelWindow(),
   });
 
   deps.lifecycle.info(

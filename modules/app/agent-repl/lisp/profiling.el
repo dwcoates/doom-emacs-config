@@ -38,6 +38,8 @@
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "workspace" (ws key))
+(declare-function agent-repl--set-log-level-window "core" (level))
+(declare-function agent-repl-webhost-set-log-level "webhost" (level until-ms))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
 (declare-function agent-repl-webhost-buffer "webhost" ())
 (defvar agent-repl--global-log-scope)
@@ -63,6 +65,14 @@ Emacs is called rather than signaled, so it writes no marker of its own.")
 
 (defvar agent-repl-profiling--timer nil
   "The max-duration stop of the running profile.")
+
+(defconst agent-repl-profiling-log-level-file "log-level"
+  "The file in a session's directory naming a log level every runtime raises
+itself to while it profiles into the session (proto/vocab/profile-session.json).")
+
+(defvar agent-repl-profiling--level-open nil
+  "Non-nil while this profile's session holds Emacs and the webhost at a raised
+log level, which the profile's stop closes.")
 
 (defvar agent-repl-profiling--generation 0
   "Counts the profiles started, so an old max-duration stop ends no later one.")
@@ -107,9 +117,44 @@ Signals an error when the file names no valid session."
     (setq agent-repl-profiling--timer
           (run-at-time agent-repl-profiling-max-seconds nil
                        #'agent-repl-profiling--expire armed)))
-  (let ((pages (agent-repl-profiling--pages 'start session)))
+  (let ((pages (agent-repl-profiling--pages 'start session))
+        (level (agent-repl-profiling--open-level session)))
     (agent-repl--info agent-repl--global-log-scope "profiling: started into session %s (%d pages sampled)" session pages)
-    (format "started %s pages=%d" session pages)))
+    (format "started %s pages=%d%s" session pages (if level (format " level=%s" level) ""))))
+
+(defun agent-repl-profiling--open-level (session)
+  "Raise Emacs, the webhost and every page to the level SESSION names.
+Answers the level, or nil when the session names none.  An unreadable or
+unknown level is recorded at error and leaves every level as it was; the
+profile still runs."
+  (let ((file (expand-file-name agent-repl-profiling-log-level-file
+                                (expand-file-name session (agent-repl-profiling-root)))))
+    (when (file-exists-p file)
+      (let* ((name (string-trim (with-temp-buffer (insert-file-contents file) (buffer-string))))
+             (level (intern name)))
+        (if (not (memq level '(debug warn error)))
+            (progn
+              (agent-repl--error agent-repl--global-log-scope
+                                 "profiling: the session %s names log level %S, not one of debug warn error; levels left as they are"
+                                 session name)
+              nil)
+          (let ((until (agent-repl--set-log-level-window level)))
+            (setq agent-repl-profiling--level-open t)
+            (agent-repl-webhost-set-log-level level (round (* 1000 until)))
+            (agent-repl--info agent-repl--global-log-scope
+                              "profiling: raised Emacs, the webhost and every page to %s for session %s until %s"
+                              level session (format-time-string "%FT%T%z" (seconds-to-time until)))
+            level))))))
+
+(defun agent-repl-profiling--close-level (session)
+  "Return Emacs, the webhost and every page to info after SESSION's window."
+  (when agent-repl-profiling--level-open
+    (setq agent-repl-profiling--level-open nil)
+    (agent-repl--set-log-level-window 'info)
+    (agent-repl-webhost-set-log-level 'info nil)
+    (agent-repl--info agent-repl--global-log-scope
+                      "profiling: closed session %s's log level window; Emacs, the webhost and every page are back at info"
+                      session)))
 
 (defun agent-repl-profiling--expire (armed)
   "Stop the profile of generation ARMED at its max duration."
@@ -157,6 +202,7 @@ Answers the files written."
           (push data files)
           (push text files))))
     (setq files (nreverse files))
+    (agent-repl-profiling--close-level session)
     (let ((pages (agent-repl-profiling--pages 'stop session)))
       (agent-repl--info agent-repl--global-log-scope "profiling: stopped session %s (%s), wrote %s; %d pages answering"
                         session reason (string-join files ", ") pages)

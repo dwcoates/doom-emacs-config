@@ -409,6 +409,40 @@ so stubbing the accessor would not reach the code under test."
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
+;;;; ---- The log level window ----
+
+(ert-deftest agent-repl-test-wh-set-log-level-tells-the-host-the-window ()
+  "A raised level is sent to the host with its window's end."
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-log-level nil))
+      (agent-repl-webhost-set-log-level 'debug 1792000000000)
+      (should (equal (agent-repl-test-wh--sent "setLogLevel")
+                     (list (agent-repl--webhost-script "setLogLevel" "debug" 1792000000000)))))))
+
+(ert-deftest agent-repl-test-wh-set-log-level-info-closes-the-window ()
+  "Info, with no end, is sent as the close and forgets the window."
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-log-level '(debug . 1792000000000)))
+      (agent-repl-webhost-set-log-level 'info nil)
+      (should (null agent-repl--webhost-log-level))
+      (should (string-search "h.setLogLevel(\"info\",null)" (car (agent-repl-test-wh--sent "setLogLevel")))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-a-standing-log-level-window ()
+  "A host that loads while a window stands is raised again."
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-log-level nil))
+      (agent-repl-webhost-set-log-level 'debug (round (* 1000 (+ (float-time) 60))))
+      (setq agent-repl-test-wh--calls nil)
+      (agent-repl--webhost-on-load 'load-changed)
+      (should (= 1 (length (agent-repl-test-wh--sent "setLogLevel")))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-no-ended-log-level-window ()
+  "A window that has ended is not handed to a host that loads after it."
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-log-level (cons 'debug (round (* 1000 (- (float-time) 1))))))
+      (agent-repl--webhost-on-load 'load-changed)
+      (should (null (agent-repl-test-wh--sent "setLogLevel"))))))
+
 (ert-deftest agent-repl-test-wh-a-load-replays-each-pages-state ()
   "A loaded host gets every page's input background and gate slot again."
   ;; Arrange

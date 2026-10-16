@@ -12,6 +12,8 @@ describe("parseHostToPage", () => {
     ["gateDock without a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: null }],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
     ["sidebarDock", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true }],
+    ["logLevel opening a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 }],
+    ["logLevel closing a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
     ["webhostFailures with none", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] }],
     [
       "webhostFailures with a row",
@@ -38,6 +40,9 @@ describe("parseHostToPage", () => {
     ["an inputBackground without a string", { channel: HOST_CHANNEL, kind: "inputBackground", background: 3 }],
     ["a gateDock with a non-finite height", { channel: HOST_CHANNEL, kind: "gateDock", pixels: Infinity, background: null }],
     ["a sidebarDock without a boolean", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: 1 }],
+    ["a logLevel naming no level", { channel: HOST_CHANNEL, kind: "logLevel", level: "trace", untilMs: 1 }],
+    ["a logLevel window with no end", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: null }],
+    ["an info logLevel with an end", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: 1 }],
     ["webhostFailures without a list", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: {} }],
     [
       "webhostFailures with an arm no frontend mints",

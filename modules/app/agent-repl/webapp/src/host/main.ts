@@ -20,6 +20,7 @@
  * away from it. The answer comes instead from the shown page, which reports
  * whether one of its text fields holds the focus (embed.ts).
  */
+import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createHost, hostHasFocus, type Host } from "./host.js";
 import { WEBHOST_SIDEBAR_ID, startWebhostSidebar } from "./sidebar.js";
 import "./host.css";
@@ -45,7 +46,7 @@ export const WEBHOST_FRAMES_CLASS = "webhost-frames";
 /** What the start may have injected, for a suite that is not about the sidebar. */
 export interface StartHostDeps {
   /** Start the webhost's sidebar; the real one dials the daemon. */
-  startSidebar?: (doc: Document, win: Window, host: Host, nav: HTMLElement) => unknown;
+  startSidebar?: (doc: Document, win: Window, host: Host, nav: HTMLElement, deps: { level: LevelWindow }) => unknown;
 }
 
 export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}): Host {
@@ -60,12 +61,15 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
   const frames = doc.createElement("div");
   frames.className = WEBHOST_FRAMES_CLASS;
   doc.body.append(frames, nav);
-  const host = createHost({ doc, win, frames });
+  // THE WEBHOST'S OWN LOG LEVEL, raised with every page's by a profiling
+  // session (`Host.setLogLevel`); its logger is the sidebar's.
+  const level = LevelWindow.fixed("info");
+  const host = createHost({ doc, win, frames, level });
   win.agentReplHost = host;
   const pending = win.__agentReplHostPending ?? [];
   delete win.__agentReplHostPending;
   for (const call of pending) call(host);
-  (deps.startSidebar ?? startWebhostSidebar)(doc, win, host, nav);
+  (deps.startSidebar ?? startWebhostSidebar)(doc, win, host, nav, { level });
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after

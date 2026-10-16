@@ -92,3 +92,67 @@ describe("the shared log level window", () => {
     expect([allowed, ended]).toEqual([true, null]);
   });
 });
+
+describe("LevelWindow.open", () => {
+  it("raises the level until its end", () => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+
+    // Act
+    const untilMs = window.open("debug", 60_000);
+
+    // Assert
+    expect([untilMs, window.allows("debug").allowed]).toEqual([1_060_000, true]);
+  });
+
+  it("reverts at the end of a window opened live", () => {
+    // Arrange
+    let now = 1_000_000;
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => now);
+    window.open("debug", 60_000);
+    now = 1_060_000;
+
+    // Act
+    const answer = window.allows("debug");
+
+    // Assert
+    expect([answer.allowed, answer.ended?.from]).toEqual([false, "debug"]);
+  });
+
+  it.each([
+    ["info", 60_000],
+    ["debug", WINDOW_SECONDS * 1000 + 1],
+    ["debug", 0],
+  ] as const)("refuses %s for %dms", (level, lastingMs) => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+
+    // Act / Assert
+    expect(() => window.open(level, lastingMs)).toThrow();
+    expect(window.level()).toBe("info");
+  });
+});
+
+describe("LevelWindow.close", () => {
+  it("reverts an open window now", () => {
+    // Arrange
+    let now = 1_000_000;
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => now);
+    window.open("debug", 60_000);
+    now = 1_010_000;
+
+    // Act
+    const closed = window.close();
+
+    // Assert
+    expect([closed, window.level()]).toEqual([{ from: "debug", untilMs: 1_010_000 }, "info"]);
+  });
+
+  it("answers null with no window open", () => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+
+    // Act / Assert
+    expect(window.close()).toBeNull();
+  });
+});

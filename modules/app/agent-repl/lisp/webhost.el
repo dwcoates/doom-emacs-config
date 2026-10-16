@@ -82,6 +82,11 @@ workspace's own.")
 (defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
   "Workspace id -> (PIXELS . BACKGROUND), the slot its docked gate takes.")
 
+(defvar agent-repl--webhost-log-level nil
+  "The log level window the host and every page record at, or nil: a cons
+\(LEVEL . UNTIL-MS), LEVEL a symbol and UNTIL-MS the window's end in epoch
+milliseconds.  Replayed to a host that loads before the window ends.")
+
 (defvar agent-repl--webhost-reload-timer nil
   "The pending host reload of a rollout burst, or nil.")
 
@@ -345,6 +350,13 @@ BACKGROUND is the input window's, or nil when it has none."
     (puthash id (cons pixels background) agent-repl--webhost-gate-docks)
     (agent-repl--webhost-call "setGateDock" id pixels background)))
 
+(defun agent-repl-webhost-set-log-level (level until-ms)
+  "Raise the host and every page to LEVEL until UNTIL-MS (epoch ms).
+LEVEL `info', with UNTIL-MS nil, closes the window.  Kept for the host's
+reloads while the window lasts.  Non-nil when the call was sent."
+  (setq agent-repl--webhost-log-level (unless (eq level 'info) (cons level until-ms)))
+  (agent-repl--webhost-call "setLogLevel" (symbol-name level) until-ms))
+
 (defun agent-repl-webhost-dismiss-digest (ws)
   "Ask WS's page to close its standing news digest."
   (when-let ((id (agent-repl--webhost-id ws)))
@@ -363,7 +375,11 @@ each page's state.  Run on every load of the host, which starts empty."
              (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))
            agent-repl--webhost-gate-docks)
   (when agent-repl--webhost-shown
-    (agent-repl--webhost-call "show" agent-repl--webhost-shown)))
+    (agent-repl--webhost-call "show" agent-repl--webhost-shown))
+  (when (and agent-repl--webhost-log-level
+             (> (cdr agent-repl--webhost-log-level) (* 1000 (float-time))))
+    (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
+                              (cdr agent-repl--webhost-log-level))))
 
 (defun agent-repl--webhost-reload-now (conn)
   "Navigate the host to its URL on CONN's daemon; its load replays the rest."

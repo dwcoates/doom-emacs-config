@@ -24,6 +24,12 @@ export const ARMED_DIR = "armed";
 export const SIGNAL = "SIGWINCH";
 /** How long a profile runs before the runtime stops it by itself. */
 export const MAX_SECONDS = 1800;
+/**
+ * The file in a session's directory naming a log level every runtime raises
+ * itself to while it profiles into the session, as a level window closed when
+ * the profile stops. Absent, levels are left as they are.
+ */
+export const LOG_LEVEL_FILE = "log-level";
 
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 

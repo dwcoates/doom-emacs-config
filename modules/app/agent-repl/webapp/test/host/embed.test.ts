@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // A workspace page's side of the host protocol. See src/host/embed.ts.
+import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
@@ -15,6 +16,8 @@ let pageWin: Window;
 let pageDoc: Document;
 let hostWin: Window;
 let presence: PresenceSource;
+let levelWindow: LevelWindow;
+let clock: number;
 let webhostFailures: WebhostFailureView;
 let link: HostLink | null;
 let received: PageToHost[];
@@ -69,7 +72,9 @@ beforeEach(() => {
   pageDoc = document;
   presence = createPresence(pageDoc, true);
   webhostFailures = createWebhostFailureView();
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures });
+  clock = 1_000_000;
+  levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, now: () => clock });
 });
 
 afterEach(() => {
@@ -87,7 +92,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow });
 
 
     // Assert
@@ -256,7 +261,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, now: () => clock });
 
     // Assert
     await delivered();
@@ -395,7 +400,7 @@ describe("the gate band", () => {
     dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
     pageDoc.body.append(dock);
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, now: () => clock });
     return dock;
   }
 
@@ -441,3 +446,52 @@ describe("the gate band", () => {
     expect(received.some((m) => m.kind === "gateBand")).toBe(false);
   });
 });
+
+describe("the host's log level", () => {
+  it("opens the page's window until the end the host names", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: clock + 60_000 });
+
+    // Assert
+    expect([levelWindow.level(), levelWindow.allows("debug").allowed]).toEqual(["debug", true]);
+  });
+
+  it("records the window it opened", async () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: clock + 60_000 });
+
+    // Assert
+    expect(await operations()).toContain("webapp.log.level-window");
+  });
+
+  it("closes the page's window on info", () => {
+    // Arrange
+    fromHost({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: clock + 60_000 });
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null });
+
+    // Assert
+    expect(levelWindow.level()).toBe("info");
+  });
+
+  it("leaves the page at info for a window that already ended", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: clock - 1 });
+
+    // Assert
+    expect(levelWindow.level()).toBe("info");
+  });
+
+  it("refuses at error a window longer than a level may last, staying at info", async () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: clock + 600_000 });
+
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    const refused = capture.sent.find((record) => record.operation === "webapp.log.level-window" && record.level.case === "error");
+    expect([levelWindow.level(), refused !== undefined]).toEqual(["info", true]);
+  });
+});
+

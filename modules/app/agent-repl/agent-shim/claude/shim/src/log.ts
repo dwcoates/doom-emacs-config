@@ -223,6 +223,12 @@ function retireStderrMirror(cause: Error): void {
 }
 
 /** Record the vendor identity as soon as the SDK reveals it. */
+/** The shim's live log threshold, which a profiling session raises (src/profiling.ts). */
+export function logLevelWindow(): LevelWindow {
+  if (runtimeContext === undefined) throw new Error("shim logger has not been configured");
+  return runtimeContext.window;
+}
+
 export function setClaudeSessionId(claudeSessionId: string): void {
   if (typeof claudeSessionId !== "string" || claudeSessionId.length === 0) {
     throw new Error("shim claude session id is required");

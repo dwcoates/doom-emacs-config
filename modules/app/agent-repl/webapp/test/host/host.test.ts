@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The host page: one iframe per workspace, one shown, state replayed on hello,
 // facts mirrored for Emacs. See src/host/host.ts.
+import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,7 +17,7 @@ import { HOST_CHANNEL, type HostToPage } from "../../src/host/protocol.js";
 let host: Host;
 
 beforeEach(() => {
-  host = createHost({ doc: document, win: window });
+  host = createHost({ doc: document, win: window, level: LevelWindow.fixed("info") });
 });
 
 afterEach(() => {
@@ -574,7 +575,7 @@ describe("the webhost's sidebar", () => {
     host.dispose();
     const stack = document.createElement("div");
     document.body.append(stack);
-    host = createHost({ doc: document, win: window, frames: stack });
+    host = createHost({ doc: document, win: window, level: LevelWindow.fixed("info"), frames: stack });
 
     // Act
     host.ensure("a", "http://ws-a.localhost:1/");
@@ -583,3 +584,103 @@ describe("the webhost's sidebar", () => {
     expect(stack.querySelector("iframe")).toBe(frame("a"));
   });
 });
+
+describe("setLogLevel", () => {
+  /** A host on CLOCK, holding the level window it raises. */
+  function leveled(clock: { ms: number }) {
+    host.dispose();
+    const level = new LevelWindow({ level: "info", untilMs: null }, () => clock.ms);
+    host = createHost({ doc: document, win: window, level, now: () => clock.ms });
+    return level;
+  }
+
+  it("raises the webhost's own level until the end it names", () => {
+    // Arrange
+    const clock = { ms: 1_000_000 };
+    const level = leveled(clock);
+
+    // Act
+    const answer = parsed(host.setLogLevel("debug", 1_060_000));
+
+    // Assert
+    expect([answer.outcome, level.level()]).toEqual(["opened", "debug"]);
+  });
+
+  it("tells every page the window", () => {
+    // Arrange
+    leveled({ ms: 1_000_000 });
+    pages(host, "a");
+    const posted = postsTo("a");
+
+    // Act
+    host.setLogLevel("debug", 1_060_000);
+
+    // Assert
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 });
+  });
+
+  it("replays a standing window to a page that says hello", () => {
+    // Arrange
+    leveled({ ms: 1_000_000 });
+    pages(host, "a");
+    host.setLogLevel("debug", 1_060_000);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 });
+  });
+
+  it("replays no window that has ended", () => {
+    // Arrange
+    const clock = { ms: 1_000_000 };
+    leveled(clock);
+    pages(host, "a");
+    host.setLogLevel("debug", 1_060_000);
+    clock.ms = 1_060_000;
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(posted.some((message) => message.kind === "logLevel")).toBe(false);
+  });
+
+  it("closes the window everywhere on info", () => {
+    // Arrange
+    const level = leveled({ ms: 1_000_000 });
+    pages(host, "a");
+    host.setLogLevel("debug", 1_060_000);
+    const posted = postsTo("a");
+
+    // Act
+    const answer = parsed(host.setLogLevel("info", null));
+
+    // Assert
+    expect([answer.outcome, level.level(), posted]).toEqual([
+      "closed",
+      "info",
+      [{ channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
+    ]);
+  });
+
+  it.each([
+    ["an unknown level", "trace", 1_060_000],
+    ["a window with no end", "debug", null],
+    ["an info level with an end", "info", 1_060_000],
+    ["a window longer than a level may last", "debug", 1_000_000 + 600_000],
+  ] as const)("refuses %s, leaving the level at info", (_name, name, untilMs) => {
+    // Arrange
+    const level = leveled({ ms: 1_000_000 });
+
+    // Act
+    const answer = parsed(host.setLogLevel(name, untilMs));
+
+    // Assert
+    expect([answer.outcome, level.level(), (answer.notes as unknown[]).length]).toEqual(["refused", "info", 1]);
+  });
+});
+

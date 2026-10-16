@@ -120,7 +120,8 @@ export async function boot(): Promise<void> {
     // A level other than info is a window (proto/vocab/log-level-window.json):
     // a page reloaded from an address whose window has ended boots at info.
     const levelSelection = selectLevel(address.logLevel, address.logLevelUntil, Date.now(), "log_level");
-    installForwardingLogger(() => client, { case: "workspace", value: workspace }, new LevelWindow(levelSelection));
+    const levelWindow = new LevelWindow(levelSelection);
+    installForwardingLogger(() => client, { case: "workspace", value: workspace }, levelWindow);
     const levelNote = selectionNote(levelSelection);
     if (levelNote !== null) log.info(levelNote, { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(levelSelection) });
 
@@ -135,7 +136,7 @@ export async function boot(): Promise<void> {
     // Joined before anything draws, so the host's first word (shown or not)
     // reaches the page before the rail decides what it can skip.
     const webhostFailures = createWebhostFailureView();
-    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures });
+    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures, levelWindow });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
