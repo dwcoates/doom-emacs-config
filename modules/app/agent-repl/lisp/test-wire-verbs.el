@@ -1974,6 +1974,26 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"worktreeUnrestorable\":{\"dir\":\"/w/gone\",\"branch\":\"b\",\"detail\":\"gone\"}}"))
                    '(:cause (:arm :worktree-unrestorable :value (:dir "/w/gone" :branch "b" :detail "gone")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-open-error-not-merged-arm ()
+  "OpenWorkspaceError's `not_merged' arm decodes as its empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notMerged\":{}}"))
+                   '(:cause (:arm :not-merged :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-brief-missing-arm ()
+  "OpenWorkspaceError's `brief_missing' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"briefMissing\":{\"detail\":\"the brief is gone\"}}"))
+                   '(:cause (:arm :brief-missing :value (:detail "the brief is gone")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-brief-missing-refuses-an-unknown-field ()
+  "OpenWorkspaceBriefMissing refuses a field the schema does not declare."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-open-workspace-brief-missing
+                   (agent-repl-test-wire-verbs--parse "{\"detail\":\"x\",\"bogus\":1}")))))
+
 (ert-deftest agent-repl-test-wire-verbs-open-error-vendor-start-failed-arm ()
   "OpenWorkspaceError's `vendor_start_failed' arm decodes with everything it
 carries."
@@ -2034,7 +2054,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable" "notMerged" "briefMissing")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()
