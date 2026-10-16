@@ -493,6 +493,11 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return d.refuse(fields, err)
 	}
 
+	reassert, err := d.concludedAfter(fields, r, prior)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+
 	if prior != nil && retiredFrom == "" {
 		unchanged, err := sameContentBarVersion(r, prior)
 		if err != nil {
@@ -511,6 +516,25 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		d.log.Log(warn, "workflow ingestion not implemented this wave — the entry is stored as never-served residue and the workflow table is untouched entries_index=%d", r.index)
 	}
 
+	if err := d.landRow(ctx, tx, fields, r, cursor, nextSeq, now, result, retiredFrom, true); err != nil {
+		return err
+	}
+	// THE CONCLUSION IS SAID AGAIN AFTER THE LATE WRITE (settledguard.go), so
+	// every reader sees the unit's lifecycle in order and the row ends on it.
+	if reassert != nil {
+		return d.landRow(ctx, tx, fields, *reassert, cursor, nextSeq, now, result, "", false)
+	}
+	return nil
+}
+
+// landRow upserts R under the next write ordinal, places it in its book and
+// its turn indexes, and adds it to RESULT for the watchers. APPLIED is a
+// producer's write: its ledger row and its lifecycle are recorded, and
+// RETIREDFROM names the retired kind it supersedes; a reassertion the store
+// makes itself (concludedAfter) records neither, since the write it repeats
+// already did.
+func (d *DB) landRow(ctx context.Context, tx *sql.Tx, fields logging.Fields, r routed, cursor *storev1.CursorState,
+	nextSeq *uint64, now int64, result *WriteResult, retiredFrom string, applied bool) error {
 	*nextSeq++
 	seq := *nextSeq
 	position, firstInsertedAtMs, err := d.upsertEntry(ctx, tx, r, seq, now)
@@ -536,11 +560,13 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 			return d.refuse(fields, err)
 		}
 	}
-	if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {
-		return d.refuse(fields, err)
-	}
-	if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
-		return d.refuse(fields, err)
+	if applied {
+		if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {
+			return d.refuse(fields, err)
+		}
+		if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
+			return d.refuse(fields, err)
+		}
 	}
 	if retiredFrom != "" {
 		// ONCE PER KEY by construction: the row now holds a real kind, so no
@@ -554,7 +580,9 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		d.log.Log(info, "%s was superseded by a real record old_kind=%s new_kind=%s entries_index=%d",
 			what, retiredFrom, r.kind, r.index)
 	}
-	result.Written++
+	if applied {
+		result.Written++
+	}
 	switch r.kind {
 	case kindPageLine, kindHookDropped:
 		// A HOOK LINE IS PUBLISHED LIKE ANY LINE, and that is the only time it

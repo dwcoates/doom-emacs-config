@@ -450,14 +450,6 @@ describe("rollBackSessionFailure", () => {
     expect(failure.cause.case === "unseenPrompt" ? failure.cause.value.vendorPromptUuid : "").toBe("u-9");
   });
 
-  it("carries the vendor's refusal of the cut verbatim", () => {
-    // Arrange, Act.
-    const failure = failures.rollBackSessionFailure({ kind: "vendorRefused", vendorMessage: "Resume rejected" }, "why");
-
-    // Assert.
-    expect(failure.cause.case === "vendorRefused" ? failure.cause.value.vendorMessage : "").toBe("Resume rejected");
-  });
-
   it("carries the vendor's reason the files cannot be restored verbatim", () => {
     // Arrange, Act.
     const failure = failures.rollBackSessionFailure({ kind: "filesNotRestorable", vendorMessage: "no checkpoint" }, "why");

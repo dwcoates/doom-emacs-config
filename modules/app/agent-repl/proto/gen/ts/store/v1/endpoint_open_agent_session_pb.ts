@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_open_agent_session.proto.
  */
 export const file_store_v1_endpoint_open_agent_session: GenFile = /*@__PURE__*/
-  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxItsBChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjMKDWtub3duX3Rocm91Z2gYAyABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVySAASMwoJdGFpbF9vbmx5GAUgASgLMh4uc3RvcmUudjEuQWdlbnRTZXNzaW9uVGFpbE9ubHlIABIRCglwYWdlX29ubHkYBCABKAhCCQoHb3BlbmluZ0oECAIQA1IJcGFnZV9zaXplIpABChhPcGVuQWdlbnRTZXNzaW9uUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdWNjZXNzSAASNAoHZmFpbHVyZRgCIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0IqsBChdPcGVuQWdlbnRTZXNzaW9uU3VjY2VzcxIoCgRwYWdlGAEgASgLMhouc3RvcmUudjEuQWdlbnRTZXNzaW9uUGFnZRIqCgV3YXRjaBgCIAEoCzIbLnN0b3JlLnYxLkFnZW50U2Vzc2lvblRva2VuEi8KBm5ld2VzdBgDIAEoCzIaLnN0b3JlLnYxLlN0b3JlSXRlbVBvaW50ZXJIAIgBAUIJCgdfbmV3ZXN0Ir0CChdPcGVuQWdlbnRTZXNzaW9uRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSQwoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiguc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvbkludmFsaWRSZXF1ZXN0SAASPwoNc3RhbGVfcG9pbnRlchgDIAEoCzImLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdGFsZVBvaW50ZXJIABJDCg9zdG9yYWdlX2ZhaWx1cmUYBCABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmVIABI/Cg11bmtub3duX2FnZW50GAUgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblVua25vd25BZ2VudEgAQgYKBGtpbmQiHgocT3BlbkFnZW50U2Vzc2lvblVua25vd25BZ2VudCIvCh5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiIAoeT3BlbkFnZW50U2Vzc2lvblN0b3JhZ2VGYWlsdXJlIh4KHE9wZW5BZ2VudFNlc3Npb25TdGFsZVBvaW50ZXIiFgoUQWdlbnRTZXNzaW9uVGFpbE9ubHlCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_store_v1_store]);
+  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxIuwBChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjMKDWtub3duX3Rocm91Z2gYAyABKAsyGi5zdG9yZS52MS5TdG9yZUl0ZW1Qb2ludGVySAASMwoJdGFpbF9vbmx5GAUgASgLMh4uc3RvcmUudjEuQWdlbnRTZXNzaW9uVGFpbE9ubHlIABIRCglwYWdlX29ubHkYBCABKAgSDwoHdm91Y2hlZBgGIAEoCEIJCgdvcGVuaW5nSgQIAhADUglwYWdlX3NpemUikAEKGE9wZW5BZ2VudFNlc3Npb25SZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblN1Y2Nlc3NIABI0CgdmYWlsdXJlGAIgASgLMiEuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvbkZhaWx1cmVIAEIICgZyZXN1bHQiqwEKF09wZW5BZ2VudFNlc3Npb25TdWNjZXNzEigKBHBhZ2UYASABKAsyGi5zdG9yZS52MS5BZ2VudFNlc3Npb25QYWdlEioKBXdhdGNoGAIgASgLMhsuc3RvcmUudjEuQWdlbnRTZXNzaW9uVG9rZW4SLwoGbmV3ZXN0GAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAiAEBQgkKB19uZXdlc3QivQIKF09wZW5BZ2VudFNlc3Npb25GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJDCg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3RIABI/Cg1zdGFsZV9wb2ludGVyGAMgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckgAEkMKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIoLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdG9yYWdlRmFpbHVyZUgAEj8KDXVua25vd25fYWdlbnQYBSABKAsyJi5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50SABCBgoEa2luZCIeChxPcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50Ii8KHk9wZW5BZ2VudFNlc3Npb25JbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIgCh5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmUiHgocT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlciIWChRBZ2VudFNlc3Npb25UYWlsT25seUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_store_v1_store]);
 
 /**
  * Open one agent's reading session: the first page, and the address of the
@@ -81,6 +81,26 @@ export type OpenAgentSessionRequest = Message<"store.v1.OpenAgentSessionRequest"
    * @generated from field: bool page_only = 4;
    */
   pageOnly: boolean;
+
+  /**
+   * Whether the caller is the producer that announced this agent and vouches
+   * that it is real. UNSET/false = an absent book is refused `unknown_agent`.
+   * SET = an absent book is one nothing has been written to yet, and it is
+   * served as the empty book it is: an empty page at its floor, `newest`
+   * UNSET, and (unless `page_only`) a watch token whose tail begins at the
+   * book's first item, whichever producer writes it. A `known_through` naming
+   * no line of the book is still refused `stale_pointer`.
+   *
+   * THE STORE IS THE ONE PARTY THAT SEES EVERY WRITE. The book's first row may
+   * come from either plane (the shim's stream, or the sidecar's copy of the
+   * vendor's transcript), so only the store can tell a waiting reader the
+   * moment it lands. A producer that was refused and re-asked on a timer
+   * instead polled the store for as long as the book stayed empty, which for
+   * an idle forked conversation was forever.
+   *
+   * @generated from field: bool vouched = 6;
+   */
+  vouched: boolean;
 };
 
 /**

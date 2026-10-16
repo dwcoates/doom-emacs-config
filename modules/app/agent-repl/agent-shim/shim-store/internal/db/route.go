@@ -768,6 +768,26 @@ var terminalArmNames = map[string]bool{
 // kind as never-terminal until someone noticed, which would leave detached-work
 // rows open forever. Reading the arm name keeps a new unit correct on arrival.
 func activityIsTerminal(activity *conversationv1.AgentActivity) bool {
+	return activityArmIn(activity, terminalArmNames)
+}
+
+// consequenceArmNames are the oneof arm names a unit carries AFTER its
+// terminal: a consequence applied to the settled unit, never a state of it
+// (conversation.v1's `diagnostics`, the IDE findings a write or an edit
+// raised).
+var consequenceArmNames = map[string]bool{
+	"diagnostics": true,
+}
+
+// activityIsConsequence reports whether an activity's item is on an arm that
+// follows its unit's terminal (consequenceArmNames).
+func activityIsConsequence(activity *conversationv1.AgentActivity) bool {
+	return activityArmIn(activity, consequenceArmNames)
+}
+
+// activityArmIn reports whether an activity's item has an arm set whose name
+// is in NAMES, in whatever vocabulary that item kind uses.
+func activityArmIn(activity *conversationv1.AgentActivity, names map[string]bool) bool {
 	item := activity.ProtoReflect()
 	itemOneof := item.Descriptor().Oneofs().ByName("item")
 	if itemOneof == nil {
@@ -781,7 +801,7 @@ func activityIsTerminal(activity *conversationv1.AgentActivity) bool {
 	oneofs := unit.Descriptor().Oneofs()
 	for i := 0; i < oneofs.Len(); i++ {
 		set := unit.WhichOneof(oneofs.Get(i))
-		if set != nil && terminalArmNames[string(set.Name())] {
+		if set != nil && names[string(set.Name())] {
 			return true
 		}
 	}

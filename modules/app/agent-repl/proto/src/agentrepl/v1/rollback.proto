@@ -20,6 +20,8 @@ message RollbackToken {
 // feed, the held prompts and the files as they were, except that a running
 // turn may already have been interrupted.
 message RollBackError {
+  reserved 10;
+  reserved "vendor_refused";
   oneof cause {
     // The workspace id is not in the daemon's registry.
     RollBackUnknownWorkspace unknown_workspace = 1;
@@ -44,8 +46,9 @@ message RollBackError {
     // The vendor conversation holds a prompt after this one that the feed
     // never drew, so rolling back would drop something unseen.
     RollBackUnseenPrompt unseen_prompt = 9;
-    // The vendor refused the cut; the conversation is whole.
-    RollBackVendorRefused vendor_refused = 10;
+    // 10 (vendor_refused) is reserved: the vendor judges the cut after the
+    // answer (conversation.v1.SessionRollbackSettled), and a cut it refuses
+    // draws the dropped prompts back into the feed with a note saying so.
     // The files cannot be restored to that prompt (it was sent before file
     // checkpointing was on, or its checkpoint is gone). Nothing was changed.
     RollBackFilesNotRestorable files_not_restorable = 11;
@@ -75,11 +78,6 @@ message RollBackPromptNotRecorded {}
 message RollBackFirstPrompt {}
 // An unseen prompt follows the cut point.
 message RollBackUnseenPrompt {}
-// The vendor refused the cut.
-message RollBackVendorRefused {
-  // The vendor's refusal, verbatim.
-  string vendor_message = 1;
-}
 // The files cannot be restored.
 message RollBackFilesNotRestorable {
   // The vendor's reason, verbatim.

@@ -465,16 +465,22 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	}), nil
 }
 
-// openingOf reads the request's `opening` arm. UNSET is the repaint.
+// openingOf reads the request's `opening` arm, UNSET being the repaint, and
+// whether the producer vouches for the agent.
 func openingOf(msg *storev1.OpenAgentSessionRequest) Opening {
-	switch opening := msg.GetOpening().(type) {
+	var opening Opening
+	switch arm := msg.GetOpening().(type) {
 	case *storev1.OpenAgentSessionRequest_KnownThrough:
-		return db.CatchUp(opening.KnownThrough)
+		opening = db.CatchUp(arm.KnownThrough)
 	case *storev1.OpenAgentSessionRequest_TailOnly:
-		return db.TailOnly()
+		opening = db.TailOnly()
 	default:
-		return db.Repaint()
+		opening = db.Repaint()
 	}
+	if msg.GetVouched() {
+		opening = opening.Vouched()
+	}
+	return opening
 }
 
 func openFailure(ref *refusal) *connect.Response[storev1.OpenAgentSessionResponse] {

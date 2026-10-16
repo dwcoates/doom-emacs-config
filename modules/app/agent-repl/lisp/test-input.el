@@ -2806,7 +2806,6 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
     (:prompt-not-recorded nil "rollback: the conversation holds no record of that prompt")
     (:first-prompt nil "rollback: the first prompt can't be rolled back; /clear starts over")
     (:unseen-prompt nil "rollback: a later prompt the feed never showed would be dropped")
-    (:vendor-refused (:vendor-message "cut refused") "rollback: the vendor refused: cut refused")
     (:files-not-restorable (:vendor-message "no checkpoint")
      "rollback: files can't be restored to that prompt: no checkpoint"))
   "Each RollBack refusal arm, its payload, and the flash it must draw.")

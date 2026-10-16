@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/proto/store/v1/storev1connect"
 )
 
 // TestOpenAnswersAPageAndAToken is the shape of the open itself.
@@ -430,4 +431,47 @@ func TestDroppedWatcherRecoversByReopeningWithKnownThrough(t *testing.T) {
 	// Assert: exactly the gap, nothing it already held.
 	assertTexts(t, "the recovery page", pageTexts(recovered.GetPage()), []string{"D", "C"})
 	store.assertNoErrorRecords()
+}
+
+// TestAVouchedOpenOfAnAbsentBookStreamsItsFirstRowFromEitherPlane: the
+// producer that announced an agent opens its book before anything is written
+// to it, and the tail carries the first row whichever plane writes it. The
+// sidecar's copy of the transcript can create the book, and only the store
+// sees that write, so the reader is told rather than re-asking on a timer.
+func TestAVouchedOpenOfAnAbsentBookStreamsItsFirstRowFromEitherPlane(t *testing.T) {
+	planes := []struct {
+		name     string
+		producer func(storev1connect.ShimStoreClient) *producer
+	}{
+		{"stream plane", streamProducer},
+		{"file plane", fileProducer},
+	}
+	for _, plane := range planes {
+		t.Run(plane.name, func(t *testing.T) {
+			// Arrange.
+			store := startStore(t, storeOptions{})
+			ctx, cancel := callContext(t)
+			defer cancel()
+			cli := store.client()
+			opened := openSessionWith(ctx, t, cli, &storev1.OpenAgentSessionRequest{
+				Agent: agentID("main"), Vouched: true,
+				Opening: &storev1.OpenAgentSessionRequest_TailOnly{TailOnly: &storev1.AgentSessionTailOnly{}},
+			})
+			stream := watchStream(ctx, t, cli, opened.GetWatch())
+			defer testclose.OrFail(t, stream)
+
+			// Act.
+			writer := plane.producer(cli)
+			writer.write(ctx, t,
+				writer.agentEntry("w-first", "u-first", frameLine(agentID("main"), responseFrame("main", "act-first", "first"))),
+			)
+
+			// Assert.
+			if opened.Newest != nil {
+				t.Errorf("newest = %v, want unset for a book nothing has written to", opened.Newest)
+			}
+			assertTexts(t, "the tail", receivedTexts(receiveLines(t, stream, 1)), []string{"first"})
+			store.assertNoErrorRecords()
+		})
+	}
 }

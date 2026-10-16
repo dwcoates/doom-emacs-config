@@ -682,3 +682,182 @@ func TestAnswersPromptIsTheAgentOutputKinds(t *testing.T) {
 		})
 	}
 }
+
+// settle states how a rollback dropping TURNS settled, as the shim does.
+func settle(h *harness, outcome any, turns ...string) {
+	h.t.Helper()
+	settled := &conversationv1.SessionRollbackSettled{}
+	for _, turn := range turns {
+		settled.DroppedTurns = append(settled.DroppedTurns, &conversationv1.TurnId{Value: turn})
+	}
+	switch o := outcome.(type) {
+	case *conversationv1.SessionRollbackSettled_ResumedAtCut:
+		settled.Outcome = o
+	case *conversationv1.SessionRollbackSettled_Refused:
+		settled.Outcome = o
+	case *conversationv1.SessionRollbackSettled_Failed:
+		settled.Outcome = o
+	case nil:
+	default:
+		h.t.Fatalf("settle: %T is no outcome arm", outcome)
+	}
+	h.resolver.OnSessionUpdate(testWorkspace, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_RollbackSettled{RollbackSettled: settled}})
+}
+
+var (
+	resumedAtCut = &conversationv1.SessionRollbackSettled_ResumedAtCut{ResumedAtCut: &conversationv1.SessionRollbackResumedAtCut{}}
+	refused      = &conversationv1.SessionRollbackSettled_Refused{Refused: &conversationv1.SessionRollbackRefused{VendorMessage: "Resume rejected"}}
+	failedBoot   = &conversationv1.SessionRollbackSettled_Failed{Failed: &conversationv1.SessionRollbackFailed{Detail: "did not boot"}}
+)
+
+// cutMade holds TURNS and takes their drawn rows off, as the verb does once
+// the shim answers its cut.
+func cutMade(h *harness, turns ...ids.TurnID) {
+	h.t.Helper()
+	h.resolver.HoldTurns(testWorkspace, turns)
+	h.resolver.WithholdDrawnTurns(testWorkspace, turns)
+}
+
+// rootOrder answers every root-feed row id, in feed order.
+func rootOrder(h *harness) []string {
+	h.t.Helper()
+	var out []string
+	for _, row := range h.rows(rootFeed()) {
+		out = append(out, row.GetId().GetValue())
+	}
+	return out
+}
+
+func TestWithholdingDrawnRowsTakesTheHeldTurnsRowsOffTheFeed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	t2 := turnRows(h, "t2")
+
+	// Act
+	cutMade(h, "t3")
+
+	// Assert
+	if got := turnRows(h, "t3"); len(got) != 0 {
+		t.Fatalf("t3 rows = %v, want none drawn while the rollback settles", got)
+	}
+	if got := turnRows(h, "t2"); !slices.Equal(got, t2) {
+		t.Fatalf("t2 rows = %v, want %v untouched", got, t2)
+	}
+	if !h.hasRecordWith("info", opRollbackHold, "withheld", 2) {
+		t.Fatalf("records = %+v, want the withholding recorded with its count", h.records())
+	}
+}
+
+func TestWithholdingDrawnRowsLeavesATurnNotHeldDrawn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := turnRows(h, "t3")
+
+	// Act
+	h.resolver.WithholdDrawnTurns(testWorkspace, []ids.TurnID{"t3"})
+
+	// Assert
+	if got := turnRows(h, "t3"); !slices.Equal(got, before) {
+		t.Fatalf("t3 rows = %v, want %v: a turn no rollback holds stays drawn", got, before)
+	}
+}
+
+func TestASettleResumedAtTheCutRemovesTheWithheldTurnsForGood(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	cutMade(h, "t3")
+
+	// Act
+	settle(h, resumedAtCut, "t3")
+	h.liveResponse("u-late", "late words", "t3")
+
+	// Assert
+	if got := turnRows(h, "t3"); len(got) != 0 {
+		t.Fatalf("t3 rows = %v, want the rolled-back turn gone for good", got)
+	}
+	if got := values(h.resolver.RollbackPrompts(testWorkspace)); slices.Contains(got, promptRowID("t3").GetValue()) {
+		t.Fatalf("RollbackPrompts() = %v, want t3's prompt gone", got)
+	}
+}
+
+func TestASettleTheVendorRefusedDrawsTheRowsBackWhereTheyStood(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := rootOrder(h)
+	cutMade(h, "t2")
+
+	// Act
+	settle(h, refused, "t2")
+
+	// Assert
+	if got := rootOrder(h); !slices.Equal(got, before) {
+		t.Fatalf("root rows = %v, want %v: the refused rollback's rows back where they stood", got, before)
+	}
+	if len(h.warnings.raised) != 1 || !strings.Contains(h.warnings.raised[0], "Resume rejected") {
+		t.Fatalf("warnings = %v, want one naming the vendor's words", h.warnings.raised)
+	}
+	if !h.hasRecord("warn", opRollbackApply) {
+		t.Fatalf("records = %+v, want the refusal recorded at WARN", h.records())
+	}
+}
+
+func TestASettleWhoseRestartFailedDrawsTheRowsBackAndRecordsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := rootOrder(h)
+	cutMade(h, "t3")
+
+	// Act
+	settle(h, failedBoot, "t3")
+
+	// Assert
+	if got := rootOrder(h); !slices.Equal(got, before) {
+		t.Fatalf("root rows = %v, want %v", got, before)
+	}
+	if !h.hasRecord("error", opRollbackApply) || len(h.warnings.raised) != 1 {
+		t.Fatalf("records = %+v, warnings = %v, want an error and one warning", h.records(), h.warnings.raised)
+	}
+}
+
+func TestASettleForTurnsTheFeedDoesNotHoldChangesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := rootOrder(h)
+
+	// Act
+	settle(h, resumedAtCut, "t3")
+
+	// Assert
+	if got := rootOrder(h); !slices.Equal(got, before) {
+		t.Fatalf("root rows = %v, want %v: no rollback of t3 was held", got, before)
+	}
+	if !h.hasRecordWith("info", opRollbackApply, "held", 0) {
+		t.Fatalf("records = %+v, want the unheld settle recorded", h.records())
+	}
+}
+
+func TestASettleWithNoOutcomeDrawsTheRowsBackAndRecordsTheBreach(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	threeTurns(h)
+	before := rootOrder(h)
+	cutMade(h, "t3")
+
+	// Act
+	settle(h, nil, "t3")
+
+	// Assert
+	if got := rootOrder(h); !slices.Equal(got, before) {
+		t.Fatalf("root rows = %v, want %v", got, before)
+	}
+	if !h.hasRecord("error", opRollbackApply) {
+		t.Fatalf("records = %+v, want the breach recorded at ERROR", h.records())
+	}
+}

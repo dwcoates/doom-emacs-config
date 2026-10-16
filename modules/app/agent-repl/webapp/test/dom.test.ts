@@ -6,6 +6,7 @@ import {
   SVG_NS,
   ancestorMatching,
   computedPx,
+  nodeLabel,
   pageIntersectionObserver,
   pageResizeObserver,
   placeChildren,
@@ -431,3 +432,37 @@ describe("pageIntersectionObserver", () => {
   });
 });
 
+
+describe("nodeLabel", () => {
+  it.each([
+    { name: "an element with classes", node: () => Object.assign(document.createElement("div"), { className: "bubble md" }), want: "div.bubble.md" },
+    { name: "an element with none", node: () => document.createElement("section"), want: "section" },
+    {
+      name: "a text node, by the element it sits in",
+      node: () => Object.assign(document.createElement("p"), { className: "prose" }).appendChild(document.createTextNode("hi")),
+      want: "p.prose",
+    },
+    { name: "a detached text node", node: () => document.createTextNode("hi"), want: "#text" },
+  ])("names $name", ({ node, want }) => {
+    // Act
+    const label = nodeLabel(node());
+
+    // Assert
+    expect(label).toBe(want);
+  });
+
+  it("is the one place a node is spelled tag.class", () => {
+    // Arrange: the spelling's own template, as a hand-rolled copy would write it.
+    const spelling = /tagName\.toLowerCase\(\)\}\.\$\{/;
+
+    // Act
+    const src = join(process.cwd(), "src");
+    const copies = filesUnder(src)
+      .filter((file) => relative(src, file) !== "dom.ts")
+      .filter((file) => spelling.test(codeOf(readFileSync(file, "utf8"))))
+      .map((file) => relative(src, file));
+
+    // Assert
+    expect(copies).toEqual([]);
+  });
+});

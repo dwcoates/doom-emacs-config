@@ -1123,7 +1123,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Git:          git,
 		Accounts:     accounts,
 		Queue:        queue,
-		RevivalTurns: queue,
+		TurnStops:    queue,
 		Merge:        mergeOrchestrator,
 		Rollout:      rolloutController,
 		Drain:        drainController,

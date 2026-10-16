@@ -75,8 +75,10 @@ describe("nextFrame", () => {
 
 describe("who waits for a frame", () => {
   it("leaves every page module to nextFrame, but those reading the scheduler off a view", () => {
-    // Arrange: the modules that own a view's missing scheduler (src/frame.ts).
-    const ownView = new Set(["frame.ts", "type-out.ts", path.join("bubble", "body.ts")]);
+    // Arrange: the modules that own a view's missing scheduler (src/frame.ts),
+    // and the busy probe, which wraps the scheduler to time every frame
+    // callback and never waits on a frame itself (src/busy-probe.ts).
+    const ownView = new Set(["frame.ts", "type-out.ts", path.join("bubble", "body.ts"), "busy-probe.ts"]);
 
     // Act
     const rolled = filesUnder(SRC)

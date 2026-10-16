@@ -285,7 +285,7 @@ func (s *server) rollBackRefusalOf(err error) (refusal, bool) {
 func rollbackRefusal(s *server, shim *workspace.ShimRefusal) refusal {
 	r := refusal{Arm: shim.Arm, Reason: shim.Detail}
 	switch shim.Arm {
-	case workspace.ArmShimVendorRefused, workspace.ArmShimFilesNotRestorable:
+	case workspace.ArmShimFilesNotRestorable:
 		r.Fields = map[string]any{"vendor_message": shim.Detail}
 	}
 	return s.fill(r)

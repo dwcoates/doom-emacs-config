@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/rollback.proto.
  */
 export const file_agentrepl_v1_rollback: GenFile = /*@__PURE__*/
-  fileDesc("ChthZ2VudHJlcGwvdjEvcm9sbGJhY2sucHJvdG8SDGFnZW50cmVwbC52MSIeCg1Sb2xsYmFja1Rva2VuEg0KBXZhbHVlGAEgASgJIucFCg1Sb2xsQmFja0Vycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuUm9sbEJhY2tXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsQmFja05vdFlldEFkb3B0ZWRIABI1CgpwbGFuX3N0YWxlGAUgASgLMh8uYWdlbnRyZXBsLnYxLlJvbGxCYWNrUGxhblN0YWxlSAASNQoKbm9fc2Vzc2lvbhgGIAEoCzIfLmFnZW50cmVwbC52MS5Sb2xsQmFja05vU2Vzc2lvbkgAEkYKE3Byb21wdF9ub3RfcmVjb3JkZWQYByABKAsyJy5hZ2VudHJlcGwudjEuUm9sbEJhY2tQcm9tcHROb3RSZWNvcmRlZEgAEjkKDGZpcnN0X3Byb21wdBgIIAEoCzIhLmFnZW50cmVwbC52MS5Sb2xsQmFja0ZpcnN0UHJvbXB0SAASOwoNdW5zZWVuX3Byb21wdBgJIAEoCzIiLmFnZW50cmVwbC52MS5Sb2xsQmFja1Vuc2VlblByb21wdEgAEj0KDnZlbmRvcl9yZWZ1c2VkGAogASgLMiMuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVmVuZG9yUmVmdXNlZEgAEkgKFGZpbGVzX25vdF9yZXN0b3JhYmxlGAsgASgLMiguYWdlbnRyZXBsLnYxLlJvbGxCYWNrRmlsZXNOb3RSZXN0b3JhYmxlSABCBwoFY2F1c2UiGgoYUm9sbEJhY2tVbmtub3duV29ya3NwYWNlIjQKHFJvbGxCYWNrV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIisKGFJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhcKFVJvbGxCYWNrTm90WWV0QWRvcHRlZCITChFSb2xsQmFja1BsYW5TdGFsZSITChFSb2xsQmFja05vU2Vzc2lvbiIbChlSb2xsQmFja1Byb21wdE5vdFJlY29yZGVkIhUKE1JvbGxCYWNrRmlyc3RQcm9tcHQiFgoUUm9sbEJhY2tVbnNlZW5Qcm9tcHQiLwoVUm9sbEJhY2tWZW5kb3JSZWZ1c2VkEhYKDnZlbmRvcl9tZXNzYWdlGAEgASgJIjQKGlJvbGxCYWNrRmlsZXNOb3RSZXN0b3JhYmxlEhYKDnZlbmRvcl9tZXNzYWdlGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
+  fileDesc("ChthZ2VudHJlcGwvdjEvcm9sbGJhY2sucHJvdG8SDGFnZW50cmVwbC52MSIeCg1Sb2xsYmFja1Rva2VuEg0KBXZhbHVlGAEgASgJIr4FCg1Sb2xsQmFja0Vycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuUm9sbEJhY2tXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsQmFja05vdFlldEFkb3B0ZWRIABI1CgpwbGFuX3N0YWxlGAUgASgLMh8uYWdlbnRyZXBsLnYxLlJvbGxCYWNrUGxhblN0YWxlSAASNQoKbm9fc2Vzc2lvbhgGIAEoCzIfLmFnZW50cmVwbC52MS5Sb2xsQmFja05vU2Vzc2lvbkgAEkYKE3Byb21wdF9ub3RfcmVjb3JkZWQYByABKAsyJy5hZ2VudHJlcGwudjEuUm9sbEJhY2tQcm9tcHROb3RSZWNvcmRlZEgAEjkKDGZpcnN0X3Byb21wdBgIIAEoCzIhLmFnZW50cmVwbC52MS5Sb2xsQmFja0ZpcnN0UHJvbXB0SAASOwoNdW5zZWVuX3Byb21wdBgJIAEoCzIiLmFnZW50cmVwbC52MS5Sb2xsQmFja1Vuc2VlblByb21wdEgAEkgKFGZpbGVzX25vdF9yZXN0b3JhYmxlGAsgASgLMiguYWdlbnRyZXBsLnYxLlJvbGxCYWNrRmlsZXNOb3RSZXN0b3JhYmxlSABCBwoFY2F1c2VKBAgKEAtSDnZlbmRvcl9yZWZ1c2VkIhoKGFJvbGxCYWNrVW5rbm93bldvcmtzcGFjZSI0ChxSb2xsQmFja1dvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIrChhSb2xsQmFja1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIXChVSb2xsQmFja05vdFlldEFkb3B0ZWQiEwoRUm9sbEJhY2tQbGFuU3RhbGUiEwoRUm9sbEJhY2tOb1Nlc3Npb24iGwoZUm9sbEJhY2tQcm9tcHROb3RSZWNvcmRlZCIVChNSb2xsQmFja0ZpcnN0UHJvbXB0IhYKFFJvbGxCYWNrVW5zZWVuUHJvbXB0IjQKGlJvbGxCYWNrRmlsZXNOb3RSZXN0b3JhYmxlEhYKDnZlbmRvcl9tZXNzYWdlGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
 
 /**
  * THE PLAN THE USER CONFIRMED, as the daemon minted it (PlanRollback) and
@@ -132,14 +132,9 @@ export type RollBackError = Message<"agentrepl.v1.RollBackError"> & {
     case: "unseenPrompt";
   } | {
     /**
-     * The vendor refused the cut; the conversation is whole.
-     *
-     * @generated from field: agentrepl.v1.RollBackVendorRefused vendor_refused = 10;
-     */
-    value: RollBackVendorRefused;
-    case: "vendorRefused";
-  } | {
-    /**
+     * 10 (vendor_refused) is reserved: the vendor judges the cut after the
+     * answer (conversation.v1.SessionRollbackSettled), and a cut it refuses
+     * draws the dropped prompts back into the feed with a note saying so.
      * The files cannot be restored to that prompt (it was sent before file
      * checkpointing was on, or its checkpoint is gone). Nothing was changed.
      *
@@ -305,27 +300,6 @@ export const RollBackUnseenPromptSchema: GenMessage<RollBackUnseenPrompt> = /*@_
   messageDesc(file_agentrepl_v1_rollback, 10);
 
 /**
- * The vendor refused the cut.
- *
- * @generated from message agentrepl.v1.RollBackVendorRefused
- */
-export type RollBackVendorRefused = Message<"agentrepl.v1.RollBackVendorRefused"> & {
-  /**
-   * The vendor's refusal, verbatim.
-   *
-   * @generated from field: string vendor_message = 1;
-   */
-  vendorMessage: string;
-};
-
-/**
- * Describes the message agentrepl.v1.RollBackVendorRefused.
- * Use `create(RollBackVendorRefusedSchema)` to create a new message.
- */
-export const RollBackVendorRefusedSchema: GenMessage<RollBackVendorRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 11);
-
-/**
  * The files cannot be restored.
  *
  * @generated from message agentrepl.v1.RollBackFilesNotRestorable
@@ -344,5 +318,5 @@ export type RollBackFilesNotRestorable = Message<"agentrepl.v1.RollBackFilesNotR
  * Use `create(RollBackFilesNotRestorableSchema)` to create a new message.
  */
 export const RollBackFilesNotRestorableSchema: GenMessage<RollBackFilesNotRestorable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 12);
+  messageDesc(file_agentrepl_v1_rollback, 11);
 

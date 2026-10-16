@@ -725,11 +725,13 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
           });
         }
         const bookId = request.agent?.value ?? "";
-        if (!knownAgents.has(bookId)) {
+        if (!knownAgents.has(bookId) && !request.vouched) {
           // THE STORE OWNS THE BOOK'S EXISTENCE (landing 7). An agent row is
           // created by the first write that names the agent, so a reader that
           // opens before then is refused — which is exactly the race a fresh
-          // session's `WatchAgent` runs, and the fake must run it too.
+          // session's `WatchAgent` runs, and the fake must run it too. A
+          // VOUCHED open is served the empty book, its tail on the first row,
+          // exactly as the real store serves it.
           return create(storev1.OpenAgentSessionResponseSchema, {
             result: {
               case: "failure",

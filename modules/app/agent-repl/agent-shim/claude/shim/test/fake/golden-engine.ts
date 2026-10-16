@@ -157,7 +157,7 @@ export async function driveEngineScenario(prompt: string, policy: EnginePolicy, 
   });
 
   const steer = steering(engine, policy, turn);
-  persistence.onWrite(steer.onWrite);
+  persistence.onWrite((entries) => steer.onWrite(entries));
   const started = await engine.startSession(freshSession());
   if (started.result.case !== "success") {
     throw new Error(`goldens: StartSession for ${prompt} was refused: ${JSON.stringify(started.result)}`);

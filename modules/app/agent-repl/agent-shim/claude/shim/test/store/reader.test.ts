@@ -308,27 +308,6 @@ describe("openAgentPage on a book with no rows yet", () => {
     expect(first).toBe("ended");
   });
 
-  it("stops waiting once the producer withdraws the announcement", async () => {
-    // Arrange.
-    const { plane } = await empty("deferred-withdrawn");
-    let known = true;
-    const session = await plane.openAgentPage(BOOK, REPAINT, () => known);
-    const pending = session.tail[Symbol.asyncIterator]().next();
-
-    // Act.
-    known = false;
-    const outcome = await Promise.race([
-      pending.then(
-        () => "ended",
-        (error: unknown) => (error instanceof PersistenceError ? error.kind : "other"),
-      ),
-      hangGuard(),
-    ]);
-    session.close();
-
-    // Assert.
-    expect(outcome).toBe("unknown_agent");
-  });
 });
 
 describe("the tail", () => {
@@ -891,6 +870,22 @@ function storedLine(pointerValue: string, unitValue: string): storev1.StoreLineA
 }
 
 /** A page at its floor, holding `lines` newest-first. */
+/** The refusal the store gives for a book it holds no row for. */
+function noSuchBook(): storev1.OpenAgentSessionResponse {
+  return create(storev1.OpenAgentSessionResponseSchema, {
+    result: {
+      case: "failure",
+      value: create(storev1.OpenAgentSessionFailureSchema, {
+        detail: "no agent row",
+        kind: {
+          case: "unknownAgent",
+          value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+        },
+      }),
+    },
+  });
+}
+
 function floorPage(lines: storev1.StoreLineAt[]): storev1.AgentSessionPage {
   return create(storev1.AgentSessionPageSchema, {
     lines,
@@ -1412,35 +1407,18 @@ describe("the tail against a malformed or ending watch", () => {
 });
 
 describe("the deferred book, against a hand-built store", () => {
-  /** An open that refuses `unknown_agent` until `writes` says otherwise. */
-  function refusingOpen(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("serves the rows that landed while it waited, then follows the tail", async () => {
     // Arrange.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens <= 2 ? refusingOpen() : opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () =>
         standingWatch([
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } }),
         ]),
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
@@ -1464,14 +1442,13 @@ describe("the deferred book, against a hand-built store", () => {
     // served by the deferred wrapper, so the inner session never sees those
     // pointers go out — and a teardown concluding through the book's head used
     // to leave this tail standing for a row that had already been handed over.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens <= 2 ? refusingOpen() : opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () => standingWatch([]),
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
@@ -1490,18 +1467,16 @@ describe("the deferred book, against a hand-built store", () => {
 
   it("ends the tail, serving nothing, when the session is closed while the book is being opened", async () => {
     // Arrange.
-    let opens = 0;
     let session: AgentPageSession | undefined = undefined;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        if (opens <= 2) return refusingOpen();
         // The consumer walks away in the very window the open is in flight.
         session?.close();
         return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () => standingWatch([]),
     });
+    reader.noteAgentMinted("book-1");
     session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();
@@ -1512,6 +1487,132 @@ describe("the deferred book, against a hand-built store", () => {
 
     // Assert.
     expect(next.done).toBe(true);
+  });
+});
+
+describe("a watch on a book the producer vouches for", () => {
+  it.each([
+    { vouching: "a producer that vouches", known: () => true, want: true },
+    { vouching: "a producer that no longer vouches", known: () => false, want: false },
+    { vouching: "no producer at all", known: undefined, want: false },
+  ])("opens vouched only for $vouching", async ({ known, want }) => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, REPAINT, known);
+    session.close();
+
+    // Assert.
+    expect(requests.map((request) => request.vouched)).toEqual([want]);
+  });
+
+  it("serves the store's empty page, then the first row the store pushes", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH),
+      watchAgentSession: () =>
+        standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
+        ]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, { case: "tailOnly" }, () => true);
+    const first = await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    expect([session.page.entries.length, session.foundNothing, unitOf(entryOf(first.value as AgentTailFrame))]).toEqual([
+      0,
+      true,
+      "unit-a",
+    ]);
+  });
+
+  it("re-opens vouched when the store ends the watch of a book still empty", async () => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([]), requests.length === 1 ? WATCH : WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? {
+              async *[Symbol.asyncIterator]() {
+                // The store ends the watch with nothing asked of it.
+              },
+            }
+          : standingWatch([
+              create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
+            ]),
+    });
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
+
+    // Act.
+    await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    expect(requests.map((request) => request.vouched)).toEqual([true, true]);
+  });
+
+  it("opens a minted book's store session vouched once its first write lands", async () => {
+    // Arrange.
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+    reader.noteAgentMinted("book-1");
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
+    const pending = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    reader.noteAgentRows(["book-1"]);
+    await pending;
+    session.close();
+
+    // Assert.
+    expect(requests.map((request) => request.vouched)).toEqual([true]);
+  });
+});
+
+describe("a minted id's absence, against one-shot answers", () => {
+  it.each([
+    { answer: "an empty book", newest: undefined, wantOpens: 1 },
+    { answer: "a book with a newest line", newest: "p9", wantOpens: 2 },
+  ])("ends only on $answer", async ({ newest, wantOpens }) => {
+    // Arrange: a vouched read of a minted book is answered by the store.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opened(floorPage([]), WATCH, newest);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+    reader.noteAgentMinted("book-1");
+    await reader.readBookHead(BOOK, () => true);
+
+    // Act: a watch after it either still defers or asks the store.
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
+    session.close();
+
+    // Assert.
+    expect(opens).toBe(wantOpens);
   });
 });
 
@@ -1903,22 +2004,6 @@ describe("a tail closed under a push", () => {
 });
 
 describe("the deferred book's own waiting", () => {
-  /** An open that refuses with `unknown_agent`, as a book with no rows is. */
-  function refusingOpen(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   /** An open that refuses because the store itself is broken. */
   function brokenOpen(): storev1.OpenAgentSessionResponse {
     return create(storev1.OpenAgentSessionResponseSchema, {
@@ -1941,75 +2026,61 @@ describe("the deferred book's own waiting", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
     // Act.
     session.close();
     const next = await session.tail[Symbol.asyncIterator]().next();
 
-    // Assert. Only the open that deferred the book was ever made.
-    expect([next.done, opens]).toEqual([true, 1]);
+    // Assert. A minted book is answered without the store, and a closed one
+    // never asks it.
+    expect([next.done, opens]).toEqual([true, 0]);
   });
 
   it("surfaces a refusal that is not about the book being absent, rather than waiting on it", async () => {
     // Arrange.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens === 1 ? refusingOpen() : brokenOpen();
+        return brokenOpen();
       },
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
-    // Act, Assert.
-    await expect(session.tail[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+    const pending = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    reader.noteAgentRows(["book-1"]);
+
+    // Assert.
+    await expect(pending).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
 
-  it("ends the tail when the session is closed while an open that refuses is in flight", async () => {
-    // Arrange.
-    let opens = 0;
-    let session: AgentPageSession | undefined = undefined;
-    const reader = readerOver({
-      openAgentSession: async () => {
-        opens += 1;
-        // The consumer walks away in the very window this refusal is in flight.
-        if (opens >= 2) session?.close();
-        return refusingOpen();
-      },
-    });
-    session = await reader.openAgentPage(BOOK, REPAINT, () => true);
-
-    // Act.
-    const next = await session.tail[Symbol.asyncIterator]().next();
-
-    // Assert. The wait was abandoned rather than re-armed for another round.
-    expect([next.done, opens]).toEqual([true, 2]);
-  });
-
   it("concludes the real session at once when the teardown concluded while it was opening", async () => {
     // Arrange.
-    let opens = 0;
     let session: AgentPageSession | undefined = undefined;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        if (opens === 1) return refusingOpen();
         session?.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "1" }));
         return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () => standingWatch([]),
     });
+    reader.noteAgentMinted("book-1");
     session = await reader.openAgentPage(BOOK, REPAINT, () => true);
+
+    const tail = session.tail;
 
     // Act.
     const served: (string | undefined)[] = [];
-    for await (const entry of session.tail) served.push(unitOf(entryOf(entry)));
+    reader.noteAgentRows(["book-1"]);
+    for await (const entry of tail) served.push(unitOf(entryOf(entry)));
 
     // Assert. The row it waited for is delivered, and then the stream ends.
     expect(served).toEqual(["unit-a"]);
@@ -2021,22 +2092,21 @@ describe("the deferred book's own waiting", () => {
     // and an upsert arriving after them names an OLDER position, which is what
     // a last-pointer mark mistakes for "the head has not been served".
     // Arrange.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens === 1
-          ? refusingOpen()
-          : opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH);
+        return opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () =>
         standingWatch([
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("1", "unit-a") } }),
         ]),
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
-    await iterator.next();
+    const first = iterator.next();
+    reader.noteAgentRows(["book-1"]);
+    await first;
     await iterator.next();
     await iterator.next();
 
@@ -2058,22 +2128,21 @@ describe("the deferred book's own waiting", () => {
 
   it("passes a later conclusion through to the session it already opened", async () => {
     // Arrange.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens === 1
-          ? refusingOpen()
-          : opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () =>
         standingWatch([
           create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: storedLine("2", "unit-b") } }),
         ]),
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
-    const first = await iterator.next();
+    const pulled = iterator.next();
+    reader.noteAgentRows(["book-1"]);
+    const first = await pulled;
 
     // Act.
     session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
@@ -2092,14 +2161,13 @@ describe("the deferred book's own waiting", () => {
     // An empty agent value names no book, so it is skipped -- and skipping it
     // must not cost the real agent in the same batch its wake-up.
     // Arrange.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens <= 2 ? refusingOpen() : opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+        return opened(floorPage([storedLine("1", "unit-a")]), WATCH);
       },
       watchAgentSession: () => standingWatch([]),
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const pending = iterator.next();
@@ -2115,32 +2183,13 @@ describe("the deferred book's own waiting", () => {
 });
 
 describe("a book whose id this shim minted", () => {
-  /**
-   * An open that refuses `unknown_agent`, as the store does for a book it holds
-   * no row for. A minted id must never reach it at all.
-   */
-  function refusingOpen(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("opens without asking the store at all", async () => {
     // Arrange.
     let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2154,7 +2203,7 @@ describe("a book whose id this shim minted", () => {
 
   it("serves an empty opening page at the floor", async () => {
     // Arrange.
-    const reader = readerOver({ openAgentSession: async () => refusingOpen() });
+    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
     reader.noteAgentMinted("book-1");
 
     // Act.
@@ -2171,13 +2220,13 @@ describe("a book whose id this shim minted", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
 
-    // Act. The tail is pulled and left standing well past the recheck cadence.
+    // Act. The tail is pulled and left standing.
     const outcome = await Promise.race([
       session.tail[Symbol.asyncIterator]().next().then(() => "served"),
       hangGuard(),
@@ -2217,7 +2266,7 @@ describe("a book whose id this shim minted", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2235,8 +2284,9 @@ describe("a book whose id this shim minted", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return opened(floorPage([]), WATCH);
       },
+      watchAgentSession: () => standingWatch([]),
     });
 
     // Act.
@@ -2253,8 +2303,9 @@ describe("a book whose id this shim minted", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return opened(floorPage([]), WATCH);
       },
+      watchAgentSession: () => standingWatch([]),
     });
 
     // Act.
@@ -2367,29 +2418,13 @@ describe("a read that stands no tail asks for no watch token", () => {
 });
 
 describe("readFirstPage on a book whose id this shim minted", () => {
-  /** The refusal the store gives for a book it holds no row for. */
-  function noSuchBook(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
-  it("ASKS the store, which the watch-side open of the same book does not", async () => {
+  it("ASKS the store, vouched, which the watch-side open of the same book does not", async () => {
     // Arrange.
-    let opens = 0;
+    const requests: storev1.OpenAgentSessionRequest[] = [];
     const reader = readerOver({
-      openAgentSession: async () => {
-        opens += 1;
-        return noSuchBook();
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([]), undefined);
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2398,12 +2433,30 @@ describe("readFirstPage on a book whose id this shim minted", () => {
     await reader.readFirstPage(BOOK, REPAINT, () => true);
 
     // Assert.
-    expect(opens).toBe(1);
+    expect(requests.map((request) => request.vouched)).toEqual([true]);
   });
 
-  it("serves an EMPTY page when a HEALTHY store refuses the book the producer vouches for", async () => {
+  it("asks the store unvouched when nobody vouches, and surfaces its refusal", async () => {
     // Arrange.
-    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return noSuchBook();
+      },
+    });
+
+    // Act.
+    const read = reader.readFirstPage(BOOK, REPAINT, () => false);
+
+    // Assert.
+    await expect(read).rejects.toMatchObject({ kind: "unknown_agent" });
+    expect(requests.map((request) => request.vouched)).toEqual([false]);
+  });
+
+  it("serves the store's EMPTY page for a vouched book nothing has written to", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => opened(floorPage([]), undefined) });
     reader.noteAgentMinted("book-1");
 
     // Act.
@@ -2495,22 +2548,6 @@ describe("readFirstPage on a book whose id this shim minted", () => {
 // disk contention that scan outlasted the teardown's budget (2026-10-06).
 // ---------------------------------------------------------------------------
 describe("readBookHead", () => {
-  /** The refusal the store gives for a book it holds no row for. */
-  function noSuchBook(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("asks for a TAIL-ONLY open, so the store reads no line", async () => {
     // Arrange.
     const requests: storev1.OpenAgentSessionRequest[] = [];
@@ -2567,15 +2604,21 @@ describe("readBookHead", () => {
     expect(head).toBeUndefined();
   });
 
-  it("answers ABSENCE when the store refuses a book the producer vouches for", async () => {
+  it("opens vouched for a producer that vouches, and answers ABSENCE for its empty book", async () => {
     // Arrange.
-    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
+    const requests: storev1.OpenAgentSessionRequest[] = [];
+    const reader = readerOver({
+      openAgentSession: async (request) => {
+        requests.push(request);
+        return opened(floorPage([]), undefined);
+      },
+    });
 
     // Act.
     const head = await reader.readBookHead(BOOK, () => true);
 
     // Assert.
-    expect(head).toBeUndefined();
+    expect([requests.map((request) => request.vouched), head]).toEqual([[true], undefined]);
   });
 
   it("surfaces unknown_agent when nobody vouches for the book", async () => {
@@ -2710,22 +2753,6 @@ describe("a line the store retired", () => {
     return create(storev1.WatchAgentSessionResponseSchema, { frame: { case: "line", value: line } });
   }
 
-  /** An open that refuses `unknown_agent`, as the store does for a book with no row. */
-  function refusingOpen(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("relays a retired push on the retired arm, converted as a served line is", async () => {
     // Arrange.
     const reader = readerOver({
@@ -2807,14 +2834,13 @@ describe("a line the store retired", () => {
 
   it("ends a deferred book's tail whose conclusion names the retired pointer", async () => {
     // Arrange.
-    let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
-        opens += 1;
-        return opens === 1 ? refusingOpen() : opened(floorPage([]), WATCH);
+        return opened(floorPage([]), WATCH);
       },
       watchAgentSession: () => standingWatch([retiredPush(storedLine("2", "unit-gone"))]),
     });
+    reader.noteAgentMinted("book-1");
     const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
     const iterator = session.tail[Symbol.asyncIterator]();
     const first = iterator.next();

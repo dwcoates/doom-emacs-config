@@ -1529,3 +1529,92 @@ func TestAPageLineMissingFromThePlaceIndexIsAStorageFailure(t *testing.T) {
 		t.Fatalf("LinesSince = %v, want a storage failure", err)
 	}
 }
+
+// ---- OpenPage, vouched ----
+
+func TestAVouchedOpenServesAnAbsentBookEmpty(t *testing.T) {
+	tests := []struct {
+		name    string
+		opening Opening
+	}{
+		{"repaint", Repaint().Vouched()},
+		{"tail_only", TailOnly().Vouched()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: another book's rows, so the pin is not zero.
+			d, _ := newStore(t)
+			seedBook(t, d, "agent-1", 2)
+
+			// Act
+			opened, err := d.OpenPage(ctx(), "agent-never-written", tc.opening)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OpenPage refused a vouched absent book: %v", err)
+			}
+			if len(opened.Page.GetLines()) != 0 || opened.Page.GetFloor() == nil {
+				t.Fatalf("page = %v, want an empty page at its floor", opened.Page)
+			}
+			if opened.Newest != nil {
+				t.Fatalf("newest = %v, want unset for an empty book", opened.Newest)
+			}
+			if opened.PinSeq == 0 {
+				t.Fatal("PinSeq = 0, want the store's newest write ordinal")
+			}
+		})
+	}
+}
+
+func TestAVouchedOpenOfAnAbsentBookReplaysItsFirstRow(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	seedBook(t, d, "agent-1", 1)
+	opened, err := d.OpenPage(ctx(), "agent-later", TailOnly().Vouched())
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	first := seedBook(t, d, "agent-later", 1)
+
+	// Act
+	replayed, err := d.LinesSince(ctx(), "agent-later", opened.PinSeq)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+	if len(replayed) != 1 || replayed[0].Line.GetAt().GetValue() != first[0].GetValue() {
+		t.Fatalf("replayed = %v, want the book's first row %q", replayed, first[0].GetValue())
+	}
+}
+
+func TestAVouchedCatchUpOnAnAbsentBookIsRefusedStale(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", 1)
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-never-written", CatchUp(pointers[0]).Vouched())
+
+	// Assert
+	if !errors.Is(err, ErrStalePointer) {
+		t.Fatalf("OpenPage error = %v, want ErrStalePointer", err)
+	}
+}
+
+func TestAVouchedOpenOfAKnownBookServesItAsAnyOpenDoes(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", 2)
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint().Vouched())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if len(opened.Page.GetLines()) != 2 || opened.Newest.GetValue() != pointers[1].GetValue() {
+		t.Fatalf("page lines = %d newest = %v, want both lines and the newest %q", len(opened.Page.GetLines()), opened.Newest, pointers[1].GetValue())
+	}
+}

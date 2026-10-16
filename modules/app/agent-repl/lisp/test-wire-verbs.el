@@ -4317,8 +4317,6 @@ webapp's alone."
                     ("{\"promptNotRecorded\":{}}" (:arm :prompt-not-recorded :value nil))
                     ("{\"firstPrompt\":{}}" (:arm :first-prompt :value nil))
                     ("{\"unseenPrompt\":{}}" (:arm :unseen-prompt :value nil))
-                    ("{\"vendorRefused\":{\"vendorMessage\":\"no\"}}"
-                     (:arm :vendor-refused :value (:vendor-message "no")))
                     ("{\"filesNotRestorable\":{\"vendorMessage\":\"gone\"}}"
                      (:arm :files-not-restorable :value (:vendor-message "gone")))))
       (should (equal (agent-repl-wire-decode-roll-back-response
@@ -4340,7 +4338,7 @@ webapp's alone."
                        #'string<)
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
                              "notYetAdopted" "planStale" "noSession" "promptNotRecorded"
-                             "firstPrompt" "unseenPrompt" "vendorRefused" "filesNotRestorable")
+                             "firstPrompt" "unseenPrompt" "filesNotRestorable")
                        #'string<))))
 
 ;;;; ---- EditHeldPrompt ------------------------------------------------------

@@ -76,7 +76,7 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 	// FIRST, before the session is read: the queue answers false once the turn
 	// is the session's, and by then the session already has it in flight.
 	if target.Turn {
-		withdrawn, err := v.deps.RevivalTurns.WithdrawRevivalTurn(ctx, ws)
+		withdrawn, err := v.deps.TurnStops.WithdrawRevivalTurn(ctx, ws)
 		if err != nil {
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
 		}
@@ -215,6 +215,14 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 
 	// The status fires now, not at the turn's real end.
 	v.deps.Footer.SetInterrupting(ws, true)
+
+	// THE KILL FOLLOWS ITS TURN'S START. The queue marks the turn in flight
+	// before its StartTurn reaches the shim, and a kill that overtook the
+	// start would find no turn open while the turn then ran on.
+	if err := v.deps.TurnStops.AwaitTurnStarted(ctx, ws, *running.Turn); err != nil {
+		v.deps.Footer.SetInterrupting(ws, false)
+		return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
+	}
 
 	// THE USER STOPPED THE TURN ITSELF, and the record says so: the feed draws
 	// the interruption bubble for a direct stop.

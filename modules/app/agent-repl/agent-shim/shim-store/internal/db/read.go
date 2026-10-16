@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
@@ -40,6 +41,9 @@ const PageSize = 50
 type Opening struct {
 	kind         openingKind
 	knownThrough *storev1.StoreItemPointer
+	// vouched serves an absent book as the empty one it is rather than
+	// refusing it (store.v1.OpenAgentSessionRequest.vouched).
+	vouched bool
 }
 
 type openingKind int
@@ -62,16 +66,27 @@ func CatchUp(knownThrough *storev1.StoreItemPointer) Opening {
 // of the open, and history is read only when a reader asks for it.
 func TailOnly() Opening { return Opening{kind: openingTailOnly} }
 
-// String names the opening for logs.
+// Vouched is O, opened by the producer that announced the agent: a book the
+// store has never heard of is served empty, and its tail stands on the first
+// row any producer writes, rather than being refused ErrUnknownAgent.
+func (o Opening) Vouched() Opening {
+	o.vouched = true
+	return o
+}
+
+// String names the opening for logs, with "+vouched" when it is.
 func (o Opening) String() string {
+	name := "repaint"
 	switch o.kind {
 	case openingCatchUp:
-		return "known_through"
+		name = "known_through"
 	case openingTailOnly:
-		return "tail_only"
-	default:
-		return "repaint"
+		name = "tail_only"
 	}
+	if o.vouched {
+		name += "+vouched"
+	}
+	return name
 }
 
 // beginRead opens the transaction a PURE READ runs in, ON THE READ POOL.
@@ -165,8 +180,17 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, opening Opening) (Ope
 	// a book that does not exist is stale only as a consequence of the book not
 	// existing, and answering `stale_pointer` would send the caller off to
 	// repaint a book nobody ever kept.
+	//
+	// A VOUCHED OPEN SERVES THE ABSENT BOOK EMPTY. The producer announced the
+	// agent, so an absent book is one nothing has written to yet: its page is
+	// empty and the pin below stands its tail on the first row, whichever
+	// producer writes it. A known_through still names no line of it and is
+	// refused below as stale.
 	if err := d.agentIsKnown(ctx, tx, agentID); err != nil {
-		return OpenedPage{}, d.refuse(base, err)
+		if !opening.vouched || !errors.Is(err, ErrUnknownAgent) {
+			return OpenedPage{}, d.refuse(base, err)
+		}
+		d.log.LogVerbose(base, "a vouched open found no book; serving it empty with its tail on the first row")
 	}
 
 	// REPAINT IS THE NEWEST PLACES; CATCH-UP IS WHAT WAS WRITTEN SINCE. A

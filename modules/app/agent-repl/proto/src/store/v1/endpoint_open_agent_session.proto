@@ -48,6 +48,21 @@ message OpenAgentSessionRequest {
   // never watched lived for the store's whole process lifetime (measured:
   // two per turn, 2026-09-10).
   bool page_only = 4;
+  // Whether the caller is the producer that announced this agent and vouches
+  // that it is real. UNSET/false = an absent book is refused `unknown_agent`.
+  // SET = an absent book is one nothing has been written to yet, and it is
+  // served as the empty book it is: an empty page at its floor, `newest`
+  // UNSET, and (unless `page_only`) a watch token whose tail begins at the
+  // book's first item, whichever producer writes it. A `known_through` naming
+  // no line of the book is still refused `stale_pointer`.
+  //
+  // THE STORE IS THE ONE PARTY THAT SEES EVERY WRITE. The book's first row may
+  // come from either plane (the shim's stream, or the sidecar's copy of the
+  // vendor's transcript), so only the store can tell a waiting reader the
+  // moment it lands. A producer that was refused and re-asked on a timer
+  // instead polled the store for as long as the book stayed empty, which for
+  // an idle forked conversation was forever.
+  bool vouched = 6;
 }
 
 // The page, or why it could not be served.

@@ -221,3 +221,37 @@ func TestRollBackTombstoneFailureIsErrorAndSurfaces(t *testing.T) {
 		t.Fatalf("records = %+v, want the tombstone failure logged at error", h.log.Records())
 	}
 }
+
+// TestARollbackDuringATurnStartPerformsOnceTheStartSettles covers a stop
+// that lands while its turn's StartTurn stands: the rewind waits out the
+// call rather than being made beside it.
+func TestARollbackDuringATurnStartPerformsOnceTheStartSettles(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	done := make(chan error, 1)
+	performedBeside := false
+	h.sender.startHook = func() {
+		h.sender.startHook = nil
+		go func() {
+			done <- h.q.RollBack(context.Background(), theWorkspace, since, nil, func(context.Context) error {
+				call, _ := h.q.standingCall(theWorkspace)
+				performedBeside = call.what != "rollback"
+				return nil
+			})
+		}()
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	err := <-done
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if performedBeside {
+		t.Fatal("the rewind was performed beside the standing start")
+	}
+}

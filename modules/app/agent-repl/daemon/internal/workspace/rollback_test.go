@@ -80,7 +80,6 @@ func TestRollBackShimRefusalPropagatesWithoutFeedCall(t *testing.T) {
 		{name: "prompt not recorded", arm: ArmShimPromptNotRecorded},
 		{name: "first prompt", arm: ArmShimFirstPrompt},
 		{name: "unseen prompt", arm: ArmShimUnseenPrompt},
-		{name: "vendor refused", arm: ArmShimVendorRefused},
 		{name: "files not restorable", arm: ArmShimFilesNotRestorable},
 	}
 	for _, tt := range tests {
@@ -140,6 +139,10 @@ func TestRollBackErrHoldsChangedPropagatesWithoutFeedCall(t *testing.T) {
 // TestRollBackSuccessCallsFeedAndCountsFilesRestored covers the happy path:
 // the shim rewinds the conversation, the feed drops exactly the turns named,
 // and the restored paths are counted into the result.
+// TestRollBackSuccessCallsFeedAndCountsFilesRestored covers the shim's
+// answer at the cut: the turns' drawn rows are withheld, and none is removed
+// for good, until the vendor's restart settles (the feed's
+// conversation.v1.SessionRollbackSettled).
 func TestRollBackSuccessCallsFeedAndCountsFilesRestored(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -158,11 +161,14 @@ func TestRollBackSuccessCallsFeedAndCountsFilesRestored(t *testing.T) {
 	if result != (RollbackResult{FilesRestored: 3}) {
 		t.Fatalf("result = %+v, want FilesRestored: 3", result)
 	}
-	if len(f.feed.rolledBackTurns) != 1 {
-		t.Fatalf("rolled back turns = %+v, want exactly one call", f.feed.rolledBackTurns)
+	if len(f.feed.withheldDrawn) != 1 {
+		t.Fatalf("withheld drawn turns = %+v, want exactly one call", f.feed.withheldDrawn)
 	}
-	if got := f.feed.rolledBackTurns[0]; len(got) != 3 || got[0] != "t1" || got[1] != "t2" || got[2] != "t3" {
-		t.Fatalf("rolled back turns = %+v, want %+v", got, turns)
+	if got := f.feed.withheldDrawn[0]; len(got) != 3 || got[0] != "t1" || got[1] != "t2" || got[2] != "t3" {
+		t.Fatalf("withheld drawn turns = %+v, want %+v", got, turns)
+	}
+	if len(f.feed.rolledBackTurns) != 0 {
+		t.Fatalf("rolled back turns = %+v, want none before the restart settles", f.feed.rolledBackTurns)
 	}
 	if !hasRecord(f, "info", opRollBack) {
 		t.Fatalf("records = %+v, want an info record under %s", f.log.logger.Records(), opRollBack)
@@ -172,7 +178,7 @@ func TestRollBackSuccessCallsFeedAndCountsFilesRestored(t *testing.T) {
 // TestRollBackHoldsTheTurnsBeforeTheCutAndNeverReleasesOnSuccess covers the
 // hold: the dropped turns' rows are withheld from before the shim cuts, so
 // the interrupted ending of a running turn is never drawn, and a rollback
-// that lands ends the hold through RollBackTurns alone.
+// that lands never releases it (the restart's settle ends it in the feed).
 func TestRollBackHoldsTheTurnsBeforeTheCutAndNeverReleasesOnSuccess(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -357,14 +363,6 @@ func TestShimAdapterRollBackSessionFailureArms(t *testing.T) {
 			}}},
 			wantArm:    ArmShimUnseenPrompt,
 			wantDetail: "uuid-123",
-		},
-		{
-			name: "vendor refused carries the vendor message as detail",
-			failure: &shimv1.RollBackSessionFailure{Cause: &shimv1.RollBackSessionFailure_VendorRefused{VendorRefused: &shimv1.RollBackSessionVendorRefused{
-				VendorMessage: "the vendor said no",
-			}}},
-			wantArm:    ArmShimVendorRefused,
-			wantDetail: "the vendor said no",
 		},
 		{
 			name: "files not restorable carries the vendor message as detail",

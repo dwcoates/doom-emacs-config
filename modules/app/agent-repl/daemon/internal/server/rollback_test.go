@@ -420,15 +420,14 @@ func TestRollBackHoldsChangedDuringPerformIsStale(t *testing.T) {
 
 // TestRollBackShimRefusalArmsMapToMatchingRollBackErrorArms pins that a
 // *workspace.ShimRefusal from the verb maps onto the RollBackError arm of the
-// same name, and that the two arms carrying vendor words (vendor_refused,
-// files_not_restorable) carry them.
+// same name, and that the arm carrying vendor words (files_not_restorable)
+// carries them.
 func TestRollBackShimRefusalArmsMapToMatchingRollBackErrorArms(t *testing.T) {
 	tests := []struct {
 		name          string
 		arm           string
 		carriesVendor bool
 	}{
-		{name: "vendor refused", arm: workspace.ArmShimVendorRefused, carriesVendor: true},
 		{name: "files not restorable", arm: workspace.ArmShimFilesNotRestorable, carriesVendor: true},
 		{name: "no session", arm: workspace.ArmShimNoSession, carriesVendor: false},
 		{name: "first prompt", arm: workspace.ArmShimFirstPrompt, carriesVendor: false},
@@ -450,10 +449,6 @@ func TestRollBackShimRefusalArmsMapToMatchingRollBackErrorArms(t *testing.T) {
 			}
 			cause := resp.Msg.GetError()
 			switch tc.arm {
-			case workspace.ArmShimVendorRefused:
-				if cause.GetVendorRefused() == nil {
-					t.Fatalf("result = %v, want vendor_refused", resp.Msg.GetResult())
-				}
 			case workspace.ArmShimFilesNotRestorable:
 				if cause.GetFilesNotRestorable() == nil {
 					t.Fatalf("result = %v, want files_not_restorable", resp.Msg.GetResult())
@@ -470,8 +465,6 @@ func TestRollBackShimRefusalArmsMapToMatchingRollBackErrorArms(t *testing.T) {
 			if tc.carriesVendor {
 				var got string
 				switch tc.arm {
-				case workspace.ArmShimVendorRefused:
-					got = cause.GetVendorRefused().GetVendorMessage()
 				case workspace.ArmShimFilesNotRestorable:
 					got = cause.GetFilesNotRestorable().GetVendorMessage()
 				}
@@ -1053,8 +1046,6 @@ func TestInterruptRollingBackRefusedRelaysWhyThePromptStayed(t *testing.T) {
 			check: func(c *agentreplv1.RollBackError) bool { return c.GetFirstPrompt() != nil }},
 		{name: "holds changed", err: promptqueue.ErrHoldsChanged,
 			check: func(c *agentreplv1.RollBackError) bool { return c.GetPlanStale() != nil }},
-		{name: "vendor refused", err: &workspace.ShimRefusal{Arm: workspace.ArmShimVendorRefused, Detail: "no"},
-			check: func(c *agentreplv1.RollBackError) bool { return c.GetVendorRefused().GetVendorMessage() == "no" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

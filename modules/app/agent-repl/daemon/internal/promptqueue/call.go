@@ -54,6 +54,10 @@ type shimCall struct {
 	// holds are the standing holds the call delivers or retires; nothing else
 	// may act on them while it stands.
 	holds []ids.TurnID
+	// settled closes once the call has returned and its claim is cleared:
+	// what a caller that must not run beside the call waits on. outside
+	// makes it.
+	settled chan struct{}
 }
 
 // delivery is a workspace's delivery lock, HELD. It is taken only by
@@ -103,6 +107,7 @@ func (d *delivery) outside(call shimCall, log dlog.Logger, fn func()) {
 		})
 		panic(fmt.Sprintf("promptqueue: a %s call on %s while a %s call stands", call.what, d.ws, standing.what))
 	}
+	call.settled = make(chan struct{})
 	d.state.call = &call
 	q.mu.Unlock()
 	log.Debug(opCall, "the delivery lock is released for the shim call", dlog.Context{
@@ -113,12 +118,40 @@ func (d *delivery) outside(call shimCall, log dlog.Logger, fn func()) {
 		d.state.drain.Lock()
 		q.mu.Lock()
 		d.state.call = nil
+		close(call.settled)
 		q.mu.Unlock()
 		log.Debug(opCall, "the shim call returned; its outcome is settled under the delivery lock", dlog.Context{
 			"call": call.what, "turn": string(call.turn),
 		})
 	}()
 	fn()
+}
+
+// lockDeliveryIdle takes ws's delivery lock with NO shim call standing, for a
+// decision that makes a call of its own and cannot defer to a standing one (a
+// rollback, which a person is waiting on). A call standing when the lock is
+// taken is waited out, and the lock taken again, until none stands or ctx
+// ends; a call is never made beside another (outside).
+func (q *queue) lockDeliveryIdle(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, what string) (*delivery, error) {
+	for {
+		d := q.lockDelivery(ws)
+		call, standing := q.standingCall(ws)
+		if !standing {
+			return d, nil
+		}
+		d.unlock()
+		log.Info(opCall, "a shim call is in flight on the workspace; the decision waits for it to settle", dlog.Context{
+			"waiting": what, "call": call.what, "call_turn": string(call.turn),
+		})
+		select {
+		case <-call.settled:
+		case <-ctx.Done():
+			log.Info(opCall, "the decision stopped waiting for the shim call to settle", dlog.Context{
+				"waiting": what, "call": call.what, "call_turn": string(call.turn), "cause": ctx.Err().Error(),
+			})
+			return nil, ctx.Err()
+		}
+	}
 }
 
 // standingCall answers the shim call standing on ws, if one does.

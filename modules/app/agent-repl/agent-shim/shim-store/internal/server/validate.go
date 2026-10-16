@@ -164,9 +164,9 @@ func (c refusalClass) armName() string {
 //     yet, and a consumer holding a stale or mistyped target — send byte-identical
 //     requests. The store cannot tell them apart, because the expectation lives
 //     in the CALLER: only the caller knows whether it vouches for the agent. The
-//     caller is also where the distinction is already acted on and recorded —
-//     the shim serves an empty page and traces it when it vouches, and surfaces
-//     the refusal as a typed error to the engine when it does not. A warn here
+//     caller is also where the distinction is already acted on — a shim that
+//     vouches opens `vouched` and is served the empty book, never refused, and
+//     one that does not surfaces the refusal as a typed error. A warn here
 //     asserted "something is wrong" on every cold bring-up, which is a severity
 //     the store is not in a position to claim.
 //

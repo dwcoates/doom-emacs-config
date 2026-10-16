@@ -1099,6 +1099,12 @@ type fakeQueue struct {
 	withdraws   []ids.WorkspaceID
 	withdrawn   bool
 	withdrawErr error
+	// startAwaits records every AwaitTurnStarted call's turn, in order;
+	// startAwaitErr is what each answers, and onStartAwait runs as each is
+	// made.
+	startAwaits   []ids.TurnID
+	startAwaitErr error
+	onStartAwait  func()
 	// gateFates records every ColdGateAnswered fate, in order; gateFateErr is
 	// what each answers, and onGateFate runs as each is settled.
 	gateFates   []promptqueue.GateFate
@@ -1119,6 +1125,15 @@ func (q *fakeQueue) ColdGateAnswered(_ context.Context, _ ids.WorkspaceID, fate 
 func (q *fakeQueue) WithdrawRevivalTurn(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 	q.withdraws = append(q.withdraws, ws)
 	return q.withdrawn, q.withdrawErr
+}
+
+// AwaitTurnStarted records the call and answers the scripted outcome.
+func (q *fakeQueue) AwaitTurnStarted(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) error {
+	q.startAwaits = append(q.startAwaits, turn)
+	if q.onStartAwait != nil {
+		q.onStartAwait()
+	}
+	return q.startAwaitErr
 }
 
 // rollBackCall is one RollBack call the fake queue recorded.
@@ -1382,6 +1397,8 @@ type fakeFeed struct {
 	// call's turns, in order.
 	heldTurns     [][]ids.TurnID
 	releasedTurns [][]ids.TurnID
+	// withheldDrawn records every WithholdDrawnTurns call's turns, in order.
+	withheldDrawn [][]ids.TurnID
 	// mainAgents is every main agent the feed was told, in order.
 	mainAgents []string
 	// freshBooks is every workspace whose session came up fresh, in order.
@@ -1428,6 +1445,11 @@ func (f *fakeFeed) HoldTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
 // ReleaseTurns records the release.
 func (f *fakeFeed) ReleaseTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
 	f.releasedTurns = append(f.releasedTurns, turns)
+}
+
+// WithholdDrawnTurns records the drawn rows taken off the feed at the cut.
+func (f *fakeFeed) WithholdDrawnTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
+	f.withheldDrawn = append(f.withheldDrawn, turns)
 }
 
 // RetireRow records the retirement.
@@ -2416,7 +2438,7 @@ func newFixture(t *testing.T) *fixture {
 	f.hasSession = true
 
 	verbs, err := New(Deps{
-		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, RevivalTurns: f.queue, Merge: f.merge,
+		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,

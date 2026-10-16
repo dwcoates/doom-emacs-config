@@ -832,6 +832,11 @@ func TestSandboxRunStreamsTheWorkingCopyAndMountsNoHostPath(t *testing.T) {
 	if !strings.Contains(run, "--interactive") || !strings.Contains(run, "type=volume,target=/artifacts") {
 		t.Fatalf("docker run = %q, want --interactive and the artifacts on a VM-side volume", run)
 	}
+	// The container must outlive its exit, or the `docker cp` below finds
+	// it gone and every failure's artifacts are lost.
+	if strings.Contains(run, "--rm") {
+		t.Fatalf("docker run = %q, want no --rm: the artifacts are copied out after the exit", run)
+	}
 
 	// Assert: what arrived on stdin is the staged working copy.
 	list, err := exec.Command("tar", "-tf", filepath.Join(f.dir, "run-stdin")).Output()

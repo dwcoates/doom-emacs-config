@@ -211,7 +211,11 @@ func answersPrompt(row *frontendv1.FeedRow) bool {
 func (r *resolver) RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := r.state(ws)
+	return r.rollBackTurnsLocked(r.state(ws), ws, turns)
+}
+
+// rollBackTurnsLocked is RollBackTurns under the resolver's lock.
+func (r *resolver) rollBackTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []ids.TurnID) error {
 	for _, turn := range turns {
 		s.rolledBack[turn] = true
 		delete(s.rollingBack, turn)
@@ -273,7 +277,11 @@ func (r *resolver) HoldTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
 func (r *resolver) ReleaseTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := r.state(ws)
+	r.releaseTurnsLocked(r.state(ws), ws, turns)
+}
+
+// releaseTurnsLocked is ReleaseTurns under the resolver's lock.
+func (r *resolver) releaseTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []ids.TurnID) {
 	for _, turn := range turns {
 		delete(s.rollingBack, turn)
 	}
@@ -290,6 +298,107 @@ func (r *resolver) ReleaseTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
 	}
 	r.logger(ws).Info(opRollbackHold, "the rollback did not happen; the rows withheld while it ran are drawn",
 		dlog.Context{"turns": len(turns), "first": firstTurn(turns), "drawn": len(replay)})
+}
+
+// WithholdDrawnTurns takes the rows already drawn for TURNS, which a rollback
+// holds (HoldTurns), off the feed until the rollback settles.
+//
+// THE SHIM ANSWERS A ROLLBACK ONCE ITS CUT IS MADE and restarts the vendor
+// behind the answer (conversation.v1.SessionRollbackSettled), so the prompt
+// the user took back would stay drawn for the whole vendor boot, some 1.7s
+// (2026-10-16). Each such row is snapshotted with its place in the order and
+// retired; the settle retires it for good (RollBackTurns) or draws it again
+// where it stood (ReleaseTurns). A row that cannot be snapshotted stays drawn.
+func (r *resolver) WithholdDrawnTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	cut := map[ids.TurnID]bool{}
+	for _, turn := range turns {
+		cut[turn] = s.rollingBack[turn]
+	}
+	withheld := 0
+	r.eachStoredRow(s, func(addr feedid.Feed, f *feedState, id string, row *frontendv1.FeedRow) {
+		turn := ids.TurnID(row.GetTurn().GetValue())
+		if !cut[turn] {
+			return
+		}
+		snapshot, ok := r.snapshotRow(s, row, unclonable{
+			operation: opRollbackHold,
+			message:   "a drawn row of a turn being rolled back could not be snapshotted; it stays drawn until the rollback settles",
+			context:   dlog.Context{"feed": f.key, "row": id, "turn": string(turn)},
+		})
+		if !ok {
+			return
+		}
+		rank := f.rank[id]
+		durable := !f.nonDurable[id]
+		if !r.retire(s, addr, id) {
+			return
+		}
+		s.withheld = append(s.withheld, withheldRow{turn: turn, at: placement{feed: addr, inherit: &rank}, row: snapshot, durable: durable})
+		withheld++
+	})
+	r.logger(ws).Info(opRollbackHold, "the cut was made; the rolled-back turns' drawn rows are withheld until the vendor's restart settles",
+		dlog.Context{"turns": len(turns), "first": firstTurn(turns), "withheld": withheld})
+}
+
+// settleRollbackLocked takes how a rollback's restart settled
+// (conversation.v1.SessionRollbackSettled): the turns this feed holds for it
+// are removed for good when the vendor resumed at the cut, and drawn again
+// where they stood, with a warning raised, when it did not. Turns it holds
+// none of (a failed try's rewind by the prompt queue, a settle restated on a
+// re-opened watch) change nothing.
+func (r *resolver) settleRollbackLocked(s *wsState, ws ids.WorkspaceID, settled *conversationv1.SessionRollbackSettled) {
+	var held []ids.TurnID
+	for _, turn := range settled.GetDroppedTurns() {
+		if s.rollingBack[ids.TurnID(turn.GetValue())] {
+			held = append(held, ids.TurnID(turn.GetValue()))
+		}
+	}
+	log := r.logger(ws)
+	fields := dlog.Context{"dropped": len(settled.GetDroppedTurns()), "held": len(held), "first": firstTurn(held)}
+	if len(held) == 0 {
+		fields["outcome"] = rollbackOutcomeName(settled)
+		log.Info(opRollbackApply, "a rollback settled for turns this feed holds none of; nothing changes", fields)
+		return
+	}
+	switch outcome := settled.GetOutcome().(type) {
+	case *conversationv1.SessionRollbackSettled_ResumedAtCut:
+		_ = r.rollBackTurnsLocked(s, ws, held)
+	case *conversationv1.SessionRollbackSettled_Refused:
+		r.releaseTurnsLocked(s, ws, held)
+		fields["vendor_message"] = outcome.Refused.GetVendorMessage()
+		log.Warn(opRollbackApply, "the vendor refused the rollback's cut; its prompts are drawn again and stay in the conversation", fields)
+		r.raiseWarning(s, opRollbackApply,
+			fmt.Sprintf("the rollback did not happen: the vendor refused it, so its prompt is still in the conversation (%s)", outcome.Refused.GetVendorMessage()))
+	case *conversationv1.SessionRollbackSettled_Failed:
+		r.releaseTurnsLocked(s, ws, held)
+		fields["detail"] = outcome.Failed.GetDetail()
+		log.Error(opRollbackApply, "the rollback's restart failed; its prompts are drawn again and stay in the conversation", fields)
+		r.raiseWarning(s, opRollbackApply,
+			fmt.Sprintf("the rollback did not happen: the vendor could not restart at the cut, so its prompt is still in the conversation (%s)", outcome.Failed.GetDetail()))
+	default:
+		// A SETTLE WITH NO OUTCOME IS THE SHIM'S MALFORMED MESSAGE: whether the
+		// cut stands is unknown, so the rows are drawn again, as for a cut that
+		// did not happen, and the breach is recorded.
+		r.releaseTurnsLocked(s, ws, held)
+		log.Error(opRollbackApply, "a rollback settled with no outcome; its prompts are drawn again", fields)
+		r.raiseWarning(s, opRollbackApply, "a rollback's outcome was not stated; its prompt is shown again")
+	}
+}
+
+// rollbackOutcomeName names SETTLED's outcome arm for a log record.
+func rollbackOutcomeName(settled *conversationv1.SessionRollbackSettled) string {
+	switch settled.GetOutcome().(type) {
+	case *conversationv1.SessionRollbackSettled_ResumedAtCut:
+		return "resumed_at_cut"
+	case *conversationv1.SessionRollbackSettled_Refused:
+		return "refused"
+	case *conversationv1.SessionRollbackSettled_Failed:
+		return "failed"
+	}
+	return "unset"
 }
 
 // withheldRollingBack reports whether ROW belongs to a turn being rolled back,

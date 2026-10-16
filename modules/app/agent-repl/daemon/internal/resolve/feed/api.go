@@ -313,6 +313,11 @@ type Resolver interface {
 	// ReleaseTurns ends a hold for a rollback that did not happen, drawing the
 	// rows withheld meanwhile in arrival order.
 	ReleaseTurns(ws ids.WorkspaceID, turns []ids.TurnID)
+	// WithholdDrawnTurns takes the rows already drawn for held TURNS off the
+	// feed once the shim has made the cut, until the rollback's restart
+	// settles (conversation.v1.SessionRollbackSettled, routed through
+	// OnSessionUpdate), which removes them for good or draws them again.
+	WithholdDrawnTurns(ws ids.WorkspaceID, turns []ids.TurnID)
 	// OnSignedIn takes a completed sign-in for the workspace's account root
 	// (signin.go): the failure rows of every drawn turn whose ending offers
 	// the sign-in action leave the feed for good. The removal always happens;

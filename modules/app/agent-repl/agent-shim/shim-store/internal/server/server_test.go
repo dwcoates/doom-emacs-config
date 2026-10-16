@@ -854,6 +854,17 @@ func TestOpenAgentSessionPassesTheRequestsOpeningToTheStore(t *testing.T) {
 				Opening: &storev1.OpenAgentSessionRequest_TailOnly{TailOnly: &storev1.AgentSessionTailOnly{}}},
 			want: "tail_only",
 		},
+		{
+			name: "vouched rides on the repaint",
+			req:  &storev1.OpenAgentSessionRequest{Agent: agentID("a1"), Vouched: true},
+			want: "repaint+vouched",
+		},
+		{
+			name: "vouched rides on the tail-only open",
+			req: &storev1.OpenAgentSessionRequest{Agent: agentID("a1"), Vouched: true,
+				Opening: &storev1.OpenAgentSessionRequest_TailOnly{TailOnly: &storev1.AgentSessionTailOnly{}}},
+			want: "tail_only+vouched",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
