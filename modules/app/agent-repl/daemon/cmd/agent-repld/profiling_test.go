@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agentrepl/logging"
 	"agentrepl/logging/profiling"
 )
 
@@ -20,6 +21,8 @@ func TestRecordProfilingEvent(t *testing.T) {
 		{name: "a start is info", event: profiling.Event{Kind: profiling.Started, Session: "s1"}, level: "info", operation: "daemon.profiling.started"},
 		{name: "a stop is info", event: profiling.Event{Kind: profiling.Stopped, Session: "s1", Reason: "exit"}, level: "info", operation: "daemon.profiling.stopped"},
 		{name: "a failure is error", event: profiling.Event{Kind: profiling.Failed, Err: errors.New("boom")}, level: "error", operation: "daemon.profiling.failed"},
+		{name: "a level window opened is info", event: profiling.Event{Kind: profiling.LevelOpened, Session: "s1", Level: "debug"}, level: "info", operation: "daemon.profiling.level_opened"},
+		{name: "a level window closed is info", event: profiling.Event{Kind: profiling.LevelClosed, Session: "s1", Level: "debug", Reason: "session_closed"}, level: "info", operation: "daemon.profiling.level_closed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -57,7 +60,7 @@ func TestStartRuntimeProfilingRefusesAMissingHome(t *testing.T) {
 	home := func() (string, error) { return "", errors.New("no home") }
 
 	// Act
-	_, err := startRuntimeProfiling(dlog.NewTestLogger(), getenv, home)
+	_, err := startRuntimeProfiling(dlog.NewTestLogger(), logging.FixedWindow(logging.LevelInfo), getenv, home)
 
 	// Assert
 	if err == nil {
@@ -75,7 +78,7 @@ func TestStartRuntimeProfilingStopsCleanlyWithNoSession(t *testing.T) {
 		return ""
 	}
 	log := dlog.NewTestLogger()
-	stop, err := startRuntimeProfiling(log, getenv, os.UserHomeDir)
+	stop, err := startRuntimeProfiling(log, logging.FixedWindow(logging.LevelInfo), getenv, os.UserHomeDir)
 	if err != nil {
 		t.Fatalf("startRuntimeProfiling: %v", err)
 	}

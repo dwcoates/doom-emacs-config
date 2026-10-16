@@ -123,19 +123,24 @@ type workspaceSinks struct {
 // The run log's open failure is returned here and is a BOOT FATAL for the
 // caller: a daemon that cannot write its own narrative cannot report what it
 // then does wrong.
-func OpenSurfaces(runLog string) (Surfaces, error) {
+//
+// It also answers the process's live log threshold, shared by every logger the
+// surfaces hand out, for the one owner that raises it while the daemon runs: a
+// profiling session (agentrepl/logging/profiling).
+func OpenSurfaces(runLog string) (Surfaces, *logging.Window, error) {
 	sel, err := logging.SelectLevel(os.Getenv(LevelEnvironment), os.Getenv(logging.UntilEnvironment), time.Now())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	s, err := openSurfacesWindow(runLog, logging.NewWindow(sel, time.Now), os.Stderr)
+	window := logging.NewWindow(sel, time.Now)
+	s, err := openSurfacesWindow(runLog, window, os.Stderr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if message, ok := sel.Note(); ok {
 		s.Global().Info(levelWindowOperation, message, Context(sel.Context()))
 	}
-	return s, nil
+	return s, window, nil
 }
 
 // openSurfaces is OpenSurfaces at one fixed level with the terminal injected,

@@ -26,6 +26,7 @@ func startRuntimeProfiling(logf *logging.Bound, getenv func(string) string, home
 		Runtime: "sidecar",
 		Root:    root,
 		Events:  func(e profiling.Event) { recordProfilingEvent(logf, e) },
+		Level:   logf.LevelWindow(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("shim-claude-sidecar: build the runtime profiler: %w", err)
@@ -39,8 +40,9 @@ func startRuntimeProfiling(logf *logging.Bound, getenv func(string) string, home
 	return func() { close(done); <-left }, nil
 }
 
-// recordProfilingEvent records one profiling event: a start or a stop at
-// info (a lifecycle transition), a failure at error.
+// recordProfilingEvent records one profiling event: a start, a stop, or a
+// session's log level window opening or closing at info (lifecycle
+// transitions), a failure at error.
 func recordProfilingEvent(logf *logging.Bound, e profiling.Event) {
 	files := strings.Join(e.Files, ",")
 	switch e.Kind {
@@ -50,6 +52,12 @@ func recordProfilingEvent(logf *logging.Bound, e profiling.Event) {
 	case profiling.Stopped:
 		logf.With(logging.Context{Operation: "profiling.stopped", Level: "info"}).Log(
 			"runtime profiling stopped and wrote its profiles session=%s reason=%s files=%s", e.Session, e.Reason, files)
+	case profiling.LevelOpened:
+		logf.With(logging.Context{Operation: "profiling.level_opened", Level: "info"}).Log(
+			"the profiling session raised the sidecar's log level for its window session=%s level=%s until=%d", e.Session, e.Level, e.Until.Unix())
+	case profiling.LevelClosed:
+		logf.With(logging.Context{Operation: "profiling.level_closed", Level: "info"}).Log(
+			"the profiling session's log level window closed; the sidecar is back at info session=%s level=%s reason=%s", e.Session, e.Level, e.Reason)
 	default:
 		logf.With(logging.Context{Operation: "profiling.failed", Level: "error"}).Log(
 			"runtime profiling could not do what the session asked session=%s reason=%s cause=%v", e.Session, e.Reason, e.Err)

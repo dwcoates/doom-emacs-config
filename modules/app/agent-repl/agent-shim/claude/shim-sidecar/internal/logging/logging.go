@@ -323,6 +323,10 @@ type Bound struct {
 	context Context
 }
 
+// LevelWindow is the process's live threshold, shared by every bound copy: a
+// profiling session raises it (agentrepl/logging/profiling).
+func (b *Bound) LevelWindow() *sharedlogging.Window { return b.logger.threshold }
+
 // New constructs a debug-enabled logger for focused tests and foreground
 // harnesses. Production passes its parsed threshold through NewAtLevel.
 func New(stderr, file io.Writer) *Logger {
