@@ -1459,6 +1459,31 @@ numbers when a measurement genuinely improves; never when it regresses.
 
 Any code shaped by performance — a cache, a skipped check, a batched or reordered call, a narrowed watch set — gets a comment at the site naming the cost it avoids, with the measurement if there is one. A decision that looks strange because it is an optimization is never removed or "simplified" without asking the owner first.
 
+## A one-shot asks before landing a non-trivial performance impact
+
+Owner ruling, 2026-10-15. A one-shot works and merges unattended, so a cost it
+adds would otherwise land without the user ever seeing it. When a one-shot's
+change will have a non-trivial performance impact, it stops and asks the user
+with `AskUserQuestion` before it merges.
+
+- **What counts.** Anything that measurably moves a user-visible latency, CPU,
+  memory, battery, disk or log volume, or test-run time: a new per-event or
+  per-workspace cost, a new watcher, poll or timer, a wider scan, a lost cache,
+  a blocking call on a hot path, a larger frame or payload, a slower or heavier
+  test tier. The perf-sensitive areas listed by `/profile-agent-repl` always
+  count. A cost that is constant, one-off and small does not.
+- **What the question carries.** The impact itself, measured where it can be
+  and estimated with its basis where it cannot. Then the options: one or more
+  concrete strategies that mitigate the cost (cache, batch, debounce, scope
+  down, move off the hot path, gate behind a flag) and the option to accept it
+  as is. Recommend one option on its merits, first in the list.
+- **What follows.** The one-shot implements the option the user picks, and
+  merges only after that. An accepted cost is recorded in the commit message,
+  and an important one in "Performance lessons" below.
+
+A non-one-shot workspace surfaces the same impact in its response rather than
+landing it silently.
+
 ## A regression fix leaves a breadcrumb at the fix site
 
 Owner instruction, 2026-09-14, standing. When a change fixes a REGRESSION — a
