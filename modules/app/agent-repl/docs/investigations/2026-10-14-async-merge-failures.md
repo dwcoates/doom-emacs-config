@@ -99,3 +99,7 @@ the log records that show it, so the failures can be fixed at their source.
 - Daemon at 12:35:25: `daemon.merge.fault` "a merge could not continue past an error; it fails", then `ReadHistory refused: unknown_agent: no session has been started on this shim and the workspace holds no persisted main agent`.
 - So the merge workspace's shim came up with no session started, and the queue tried to drive a turn on it. Not traced further. Re-requested under a new name.
 - Recurred 2026-10-15 ~15:50 on `matrix-halves-2` after its 4th gate attempt: "workspace `776c48e13c694622` has no live session to await turn `ed95c4f47c3f452f` on". The same fault as above, now twice. Re-requested as `halves-and-removals`.
+
+## Landings reported by the children since 2026-10-16 00:30
+
+- `redundancy-stale-rows-land` (merge workspace `redundancy-stale-rows`), from `test-redundancy-measure`: LANDED as `bcb2acd6ad`.
