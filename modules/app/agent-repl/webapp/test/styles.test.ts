@@ -36,7 +36,7 @@ import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, inDocument, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
@@ -4146,6 +4146,37 @@ describe("the tool card's command grey", () => {
 });
 
 /**
+ * THE QUESTION HEADER CHIP IS THE COMMAND GREY (owner request, 2026-10-16):
+ * a question's header badge reads in the same grey as a tool card's `.cmd`
+ * input line, where it was the `--accent` blue.
+ */
+describe("the question header chip's grey", () => {
+  it("colors the header chip with the command grey token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".q-chip");
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--tool-command\)/);
+  });
+
+  it("leaves the header chip out of the accent blue", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".q-chip") ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/var\(--accent\)/);
+  });
+
+  it("cascades the command grey onto a settled verdict's header chip", () => {
+    // Arrange / Act
+    const color = cascadedValueIn("q-verdict", "badge q-chip", "color");
+
+    // Assert
+    expect(color).toBe("var(--tool-command)");
+  });
+});
+
+/**
  * THE PAGE-COLORED FILL (owner request, 2026-10-08): a thinking bubble and an
  * interim response are filled with the page's own `--bg`, so the bubble's
  * background is not there in either theme; every other response keeps the
@@ -4864,43 +4895,26 @@ describe("THEME_BLOCKS, the per-theme token table", () => {
  * the verdict badges read at the given answer's size.
  */
 describe("the ask cards' square controls", () => {
-  /** The cascaded PROPERTY of a CLASS element placed inside a PARENT element. */
-  function cascadedIn(parentClass: string, childClass: string, property: string): string {
-    const parent = document.createElement("div");
-    parent.className = parentClass;
-    const child = document.createElement("span");
-    child.className = childClass;
-    parent.append(child);
-    document.body.replaceChildren(parent);
-    return cascadedValue(child, property);
-  }
-
   it.each([
     ["a feed tab", "feed-group-tab-strip", "feed-group-tab"],
     ["a merge tab", "merge-tabs", "merge-tab"],
     ["a question option", "q-opts", "q-opt"],
     ["a question verdict's header chip", "q-verdict", "badge q-chip"],
   ])("rounds %s by the one tab corner", (_name, parentClass, childClass) => {
-    // Arrange
-    const teardown = installStylesheet();
-    // Act
-    const radius = cascadedIn(parentClass, childClass, "border-radius");
+    // Arrange / Act
+    const radius = cascadedValueIn(parentClass, childClass, "border-radius");
     // Assert
     expect(radius).toBe("var(--tab-radius)");
-    teardown();
   });
 
   it.each([
     ["the given answers", "tool-card", "q-verdicts"],
     ["a question verdict's header chip", "q-verdict", "badge q-chip"],
   ])("sizes %s by the one settled-answer size", (_name, parentClass, childClass) => {
-    // Arrange
-    const teardown = installStylesheet();
-    // Act
-    const size = cascadedIn(parentClass, childClass, "font-size");
+    // Arrange / Act
+    const size = cascadedValueIn(parentClass, childClass, "font-size");
     // Assert
     expect(size).toBe("var(--ask-verdict-size)");
-    teardown();
   });
 
   it("declares the tab corner square and the settled-answer size once", () => {

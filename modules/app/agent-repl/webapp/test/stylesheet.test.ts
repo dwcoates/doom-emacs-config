@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cascadedValue, inDocument, inRail, rulesOf, selectorOf } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, inRail, rulesOf, selectorOf } from "./stylesheet.js";
 import STYLES_TEST from "./styles.test.ts?raw";
 import STYLESHEET from "./stylesheet.ts?raw";
 import { filesUnder } from "./files-under.js";
@@ -114,6 +114,38 @@ describe("inDocument", () => {
 
     // Assert
     expect(sites).toEqual([0, 1]);
+  });
+});
+
+describe("cascadedValueIn", () => {
+  it("answers the declaration the cascade hands the child inside the parent", () => {
+    // Arrange / Act: a verdict's chip, which only the parent-scoped rule rounds.
+    const radius = cascadedValueIn("q-verdict", "badge q-chip", "border-radius");
+
+    // Assert
+    expect(radius).toBe("var(--tab-radius)");
+  });
+
+  it("takes the pair and the stylesheet down once it answers", () => {
+    // Arrange
+    const sheets = document.head.querySelectorAll("style").length;
+
+    // Act
+    cascadedValueIn("q-verdict", "badge q-chip", "color");
+
+    // Assert
+    expect([document.body.querySelector(".q-verdict"), document.head.querySelectorAll("style").length]).toEqual([null, sheets]);
+  });
+
+  it("is the one child-in-parent cascade probe the stylesheet suite shares", () => {
+    // Arrange: the hand-rolled shape cascadedValueIn replaced.
+    const shape = /document\.body\.replaceChildren\(parent\)/g;
+
+    // Act
+    const sites = STYLES_TEST.match(shape)?.length ?? 0;
+
+    // Assert
+    expect(sites).toBe(0);
   });
 });
 
