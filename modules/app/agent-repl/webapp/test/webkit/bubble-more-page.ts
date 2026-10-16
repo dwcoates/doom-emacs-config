@@ -7,18 +7,10 @@
  * own first-line walk (`domClampGeometry`), which the suites read a clamp's
  * characters through.
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-log";
 import { refreshHasMore } from "../../src/feed/bubble-more.js";
 import { domClampGeometry } from "../../src/feed/ellipsis-trim.js";
 
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    () => undefined,
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-bubble-more-page" });
+installPageLogger("bubble-more");
 
 export { domClampGeometry, refreshHasMore };

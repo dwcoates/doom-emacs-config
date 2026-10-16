@@ -11,7 +11,7 @@
  * WHAT IT MEASURES IS WHAT IS PAINTED: every sample is a painted frame's
  * (`paintedFrames`, painted-frames.ts).
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-log";
 import { observeScrollBox, type TailFollow } from "../../src/scroll.js";
 import { createFeedTail } from "../../src/feed/feed.js";
 import { paintedFrames } from "./painted-frames";
@@ -100,24 +100,7 @@ function rowAbove(box: HTMLElement, host: HTMLElement): HTMLElement {
   return above;
 }
 
-/**
- * The webapp's own logger, at DEBUG. Its console line -- written for every
- * record, before the forwarding throttle -- is what this page keeps for the
- * test to read, as `level operation`; the forwarding sink accepts and drops.
- */
-const written: string[] = [];
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    (level, line) => {
-      const { operation } = JSON.parse(line) as { operation: string };
-      written.push(`${level} ${operation}`);
-    },
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-anchoring-page" });
+const records = installPageLogger("anchoring");
 
 const { box, host, tail } = mount();
 const frame = paintedFrames();
@@ -162,5 +145,5 @@ window.anchoring = {
     }
     return { worst, top: box.scrollTop };
   },
-  records: () => [...written],
+  records,
 };

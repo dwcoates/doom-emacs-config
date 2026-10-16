@@ -12,7 +12,7 @@
  * WHAT IT MEASURES IS WHAT IS PAINTED: every sample is a painted frame's
  * (`paintedFrames`, painted-frames.ts), the frame the reader sees.
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-log";
 import { observeScrollBox } from "../../src/scroll.js";
 import { createFeedTail, latestEntry } from "../../src/feed/feed.js";
 import { paintedFrames } from "./painted-frames";
@@ -42,8 +42,7 @@ declare global {
   }
 }
 
-setLogger(new ForwardingLogger(() => Promise.resolve("accepted"), () => undefined, {}, "info"));
-bindLogContext({ connection_id: "webkit-pinned-tail-page" });
+installPageLogger("pinned-tail", "info");
 
 document.body.innerHTML = `
   <div id="main-col" style="height:100vh">

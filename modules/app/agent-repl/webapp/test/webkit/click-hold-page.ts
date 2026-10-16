@@ -13,7 +13,7 @@
  * WHAT IT MEASURES IS WHAT IS PAINTED: every sample is a painted frame's
  * (`paintedFrames`, painted-frames.ts), the frame the reader sees.
  */
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
+import { installPageLogger } from "./page-log";
 import { holdViewOnClicks, observeScrollBox } from "../../src/scroll.js";
 import { createFeedTail } from "../../src/feed/feed.js";
 import { paintedFrames } from "./painted-frames";
@@ -53,23 +53,7 @@ declare global {
   }
 }
 
-/**
- * The webapp's own logger, at DEBUG. Its console line is what this page keeps
- * for the test to read, as `level operation`; the forwarding sink drops.
- */
-const written: string[] = [];
-setLogger(
-  new ForwardingLogger(
-    () => Promise.resolve("accepted"),
-    (level, line) => {
-      const { operation } = JSON.parse(line) as { operation: string };
-      written.push(`${level} ${operation}`);
-    },
-    {},
-    "debug",
-  ),
-);
-bindLogContext({ connection_id: "webkit-click-hold-page" });
+const records = installPageLogger("click-hold");
 
 document.documentElement.style.setProperty("--gate-dock-height", `${DOCK_PX.toString()}px`);
 document.body.innerHTML = `
@@ -163,5 +147,5 @@ window.clickHold = {
     });
     return Math.max(hidden, await worstMove(before, frames));
   },
-  records: () => [...written],
+  records,
 };
