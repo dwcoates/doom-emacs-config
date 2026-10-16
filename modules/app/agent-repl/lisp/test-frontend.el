@@ -1721,6 +1721,52 @@ purely daemon-driven."
            (when (buffer-live-p (plist-get entry :buffer))
              (kill-buffer (plist-get entry :buffer))))))))
 
+;;;; ---- The gui open under an active minibuffer ------------------------------
+
+(defmacro agent-repl-test--with-gui-open-boundaries (held displayed finished &rest body)
+  "Run BODY with `agent-repl--gui-open' wired to fakes.
+HELD non-nil makes the background anchor answer `:held' without running
+the build.  DISPLAYED and FINISHED are bound to whether the webview was
+displayed and the placeholder finished."
+  (declare (indent 3))
+  `(let ((,displayed nil) (,finished nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-require-xwidget) #'ignore)
+               ((symbol-function 'agent-repl--frontend-validate-for-ws) #'ignore)
+               ((symbol-function 'agent-repl--open-progress-note) #'ignore)
+               ((symbol-function 'agent-repl--open-progress-finish)
+                (lambda (_ws) (setq ,finished t)))
+               ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                (lambda (_ws) 'the-buffer))
+               ((symbol-function 'agent-repl--frontend-display-webview)
+                (lambda (_ws _buf) (setq ,displayed t)))
+               ((symbol-function 'agent-repl--call-in-background-workspace)
+                (lambda (_ws fn) (if ,held :held (funcall fn)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-gui-open-held-by-a-minibuffer-is-pending ()
+  "A mount held for an active minibuffer answers `:pending' and displays nothing.
+The open still owns its outcome, so the placeholder stays up until the
+held mount runs."
+  ;; Arrange
+  (agent-repl-test--with-gui-open-boundaries t displayed finished
+    ;; Act
+    (let ((outcome (agent-repl--gui-open "ws1")))
+      ;; Assert
+      (should (eq outcome :pending))
+      (should-not displayed)
+      (should-not finished))))
+
+(ert-deftest agent-repl-test-frontend-gui-open-without-a-minibuffer-answers-the-buffer ()
+  "A mount that runs at once displays, finishes the placeholder and answers the buffer."
+  ;; Arrange
+  (agent-repl-test--with-gui-open-boundaries nil displayed finished
+    ;; Act
+    (let ((outcome (agent-repl--gui-open "ws1")))
+      ;; Assert
+      (should (eq outcome 'the-buffer))
+      (should displayed)
+      (should finished))))
+
 ;;;; ---- Non-displaying pre-creation -------------------------------------------
 
 (defvar agent-repl-test--precreate-urls nil

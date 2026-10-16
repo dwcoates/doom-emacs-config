@@ -1379,6 +1379,39 @@ activation hook sends no SelectWorkspace echo."
       ;; Assert
       (should (member "elisp.roster.current: deferred id=b ws=two requested=one" infos)))))
 
+(ert-deftest agent-repl-test-roster-a-current-is-held-while-a-minibuffer-is-active ()
+  "A `current' arriving while the user types in a minibuffer moves nothing:
+following it would select the destination's input window."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    (let ((agent-repl--minibuffer-held nil))
+      (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () t)))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
+      ;; Assert
+      (should (null agent-repl-test-roster--switched))
+      (should (equal (mapcar #'car agent-repl--minibuffer-held) '(roster-follow))))))
+
+(ert-deftest agent-repl-test-roster-a-held-current-follows-the-newest-roster-on-release ()
+  "The release re-applies the roster as it stands then, so a selection that
+changed while the user typed is followed once, to where it ended."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    (let ((agent-repl--minibuffer-held nil)
+          (agent-repl--minibuffer-release-armed nil)
+          (active t))
+      (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () active)))
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
+        (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+        (setq active nil)
+        ;; Act
+        (agent-repl--minibuffer-release))
+      ;; Assert
+      (should (equal agent-repl-test-roster--switched '("two"))))))
+
 (ert-deftest agent-repl-test-roster-a-followed-current-is-recorded-at-info ()
   "The follow is recorded at INFO with its push arrival."
   ;; Arrange
@@ -3349,7 +3382,7 @@ a second switch, and lands in the destination's input window."
 (ert-deftest agent-repl-test-roster-every-move-to-a-selected-workspace-goes-through-move-frame ()
   "The roster's follow and Emacs's own switch request move the frame
 through `agent-repl-roster-move-frame', and neither switches on its own."
-  (dolist (spec '(("roster.el" . "agent-repl-roster-apply-current")
+  (dolist (spec '(("roster.el" . "agent-repl-roster--follow")
                   ("host.el" . "agent-repl-host--move-on-request")))
     (with-temp-buffer
       ;; Arrange

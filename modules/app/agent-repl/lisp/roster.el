@@ -74,6 +74,7 @@
 (declare-function agent-repl--ws-rename-state "workspace" (old new dir))
 (declare-function agent-repl--ws-rename-persp "workspace" (old new))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
+(declare-function agent-repl--when-minibuffer-free "workspace" (scope label key fn))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-ref-id-table "workspace" ())
 (declare-function agent-repl--ws-log-name "workspace" (ws))
@@ -1015,6 +1016,8 @@ be invisible:
   - no tab yet: the workspace has no tab to land on; the tab's opener
     calls this again;
   - already shown;
+  - held: a minibuffer is active, so the follow waits for its exit
+    (`agent-repl--when-minibuffer-free');
   - followed: the switch, landing in the destination's input window; the
     record carries the push's arrival, the milliseconds since it, and the
     milliseconds since Emacs's own request for this workspace, if any.
@@ -1067,20 +1070,36 @@ A roster with no `current' decides nothing and says so at DEBUG."
         (agent-repl--info name "elisp.roster.current: already shown ws=%s" name))
       nil)
      (t
-      (setq agent-repl-roster--judged-current id)
-      (agent-repl--info name "elisp.roster.current: followed ws=%s id=%s from=%s pushed-at=%s since-push-ms=%s since-request-ms=%s"
-                        name id shown
-                        (if agent-repl-roster--pushed-at
-                            (format-time-string "%T.%3N" agent-repl-roster--pushed-at)
-                          "none")
-                        (agent-repl-roster--ms-since agent-repl-roster--pushed-at)
-                        ;; Only a request for THIS workspace is the switch's origin;
-                        ;; a sidebar click has no Emacs request behind it.
-                        (agent-repl-roster--ms-since
-                         (and (equal (car agent-repl-host-last-request) name)
-                              (cdr agent-repl-host-last-request))))
-      (agent-repl-roster-move-frame name)
-      name))))
+      ;; A MINIBUFFER HOLDS THE FOLLOW: moving the frame selects the
+      ;; destination's input window, which would take the user out of the
+      ;; prompt they are typing in.  The release re-applies the roster as it
+      ;; stands THEN, so only the newest selection is followed.
+      (let ((outcome (agent-repl--when-minibuffer-free
+                      scope "roster-follow" 'roster-follow
+                      (lambda (released)
+                        (if released
+                            (agent-repl-roster-apply-current)
+                          (agent-repl-roster--follow name id shown))))))
+        (unless (eq outcome :held) outcome))))))
+
+(defun agent-repl-roster--follow (name id shown)
+  "Move the frame from SHOWN to NAME, the roster\='s `current\' row ID.
+The `followed\' decision of `agent-repl-roster-apply-current\', recorded at
+INFO with the push\='s timing.  Returns NAME."
+  (setq agent-repl-roster--judged-current id)
+  (agent-repl--info name "elisp.roster.current: followed ws=%s id=%s from=%s pushed-at=%s since-push-ms=%s since-request-ms=%s"
+                    name id shown
+                    (if agent-repl-roster--pushed-at
+                        (format-time-string "%T.%3N" agent-repl-roster--pushed-at)
+                      "none")
+                    (agent-repl-roster--ms-since agent-repl-roster--pushed-at)
+                    ;; Only a request for THIS workspace is the switch's origin;
+                    ;; a sidebar click has no Emacs request behind it.
+                    (agent-repl-roster--ms-since
+                     (and (equal (car agent-repl-host-last-request) name)
+                          (cdr agent-repl-host-last-request))))
+  (agent-repl-roster-move-frame name)
+  name)
 
 (defun agent-repl-roster-move-frame (name)
   "Move the frame to workspace NAME, landing in its input window.
