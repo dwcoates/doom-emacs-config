@@ -9,38 +9,56 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// awaitExitEvent waits for pid's exit on a pidfd becoming readable, bounded
-// by ctx's deadline, answering whether the exit was seen. pidfd_open(2) opens
-// a zombie too, so its ESRCH is a process already reaped, whose files are
-// released: seen.
+// unregisteredExitSeen is what an exit event that could not be taken says of
+// the exit (awaitExitEvent): pidfd_open(2) opens a zombie too, so its ESRCH is
+// a process already reaped, whose files are released.
+const unregisteredExitSeen = true
+
+// exitEvent is one process's exit event on a pidfd, which turns readable at
+// the exit, held from takeExitEvent until close.
 //
 // The pidfd needs no close-on-exec mark of its own: pidfd_open(2) always sets
 // O_CLOEXEC on the descriptor it answers, so it never leaks into a child.
-func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
+type exitEvent struct {
+	fd int
+}
+
+// takeExitEvent opens pid's pidfd, answering nil (and no error) for a process
+// already reaped.
+func takeExitEvent(pid int) (*exitEvent, error) {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		if errors.Is(err, unix.ESRCH) {
-			return true, nil
+			return nil, nil
 		}
-		return false, fmt.Errorf("pidfd_open: %w", err)
+		return nil, fmt.Errorf("pidfd_open: %w", err)
 	}
-	defer unix.Close(fd)
+	return &exitEvent{fd: fd}, nil
+}
+
+// await waits for the exit, bounded by ctx's deadline.
+func (e *exitEvent) await(ctx context.Context) error {
 	timeout := -1
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout = int(max(time.Until(deadline), 0).Milliseconds())
 	}
-	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	fds := []unix.PollFd{{Fd: int32(e.fd), Events: unix.POLLIN}}
 	for {
 		n, err := unix.Poll(fds, timeout)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
-			return false, fmt.Errorf("wait for the exit: %w", err)
+			return fmt.Errorf("wait for the exit: %w", err)
 		}
 		if n == 0 {
-			return false, context.DeadlineExceeded
+			return context.DeadlineExceeded
 		}
-		return true, nil
+		return nil
 	}
+}
+
+// close releases the pidfd.
+func (e *exitEvent) close() {
+	unix.Close(e.fd)
 }

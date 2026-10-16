@@ -821,6 +821,7 @@ func TestAwaitGroupEnd(t *testing.T) {
 	m := func(pid int) procgroup.Member { return procgroup.Member{Pid: pid, Comm: "c", State: "running"} }
 	tests := []struct {
 		name     string
+		held     []int
 		listings [][]procgroup.Member // answered in turn; the last repeats
 		listErr  error
 		waitErr  error
@@ -837,6 +838,12 @@ func TestAwaitGroupEnd(t *testing.T) {
 		{name: "a member whose exit was not seen is awaited again until the listing drops it",
 			listings: [][]procgroup.Member{{m(1), m(2)}, {m(2)}, {m(2)}, {}}, unseenWaits: map[int]int{2: 2},
 			wantWaits: []int{1, 2, 2, 2}},
+		{name: "a held member is awaited though no listing shows it",
+			held: []int{5}, listings: [][]procgroup.Member{{}}, wantWaits: []int{5}},
+		{name: "a held member is not awaited again while it stays listed",
+			held: []int{1}, listings: [][]procgroup.Member{{m(1)}}, wantWaits: []int{1}},
+		{name: "a held member's wait that answers no exit is answered", held: []int{5},
+			listings: [][]procgroup.Member{{}}, unseenWaits: map[int]int{5: 1}, wantWaits: []int{5}, wantErr: errHeldExitUnseen},
 		{name: "a listing that fails is answered", listErr: errList, wantErr: errList},
 		{name: "a wait that fails is answered", listings: [][]procgroup.Member{{m(1)}}, waitErr: errWait,
 			wantWaits: []int{1}, wantErr: errWait},
@@ -866,7 +873,7 @@ func TestAwaitGroupEnd(t *testing.T) {
 			stalled := func(int, time.Duration) { t.Error("a stall was reported") }
 
 			// Act
-			err := awaitGroupEnd(7, time.Minute, list, wait, stalled)
+			err := awaitGroupEnd(7, tt.held, time.Minute, list, wait, stalled)
 
 			// Assert
 			if !errors.Is(err, tt.wantErr) {
@@ -879,6 +886,94 @@ func TestAwaitGroupEnd(t *testing.T) {
 				t.Errorf("waits = %v, want %v", waits, tt.wantWaits)
 			}
 		})
+	}
+}
+
+// TestHoldGroupExits pins the hold Kill takes while the group is stopped:
+// every listed member's event is taken, a member the kernel refuses is left to
+// the listing, and a failure is answered naming the member, with the events
+// taken so far kept for the caller's close.
+func TestHoldGroupExits(t *testing.T) {
+	errList := errors.New("the group could not be listed")
+	errTake := errors.New("the exit event could not be registered")
+	m := func(pid int) procgroup.Member { return procgroup.Member{Pid: pid, Comm: "c", State: "stopped"} }
+	tests := []struct {
+		name     string
+		members  []procgroup.Member
+		listErr  error
+		refused  map[int]bool
+		failing  int
+		wantHeld []int
+		wantErr  error
+	}{
+		{name: "every member is held", members: []procgroup.Member{m(3), m(1)}, wantHeld: []int{1, 3}},
+		{name: "a member the kernel refuses is not held", members: []procgroup.Member{m(1), m(2)},
+			refused: map[int]bool{2: true}, wantHeld: []int{1}},
+		{name: "a listing that fails is answered", listErr: errList, wantHeld: []int{}, wantErr: errList},
+		{name: "a take that fails is answered with what was held", members: []procgroup.Member{m(1), m(2)},
+			failing: 2, wantHeld: []int{1}, wantErr: errTake},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			list := func(int) ([]procgroup.Member, error) { return tt.members, tt.listErr }
+			take := func(pid int) (*exitEvent, error) {
+				if pid == tt.failing {
+					return nil, errTake
+				}
+				if tt.refused[pid] {
+					return nil, nil
+				}
+				return &exitEvent{}, nil
+			}
+
+			// Act
+			held, err := holdGroupExits(7, list, take)
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if tt.failing != 0 && !strings.Contains(err.Error(), fmt.Sprintf("member %d", tt.failing)) {
+				t.Errorf("err = %v, want the member named", err)
+			}
+			if got := held.pids(); !slices.Equal(got, tt.wantHeld) {
+				t.Errorf("held = %v, want %v", got, tt.wantHeld)
+			}
+		})
+	}
+}
+
+// TestHeldExitsWaitSeesAHeldMembersExit pins that a held event sees its
+// member's exit, the property awaitGroupEnd counts on for a member the
+// listing no longer shows.
+func TestHeldExitsWaitSeesAHeldMembersExit(t *testing.T) {
+	// Arrange
+	cmd := exec.Command("/bin/sleep", "100")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	pid := cmd.Process.Pid
+	held, err := holdGroupExits(0, func(int) ([]procgroup.Member, error) {
+		return []procgroup.Member{{Pid: pid}}, nil
+	}, takeExitEvent)
+	if err != nil {
+		t.Fatalf("holdGroupExits: %v", err)
+	}
+	defer held.close()
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Act
+	seen, err := held.wait(ctx, pid)
+
+	// Assert
+	if err != nil || !seen {
+		t.Fatalf("wait = %v, %v; want the exit seen", seen, err)
 	}
 }
 

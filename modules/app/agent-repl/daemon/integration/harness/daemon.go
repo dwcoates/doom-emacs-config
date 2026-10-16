@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1364,6 +1366,19 @@ func (d *Daemon) killGroup() bool {
 	if d.afterGroupStopped != nil {
 		d.afterGroupStopped()
 	}
+	// EVERY MEMBER'S EXIT EVENT IS TAKEN WHILE THE GROUP IS STOPPED, BEFORE
+	// ANY OF THEM IS KILLED. A stopped process is not exiting, so the kernel
+	// grants the registration; once the kill is under way it refuses it, and
+	// refuses the dying member to the group listing too, while the member
+	// still holds its files (2026-10-16:
+	// TestKillReturnsOnceEveryMemberHasReleasedItsFiles read a member's FIFO
+	// still open after Kill returned). The group wait below awaits every held
+	// event whatever the listing shows.
+	held, err := holdGroupExits(pgid, procgroup.UnendedMembers, takeExitEvent)
+	if err != nil {
+		d.t.Errorf("harness: hold the exit events of the daemon's group %d before killing it: %v", pgid, err)
+	}
+	defer held.close()
 	if !d.killLeader() {
 		return false
 	}
@@ -1406,29 +1421,97 @@ func (d *Daemon) killGroup() bool {
 	// Kill returned, read that dying member as its incumbent serving and
 	// refused to boot (2026-10-15, TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain:
 	// the killed daemon was forking its desktop notifier).
-	if err := awaitGroupEnd(pgid, leaderExitReportAfter, procgroup.UnendedMembers, awaitExitEvent, d.memberStalled); err != nil {
+	if err := awaitGroupEnd(pgid, held.pids(), leaderExitReportAfter, procgroup.UnendedMembers, held.wait, d.memberStalled); err != nil {
 		d.t.Errorf("harness: await the exit of the killed daemon's group %d: %v", pgid, err)
 	}
 	return true
 }
 
-// awaitGroupEnd waits, unbounded, for the exit of every process of group pgid
-// that list answers, through awaitKilledLeader (so a stuck one is reported
-// while the wait goes on). It lists the group again after each round, so a
-// member forked while the kill was under way is awaited too, and it ends once
-// every member listed is one whose exit it has SEEN: an exited process stays
-// listed until it turns zombie, and is never awaited twice.
+// heldExits is the exit events of a stopped group's members, taken before any
+// of them was killed (holdGroupExits), by pid.
+type heldExits map[int]*exitEvent
+
+// holdGroupExits takes the exit event of every member of the stopped group
+// pgid that list answers. A member the kernel refuses the registration for is
+// one already exiting on its own, before the stop; it is left to
+// awaitGroupEnd's listing. On an error the events taken so far stand, for the
+// caller's close.
+func holdGroupExits(pgid int, list func(int) ([]procgroup.Member, error), take func(int) (*exitEvent, error)) (heldExits, error) {
+	held := heldExits{}
+	members, err := list(pgid)
+	if err != nil {
+		return held, err
+	}
+	for _, m := range members {
+		ev, err := take(m.Pid)
+		if err != nil {
+			return held, fmt.Errorf("member %d (%s, %s): %w", m.Pid, m.Comm, m.State, err)
+		}
+		if ev != nil {
+			held[m.Pid] = ev
+		}
+	}
+	return held, nil
+}
+
+// pids answers the held members' pids, in ascending order.
+func (h heldExits) pids() []int {
+	return slices.Sorted(maps.Keys(h))
+}
+
+// wait awaits pid's exit on its held event, else on one taken now
+// (awaitExitEvent): awaitGroupEnd's wait.
+func (h heldExits) wait(ctx context.Context, pid int) (bool, error) {
+	ev, ok := h[pid]
+	if !ok {
+		return awaitExitEvent(ctx, pid)
+	}
+	if err := ev.await(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// close releases every held event.
+func (h heldExits) close() {
+	for _, ev := range h {
+		ev.close()
+	}
+}
+
+// errHeldExitUnseen is a held member's wait answering an exit it did not see:
+// a held event is registered, so its wait sees the exit or fails.
+var errHeldExitUnseen = errors.New("the wait on its held exit event answered no exit")
+
+// awaitGroupEnd waits, unbounded, for the exit of every process of group pgid,
+// through awaitKilledLeader (so a stuck one is reported while the wait goes
+// on). It answers once every member is one whose exit it has SEEN.
 //
-// A MEMBER WHOSE EXIT WAS NOT SEEN IS NOT ENDED. On Darwin a member already
-// exiting refuses the exit event while it still holds its files
-// (awaitExitEvent), so it stays unended and is listed again, until the
-// listing drops it as a zombie: its files are released on the way there.
-// That last stretch is the kernel finishing an exit already under way, the
-// one wait here with no event to block on, so the relisting yields between
-// rounds rather than spinning the core.
-func awaitGroupEnd(pgid int, reportAfter time.Duration, list func(int) ([]procgroup.Member, error),
+// THE HELD MEMBERS ARE AWAITED FIRST, WHATEVER THE LISTING SHOWS. Each was
+// stopped and alive when its event was taken (holdGroupExits), so its wait
+// sees its exit, and the exit event is posted only once its files are
+// released. The listing is no evidence of that: on Darwin a member whose exit
+// is under way drops out of it while it still holds its files.
+//
+// THEN THE GROUP IS LISTED, after each round, for a member the hold could not
+// cover: one forked once the leader's exit orphaned the group (which continues
+// its stopped members), or one already exiting before the stop. An exited
+// process stays listed until it turns zombie, and is never awaited twice. Such
+// a member whose exit was not seen (awaitExitEvent) is listed again until the
+// listing drops it, yielding between rounds rather than spinning the core.
+func awaitGroupEnd(pgid int, held []int, reportAfter time.Duration, list func(int) ([]procgroup.Member, error),
 	wait func(context.Context, int) (bool, error), stalled func(pid int, waited time.Duration)) error {
 	exited := map[int]bool{}
+	for _, pid := range held {
+		seen, err := awaitKilledLeader(pid, reportAfter, wait, stalled)
+		if err != nil {
+			return fmt.Errorf("held member %d: %w", pid, err)
+		}
+		if !seen {
+			return fmt.Errorf("held member %d: %w", pid, errHeldExitUnseen)
+		}
+		exited[pid] = true
+	}
 	for {
 		members, err := list(pgid)
 		if err != nil {
