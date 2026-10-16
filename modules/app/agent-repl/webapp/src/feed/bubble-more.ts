@@ -151,6 +151,11 @@ export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
  * violation, recorded once and thrown, never read as "nothing hidden".
  */
 export function hidesContentBeyondCap(box: HTMLElement): boolean {
+  return renderedLinesHeight(box, requireBody(box)) > box.clientHeight;
+}
+
+/** The body BOX, a bubble's scroll box, holds; its absence is the invariant violation above. */
+function requireBody(box: HTMLElement): HTMLElement {
   const body = box.querySelector<HTMLElement>(BODY_SELECTOR);
   if (body === null) {
     log.error("a bubble's has-more cannot be measured: its scroll box holds no body", {
@@ -159,13 +164,17 @@ export function hidesContentBeyondCap(box: HTMLElement): boolean {
     });
     throw new Error("has-more unmeasurable: the bubble's scroll box holds no body");
   }
-  return renderedLinesHeight(box, body) > box.clientHeight;
+  return body;
 }
 
 /** The height of BODY's rendered lines, clamped or not (see `hidesContentBeyondCap`). */
 function renderedLinesHeight(box: HTMLElement, body: HTMLElement): number {
-  const clamped = box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS;
-  return clamped ? body.scrollHeight : body.offsetHeight;
+  return isEllipsisBox(box) ? body.scrollHeight : body.offsetHeight;
+}
+
+/** Whether BOX is the box of a bubble in the ellipsis mode, whose body is its clamp. */
+function isEllipsisBox(box: HTMLElement): boolean {
+  return box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS;
 }
 
 /**
@@ -195,10 +204,7 @@ const MORE_KINDS: readonly MoreKind[] = [
     selector: MORE_BUBBLE_SELECTOR,
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
     hidesContent: hidesContentBeyondCap,
-    clamp: (box) =>
-      box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS
-        ? box.querySelector<HTMLElement>(BODY_SELECTOR)
-        : null,
+    clamp: (box) => (isEllipsisBox(box) ? box.querySelector<HTMLElement>(BODY_SELECTOR) : null),
   },
   {
     selector: `.${TITLE_FOLD_CLASS}`,
