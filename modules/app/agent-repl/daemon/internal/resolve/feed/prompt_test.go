@@ -1266,3 +1266,43 @@ func TestAnAgentPromptAwaitsTheUserWhileAnAskOfItsTurnStands(t *testing.T) {
 	}
 }
 
+// isTurnPrompt picks the prompt rows a turn's edges move, and no others.
+func TestIsTurnPromptPicksOnlyThePromptsOfTheTurn(t *testing.T) {
+	stamped := func(turn string, row *frontendv1.FeedRow) *frontendv1.FeedRow {
+		if turn != "" {
+			row.Turn = &conversationv1.TurnId{Value: turn}
+		}
+		return row
+	}
+	user := func() *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}}
+	}
+	agent := func() *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{}}}
+	}
+	question := func() *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Question{Question: &frontendv1.FeedQuestion{}}}
+	}
+	cases := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want bool
+	}{
+		{name: "a user prompt of the turn", row: stamped("turn-1", user()), want: true},
+		{name: "an agent prompt of the turn", row: stamped("turn-1", agent()), want: true},
+		{name: "a user prompt of another turn", row: stamped("turn-2", user()), want: false},
+		{name: "an unstamped user prompt", row: stamped("", user()), want: false},
+		{name: "a non-prompt row of the turn", row: stamped("turn-1", question()), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := isTurnPrompt(tc.row, "turn-1")
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("isTurnPrompt = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

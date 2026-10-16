@@ -309,8 +309,7 @@ func (r *resolver) restateTurnPrompts(s *wsState, turn *conversationv1.TurnId) {
 		return
 	}
 	restated := r.republishRows(s, func(row *frontendv1.FeedRow) bool {
-		return row.GetTurn().GetValue() == turn.GetValue() &&
-			(row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil)
+		return isTurnPrompt(row, turn.GetValue())
 	})
 	r.logger(s.id).Debug("daemon.feed.turn_prompts_restated",
 		"an ask of the turn opened or settled; its prompt rows were re-published",
@@ -326,12 +325,20 @@ func (r *resolver) restateTurnPrompts(s *wsState, turn *conversationv1.TurnId) {
 func (r *resolver) settleTurnPrompts(s *wsState, turn ids.TurnID) {
 	s.endedTurns[turn] = true
 	settled := r.republishRows(s, func(row *frontendv1.FeedRow) bool {
-		return row.GetTurn().GetValue() == string(turn) &&
+		return isTurnPrompt(row, string(turn)) &&
 			(row.GetUserPrompt().GetWorking() || row.GetAgentPrompt().GetWorking())
 	})
 	r.logger(s.id).Debug("daemon.feed.turn_prompts_settled",
 		"the turn ended; its prompt rows were re-published no longer working",
 		dlog.Context{"turn": string(turn), "rows": settled})
+}
+
+// isTurnPrompt answers whether ROW is a prompt row (a user's or an agent's)
+// stamped with TURN: the rows whose `working` and `awaiting_user` flags that
+// turn's edges move.
+func isTurnPrompt(row *frontendv1.FeedRow, turn string) bool {
+	return row.GetTurn().GetValue() == turn &&
+		(row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil)
 }
 
 // republishRows re-publishes, in place on its own feed, every stored row of
