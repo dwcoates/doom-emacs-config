@@ -647,8 +647,13 @@ func (r *resolver) applyDiagnostics(s *wsState, unitID string, report *conversat
 	}
 	returned := u.row.GetActivity().GetSimpleToolCall().GetReturned()
 	if returned == nil {
-		r.logger(s.id).Warn("daemon.feed.diagnostics_before_terminal",
-			"a diagnostics report arrived before its change settled",
+		// THE SAME CROSS-PLANE ORDERING, one step later: the stream plane drew
+		// the card, and the transcript plane's report landed before the
+		// stream plane's terminal. The unit retains the lines and the
+		// terminal applies them (returnedOutcome), so nothing is lost and a
+		// warning here is the same false alarm.
+		r.logger(s.id).Debug("daemon.feed.diagnostics_before_terminal",
+			"a diagnostics report arrived before its change settled and was retained for its terminal",
 			dlog.Context{"unit": unitID})
 		return nil, errNotARow
 	}
