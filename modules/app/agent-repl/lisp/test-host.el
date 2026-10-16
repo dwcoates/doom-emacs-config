@@ -4050,7 +4050,8 @@ every frame move recorded in `moved'."
                 (lambda (id) (cl-find-if (lambda (ws) (equal (format "ws-id-%s" (substring ws 3)) id)) ,tabbed)))
                ((symbol-function 'agent-repl-roster-move-frame) (lambda (ws) (push ws moved)))
                ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
-               ((symbol-function 'agent-repl-webhost-show) (lambda (ws) (push (list :shown ws) moved))))
+               ((symbol-function 'agent-repl-webhost-show) (lambda (ws) (push (list :shown ws) moved)))
+               ((symbol-function 'agent-repl--frontend-fit-webviews) (lambda (&rest _) (push :fitted moved))))
        ,@body)))
 
 (ert-deftest agent-repl-test-host-a-switch-request-moves-the-frame-at-once ()
@@ -4062,9 +4063,10 @@ follow came some 50ms later (2026-10-15 switch-bench)."
     (agent-repl-test-host--moving "ws-1" '("ws-1" "ws-2")
       ;; Act
       (agent-repl-host-request-switch "ws-2" 'cycle)
-      ;; Assert: the page is shown first, so WebKit paints it while Emacs
-      ;; switches its own view.
-      (should (equal (reverse moved) '((:shown "ws-2") "ws-2")))
+      ;; Assert: the frame moves, the webview takes the size its window now
+      ;; has, and only then is the page shown, so WebKit paints it once at
+      ;; that size (2026-10-16: the page painted at the old height first).
+      (should (equal (reverse moved) '("ws-2" :fitted (:shown "ws-2"))))
       (should (equal (agent-repl-test-host--selected-ids) '("ws-id-2"))))))
 
 (ert-deftest agent-repl-test-host-a-switch-request-with-no-page-moves-the-frame-alone ()
@@ -4078,7 +4080,7 @@ switch pass shows its page once it is made."
         ;; Act
         (agent-repl-host-request-switch "ws-2" 'cycle)
         ;; Assert
-        (should (equal moved '("ws-2")))
+        (should (equal (reverse moved) '("ws-2" :fitted)))
         (should (agent-repl-test-host--logged-p
                  :info "elisp.host.move-on-request ws=ws-2 decision=moved from=ws-1 page=none"))))))
 
@@ -4092,7 +4094,7 @@ switch pass shows its page once it is made."
       (agent-repl-host-request-switch "ws-2" 'cycle)
       (agent-repl-host-request-switch "ws-3" 'cycle)
       ;; Assert
-      (should (equal (reverse moved) '((:shown "ws-2") "ws-2" (:shown "ws-3") "ws-3"))))))
+      (should (equal (reverse moved) '("ws-2" :fitted (:shown "ws-2") "ws-3" :fitted (:shown "ws-3")))))))
 
 (ert-deftest agent-repl-test-host-a-switch-request-to-a-workspace-with-no-tab-moves-nothing ()
   "A workspace with no tab yet is landed on by the roster's follow once its
