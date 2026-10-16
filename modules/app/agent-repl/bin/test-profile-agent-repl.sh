@@ -329,7 +329,8 @@ else
     fail "a switch tour's section splits its own switches into phases" "$tour_report"
 fi
 overlap_report="$("$HELPER" --session "$R/sess" --logs "$R/overlap-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
-if sed -n '/^## Switch tour slow/,/^## Switch tour fast/p' <<<"$overlap_report" | grep -q '| 0 | 1 | 0 | 0 | 0 | 0 |'; then
+overlap_slow="$(sed -n '/^## Switch tour slow/,/^## Switch tour fast/p' <<<"$overlap_report")"
+if grep -q '| 0 | 1 | 0 | 0 | 0 | 0 |' <<<"$overlap_slow"; then
     pass "a tour's window ends where the next tour starts, inside its settle margin"
 else
     fail "a tour's window ends where the next tour starts, inside its settle margin" "$overlap_report"
