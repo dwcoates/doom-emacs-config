@@ -606,8 +606,7 @@ var switchPhases = []struct {
 	name string
 	end  func(record) bool
 }{
-	{"Emacs, before its switch pass runs (its redisplay and hooks)", isActivationWon},
-	{"Emacs's switch pass, to the webhost told to show the page", isWebhostShow},
+	{"Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass)", isWebhostShow},
 	{"the webhost, to the page told it is shown", isPageSwitchedTo},
 	{"the page, to its first shown frame", isPageShownFrame},
 }

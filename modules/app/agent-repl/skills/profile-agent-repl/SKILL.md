@@ -84,10 +84,11 @@ which every runtime stops by itself.
 
     | Phase | Ends at |
     |---|---|
-    | Emacs, before its switch pass runs (its redisplay and hooks) | `elisp.panels.switch-activation-won` |
-    | Emacs's switch pass, to the webhost told to show the page | `elisp.webhost.show` (recorded at the call) |
+    | Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass) | `elisp.webhost.show`, recorded at the call |
     | the webhost, to the page told it is shown | webapp `page.switched-to` |
     | the page, to its first shown frame | webapp `page.shown-frame` |
+
+    The pass tells the webhost before it records `elisp.panels.switch-activation-won` (whose `waited-ms` is the wait before the pass), and `elisp.panels.webview-on-switch` is recorded on the idle turn after the redisplay, so neither ends a phase.
   - e. Write what the session found into the perf-sensitive list (step 6).
 
 4. Startup assessment (`startup-assessment`). LEAD SESSION ONLY: a subagent never launches, quits or drives Emacs.

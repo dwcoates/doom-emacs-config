@@ -267,8 +267,7 @@ if grep -q "| switch to a shown workspace (keystroke to the page's first shown f
 else
     fail "a repeat switch is measured from the keystroke to the page's first shown frame" "$report"
 fi
-if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 25ms |' <<<"$report" &&
-    grep -q "| Emacs's switch pass, to the webhost told to show the page | 1 | 10ms |" <<<"$report" &&
+if grep -q '| Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass) | 1 | 35ms |' <<<"$report" &&
     grep -q '| the webhost, to the page told it is shown | 1 | 35ms |' <<<"$report" &&
     grep -q '| the page, to its first shown frame | 1 | 60ms |' <<<"$report"; then
     pass "a repeat switch is split into its Emacs, webhost and page phases"
@@ -323,7 +322,7 @@ if grep -q 'Rail draws: 1, script 6ms median, 6ms at most.' <<<"$fast"; then
 else
     fail "a switch tour's section gives its rail draws" "$tour_report"
 fi
-if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 30ms |' <<<"$fast" &&
+if grep -q '| Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass) | 1 | 40ms |' <<<"$fast" &&
     grep -q '| the page, to its first shown frame | 1 | 50ms |' <<<"$fast"; then
     pass "a switch tour's section splits its own switches into phases"
 else
