@@ -755,59 +755,102 @@ The mirror of `agent-repl-response-search-forward'."
   (interactive)
   (agent-repl--response-search #'evil-ex-search-backward))
 
+(defun agent-repl--input-endpoints (ws op prefix detail-name detail)
+  "Return WS's (REF . CONN) for the composer verb OP, or nil after saying why.
+With no daemon-minted ref, or no connection, nothing can be sent: the miss
+is logged at WARN as `elisp.input.OP-no-ref' / `-no-conn' carrying DETAIL
+under DETAIL-NAME, and the composer flashes under PREFIX.  THE ONE GUARD
+every composer verb sends behind."
+  (let ((ref (agent-repl-host-ref ws))
+        (conn (agent-repl-host-conn-or-primary ws))
+        (shown (concat detail-name "=%S")))
+    (cond
+     ((null ref)
+      (agent-repl--warn ws (concat "elisp.input." op "-no-ref ws=%s " shown) ws detail)
+      (agent-repl--input-flash ws (format "%s: workspace not ready" prefix))
+      nil)
+     ((null conn)
+      (agent-repl--warn ws (concat "elisp.input." op "-no-conn ws=%s " shown) ws detail)
+      (agent-repl--input-flash ws (format "%s: no daemon connection" prefix))
+      nil)
+     (t (cons ref conn)))))
+
+(defun agent-repl--input-report-refusal (ws slug cause flash warn-format &rest warn-args)
+  "Report a composer verb's refusal CAUSE for WS and flash FLASH.
+A handover arm is routed to host.el's handover walk under
+`SLUG-handover-refusal' (logged at INFO there) instead of logged as a
+refusal; any other is logged at WARN with WARN-FORMAT and WARN-ARGS.  The
+flash stands either way, because the verb did not happen.  THE ONE
+REFUSAL REPORT every composer verb shares."
+  (unless (agent-repl-host-route-handover ws cause (concat slug "-handover-refusal"))
+    (apply #'agent-repl--warn ws warn-format warn-args))
+  (agent-repl--input-flash ws flash))
+
+(cl-defun agent-repl--input-call (ws &key op prefix detail-name detail rpc request
+                                      on-success on-refused)
+  "Send the composer verb OP for WS through RPC and report how it went.
+THE ONE SHAPE every asynchronous composer verb call takes, so each answers
+alike:
+- no daemon-minted ref, or no connection: nothing is sent
+  (`agent-repl--input-endpoints');
+- otherwise RPC is called with REQUEST (a function of the ref answering
+  the request plist), logged at INFO;
+- a success hands its value to ON-SUCCESS;
+- a refusal is reported (`agent-repl--input-report-refusal') with the
+  text ON-REFUSED answers for its cause, flashed under PREFIX;
+- an answer arm the composer does not know is an ERROR;
+- a transport failure is logged at WARN and flashed.
+Every record is the operation `elisp.input.OP...' and carries DETAIL
+under DETAIL-NAME, so a log line names what was asked."
+  (when-let* ((endpoints (agent-repl--input-endpoints ws op prefix detail-name detail)))
+    (let ((slug (concat "elisp.input." op))
+          (shown (concat detail-name "=%S")))
+      (agent-repl--info ws (concat slug " ws=%s " shown) ws detail)
+      (funcall
+       rpc (cdr endpoints) (funcall request (car endpoints))
+       :on-response
+       (lambda (response)
+         (pcase (plist-get response :arm)
+           (:success (funcall on-success (plist-get response :value)))
+           (:error
+            (let ((cause (plist-get (plist-get response :value) :cause)))
+              (agent-repl--input-report-refusal
+               ws slug cause (format "%s: %s" prefix (funcall on-refused cause))
+               (concat slug "-refused ws=%s " shown " cause=%S") ws detail cause)))
+           (other
+            (agent-repl--error ws (concat slug "-unknown-arm ws=%s arm=%S") ws other))))
+       :on-failure
+       (lambda (failure)
+         (agent-repl--warn ws (concat slug "-failure ws=%s " shown " detail=%S")
+                           ws detail failure)
+         (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix)))))))
+
 (defun agent-repl--input-select-feed-row (ws move)
   "Send the `SelectFeedRow' MOVE for WS and report how it went.
 MOVE is (:arm ARM :value V): ARM `:turn-boundary' with V
 \(:direction `:older'/`:newer'), or `:clear' with V nil.  THE ONE SEND of
-every composer selection move, so each answers alike: the outcome is the
-daemon's, and its push on the host watch is what changes Emacs's state; a
-step that finds nothing of its kind says so; a refusal or transport
-failure flashes the composer and is logged -- error coverage is never
-dropped just because the daemon is the authority."
-  (let* ((arm (plist-get move :arm))
-         (prefix (cdr (assq arm agent-repl--input-selection-flash-prefixes)))
-         (ref (agent-repl-host-ref ws))
-         (conn (agent-repl-host-conn-or-primary ws)))
-    (cond
-     ((null ref)
-      (agent-repl--warn ws "elisp.input.select-feed-row-no-ref ws=%s move=%S" ws move)
-      (agent-repl--input-flash ws (format "%s: workspace not ready" prefix)))
-     ((null conn)
-      (agent-repl--warn ws "elisp.input.select-feed-row-no-conn ws=%s move=%S" ws move)
-      (agent-repl--input-flash ws (format "%s: no daemon connection" prefix)))
-     (t
-      (agent-repl--info ws "elisp.input.select-feed-row ws=%s move=%S" ws move)
-      (agent-repl-rpc-select-feed-row
-       conn (list :workspace ref :move move)
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            (let ((outcome (plist-get (plist-get response :value) :outcome)))
-              (agent-repl--info ws "elisp.input.select-feed-row-answered ws=%s move=%S outcome=%S"
-                                ws move (plist-get outcome :arm))
-              ;; A step that lands on NOTHING means there is no row of its
-              ;; kind: say so rather than leave the gesture silent.
-              (when (eq (plist-get outcome :arm) :nothing-selectable)
-                (agent-repl--input-flash
-                 ws (cdr (assq arm agent-repl--input-selection-nothing-selectable-flashes))))))
-           (:error
-            (let ((cause (plist-get (plist-get response :value) :cause)))
-              ;; A handover arm is news, not a fault: host.el walks it.  The
-              ;; move itself did not happen, so the composer still says so.
-              (unless (agent-repl-host-route-handover
-                       ws cause "elisp.input.select-feed-row-handover-refusal")
-                (agent-repl--warn ws "elisp.input.select-feed-row-refused ws=%s move=%S cause=%S"
-                                  ws move cause))
-              (agent-repl--input-flash ws (format "%s: selection refused" prefix))))
-           (other
-            (agent-repl--error ws "elisp.input.select-feed-row-unknown-arm ws=%s arm=%S"
-                               ws other))))
-       :on-failure
-       (lambda (detail)
-         (agent-repl--warn ws "elisp.input.select-feed-row-failure ws=%s move=%S detail=%S"
-                           ws move detail)
-         (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix))))))))
+every composer selection move, so each answers alike (see
+`agent-repl--input-call'): the outcome is the daemon's, and its push on
+the host watch is what changes Emacs's state; a step that finds nothing of
+its kind says so."
+  (let ((arm (plist-get move :arm)))
+    (agent-repl--input-call
+     ws :op "select-feed-row"
+     :prefix (cdr (assq arm agent-repl--input-selection-flash-prefixes))
+     :detail-name "move" :detail move
+     :rpc #'agent-repl-rpc-select-feed-row
+     :request (lambda (ref) (list :workspace ref :move move))
+     :on-success
+     (lambda (value)
+       (let ((outcome (plist-get value :outcome)))
+         (agent-repl--info ws "elisp.input.select-feed-row-answered ws=%s move=%S outcome=%S"
+                           ws move (plist-get outcome :arm))
+         ;; A step that lands on NOTHING means there is no row of its kind:
+         ;; say so rather than leave the gesture silent.
+         (when (eq (plist-get outcome :arm) :nothing-selectable)
+           (agent-repl--input-flash
+            ws (cdr (assq arm agent-repl--input-selection-nothing-selectable-flashes))))))
+     :on-refused (lambda (_cause) "selection refused"))))
 
 (defun agent-repl--input-select-step (direction)
   "Step the current workspace's selection through the turn boundaries.
@@ -918,10 +961,10 @@ They come in the order the confirmation lists them."
 A handover arm is routed to host.el's handover walk (logged at INFO there)
 instead of logged as a refusal; the flash stands either way, because the
 rollback did not happen and the key must be pressed again."
-  (unless (agent-repl-host-route-handover
-           ws cause (format "elisp.input.rollback-%s-handover-refusal" verb))
-    (agent-repl--warn ws "elisp.input.rollback-refused ws=%s verb=%s cause=%S" ws verb cause))
-  (agent-repl--input-flash ws (agent-repl--input-rollback-refusal-text cause)))
+  (agent-repl--input-report-refusal
+   ws (format "elisp.input.rollback-%s" verb) cause
+   (agent-repl--input-rollback-refusal-text cause)
+   "elisp.input.rollback-refused ws=%s verb=%s cause=%S" ws verb cause))
 
 (defun agent-repl--input-rollback-failed (ws verb detail)
   "Log and flash WS's VERB transport failure DETAIL."
@@ -978,19 +1021,8 @@ WARN and flashed, never silently lost."
   "Return WS's (REF . CONN) for a rollback rpc, or nil after saying why not.
 CONTEXT is the request's own fields, logged when the workspace is not
 ready or no daemon connection stands; the composer flashes either way.
-The one guard every rollback rpc sends behind."
-  (let ((ref (agent-repl-host-ref ws))
-        (conn (agent-repl-host-conn-or-primary ws)))
-    (cond
-     ((null ref)
-      (agent-repl--warn ws "elisp.input.rollback-no-ref ws=%s context=%S" ws context)
-      (agent-repl--input-flash ws "rollback: workspace not ready")
-      nil)
-     ((null conn)
-      (agent-repl--warn ws "elisp.input.rollback-no-conn ws=%s context=%S" ws context)
-      (agent-repl--input-flash ws "rollback: no daemon connection")
-      nil)
-     (t (cons ref conn)))))
+The one guard every rollback rpc sends behind (`agent-repl--input-endpoints')."
+  (agent-repl--input-endpoints ws "rollback" "rollback" "context" context))
 
 (defun agent-repl--input-rollback (ws files &optional prompt)
   "Plan a rollback of WS's conversation, confirm it, and perform it.

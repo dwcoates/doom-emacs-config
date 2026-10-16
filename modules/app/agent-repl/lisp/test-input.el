@@ -4034,3 +4034,135 @@ This is what an Emacs restart does to it.  Returns the new buffer."
     (agent-repl-input-mode)
     (should (memq #'agent-repl-command-completion-at-point completion-at-point-functions))
     (should (local-variable-p 'completion-at-point-functions))))
+
+;;;; ---- The composer verb call (`agent-repl--input-call') -----------------
+
+(defvar agent-repl-test-input--call-log nil
+  "Every (LEVEL . MESSAGE) the stubbed logging ladder received, newest first.")
+
+(defvar agent-repl-test-input--verb-answer nil
+  "What the stubbed verb answers: `(:response PLIST)' or `(:failure DETAIL)'.")
+
+(defmacro agent-repl-test-input--with-call (&rest body)
+  "Run BODY in a composer with the logging ladder recorded.
+The stubbed verb answers `agent-repl-test-input--verb-answer' and pushes
+its requests onto `agent-repl-test-input--select-requests'."
+  (declare (indent 0))
+  `(agent-repl-test-input--with
+     (let ((agent-repl-test-input--select-requests nil)
+           (agent-repl-test-input--call-log nil))
+       (cl-letf (((symbol-function 'agent-repl--warn)
+                  (lambda (_ws fmt &rest args)
+                    (push (cons :warn (apply #'format fmt args)) agent-repl-test-input--call-log)))
+                 ((symbol-function 'agent-repl--error)
+                  (lambda (_ws fmt &rest args)
+                    (push (cons :error (apply #'format fmt args)) agent-repl-test-input--call-log)))
+                 ((symbol-function 'agent-repl--info)
+                  (lambda (_ws fmt &rest args)
+                    (push (cons :info (apply #'format fmt args)) agent-repl-test-input--call-log))))
+         ,@body))))
+
+(defun agent-repl-test-input--stub-verb (conn request &rest keys)
+  "The stubbed verb: record CONN's REQUEST and answer per the bound `answer'."
+  (ignore conn)
+  (push request agent-repl-test-input--select-requests)
+  (pcase (car agent-repl-test-input--verb-answer)
+    (:response (funcall (plist-get keys :on-response) (cadr agent-repl-test-input--verb-answer)))
+    (:failure (funcall (plist-get keys :on-failure) (cadr agent-repl-test-input--verb-answer)))))
+
+(defun agent-repl-test-input--call (&optional on-success)
+  "Call the stubbed verb `probe' through `agent-repl--input-call'.
+ON-SUCCESS receives the success value; it defaults to ignoring it."
+  (agent-repl--input-call
+   "ws-one" :op "probe" :prefix "probe" :detail-name "what" :detail 'thing
+   :rpc #'agent-repl-test-input--stub-verb
+   :request (lambda (ref) (list :workspace ref))
+   :on-success (or on-success #'ignore)
+   :on-refused (lambda (cause) (format "refused %s" (plist-get cause :arm)))))
+
+(defun agent-repl-test-input--call-logged-p (level regexp)
+  "Return non-nil when a LEVEL record matching REGEXP was logged."
+  (cl-some (lambda (entry) (and (eq (car entry) level) (string-match-p regexp (cdr entry))))
+           agent-repl-test-input--call-log))
+
+(ert-deftest agent-repl-test-input-call-sends-the-request-for-the-ref ()
+  "The request is built from the daemon-minted ref and the send is logged."
+  (agent-repl-test-input--with-call
+    (let ((agent-repl-test-input--verb-answer '(:response (:arm :success :value nil))))
+      (agent-repl-test-input--call))
+    (should (equal agent-repl-test-input--select-requests
+                   (list (list :workspace agent-repl-test-input--ref))))
+    (should (agent-repl-test-input--call-logged-p :info "elisp.input.probe ws=ws-one what=thing"))))
+
+(ert-deftest agent-repl-test-input-call-hands-the-success-value-on ()
+  "A success's value reaches ON-SUCCESS and the composer stays quiet."
+  (agent-repl-test-input--with-call
+    (let ((got nil))
+      (let ((agent-repl-test-input--verb-answer '(:response (:arm :success :value (:outcome 7)))))
+        (agent-repl-test-input--call (lambda (value) (setq got value))))
+      (should (equal got '(:outcome 7)))
+      (should-not (agent-repl-test-input--notice)))))
+
+(ert-deftest agent-repl-test-input-call-refusal-is-logged-and-flashed ()
+  "A refusal is logged at WARN with its cause and flashes ON-REFUSED's text."
+  (agent-repl-test-input--with-call
+    (let ((agent-repl-test-input--verb-answer '(:response (:arm :error :value (:cause (:arm :ask-not-standing :value nil))))))
+      (agent-repl-test-input--call))
+    (should (agent-repl-test-input--call-logged-p :warn "elisp.input.probe-refused .*what=thing.*ask-not-standing"))
+    (should (equal (agent-repl-test-input--notice) "probe: refused :ask-not-standing"))))
+
+(ert-deftest agent-repl-test-input-call-handover-refusal-is-routed-not-warned ()
+  "A handover arm goes to the handover walk, never logged as a refusal."
+  (agent-repl-test-input--with-call
+    (let ((routed nil))
+      (cl-letf (((symbol-function 'agent-repl-host-route-handover)
+                 (lambda (_ws cause slug) (setq routed (list cause slug)) t)))
+        (let ((agent-repl-test-input--verb-answer '(:response (:arm :error :value (:cause (:arm :transferring-away :value nil))))))
+          (agent-repl-test-input--call)))
+      (should (equal routed '((:arm :transferring-away :value nil) "elisp.input.probe-handover-refusal")))
+      (should-not (agent-repl-test-input--call-logged-p :warn "probe-refused")))))
+
+(ert-deftest agent-repl-test-input-call-unknown-arm-is-an-error ()
+  "An answer arm the composer does not know is logged at ERROR."
+  (agent-repl-test-input--with-call
+    (let ((agent-repl-test-input--verb-answer '(:response (:arm :accepted :value nil))))
+      (agent-repl-test-input--call))
+    (should (agent-repl-test-input--call-logged-p :error "elisp.input.probe-unknown-arm .*:accepted"))))
+
+(ert-deftest agent-repl-test-input-call-failure-is-logged-and-flashed ()
+  "A transport failure is logged at WARN with the detail and flashed."
+  (agent-repl-test-input--with-call
+    (let ((agent-repl-test-input--verb-answer '(:failure (:kind :transport :message "down"))))
+      (agent-repl-test-input--call))
+    (should (agent-repl-test-input--call-logged-p :warn "elisp.input.probe-failure .*down"))
+    (should (equal (agent-repl-test-input--notice) "probe: the daemon did not answer"))))
+
+(ert-deftest agent-repl-test-input-call-without-a-ref-sends-nothing ()
+  "No daemon-minted ref: nothing is sent, the miss is logged and flashed."
+  (agent-repl-test-input--with-call
+    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      (let ((agent-repl-test-input--verb-answer '(:response (:arm :success :value nil))))
+        (agent-repl-test-input--call)))
+    (should-not agent-repl-test-input--select-requests)
+    (should (agent-repl-test-input--call-logged-p :warn "elisp.input.probe-no-ref"))
+    (should (equal (agent-repl-test-input--notice) "probe: workspace not ready"))))
+
+(ert-deftest agent-repl-test-input-call-without-a-connection-sends-nothing ()
+  "No connection: nothing is sent, the miss is logged and flashed."
+  (agent-repl-test-input--with-call
+    (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) nil)))
+      (let ((agent-repl-test-input--verb-answer '(:response (:arm :success :value nil))))
+        (agent-repl-test-input--call)))
+    (should-not agent-repl-test-input--select-requests)
+    (should (agent-repl-test-input--call-logged-p :warn "elisp.input.probe-no-conn"))
+    (should (equal (agent-repl-test-input--notice) "probe: no daemon connection"))))
+
+(ert-deftest agent-repl-test-input-every-composer-verb-goes-through-the-one-call ()
+  "No send site in input.el hand-rolls the verb call's handover routing."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents (expand-file-name "input.el" agent-repl-test--module-dir))
+                  (buffer-string)))
+        (count 0) (start 0))
+    (while (string-match "(agent-repl-host-route-handover" source start)
+      (setq count (1+ count) start (match-end 0)))
+    (should (= count 1))))
