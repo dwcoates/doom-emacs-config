@@ -814,7 +814,8 @@ type AgentQuestionSelection struct {
 	// answer cannot drift onto the wrong question.
 	Question *AgentQuestionText `protobuf:"bytes,1,opt,name=question,proto3" json:"question,omitempty"`
 	// The options picked, echoed verbatim from the ones offered. EMPTY when the
-	// user picked none of them and answered only in free text below.
+	// user picked none of them: answered only in free text below, or, for a
+	// multi-select confirmed with nothing ticked or typed, "none of these".
 	Chosen []*AgentQuestionChoice `protobuf:"bytes,2,rep,name=chosen,proto3" json:"chosen,omitempty"`
 	// What the user typed instead of, or alongside, the offered options.
 	//
