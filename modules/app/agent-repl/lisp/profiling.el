@@ -313,12 +313,12 @@ profile.  Answers what it did as a string for the collector:
 ;; report), never this timer.
 
 (defconst agent-repl-profiling-switch-tour-interval 1.5
-  "Seconds between two keys of a switch tour.")
+  "Seconds between two keys of a switch tour that names no pace of its own.")
 
 (defvar agent-repl-profiling--tour nil
   "The running switch tour, or nil: a plist of the keys still to queue
-\(:keys), how many it was asked for each way (:count), and its pending
-step (:timer).")
+\(:keys), how many it was asked for each way (:count), the seconds between
+keys (:interval), its label (:label), and its pending step (:timer).")
 
 (defun agent-repl-profiling--tour-refuse (fmt &rest args)
   "Record a refused switch tour at error, and signal it.  FMT and ARGS word it."
@@ -326,24 +326,34 @@ step (:timer).")
     (agent-repl--error agent-repl--global-log-scope "profiling.switch-tour-refused: %s" why)
     (error "Switch tour refused: %s" why)))
 
-(defun agent-repl-profiling-switch-tour (count)
+(defun agent-repl-profiling-switch-tour (count &optional interval label)
   "Switch right COUNT times with `s-}', then back COUNT times with `s-{'.
-Each key is queued as a keystroke, `agent-repl-profiling-switch-tour-interval'
-seconds after the one before, and the tour ends on the workspace it began on.
+Each key is queued as a keystroke INTERVAL seconds after the one before
+\(`agent-repl-profiling-switch-tour-interval' when nil), and the tour ends on
+the workspace it began on.  LABEL (default \"tour\") names the tour in every
+record it writes, so a report can tell two tours of one session apart.
 Answers at once, while the tour runs on its own timer."
   (interactive "nSwitches each way: ")
+  (setq interval (or interval agent-repl-profiling-switch-tour-interval)
+        label (or label "tour"))
   (unless (and (integerp count) (> count 0))
     (agent-repl-profiling--tour-refuse "the count %S is not a positive integer" count))
+  (unless (and (numberp interval) (> interval 0))
+    (agent-repl-profiling--tour-refuse "the interval %S is not a positive number of seconds" interval))
+  (unless (and (stringp label) (string-match-p "\\`[A-Za-z0-9._-]+\\'" label))
+    (agent-repl-profiling--tour-refuse "the label %S is not one word of letters, digits, dots, dashes or underscores" label))
   (when agent-repl-profiling--tour
     (agent-repl-profiling--tour-refuse "a tour is already running, %d keys left"
                                        (length (plist-get agent-repl-profiling--tour :keys))))
   (setq agent-repl-profiling--tour
         (list :keys (append (make-list count "s-}") (make-list count "s-{"))
               :count count
+              :interval interval
+              :label label
               :timer nil))
   (agent-repl--info agent-repl--global-log-scope
-                    "profiling.switch-tour-started count=%d interval=%s"
-                    count agent-repl-profiling-switch-tour-interval)
+                    "profiling.switch-tour-started label=%s count=%d interval=%s"
+                    label count interval)
   (agent-repl-profiling--tour-step)
   (format "touring %d switches" (* 2 count)))
 
@@ -352,19 +362,28 @@ Answers at once, while the tour runs on its own timer."
 With no key left, the tour ends."
   (let ((keys (plist-get agent-repl-profiling--tour :keys)))
     (if (null keys)
-        (let ((count (plist-get agent-repl-profiling--tour :count)))
+        (let ((count (plist-get agent-repl-profiling--tour :count))
+              (label (plist-get agent-repl-profiling--tour :label)))
           (setq agent-repl-profiling--tour nil)
           (agent-repl--info agent-repl--global-log-scope
-                            "profiling.switch-tour-done switches=%d" (* 2 count)))
+                            "profiling.switch-tour-done label=%s switches=%d" label (* 2 count)))
       (setq unread-command-events
             (append unread-command-events (listify-key-sequence (kbd (car keys)))))
       (agent-repl--info agent-repl--global-log-scope
-                        "profiling.switch-tour-key key=%s remaining=%d"
-                        (car keys) (length (cdr keys)))
+                        "profiling.switch-tour-key label=%s key=%s remaining=%d"
+                        (plist-get agent-repl-profiling--tour :label) (car keys) (length (cdr keys)))
       (setq agent-repl-profiling--tour
             (plist-put (plist-put agent-repl-profiling--tour :keys (cdr keys))
-                       :timer (run-at-time agent-repl-profiling-switch-tour-interval nil
+                       :timer (run-at-time (plist-get agent-repl-profiling--tour :interval) nil
                                            #'agent-repl-profiling--tour-step))))))
+
+(defun agent-repl-profiling-switch-tour-state ()
+  "Answers the running tour as \"running LABEL KEYS-LEFT\", or \"idle\".
+What a driver outside Emacs waits on (bin/profile-agent-repl.sh switch-bench)."
+  (if agent-repl-profiling--tour
+      (format "running %s %d" (plist-get agent-repl-profiling--tour :label)
+              (length (plist-get agent-repl-profiling--tour :keys)))
+    "idle"))
 
 (defun agent-repl-profiling-switch-tour-cancel ()
   "Stop the running switch tour before its next key; answers what it did."

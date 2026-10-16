@@ -352,12 +352,12 @@ Binds what `agent-repl-test-profiling--with-root' binds."
     (agent-repl-profiling-switch-tour 1)
     (dotimes (_ 2) (agent-repl-test-profiling--run-step armed))
     (should (null agent-repl-profiling--tour))
-    (should (member '(info . "profiling.switch-tour-done switches=2") logged))))
+    (should (member '(info . "profiling.switch-tour-done label=tour switches=2") logged))))
 
 (ert-deftest agent-repl-test-profiling-tour-records-each-key-it-queues ()
   (agent-repl-test-profiling--with-tour
     (agent-repl-profiling-switch-tour 1)
-    (should (member '(info . "profiling.switch-tour-key key=s-} remaining=1") logged))))
+    (should (member '(info . "profiling.switch-tour-key label=tour key=s-} remaining=1") logged))))
 
 (ert-deftest agent-repl-test-profiling-tour-refuses-a-count-that-is-not-positive ()
   (agent-repl-test-profiling--with-tour
@@ -379,6 +379,39 @@ Binds what `agent-repl-test-profiling--with-root' binds."
     (should (equal (agent-repl-profiling-switch-tour-cancel) "cancelled with 3 keys left"))
     (should (null agent-repl-profiling--tour))
     (should (member '(info . "profiling.switch-tour-cancelled keys-left=3") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-spaces-keys-by-the-pace-it-names ()
+  (agent-repl-test-profiling--with-tour
+    (let (seconds)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (secs _repeat _fn &rest _args) (push secs seconds) (timer-create))))
+        (agent-repl-profiling-switch-tour 1 0.25 "fast"))
+      (should (equal seconds '(0.25))))))
+
+(ert-deftest agent-repl-test-profiling-tour-names-its-label-in-every-record ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 1 0.25 "fast")
+    (should (member '(info . "profiling.switch-tour-started label=fast count=1 interval=0.25") logged))
+    (should (member '(info . "profiling.switch-tour-key label=fast key=s-} remaining=1") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-refuses-a-pace-that-is-not-positive ()
+  (agent-repl-test-profiling--with-tour
+    (should-error (agent-repl-profiling-switch-tour 1 0 "fast"))
+    (should (null agent-repl-profiling--tour))))
+
+(ert-deftest agent-repl-test-profiling-tour-refuses-a-label-of-more-than-one-word ()
+  (agent-repl-test-profiling--with-tour
+    (should-error (agent-repl-profiling-switch-tour 1 1 "two words"))
+    (should (null agent-repl-profiling--tour))))
+
+(ert-deftest agent-repl-test-profiling-tour-state-names-a-running-tour ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 2 1 "slow")
+    (should (equal (agent-repl-profiling-switch-tour-state) "running slow 3"))))
+
+(ert-deftest agent-repl-test-profiling-tour-state-is-idle-with-no-tour ()
+  (agent-repl-test-profiling--with-tour
+    (should (equal (agent-repl-profiling-switch-tour-state) "idle"))))
 
 (ert-deftest agent-repl-test-profiling-tour-cancel-with-no-tour-says-so ()
   (agent-repl-test-profiling--with-tour
