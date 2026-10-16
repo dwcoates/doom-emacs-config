@@ -30,9 +30,12 @@ const ClickTimeout = 60 * time.Second
 const postBound = ClickTimeout + 10*time.Second
 
 // deliveredBound bounds one query of which banners the platform still holds.
-// A healthy terminal-notifier -list ALL answers in 40ms (measured 2026-10-15),
-// so a run past this is a hung program.
-const deliveredBound = 100 * time.Millisecond
+// A healthy terminal-notifier -list ALL answers in 40ms on a quiet machine
+// (measured 2026-10-15), and in 54ms median, 76ms worst of 20 at load 22
+// (2026-10-16), the load this machine sits at while tests run. The bound is
+// just over twice that worst healthy run, so a run past it is a hung
+// program; the 100ms it was killed healthy runs, failing the focus-gain claim.
+const deliveredBound = 160 * time.Millisecond
 
 // versionBound bounds the version query a platform's minimum version is
 // checked with at boot.
