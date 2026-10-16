@@ -15201,7 +15201,9 @@ type FeedUserPrompt struct {
 	// later copy (a history replay, a reconnect's page) of a turn it has seen
 	// end UNSET. UNSET = the turn has ended, or the row names no turn, or the
 	// row is a prompt a fork inherited (settled in its parent). The client
-	// draws the wave from this flag verbatim and from nothing else.
+	// draws the wave from this flag and `awaiting_user` and from nothing else:
+	// the bubble waves exactly while `working` is set and `awaiting_user` is
+	// not.
 	Working bool `protobuf:"varint,3,opt,name=working,proto3" json:"working,omitempty"`
 	// THE KNOWN SLASH COMMANDS THE PROMPT'S TEXT NAMES, so the bubble marks
 	// them as the Emacs composer marks them while they are typed. One entry per
@@ -15218,7 +15220,20 @@ type FeedUserPrompt struct {
 	// opening brackets and quotes, ending before its closing brackets, quotes
 	// and sentence punctuation — exactly when the word less its slash is in
 	// this list, the composer's own rule. Empty while no catalog is known.
-	Commands      []*FeedUserPromptCommand `protobuf:"bytes,4,rep,name=commands,proto3" json:"commands,omitempty"`
+	Commands []*FeedUserPromptCommand `protobuf:"bytes,4,rep,name=commands,proto3" json:"commands,omitempty"`
+	// SET while this prompt's turn is WORKING AND BLOCKED ON THE USER: a
+	// question (FeedQuestion) or a consent (FeedPermission) stamped with the
+	// same turn stands open. The wave PAUSES for exactly that span, because
+	// nothing is running while the turn waits on the person, and resumes when
+	// the last such ask settles, whichever way (answered, denied, expired,
+	// abandoned). A DAEMON FACT with two edges and no others: the daemon
+	// RE-PUBLISHES the turn's prompt rows when one of the turn's asks OPENS
+	// and when its last open ask SETTLES. Kept APART from `working` because
+	// the turn is still in flight across the pause: `working` keeps its own
+	// edges (the row's first draw, the turn's terminal) and its own meaning,
+	// so nothing that reads `working` as "this turn has not ended" mistakes a
+	// pause for an end. Never set while `working` is unset.
+	AwaitingUser  bool `protobuf:"varint,5,opt,name=awaiting_user,json=awaitingUser,proto3" json:"awaiting_user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -15288,6 +15303,13 @@ func (x *FeedUserPrompt) GetCommands() []*FeedUserPromptCommand {
 		return x.Commands
 	}
 	return nil
+}
+
+func (x *FeedUserPrompt) GetAwaitingUser() bool {
+	if x != nil {
+		return x.AwaitingUser
+	}
+	return false
 }
 
 type isFeedUserPrompt_Result interface {
@@ -15826,7 +15848,11 @@ type FeedAgentPrompt struct {
 	// the same daemon fact, the same edges and the same re-publication as
 	// FeedUserPrompt.working, this row's sibling in every other way. UNSET =
 	// that turn has ended, or the row names no turn.
-	Working       bool `protobuf:"varint,6,opt,name=working,proto3" json:"working,omitempty"`
+	Working bool `protobuf:"varint,6,opt,name=working,proto3" json:"working,omitempty"`
+	// SET while that turn is working and blocked on the user — the same daemon
+	// fact, the same edges and the same re-publication as
+	// FeedUserPrompt.awaiting_user. The wave pauses while it is set.
+	AwaitingUser  bool `protobuf:"varint,7,opt,name=awaiting_user,json=awaitingUser,proto3" json:"awaiting_user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -15912,6 +15938,13 @@ func (x *FeedAgentPrompt) GetRefused() *FeedAgentPromptRefused {
 func (x *FeedAgentPrompt) GetWorking() bool {
 	if x != nil {
 		return x.Working
+	}
+	return false
+}
+
+func (x *FeedAgentPrompt) GetAwaitingUser() bool {
+	if x != nil {
+		return x.AwaitingUser
 	}
 	return false
 }
@@ -24158,12 +24191,13 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\v_other_text\"+\n" +
 	"\x15FeedQuestionOtherText\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\"\n" +
-	"\x13FeedQuestionExpiredJ\x04\b\x01\x10\x02R\x05at_ms\"\xef\x01\n" +
+	"\x13FeedQuestionExpiredJ\x04\b\x01\x10\x02R\x05at_ms\"\x94\x02\n" +
 	"\x0eFeedUserPrompt\x129\n" +
 	"\x06author\x18\x01 \x01(\v2!.frontend.v1.FeedUserPromptAuthorR\x06author\x12>\n" +
 	"\asuccess\x18\x02 \x01(\v2\".frontend.v1.FeedUserPromptSuccessH\x00R\asuccess\x12\x18\n" +
 	"\aworking\x18\x03 \x01(\bR\aworking\x12>\n" +
-	"\bcommands\x18\x04 \x03(\v2\".frontend.v1.FeedUserPromptCommandR\bcommandsB\b\n" +
+	"\bcommands\x18\x04 \x03(\v2\".frontend.v1.FeedUserPromptCommandR\bcommands\x12#\n" +
+	"\rawaiting_user\x18\x05 \x01(\bR\fawaitingUserB\b\n" +
 	"\x06result\"+\n" +
 	"\x15FeedUserPromptCommand\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"L\n" +
@@ -24187,14 +24221,15 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x14FeedUnsupportedBlock\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\"$\n" +
 	"\x0eFeedQuoteBlock\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x9c\x03\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xc1\x03\n" +
 	"\x0fFeedAgentPrompt\x12=\n" +
 	"\aaddress\x18\x01 \x01(\v2#.frontend.v1.FeedAgentPromptAddressR\aaddress\x124\n" +
 	"\x04body\x18\x02 \x01(\v2 .frontend.v1.FeedAgentPromptBodyR\x04body\x12P\n" +
 	"\x0equeued_to_live\x18\x03 \x01(\v2(.frontend.v1.FeedAgentPromptQueuedToLiveH\x00R\fqueuedToLive\x12[\n" +
 	"\x11resumed_recipient\x18\x04 \x01(\v2,.frontend.v1.FeedAgentPromptResumedRecipientH\x00R\x10resumedRecipient\x12?\n" +
 	"\arefused\x18\x05 \x01(\v2#.frontend.v1.FeedAgentPromptRefusedH\x00R\arefused\x12\x18\n" +
-	"\aworking\x18\x06 \x01(\bR\aworkingB\n" +
+	"\aworking\x18\x06 \x01(\bR\aworking\x12#\n" +
+	"\rawaiting_user\x18\a \x01(\bR\fawaitingUserB\n" +
 	"\n" +
 	"\bdelivery\"\x1d\n" +
 	"\x1bFeedAgentPromptQueuedToLive\"!\n" +
