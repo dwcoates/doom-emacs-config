@@ -562,11 +562,14 @@ func TestClientLogForwardsTheClientsNormalClass(t *testing.T) {
 	}
 }
 
-func TestClientLogRecordsTheSuccessfulRequestBoundaryAtDebug(t *testing.T) {
+// TestClientLogRecordsNothingOfItsOwnOnSuccess pins that a forwarded record
+// is its own evidence: the daemon persists it and writes no record about it.
+func TestClientLogRecordsNothingOfItsOwnOnSuccess(t *testing.T) {
 	// Arrange.
 	log := &recordingLogger{}
+	surfaces := &fakeSurfaces{workspace: log}
 	h := newHarness(t, func(deps *Deps) {
-		deps.Log = &fakeSurfaces{workspace: log}
+		deps.Log = surfaces
 	})
 
 	// Act.
@@ -582,21 +585,13 @@ func TestClientLogRecordsTheSuccessfulRequestBoundaryAtDebug(t *testing.T) {
 	}
 
 	// Assert.
-	var persisted *logRecord
-	for i := range log.records {
-		if log.records[i].Message == "persisted a forwarded client record" {
-			persisted = &log.records[i]
-			break
+	for _, record := range log.records {
+		if record.Operation == "daemon.server.client_log" {
+			t.Fatalf("records = %v, want none of ClientLog's own", log.records)
 		}
 	}
-	if persisted == nil {
-		t.Fatalf("records = %v, want the forwarded-record success", log.records)
-	}
-	if persisted.Level != "DEBUG" || persisted.Operation != "daemon.server.client_log" {
-		t.Fatalf("record = %+v, want the client-log debug operation", persisted)
-	}
-	if persisted.Context["operation"] != "webapp.render" {
-		t.Fatalf("context = %v, want the forwarded operation", persisted.Context)
+	if len(surfaces.clientRecords) != 1 || surfaces.clientRecords[0].Operation != "webapp.render" {
+		t.Fatalf("client records = %+v, want the forwarded one persisted", surfaces.clientRecords)
 	}
 }
 

@@ -278,12 +278,6 @@ func (s *server) ClientLog(
 		if err := s.deps.Log.CentralClientLog(clientRecord(clientKind, record)); err != nil {
 			return nil, fail(s.log, rpc, fmt.Errorf("persist a webhost client record: %w", err))
 		}
-		s.log.Debug("daemon.server.client_log", "persisted a forwarded webhost client record", dlog.Context{
-			"client_kind":        clientKind,
-			"operation":          record.GetOperation(),
-			"verbose":            record.GetVerbose(),
-			dlog.KeyClientSource: dlog.ClientSourceWebhost,
-		})
 		resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 		return connect.NewResponse(resp), nil
 	}
@@ -298,11 +292,6 @@ func (s *server) ClientLog(
 	if err := s.deps.Log.ClientLog(subject.Record.Dir, clientRecord(clientKind, record)); err != nil {
 		return nil, fail(subject.Log, rpc, fmt.Errorf("persist a client record: %w", err))
 	}
-	subject.Log.Debug("daemon.server.client_log", "persisted a forwarded client record", dlog.Context{
-		"client_kind": clientKind,
-		"operation":   record.GetOperation(),
-		"verbose":     record.GetVerbose(),
-	})
 	resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 	return connect.NewResponse(resp), nil
 }

@@ -33,11 +33,14 @@ func boundaryOperation(rpc string) string {
 }
 
 type requestBoundary struct {
-	log       dlog.Logger
-	rpc       string
-	requestID string
-	workspace string
-	started   time.Time
+	// unrecorded is an rpc whose boundary writes no records of its own
+	// (unrecordedRPCs).
+	unrecorded bool
+	log        dlog.Logger
+	rpc        string
+	requestID  string
+	workspace  string
+	started    time.Time
 }
 
 func (s *server) beginRequest(
@@ -96,11 +99,12 @@ func (s *server) beginRequest(
 		log = log.With(dlog.Context{dlog.KeyRequestID: headerValue})
 	}
 	return requestBoundary{
-		log:       log,
-		rpc:       rpc,
-		requestID: headerValue,
-		workspace: workspaceIDText,
-		started:   time.Now(),
+		unrecorded: unrecordedRPCs[rpc],
+		log:        log,
+		rpc:        rpc,
+		requestID:  headerValue,
+		workspace:  workspaceIDText,
+		started:    time.Now(),
 	}, nil
 }
 
@@ -121,13 +125,24 @@ func requestWorkspaceID(msg proto.Message) string {
 	return workspace.Get(id).String()
 }
 
+// unrecordedRPCs are the rpcs whose boundary records nothing of its own.
+//
+// CLIENTLOG IS ITS OWN EVIDENCE. Each call forwards one client record, which
+// the daemon persists; recording the call's entry and completion around it
+// wrote five daemon records for every page record (some 325 per workspace
+// switch, 2026-10-15). Its failures and refusals are still recorded where
+// they are answered (fail, refuse).
+var unrecordedRPCs = map[string]bool{"ClientLog": true}
+
 // enter records the rpc's entry under its boundary operation and answers the
-// record of its completion, which the caller defers over its named error.
+// record of its completion, which the caller defers over its named error. An
+// unrecorded rpc records neither.
 func (b requestBoundary) enter() func(*error) {
+	if b.unrecorded {
+		return func(*error) {}
+	}
 	operation := boundaryOperation(b.rpc)
 	b.log.Debug(operation, "entered the rpc handler", b.entryContext())
-	b.log.Debug(operation, "resolved the rpc request scope", b.entryContext())
-	b.log.Debug(operation, "delegated the rpc request", b.entryContext())
 	return func(err *error) {
 		b.log.Debug(operation, "completed the rpc handler", b.completionContext(*err))
 	}
