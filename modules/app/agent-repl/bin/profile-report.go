@@ -721,7 +721,7 @@ func switchTourTables(w io.Writer, records []record) {
 			}
 			inside = append(inside, x)
 		}
-		var keys, switches, won, superseded, told, frames, draws int
+		var keys, switches, won, superseded, told, frames int
 		var stalls, drawMs []time.Duration
 		for _, x := range inside {
 			switch {
@@ -740,7 +740,6 @@ func switchTourTables(w io.Writer, records []record) {
 			case x.Runtime == "webapp" && x.Operation == "webhost.stall":
 				stalls = append(stalls, contextMillis(x, "blocked_ms"))
 			case x.Runtime == "webapp" && x.Operation == "sidebar.roster-draw":
-				draws++
 				drawMs = append(drawMs, contextMillis(x, "draw_ms"))
 			}
 		}
@@ -756,8 +755,8 @@ func switchTourTables(w io.Writer, records []record) {
 		}
 		fmt.Fprintf(w, "Main-thread stalls: %d, %s blocked in all, the longest %s.\n", len(stalls), ms(blocked), ms(longest))
 		if len(drawMs) > 0 {
-			sort.Slice(drawMs, func(a, b int) bool { return drawMs[a] < drawMs[b] })
-			fmt.Fprintf(w, "Rail draws: %d, script %s median, %s at most.\n", draws, ms(percentile(drawMs, 0.5)), ms(drawMs[len(drawMs)-1]))
+			drawn := spreadOf(drawMs)
+			fmt.Fprintf(w, "Rail draws: %d, script %s median, %s at most.\n", drawn.n, ms(drawn.p50), ms(drawn.max))
 		} else {
 			fmt.Fprintln(w, "Rail draws: none.")
 		}
