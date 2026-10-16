@@ -464,6 +464,10 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		// The query died out from under the turn. A consumer with no stream
 		// open still needs the turn's terminal, so the feed draws it here.
 		r.drawQueryDied(s, update.GetQueryDied())
+	case *conversationv1.SessionUpdate_RollbackSettled:
+		// HOW A ROLLBACK'S RESTART SETTLED: the rows withheld for it leave or
+		// come back (rollback.go).
+		r.settleRollbackLocked(s, ws, update.GetRollbackSettled())
 	case *conversationv1.SessionUpdate_CommandCatalog:
 		// THE CATALOG CHANGES WHICH COMMANDS A PROMPT NAMES (commands.go). The
 		// watcher installs it in the one table (Deps.Commands) before routing

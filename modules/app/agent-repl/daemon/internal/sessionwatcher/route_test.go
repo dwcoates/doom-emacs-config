@@ -3347,3 +3347,29 @@ func TestRoutingASessionUpdateRecordsThatItWasRouted(t *testing.T) {
 		t.Fatalf("session_update_routed records = %v, want one naming the diagnostics arm", routed)
 	}
 }
+
+// TestRouteRollbackSettledHandsTheSettleToTheFeedAlone covers how a
+// rollback's restart settled: the feed's withheld rows leave or come back, and
+// no other view hears of it.
+func TestRouteRollbackSettledHandsTheSettleToTheFeedAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	update := &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RollbackSettled{RollbackSettled: &conversationv1.SessionRollbackSettled{
+		DroppedTurns: []*conversationv1.TurnId{{Value: "t1"}},
+		Outcome: &conversationv1.SessionRollbackSettled_ResumedAtCut{
+			ResumedAtCut: &conversationv1.SessionRollbackResumedAtCut{}},
+	}}}
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(update) })
+
+	// Assert.
+	e := requireEvent(t, got, "feed.OnSessionUpdate")
+	if e.detail != "rollback_settled" {
+		t.Fatalf("the feed was handed %q, want rollback_settled", e.detail)
+	}
+	if len(got) != 1 {
+		t.Fatalf("events = %+v, want the feed's alone", got)
+	}
+}

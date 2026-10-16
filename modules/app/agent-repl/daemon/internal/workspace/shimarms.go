@@ -255,8 +255,6 @@ func rollBackSessionArm(failure *shimv1.RollBackSessionFailure) (arm, vendor str
 		return ArmShimFirstPrompt, ""
 	case *shimv1.RollBackSessionFailure_UnseenPrompt:
 		return ArmShimUnseenPrompt, cause.UnseenPrompt.GetVendorPromptUuid()
-	case *shimv1.RollBackSessionFailure_VendorRefused:
-		return ArmShimVendorRefused, cause.VendorRefused.GetVendorMessage()
 	case *shimv1.RollBackSessionFailure_FilesNotRestorable:
 		return ArmShimFilesNotRestorable, cause.FilesNotRestorable.GetVendorMessage()
 	default:

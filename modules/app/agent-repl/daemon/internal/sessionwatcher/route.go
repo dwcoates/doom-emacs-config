@@ -166,6 +166,15 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		w.sinks.Commands.OnCommandCatalog(w.ws, u.CommandCatalog)
 		w.sinks.Feed.OnSessionUpdate(w.ws, update)
 
+	case *conversationv1.SessionUpdate_RollbackSettled:
+		// HOW A ROLLBACK'S RESTART SETTLED: the feed's withheld rows leave for
+		// good or come back (resolve/feed/rollback.go).
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the feed", dlog.Context{
+			"arm":     sessionArm(update),
+			"dropped": len(u.RollbackSettled.GetDroppedTurns()),
+		})
+		w.sinks.Feed.OnSessionUpdate(w.ws, update)
+
 	case *conversationv1.SessionUpdate_CacheLapse:
 		// A HIDDEN WORKSPACE'S PROJECTED LAPSE, and no view's: the keeper
 		// records it on the workspace's row, which the roster then draws.
@@ -284,6 +293,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "command_catalog"
 	case *conversationv1.SessionUpdate_CacheLapse:
 		return "cache_lapse"
+	case *conversationv1.SessionUpdate_RollbackSettled:
+		return "rollback_settled"
 	default:
 		return "unset"
 	}

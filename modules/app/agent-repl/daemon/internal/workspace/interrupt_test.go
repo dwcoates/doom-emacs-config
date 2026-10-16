@@ -1139,11 +1139,12 @@ func TestInterruptRollingBackRefusedKillsTheTurnAndCarriesTheRefusal(t *testing.
 }
 
 func TestInterruptRollingBackRefusedAfterItsInterruptStillAnswersTheStop(t *testing.T) {
-	// Arrange: the vendor refused the cut after the shim interrupted the turn.
+	// Arrange: the vendor refused to restore the files after the shim had
+	// interrupted the turn (the one refusal that comes after the interrupt).
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	runningTurn(f, 0)
-	f.shim.rollBackErr = &ShimRefusal{Verb: "RollBackSession", Arm: ArmShimVendorRefused, Detail: "no"}
+	f.shim.rollBackErr = &ShimRefusal{Verb: "RollBackSession", Arm: ArmShimFilesNotRestorable, Detail: "no"}
 	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoTurnOpen}
 
 	// Act.

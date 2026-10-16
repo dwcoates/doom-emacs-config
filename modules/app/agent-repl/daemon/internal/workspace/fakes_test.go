@@ -1382,6 +1382,8 @@ type fakeFeed struct {
 	// call's turns, in order.
 	heldTurns     [][]ids.TurnID
 	releasedTurns [][]ids.TurnID
+	// withheldDrawn records every WithholdDrawnTurns call's turns, in order.
+	withheldDrawn [][]ids.TurnID
 	// mainAgents is every main agent the feed was told, in order.
 	mainAgents []string
 	// freshBooks is every workspace whose session came up fresh, in order.
@@ -1428,6 +1430,11 @@ func (f *fakeFeed) HoldTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
 // ReleaseTurns records the release.
 func (f *fakeFeed) ReleaseTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
 	f.releasedTurns = append(f.releasedTurns, turns)
+}
+
+// WithholdDrawnTurns records the drawn rows taken off the feed at the cut.
+func (f *fakeFeed) WithholdDrawnTurns(_ ids.WorkspaceID, turns []ids.TurnID) {
+	f.withheldDrawn = append(f.withheldDrawn, turns)
 }
 
 // RetireRow records the retirement.

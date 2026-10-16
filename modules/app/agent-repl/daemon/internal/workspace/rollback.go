@@ -89,11 +89,13 @@ func (v *verbs) RollBack(ctx context.Context, ws ids.WorkspaceID, req RollbackRe
 		log.Error(opRollBack, "the rollback failed", dlog.Context{"cause": err.Error()})
 		return RollbackResult{}, err
 	}
-	// THE FEED'S REMOVAL ALWAYS HAPPENS; an error means only that recording it
-	// durably failed, which the feed has already logged and raised. The vendor
-	// conversation is already rolled back, so the rollback succeeded.
-	_ = v.deps.Feed.RollBackTurns(ws, req.Turns)
-	log.Info(opRollBack, "the conversation was rolled back", dlog.Context{"files_restored": len(restored)})
+	// THE CUT IS MADE; THE VENDOR RESTARTS BEHIND THE ANSWER. The rows stay
+	// withheld, the drawn ones taken off the feed too, until the shim states
+	// how the restart settled (conversation.v1.SessionRollbackSettled), which
+	// the feed takes through OnSessionUpdate: removed for good when the vendor
+	// resumed at the cut, drawn again with a warning when it did not.
+	v.deps.Feed.WithholdDrawnTurns(ws, req.Turns)
+	log.Info(opRollBack, "the conversation was cut; the vendor restarts at the fork point behind the answer", dlog.Context{"files_restored": len(restored)})
 	return RollbackResult{FilesRestored: len(restored)}, nil
 }
 
