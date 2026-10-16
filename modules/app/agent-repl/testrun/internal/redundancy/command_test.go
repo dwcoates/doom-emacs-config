@@ -1,6 +1,7 @@
 package redundancy
 
 import (
+	"agentrepl/testrun/internal/redundancy/proc"
 	"bytes"
 	"errors"
 	"flag"
@@ -78,6 +79,7 @@ func TestCommonRegisterDefaultsAndRefusals(t *testing.T) {
 		{name: "no -out", argv: nil, wantErr: "-out is required"},
 		{name: "an unknown universe", argv: []string{"-out", "/o", "-universe", "lines"}, wantErr: "unknown universe"},
 		{name: "a negative budget", argv: []string{"-out", "/o", "-max-coverage-drop", "-1"}, wantErr: "must not be negative"},
+		{name: "no process cap", argv: []string{"-out", "/o", "-procs", "0"}, wantErr: "-procs must be at least 1, got 0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,7 +101,7 @@ func TestCommonRegisterDefaultsAndRefusals(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || c.Universe != KillsOnly || c.Budget.MaxDrop != DefaultMaxDrop || c.MaxLoad != 32 || c.QuietWait != time.Hour || c.Overhead != DefaultOverhead {
+			if err != nil || c.Universe != KillsOnly || c.Budget.MaxDrop != DefaultMaxDrop || c.MaxLoad != 32 || c.QuietWait != time.Hour || c.Overhead != DefaultOverhead || c.Procs != proc.DefaultProcs {
 				t.Fatalf("common = %+v, %v", c, err)
 			}
 		})

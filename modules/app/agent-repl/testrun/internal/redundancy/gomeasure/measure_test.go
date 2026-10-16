@@ -246,7 +246,7 @@ func fakeConfig(t *testing.T) (Config, string) {
 	return Config{
 		Module: dir, Suites: []Suite{{Package: ".", Tests: []string{"p_test.go"}}}, Mutate: []string{"."},
 		Runs: 2, PinCalls: []string{"FindRecord"}, Scratch: t.TempDir(), Go: "go", HangBound: 3 * time.Second,
-		MaxLoad: DefaultMaxLoad, QuietWait: time.Minute,
+		MaxLoad: DefaultMaxLoad, QuietWait: time.Minute, Procs: 2,
 	}, dir
 }
 

@@ -117,6 +117,8 @@ type Config struct {
 	// and QuietWait how long it waits for less (load.go).
 	MaxLoad   float64
 	QuietWait time.Duration
+	// Procs caps every process the measurement runs (proc.Counter).
+	Procs int
 	// Clock is what the load gate waits by; nil is the wall clock.
 	Clock Clock `json:"-"`
 }
@@ -186,7 +188,7 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 	if cfg.HangBound <= 0 {
 		return nil, fmt.Errorf("gomeasure: the hang bound must be positive, got %s", cfg.HangBound)
 	}
-	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: exec, Name: "gomeasure"}, log: log}
+	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: exec, Name: "gomeasure", Procs: cfg.Procs}, log: log}
 	if err := m.gate().Check(); err != nil {
 		return nil, fmt.Errorf("gomeasure: %w", err)
 	}

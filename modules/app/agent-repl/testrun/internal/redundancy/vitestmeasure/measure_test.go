@@ -107,7 +107,7 @@ func fakePackage(t *testing.T) (Config, *fakeNpx) {
 	var log bytes.Buffer
 	cfg := Config{
 		Package: pkg, System: "webapp", ConfigFile: "vitest.config.ts", Mutate: []string{"src/**/*.ts"}, Runs: 2,
-		Trace: "/m/testrun/vitest/redundancy-trace.mjs", Scratch: t.TempDir(),
+		Trace: "/m/testrun/vitest/redundancy-trace.mjs", Scratch: t.TempDir(), Procs: 2,
 		Gate: proc.Gate{Log: &run.Log{Out: &log, Err: &log}, MaxLoad: 32, QuietWait: time.Minute},
 	}
 	return cfg, f

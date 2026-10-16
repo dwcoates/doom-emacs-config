@@ -61,8 +61,10 @@ type Config struct {
 	Pins []string
 	// Trace is testrun/vitest/redundancy-trace.mjs; Skip its
 	// redundancy-skip.mjs beside it.
-	Trace   string
-	Skip    string
+	Trace string
+	Skip  string
+	// Procs caps every process the measurement runs (proc.Counter).
+	Procs   int
 	Scratch string
 	Gate    proc.Gate
 }
@@ -107,7 +109,7 @@ func Measure(ctx context.Context, cfg Config, exec proc.Exec, log *run.Log) (*re
 	if len(cfg.Mutate) == 0 {
 		return nil, fmt.Errorf("vitestmeasure: nothing to mutate")
 	}
-	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: exec, Name: "vitestmeasure"}, log: log}
+	m := &measurer{cfg: cfg, counter: &proc.Counter{Exec: exec, Name: "vitestmeasure", Procs: cfg.Procs}, log: log}
 	cfg.Gate.Run = m.run
 	m.cfg.Gate = cfg.Gate
 	if err := cfg.Gate.Check(); err != nil {

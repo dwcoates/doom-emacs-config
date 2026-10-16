@@ -36,6 +36,8 @@ type Common struct {
 	// MaxLoad and QuietWait are the load gate's (proc.Gate).
 	MaxLoad   float64
 	QuietWait time.Duration
+	// Procs caps every process the measurement runs (proc.Counter).
+	Procs int
 }
 
 // Register adds the common flags to fs; the answer finishes them once fs
@@ -51,9 +53,13 @@ func (c *Common) Register(fs *flag.FlagSet) func() error {
 	fs.BoolVar(&c.KeepScratch, "keep-scratch", false, "keep the scratch directory")
 	fs.Float64Var(&c.MaxLoad, "max-load", proc.DefaultMaxLoad, "the most one-minute load average a phase or a mutant starts under")
 	fs.DurationVar(&c.QuietWait, "quiet-wait", proc.DefaultQuietWait, "how long to wait for the load to drop before failing")
+	fs.IntVar(&c.Procs, "procs", proc.DefaultProcs, "GOMAXPROCS for every process the measurement runs and they spawn")
 	return func() error {
 		if c.Out == "" {
 			return fmt.Errorf("-out is required")
+		}
+		if c.Procs < 1 {
+			return fmt.Errorf("-procs must be at least 1, got %d", c.Procs)
 		}
 		u, err := ParseUniverse(*universe)
 		if err != nil {

@@ -91,7 +91,7 @@ func TestOSExecReportsACommandThatCannotStart(t *testing.T) {
 
 func TestCounterCountsEveryProcessAndItsCPU(t *testing.T) {
 	// Arrange
-	c := &Counter{Name: "x", Exec: func(context.Context, Cmd) (Result, error) { return Result{CPU: time.Second}, nil }}
+	c := &Counter{Name: "x", Procs: 1, Exec: func(context.Context, Cmd) (Result, error) { return Result{CPU: time.Second}, nil }}
 
 	// Act
 	for i := 0; i < 3; i++ {
@@ -121,7 +121,7 @@ func TestCounterEndsAtAnInterrupt(t *testing.T) {
 			// Arrange
 			ctx, cancel := context.WithCancel(context.Background())
 			ran := false
-			c := &Counter{Name: "x", Exec: func(context.Context, Cmd) (Result, error) {
+			c := &Counter{Name: "x", Procs: 1, Exec: func(context.Context, Cmd) (Result, error) {
 				ran = true
 				cancel()
 				return Result{TimedOut: true}, nil
@@ -141,5 +141,46 @@ func TestCounterEndsAtAnInterrupt(t *testing.T) {
 				t.Fatalf("ran = %t", ran)
 			}
 		})
+	}
+}
+
+func TestCounterCapsEveryProcessItRuns(t *testing.T) {
+	// Arrange: a command carrying a GOMAXPROCS of its own.
+	var env []string
+	c := &Counter{Name: "x", Procs: 2, Exec: func(_ context.Context, cmd Cmd) (Result, error) {
+		env = cmd.Env
+		return Result{}, nil
+	}}
+	cmd := Cmd{Path: "/bin/true", Env: []string{"A=1", "GOMAXPROCS=16"}}
+
+	// Act
+	if _, err := c.Run(context.Background(), cmd); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the cap comes last, so it wins, and the caller's slice is
+	// left alone.
+	if len(env) != 3 || env[2] != "GOMAXPROCS=2" {
+		t.Fatalf("env = %v, want the cap last", env)
+	}
+	if len(cmd.Env) != 2 {
+		t.Fatalf("the caller's env became %v", cmd.Env)
+	}
+}
+
+func TestCounterRefusesNoCap(t *testing.T) {
+	// Arrange
+	ran := false
+	c := &Counter{Name: "x", Exec: func(context.Context, Cmd) (Result, error) {
+		ran = true
+		return Result{}, nil
+	}}
+
+	// Act
+	_, err := c.Run(context.Background(), Cmd{Path: "/bin/true"})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "x: the process cap must be at least 1, got 0") || ran {
+		t.Fatalf("err = %v, ran %t", err, ran)
 	}
 }

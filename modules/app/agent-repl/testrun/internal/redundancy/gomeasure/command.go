@@ -144,7 +144,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if err := finish(); err != nil {
 		return Args{}, err
 	}
-	a.Delete, a.Pins, a.MaxLoad, a.QuietWait = a.Common.Delete, a.Common.Pins, a.Common.MaxLoad, a.Common.QuietWait
+	a.Delete, a.Pins, a.MaxLoad, a.QuietWait, a.Procs = a.Common.Delete, a.Common.Pins, a.Common.MaxLoad, a.Common.QuietWait, a.Common.Procs
 	named := 0
 	for _, v := range []string{pkg, suitesFile, *rosterSuite} {
 		if v != "" {
