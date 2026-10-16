@@ -271,7 +271,7 @@ export function drawHeldPrompt(
       role: "prompt",
       variant: "held",
       hooks: holdCardHooks(hold === null ? null : hold.case),
-      working: false,
+      waving: false,
       strip: [head],
       // THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): floated
       // into the corner, so the collapsed line's ellipsis falls before it.

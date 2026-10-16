@@ -1527,6 +1527,70 @@ describe("createFeedController: the working prompt's thinking wave", () => {
     expect(promptBubble(host, "p1").querySelector(".bubble-body")).toBe(body);
   });
 
+  it("does not wave a working prompt whose turn awaits the user", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true, true)]),
+      "replace",
+    );
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
+  });
+
+  it("does not wave a working agent prompt whose turn awaits the user", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true, true)]),
+      "replace",
+    );
+    expect(promptBubble(host, "a1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      false,
+    );
+  });
+
+  it("pauses the wave in place when the prompt row is re-pushed awaiting the user", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true)]),
+      "replace",
+    );
+    const before = promptBubble(host, "p1");
+    controller.upsert(userPromptRow("p1", "one", "t1", true, true));
+    expect({
+      same: promptBubble(host, "p1") === before,
+      waving: before.hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+    }).toEqual({ same: true, waving: false });
+  });
+
+  it("resumes the wave in place when the prompt row is re-pushed no longer awaiting the user", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1", true, true)]),
+      "replace",
+    );
+    const before = promptBubble(host, "p1");
+    controller.upsert(userPromptRow("p1", "one", "t1", true, false));
+    expect({
+      same: promptBubble(host, "p1") === before,
+      wave: before.getAttribute(PROMPT_WAVE_ATTRIBUTE),
+    }).toEqual({ same: true, wave: PROMPT_WAVE_WORKING });
+  });
+
+  it("resumes an agent prompt's wave when its row is re-pushed no longer awaiting the user", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true, true)]),
+      "replace",
+    );
+    controller.upsert(
+      agentPromptRow("a1", "\u2192 Explore", "go", "t1", true, false),
+    );
+    expect(promptBubble(host, "a1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      PROMPT_WAVE_WORKING,
+    );
+  });
+
   it("redraws a re-push that changes more than the flag, drawing the new flag", () => {
     const { controller, host } = fixture();
     controller.applyPage(

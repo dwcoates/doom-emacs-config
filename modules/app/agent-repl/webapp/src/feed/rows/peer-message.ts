@@ -40,7 +40,7 @@ export function drawFeedPeerMessage(msg: FeedPeerMessage, previous?: HTMLElement
       role: "prompt",
       variant: "peer",
       hooks: [PEER_BUBBLE_CLASS],
-      working: false,
+      waving: false,
       strip: [label],
       content: [markdownSlot(PEER_BODY_CLASS, msg.body)],
       capLines: 0,

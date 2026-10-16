@@ -23,11 +23,18 @@ import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
 
 /** A prompt with the given blocks. */
-function prompt(blocks: unknown[], author = "You", working = false, commands: string[] = []) {
+function prompt(
+  blocks: unknown[],
+  author = "You",
+  working = false,
+  commands: string[] = [],
+  awaitingUser = false,
+) {
   return create(FeedUserPromptSchema, {
     author: { label: author },
     result: { case: "success", value: { body: { blocks: blocks as never } } },
     working,
+    awaitingUser,
     commands: commands.map((name) => ({ name })),
   });
 }
@@ -106,6 +113,11 @@ describe("drawFeedUserPrompt: the bubble", () => {
 
   it("does not wave when its row says the turn is not working", () => {
     const el = drawFeedUserPrompt(prompt([], "You", false));
+    expect(el.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("does not wave while its row says the working turn awaits the user", () => {
+    const el = drawFeedUserPrompt(prompt([], "You", true, [], true));
     expect(el.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
   });
 

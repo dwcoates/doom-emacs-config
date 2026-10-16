@@ -111,7 +111,7 @@ import {
 } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
-import { setPromptWave } from "../breathing.js";
+import { promptWaves, setPromptWave } from "../breathing.js";
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -1961,36 +1961,38 @@ export function createFeedController(
   }
 
   /**
-   * THE THINKING WAVE IS THE ROW'S `working` FLAG, VERBATIM.
+   * THE THINKING WAVE IS THE ROW'S `working` AND `awaitingUser` FLAGS.
    *
-   * Whether a prompt's turn is still working is the daemon's fact
-   * (`FeedUserPrompt.working`, `FeedAgentPrompt.working`), drawn by the prompt
-   * renderers at construction. The daemon RE-PUSHES the prompt row on the
-   * turn's terminal with the flag unset, and a re-push that changes nothing
-   * but the flag is applied HERE, on the bubble already on screen: redrawing
-   * the prompt for it would rebuild its text and lose the reader's scroll
-   * inside a long one, for a change that is only the band stopping.
+   * Whether a prompt's turn is still working, and whether it is waiting on the
+   * user, are the daemon's facts (`FeedUserPrompt.working`/`.awaitingUser`,
+   * `FeedAgentPrompt.working`/`.awaitingUser`), read by `promptWaves` and drawn
+   * by the prompt renderers at construction. The daemon RE-PUSHES the prompt
+   * row on the turn's terminal, and when one of the turn's asks opens or
+   * settles, and a re-push that changes nothing but those flags is applied
+   * HERE, on the bubble already on screen: redrawing the prompt for it would
+   * rebuild its text and lose the reader's scroll inside a long one, for a
+   * change that is only the band stopping or starting.
    *
    * Answers whether the re-push was applied in place. Anything else about the
    * row changing — or a row not yet drawn — takes the ordinary redraw, which
    * draws the flag from the new row anyway.
    */
   function movePromptWaveInPlace(held: RowState, row: FeedRow): boolean {
-    const working = promptWorking(row);
-    if (working === null || held.dirty) return false;
-    if (promptWorking(held.row) === null) return false;
+    const waving = promptWave(row);
+    if (waving === null || held.dirty) return false;
+    if (promptWave(held.row) === null) return false;
     const bubble = held.element.querySelector<HTMLElement>(".bubble.user");
     if (bubble === null) return false;
-    if (!equals(FeedRowSchema, withWorking(held.row, working), row))
+    if (!equals(FeedRowSchema, withPromptFlagsOf(held.row, row), row))
       return false;
     held.row = row;
-    setPromptWave(bubble, working);
-    log.debug(`moved the prompt wave in place: working=${String(working)}`, {
+    setPromptWave(bubble, waving);
+    log.debug(`moved the prompt wave in place: waving=${String(waving)}`, {
       operation: "feed.prompt-wave-moved",
       context: {
         feed: feedName(),
         row: requireMessage(row.id, "FeedRow.id").value,
-        working,
+        waving,
       },
     });
     return true;
@@ -2057,12 +2059,12 @@ export function orderKeyOf(row: FeedRow): string {
   return key;
 }
 
-/** A prompt row's `working` flag, or null for a row that is not a prompt. */
-function promptWorking(row: FeedRow): boolean | null {
+/** Whether a prompt row's bubble waves, or null for a row that is not a prompt. */
+function promptWave(row: FeedRow): boolean | null {
   switch (row.row.case) {
     case "userPrompt":
     case "agentPrompt":
-      return row.row.value.working;
+      return promptWaves(row.row.value);
     default:
       return null;
   }
@@ -2080,11 +2082,19 @@ function isSentPrompt(row: FeedRow): boolean {
   return row.row.case === "userPrompt" && row.row.value.working;
 }
 
-/** A copy of prompt row ROW with its `working` flag set to WORKING. */
-function withWorking(row: FeedRow, working: boolean): FeedRow {
+/**
+ * A copy of prompt row ROW carrying FROM's wave flags (`working`,
+ * `awaitingUser`), so a re-push differing from ROW only in those compares
+ * equal to the copy.
+ */
+function withPromptFlagsOf(row: FeedRow, from: FeedRow): FeedRow {
   const copy = clone(FeedRowSchema, row);
-  if (copy.row.case === "userPrompt" || copy.row.case === "agentPrompt") {
-    copy.row.value.working = working;
+  if (
+    (copy.row.case === "userPrompt" && from.row.case === "userPrompt") ||
+    (copy.row.case === "agentPrompt" && from.row.case === "agentPrompt")
+  ) {
+    copy.row.value.working = from.row.value.working;
+    copy.row.value.awaitingUser = from.row.value.awaitingUser;
   }
   return copy;
 }

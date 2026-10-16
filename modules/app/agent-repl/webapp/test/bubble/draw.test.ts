@@ -48,7 +48,7 @@ function spec(variant: PromptVariant | ResponseVariant, overrides: Partial<Bubbl
   const role = BUBBLE_VARIANTS[variant];
   const base =
     role === "prompt"
-      ? { role, variant: variant as PromptVariant, working: false, content: [], capLines: "feed" as const }
+      ? { role, variant: variant as PromptVariant, waving: false, content: [], capLines: "feed" as const }
       : { role, variant: variant as ResponseVariant, content: [], capLines: "feed" as const };
   return { ...base, ...overrides } as BubbleSpec;
 }
@@ -258,7 +258,7 @@ describe("drawBubble: the uncapped mode", () => {
 describe("drawBubble: the working wave", () => {
   it("waves a working prompt", () => {
     // Arrange / Act
-    const { bubble } = drawBubble({ ...spec("user"), working: true } as BubbleSpec);
+    const { bubble } = drawBubble({ ...spec("user"), waving: true } as BubbleSpec);
     // Assert
     expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
   });
@@ -489,7 +489,7 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
     const first = drawBubble(spec("user")).bubble;
     const phase = first.style.animationDelay;
     // Act
-    drawBubble({ ...spec("user"), working: true } as BubbleSpec, first);
+    drawBubble({ ...spec("user"), waving: true } as BubbleSpec, first);
     // Assert
     expect([first.style.animationDelay, first.getAttribute(PROMPT_WAVE_ATTRIBUTE)]).toEqual([
       phase,
