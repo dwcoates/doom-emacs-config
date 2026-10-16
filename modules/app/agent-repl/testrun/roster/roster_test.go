@@ -236,3 +236,34 @@ func TestEverySuiteThatReadsTheScenarioGoldensDeclaresThem(t *testing.T) {
 		})
 	}
 }
+
+// TestNoSuiteHashesTheBuiltWebappDistItDoesNotRead pins that a suite whose
+// keyed tree covers webapp/ but which reads no built dist declares the dist
+// generated: the run builds a stale dist after keying, and a hashed dist then
+// refused the suite's green record.
+func TestNoSuiteHashesTheBuiltWebappDistItDoesNotRead(t *testing.T) {
+	for _, s := range Suites {
+		if s.Reuse == nil || s.NeedsWebappDist {
+			continue
+		}
+		covers := s.Path == "webapp"
+		for _, in := range s.Reuse.Inputs {
+			covers = covers || in == "webapp/"
+		}
+		if !covers {
+			continue
+		}
+		t.Run(s.Name, func(t *testing.T) {
+			// Act
+			generated := false
+			for _, g := range s.Reuse.Generated {
+				generated = generated || g == "webapp/dist/"
+			}
+
+			// Assert
+			if !generated {
+				t.Fatalf("%s hashes webapp/ but does not declare webapp/dist/ generated", s.Name)
+			}
+		})
+	}
+}

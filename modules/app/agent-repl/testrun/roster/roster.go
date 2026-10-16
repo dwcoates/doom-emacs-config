@@ -269,7 +269,13 @@ var Suites = []Suite{
 			// pictures its tests compare, and the scripts its npm hooks run.
 			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/ts/", "images/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
-		}, Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/"}}},
+		},
+			// THE BUILT DIST IS AN OUTPUT, built from the hashed sources by the
+			// run itself (cli.Deps.PrepareWebappDist) and read by no webapp
+			// test. Hashed, a run that rebuilt a stale dist after keying the
+			// suite refused to record its green pass ("its inputs changed while
+			// it ran", 2026-10-16).
+			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"}}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
 	// `npm run test:integration` always has.
