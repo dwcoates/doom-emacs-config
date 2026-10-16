@@ -63,6 +63,11 @@ func TestWorkspaceLogPathIsTheContractedSymlink(t *testing.T) {
 	}
 }
 
+// declared licenses exactly the named operations, as ExpectWarnings would.
+func declared(operations ...string) func(LogRecord) bool {
+	return func(r LogRecord) bool { return slices.Contains(operations, r.Operation) }
+}
+
 func TestUnexpectedWarningsWithNothingDeclaredFlagsEveryWarningRecord(t *testing.T) {
 	// Arrange: the set StartDaemon arms every daemon with.
 	records := []LogRecord{
@@ -71,7 +76,7 @@ func TestUnexpectedWarningsWithNothingDeclaredFlagsEveryWarningRecord(t *testing
 	}
 
 	// Act
-	got := unexpectedWarnings(records, map[string]bool{})
+	got := unexpectedWarnings(records, declared())
 
 	// Assert
 	if len(got) != 2 {
@@ -87,7 +92,7 @@ func TestUnexpectedWarningsSkipsADeclaredOperation(t *testing.T) {
 	}
 
 	// Act
-	got := unexpectedWarnings(records, map[string]bool{"daemon.shimclient.redial": true})
+	got := unexpectedWarnings(records, declared("daemon.shimclient.redial"))
 
 	// Assert
 	if len(got) != 1 || got[0].Operation != "daemon.workspace.open" {
@@ -103,7 +108,7 @@ func TestUnexpectedWarningsIgnoresRecordsBelowAWarningLevel(t *testing.T) {
 	}
 
 	// Act
-	got := unexpectedWarnings(records, map[string]bool{})
+	got := unexpectedWarnings(records, declared())
 
 	// Assert
 	if len(got) != 0 {
@@ -547,7 +552,7 @@ func TestAnchorAccountSaysWhetherTheAnchorWasWritten(t *testing.T) {
 
 func TestAwaitLogRecordWithinReturnsTheRecordThePredicateAccepts(t *testing.T) {
 	// Arrange: a workspace log beside a bare Daemon carrying its run budget.
-	d := &Daemon{t: t, ctx: context.Background(), StateDir: t.TempDir()}
+	d := &Daemon{t: t, ctx: context.Background(), StateDir: t.TempDir(), daemonProc: &daemonProc{}}
 	path := filepath.Join(t.TempDir(), "webapp.log")
 	lines := `{"timestamp":"2026-10-06T12:00:00Z","level":"info","pid":7,"operation":"webapp-layer.other","message":"not this"}
 {"timestamp":"2026-10-06T12:00:01Z","level":"info","pid":7,"operation":"webapp-layer.handover.page-mounted","message":"mounted"}

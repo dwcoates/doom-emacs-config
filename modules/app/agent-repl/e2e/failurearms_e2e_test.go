@@ -28,23 +28,12 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // ---------------------------------------------------------------------------
 // Local helpers, fa* prefixed — this suite shares one package across
 // independently written area files.
 // ---------------------------------------------------------------------------
-
-// faNewWorkspace mints a fresh fake-git-backed repository and registers it as
-// a workspace on w's daemon. No real git anywhere: NewWorld never sets
-// Opts.SkipFakeGit, so the daemon gets the daemon harness's scripted fake.
-func faNewWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
-	t.Helper()
-	repo := harness.NewRepo(t)
-	return harness.Register(t, w.Daemon, repo.Dir)
-}
 
 // faApiErrorWarnings are the two records a MID-TURN vendor request failure
 // legitimately leaves, and they are this file's own subject: every scenario
@@ -101,9 +90,9 @@ func faDriveErrored(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenar
 func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	w.ExpectWarnings(faApiErrorWarnings...)
-	ws := faNewWorkspace(t, w)
+	ws := w.NewWorkspace(t)
 
 	// Act
 	errored := faDriveErrored(t, w, ws, "api-429")

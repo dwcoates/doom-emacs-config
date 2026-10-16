@@ -26,18 +26,18 @@ type GitWorld struct {
 	StateFile string
 
 	root string
-	t    *testing.T
+	t    testing.TB
 }
 
 // worlds holds one world per test, so a repository can be built before or
 // after the daemon that will read it.
 var (
 	worldsMu sync.Mutex
-	worlds   = map[*testing.T]*GitWorld{}
+	worlds   = map[testing.TB]*GitWorld{}
 )
 
 // World answers this test's git world, minting it on first use.
-func World(t *testing.T) *GitWorld {
+func World(t testing.TB) *GitWorld {
 	t.Helper()
 	worldsMu.Lock()
 	defer worldsMu.Unlock()
@@ -72,19 +72,19 @@ type Repo struct {
 	Dir string
 
 	w *GitWorld
-	t *testing.T
+	t testing.TB
 }
 
 // NewRepo mints a fake repository under the test's own tree.
-func NewRepo(t *testing.T) *Repo {
+func NewRepo(t testing.TB) *Repo {
 	t.Helper()
 	w := World(t)
-	return NewRepoAt(t, filepath.Join(w.root, "repo-"+mintName(w)))
+	return NewRepoAt(t, mintRepoDir(t, w))
 }
 
 // NewRepoAt mints a fake repository at an exact path, for the tests that care
 // where the workspace lives (the multi-repo root, the daemon's self repo).
-func NewRepoAt(t *testing.T, dir string) *Repo {
+func NewRepoAt(t testing.TB, dir string) *Repo {
 	t.Helper()
 	w := World(t)
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
@@ -122,13 +122,47 @@ func (r *Repo) PolicyDir() string {
 	return filepath.Join(r.Dir, ".agent-repl", "prompts")
 }
 
-// mintName answers a fresh repository directory name.
-func mintName(w *GitWorld) string {
-	entries, err := os.ReadDir(w.root)
-	if err != nil {
-		return "0"
+// mintRepoDir creates and answers a fresh repository directory under the
+// world's root: repo-a, repo-b and so on, the first name not yet taken.
+//
+// THE NAME IS TAKEN BY THE KERNEL, NOT BY A COUNT. Tests that share one
+// daemon (a View) mint into one world concurrently, and two that counted the
+// same entries would mint the same name. os.Mkdir succeeds for exactly one
+// caller per name, so a name is never handed out twice.
+func mintRepoDir(t testing.TB, w *GitWorld) string {
+	t.Helper()
+	for i := 0; ; i++ {
+		dir := filepath.Join(w.root, "repo-"+string(rune('a'+i)))
+		err := os.Mkdir(dir, 0o755)
+		if err == nil {
+			return dir
+		}
+		if !os.IsExist(err) {
+			t.Fatalf("harness: mint a repository directory %s: %v", dir, err)
+		}
 	}
-	return string(rune('a' + len(entries)))
+}
+
+// bindWorld makes w the git world of the test t: the world of the daemon t
+// views, so the repositories t mints are ones that daemon's git can see. A
+// test that already minted a world of its own is refused rather than split
+// across two.
+func bindWorld(t testing.TB, w *GitWorld) {
+	t.Helper()
+	if w == nil {
+		t.Fatalf("harness: %s views a daemon with no git world", t.Name())
+	}
+	worldsMu.Lock()
+	defer worldsMu.Unlock()
+	if own, ok := worlds[t]; ok && own != w {
+		t.Fatalf("harness: %s already has a git world of its own; take the shared daemon's view before minting any repository", t.Name())
+	}
+	worlds[t] = w
+	t.Cleanup(func() {
+		worldsMu.Lock()
+		delete(worlds, t)
+		worldsMu.Unlock()
+	})
 }
 
 // edit mutates the fixture file under the same lock the scripted `git` takes.
@@ -200,7 +234,7 @@ const DefaultWorkPath = "modules/app/agent-repl/work.txt"
 // concludes at once with nothing to land (merge: "already on <target>"); a
 // test that means to exercise a merge's phases commits work first. paths are
 // what the commit touches, DefaultWorkPath when none are named.
-func CommitWork(t *testing.T, dir string, paths ...string) string {
+func CommitWork(t testing.TB, dir string, paths ...string) string {
 	t.Helper()
 	if len(paths) == 0 {
 		paths = []string{DefaultWorkPath}

@@ -30,7 +30,7 @@ import (
 // carry, or nil when this run is not collecting coverage. A directory that
 // cannot be created fails the test rather than silently costing the run its
 // numbers.
-func coverageEnv(t *testing.T, binary string) []string {
+func coverageEnv(t testing.TB, binary string) []string {
 	t.Helper()
 	env, err := harness.CoverageEnv(harness.CoverageRoot(), binary)
 	if err != nil {

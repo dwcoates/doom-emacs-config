@@ -70,8 +70,7 @@ func cbuAwaitServedWithoutAsking(t *testing.T, w *World, workspaceDir string) ha
 // workspace's directory.
 func cbuBringUp(t *testing.T, w *World) string {
 	t.Helper()
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	// Plain prose, which the fake registry falls through to its PROSE scenario
 	// for: this suite is about the bring-up BEFORE the turn, and a scenario with
 	// its own machinery would only add writes to reason about.

@@ -47,8 +47,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // newFileToolsWorkspace builds one World and registers a fresh fake
@@ -57,8 +55,7 @@ import (
 func newFileToolsWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	return w, ws
 }
 

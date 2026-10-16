@@ -23,7 +23,7 @@ type Stream[T any] struct {
 	// C carries every push in order.
 	C <-chan T
 
-	t       *testing.T
+	t       testing.TB
 	cancel  context.CancelFunc
 	errCh   chan error
 	headers chan http.Header
@@ -37,7 +37,7 @@ type Stream[T any] struct {
 // something happens to publish; a handler that flushes at accept hands the
 // client its headers immediately, so a stream with no view yet is still
 // visibly OPEN. Nothing else on the wire can tell those two apart.
-func (s *Stream[T]) AwaitHeaders(t *testing.T, ctx context.Context, what string) http.Header {
+func (s *Stream[T]) AwaitHeaders(t testing.TB, ctx context.Context, what string) http.Header {
 	t.Helper()
 	if s.headers == nil {
 		t.Fatalf("stream %s was not opened with header capture", what)
@@ -84,7 +84,7 @@ func (s *Stream[T]) Drain() {
 
 // AwaitView reads pushes until one satisfies the predicate, and answers it.
 // The wait is bounded by the daemon's context; nothing sleeps.
-func AwaitView[T any](t *testing.T, ctx context.Context, s *Stream[T], what string, pred func(T) bool) T {
+func AwaitView[T any](t testing.TB, ctx context.Context, s *Stream[T], what string, pred func(T) bool) T {
 	t.Helper()
 	var zero T
 	for {
@@ -116,13 +116,13 @@ func SessionServes(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 
 // AwaitSessionServes waits on HOST for the push that states the session
 // serves (SessionServes), and answers it.
-func AwaitSessionServes(t *testing.T, ctx context.Context, host *Stream[*agentreplv1.WatchHostWorkspaceResponse]) *agentreplv1.WatchHostWorkspaceResponse {
+func AwaitSessionServes(t testing.TB, ctx context.Context, host *Stream[*agentreplv1.WatchHostWorkspaceResponse]) *agentreplv1.WatchHostWorkspaceResponse {
 	t.Helper()
 	return AwaitView(t, ctx, host, "the session reporting live, attached and open", SessionServes)
 }
 
 // AwaitNext answers the next push, whatever it is.
-func AwaitNext[T any](t *testing.T, ctx context.Context, s *Stream[T], what string) T {
+func AwaitNext[T any](t testing.TB, ctx context.Context, s *Stream[T], what string) T {
 	t.Helper()
 	return AwaitView(t, ctx, s, what, func(T) bool { return true })
 }
@@ -130,7 +130,7 @@ func AwaitNext[T any](t *testing.T, ctx context.Context, s *Stream[T], what stri
 // ExpectNoPush asserts that nothing arrives before the probe deadline. It is a
 // negative assertion, so it necessarily waits out a bound rather than
 // synchronizing on an event.
-func ExpectNoPush[T any](t *testing.T, s *Stream[T], probe time.Duration, what string) {
+func ExpectNoPush[T any](t testing.TB, s *Stream[T], probe time.Duration, what string) {
 	t.Helper()
 	if v, ok := firstPushMatching(s, probe, func(T) bool { return true }); ok {
 		t.Fatalf("got a push %v, want none: %s", v, what)
@@ -176,7 +176,7 @@ const ProbeWindow = 500 * time.Millisecond
 
 // runStream pumps a Connect server stream onto a channel, carrying every
 // frame the stream delivers.
-func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) Push) *Stream[Push] {
+func runStream[Resp any, Push any](t testing.TB, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) Push) *Stream[Push] {
 	t.Helper()
 	return runStreamSelecting(t, ctx, open, func(r *Resp) (Push, bool) { return pick(r), true })
 }
@@ -194,7 +194,7 @@ func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(
 // SELECTING is the fix rather than dropping nils inside the picker: a stream
 // says which frames it is about, and a frame it is not about never reaches its
 // channel at all.
-func runStreamSelecting[Resp any, Push any](t *testing.T, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) (Push, bool)) *Stream[Push] {
+func runStreamSelecting[Resp any, Push any](t testing.TB, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) (Push, bool)) *Stream[Push] {
 	t.Helper()
 	return runStreamExpanding(t, ctx, nil, open, func(r *Resp) []Push {
 		v, ok := pick(r)
@@ -213,7 +213,7 @@ func runStreamSelecting[Resp any, Push any](t *testing.T, ctx context.Context, o
 // item settled as ride inside that one frame, so a stream of rows takes each
 // of them; and the held section a root feed's open serves is the section a
 // stream of sections begins with.
-func runStreamExpanding[Resp any, Push any](t *testing.T, ctx context.Context, seed []Push, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) []Push) *Stream[Push] {
+func runStreamExpanding[Resp any, Push any](t testing.TB, ctx context.Context, seed []Push, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) []Push) *Stream[Push] {
 	t.Helper()
 	streamCtx, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
@@ -500,7 +500,7 @@ func (d *Daemon) WatchLogin(ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.L
 }
 
 // AwaitProcessGone waits for a pid to leave, bounded by the context.
-func AwaitProcessGone(t *testing.T, ctx context.Context, pid int) {
+func AwaitProcessGone(t testing.TB, ctx context.Context, pid int) {
 	t.Helper()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

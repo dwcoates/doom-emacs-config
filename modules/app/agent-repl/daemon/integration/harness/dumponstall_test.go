@@ -89,7 +89,7 @@ func TestDumpOnStall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a bare Daemon carrying only what the dump touches.
 			cmd := startQuitChild(t, tc.standIn())
-			d := &Daemon{t: t, cmd: cmd}
+			d := &Daemon{t: t, daemonProc: &daemonProc{cmd: cmd}}
 
 			// Act
 			got := d.dumpOnStall(tc.bound)
@@ -105,7 +105,7 @@ func TestDumpOnStall(t *testing.T) {
 func TestDumpOnStallNeverSignalsAReapedDaemon(t *testing.T) {
 	// Arrange: the reap has begun, so the pid may already name a stranger.
 	cmd := startQuitChild(t, exec.Command("/bin/sh", "-c", `echo ready; while :; do sleep 100 & wait $!; done`))
-	d := &Daemon{t: t, cmd: cmd}
+	d := &Daemon{t: t, daemonProc: &daemonProc{cmd: cmd}}
 	d.sigMu.Lock()
 	d.reapBegun = true
 	d.sigMu.Unlock()

@@ -197,7 +197,7 @@ var (
 
 // requireNode answers the `node` binary on PATH, failing the test loudly if
 // none is found (a skip only under the opt-out; see precondition_test.go).
-func requireNode(t *testing.T) string {
+func requireNode(t testing.TB) string {
 	t.Helper()
 	nodeOnce.Do(func() {
 		nodeBin, nodeErr = exec.LookPath("node")
@@ -245,7 +245,7 @@ var (
 // (deps present, esbuild fails) is NOT a skip — it fails every test that
 // needs the real shim, which is correct: the shim not compiling is a real
 // defect this suite exists to catch.
-func requireShimBundle(t *testing.T) string {
+func requireShimBundle(t testing.TB) string {
 	t.Helper()
 	node := requireNode(t)
 	if _, err := os.Stat(filepath.Join(repo.shimDir, "node_modules")); err != nil {
@@ -406,7 +406,7 @@ var storeProgram = &programOnce{name: "shim-store", build: func() (string, error
 }}
 
 // requireStoreBinary builds the real shim-store, once per run.
-func requireStoreBinary(t *testing.T) string {
+func requireStoreBinary(t testing.TB) string {
 	t.Helper()
 	return storeProgram.require(t, "this suite runs against the REAL store, which does not build")
 }
@@ -416,7 +416,7 @@ var sidecarProgram = &programOnce{name: "shim-claude-sidecar", build: func() (st
 }}
 
 // requireSidecarBinary builds the real shim-claude-sidecar, once per run.
-func requireSidecarBinary(t *testing.T) string {
+func requireSidecarBinary(t testing.TB) string {
 	t.Helper()
 	return sidecarProgram.require(t, "this suite runs against the REAL sidecar, which does not build")
 }
@@ -432,7 +432,7 @@ var lockProgram = &programOnce{name: "shim-lock", build: func() (string, error) 
 // that cannot find the binary refuses every StartSession. The path travels to
 // the shim as AGENT_REPL_SHIM_LOCK_BIN, so what is claimed here is the binary
 // THIS checkout built, never whatever happens to be deployed on the machine.
-func requireLockBinary(t *testing.T) string {
+func requireLockBinary(t testing.TB) string {
 	t.Helper()
 	return lockProgram.require(t, "this suite runs against the REAL shim, whose lock holder does not build")
 }

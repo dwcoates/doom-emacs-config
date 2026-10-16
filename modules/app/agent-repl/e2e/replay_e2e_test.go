@@ -18,8 +18,6 @@ package e2e
 
 import (
 	"testing"
-
-	"agent-repld/integration/harness"
 )
 
 // TestAWorkspaceOpenReplaysItsFirstPageOnce covers the other half of the
@@ -29,8 +27,7 @@ func TestAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 
 	// Act.
 	first := SubmitPrompt(t, w, ws, "say something")

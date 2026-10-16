@@ -289,6 +289,20 @@ root, fresh `.claude.json` account roots (routing through
 `d.MultiRepoRoot` reuses the existing harness field verbatim for the
 multi-repo tests in this suite).
 
+**The shared default World.** A test that needs only `WorldOpts{}` takes
+`SharedWorld(t)` (`sharedworld_test.go`) instead of `NewWorld`: the suite
+builds ONE default World per test process, on the first test that asks
+(`harness.Suite()` owns it), and ends it after the last test. Each test gets
+a view of it (`harness.Daemon.View`): its own failures, run budget and
+warning sweep, over the fresh workspaces it registers (`World.NewWorkspace`).
+A World costs about 2.7s to build and tear down; a workspace inside a
+running one about 0.3s (docs/investigations/2026-10-14-test-shared-setup-lzb.md).
+A test keeps `NewWorld` when it stops, restarts, deploys or relaunches any
+process, needs other `WorldOpts`, asserts a view spanning the daemon or the
+account, or must declare a warning no workspace carries
+(`modules/app/agent-repl/AGENTS.md`, "A case may share an expensive fixture,
+never a slice another case reads").
+
 `AGENT_REPL_FORBID_VENDOR_CALLS=1` in EVERY spawned process's environment —
 daemon, sidecar, store, and (inherited) shim — with no exception. This is
 already how `daemon/integration` behaves; nothing new.

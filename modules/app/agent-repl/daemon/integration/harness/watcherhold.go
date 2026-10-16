@@ -17,7 +17,7 @@ import (
 // the test releases it. It pins open a window that is otherwise microseconds
 // wide, so a test lands a call inside it on every run, with nothing timed.
 type WatcherStartHold struct {
-	t       *testing.T
+	t       testing.TB
 	socket  string
 	ln      net.Listener
 	conn    net.Conn
@@ -27,7 +27,7 @@ type WatcherStartHold struct {
 // HoldFirstWatcherStart listens for a daemon's watcher-start hold. Hand Env()
 // to the daemon's ExtraEnv. The hold is released at cleanup if the test has
 // not released it, so a failed test never leaves its daemon parked.
-func HoldFirstWatcherStart(t *testing.T) *WatcherStartHold {
+func HoldFirstWatcherStart(t testing.TB) *WatcherStartHold {
 	t.Helper()
 	socket := filepath.Join(ShortTempDir(t), "hold.sock")
 	ln, err := net.Listen("unix", socket)

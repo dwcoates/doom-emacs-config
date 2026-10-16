@@ -68,23 +68,16 @@ import (
 func pmNewPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	pmOpenWorkspace(t, w, ws)
-	return w, ws
+	return w, pmNewPermissionWorkspace(t, w)
 }
 
-// pmOpenWorkspace sends OpenWorkspace, which is what spawns the real shim
-// session a permission test needs before it can SubmitPrompt.
-func pmOpenWorkspace(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+// pmNewPermissionWorkspace registers and opens a fresh workspace on w, for a
+// test that brings its own World (the shared one).
+func pmNewPermissionWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
 	t.Helper()
-	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace = %v, want a success", resp.Msg)
-	}
+	ws := w.NewWorkspace(t)
+	w.RequireOpen(t, ws)
+	return ws
 }
 
 // pmOpenFeedWatch opens the workspace's root feed and answers both the current
@@ -163,7 +156,8 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			w, ws := pmNewPermissionWorld(t)
+			w := SharedWorld(t)
+			ws := pmNewPermissionWorkspace(t, w)
 			turn := SubmitPrompt(t, w, ws, tc.prompt)
 			askRow := pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
 				return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil

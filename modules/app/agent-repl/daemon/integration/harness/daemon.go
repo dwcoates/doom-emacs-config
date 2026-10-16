@@ -439,10 +439,32 @@ type Daemon struct {
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
-	t   *testing.T
+	t   testing.TB
 	ctx context.Context
 	// waitBound is ONE wait's failure bound; ctx above is the whole run's.
-	waitBound  time.Duration
+	waitBound time.Duration
+	expected  map[string]bool
+	// required are the expected operations a test also REQUIRES to have been
+	// produced (RequireWarnings): the sweep fails on one that never was.
+	required map[string]bool
+	// expectedFor are the operations ExpectWarningsFor licensed for one
+	// workspace's records only, keyed by the workspace's directory forms.
+	expectedFor map[string]map[string]bool
+	// view is whether this Daemon is a View of a process another fixture
+	// owns; claims are the workspace directory forms the view answers for.
+	view   bool
+	claims map[string]bool
+
+	// daemonProc is the PROCESS's state, as opposed to one test's: its
+	// command, its client, its exit and the locks that order them. Every
+	// Daemon over one process shares the one daemonProc.
+	*daemonProc
+}
+
+// daemonProc is the state of one daemon PROCESS, shared by everything that
+// names it. Its mu also guards the per-test expectation maps on Daemon, so one
+// lock orders every read and write the sweep makes.
+type daemonProc struct {
 	cmd        *exec.Cmd
 	stderrPath string
 	// afterGroupStopped, when set, runs inside Kill between the group's
@@ -475,14 +497,16 @@ type Daemon struct {
 	reapBegun bool
 	exitErr   error
 	waitOnce  sync.Once
-	expected  map[string]bool
-	// required are the expected operations a test also REQUIRES to have been
-	// produced (RequireWarnings): the sweep fails on one that never was.
-	required map[string]bool
-	shims    map[string]*ShimControl
+	shims     map[string]*ShimControl
 	// inMemoryState is whether this daemon's state lives in memory (see
 	// Opts.DurableState).
 	inMemoryState bool
+	// claimed maps every workspace directory form a view claimed to that
+	// view's test, so the owner's sweep leaves those records to the view.
+	claimed map[string]string
+	// leftClaims are the claims of views whose tests have ended, for the
+	// owner's final sweep of what their workspaces logged afterwards.
+	leftClaims []claim
 }
 
 // InstallFakeGit installs the scripted `git` into dir, the directory that
@@ -496,7 +520,7 @@ type Daemon struct {
 // tree exactly as the copy's did. The suite's binaries and every fakebin sit
 // under the one run root, so the link never crosses a file system; one that
 // would is a failed test, never a silent copy.
-func InstallFakeGit(t *testing.T, dir string) {
+func InstallFakeGit(t testing.TB, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
@@ -583,7 +607,7 @@ func cleanGitEnv(env []string) []string {
 
 // StartDaemon lays out a hermetic environment, starts the daemon, waits for
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.
-func StartDaemon(t *testing.T, opts Opts) *Daemon {
+func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	t.Helper()
 	// The suite's live-daemon cap, held for this top-level test's whole run.
 	// See slots.go: DefaultTimeout's measured basis is eight concurrent
@@ -613,7 +637,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		t:                  t,
 		expected:           map[string]bool{},
 		required:           map[string]bool{},
-		shims:              map[string]*ShimControl{},
+		daemonProc:         &daemonProc{shims: map[string]*ShimControl{}},
 	}
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
@@ -659,17 +683,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
 	// end with an empty expected set, so a test that never calls ExpectWarnings
 	// still gets the assertion. ExpectWarnings only widens this set.
-	registerLogChecks(t, func() {
-		dest := ""
-		if root := os.Getenv(ArtifactsEnv); root != "" {
-			dest = filepath.Join(root, artifactDirName(t.Name()))
-		}
-		var extra []string
-		if d.stderrPath != "" {
-			extra = append(extra, d.stderrPath)
-		}
-		preserveFailureLogs(t.Logf, filepath.Join(d.StateDir, "logs"), dest, extra...)
-	}, d.assertNoUnexpectedWarnings, d.assertNoUnproducedRequiredWarnings)
+	registerLogChecks(t, func() { keepFailureLogs(t, d.StateDir, d.stderrPath) }, d.assertNoUnexpectedWarnings, d.assertNoUnproducedRequiredWarnings)
 	// THE LOCK DIRECTORY IS A CROSS-DAEMON RENDEZVOUS, not a per-start temp
 	// dir, so it is keyed to the STATE ROOT and settled only now that the root
 	// is known.
@@ -949,7 +963,7 @@ func (d *Daemon) awaitServing() {
 // Non-socket paths (config roots, fake dists, prompt copies, repos) have no
 // such budget and stay under t.TempDir(), where a failed run's leftovers are
 // named after the test that left them.
-func ShortTempDir(t *testing.T) string {
+func ShortTempDir(t testing.TB) string {
 	t.Helper()
 	// Under the run root (runroot.go), so an abnormally ended run's state
 	// roots are reclaimed with it. It is itself under /tmp and short.
@@ -969,7 +983,7 @@ func ShortTempDir(t *testing.T) string {
 // the state root cannot hold a shim socket. The daemon refuses such a root at
 // boot; without this the failure surfaces as a DefaultTimeout wait for
 // daemon.addr instead.
-func requireSocketPathBudget(t *testing.T, stateDir string) {
+func requireSocketPathBudget(t testing.TB, stateDir string) {
 	t.Helper()
 	layout, err := stateroot.Root(stateDir, "")
 	if err != nil {
@@ -1231,6 +1245,7 @@ const reapGrace = 2 * time.Second
 // indefinitely.
 func (d *Daemon) Stop() {
 	d.t.Helper()
+	d.refuseOnView("Stop")
 	d.signal(syscall.SIGTERM)
 	if d.awaitReapWithin(DefaultTimeout) {
 		return
@@ -1322,6 +1337,7 @@ func (d *Daemon) standDownStraysForCoverage() {
 // SIGCONT, so the group kill follows the leader's exit at once.
 func (d *Daemon) Kill() {
 	d.t.Helper()
+	d.refuseOnView("Kill")
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
 	}
@@ -1808,7 +1824,7 @@ func (d *Daemon) Stderr() string {
 }
 
 // Register registers a repository's worktree and answers the minted ref.
-func Register(t *testing.T, d *Daemon, dir string) *workspacev1.WorkspaceRef {
+func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: dir}))
 	if err != nil {
@@ -1817,6 +1833,14 @@ func Register(t *testing.T, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	ref := resp.Msg.GetSuccess().GetWorkspace()
 	if ref.GetId() == "" {
 		t.Fatalf("RegisterWorkspace(%s) = %v, want a success carrying a workspace id", dir, resp.Msg)
+	}
+	// A VIEW ANSWERS FOR WHAT IT REGISTERS (view.go): the daemon may name the
+	// workspace by the directory given or by its own resolved form.
+	if d.view {
+		d.Claim(dir)
+		if ref.GetDir() != dir {
+			d.Claim(ref.GetDir())
+		}
 	}
 	return ref
 }
@@ -1889,7 +1913,7 @@ var (
 // the daemon's process tree, so no Daemon's ReapStrays will signal it. The
 // exemption is dropped at the end of the test that declared it, because the pid
 // is free for reuse the moment that process is reaped.
-func SpareFromStrayReaping(t *testing.T, pid int) {
+func SpareFromStrayReaping(t testing.TB, pid int) {
 	t.Helper()
 	sparedMu.Lock()
 	sparedFromReaping[pid] = true

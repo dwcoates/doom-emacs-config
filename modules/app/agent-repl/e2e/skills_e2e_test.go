@@ -116,25 +116,23 @@ func TestSkillInvocation(t *testing.T) {
 		prompt:    "!skill",
 		wantSkill: "fake-skill",
 	}
-	t.Run(tc.name, func(t *testing.T) { runSkillScenarioCase(t, tc) })
+	t.Run(tc.name, func(t *testing.T) { runSkillScenarioCase(t, SharedWorld(t), tc) })
 }
 
-// runSkillScenarioCase is the shared AAA body for both skill tests: they
+// runSkillScenarioCase is the shared AAA body for the skill tests: they
 // differ only in which prompt is submitted and which skill name the fake
 // derives from it, so the arrange/act/assert shape is identical and factored
 // once rather than duplicated per SPEC.md test.
-func runSkillScenarioCase(t *testing.T, tc skillScenarioCase) {
+func runSkillScenarioCase(t *testing.T, w *World, tc skillScenarioCase) {
 	t.Helper()
 
-	// Arrange: one real daemon+store+sidecar+shim world, one fake-git
-	// repository registered as the workspace. Only the systems this suite
+	// Arrange: the World the caller brings (the shared one, or its own), one
+	// fake-git repository registered as the workspace. Only the systems this suite
 	// owns (agent-repld, the shim, shim-store, shim-sidecar) run for real;
 	// git is an external dependency and stays mocked via the daemon
 	// harness's own scripted fakegit world, exactly as daemon/integration's
 	// own tests register a workspace (harness.NewRepo + harness.Register).
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	// Act: drive the real `!skill ...` prompt through the daemon's real
 	// SubmitPrompt, to the real shim's `--fake` vendor, through to a

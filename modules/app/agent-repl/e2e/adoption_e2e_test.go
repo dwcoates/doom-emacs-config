@@ -97,8 +97,7 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 	// (E2E-EVENT-INVENTORY.md ruling 3).
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
@@ -420,8 +419,7 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.gather_title_digest", "daemon.shimclient.watch_agent",
 		"daemon.shimclient.watch_session")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	adLeaveSessionDown(t, w, ws)
 	daemonStream := w.WatchDaemonStream()

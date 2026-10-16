@@ -66,15 +66,8 @@ import (
 // fresh harness.NewRepo directory is never under MultiRepoRoot).
 func cpNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace(%s): %v", repo.Dir, err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace(%s) = %v, want success", repo.Dir, resp.Msg)
-	}
+	ws := w.NewWorkspace(t)
+	w.RequireOpen(t, ws)
 	return ws, w.DefaultConfigDir
 }
 
@@ -166,7 +159,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 func TestCompactionDirected(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := SharedWorld(t)
 	ws, configDir := cpNewWorkspace(t, w)
 	const wantSummary = "Compacted the conversation."
 

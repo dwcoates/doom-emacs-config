@@ -58,8 +58,7 @@ import (
 func newHookWorld(t *testing.T) (*World, *harness.Repo, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	return w, repo, ws
 }
 

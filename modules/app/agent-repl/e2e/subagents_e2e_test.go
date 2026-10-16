@@ -190,9 +190,8 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 func TestSubagentSyncNestedActivity(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 
 	// Act.
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
@@ -295,9 +294,8 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 func TestSubagentDetached(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 
 	// Act: the main turn ends on the async-launch ack, well before the
 	// sweep itself completes.
@@ -366,8 +364,7 @@ func TestNestedSubagentHistoricalUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	// Act.
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-historical")
@@ -464,8 +461,7 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Arrange: a real spawn, driven to completion so the store holds it.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
 
 	// Act: crash the daemon and cold-boot a successor, which knows the spawn
@@ -510,9 +506,8 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 	t.Parallel()
 	// Arrange: the held turn, with its detached agent live beneath it.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 	_, rootToken := openFeed(t, w, ws, nil)
 	rootStream := w.WatchFeed(rootToken)
 
@@ -573,8 +568,7 @@ func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	const (
 		thinking   = "Answering while the sweep runs."
 		conclusion = "The sweep is running in the background."
@@ -656,8 +650,7 @@ func TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) 
 	// Arrange.
 	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings("daemon.rollout.reconcile")
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, first.Daemon, repo.Dir)
+	ws := first.NewWorkspace(t)
 	turn := driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")
 	// THE CRASH WAITS FOR THE TURN'S DURABLE CLOSE, as raiseColdGate's does
 	// (coldgate_e2e_test.go): a kill between the feed's turn end and the

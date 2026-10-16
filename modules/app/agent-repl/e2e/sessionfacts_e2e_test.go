@@ -69,8 +69,7 @@ import (
 func sfNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, repo.Dir
 }
 

@@ -132,8 +132,7 @@ func TestAccountUsage(t *testing.T) {
 	// Arrange: one world, one (fake-git) repository registered as a
 	// workspace.
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	repo, ws := w.NewRepoWorkspace(t)
 
 	// Act: drive the scenario that switches the account-usage probe to the
 	// full/available shape, to its own turn-ended, store-durable
@@ -199,8 +198,7 @@ func TestContextUsage(t *testing.T) {
 	// Arrange: one world, one (fake-git) repository registered as a
 	// workspace.
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
 	// Act: drive the drift scenario once, then read the /context panel —
 	// the daemon-resolved view of the SessionContextUsage state the shim's

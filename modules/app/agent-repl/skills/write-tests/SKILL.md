@@ -77,6 +77,11 @@ coverage impact (always none).
 10. **Process spawns and polls in the harness.**
     - Fixes that kept coverage: `isZombie` reads the kernel's state in process instead of spawning `ps` (409602c36); the log reader decodes only what was appended since its last read.
 
+11. **A fixture that costs more than the test it serves, built per test.**
+    - Evidence (2026-10-14, solo, steady state): an e2e `World` costs about 2.7s wall to build and tear down, a fresh workspace inside a running one 0.30-0.41s; three tests on three Worlds took 7.80s and 1.33 CPU-s, on one World 2.36s and 0.72 CPU-s. A daemon-integration `newOpened` fixture costs 0.14s, which is not worth sharing (docs/investigations/2026-10-14-test-shared-setup-lzb.md).
+    - Fix: share the fixture, never a slice of it: `SharedWorld(t)` (e2e) builds one default World per test process, owned by `harness.Suite()`, and each test takes a `harness.Daemon.View` with its own sweep over the workspaces it registered. The rule is AGENTS.md "A case may share an expensive fixture, never a slice another case reads".
+    - Coverage impact: none; every test keeps its own case, workspace and failure.
+
 ## Changes that LOOK faster and are refused
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.

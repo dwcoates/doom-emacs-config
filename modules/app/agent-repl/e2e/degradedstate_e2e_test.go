@@ -46,11 +46,8 @@ import (
 	"context"
 	"testing"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"connectrpc.com/connect"
 
 	"agent-repld/integration/harness"
 )
@@ -66,16 +63,9 @@ import (
 // for the test's life exactly as that convention does.
 func openWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
 	t.Helper()
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 
-	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace = %v, want success", resp.Msg)
-	}
+	w.RequireOpen(t, ws)
 
 	host := w.WatchHost(ws)
 	t.Cleanup(host.Close)

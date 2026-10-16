@@ -283,7 +283,7 @@ func dlShellLostHow(lost *frontendv1.FeedShellLost) string {
 func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow], *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w.ExpectWarnings("daemon.health.open_fault")
-	ws := dbWorkspace(t, w)
+	ws := w.NewWorkspace(t)
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	turn := SubmitPrompt(t, w, ws, "!bash-detach-live")
 	AwaitTurnEnded(t, w, ws, turn)

@@ -165,9 +165,8 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 func TestClearRotatesIdentity(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 
 	// Act: the first (and, for this session, only) prompt is "!rotate"
@@ -208,8 +207,7 @@ func TestSecondRotateUnderRotatedIdentity(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 
 	// Act: first rotation, same as TestClearRotatesIdentity.

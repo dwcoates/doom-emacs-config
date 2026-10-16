@@ -28,8 +28,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"connectrpc.com/connect"
-
-	"agent-repld/integration/harness"
 )
 
 // ---------------------------------------------------------------------------
@@ -37,19 +35,6 @@ import (
 // area file shares this package and this suite's fanout dispatches one
 // writer per file with no cross-file coordination on identifier names.
 // ---------------------------------------------------------------------------
-
-// tlNewWorkspace mints a fresh fake-git-backed repository and registers it as
-// a workspace on w's daemon. This suite does NOT use real git (project-lead
-// ruling, superseding the SkipFakeGit design in SPEC.md section B/D "Real
-// git": every external dependency stays mocked — git is the daemon harness's
-// scripted fake, the vendor is the fake SDK). NewWorld never sets
-// Opts.SkipFakeGit, so the daemon gets the same scripted git every ordinary
-// daemon/integration test gets.
-func tlNewWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
-	t.Helper()
-	repo := harness.NewRepo(t)
-	return harness.Register(t, w.Daemon, repo.Dir)
-}
 
 // tlOpenRows answers the workspace's current root-feed page, post-turn — the
 // same page AwaitTurnEnded consults, exposed here for tests that need to
@@ -112,8 +97,8 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 func TestTurnStartToCompletion(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	ws := tlNewWorkspace(t, w)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 
 	// Act
 	turn := driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "Tell me something you find interesting.")

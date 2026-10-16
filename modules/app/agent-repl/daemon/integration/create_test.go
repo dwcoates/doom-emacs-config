@@ -778,4 +778,13 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the spawn_failed arm carrying a detail",
 			resp.Msg.GetResult())
 	}
+	// THE FAILED CREATE IS THEN REPORTED, ASYNCHRONOUSLY, to the repository's
+	// main-worktree workspace, whose shim dies by the same default profile, so
+	// the report cannot be delivered and says so at ERROR. Awaited rather than
+	// left to race the test's end: whether that record landed before the sweep
+	// used to decide the test's verdict.
+	d.RequireWarnings("daemon.workspace.create_failed_report")
+	d.AwaitLogRecord(d.RunLogPath(), "the failed create's undeliverable report", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.workspace.create_failed_report" && r.Level == "error"
+	})
 }

@@ -17,7 +17,7 @@ import (
 // client wiring (Daemon.dial) until it owns every workspace, but it still
 // binds and serves its own listener the moment it starts, and a test that
 // wants to prove THAT needs to dial it directly by the address it reported.
-func DialAt(t *testing.T, addr string) agentreplv1connect.AgentReplClient {
+func DialAt(t testing.TB, addr string) agentreplv1connect.AgentReplClient {
 	t.Helper()
 	httpClient := &http.Client{
 		Transport: &http2.Transport{

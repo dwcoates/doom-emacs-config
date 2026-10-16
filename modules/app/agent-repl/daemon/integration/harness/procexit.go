@@ -37,7 +37,7 @@ func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
 // by ctx. Unlike AwaitProcessGone it does not poll: it waits on the exit event
 // itself, so it works for a process this test did not start (a daemon's shim)
 // and returns the moment the process ends.
-func AwaitProcessExit(t *testing.T, ctx context.Context, pid int) {
+func AwaitProcessExit(t testing.TB, ctx context.Context, pid int) {
 	t.Helper()
 	if err := WaitProcessExit(ctx, pid); err != nil {
 		t.Fatalf("process %d did not exit: %v", pid, err)

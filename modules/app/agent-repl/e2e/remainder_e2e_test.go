@@ -150,8 +150,7 @@ import (
 func rmNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
+	ws := w.NewWorkspace(t)
 	return w, ws
 }
 
@@ -254,7 +253,8 @@ func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
 func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w, ws := rmNewWorkspace(t)
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
 
 	// Act
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")

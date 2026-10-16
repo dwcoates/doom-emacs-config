@@ -250,8 +250,7 @@ func raiseColdGate(t *testing.T) *coldGate {
 	// cold-gate floor behind.
 	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings(coldGateWarnings...)
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, first.Daemon, repo.Dir)
+	ws := first.NewWorkspace(t)
 
 	seed := driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "cold-seed")
 	// THE CRASH WAITS FOR THE SEED TURN'S DURABLE CLOSE. The feed publishes a

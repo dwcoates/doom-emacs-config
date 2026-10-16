@@ -66,8 +66,7 @@ func TestPerfSubmitPromptAck(t *testing.T) {
 
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repoFixture := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
+	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	perfWarmSession(t, w, ws)
 	rec := NewPerfRecorder("submit-prompt-ack")
@@ -109,8 +108,7 @@ func TestPerfSubmitPromptToRosterArm(t *testing.T) {
 
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repoFixture := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
+	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	perfWarmSession(t, w, ws)
 	rec := NewPerfRecorder("submit-prompt-roster-arm")
@@ -157,8 +155,7 @@ func TestPerfSelectWorkspaceAck(t *testing.T) {
 
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repoFixture := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
+	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	rec := NewPerfRecorder("select-workspace-ack")
 
@@ -221,8 +218,7 @@ func TestPerfFooterFlipOnParticipantLoss(t *testing.T) {
 
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repoFixture := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
+	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	perfWarmSession(t, w, ws)
 	rec := NewPerfRecorder("footer-flip-participant-loss")

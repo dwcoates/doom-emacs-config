@@ -106,7 +106,7 @@ type DeployBuilder struct {
 // fails, as a harness that never builds does; StartDaemon stages
 // DeployCurrent at once. A world that starts its daemon some other way (the
 // Emacs layer's launcher) points AGENT_REPL_DEPLOY_BUILDER at Path itself.
-func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBuilder {
+func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBuilder {
 	t.Helper()
 	if (src.Store == "") != (src.Sidecar == "") {
 		t.Fatalf("harness: the deploy's real services are both or neither, got store %q and sidecar %q", src.Store, src.Sidecar)
