@@ -80,30 +80,47 @@ expected_comm() {
     esac
 }
 
+# marker_state MARKER -- what MARKER's process is now: "live", "gone" (no
+# process has its pid), "recycled COMM" (its pid now names another program,
+# so its own process is gone too), or "unknown" (a runtime this collector
+# does not know). Every reader of the armed markers goes through it.
+marker_state() {
+    local name="${1##*/}" want comm
+    want="$(expected_comm "${name%-*}")" || { printf 'unknown'; return 0; }
+    comm="$(ps -o comm= -p "${name##*-}" 2>/dev/null || true)"
+    if [ -z "$comm" ]; then
+        printf 'gone'
+    elif [ "${comm##*/}" != "$want" ]; then
+        printf 'recycled %s' "${comm##*/}"
+    else
+        printf 'live'
+    fi
+}
+
 # signal_armed -- send SIGWINCH to every live runtime holding a marker, and
-# remove the markers of processes that are gone. Prints one line per marker.
+# remove the markers whose process is gone or whose pid another program now
+# has. Prints one line per marker.
 signal_armed() {
     [ -d "$ARMED" ] || return 0
-    local marker name runtime pid want comm
+    local marker name pid state
     for marker in "$ARMED"/*; do
         [ -e "$marker" ] || continue
         name="${marker##*/}"
-        runtime="${name%-*}"
         pid="${name##*-}"
-        want="$(expected_comm "$runtime")" || {
-            printf 'skipped %s: unknown runtime\n' "$name"
-            continue
-        }
-        comm="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
-        if [ -z "$comm" ]; then
-            rm -f "$marker"
-            printf 'removed %s: the process is gone\n' "$name"
-            continue
-        fi
-        if [ "${comm##*/}" != "$want" ]; then
-            printf 'skipped %s: pid %s is %s, not %s\n' "$name" "$pid" "${comm##*/}" "$want"
-            continue
-        fi
+        state="$(marker_state "$marker")"
+        case $state in
+            unknown)
+                printf 'skipped %s: unknown runtime\n' "$name"
+                continue ;;
+            gone)
+                rm -f "$marker"
+                printf 'removed %s: the process is gone\n' "$name"
+                continue ;;
+            recycled\ *)
+                rm -f "$marker"
+                printf 'removed %s: the process is gone; pid %s is now %s\n' "$name" "$pid" "${state#recycled }"
+                continue ;;
+        esac
         if env kill -WINCH "$pid"; then
             printf 'signaled %s\n' "$name"
         else
@@ -262,18 +279,17 @@ cmd_status() {
     else
         printf 'no session is open\n'
     fi
-    local marker name runtime pid comm
+    local marker name state
     for marker in "$ARMED"/*; do
         [ -e "$marker" ] || continue
         name="${marker##*/}"
-        runtime="${name%-*}"
-        pid="${name##*-}"
-        comm="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
-        if [ -n "$comm" ]; then
-            printf 'armed: %s (%s)\n' "$name" "${comm##*/}"
-        else
-            printf 'stale: %s (the process is gone)\n' "$name"
-        fi
+        state="$(marker_state "$marker")"
+        case $state in
+            live) printf 'armed: %s (%s)\n' "$name" "$(expected_comm "${name%-*}")" ;;
+            gone) printf 'stale: %s (the process is gone)\n' "$name" ;;
+            recycled\ *) printf 'stale: %s (the process is gone; its pid is now %s)\n' "$name" "${state#recycled }" ;;
+            *) printf 'unknown: %s\n' "$name" ;;
+        esac
     done
 }
 
@@ -316,14 +332,15 @@ parse_leg() {
     printf '%s %s' "$n" "$seconds"
 }
 
-# runtime_pids -- "daemon=PID emacs=PID", the processes a rollout replaces.
+# runtime_pids -- "daemon=PID[,PID] emacs=PID", the processes a rollout
+# replaces: every daemon whose marker's process is live (marker_state), and
+# Emacs.
 runtime_pids() {
-    local daemon marker
-    daemon="none"
+    local daemons="" marker
     for marker in "$ARMED"/daemon-*; do
-        [ -e "$marker" ] && daemon="${marker##*-}"
+        [ -e "$marker" ] && [ "$(marker_state "$marker")" = live ] && daemons="$daemons${daemons:+,}${marker##*-}"
     done
-    printf 'daemon=%s emacs=%s' "$daemon" "$(eval_emacs '(emacs-pid)' 2>/dev/null || printf none)"
+    printf 'daemon=%s emacs=%s' "${daemons:-none}" "$(eval_emacs '(emacs-pid)' 2>/dev/null || printf none)"
 }
 
 # run_tour LABEL N SECONDS -- drive one switch tour in Emacs and wait for it to
@@ -369,8 +386,10 @@ cmd_switch_bench() {
         die "switch-bench: Emacs is unreachable: $ready"
     [ "$ready" = "t" ] || die "switch-bench: this Emacs has no switch tour (agent-repl-profiling-switch-tour-state); load lisp/profiling.el"
     local before after id dir ok=1
-    before="$(runtime_pids)"
     cmd_start --log-level debug
+    # READ AFTER THE START, whose sweep removed every marker of a process that
+    # is gone, and of live markers only: a dead daemon's marker is no runtime.
+    before="$(runtime_pids)"
     id="$(cat "$ACTIVE")"
     dir="$ROOT/$id"
     printf '{"slow":"%s","fast":"%s","before":"%s"}\n' "$slow" "$fast" "$before" >"$dir/bench.json"

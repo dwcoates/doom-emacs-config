@@ -102,10 +102,11 @@ if [ ! -e "$W/root/armed/store-202" ]; then
 else
     fail "start removes the marker of a process that is gone"
 fi
-if grep -q 'skipped sidecar-303: pid 303 is zsh, not shim-claude-sidecar' "$W/root/$session/control.log"; then
-    pass "start skips a marker whose pid is another program, and says so"
+if [ ! -e "$W/root/armed/sidecar-303" ] &&
+    grep -q 'removed sidecar-303: the process is gone; pid 303 is now zsh' "$W/root/$session/control.log"; then
+    pass "start removes a marker whose pid is now another program, and says so"
 else
-    fail "start skips a marker whose pid is another program, and says so" "$(cat "$W/root/$session/control.log")"
+    fail "start removes a marker whose pid is now another program, and says so" "$(cat "$W/root/$session/control.log")"
 fi
 if grep -q 'agent-repl-profiling-reconcile' "$W/log" && grep -q '^emacs: "started"' "$W/root/$session/control.log"; then
     pass "start asks Emacs to reconcile and records its answer"
@@ -212,6 +213,7 @@ cat >"$R/logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:00:11.300-04:00","runtime":"webapp","operation":"feed.page-placed","message":"placed","workspace_id":"B","context":{"connection_id":"c2"}}
 {"timestamp":"2026-10-12T12:00:20.000-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=2","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.025-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-won ws=a generation=2 waited-ms=25","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:00:20.035-04:00","runtime":"emacs","operation":"x","message":"elisp.webhost.show ws=a id=s1","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.040-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.070-04:00","runtime":"webapp","operation":"page.switched-to","message":"switched","workspace_id":"A","context":{"connection_id":"c1"}}
 {"timestamp":"2026-10-12T12:00:20.130-04:00","runtime":"webapp","operation":"page.shown-frame","message":"frame","workspace_id":"A","context":{"connection_id":"c1"}}
@@ -265,9 +267,8 @@ if grep -q "| switch to a shown workspace (keystroke to the page's first shown f
 else
     fail "a repeat switch is measured from the keystroke to the page's first shown frame" "$report"
 fi
-if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 25ms |' <<<"$report" &&
-    grep -q "| Emacs's switch pass, to its view shown | 1 | 15ms |" <<<"$report" &&
-    grep -q '| the webhost, to the page told it is shown | 1 | 30ms |' <<<"$report" &&
+if grep -q '| Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass) | 1 | 35ms |' <<<"$report" &&
+    grep -q '| the webhost, to the page told it is shown | 1 | 35ms |' <<<"$report" &&
     grep -q '| the page, to its first shown frame | 1 | 60ms |' <<<"$report"; then
     pass "a repeat switch is split into its Emacs, webhost and page phases"
 else
@@ -286,6 +287,7 @@ cat >"$R/tour-logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:01:00.260-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-key label=fast key=next remaining=0","workspace_id":""}
 {"timestamp":"2026-10-12T12:01:00.270-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=5","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:01:00.300-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-won ws=a generation=5 waited-ms=30","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:01:00.310-04:00","runtime":"emacs","operation":"x","message":"elisp.webhost.show ws=a id=s2","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:01:00.320-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:01:00.330-04:00","runtime":"webapp","operation":"webhost.stall","message":"stalled","workspace_id":"","context":{"blocked_ms":120}}
 {"timestamp":"2026-10-12T12:01:00.340-04:00","runtime":"webapp","operation":"sidebar.roster-draw","message":"drew","workspace_id":"","context":{"draw_ms":6}}
@@ -294,6 +296,14 @@ cat >"$R/tour-logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:01:00.500-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=fast switches=2","workspace_id":""}
 {"timestamp":"2026-10-12T12:01:09.000-04:00","runtime":"webapp","operation":"webhost.stall","message":"stalled","workspace_id":"","context":{"blocked_ms":900}}
 {"timestamp":"2026-10-12T12:01:10.000-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=slow count=8 interval=1.5","workspace_id":""}
+EOF
+cat >"$R/overlap-logs.jsonl" <<'EOF'
+{"timestamp":"2026-10-12T12:02:00.000-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=slow count=1 interval=1.5","workspace_id":""}
+{"timestamp":"2026-10-12T12:02:00.010-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=b origin=cycle count=1","workspace_id":"B"}
+{"timestamp":"2026-10-12T12:02:01.500-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=slow switches=1","workspace_id":""}
+{"timestamp":"2026-10-12T12:02:01.800-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=fast count=1 interval=0.25","workspace_id":""}
+{"timestamp":"2026-10-12T12:02:01.810-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=2","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:02:02.100-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=fast switches=1","workspace_id":""}
 EOF
 tour_report="$("$HELPER" --session "$R/sess" --logs "$R/tour-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
 fast="$(sed -n '/^## Switch tour fast/,/^## Switch tour slow/p' <<<"$tour_report")"
@@ -312,11 +322,18 @@ if grep -q 'Rail draws: 1, script 6ms median, 6ms at most.' <<<"$fast"; then
 else
     fail "a switch tour's section gives its rail draws" "$tour_report"
 fi
-if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 30ms |' <<<"$fast" &&
+if grep -q '| Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass) | 1 | 40ms |' <<<"$fast" &&
     grep -q '| the page, to its first shown frame | 1 | 50ms |' <<<"$fast"; then
     pass "a switch tour's section splits its own switches into phases"
 else
     fail "a switch tour's section splits its own switches into phases" "$tour_report"
+fi
+overlap_report="$("$HELPER" --session "$R/sess" --logs "$R/overlap-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
+overlap_slow="$(sed -n '/^## Switch tour slow/,/^## Switch tour fast/p' <<<"$overlap_report")"
+if grep -q '| 0 | 1 | 0 | 0 | 0 | 0 |' <<<"$overlap_slow"; then
+    pass "a tour's window ends where the next tour starts, inside its settle margin"
+else
+    fail "a tour's window ends where the next tour starts, inside its settle margin" "$overlap_report"
 fi
 if grep -q '^## Switch tour slow' <<<"$tour_report" && grep -q 'The tour never recorded its end' <<<"$tour_report"; then
     pass "a tour that never ended is named and left unsummarized"
@@ -392,6 +409,17 @@ else
 fi
 
 # --- switch-bench ----------------------------------------------------------------
+# --- status of stale markers ---------------------------------------------------
+fresh_world status-stale
+out="$(collector status)"
+if grep -q 'stale: store-202 (the process is gone)' <<<"$out" &&
+    grep -q 'stale: sidecar-303 (the process is gone; its pid is now zsh)' <<<"$out" &&
+    grep -q 'armed: daemon-101 (agent-repld)' <<<"$out"; then
+    pass "status names a marker whose pid is now another program as stale, not armed"
+else
+    fail "status names a marker whose pid is now another program as stale, not armed" "$out"
+fi
+
 # A stub Emacs that answers each form the bench sends: whether it has a tour,
 # its pid (one per line of $STUB_EMACS_PIDS, the last repeated), the tour's
 # acceptance, its state ($STUB_TOUR_STATE, default idle), and the reconcile.
@@ -420,6 +448,7 @@ chmod +x "$BENCH_STUBS/emacsclient"
 # bench ARGS... -- run switch-bench in a fresh world, its answer in $out and $rc.
 bench() {
     fresh_world "bench-$RANDOM"
+    [ -z "${BENCH_STALE_DAEMON:-}" ] || : >"$W/root/armed/daemon-$BENCH_STALE_DAEMON"
     printf '999\n' >"$W/pids"
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >%q\ncat %q\n' "$W/logs-args" "$R/logs.jsonl" >"$W/logs.sh"
     chmod +x "$W/logs.sh"
@@ -483,6 +512,15 @@ if [ "$rc" -ne 0 ] && grep -q 'INVALID RUN: a rollout replaced a runtime' <<<"$o
 else
     fail "switch-bench fails a run during which a rollout replaced a runtime, and closes its session" "rc=$rc out=$out"
 fi
+
+for stale in 77 303; do
+    BENCH_STALE_DAEMON=$stale bench --slow 1:0.05 --fast 1:0.05
+    if [ "$rc" -eq 0 ] && grep -q '"before":"daemon=101 emacs=999"' "$W/root/$BENCH_SESSION/bench.json"; then
+        pass "switch-bench reads only the live daemon, past a stale daemon-$stale marker"
+    else
+        fail "switch-bench reads only the live daemon, past a stale daemon-$stale marker" "rc=$rc out=$out $(cat "$W/root/$BENCH_SESSION/bench.json" 2>&1)"
+    fi
+done
 
 STUB_TOUR_STATE="running slow 1" bench --slow 1:0.05 --fast 1:0.05
 if [ "$rc" -ne 0 ] && grep -q 'past its deadline; cancelled' <<<"$out" && grep -q 'switch-tour-cancel' "$W/log" && [ ! -e "$W/root/active" ]; then

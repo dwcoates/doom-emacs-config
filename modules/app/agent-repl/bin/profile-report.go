@@ -417,6 +417,13 @@ func isEditorSwitch(r record) bool {
 func isWebviewOnSwitch(r record) bool {
 	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.panels.webview-on-switch: ")
 }
+
+// isWebhostShow is Emacs telling the webhost to show a page, recorded at the
+// call. (elisp.panels.webview-on-switch is recorded on the idle turn after the
+// redisplay, after the page may already have been told, so it ends no phase.)
+func isWebhostShow(r record) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.webhost.show ")
+}
 func isFeedPainted(r record) bool { return r.Runtime == "webapp" && r.Operation == "feed.page-placed" }
 func isActivationWon(r record) bool {
 	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.panels.switch-activation-won ")
@@ -459,6 +466,11 @@ func nextFor(records []record, i int, ws string, start time.Time, match func(rec
 		r := records[j]
 		if r.at.Sub(start) > within {
 			break
+		}
+		// An edge is never earlier than the one before it: records of one
+		// instant from two runtimes can sort either way.
+		if r.at.Before(start) {
+			continue
 		}
 		if r.WorkspaceID == ws && match(r) {
 			return r, true
@@ -594,8 +606,7 @@ var switchPhases = []struct {
 	name string
 	end  func(record) bool
 }{
-	{"Emacs, before its switch pass runs (its redisplay and hooks)", isActivationWon},
-	{"Emacs's switch pass, to its view shown", isWebviewOnSwitch},
+	{"Emacs, from the key to the webhost told to show the page (its redisplay, hooks and switch pass)", isWebhostShow},
 	{"the webhost, to the page told it is shown", isPageSwitchedTo},
 	{"the page, to its first shown frame", isPageShownFrame},
 }
@@ -689,7 +700,7 @@ func messageField(message, key string) string {
 }
 
 // tourSettle is how long after a tour's last key its switches may still be
-// landing, and are still the tour's.
+// landing, and are still the tour's, unless the next tour starts first.
 const tourSettle = 3 * time.Second
 
 // switchTourTables prints a section per switch tour in RECORDS: the keys it
@@ -702,9 +713,20 @@ func switchTourTables(w io.Writer, records []record) {
 			continue
 		}
 		end := time.Time{}
-		for _, later := range records[i+1:] {
+		for j, later := range records[i+1:] {
 			if tourDone(later, label) {
 				end = later.at.Add(tourSettle)
+				// A tour's window ends where the next tour starts, if
+				// that is sooner: the next tour's switches are its own.
+				for _, next := range records[i+1+j+1:] {
+					if !next.at.Before(end) {
+						break
+					}
+					if _, starts := tourStarted(next); starts {
+						end = next.at.Add(-time.Nanosecond)
+						break
+					}
+				}
 				break
 			}
 		}
