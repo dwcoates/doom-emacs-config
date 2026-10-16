@@ -831,8 +831,10 @@ do_run() {
   read -ra cpu_args <<<"$cpu_out"
   log "capping the container to $SANDBOX_CPUS CPUs"
 
+  # NO `--rm`: the container outlives its exit so the failure artifacts can
+  # be copied out of it, and the EXIT trap removes it (see below).
   local args=(
-    run --rm --init
+    run --init
     "${cpu_args[@]}"
     --network none
     --user 1000:1000
