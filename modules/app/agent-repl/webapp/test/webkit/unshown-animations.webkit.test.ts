@@ -75,11 +75,18 @@ async function setShown(page: Page, shown: boolean): Promise<void> {
   }, shown);
 }
 
-/** The animation of element ID, its computed opacity, and the timeline's time now. */
+/**
+ * The animation of element ID, its computed opacity, and the timeline's time
+ * now, once the animation has no pending play or pause. A pause the hide asks
+ * for lands at the next frame, and until it does the animation's time still
+ * runs: a read taken inside that window saw a time the held animation then
+ * moved past, by however late a loaded machine drew that frame.
+ */
 async function read(page: Page, id: string): Promise<Read & { now: number; opacity: string }> {
-  return page.evaluate((elId) => {
+  return page.evaluate(async (elId) => {
     const el = document.getElementById(elId)!;
     const animation = el.getAnimations()[0];
+    await animation.ready;
     return {
       playState: animation.playState,
       currentTime: Number(animation.currentTime),
