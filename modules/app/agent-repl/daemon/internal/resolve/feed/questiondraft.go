@@ -309,9 +309,9 @@ func (r *resolver) applyQuestionEdit(served *questionState, edit QuestionEdit) (
 		if single {
 			return 0, &UnservedQuestionValueError{Text: edit.Question, Why: "only a multi-select question is confirmed"}
 		}
-		// A confirm with nothing ticked or typed leaves the question unanswered:
-		// there is nothing to answer it with.
-		draft.Answered = len(draft.Chosen) > 0 || draft.OtherText != nil
+		// A confirm ALWAYS answers: with nothing ticked or typed, the answer is
+		// "none of these", delivered as an empty selection.
+		draft.Answered = true
 		served.active = index
 	default:
 		panic(fmt.Sprintf("feed: unhandled question edit kind %v", edit.Kind))

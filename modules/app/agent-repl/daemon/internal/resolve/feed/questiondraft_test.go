@@ -170,7 +170,7 @@ func TestAConfirmAnswersAMultiSelectWithItsTicks(t *testing.T) {
 	}
 }
 
-func TestAConfirmWithNothingTickedLeavesTheQuestionUnanswered(t *testing.T) {
+func TestAConfirmWithNothingTickedAnswersTheQuestionWithNone(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.openTwoQuestionAsk()
@@ -179,8 +179,9 @@ func TestAConfirmWithNothingTickedLeavesTheQuestionUnanswered(t *testing.T) {
 	h.edit(QuestionEdit{Kind: EditConfirm, Question: "Which suites?"})
 
 	// Assert.
-	if h.openDraft().GetDrafts()[1].GetAnswered() {
-		t.Fatal("an empty confirm answered the question")
+	got := h.openDraft().GetDrafts()[1]
+	if !got.GetAnswered() || len(got.GetChosen()) != 0 || got.GetOtherText() != nil {
+		t.Fatalf("draft = %+v, want answered with nothing chosen or typed", got)
 	}
 }
 
@@ -287,6 +288,26 @@ func TestTheEditAnsweringTheLastQuestionClaimsTheBatchAndHandsBackItsAnswers(t *
 	}
 	if outcome.Agent.GetValue() != mainAgent().GetValue() {
 		t.Fatalf("agent = %q, want the asking agent", outcome.Agent.GetValue())
+	}
+}
+
+func TestAnEmptyConfirmOnTheLastQuestionDeliversAnEmptySelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.openTwoQuestionAsk()
+	h.edit(pickAuth("API key"))
+
+	// Act.
+	outcome := h.edit(QuestionEdit{Kind: EditConfirm, Question: "Which suites?"})
+
+	// Assert.
+	answers := outcome.Deliver.GetAnswers()
+	if len(answers) != 2 {
+		t.Fatalf("answers = %+v, want the batch delivered with one answer per question", outcome.Deliver)
+	}
+	got := answers[1]
+	if got.GetQuestion().GetText() != "Which suites?" || len(got.GetChosen()) != 0 || got.FreeText != nil {
+		t.Fatalf("second answer = %+v, want the multi-select answered with nothing chosen or typed", got)
 	}
 }
 

@@ -185,7 +185,8 @@ message AgentQuestionSelection {
   AgentQuestionText question = 1;
 
   // The options picked, echoed verbatim from the ones offered. EMPTY when the
-  // user picked none of them and answered only in free text below.
+  // user picked none of them: answered only in free text below, or, for a
+  // multi-select confirmed with nothing ticked or typed, "none of these".
   repeated AgentQuestionChoice chosen = 2;
 
   // What the user typed instead of, or alongside, the offered options.

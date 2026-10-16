@@ -10,31 +10,46 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// awaitExitEvent waits for pid's exit on a kqueue EVFILT_PROC/NOTE_EXIT
-// event, bounded by ctx's deadline, answering whether it saw the event itself
-// (seen) rather than a process it could not register on (ESRCH: one that has
-// begun exiting, or is gone).
+// unregisteredExitSeen is what an exit event that could not be taken says of
+// the exit (awaitExitEvent).
 //
-// ON DARWIN ESRCH DOES NOT MEAN THE FILES ARE RELEASED. A process SIGKILLed a
-// moment before the registration can refuse it while its exit is still under
-// way and it still holds its open files: measured 2026-10-15, 2 of 300 such
-// registrations answered ESRCH with the process's FIFO write end still open,
-// and none of the 298 that saw the event did. So an unseen exit is answered
-// as such, for a caller that needs the files released to wait on something
-// else.
-func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
+// ON DARWIN AN UNTAKEN EVENT DOES NOT MEAN THE FILES ARE RELEASED. A process
+// SIGKILLed a moment before the registration refuses it (ESRCH: the kernel
+// will not find a process whose exit is under way) while it still holds its
+// open files: measured 2026-10-15, 2 of 300 such registrations answered ESRCH
+// with the process's FIFO write end still open, and none of the 298 that saw
+// the event did. The same lookup refuses it to the group listing, so a caller
+// that needs the files released takes the event before the kill
+// (holdGroupExits).
+const unregisteredExitSeen = false
+
+// exitEvent is one process's exit event on a kqueue EVFILT_PROC/NOTE_EXIT
+// registration, held from takeExitEvent until close.
+type exitEvent struct {
+	kq int
+}
+
+// takeExitEvent registers for pid's exit, answering nil (and no error) for a
+// process the kernel refuses the registration for (ESRCH: one that has begun
+// exiting, or is gone).
+func takeExitEvent(pid int) (*exitEvent, error) {
 	kq, err := newExitQueue()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	defer unix.Close(kq)
 	change := unix.Kevent_t{Ident: uint64(pid), Filter: unix.EVFILT_PROC, Flags: unix.EV_ADD | unix.EV_ONESHOT, Fflags: unix.NOTE_EXIT}
 	if _, err := unix.Kevent(kq, []unix.Kevent_t{change}, nil, nil); err != nil {
+		unix.Close(kq)
 		if errors.Is(err, unix.ESRCH) {
-			return false, nil
+			return nil, nil
 		}
-		return false, fmt.Errorf("register the exit event: %w", err)
+		return nil, fmt.Errorf("register the exit event: %w", err)
 	}
+	return &exitEvent{kq: kq}, nil
+}
+
+// await waits for the exit, bounded by ctx's deadline.
+func (e *exitEvent) await(ctx context.Context) error {
 	var timeout *unix.Timespec
 	if deadline, ok := ctx.Deadline(); ok {
 		ts := unix.NsecToTimespec(max(time.Until(deadline), 0).Nanoseconds())
@@ -42,18 +57,23 @@ func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
 	}
 	events := make([]unix.Kevent_t, 1)
 	for {
-		n, err := unix.Kevent(kq, nil, events, timeout)
+		n, err := unix.Kevent(e.kq, nil, events, timeout)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
-			return false, fmt.Errorf("wait for the exit event: %w", err)
+			return fmt.Errorf("wait for the exit event: %w", err)
 		}
 		if n == 0 {
-			return false, context.DeadlineExceeded
+			return context.DeadlineExceeded
 		}
-		return true, nil
+		return nil
 	}
+}
+
+// close releases the registration.
+func (e *exitEvent) close() {
+	unix.Close(e.kq)
 }
 
 // newExitQueue answers a kqueue descriptor marked close-on-exec.

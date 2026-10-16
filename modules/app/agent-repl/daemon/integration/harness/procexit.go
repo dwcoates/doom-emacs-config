@@ -14,6 +14,25 @@ func WaitProcessExit(ctx context.Context, pid int) error {
 	return err
 }
 
+// awaitExitEvent waits for pid's exit on the kernel's exit event, bounded by
+// ctx's deadline, answering whether it saw the exit itself. An event that
+// could not be taken answers unregisteredExitSeen, the platform's reading of
+// that refusal.
+func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
+	ev, err := takeExitEvent(pid)
+	if err != nil {
+		return false, err
+	}
+	if ev == nil {
+		return unregisteredExitSeen, nil
+	}
+	defer ev.close()
+	if err := ev.await(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // AwaitProcessExit blocks on the kernel's own report that pid exited, bounded
 // by ctx. Unlike AwaitProcessGone it does not poll: it waits on the exit event
 // itself, so it works for a process this test did not start (a daemon's shim)

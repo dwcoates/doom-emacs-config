@@ -441,7 +441,8 @@ export type AgentQuestionSelection = Message<"conversation.v1.AgentQuestionSelec
 
   /**
    * The options picked, echoed verbatim from the ones offered. EMPTY when the
-   * user picked none of them and answered only in free text below.
+   * user picked none of them: answered only in free text below, or, for a
+   * multi-select confirmed with nothing ticked or typed, "none of these".
    *
    * @generated from field: repeated conversation.v1.AgentQuestionChoice chosen = 2;
    */
