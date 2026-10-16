@@ -2393,6 +2393,32 @@ The screen must only demote names that could not be routed at all."
     ;; Act / Assert
     (should (zerop (hash-table-count (agent-repl--ws-ref-id-table))))))
 
+(ert-deftest agent-repl-test-ws-live-ref-id ()
+  "A live entry answers its ref id; a tombstone and an entry with no ref none."
+  (dolist (case '(((:ref (:id "ws-1")) . "ws-1")
+                  ((:ref (:id "ws-1") :killed-at (0 0)) . nil)
+                  ((:project-dir "/tmp") . nil)))
+    ;; Act / Assert
+    (should (equal (agent-repl--ws-live-ref-id (car case)) (cdr case)))))
+
+(ert-deftest agent-repl-test-both-ref-id-lookups-share-one-rule ()
+  "`agent-repl--ws-by-ref-id' and `agent-repl--ws-ref-id-table' find a
+workspace by `agent-repl--ws-live-ref-id', and neither reads :killed-at
+itself, so the two cannot drift apart."
+  (dolist (fn '("agent-repl--ws-by-ref-id" "agent-repl--ws-ref-id-table"))
+    (with-temp-buffer
+      ;; Arrange
+      (insert-file-contents (expand-file-name "workspace.el" agent-repl-test--module-dir))
+      (emacs-lisp-mode)
+      (goto-char (point-min))
+      (re-search-forward (concat "^(defun " (regexp-quote fn) " "))
+      (beginning-of-defun)
+      ;; Act
+      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
+        ;; Assert
+        (should (string-match-p "agent-repl--ws-live-ref-id" body))
+        (should-not (string-match-p ":killed-at)" body))))))
+
 (ert-deftest agent-repl-test-ws-ref-id-table-answers-a-shared-id-as-the-lookup-does ()
   "Two live workspaces carrying one id answer as `agent-repl--ws-by-ref-id'."
   ;; Arrange

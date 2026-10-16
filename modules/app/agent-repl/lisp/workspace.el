@@ -936,8 +936,7 @@ so answering with one would resurrect a closed workspace."
   (let ((found nil))
     (maphash (lambda (name plist)
                (when (and (null found)
-                          (null (plist-get plist :killed-at))
-                          (equal (plist-get (plist-get plist :ref) :id) id))
+                          (equal (agent-repl--ws-live-ref-id plist) id))
                  (setq found name)))
              agent-repl--workspaces)
     ;; A LOOKUP IS NOT AN EVENT, found or not.  Every caller treats a miss as
@@ -959,13 +958,19 @@ are absent, and where two live workspaces carry one id the first the
 registry yields answers."
   (let ((table (make-hash-table :test 'equal)))
     (maphash (lambda (name plist)
-               (let ((id (plist-get (plist-get plist :ref) :id)))
-                 (when (and id
-                            (null (plist-get plist :killed-at))
-                            (null (gethash id table)))
+               (let ((id (agent-repl--ws-live-ref-id plist)))
+                 (when (and id (null (gethash id table)))
                    (puthash id name table))))
              agent-repl--workspaces)
     table))
+
+(defun agent-repl--ws-live-ref-id (plist)
+  "Return the ref id the workspace whose entry is PLIST answers to, or nil.
+A tombstone answers to none: it has no tab.  The one rule
+`agent-repl--ws-by-ref-id' and `agent-repl--ws-ref-id-table' both find a
+workspace by, so the two can never disagree."
+  (and (null (plist-get plist :killed-at))
+       (plist-get (plist-get plist :ref) :id)))
 
 ;;;; ---- Render state: the roster row's status arm ---------------------
 ;;
