@@ -747,9 +747,9 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 // `unknown_workspace`, the page failed its boot, and the host's adopt waited
 // 10s for a web participant that never came.
 //
-// Registry reads run without pause on the other workspaces from the
+// Registry reads run without pause on the second workspace from the
 // announcement until the first workspace is adopted, so they straddle the
-// promotion; then every other workspace's participants adopt. The harness's
+// promotion; then the second workspace's participants adopt. The harness's
 // warning sweep holds the run to no ERROR, and every read and every adoption
 // must be served.
 //
@@ -763,28 +763,13 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 // false unknown_workspace).
 func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 	t.Parallel()
-	registryReadsAcrossThePromotion(t, 6)
-}
-
-// TestRegistryReadsAcrossTheSuccessorsPromotionAreServedTwo is the cut the
-// cross-product audit proposes: one workspace adopting and one reading
-// across the promotion are every party the assertions need, and more readers
-// only change the race's odds (the deterministic reproductions are wsm's
-// TestAReadThatTookTheHandleBeforeAPromotionStillReads and server's
-// TestAnAdoptionWhoseRegistryReadBreaksFailsRatherThanAnsweringUnknown). It
-// stands beside the six-workspace test until the redundancy prover rules
-// the original deletable, then replaces it.
-func TestRegistryReadsAcrossTheSuccessorsPromotionAreServedTwo(t *testing.T) {
-	t.Parallel()
-	registryReadsAcrossThePromotion(t, 2)
-}
-
-// registryReadsAcrossThePromotion drives WORKSPACES idle workspaces through a
-// successor's promotion, the first adopting while the rest read the registry.
-func registryReadsAcrossThePromotion(t *testing.T, workspaces int) {
-	t.Helper()
-	// Arrange: several idle workspaces, each with its host and web streams
-	// open at the announcement, so each is an expected two-party rendezvous.
+	// Arrange: two idle workspaces, each with its host and web streams open
+	// at the announcement, so each is an expected two-party rendezvous. TWO
+	// IS EVERY PARTY THE ASSERTIONS NEED: one adopts first while the other
+	// reads the registry across the promotion and adopts after it. More
+	// readers only change the race's odds, which this guard does not depend
+	// on (the reproductions above do not either).
+	const workspaces = 2
 	selfRepo, d := drainSelfRepoDaemon(t)
 	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	fixtures := make([]*fixture, workspaces)
