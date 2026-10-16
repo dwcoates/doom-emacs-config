@@ -177,17 +177,36 @@ func TestVerifyMeasuresAKeptCaseOnceAndADeletedOneEveryRun(t *testing.T) {
 	}
 }
 
-func TestVerifyRefusesADeletionSetNamingAnUnknownCase(t *testing.T) {
-	// Arrange
-	cfg, f := verifyConfig(t, ".:TestGone")
+func TestVerifyRefusesADeletionSetNamingAnUnknownSubtest(t *testing.T) {
+	// Arrange: TestB is declared, so only discovery shows TestB/gone is not.
+	cfg, f := verifyConfig(t, ".:TestB/gone")
 	log, _ := quietLog()
 
 	// Act
 	_, err := Measure(context.Background(), cfg, f.exec, log)
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "names cases the measurement holds none of: .:TestGone") {
+	if err == nil || !strings.Contains(err.Error(), "names cases the measurement holds none of: .:TestB/gone") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestVerifyRefusesAnUndeclaredTopLevelTestBeforeDiscovery(t *testing.T) {
+	// Arrange: a stale audit row, its test removed from the source.
+	cfg, f := verifyConfig(t, ".:TestB/x", "./integ:TestGone/sub", ".:TestAlsoGone")
+	log, _ := quietLog()
+
+	// Act
+	_, err := Measure(context.Background(), cfg, f.exec, log)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "names cases no suite's test files declare: ./integ:TestGone/sub, .:TestAlsoGone") {
+		t.Fatalf("err = %v, want both stale rows named", err)
+	}
+	for _, call := range f.calls {
+		if strings.Contains(call, "-test.run") || strings.Contains(call, "go build") {
+			t.Fatalf("ran %q before refusing the deletion set", call)
+		}
 	}
 }
 

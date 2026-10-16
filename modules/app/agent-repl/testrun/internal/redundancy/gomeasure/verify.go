@@ -32,6 +32,35 @@ import (
 // splitDeleted marks the leaves the deletion set names: a leaf by its case
 // ID, or every leaf of a top-level test the set names (qualified by package
 // when the measurement spans several).
+// deletedTopsExist refuses, before discovery, a deletion set naming a case
+// whose top-level test no suite's test files declare: a stale audit row
+// then fails the measurement in seconds, not after discovering every case.
+// A missing subtest is splitDeleted's to find.
+func (m *measurer) deletedTopsExist(tops [][]string) error {
+	declared := map[string]bool{}
+	for i, ts := range tops {
+		for _, top := range ts {
+			declared[m.id(leaf{i, top})] = true
+		}
+	}
+	var unknown []string
+	for _, d := range m.cfg.Delete {
+		top := Top(d)
+		if len(m.suites) > 1 {
+			pkg, name, _ := strings.Cut(d, ":")
+			top = pkg + ":" + Top(name)
+		}
+		if !declared[top] {
+			unknown = append(unknown, d)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("gomeasure: the deletion set names cases no suite's test files declare: %s", strings.Join(unknown, ", "))
+	}
+	return nil
+}
+
 func (m *measurer) splitDeleted(leaves []leaf) (map[leaf]bool, error) {
 	named := map[string]bool{}
 	for _, d := range m.cfg.Delete {

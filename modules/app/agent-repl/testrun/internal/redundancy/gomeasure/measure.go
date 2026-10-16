@@ -246,6 +246,9 @@ func Measure(ctx context.Context, cfg Config, exec Exec, log *run.Log) (*redunda
 		}
 		log.Infof("redundancy: %s: %d top-level tests, %d pinned as log-record assertions", s.Package, len(tops[i]), len(p))
 	}
+	if err := m.deletedTopsExist(tops); err != nil {
+		return nil, err
+	}
 	imports, err := m.importPaths(ctx, cfg.Mutate)
 	if err != nil {
 		return nil, err
