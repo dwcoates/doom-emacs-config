@@ -1007,6 +1007,7 @@ signals."
                 ;; ghost (`agent-repl-host-select').
                 (agent-repl-host--select-in-flight nil)
                 (agent-repl-host--select-queued nil)
+                (agent-repl-host--confirming nil)
                 ;; Real blink-cadence scenarios arm keyed timers.  Give the
                 ;; scenario its own registry and marker table so their later
                 ;; steps cannot fire after the workspace registry unwinds.

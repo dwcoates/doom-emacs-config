@@ -53,6 +53,29 @@ func TestRowAnswersTheLastResolvedRowWithItsRostersRevision(t *testing.T) {
 	}
 }
 
+func TestRevisionAnswersTheLastResolvedRostersRevision(t *testing.T) {
+	// Arrange.
+	r := arrange(t)
+
+	// Act.
+	r.SetOpening(theWS, true)
+
+	// Assert.
+	if got, want := r.Revision(), latest(t, r).GetRevision(); got != want || got == 0 {
+		t.Fatalf("Revision = %d, want the published roster's %d", got, want)
+	}
+}
+
+func TestRevisionIsZeroBeforeAnyRoster(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act / Assert.
+	if got := r.Revision(); got != 0 {
+		t.Fatalf("Revision = %d before any roster, want 0", got)
+	}
+}
+
 func TestRowFollowsALaterResolve(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))

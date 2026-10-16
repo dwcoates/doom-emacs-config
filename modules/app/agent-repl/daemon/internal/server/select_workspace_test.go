@@ -114,6 +114,24 @@ func TestSelectingARevealedMergeWorkspaceRevealsNothingMore(t *testing.T) {
 	}
 }
 
+func TestSelectWorkspaceAnswersTheRosterRevisionItsSelectionIsIn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Deps.Sidebar.(*fakeSidebar).revision = 42
+
+	// Act.
+	resp, err := h.Client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetRosterRevision(); got != 42 {
+		t.Fatalf("roster_revision = %d, want the sidebar's 42", got)
+	}
+}
+
 func TestSelectWorkspaceLetsGoOfEveryHeldBanner(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

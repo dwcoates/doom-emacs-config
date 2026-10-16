@@ -738,8 +738,14 @@ arm this codec does not know is refused as an unknown field."
                 (plist-get value :workspace))))))
 
 (defun agent-repl-wire-decode-select-workspace-success (value)
-  "Decode VALUE as the empty message `SelectWorkspaceSuccess'."
-  (agent-repl-wire--decode-empty "SelectWorkspaceSuccess" value))
+  "Decode VALUE as `SelectWorkspaceSuccess', `(:roster-revision N)'.
+N is the roster revision the selection is in; a revision the wire omits is
+zero, as proto3 writes it."
+  (let ((object (agent-repl-wire--object "SelectWorkspaceSuccess" value)))
+    (agent-repl-wire--check-keys "SelectWorkspaceSuccess" object '(rosterRevision))
+    (list :roster-revision (or (agent-repl-wire--decode-uint64
+                                "SelectWorkspaceSuccess" 'rosterRevision object)
+                               0))))
 
 (defun agent-repl-wire-decode-select-workspace-unknown-workspace (value)
   "Decode VALUE as the empty message `SelectWorkspaceUnknownWorkspace'.

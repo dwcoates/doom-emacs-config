@@ -1386,9 +1386,13 @@ func (f *fakeTopbar) AwaitEdge(t *testing.T) participantEdge { return f.edges.aw
 type fakeSidebar struct {
 	sidebar.Resolver
 	topic publish.Topic[*frontendv1.WorkspaceRoster]
+	// revision is what Revision answers.
+	revision uint64
 }
 
 func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return &f.topic }
+
+func (f *fakeSidebar) Revision() uint64 { return f.revision }
 
 // harness is one running surface over real Connect handlers.
 type harness struct {

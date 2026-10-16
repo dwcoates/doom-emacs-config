@@ -814,8 +814,12 @@ func (s *server) SelectWorkspace(
 	// THE USER CHOSE A WORKSPACE (a switch in Emacs, a handed banner's click),
 	// so no banner made before the choice may steer a later return to Emacs.
 	s.deps.Banners.Forget("a workspace was selected")
+	// THE REVISION IS READ AFTER THE STAMP, whose render published under the
+	// resolver's lock (sidebar.Resolver.Revision): every roster at it or later
+	// carries this selection, so the editor that moved on it is never moved
+	// back by a roster from before it.
 	resp.Result = &agentreplv1.SelectWorkspaceResponse_Success{
-		Success: &agentreplv1.SelectWorkspaceSuccess{},
+		Success: &agentreplv1.SelectWorkspaceSuccess{RosterRevision: s.deps.Sidebar.Revision()},
 	}
 	return connect.NewResponse(resp), nil
 }

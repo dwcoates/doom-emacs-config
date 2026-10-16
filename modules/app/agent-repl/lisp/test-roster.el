@@ -146,6 +146,7 @@ whose calls are the observation."
            (agent-repl-host-reselect-pending nil)
            (agent-repl-host--select-in-flight nil)
            (agent-repl-host--select-queued nil)
+           (agent-repl-host--confirming nil)
            (agent-repl-host-last-request nil)
            (agent-repl-roster--judged-current nil)
            (agent-repl-roster--pushed-at nil)
@@ -3362,3 +3363,61 @@ through `agent-repl-roster-move-frame', and neither switches on its own."
         ;; Assert
         (should (string-match-p "(agent-repl-roster-move-frame " body))
         (should-not (string-match-p "(agent-repl--ws-switch " body))))))
+
+;;;; ---- An answered selection is never moved back by a roster from before it ----
+
+(defun agent-repl-test-roster--at-revision (roster revision)
+  "ROSTER with its revision set to REVISION."
+  (plist-put (copy-sequence roster) :revision revision))
+
+(ert-deftest agent-repl-test-roster-a-roster-from-before-the-answered-selection-is-not-followed ()
+  "The selection answered at revision 7 holds: a roster at 6 naming the
+workspace the user left is deferred, so the frame stays where Emacs moved
+it (2026-10-16: it went back, then forward, on every switch)."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two"
+          agent-repl-host--confirming (cons "two" 7))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--at-revision (agent-repl-test-roster--two-tabs "a") 6))
+    ;; Assert
+    (should (null agent-repl-test-roster--switched))
+    (should (equal agent-repl-host--confirming '("two" . 7)))))
+
+(ert-deftest agent-repl-test-roster-the-roster-carrying-the-answered-selection-releases-it ()
+  "A roster at the answered revision releases the selection and is judged
+as any roster is."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two"
+          agent-repl-host--confirming (cons "two" 7))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--at-revision (agent-repl-test-roster--two-tabs "b") 7))
+    ;; Assert
+    (should (null agent-repl-host--confirming))
+    (should (null agent-repl-test-roster--switched))))
+
+(ert-deftest agent-repl-test-roster-a-later-roster-naming-another-workspace-is-followed ()
+  "Once released, a roster past the answered revision that names another
+workspace is the daemon's newer word, and is followed."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two"
+          agent-repl-host--confirming (cons "two" 7))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--at-revision (agent-repl-test-roster--two-tabs "a") 8))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("one")))))
+
+(ert-deftest agent-repl-test-roster-a-closed-stream-ends-the-wait-for-an-answered-selection ()
+  "The next daemon's revisions start afresh, so the wait ends with the stream."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-host--confirming (cons "two" 7))
+    ;; Act
+    (agent-repl-roster-on-close '(:cancelled))
+    ;; Assert
+    (should (null agent-repl-host--confirming))))

@@ -124,11 +124,25 @@
                  '("SelectWorkspaceRequest" workspace
                    "required message field is absent"))))
 
-(ert-deftest agent-repl-test-wire-host-select-success-is-empty ()
-  "Selection succeeded; the roster stream carries the new `current'."
+(ert-deftest agent-repl-test-wire-host-select-success-carries-its-roster-revision ()
+  "Selection succeeded, in the roster revision the answer names."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-response
+                  "{\"success\":{\"rosterRevision\":\"42\"}}")
+                 '(:arm :success :value (:roster-revision 42)))))
+
+(ert-deftest agent-repl-test-wire-host-select-success-without-a-revision-is-revision-zero ()
+  "proto3 omits a zero revision on the wire; it decodes as zero."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-select-workspace-response "{\"success\":{}}")
-                 '(:arm :success :value nil))))
+                 '(:arm :success :value (:roster-revision 0)))))
+
+(ert-deftest agent-repl-test-wire-host-select-success-refuses-an-unknown-field ()
+  "A field the decoder does not hold is a breach, as for every message."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-select-workspace-response
+                  "{\"success\":{\"later\":1}}")
+                 '("SelectWorkspaceSuccess" later "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-select-error-arm-decodes ()
   "The error arm decodes to its keyword with the cause the daemon named."

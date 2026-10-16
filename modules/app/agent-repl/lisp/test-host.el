@@ -182,6 +182,7 @@ unary rpc can produce, which the contract never collapses into one."
   `(let ((agent-repl-host--by-name (make-hash-table :test 'equal))
          (agent-repl-host--select-in-flight nil)
          (agent-repl-host--select-queued nil)
+         (agent-repl-host--confirming nil)
          (agent-repl-host-last-request nil)
          (agent-repl-host--editor-switches 0)
          (agent-repl-host-automatic-switch nil)
@@ -214,7 +215,7 @@ unary rpc can produce, which the contract never collapses into one."
           (list :response (list :arm :success
                                 :value (list :workspace (agent-repl-test-host--ref)))))
          (agent-repl-test-host--select-answer
-          (list :response (list :arm :success :value nil)))
+          (list :response (list :arm :success :value (list :roster-revision 0))))
          (agent-repl-test-host--mark-viewed-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
@@ -785,7 +786,7 @@ a dead link, not lost to the older one (2026-10-14)."
 
 ;;;; ---- Select: one at a time, the last press wins ----
 
-(defconst agent-repl-test-host--success '(:arm :success :value nil)
+(defconst agent-repl-test-host--success '(:arm :success :value (:roster-revision 0))
   "A SelectWorkspace success answer.")
 
 (defun agent-repl-test-host--subscribe-three ()
@@ -858,14 +859,17 @@ selection sent; a press already passed over is never sent at all."
     ;; Assert
     (should (equal (agent-repl-host-pending-selection) "ws-1"))))
 
-(ert-deftest agent-repl-test-host-pending-selection-clears-on-the-answer ()
-  "Once every selection is answered nothing is pending."
+(ert-deftest agent-repl-test-host-pending-selection-clears-once-the-answered-roster-is-held ()
+  "Once every selection is answered AND the roster carrying it is held,
+nothing is pending; between the two the answered one still is."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe-three)
     (agent-repl-host-select "ws-1")
-    ;; Act
     (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    (should (equal (agent-repl-host-pending-selection) "ws-1"))
+    ;; Act
+    (agent-repl-host-release-confirmed 0)
     ;; Assert
     (should (null (agent-repl-host-pending-selection)))))
 
@@ -2461,7 +2465,7 @@ chose, addressed by the DIR, since the ids were re-minted."
           agent-repl-test-host--select-answer (agent-repl-test-host--standing-down-answer))
     (agent-repl-host-select "ws-1")
     (setq agent-repl-test-host--select-answer
-          (list :response (list :arm :success :value nil)))
+          (list :response (list :arm :success :value (list :roster-revision 0))))
     (let ((conn (agent-repl-connect-open "127.0.0.1:9002")))
       (cl-letf (((symbol-function 'agent-repl--live-ws-names)
                  (lambda () '("ws-2" "ws-1")))
@@ -4114,3 +4118,45 @@ tab opens, never here."
       (agent-repl-host-request-switch "ws-2" 'cycle)
       ;; Assert
       (should (null moved)))))
+
+
+;;;; ---- An answered selection awaits the roster that carries it ----
+
+(ert-deftest agent-repl-test-host-an-answered-selection-stays-pending-until-its-roster ()
+  "The answer names the roster revision the selection is in; until Emacs
+holds that roster the selection stays pending, so a roster from before it
+is deferred rather than followed back (2026-10-16)."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-select "ws-2")
+    ;; Act
+    (agent-repl-test-host--answer-held '(:arm :success :value (:roster-revision 7)))
+    ;; Assert
+    (should (equal agent-repl-host--confirming '("ws-2" . 7)))
+    (should (equal (agent-repl-host-pending-selection) "ws-2"))))
+
+(ert-deftest agent-repl-test-host-release-confirmed-waits-for-the-revision ()
+  "A roster before the answered revision keeps the selection pending; one
+at it or after releases it."
+  (dolist (case '((6 . ("ws-2" . 7)) (7 . nil) (9 . nil)))
+    (agent-repl-test-host--with-harness
+      ;; Arrange
+      (setq agent-repl-host--confirming (cons "ws-2" 7))
+      ;; Act
+      (agent-repl-host-release-confirmed (car case))
+      ;; Assert
+      (should (equal agent-repl-host--confirming (cdr case))))))
+
+(ert-deftest agent-repl-test-host-forget-confirming-ends-the-wait-and-says-why ()
+  "A closed roster stream ends the wait: the next daemon's revisions start
+afresh."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-host--confirming (cons "ws-2" 7))
+    ;; Act
+    (agent-repl-host-forget-confirming "the roster stream closed")
+    ;; Assert
+    (should (null agent-repl-host--confirming))
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.select-unconfirmed ws=ws-2 awaited=7 reason=the roster stream closed"))))
