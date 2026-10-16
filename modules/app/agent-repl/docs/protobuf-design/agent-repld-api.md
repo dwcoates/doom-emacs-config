@@ -21,6 +21,48 @@ contract yet: each section says what the owner has ruled and what is open.
 - Skill names start with `agent-repl-`; slash completion matches by substring
   (landed 2026-10-16), so `/profile` still finds `/agent-repl-profile`.
 
+## Core design principles
+
+Owner-stated, project-wide; every sketch is checked against them before it is
+offered.
+
+1. NO DEFAULTS. Every create and every merge names each of its choices; each
+   choice and value is documented in the proto comments and the skills.
+   Consequences: no `optional` field may stand for an implicit choice (the
+   context origin is a required oneof with a `fresh` arm, not an unset
+   field). Reopens: the "optional fork source, unset is fresh" ruling.
+   Does not claim: that ANCILLARY settings (model, priority) lose their
+   defaults; it governs the topology and landing choices.
+2. THE DAEMON ENFORCES THE RULES. Every combination the rules refuse is
+   refused by the daemon; skills and proto comments state the same rules but
+   are never the enforcement. Consequences: wherever the daemon lacks the
+   fact a rule needs, the contract must carry it (a gap is an API change, not
+   a skill caveat). Does not claim: that callers may skip stating a choice
+   because the daemon would refuse a wrong one.
+3. A BRANCH OWNED BY A WORKSPACE LANDS ONLY INTO THAT WORKSPACE; landing it
+   anywhere else is that workspace's responsibility. A branch cut from main
+   lands only on main. Consequences: the branch source must distinguish main,
+   a workspace's branch, and a branch no workspace owns. Reopens: the async
+   merge's "any named branch onto the requester's target".
+4. WHOEVER HOLDS THE WORK'S CONTEXT LANDS IT. Forked from the branch's owner,
+   the new workspace lands itself; otherwise the owner arbitrates and lands,
+   told by a required notice (with a daemon addendum), reopened if closed.
+   Does not claim: any guard against landing into a checkout its agent is
+   editing.
+5. WORKSPACES THAT ARE BRANCHED FROM OR FORKED FROM ARE TOLD: a brief notice
+   when the derived workspace is created, lands, or closes without landing;
+   one combined notice when both.
+6. A SUBAGENT'S WORK LANDS ONLY THROUGH AN ASYNC MERGE, forked from the
+   workspace that spawned the subagent, onto main or into that workspace's
+   branch. No subagent transcript is ever forked.
+7. AN ASYNC MERGE FORKS WHEN IT STARTS, not when it is requested.
+8. THE AGENT API IS RPC ONLY. No agent-facing operation writes a command file;
+   the command-file ingress is retired.
+
+## Landed changes
+
+(none yet)
+
 ## No defaults (ruled 2026-10-16)
 
 - Creating and merging workspaces have NO defaults. Every create names its
