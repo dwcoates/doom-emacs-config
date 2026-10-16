@@ -16,12 +16,20 @@ import (
 // The pidfd needs no close-on-exec mark of its own: pidfd_open(2) always sets
 // O_CLOEXEC on the descriptor it answers, so it never leaks into a child.
 func WaitProcessExit(ctx context.Context, pid int) error {
+	_, err := awaitExitEvent(ctx, pid)
+	return err
+}
+
+// awaitExitEvent is WaitProcessExit, answering whether the exit was seen.
+// pidfd_open(2) opens a zombie too, so its ESRCH is a process already reaped,
+// whose files are released: seen.
+func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		if errors.Is(err, unix.ESRCH) {
-			return nil
+			return true, nil
 		}
-		return fmt.Errorf("pidfd_open: %w", err)
+		return false, fmt.Errorf("pidfd_open: %w", err)
 	}
 	defer unix.Close(fd)
 	timeout := -1
@@ -35,11 +43,11 @@ func WaitProcessExit(ctx context.Context, pid int) error {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("wait for the exit: %w", err)
+			return false, fmt.Errorf("wait for the exit: %w", err)
 		}
 		if n == 0 {
-			return context.DeadlineExceeded
+			return false, context.DeadlineExceeded
 		}
-		return nil
+		return true, nil
 	}
 }
