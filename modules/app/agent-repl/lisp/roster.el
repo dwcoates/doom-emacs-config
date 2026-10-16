@@ -75,6 +75,7 @@
 (declare-function agent-repl--ws-rename-persp "workspace" (old new))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
+(declare-function agent-repl--ws-ref-id-table "workspace" ())
 (declare-function agent-repl--ws-log-name "workspace" (ws))
 (declare-function agent-repl--refresh-magit-status-for-dir "session" (dir &optional ws))
 ;; W2-A's names (host.el, daemon-link.el).  Declared, never defined here.
@@ -1096,24 +1097,30 @@ push carried for the row (nil on a first sighting), WS is the tab\='s
 workspace or nil when no tab exists for the id yet, and SCOPE is the log
 sink to attribute a record about the row to.
 
+EVERY ROW'S WS IS READ FROM THE REGISTRY AS IT STOOD WHEN THE WALK BEGAN
+\(`agent-repl--ws-ref-id-table'), one scan for the whole push rather than
+one per row: the push is applied against one registry, and no FN opens or
+closes a tab.
+
 THE ONE PLACE A PUSH IS COMPARED AGAINST THE ONE BEFORE IT.  Both
 readers of that comparison — the FINISH EDGE and the STATUS CHANGE —
 walk through here, so there is one answer to \"what changed in this
 push\" rather than two tables drifting apart.  It must run BEFORE
 `agent-repl-roster--record-statuses\=', which is what makes this push\='s
 arms the next push\='s PREVIOUS."
-  (dolist (entry (agent-repl-roster-walk roster))
-    (let* ((row (plist-get entry :row))
-           (id (agent-repl-roster-row-id row))
-           (current (agent-repl-roster-row-status row))
-           (previous (gethash id agent-repl-roster--status-by-id))
-           (ws (agent-repl--ws-by-ref-id id))
-           (scope (if ws
-                      ws
-                    '(:agent-repl-central
-                      "a roster row without a tab has no workspace sink"))))
-      (funcall fn (list :row row :id id :ws ws :scope scope
-                        :previous previous :current current)))))
+  (let ((names (agent-repl--ws-ref-id-table)))
+    (dolist (entry (agent-repl-roster-walk roster))
+      (let* ((row (plist-get entry :row))
+             (id (agent-repl-roster-row-id row))
+             (current (agent-repl-roster-row-status row))
+             (previous (gethash id agent-repl-roster--status-by-id))
+             (ws (gethash id names))
+             (scope (if ws
+                        ws
+                      '(:agent-repl-central
+                        "a roster row without a tab has no workspace sink"))))
+        (funcall fn (list :row row :id id :ws ws :scope scope
+                          :previous previous :current current))))))
 
 (defun agent-repl-roster--run-finish-edges (roster)
   "Run `agent-repl-roster-finish-functions' for every finish edge in ROSTER.

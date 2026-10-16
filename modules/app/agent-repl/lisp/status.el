@@ -20,7 +20,7 @@
 (declare-function agent-repl--register-timer "core")
 (declare-function agent-repl--ws-add-activated-hook "workspace")
 (declare-function agent-repl--ws-after-system-load "workspace")
-(declare-function agent-repl--ws-by-ref-id "workspace")
+(declare-function agent-repl--ws-ref-id-table "workspace")
 (declare-function agent-repl--ws-current-log-name "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
@@ -1466,12 +1466,14 @@ finished must not paint a marker the daemon has already retracted."
       (progn
         (remhash ws agent-repl-status--marker-on)
         (agent-repl--log ws "elisp.status.attention-cleared: ws=%s" ws)
-        (agent-repl--force-tab-bar-redraw))
-    (agent-repl--log-verbose ws "elisp.status.attention-cleared: ws=%s already-clear" ws)))
+        (agent-repl--force-tab-bar-redraw))))
 
 (defun agent-repl-status-sync-attention (roster)
   "Follow ROSTER's attention markers.
 Blink then steady where a marker is set, cleared where it is not.
+Each row's workspace is read from one `agent-repl--ws-ref-id-table' built
+for the push, so the walk costs the rows plus the workspaces, not their
+product.
 Registered on `agent-repl-roster-update-functions'.
 
 A marker that ARRIVES on a row runs the canonical cadence — the cadence
@@ -1481,18 +1483,19 @@ merely PERSISTS across a re-push is left alone: re-blinking on every
 unrelated roster push would blink at the daemon's push rate rather than
 at the notification's.  A marker that LEAVES is cleared, cancelling any
 blink still in flight."
-  (dolist (entry (agent-repl-roster-walk roster))
-    (let* ((row (plist-get entry :row))
-           (ws (agent-repl--ws-by-ref-id (agent-repl-roster-row-id row))))
-      (when ws
-        (if (agent-repl-roster-row-attention-p row)
-            (unless (agent-repl-status-attention-visible-p ws)
-              ;; Marked visible BEFORE the cadence is armed: the first step
-              ;; is a timer, so a second push landing before it fires would
-              ;; otherwise see no marker and restart the blink.
-              (puthash ws t agent-repl-status--marker-on)
-              (agent-repl-status-blink-tab ws))
-          (agent-repl-status-clear-attention ws))))))
+  (let ((names (agent-repl--ws-ref-id-table)))
+    (dolist (entry (agent-repl-roster-walk roster))
+      (let* ((row (plist-get entry :row))
+             (ws (gethash (agent-repl-roster-row-id row) names)))
+        (when ws
+          (if (agent-repl-roster-row-attention-p row)
+              (unless (agent-repl-status-attention-visible-p ws)
+                ;; Marked visible BEFORE the cadence is armed: the first step
+                ;; is a timer, so a second push landing before it fires would
+                ;; otherwise see no marker and restart the blink.
+                (puthash ws t agent-repl-status--marker-on)
+                (agent-repl-status-blink-tab ws))
+            (agent-repl-status-clear-attention ws)))))))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-status-sync-attention)
 
