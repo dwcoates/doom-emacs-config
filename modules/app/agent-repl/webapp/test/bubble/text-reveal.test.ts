@@ -8,6 +8,7 @@ import {
   applyTextReveal,
   clearTextReveal,
   fullTextOf,
+  wholeTextOf,
 } from "../../src/bubble/text-reveal.js";
 
 /** A detached root holding HTML. */
@@ -129,5 +130,28 @@ describe("fullTextOf", () => {
     const text = fullTextOf(root);
     // Assert
     expect(text).toBe("hello world");
+  });
+});
+
+describe("wholeTextOf", () => {
+  it("answers a truncated node's whole text", () => {
+    // Arrange
+    const root = document.createElement("p");
+    root.textContent = "hello world";
+    applyTextReveal(root, 3);
+
+    // Act
+    const whole = wholeTextOf(root.firstChild as Text);
+
+    // Assert
+    expect([whole, (root.firstChild as Text).data]).toEqual(["hello world", "hel"]);
+  });
+
+  it("answers an untouched node's own text", () => {
+    // Arrange
+    const node = document.createTextNode("plain");
+
+    // Act / Assert
+    expect(wholeTextOf(node)).toBe("plain");
   });
 });
