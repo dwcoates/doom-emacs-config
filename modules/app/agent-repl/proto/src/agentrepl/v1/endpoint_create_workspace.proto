@@ -135,6 +135,27 @@ message CreateWorkspaceOneShot {
 
   // The one-shot's commission. A one-shot IS its prompt — always set.
   conversation.v1.UserSaid prompt = 1;
+
+  // The workspace the commission is ABOUT, when the one-shot was asked for
+  // from inside another workspace to fix something wrong with it (a defect in
+  // its feed, its state, its behavior). UNSET = the commission stands on its
+  // own words. PRESENT = the daemon opens the commission with a note naming
+  // this workspace — its name, worktree and branch — as the one the cited
+  // issue corresponds to, so the agent investigates that workspace's logs and
+  // records rather than its own. The context workspace is NOT the one-shot's
+  // parent: the one-shot is still top-level, cut from and merging into the
+  // primary branch, and nothing of the context workspace's conversation or
+  // worktree is carried over.
+  optional CreateWorkspaceOneShotContext context = 4;
+}
+
+// The workspace a one-shot's commission concerns.
+message CreateWorkspaceOneShotContext {
+  // The workspace the cited issue corresponds to, as the roster served it.
+  // Must be a workspace the daemon's registry holds; a ref it does not hold
+  // is refused with `CreateWorkspaceError.unknown_context_workspace` before
+  // anything is minted.
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // The spawning parent and, optionally, a conversation fork from it.
@@ -246,6 +267,8 @@ message CreateWorkspaceError {
     // workspace will be created under it when the requesting turn ends
     // (agentrepl.v1.MergeWorkspaceAsync.name).
     CreateWorkspaceNameReserved name_reserved = 18;
+    // The one-shot's context workspace is not in the daemon's registry.
+    CreateWorkspaceUnknownContextWorkspace unknown_context_workspace = 19;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -285,6 +308,12 @@ message CreateWorkspaceUnknownForkSource {
 }
 // Names the fork source that has no conversation.
 message CreateWorkspaceForkSourceHasNoConversation {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the one-shot context workspace the registry does not hold
+// (CreateWorkspaceOneShot.context).
+message CreateWorkspaceUnknownContextWorkspace {
+  // The context workspace as the request named it.
   workspace.v1.WorkspaceRef workspace = 1;
 }
 // Names the reserved branch. A supplied name skips the disambiguation a
