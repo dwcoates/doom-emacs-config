@@ -274,64 +274,6 @@ func TestQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
 // The converter fault window: `!fault-converter`, `!fault-recover`.
 // ===========================================================================
 
-// TestConverterDefectOpensADegradedWindow drives `!fault-converter`: ONE
-// malformed vendor message (a `hook_started` whose `hook_id` is the empty
-// string — "an identity the converter requires and refuses to invent") in an
-// otherwise ordinary, SUCCEEDING turn.
-//
-// Two facts, both from the scenario's own arms line ("SessionFault.
-// converter_defect with an OPEN SessionDegradedWindow — the diagnostics arm,
-// reached without any rpc failing. The malformed message itself reaches NO
-// conversation.v1 arm, which is the point"):
-//
-//  1. the turn still CONCLUDES — a defective vendor message does not stop a
-//     turn (failures.ts's own header);
-//  2. the malformed hook draws NO hook card, and the shim's diagnostics
-//     carry an OPEN degraded window, which the daemon projects onto the
-//     topbar as a TopbarDegradedWindowWarningDetail with `open` set.
-//
-// As in the store-outage area, the component/reason strings are NOT pinned:
-// topbar.proto commits only to "a component degraded, for a stated reason".
-func TestConverterDefectOpensADegradedWindow(t *testing.T) {
-	t.Parallel()
-	// Arrange: a converter defect is exactly a workspace health fault.
-	w := NewWorld(t, WorldOpts{})
-	w.ExpectWarnings("daemon.health.open_fault")
-	ws, configDir := pfNewWorkspace(t, w)
-	topbar := w.WatchTopbar(ws)
-	defer topbar.Close()
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, configDir, "fault-converter")
-
-	// Assert: the turn ended ordinarily.
-	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
-		t.Fatalf("turn ended = %v, want a plain conclusion (an unconvertible message never stops a turn)", ended)
-	}
-	// Assert: the malformed hook announcement reached NO arm — no hook card.
-	if h := hookRow(rows); h != nil {
-		t.Fatalf("feed drew a hook card %v from the MALFORMED hook_started, want none (it reaches no conversation.v1 arm)", h)
-	}
-	// Assert: the diagnostics arm — an OPEN degraded window on the topbar.
-	view := pfAwaitView(t, w, topbar, "an open degraded window from the converter defect", func(v *frontendv1.TopbarView) bool {
-		return pfOpenDegradedWindow(v) != nil
-	})
-	open := pfOpenDegradedWindow(view)
-	if open == nil {
-		t.Fatalf("topbar push matched an open degraded window but re-scanning it found none")
-	}
-	if open.GetComponent().GetText() == "" {
-		t.Errorf("degraded window component = %q, want a stated component (TopbarWarningComponent)", open.GetComponent().GetText())
-	}
-	if open.GetReason().GetText() == "" {
-		t.Errorf("degraded window reason = %q, want a stated reason (TopbarWarningDetailLine)", open.GetReason().GetText())
-	}
-	if open.GetBeganAtMs() <= 0 {
-		t.Errorf("degraded window began_at_ms = %d, want a positive epoch-ms timestamp", open.GetBeganAtMs())
-	}
-}
-
 // TestConverterRecoveryClosesTheDegradedWindow is the pair's second half:
 // after the defect, `!fault-recover` sends the SAME hook announcement
 // WELL-FORMED, and `fault-recover`'s arms line is "the diagnostics returning

@@ -132,19 +132,6 @@ func awaitOpenQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, fir
 	})
 }
 
-// awaitSettledQuestion waits for the SAME upsert-keyed row (by FeedId) to
-// carry a non-open state — either FeedQuestionAnswered or FeedQuestionExpired.
-func awaitSettledQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, id *frontendv1.FeedId) *frontendv1.FeedRow {
-	t.Helper()
-	return qAwaitFeedRow(t, w, ws, "question "+id.GetValue()+" to settle", func(row *frontendv1.FeedRow) bool {
-		if row.GetId().GetValue() != id.GetValue() {
-			return false
-		}
-		q := row.GetQuestion()
-		return q != nil && q.GetOpen() == nil
-	})
-}
-
 // answerQuestion submits an AnswerQuestionRequest and fails the test loudly
 // on anything but AnswerQuestionSuccess — every test in this file expects its
 // answer to be accepted; a refusal here is a test bug, not an assertable arm.
@@ -161,80 +148,6 @@ func answerQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, questi
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("AnswerQuestion = %v, want success", resp.Msg)
 	}
-}
-
-// givenAnswer finds the FeedQuestionGivenAnswer matching a question's header
-// (the settled row's own re-stated chip, FeedQuestionGivenAnswer.header) —
-// never by position, mirroring the wire's own "echo by text" contract.
-func givenAnswer(t *testing.T, answered *frontendv1.FeedQuestionAnswered, header string) *frontendv1.FeedQuestionGivenAnswer {
-	t.Helper()
-	for _, a := range answered.GetAnswers() {
-		if a.GetHeader().GetText() == header {
-			return a
-		}
-	}
-	t.Fatalf("no given answer for header %q in %v", header, answered)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// #89 QuestionSingleSelect — question-single-select.
-//
-// `!ask-single` (questions.ts ASK_SINGLE): one single-select question, four
-// options, asked through the shim's own gate. arms (per the scenario's own
-// doc field): "AgentQuestion.start choices=single_select +
-// AgentQuestionSuccess.outcome=answered".
-// ---------------------------------------------------------------------------
-
-func TestQuestionSingleSelect(t *testing.T) {
-	t.Parallel()
-	w, ws := newQuestionWorkspace(t)
-	const question = "How do you want the new branch set up?"
-	const chosenLabel = "New worktree off master"
-
-	turn := SubmitPrompt(t, w, ws, "!ask-single")
-
-	open := awaitOpenQuestion(t, w, ws, question)
-	items := open.GetQuestion().GetQuestions()
-	if len(items) != 1 {
-		t.Fatalf("ask-single batch = %d questions, want 1", len(items))
-	}
-	single := items[0].GetSingleSelect()
-	if single == nil {
-		t.Fatalf("ask-single question = %v, want single_select", items[0])
-	}
-	if len(single.GetOptions()) != 4 {
-		t.Fatalf("ask-single options = %d, want 4", len(single.GetOptions()))
-	}
-	var sawChosen bool
-	for _, opt := range single.GetOptions() {
-		if opt.GetLabel().GetText() == chosenLabel {
-			sawChosen = true
-		}
-	}
-	if !sawChosen {
-		t.Fatalf("ask-single options = %v, want one labeled %q", single.GetOptions(), chosenLabel)
-	}
-
-	answerQuestion(t, w, ws, open.GetId(), &agentreplv1.AnswerQuestionAnswer{
-		QuestionText: question,
-		Chosen:       []string{chosenLabel},
-	})
-
-	settled := awaitSettledQuestion(t, w, ws, open.GetId())
-	answered := settled.GetQuestion().GetAnswered()
-	if answered == nil {
-		t.Fatalf("ask-single settled as %v, want FeedQuestionAnswered", settled.GetQuestion())
-	}
-	given := givenAnswer(t, answered, items[0].GetHeader().GetText())
-	if want := []string{chosenLabel}; len(given.GetChosen()) != 1 || given.GetChosen()[0] != want[0] {
-		t.Errorf("ask-single given.Chosen = %v, want %v", given.GetChosen(), want)
-	}
-	if given.GetOtherText() != nil {
-		t.Errorf("ask-single given.OtherText = %v, want unset (a listed choice, not free text)", given.GetOtherText())
-	}
-
-	AwaitTurnEnded(t, w, ws, turn)
 }
 
 // TestAnOpenQuestionIsNamedAndGreenOnTheStripAndTheRail pins the owner's
@@ -268,39 +181,3 @@ func TestAnOpenQuestionIsNamedAndGreenOnTheStripAndTheRail(t *testing.T) {
 	})
 	AwaitTurnEnded(t, w, ws, turn)
 }
-
-// ---------------------------------------------------------------------------
-// #92 QuestionUnanswered — question-unanswered.
-//
-// GROUNDING: the golden itself is a real, captured vendor recording (see this
-// file's header) whose own terminal is `success.completed`
-// (MANIFEST.md: "question-unanswered | ... | success.completed"). The FAKE
-// scenario reproduces the shape by having the shim's `canUseTool` gate
-// resolve DENY, per its own doc comment: "the gate's DENY becomes an error
-// tool_result and the batch ends unanswered... an expiry is modeled as this
-// same denial".
-//
-// OPEN QUESTION (flagging rather than guessing, per this area's binding
-// instruction): the only DAEMON-API-LEVEL lever this suite found for
-// resolving an open question's gate as DENY without answering it is the one
-// `shim.md` documents generically for "every teardown path — interrupt,
-// shutdown, SDK abort" (§"What the shim IS", the PERMISSION-CALLBACK
-// LIVENESS bullet): "resolves ALL pending permission callbacks (as denied)
-// before proceeding." `AnswerQuestionRequest` itself
-// (endpoint_answer_question.proto) has NO deny arm — only real answers — so
-// this test uses the daemon's `Interrupt` rpc (target: turn) as that
-// documented teardown path. Whether the turn that follows reaches
-// `success.completed` (as the real capture did — captured, presumably,
-// against a DIFFERENT denial path this suite has no rpc-level equivalent
-// for) or `success.interrupted` (Interrupt's own ordinary outcome) is NOT
-// verified here — verifying it would mean reading the shim's/daemon's
-// production translation of an interrupt-during-an-open-question, which this
-// area's instructions forbid. This test therefore asserts only what is
-// structurally certain from the proto alone: the question settles OUT of its
-// open state, and — since `FeedQuestion.state` has exactly three arms
-// (open/answered/expired) and nobody answered — it must be
-// `FeedQuestionExpired`, never `FeedQuestionAnswered`. If the project lead's
-// run instead shows the turn's terminal disagreeing with the capture's
-// `success.completed`, that is this open question resolving, not a
-// production defect this test should paper over.
-// ---------------------------------------------------------------------------

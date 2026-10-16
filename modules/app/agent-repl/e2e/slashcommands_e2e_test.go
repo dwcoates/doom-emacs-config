@@ -177,35 +177,6 @@ type scShapeAUserRecord struct {
 // Scenario driven: SLASH_LOCAL ("!slash").
 // ---------------------------------------------------------------------------
 
-// TestVendorAnsweredSlashCommand drives "!slash" and asserts the turn draws
-// as an ORDINARY concluded turn whose answering response is exactly
-// SLASH_LOCAL's own closing text — never a distinct unit for the vendor's
-// `local_command_output` system message or the `system`/`local_command`
-// transcript record it also writes (per daemon.md's "Failure classification"
-// / frontend/v1/failure.proto: entry-less vendor-specific residue is never a
-// feed row). SLASH_LOCAL is deliberately built with NO reasoning prelude
-// (unlike every other turn — the vendor answered this one itself), but
-// thinking has no feed-row arm of its own regardless of scenario
-// (frontend/v1/feed.proto's FeedTurnActivity oneof carries no thinking arm),
-// so that distinction is not independently observable at this wire and this
-// test does not attempt to assert it.
-func TestVendorAnsweredSlashCommand(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	w := NewWorld(t, WorldOpts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, w.Daemon, repo.Dir)
-
-	// Act.
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "slash")
-
-	// Assert.
-	const wantConclusion = "Answered the slash command locally."
-	if got := scAnsweringResponseProse(t, w, ws, turn); got != wantConclusion {
-		t.Errorf("answering response prose = %q, want %q", got, wantConclusion)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // #62 — SlashShapeAUnnamed: the negative — a record naming NO command.
 // UNGROUNDED/INVENTED (see file header). Scenario driven:

@@ -280,6 +280,15 @@ requests) on the webapp side and `cmd.Wait` over a channel on the Go side.
 Nine areas, nine Go tests, nine vitest files, **63 vitest tests**, all green
 over two consecutive full runs. Each area's file header is its own spec.
 
+**Retired since (test tier audit, 2026-10-14 to 2026-10-16).** F1, F2, F3 and
+F5 to F9 were deleted: each asserted, through one shared page, what the
+webapp's fake-daemon integration tier and the Go e2e areas already pin. The
+covering test for each is named in
+`docs/investigations/2026-10-14-test-tier-audit-e2e-edj.md`. F4
+(`cards.layer.test.ts`) stays as the only driver of
+`!perm-allow-standing-mode`, alongside the client-log area and the restart
+handover. The sections below are the as-built record.
+
 ### The family -> scenario map, established EMPIRICALLY
 
 Every `!name` this layer submits is a fake-SDK scenario a Go area test already

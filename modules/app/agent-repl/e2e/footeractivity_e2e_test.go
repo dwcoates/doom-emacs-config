@@ -56,28 +56,6 @@ func footerTier(v *frontendv1.FooterView, tier protoreflect.Name) protoreflect.M
 	return cell.Get(cell.Descriptor().Fields().ByName("salient")).Message()
 }
 
-// footerSalientKind answers the salient line's kind message when it is the
-// named kind, or nil.
-func footerSalientKind(v *frontendv1.FooterView, kind protoreflect.Name) protoreflect.Message {
-	salient := footerTier(v, "salient")
-	if salient == nil {
-		return nil
-	}
-	field := oneofarm.Field(salient, "kind")
-	if field == nil || field.Name() != kind {
-		return nil
-	}
-	return salient.Get(field).Message()
-}
-
-// footerNotification answers the standing push notification's text, or "".
-func footerNotification(v *frontendv1.FooterView) string {
-	if m := footerSalientKind(v, "notification"); m != nil {
-		return m.Interface().(*frontendv1.FooterStatusActivityNotification).GetText()
-	}
-	return ""
-}
-
 // footerEnduringUsage answers the enduring line's usage when the cell is
 // unpinned and the daemon chose the usage line, or nil.
 func footerEnduringUsage(v *frontendv1.FooterView) *frontendv1.FooterActivityEnduringUsage {

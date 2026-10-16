@@ -54,7 +54,6 @@ package e2e
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -153,54 +152,6 @@ func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, a
 // verbatim "spawn ENOENT" — and `echo` is restated connected. A daemon that
 // treated "absent from the newest catalog" as "gone" would fail this.
 // ===========================================================================
-
-func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-
-	// Arrange: STATE the five-server catalog on the daemon first. The shim
-	// probes mcpServerStatus() at StartSession too, but those start-time
-	// pushes predate this test's daemon subscription, so the only catalog
-	// this test can rely on the daemon having taken is one a turn CLOSE
-	// pushed (engine/session.ts reprobeSessionFacts). `!mcp-all` is that
-	// turn, and it is what makes the narrowing below a NARROWING rather than
-	// the first catalog the daemon ever saw.
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-all")
-	awaitMcpPanel(t, w, ws, func(v *frontendv1.McpPanelView) bool {
-		return v != nil && len(v.GetRows()) == 5
-	})
-
-	// Act: narrow the catalog to the connected server alone.
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-healthy")
-	panel := awaitMcpPanel(t, w, ws, func(v *frontendv1.McpPanelView) bool {
-		return v != nil && len(v.GetRows()) == 5
-	})
-
-	// Assert: every row still stands, with its health unchanged.
-	wantHealth := map[string]string{
-		"echo":         "connected",
-		"broken":       "failed",
-		"needs-login":  "needs_auth",
-		"slow":         "pending",
-		"switched-off": "disabled",
-	}
-	for _, row := range panel.GetRows() {
-		want, ok := wantHealth[row.GetName()]
-		if !ok {
-			t.Errorf("McpPanelView row for unexpected server %q: %v", row.GetName(), row)
-			continue
-		}
-		if got := mcpRowHealth(row); got != want {
-			t.Errorf("after !mcp-healthy, McpPanelRow %q health = %q, want %q — a narrowed catalog states nothing about the servers it omits",
-				row.GetName(), got, want)
-		}
-		delete(wantHealth, row.GetName())
-	}
-	for name := range wantHealth {
-		t.Errorf("after !mcp-healthy, the /mcp panel dropped the row for %q; only an UNSET health arm may drop a row (mcp_panel rows are keyed by name)", name)
-	}
-}
 
 // ===========================================================================
 // The five-hour rate-limit window — `!rate-limit-five-hour`
@@ -360,50 +311,6 @@ func sfSwitchedToUnread(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, tu
 	sfAwaitUnreadable(t, w, ws.GetDir(), reason)
 }
 
-// sfAssertNoCaveat fails if the line carries an account-usage outcome: the
-// ruling retired the unread caveat, and a daemon that still filled it would
-// draw a warning the owner removed.
-func sfAssertNoCaveat(t *testing.T, line *frontendv1.FooterActivityEnduringUsage) {
-	t.Helper()
-	if line.GetSample() != nil {
-		t.Errorf("FooterActivityEnduringUsage.sample = %v, want UNSET: an unread sample draws no caveat (owner ruling, fc4917be4)", line.GetSample())
-	}
-}
-
-func TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		reason   string
-		scenario string
-	}{
-		{reason: "service_unavailable", scenario: "usage-service-unavailable"},
-		{reason: "window_unavailable", scenario: "usage-window-unavailable"},
-		{reason: "utilization_unavailable", scenario: "usage-utilization-unavailable"},
-		{reason: "sampling_failure", scenario: "usage-sampling-failure"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.reason, func(t *testing.T) {
-			t.Parallel()
-			// Arrange: the session's start-time probe READ the available
-			// shape, so the figures standing are figures actually read.
-			w, ws, _ := sfNewWorkspace(t)
-
-			// Act
-			sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario), tc.reason)
-			line := sfAwaitUsage(t, w, ws)
-
-			// Assert: ALONGSIDE, never instead of. The five-hour figure the
-			// last readable sample filed is still drawn, and no caveat is
-			// drawn for the unread.
-			if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
-				t.Errorf("FooterAllowance(session).utilization = %v, want the standing %v left alone by the %s sample",
-					got, sfFiveHourUtilization, tc.reason)
-			}
-			sfAssertNoCaveat(t, line)
-		})
-	}
-}
-
 // A SAMPLED WINDOW RESETS IN THE FUTURE, so the drawn countdown runs.
 //
 // THE DEFECT THIS PINS: catalogs.ts fakeAccountUsage used to state its reset
@@ -434,28 +341,6 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 	if got := line.GetSession().GetResetsAtS(); got <= readAt {
 		t.Errorf("FooterAllowance(session).resets_at_s = %d, want an instant after the read at %d: a sampled window must reset in the FUTURE, never at `resets in 0m`",
 			got, readAt)
-	}
-}
-
-// THE SAMPLING FAILURE KEEPS THE SHIM'S OWN CAUSE. The arm exists so a reader
-// learns WHY the shim could not sample. The strip no longer draws the unread
-// (owner ruling, fc4917be4), so the daemon's breadcrumb is where the cause
-// lands, and a cause dropped there would leave the record saying only
-// "something".
-func TestAccountUsageSamplingFailureCarriesACause(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-sampling-failure")
-	sfAwaitConclusion(t, w, ws, turn,
-		"The account-usage probe now answers with the sampling_failure shape.")
-
-	// Assert
-	record := sfAwaitUnreadable(t, w, ws.GetDir(), "sampling_failure")
-	if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, "transcript scan") {
-		t.Errorf("the sampling failure's breadcrumb cause = %q, want the shim's own account of what failed (catalogs.ts: the local transcript scan)", cause)
 	}
 }
 

@@ -182,47 +182,6 @@ func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	}
 }
 
-// TestInterruptedTurnAnchorsTheRewindOnItsOwnRecord — interrupting a turn
-// mid-tool is ordinary use: the turn's tool result lands after its last
-// assistant record. That result is the turn's own real record, so it advances
-// the anchor (ruled 2026-10-06), the next rewind keeps it, and nothing is
-// refused.
-func TestInterruptedTurnAnchorsTheRewindOnItsOwnRecord(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, shimLog := keepaliveWorld(t)
-	turn := SubmitPrompt(t, w, ws, "!interrupt")
-	w.Daemon.AwaitLogRecord(shimLog, "the interrupt scenario's tool call to be live",
-		func(r harness.LogRecord) bool { return r.Message == "fake mid-tool interrupt turn" })
-	resp, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: ws,
-		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	}))
-	if err != nil {
-		t.Fatalf("Interrupt(turn): %v", err)
-	}
-	if resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
-		t.Fatalf("Interrupt(turn) = %v, want success.interrupted_turn", resp.Msg)
-	}
-	AwaitTurnEnded(t, w, ws, turn)
-
-	// Act
-	rewind := w.Daemon.AwaitLogRecord(shimLog, "the first rewind before a beat", isRewind("keepalive"))
-
-	// Assert
-	if got := fmt.Sprint(rewind.Context["anchor_turn_id"]); got != turn.GetValue() {
-		t.Errorf("the rewind anchors on turn %q, want the interrupted turn %q", got, turn.GetValue())
-	}
-	if got := spanKinds(t, rewind, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
-		t.Errorf("the rewind discards span kinds %v, want exactly the keep-alive", got)
-	}
-	for _, r := range shimRecords(t, shimLog) {
-		if isRefusal(r) {
-			t.Errorf("the shim refused a rewind %v, want the interrupted turn's record anchored", r.Context)
-		}
-	}
-}
-
 // TestStopReplayedByEveryRewindNeverLoops — the ship-gns loop (2026-10-02):
 // each rewind replaced the vendor query, the old query's task was reported
 // stopped, and the vendor answered that stop in a turn of its own. Driven by
