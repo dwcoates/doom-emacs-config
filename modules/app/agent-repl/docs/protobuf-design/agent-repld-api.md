@@ -174,7 +174,7 @@ invariant), how common it is, and example situations.
 | O5 | other (Y) | main | any other branch | NO (owner, 2026-10-16) | never | none |
 | F1 | fresh | main | main | yes, situational (owner, 2026-10-16) | situational | a truly tangential bug the current context does not help with; a review that must not be biased by the existing context |
 | F2 | fresh | W | W | yes, situational; W arbitrates and lands, since the new workspace did not fork W's context (owner, 2026-10-16) | situational | as F1, on W's unlanded work |
-| U1 | the subagent's own context (typically) | a branch no workspace owns (the subagent's) | main | yes (owner, 2026-10-16) | common | landing a subagent's work: a workspace bootstrapped from the subagent's branch and the subagent's context, so it can repair and land that work |
+| U1 | forked from the workspace that spawned the subagent (owner, 2026-10-16) | a branch no workspace owns (the subagent's) | main | yes | common | landing a subagent's work: the spawning workspace knows why the subagent was dispatched and how to work with it, which is enough context to repair and land the work |
 
 ## Enforcement and its gaps
 
@@ -187,12 +187,11 @@ today, and what it lacks:
   when needed); a forgotten one does not.
 - An unowned branch: resolvable as a git ref; its worktree may or may not still
   exist, which does not matter since a create always cuts from the branch tip.
-- GAP: a SUBAGENT'S CONTEXT. A subagent's transcript lives under its parent
-  session (`<session>/subagents/agent-<id>.jsonl`, sidechain records), and
-  nothing today forks it: ForkSession forks only a workspace's main
-  transcript. The context origin needs a fourth kind, "subagent S of
-  workspace W", and the shim must fork a sidechain transcript into a session
-  of its own.
+- No subagent context is ever forked (owner, 2026-10-16): U1 forks the workspace
+  that spawned the subagent, so ForkSession needs no sidechain support. The
+  request names that workspace explicitly; the daemon can check that the
+  subagent's transcript (`<session>/subagents/agent-<id>.jsonl`) lies under
+  that workspace's session.
 - GAP: tying a subagent to its branch. Nothing records which branch a
   subagent worked on, so the request names both and the daemon can only check
   that each exists.
