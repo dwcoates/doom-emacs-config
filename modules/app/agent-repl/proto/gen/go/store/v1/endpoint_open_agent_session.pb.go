@@ -48,7 +48,22 @@ type OpenAgentSessionRequest struct {
 	// there is no close — and every unclaimed token minted for a read that
 	// never watched lived for the store's whole process lifetime (measured:
 	// two per turn, 2026-09-10).
-	PageOnly      bool `protobuf:"varint,4,opt,name=page_only,json=pageOnly,proto3" json:"page_only,omitempty"`
+	PageOnly bool `protobuf:"varint,4,opt,name=page_only,json=pageOnly,proto3" json:"page_only,omitempty"`
+	// Whether the caller is the producer that announced this agent and vouches
+	// that it is real. UNSET/false = an absent book is refused `unknown_agent`.
+	// SET = an absent book is one nothing has been written to yet, and it is
+	// served as the empty book it is: an empty page at its floor, `newest`
+	// UNSET, and (unless `page_only`) a watch token whose tail begins at the
+	// book's first item, whichever producer writes it. A `known_through` naming
+	// no line of the book is still refused `stale_pointer`.
+	//
+	// THE STORE IS THE ONE PARTY THAT SEES EVERY WRITE. The book's first row may
+	// come from either plane (the shim's stream, or the sidecar's copy of the
+	// vendor's transcript), so only the store can tell a waiting reader the
+	// moment it lands. A producer that was refused and re-asked on a timer
+	// instead polled the store for as long as the book stayed empty, which for
+	// an idle forked conversation was forever.
+	Vouched       bool `protobuf:"varint,6,opt,name=vouched,proto3" json:"vouched,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -118,6 +133,13 @@ func (x *OpenAgentSessionRequest) GetTailOnly() *AgentSessionTailOnly {
 func (x *OpenAgentSessionRequest) GetPageOnly() bool {
 	if x != nil {
 		return x.PageOnly
+	}
+	return false
+}
+
+func (x *OpenAgentSessionRequest) GetVouched() bool {
+	if x != nil {
+		return x.Vouched
 	}
 	return false
 }
@@ -639,12 +661,13 @@ var File_store_v1_endpoint_open_agent_session_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
 	"\n" +
-	"*store/v1/endpoint_open_agent_session.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"\x84\x02\n" +
+	"*store/v1/endpoint_open_agent_session.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"\x9e\x02\n" +
 	"\x17OpenAgentSessionRequest\x12.\n" +
 	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12A\n" +
 	"\rknown_through\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\fknownThrough\x12=\n" +
 	"\ttail_only\x18\x05 \x01(\v2\x1e.store.v1.AgentSessionTailOnlyH\x00R\btailOnly\x12\x1b\n" +
-	"\tpage_only\x18\x04 \x01(\bR\bpageOnlyB\t\n" +
+	"\tpage_only\x18\x04 \x01(\bR\bpageOnly\x12\x18\n" +
+	"\avouched\x18\x06 \x01(\bR\avouchedB\t\n" +
 	"\aopeningJ\x04\b\x02\x10\x03R\tpage_size\"\xa2\x01\n" +
 	"\x18OpenAgentSessionResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.store.v1.OpenAgentSessionSuccessH\x00R\asuccess\x12=\n" +
