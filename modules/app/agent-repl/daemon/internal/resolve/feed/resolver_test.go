@@ -279,16 +279,27 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 	return h
 }
 
+func TestACachedWorkspaceLoggerRecordsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.logger(testWorkspace)
+	before := len(h.records())
+
+	// Act.
+	h.resolver.logger(testWorkspace)
+
+	// Assert.
+	if got := h.records()[before:]; len(got) != 0 {
+		t.Fatalf("a cached logger recorded %+v, want nothing", got)
+	}
+}
+
 func TestFeedDecisionsRecordTheirSelectedBranches(t *testing.T) {
 	tests := []struct {
 		name      string
 		condition string
 		act       func(*resolver)
 	}{
-		{
-			name: "a cached workspace logger is selected", condition: "cached logger",
-			act: func(r *resolver) { r.logger(testWorkspace); r.logger(testWorkspace) },
-		},
 		{
 			name: "an existing workspace state is selected", condition: "ok",
 			act: func(r *resolver) { r.state(testWorkspace); r.state(testWorkspace) },

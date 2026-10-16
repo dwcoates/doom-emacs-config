@@ -396,12 +396,18 @@ func durableOrder(f *feedState) []string {
 // arm (MORE: older rows remain to be served or loaded), and the crumbs above it.
 func (r *resolver) composePageRange(s *wsState, f *feedState, order []string, start, end int, more bool) *frontendv1.FeedPage {
 	rows := make([]*frontendv1.FeedRow, 0, end-start)
+	absent := 0
 	for _, id := range order[start:end] {
 		if row, ok := f.rows[id]; ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row, ok := f.rows[id]; ok"})
 			rows = append(rows, row)
+			continue
 		}
+		absent++
 	}
+	// ONE RECORD A PAGE, not one a row: a row it holds is no decision, and a
+	// row the order names that the feed does not hold is counted.
+	r.logger(s.id).Debug("daemon.feed.page_composed", "composed a feed page", dlog.Context{
+		"feed": f.key, "rows": len(rows), "absent": absent, "more": more})
 	success := &frontendv1.FeedPageSuccess{
 		Rows:        rows,
 		Breadcrumbs: r.breadcrumbs(s, f.key),

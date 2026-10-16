@@ -610,10 +610,9 @@ const stallLock = "feed.resolver"
 // global surface — the record is about the resolution failing, not about the
 // workspace, which is why it is the one thing that may be global.
 func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
+	// A CACHED LOGGER IS NO EVENT: it was the feed's most frequent record
+	// (some 50 per workspace switch, 2026-10-15).
 	if l, ok := r.loggers[ws]; ok {
-		l.Debug("daemon.feed.row_decision", "selected the cached workspace logger", dlog.Context{
-			"function": "logger", "workspace": string(ws), "cached": true,
-		})
 		return l
 	}
 	global := r.deps.Log.Global()
