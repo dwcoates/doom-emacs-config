@@ -493,6 +493,10 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return d.refuse(fields, err)
 	}
 
+	if _, err := d.keepSettledUnit(fields, &r, prior); err != nil {
+		return d.refuse(fields, err)
+	}
+
 	if prior != nil && retiredFrom == "" {
 		unchanged, err := sameContentBarVersion(r, prior)
 		if err != nil {
