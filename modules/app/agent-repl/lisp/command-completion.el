@@ -26,6 +26,16 @@
 ;; THE COMPLETION IS NON-EXCLUSIVE.  `/usr/local' or any slash word that
 ;; names no command falls through to the next completion function.
 ;;
+;; MATCHING IS BY SUBSTRING, NOT ONLY PREFIX.  Typing `/profile' or `/prof'
+;; offers `/agent-repl-profile'.  The candidates are not a plain list: they
+;; are wrapped in a completion table (`agent-repl--command-completion-table')
+;; that answers its own `metadata' category
+;; (`agent-repl--command-completion-category'), and that category alone --
+;; via `completion-category-defaults', never the user's own
+;; `completion-category-overrides' -- is given the `substring' style.  Every
+;; other completion in Emacs, including the user's own, still follows
+;; whatever `completion-styles' they have set.
+;;
 ;; A POPUP ROW STAYS NARROW.  Each candidate's annotation (argument hint,
 ;; then description) is cut to `agent-repl-command-completion-annotation-width'
 ;; columns; the full description is the candidate's doc signature.
@@ -47,6 +57,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'minibuffer)
 
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -123,6 +134,39 @@ next character.  Point sits inside it or at its end."
            append (cons (concat "/" (plist-get entry :name))
                         (mapcar (lambda (alias) (concat "/" alias))
                                 (plist-get entry :aliases)))))
+
+(defconst agent-repl--command-completion-category 'agent-repl-slash-command
+  "This capf's own completion category, named to no other table's.
+Registered just below, in `completion-category-defaults', with the
+`substring' style -- so `/profile' offers `/agent-repl-profile' by
+substring, not only by prefix -- without touching the user's own
+`completion-styles' or reaching for `completion-category-overrides',
+which is the user's to set.")
+
+(add-to-list 'completion-category-defaults
+             (list agent-repl--command-completion-category '(styles substring basic)))
+
+(defun agent-repl--command-completion-table (candidates)
+  "Return a completion table over CANDIDATES, in this capf's own category.
+A plain collection function -- STRING PREDICATE ACTION, as
+`completion-at-point-functions' may return -- that answers a `metadata'
+ACTION with `agent-repl--command-completion-category' and otherwise
+completes over CANDIDATES the usual way, via `complete-with-action'.
+
+A `boundaries' ACTION answers that every CANDIDATE's leading `/' is
+outside the completed field, so the `substring' style's pattern is built
+from the command's NAME alone -- `/profile' is then a substring of
+`/agent-repl-profile' because `profile' is a substring of
+`agent-repl-profile', even though `/profile' the literal eight characters
+never occurs in it.  Candidates themselves keep their `/', unaffected."
+  (lambda (string predicate action)
+    (cond
+     ((eq action 'metadata)
+      `(metadata (category . ,agent-repl--command-completion-category)))
+     ((eq (car-safe action) 'boundaries)
+      (cons 'boundaries (cons (if (string-prefix-p "/" string) 1 0)
+                              (length (cdr action)))))
+     (t (complete-with-action action candidates string predicate)))))
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."
@@ -265,7 +309,8 @@ completion runs per keystroke."
         (agent-repl-command-completion-refresh ws)))
     (let ((catalog agent-repl--command-completion-catalog))
       (list (car bounds) (cdr bounds)
-            (agent-repl--command-completion-candidates catalog)
+            (agent-repl--command-completion-table
+             (agent-repl--command-completion-candidates catalog))
             :exclusive 'no
             :annotation-function
             (lambda (candidate) (agent-repl--command-completion-annotation catalog candidate))
