@@ -103,3 +103,4 @@ the log records that show it, so the failures can be fixed at their source.
 ## Landings reported by the children since 2026-10-16 00:30
 
 - `redundancy-stale-rows-land` (merge workspace `redundancy-stale-rows`), from `test-redundancy-measure`: LANDED as `bcb2acd6ad`.
+- `redundancy-discovery-bound-land` (merge workspace `redundancy-discovery-bound`), from `test-redundancy-measure`: LANDED as `39b88e175b`.
