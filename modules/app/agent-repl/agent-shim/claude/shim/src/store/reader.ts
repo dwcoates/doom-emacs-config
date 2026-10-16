@@ -371,8 +371,8 @@ interface Reader {
    * The newest page of one book, for a read that stands no tail.
    *
    * Always asks the store, so an unreachable store is a refusal and never an
-   * empty page. `known` is the producer's own vouching, and it turns the
-   * store's `unknown_agent` into the empty page a fresh session's book is.
+   * empty page. `known` is the producer's own vouching, and with it the store
+   * serves an absent book as the empty page a fresh session's book is.
    */
   readFirstPage(
     agent: conversationv1.AgentId,
@@ -433,38 +433,24 @@ interface ReaderOptions extends ReadRetryOptions {
   readonly client: StoreClient;
 }
 
-/**
- * How long a waiter sleeps before re-asking the store for an AGENT's book.
- *
- * The note from {@link Reader.noteAgentRows} is the real signal here, and it is
- * COMPLETE for one shim: every row that creates an agent row is written by this
- * process, so a waiter is woken by the very commit it was blocked on. The
- * recheck is the belt to that braces, and it is deliberately slow: an agent
- * wait stands for as long as a fresh session is idle, and re-asking the store
- * forty times a second meanwhile would be a busy loop against an external
- * resource.
- */
-const AGENT_ROW_RECHECK_MS = 250;
-
 /** One "wait for the first row" rendezvous, keyed by whatever names the thing. */
 interface FirstRowGate {
   /** Wake everyone waiting on this key; the store now holds a row for it. */
   wake(key: string): void;
-  /**
-   * Wait for this key's first row to land, or for the recheck cadence (or
-   * DELAYMS, for a caller backing its recheck off).
-   */
-  wait(key: string, delayMs?: number): Promise<void>;
+  /** Wait until this key is woken. */
+  wait(key: string): Promise<void>;
 }
 
 /**
- * A first-row rendezvous on one recheck cadence.
+ * A first-row rendezvous with NO RECHECK: a waiter wakes only when woken.
  *
- * AN AGENT BOOK'S WAIT, AND NO LONGER A SHELL RUN'S. A shell run's first row is
- * its start, which this shim writes ahead of the run's announcement, so a watch
- * opened on an announced run finds it in the store and waits for nobody.
+ * IT SERVES ONE WAIT: a book whose id this shim MINTED, which nothing can have
+ * written yet, so the only write that ends its absence is this shim's own and
+ * wakes it ({@link Reader.noteAgentRows}). Every other announced book is
+ * opened VOUCHED, so the store answers it at once and its own fan-out carries
+ * the first row; nothing here re-asks the store on a timer.
  */
-function firstRowGate(recheckMs: number): FirstRowGate {
+function firstRowGate(): FirstRowGate {
   const waiters = new Map<string, Set<() => void>>();
   return {
     wake(key) {
@@ -473,21 +459,10 @@ function firstRowGate(recheckMs: number): FirstRowGate {
       waiters.delete(key);
       for (const wake of waiting) wake();
     },
-    wait(key, delayMs = recheckMs) {
+    wait(key) {
       return new Promise<void>((resolve) => {
-        let settled = false;
-        const finish = (): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          waiters.get(key)?.delete(finish);
-          resolve();
-        };
-        const timer = setTimeout(finish, delayMs);
-        // Never hold the process open for a wait nobody is blocked on.
-        timer.unref?.();
         const waiting = waiters.get(key) ?? new Set<() => void>();
-        waiting.add(finish);
+        waiting.add(resolve);
         waiters.set(key, waiting);
       });
     },
@@ -498,14 +473,14 @@ export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
 
   /**
-   * Who is waiting for a given AGENT's first stored row, by agent value.
+   * Who is waiting for a MINTED agent's first stored row, by agent value.
    *
-   * `OpenAgentSession` refuses `unknown_agent` until something has been written
-   * under the id (landing 7), and the main agent's row is created by its first
-   * write — so a daemon that opens `WatchAgent` on a fresh session, exactly as
-   * the contract tells it to, arrives before the book exists.
+   * The main agent's row is created by its first write, so a daemon that opens
+   * `WatchAgent` on a fresh session, exactly as the contract tells it to,
+   * arrives before the book exists, and the deferred book waits here for this
+   * shim's own write to land.
    */
-  const agentRows = firstRowGate(AGENT_ROW_RECHECK_MS);
+  const agentRows = firstRowGate();
 
   /**
    * Agents whose id THIS PROCESS MINTED and has written nothing under yet.
@@ -519,10 +494,10 @@ export function createReader(options: ReaderOptions): Reader {
    * store's log, and a contract-abiding cold bring-up made exactly two of them
    * per fresh agent — the open, and the deferred session's own re-open.
    *
-   * IT IS NOT THE OBSERVED refusal. A store that answered `unknown_agent` for
-   * an id this shim did not mint has told us about a book ANOTHER writer may
-   * yet register, and that wait keeps its recheck cadence (below) as the belt
-   * to a note that would never come. Only a minted id waits on the note alone.
+   * IT IS NOT AN OBSERVED absence. A book whose id this shim did not mint may
+   * be registered by ANOTHER writer (the sidecar's copy of the transcript),
+   * which no note reports, so it is opened vouched and the store says when
+   * its first row lands. Only a minted id waits on the note.
    *
    * An id leaves the set the moment a batch naming it lands, or an open for it
    * succeeds — either way the book demonstrably exists.
@@ -537,11 +512,18 @@ export function createReader(options: ReaderOptions): Reader {
    * service has no close, so a token minted for a page that is then abandoned
    * can never be reclaimed and lives for the store's whole process lifetime.
    * A page-only open mints nothing and answers with `watch` unset.
+   *
+   * `vouched` IS THE PRODUCER'S WORD that the agent is real. The store then
+   * serves an absent book as the empty book it is (an empty page, no newest,
+   * and a tail that carries the first row whichever plane writes it) rather
+   * than refusing it `unknown_agent`. The store is the one party that sees
+   * every write, so it is the one that says when the first row lands.
    */
   const openSession = async (
     agent: conversationv1.AgentId,
     opening: AgentOpening,
-    pageOnly = false,
+    pageOnly: boolean,
+    vouched: boolean,
   ): Promise<storev1.OpenAgentSessionSuccess> => {
     let response: storev1.OpenAgentSessionResponse;
     try {
@@ -550,6 +532,7 @@ export function createReader(options: ReaderOptions): Reader {
           agent,
           opening: toStoreOpening(opening),
           pageOnly,
+          vouched,
         }),
       );
     } catch (error) {
@@ -611,22 +594,27 @@ export function createReader(options: ReaderOptions): Reader {
     }
   };
 
-  /** One book, opened from the store as it stands. Refuses a book with no rows. */
+  /**
+   * One book, opened from the store as it stands. An absent book is refused
+   * unless VOUCHED, when it is served empty with its tail on the first row.
+   */
   const openBookNow = async (
     agent: conversationv1.AgentId,
     opening: AgentOpening,
+    vouched: boolean,
   ): Promise<AgentPageSession> => {
-    const opened = await openSession(agent, opening);
+    const opened = await openSession(agent, opening, false, vouched);
     if (opened.page === undefined || opened.watch === undefined) {
       throw new PersistenceError(
         "store_unavailable",
         "the store opened a reading session with no page or no watch token",
       );
     }
-    // THE STORE ANSWERED FOR THE BOOK, so it holds a row for it. A minted id
-    // whose book demonstrably exists is no longer a certain absence, and the
-    // belief must not outlive the answer that disproved it.
-    booksMinted.delete(agent.value);
+    // A BOOK THE STORE NAMES A NEWEST LINE OF HOLDS ROWS. A minted id whose
+    // book demonstrably exists is no longer a certain absence, and the belief
+    // must not outlive the answer that disproved it. A vouched open of an
+    // empty book proves nothing either way, so it leaves the belief alone.
+    if (opened.newest !== undefined) booksMinted.delete(agent.value);
     const page = toHistoryPage(opened.page);
     const knownThrough = opening.case === "knownThrough" ? opening.value : undefined;
     /**
@@ -829,9 +817,12 @@ export function createReader(options: ReaderOptions): Reader {
           // because a mark is missing solely when the book held nothing at
           // the open: a tail-only open marks the store's `newest` as of the
           // open, so everything a markless book holds now was written since.
+          //
+          // THE RE-OPEN CARRIES THE OPEN'S VOUCHING: a book still empty when
+          // the store ended the watch is as absent as it was at the open.
           const mark = servedThrough;
           const reopened = await onReadRetrySchedule("reopenAgentTail", agent, () =>
-            openSession(agent, mark === undefined ? REPAINT : { case: "knownThrough", value: mark }),
+            openSession(agent, mark === undefined ? REPAINT : { case: "knownThrough", value: mark }, false, vouched),
           );
           if (reopened.watch === undefined) {
             throw new PersistenceError(
@@ -915,21 +906,17 @@ export function createReader(options: ReaderOptions): Reader {
   };
 
   /**
-   * An ANNOUNCED book that the store holds no rows for yet: an empty opening
-   * page now, and the tail stood the moment its first row lands.
+   * A book whose id this shim MINTED and has written nothing under: an empty
+   * opening page now, answered without the store, and the tail stood once
+   * this shim's own first write under the id lands.
    *
-   * THE PRODUCER IS THE ARBITER (landing 7). The store refuses `unknown_agent`
-   * until something has been written under an id, and the main agent's row is
-   * created by its first write — so a daemon that opens `WatchAgent` on a fresh
-   * session before any turn, which the endpoint contract tells it to do, races
-   * that write and always loses. Refusing there closed the stream at the
-   * transport and the daemon read it as a severed link on every bring-up.
+   * THE ANSWER IS ALREADY KNOWN, so the store is not asked for it. The daemon
+   * opens a fresh session's `WatchAgent` before any turn, as the endpoint
+   * contract tells it to, and the book provably does not exist yet. Answering
+   * here keeps a cold bring-up independent of the store: with the store down,
+   * the session still comes up and its writes surface the outage.
    *
-   * The wait is NOT open-ended: it holds only while `known` still says this
-   * shim announced the agent, exactly as a shell run's wait holds only while
-   * the run is still live. An id nobody announced is refused at once, and an
-   * announcement withdrawn under a standing wait surfaces the store's own
-   * refusal rather than waiting on for a row that can never come.
+   * The tail's store session is opened VOUCHED once that write lands.
    */
   const deferredBook = (
     agent: conversationv1.AgentId,
@@ -985,37 +972,26 @@ export function createReader(options: ReaderOptions): Reader {
     const openWhenWritten = async (): Promise<AgentPageSession | undefined> => {
       for (;;) {
         if (closed) return undefined;
-        // A MINTED BOOK IS WAITED FOR, NEVER ASKED ABOUT. This session was
-        // deferred BECAUSE no book can exist yet, so an ask here would earn the
-        // refusal that built it a second time and learn nothing. The write that
-        // ends the absence is this shim's own and wakes the wait, so there is
-        // nothing for a recheck to discover in the meantime. A producer that no
-        // longer vouches falls through to the ask deliberately: the store's own
-        // refusal is what such a caller is owed.
+        // A CONCLUDED TAIL WAITS FOR NOTHING. The teardown writes the terminal
+        // it owes BEFORE concluding, so a book still absent here holds nothing
+        // this consumer is owed and standing on would never end the stream.
+        if (concluded) return undefined;
+        // A MINTED BOOK IS WAITED FOR, NEVER ASKED ABOUT. The write that ends
+        // its absence is this shim's own and wakes the wait.
         if (booksMinted.has(agent.value) && known()) {
-          // A CONCLUDED TAIL WAITS FOR NOTHING. The teardown writes the terminal
-          // it owes BEFORE concluding, so a book still absent here holds nothing
-          // this consumer is owed and standing on would never end the stream.
-          if (concluded) return undefined;
           await agentRows.wait(agent.value);
           continue;
         }
-        try {
-          // ON THE READ HALF'S SCHEDULE, for the reason the tail's re-open is:
-          // a store restarting under a live shim refuses this open for as long
-          // as its socket is down, and one attempt would turn a restart the
-          // schedule absorbs into a deferred book that never opens.
-          return await onReadRetrySchedule("openDeferredAgentBook", agent, () =>
-            openBookNow(agent, innerOpening),
-          );
-        } catch (error) {
-          if (!(error instanceof PersistenceError) || error.kind !== "unknown_agent") throw error;
-          if (closed) return undefined;
-          // A CONCLUDED TAIL WAITS FOR NOTHING, as above.
-          if (concluded) return undefined;
-          if (!known()) throw error;
-          await agentRows.wait(agent.value);
-        }
+        // ON THE READ HALF'S SCHEDULE, for the reason the tail's re-open is:
+        // a store restarting under a live shim refuses this open for as long
+        // as its socket is down, and one attempt would turn a restart the
+        // schedule absorbs into a deferred book that never opens. VOUCHED
+        // while the producer still vouches, so the book's first row is the
+        // store's to stream; a producer that stopped vouching gets the store's
+        // own refusal.
+        return onReadRetrySchedule("openDeferredAgentBook", agent, () =>
+          openBookNow(agent, innerOpening, known()),
+        );
       }
     };
 
@@ -1108,7 +1084,7 @@ export function createReader(options: ReaderOptions): Reader {
       concludeThrough(through) {
         concluded = true;
         concludeAt = through;
-        // Wake the wait so a teardown does not sit out the recheck cadence.
+        // Wake the wait, which no write may ever end now.
         agentRows.wake(agent.value);
         // ALREADY SERVED IS ALREADY DONE, and the inner session cannot tell:
         // a conclusion naming a pointer this wrapper handed out of the opening
@@ -1128,37 +1104,37 @@ export function createReader(options: ReaderOptions): Reader {
     };
   };
 
-  /** One book, waiting out the first-write race when the producer vouches for it. */
-  const openBook = async (
+  /**
+   * One book, for a watch.
+   *
+   * THE PRODUCER VOUCHES, AND THE STORE WAITS. A book exists only once
+   * something is written to it, by this shim's stream or by the sidecar's
+   * copy of the vendor's transcript. While `known` holds, the open is
+   * VOUCHED: the store serves an absent book empty and stands its tail on the
+   * first row, whichever plane writes it. This shim used to be refused, serve
+   * the empty page itself, and re-ask the store every 250ms until the book
+   * existed, which for an idle forked conversation was four refusals a second
+   * for as long as the workspace stayed open. An id this shim MINTED is
+   * answered without the store ({@link deferredBook}), and an id nobody
+   * announced gets the store's refusal.
+   */
+  const openBook = (
     agent: conversationv1.AgentId,
     opening: AgentOpening,
     known?: () => boolean,
   ): Promise<AgentPageSession> => {
-    // THE BOOK CANNOT EXIST YET: this shim minted the id and has written
-    // nothing under it. Asking anyway buys nothing but an `unknown_agent`
-    // refusal in the store's log on a bring-up going exactly as the contract
-    // says it should — the store is right to refuse, so it is not asked.
-    if (known !== undefined && known() && booksMinted.has(agent.value)) {
+    const vouched = known !== undefined && known();
+    if (vouched && booksMinted.has(agent.value)) {
       LOGGER.debug(
         { agent: agent.value },
         "this agent's id was minted here and nothing is written under it yet, so no book was asked for; serving an empty page and standing the tail on its first row",
       );
-      return deferredBook(agent, opening, known);
+      return Promise.resolve(deferredBook(agent, opening, known));
     }
-    try {
-      // ON THE READ HALF'S SCHEDULE. This is the open a WatchAgent stands its
-      // whole tail on, and a deploy that kickstarts the store under a live
-      // shim used to fail it terminally on the first unreachable attempt.
-      return await onReadRetrySchedule("openAgentBook", agent, () => openBookNow(agent, opening));
-    } catch (error) {
-      if (known === undefined || !(error instanceof PersistenceError)) throw error;
-      if (error.kind !== "unknown_agent" || !known()) throw error;
-      LOGGER.debug(
-        { agent: agent.value },
-        "the store holds no rows for this announced agent yet; serving an empty page and standing the tail on its first row",
-      );
-      return deferredBook(agent, opening, known);
-    }
+    // ON THE READ HALF'S SCHEDULE. This is the open a WatchAgent stands its
+    // whole tail on, and a deploy that kickstarts the store under a live
+    // shim used to fail it terminally on the first unreachable attempt.
+    return onReadRetrySchedule("openAgentBook", agent, () => openBookNow(agent, opening, vouched));
   };
 
   /**
@@ -1172,55 +1148,37 @@ export function createReader(options: ReaderOptions): Reader {
    * apart. Asking separates them:
    *
    *   - the store answers → the page it served;
-   *   - the store refuses the BOOK, while the producer still vouches for the
-   *     agent → an empty page, because a session whose first row has not landed
-   *     has an empty past and not an unknown one;
-   *   - the store cannot be reached, or fails the read → that refusal, surfaced
-   *     as it stands for the engine's typed arm.
+   *   - the producer vouches for an agent with no book yet → the store's own
+   *     empty page at its floor (a vouched open), because a session whose
+   *     first row has not landed has an empty past and not an unknown one;
+   *   - the store refuses, cannot be reached, or fails the read → that
+   *     refusal, surfaced as it stands for the engine's typed arm.
    *
-   * An `unknown_agent` in the store's log on a cold read is the cost, and it is
-   * the right one: an empty page invented over an unreachable store tells a
-   * consumer this conversation has no history. The write half spares the
-   * common case: a read of a book whose first row is still queued waits for it
-   * to land before it gets here (writer.ts `readFirstPage`), so only a book
-   * with nothing written or queued is asked for early.
+   * An empty page invented over an unreachable store would tell a consumer
+   * this conversation has no history, which is why the store is asked. The
+   * write half spares the common case: a read of a book whose first row is
+   * still queued waits for it to land before it gets here (writer.ts
+   * `readFirstPage`).
    */
   const readFirstPageOnce = async (
     agent: conversationv1.AgentId,
     opening: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> => {
-    let opened: storev1.OpenAgentSessionSuccess;
-    try {
-      // PAGE-ONLY: this read stands no tail, so it asks for no token. Nothing
-      // is minted, so there is nothing to abandon — the reason the store's
-      // registry no longer grows by one per one-shot read. A tail-only opening
-      // is relayed as it stands: the store still answers for the book (and
-      // for its own reachability) and serves no lines.
-      opened = await openSession(agent, opening, true);
-    } catch (error) {
-      if (known === undefined || !(error instanceof PersistenceError)) throw error;
-      if (error.kind !== "unknown_agent" || !known()) throw error;
-      LOGGER.debug(
-        { agent: agent.value },
-        "the store holds no rows for this announced agent yet; serving an empty page for a read that stands no tail",
-      );
-      // AN EMPTY BOOK IS AT ITS FLOOR: there are no older entries to walk to.
-      return create(conversationv1.HistoryPageSchema, {
-        entries: [],
-        boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
-      });
-    }
+    // PAGE-ONLY: this read stands no tail, so it asks for no token. Nothing is
+    // minted, so there is nothing to abandon -- the reason the store's
+    // registry no longer grows by one per one-shot read. A tail-only opening
+    // is relayed as it stands: the store still answers for the book (and for
+    // its own reachability) and serves no lines. VOUCHED while the producer
+    // vouches, so an announced book with nothing in it is the store's own
+    // empty page.
+    const opened = await openSession(agent, opening, true, known !== undefined && known());
     if (opened.page === undefined) {
-      throw new PersistenceError(
-        "store_unavailable",
-        "the store answered a page-only open with no page",
-      );
+      throw new PersistenceError("store_unavailable", "the store answered a page-only open with no page");
     }
-    // THE STORE ANSWERED FOR THE BOOK, so it holds a row for it, exactly as on
-    // the watched open. A minted id whose book demonstrably exists is no longer
-    // a certain absence.
-    booksMinted.delete(agent.value);
+    // A BOOK THE STORE NAMES A NEWEST LINE OF HOLDS ROWS, exactly as on the
+    // watched open.
+    if (opened.newest !== undefined) booksMinted.delete(agent.value);
     return toHistoryPage(opened.page);
   };
 
@@ -1251,28 +1209,18 @@ export function createReader(options: ReaderOptions): Reader {
    * 6 s after the shim's teardown had given up on it).
    *
    * `known` is the producer's vouching, exactly as on {@link readFirstPage}:
-   * with it holding, the store's `unknown_agent` is the empty book a session
-   * killed before its first write has, and absence is its head. Every other
-   * refusal is surfaced as it stands.
+   * with it holding, the store answers the empty book a session killed before
+   * its first write has, and absence is its head. Every refusal is surfaced
+   * as it stands.
    */
   const readBookHeadOnce = async (
     agent: conversationv1.AgentId,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPointer | undefined> => {
-    let opened: storev1.OpenAgentSessionSuccess;
-    try {
-      opened = await openSession(agent, { case: "tailOnly" }, true);
-    } catch (error) {
-      if (known === undefined || !(error instanceof PersistenceError)) throw error;
-      if (error.kind !== "unknown_agent" || !known()) throw error;
-      LOGGER.debug(
-        { agent: agent.value },
-        "the store holds no rows for this announced agent yet; its book has no head",
-      );
-      return undefined;
-    }
+    const opened = await openSession(agent, { case: "tailOnly" }, true, known !== undefined && known());
+    if (opened.newest === undefined) return undefined;
     booksMinted.delete(agent.value);
-    return opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
+    return toHistoryPointer(opened.newest);
   };
 
   /**

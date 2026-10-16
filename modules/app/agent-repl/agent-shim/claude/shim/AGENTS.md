@@ -1697,10 +1697,14 @@ serves one on every entry it hands out.
   - **THE PRODUCER IS THE ARBITER** (`SessionContext.knowsAgent`). It rides down
     into the record plane as `openAgentPage`'s `known` predicate (a shell
     run needs no such predicate: its start is written before it is announced):
-    - vouched for → the refusal is WAITED OUT: an empty opening page now, and
-      the tail stood on the book's first row (woken by the write that lands it,
-      `Reader.noteAgentRows`). `ReadHistory` answers the same empty page rather
-      than refusing, which is what a keep-alive-only session's book is.
+    - vouched for → the open is VOUCHED (`store.v1.OpenAgentSessionRequest
+      .vouched`): the store serves the absent book empty and stands the tail
+      on its first row, whichever plane writes it. Nothing re-asks the store on
+      a timer. An id this shim MINTED is answered without the store (an empty
+      page now, the vouched open once this shim's first write lands,
+      `Reader.noteAgentRows`), so a cold bring-up does not depend on the
+      store. `ReadHistory` answers the same empty page rather than refusing,
+      which is what a keep-alive-only session's book is.
     - not vouched for → the store's refusal stands, as `Code.NotFound`.
     - any other refusal (`storage_failure`) is untouched.
   - The empty-book refusal in `watchAgent` also stays, for a store that serves

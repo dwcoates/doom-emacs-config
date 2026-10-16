@@ -1374,6 +1374,23 @@ describe("which writes end a minted book's absence", () => {
   });
 });
 
+describe("a watch on a resumed agent's book nothing has written to yet", () => {
+  it("is served the first row by the store, which is asked once", async () => {
+    // Arrange: an id this shim did not mint, vouched for, with no book yet.
+    const { store: fake, persistence: plane } = await persistence("vouched-first-row");
+    const session = await plane.openAgentPage(BOOK, REPAINT, () => true);
+    const first = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    await plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")]);
+    const served = await first;
+
+    // Assert. The store pushed the row on the one open; nothing re-asked it.
+    expect([served.done, fake.reads().filter((read) => read.rpc === "OpenAgentSession").length]).toEqual([false, 1]);
+    session.close();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Backpressure, bounded batches, and the order the store receives
 // ---------------------------------------------------------------------------
