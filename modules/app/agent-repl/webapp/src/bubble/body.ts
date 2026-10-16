@@ -486,7 +486,7 @@ function armPainter(body: BubbleBody): Painter {
   const watch = (): void => {
     if (observer === null) onDiscard(body, () => observer?.disconnect());
     else observer.disconnect();
-    observer = observeContainingBlock(body, rewrap);
+    observer = observeContainingBlock(body, () => rewrap());
   };
 
   function paint(only?: HTMLElement): void {
@@ -528,12 +528,17 @@ function armPainter(body: BubbleBody): Painter {
 }
 
 /**
- * Run REWRAP whenever BODY's containing block changes size. The recompute is
- * deferred to an animation frame so a burst of resizes coalesces and the
- * repaint's own height change is not re-observed inside the same delivery; it
- * repaints only when the integer column count moved.
+ * Run REWRAP, handed the block, whenever the CONTAINING BLOCK of BODY's
+ * bubble (the box its percentage cap resolves against) changes size: the one
+ * observer of a bubble's column, for the tree painter here (which repaints
+ * only when the integer column count moved) and the collapsed width
+ * (src/feed/collapsed-width.ts). The recompute is deferred to an animation
+ * frame so a burst of resizes coalesces and the caller's own reaction is not
+ * re-observed inside the same delivery. The block is the bubble's parent when
+ * this is called: a caller that follows a moving bubble calls it again on
+ * every attach.
  */
-function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeObserver {
+export function observeContainingBlock(body: HTMLElement, rewrap: (containing: HTMLElement) => void): ResizeObserver {
   const Observer = pageResizeObserver(body);
   // A page with an observer has a view; naming both narrows both.
   const view = body.ownerDocument.defaultView;
@@ -544,7 +549,7 @@ function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeOb
   let scheduled = false;
   const recompute = (): void => {
     scheduled = false;
-    rewrap();
+    rewrap(containing);
   };
   const observer = new Observer(() => {
     if (scheduled) return;
