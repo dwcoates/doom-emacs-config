@@ -28,6 +28,7 @@ import {
   FeedShellSchema,
   FeedSimpleToolCallSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { createBubbleBody } from "../../src/bubble/body.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS, bubbleBox } from "../../src/feed/bubble-scroll.js";
 import { agenticBubble } from "../../src/feed/cards/controls.js";
 import { drawFeedShellBody } from "../../src/feed/cards/shell.js";
@@ -116,8 +117,7 @@ const KINDS: readonly Kind[] = [
 describe("bubbleBox: the shared box", () => {
   it("wears the class the stylesheet caps and paints a scrollbar on", () => {
     // Arrange
-    const body = document.createElement("div");
-    body.className = "bubble-body";
+    const body = createBubbleBody();
 
     // Act
     const scroll = bubbleBox(body, true);
@@ -128,8 +128,7 @@ describe("bubbleBox: the shared box", () => {
 
   it("builds an uncapped box with the structural class alone, never the scroll class", () => {
     // Arrange
-    const body = document.createElement("div");
-    body.className = "bubble-body";
+    const body = createBubbleBody();
 
     // Act
     const box = bubbleBox(body, false);
@@ -140,8 +139,7 @@ describe("bubbleBox: the shared box", () => {
 
   it("holds the body as its only child, so the box's edge is not the text's", () => {
     // Arrange
-    const body = document.createElement("div");
-    body.className = "bubble-body";
+    const body = createBubbleBody();
 
     // Act
     const scroll = bubbleBox(body, true);

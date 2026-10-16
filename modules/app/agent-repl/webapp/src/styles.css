@@ -1726,6 +1726,20 @@ pre {
 .bubble > .bubble-scroll {
   scrollbar-gutter: stable;
 }
+/* THE COLLAPSED FIT (owner request, 2026-10-16): a collapsed bubble is as wide
+   as the lines it SHOWS, never the longer ones only its expanded view shows.
+   src/feed/collapsed-width.ts measures those lines and states the box width
+   they need as `--collapsed-width`. The width is only the box's CONTRIBUTION
+   to the bubble's fit-content size: a percentage min/max is ignored there, so
+   a header strip or footer wider than the lines still widens the bubble. The
+   two 100% bounds then stretch the box to the bubble it is in, exactly as
+   the column's stretch does unfitted. An expanded box drops the fit, so the
+   bubble widens to everything it holds as it grows taller. */
+.bubble > .bubble-scroll.collapsed-fit:not(.expanded) {
+  width: var(--collapsed-width);
+  min-width: 100%;
+  max-width: 100%;
+}
 /* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
    bubble's right padding gave up. A scrollbar is laid out between the scroll
    box's border and its padding, so this padding is the distance from the TEXT

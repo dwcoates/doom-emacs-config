@@ -38,6 +38,7 @@ import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { EXPANDED_CLASS } from "../expand.js";
 import { pageResizeObserver } from "../dom.js";
 import { log } from "../log.js";
+import { applyCollapsedWidth, clearCollapsedWidth, collapsedWidthOf } from "./collapsed-width.js";
 import { applyEllipsisTrim, clearEllipsisTrim } from "./ellipsis-trim.js";
 import { onDiscard } from "./ticking.js";
 
@@ -192,6 +193,11 @@ interface MoreKind {
    * ellipsis-trim.ts places; null for a box that draws no `…` (a fade bubble).
    */
   clamp(box: HTMLElement): HTMLElement | null;
+  /**
+   * Whether a collapsed box of this kind is as wide as the lines it shows
+   * (collapsed-width.ts): a bubble is, a title fold spans its card.
+   */
+  readonly fitsWidth: boolean;
 }
 
 /**
@@ -205,12 +211,14 @@ const MORE_KINDS: readonly MoreKind[] = [
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
     hidesContent: hidesContentBeyondCap,
     clamp: (box) => (isEllipsisBox(box) ? box.querySelector<HTMLElement>(BODY_SELECTOR) : null),
+    fitsWidth: true,
   },
   {
     selector: `.${TITLE_FOLD_CLASS}`,
     isOpen: (box) => box.matches(TITLE_FOLD_OPEN_SELECTOR),
     hidesContent: overflowsCap,
     clamp: (box) => box,
+    fitsWidth: false,
   },
 ];
 
@@ -231,17 +239,24 @@ export function shouldShowMore(box: HTMLElement): boolean {
 }
 
 /**
- * Add or drop `has-more` on BOX to match its current overflow and state, and
- * place a clamp's `…` (ellipsis-trim.ts). The clamp's trim is cleared BEFORE
- * the overflow is measured, since a trim narrows the line and a stale one
- * could make text that now fits read as overflowing; it is put back only on a
- * collapsed box whose clamp is writing its `…`.
+ * Add or drop `has-more` on BOX to match its current overflow and state, fit a
+ * collapsed bubble's width to the lines it shows (collapsed-width.ts), and
+ * place a clamp's `…` (ellipsis-trim.ts). The clamp's trim and the bubble's
+ * width are cleared BEFORE the overflow is measured, since each narrows the
+ * lines and a stale one could make text that now fits read as overflowing.
+ * Each is put back only on a collapsed box that hides content: the width
+ * first, since the `…` is placed on the line the fitted box lays out.
  */
 export function refreshHasMore(box: HTMLElement): void {
-  const clamp = kindOf(box)?.clamp(box) ?? null;
+  const kind = kindOf(box);
+  const clamp = kind?.clamp(box) ?? null;
+  const fits = kind?.fitsWidth === true;
+  const fitted = collapsedWidthOf(box);
   if (clamp !== null) clearEllipsisTrim(clamp);
+  if (fits) clearCollapsedWidth(box);
   const more = shouldShowMore(box);
   box.classList.toggle(HAS_MORE_CLASS, more);
+  if (fits && more) applyCollapsedWidth(box, requireBody(box), isEllipsisBox(box), fitted);
   if (clamp !== null && more) applyEllipsisTrim(clamp);
 }
 
