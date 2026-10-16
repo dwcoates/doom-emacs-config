@@ -323,6 +323,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "status")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "input")
+;; The composer's spellcheck (flyspell + hunspell); panels.el turns it on
+;; for every composer it creates.
+(agent-repl--load-module "spell")
 ;; WHY: command-completion.el is the composer's slash-command completion
 ;; (`agent-repl-input-mode' installs its capf).  It asks the daemon through
 ;; rpc.el and resolves the workspace's ref and connection through host.el,

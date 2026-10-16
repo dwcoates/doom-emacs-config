@@ -501,6 +501,13 @@ file the run made unremovable, which the person reading the run must see."
       (insert "test-build-id\n"))
     (setq agent-repl--frontend-webapp-dir test-webapp-dir)))
 
+;; Composers are born unspellchecked in tests.  Every composer a test
+;; creates through production (a roster push, an opened tab) would otherwise
+;; reach the guarded PATH lookup for hunspell and start flyspell.  The spell
+;; suite (test-spell.el) binds this back to t and stubs those boundaries.
+(when (and noninteractive (boundp 'agent-repl-input-spellcheck))
+  (setq agent-repl-input-spellcheck nil))
+
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
 ;; test-emitted line to the user's real OS-temporary agent-repl logfile.
