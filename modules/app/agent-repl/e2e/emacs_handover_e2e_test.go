@@ -477,7 +477,14 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 		emGHIWorkspaceNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(beforeCreate)+1 }))
 	trigger := emHO40AddedName(t, beforeCreate, after)
-	emGHIAwaitStatus(t, e, trigger, "the trigger workspace's opening turn to conclude", emGHISettledArms...)
+	// THE TURN'S END IS THE DAEMON'S RECORD, NOT THE ROW'S DRAWN ARM: a
+	// workspace whose tab is still opening draws `inactive` over every other
+	// arm until its page is drawn, which is webview boot time this test is not
+	// about (under a loaded run it outlasted the bound while the turn had long
+	// ended).
+	e.AwaitEval("the trigger workspace's opening turn to conclude",
+		`(and (agent-repl-roster-last-turn-ended-ms `+elispString(trigger)+`) t)`,
+		decodeBool)
 
 	triggerDir := e.EvalString(`(or (plist-get (agent-repl-host-ref ` + elispString(trigger) + `) :dir) "")`)
 	if triggerDir == "" {
