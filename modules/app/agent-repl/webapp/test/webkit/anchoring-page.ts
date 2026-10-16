@@ -18,7 +18,8 @@
  * yet, a state that is never painted.
  */
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
-import { TailFollow, feedAnchorRows, observeScrollBox, revealGeometry } from "../../src/scroll.js";
+import { observeScrollBox, type TailFollow } from "../../src/scroll.js";
+import { createFeedTail } from "../../src/feed/feed.js";
 
 /** The rows the page draws, and the real height of row I (60px to 759px). */
 const ROWS = 400;
@@ -73,16 +74,8 @@ function mount(): { box: HTMLElement; host: HTMLElement; tail: TailFollow } {
     item.append(card);
     host.append(item);
   }
-  // As mountFeed builds it: the tail owner reading the latest entry and
-  // anchoring on the feed's rows, and the box observer.
-  const tail = new TailFollow(
-    box,
-    () => {
-      const last = host.lastElementChild;
-      return last === null ? null : revealGeometry(box, last);
-    },
-    feedAnchorRows(box, host),
-  );
+  // As mountFeed builds it: the feed's own tail owner, and the box observer.
+  const tail = createFeedTail(box, host);
   observeScrollBox(box, tail);
   return { box, host, tail };
 }

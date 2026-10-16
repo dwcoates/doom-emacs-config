@@ -23,7 +23,8 @@ import {
   onClientVerdict,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
+import { createFeedTail, latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
+import { SCROLL_FLOOR_CLASS } from "../../src/scroll.js";
 import {
   SELECTED_ENTRY_CLASS,
   SELECTED_ROW_ATTRIBUTE,
@@ -2426,6 +2427,72 @@ describe("mountFeed: the reader's click never moves the feed", () => {
     await settle();
     expect(capture.sent.filter((r) => r.operation === "scroll.click-held")).toEqual([]);
     dock.remove();
+  });
+});
+
+describe("createFeedTail", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  /** The page's scroll zone: a 300px viewport over the feed's rows, one row at TOP. */
+  function zone(top: number) {
+    const box = document.createElement("div");
+    const host = document.createElement("main");
+    const row = document.createElement("div");
+    row.className = "feed-item";
+    row.setAttribute("data-feed-row", "r1");
+    host.append(row);
+    box.append(host);
+    document.body.append(box);
+    box.getBoundingClientRect = domRect(0, 300);
+    row.getBoundingClientRect = domRect(top, 50);
+    return { box, host };
+  }
+
+  it("hangs the box's scroll floor as its last child", () => {
+    // Arrange
+    const { box, host } = zone(100);
+    // Act
+    createFeedTail(box, host);
+    // Assert
+    expect(box.lastElementChild?.className).toBe(SCROLL_FLOOR_CLASS);
+  });
+
+  it("latches the follow when the column's latest entry is in view", () => {
+    // Arrange
+    const { box, host } = zone(100);
+    const tail = createFeedTail(box, host);
+    // Act
+    tail.onScroll();
+    // Assert
+    expect(tail.isFollowing()).toBe(true);
+  });
+
+  it("does not latch the follow when the column's latest entry is out of view", () => {
+    // Arrange
+    const { box, host } = zone(900);
+    const tail = createFeedTail(box, host);
+    // Act
+    tail.onScroll();
+    // Assert
+    expect(tail.isFollowing()).toBe(false);
+  });
+
+  it("is the one place the feed's tail owner is built, in production and in the webkit pages", () => {
+    // Arrange
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
+    const sources = import.meta.glob(["../../src/**/*.ts", "../webkit/*-page.ts"], {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>;
+    // Act
+    const builders = Object.entries(sources)
+      .filter(([, src]) => /new TailFollow\(/.test(src))
+      .map(([path]) => path);
+    // Assert
+    expect([Object.keys(sources).length > 5, builders]).toEqual([true, ["../../src/feed/feed.ts"]]);
   });
 });
 

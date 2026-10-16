@@ -173,27 +173,11 @@ export function mountFeed(
   log.info("mounting the feed", { operation: "feed.mount", context: {} });
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
-  const tail =
-    scrollBox === null
-      ? null
-      : new TailFollow(
-          scrollBox,
-          () => {
-            const entry = latestEntry(scrollBox);
-            return entry === null ? null : revealGeometry(scrollBox, entry);
-          },
-          // THE SCROLL ANCHOR'S ROWS: the root feed's own, in HOST. WebKit
-          // has no native scroll anchoring, so the tail owner holds the
-          // content under a reader who is off the tail (scroll.ts).
-          // THE ROWS ARE THE ROOT BODY'S ROW LIST, not the feed host's own
-          // children (the page-error slot and the body mount), which held one
-          // box for the whole feed and so never moved when a row above the
-          // reader changed height.
-          feedAnchorRows(scrollBox, () => rootRows(host)),
-          // THE FLOOR UNDER A CLICK-HELD VIEW: the box cannot clamp the view
-          // a reader's click holds (scroll.ts, `ScrollFloor`).
-          scrollFloor(scrollBox),
-        );
+  // THE SCROLL ANCHOR'S ROWS ARE THE ROOT BODY'S ROW LIST, not the feed
+  // host's own children (the page-error slot and the body mount), which held
+  // one box for the whole feed and so never moved when a row above the reader
+  // changed height.
+  const tail = scrollBox === null ? null : createFeedTail(scrollBox, () => rootRows(host));
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
   // The size half is the footer occlusion (see `observeScrollBox`) — the
@@ -1185,6 +1169,27 @@ function bubbleOfRow(
 }
 
 /** The row's element, searched across the root feed and every OPEN sub-feed. */
+
+/**
+ * THE ROOT FEED'S TAIL OWNER over the scroll BOX, as every mount of the feed
+ * builds it: it reads the column's latest entry (`latestEntry`), anchors on
+ * the root rows in ROWS (WebKit has no native scroll anchoring, so the tail
+ * owner holds the content under a reader who is off the tail, scroll.ts), and
+ * keeps a click-held view out of the box's clamp with the box's own floor
+ * (`scrollFloor`). ROWS may be a reader of the rows' container, for a feed
+ * whose row list mounts after the tail owner is built.
+ */
+export function createFeedTail(box: HTMLElement, rows: Element | (() => Element)): TailFollow {
+  return new TailFollow(
+    box,
+    () => {
+      const entry = latestEntry(box);
+      return entry === null ? null : revealGeometry(box, entry);
+    },
+    feedAnchorRows(box, rows),
+    scrollFloor(box),
+  );
+}
 
 /**
  * THE FEED COLUMN'S LATEST ENTRY inside the scroll BOX: the last thing drawn in

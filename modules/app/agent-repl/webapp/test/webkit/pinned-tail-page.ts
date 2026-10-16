@@ -15,8 +15,8 @@
  * feed's own corrections left — the frame the reader sees.
  */
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
-import { TailFollow, feedAnchorRows, observeScrollBox, revealGeometry } from "../../src/scroll.js";
-import { latestEntry } from "../../src/feed/feed.js";
+import { observeScrollBox } from "../../src/scroll.js";
+import { createFeedTail, latestEntry } from "../../src/feed/feed.js";
 import { MERGE_BUBBLE_ATTRIBUTE } from "../../src/feed/merge-bubble.js";
 
 /** What one growth saw across the frames it painted. */
@@ -77,14 +77,7 @@ merge.style.height = "300px";
 merge.textContent = "merge";
 pinned.append(merge);
 rows.append(pinned);
-const tail = new TailFollow(
-  box,
-  () => {
-    const entry = latestEntry(box);
-    return entry === null ? null : revealGeometry(box, entry);
-  },
-  feedAnchorRows(box, rows),
-);
+const tail = createFeedTail(box, rows);
 observeScrollBox(box, tail);
 
 const sentinel = document.createElement("div");
