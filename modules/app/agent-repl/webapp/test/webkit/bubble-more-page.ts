@@ -1,9 +1,10 @@
 /**
- * The page module the ellipsis trim's WebKit suite bundles: the REAL
+ * The page module the bubble measurer's WebKit suites bundle: the REAL
  * `refreshHasMore` (src/feed/bubble-more.ts, which places a clamp's `…`
- * through src/feed/ellipsis-trim.ts), under the webapp's own logger, exposed
- * on `window.EllipsisTrim` beside the trim's own first-line walk
- * (`domClampGeometry`), which the suite reads each clamp's characters through.
+ * through src/feed/ellipsis-trim.ts), under the webapp's own logger,
+ * exposed on the window name each suite bundles it under, beside the clamp's
+ * own first-line walk (`domClampGeometry`), which the suites read a clamp's
+ * characters through.
  */
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { refreshHasMore } from "../../src/feed/bubble-more.js";
@@ -17,6 +18,6 @@ setLogger(
     "debug",
   ),
 );
-bindLogContext({ connection_id: "webkit-ellipsis-trim-page" });
+bindLogContext({ connection_id: "webkit-bubble-more-page" });
 
 export { domClampGeometry, refreshHasMore };
