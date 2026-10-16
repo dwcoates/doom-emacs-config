@@ -431,6 +431,7 @@ export function userPromptRow(
   text: string,
   turn?: string,
   working = false,
+  awaitingUser = false,
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -445,18 +446,23 @@ export function userPromptRow(
           value: { body: { blocks: [{ block: { case: "text", value: { text } } }] } },
         },
         working,
+        awaitingUser,
       }),
     },
   });
 }
 
-/** An agent-prompt row; WORKING is the daemon's flag for its turn. */
+/**
+ * An agent-prompt row; WORKING and AWAITINGUSER are the daemon's flags for its
+ * turn.
+ */
 export function agentPromptRow(
   id: string,
   address: string,
   text: string,
   turn?: string,
   working = false,
+  awaitingUser = false,
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -468,6 +474,7 @@ export function agentPromptRow(
         address: { text: address },
         body: { blocks: [{ block: { case: "text", value: { text } } }] },
         working,
+        awaitingUser,
       }),
     },
   });

@@ -276,6 +276,18 @@ export function armPromptWave(
 }
 
 /**
+ * WHETHER A PROMPT ROW'S BUBBLE WAVES: its turn is working AND NOT WAITING ON
+ * THE USER. Both are the daemon's facts (`working`, `awaitingUser` on
+ * `FeedUserPrompt` and `FeedAgentPrompt`); the wave PAUSES while a question or
+ * a consent of the turn stands open and resumes when it settles. The ONE
+ * reading of the two flags, so a prompt renderer and the feed's in-place move
+ * can never disagree about whether a bubble waves.
+ */
+export function promptWaves(prompt: { working: boolean; awaitingUser: boolean }): boolean {
+  return prompt.working && !prompt.awaitingUser;
+}
+
+/**
  * Put the wave on BUBBLE iff WORKING, and take it off otherwise. The phase is
  * left as it stands, so a bubble whose flag flips mid-pass never jumps.
  */

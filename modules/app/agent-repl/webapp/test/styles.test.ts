@@ -747,8 +747,8 @@ describe("the ellipsis instead of the fade", () => {
   function drawnBox(ellipsis: boolean): { box: HTMLElement; body: HTMLElement; remove: () => void } {
     const { bubble, body } = drawBubble(
       ellipsis
-        ? { role: "prompt", variant: "held", working: false, content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
-        : { role: "prompt", variant: "user", working: false, content: [], capLines: "feed" },
+        ? { role: "prompt", variant: "held", waving: false, content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
+        : { role: "prompt", variant: "user", waving: false, content: [], capLines: "feed" },
     );
     document.body.append(bubble);
     const box = body.parentElement as HTMLElement;

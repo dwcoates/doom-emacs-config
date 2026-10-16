@@ -1079,3 +1079,230 @@ func TestTheRowRepublishersShareRepublishRows(t *testing.T) {
 		})
 	}
 }
+
+// promptAwaiting answers the awaiting-user flag on the turn's user-prompt row.
+func (h *harness) promptAwaiting(turn string) bool {
+	h.t.Helper()
+	return h.promptRow(turn).GetUserPrompt().GetAwaitingUser()
+}
+
+// openConsent opens consent ask ASK on the running turn.
+func openConsent(ask string) func(h *harness) {
+	return func(h *harness) {
+		h.ask(ask, "unit-"+ask, &conversationv1.AgentPermissionStart{
+			Prompt: &conversationv1.AgentPermissionPrompt{Title: "Claude wants to run ls"},
+		})
+	}
+}
+
+// openQuestion opens question ask ASK on the running turn.
+func openQuestion(ask string) func(h *harness) {
+	return func(h *harness) {
+		h.pose(ask, &conversationv1.AgentQuestionStart{Batch: twoQuestionBatch()})
+	}
+}
+
+// THE WAVE PAUSES WHILE THE TURN WAITS ON THE USER: a prompt awaits the user
+// exactly while an ask stamped with its turn stands open, and every way an ask
+// settles takes the pause away. The turn stays working across the pause.
+func TestAPromptAwaitsTheUserWhileAnAskOfItsTurnStands(t *testing.T) {
+	cases := []struct {
+		name         string
+		act          func(h *harness)
+		wantWorking  bool
+		wantAwaiting bool
+	}{
+		{name: "no ask", act: func(*harness) {}, wantWorking: true, wantAwaiting: false},
+		{name: "a consent standing", act: openConsent("ask-1"), wantWorking: true, wantAwaiting: true},
+		{name: "a consent allowed", act: func(h *harness) {
+			openConsent("ask-1")(h)
+			h.ask("ask-1", "unit-ask-1", &conversationv1.AgentPermissionSuccess{
+				Decision: &conversationv1.AgentPermissionSuccess_Allowed{Allowed: &conversationv1.AgentPermissionAllowed{
+					Scope: &conversationv1.AgentPermissionAllowed_Once{Once: &conversationv1.AgentPermissionAllowedOnce{}},
+				}},
+			})
+		}, wantWorking: true, wantAwaiting: false},
+		{name: "a consent denied", act: func(h *harness) {
+			openConsent("ask-1")(h)
+			h.ask("ask-1", "unit-ask-1", &conversationv1.AgentPermissionSuccess{
+				Decision: &conversationv1.AgentPermissionSuccess_Denied{Denied: &conversationv1.AgentPermissionDenied{
+					By: &conversationv1.AgentPermissionDenied_User{User: &conversationv1.AgentPermissionDeniedByUser{}},
+				}},
+			})
+		}, wantWorking: true, wantAwaiting: false},
+		{name: "a consent abandoned", act: func(h *harness) {
+			openConsent("ask-1")(h)
+			h.ask("ask-1", "unit-ask-1", &conversationv1.AgentPermissionFailure{})
+		}, wantWorking: true, wantAwaiting: false},
+		{name: "a question standing", act: openQuestion("ask-1"), wantWorking: true, wantAwaiting: true},
+		{name: "a question answered", act: func(h *harness) {
+			openQuestion("ask-1")(h)
+			h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+				Batch: twoQuestionBatch(),
+				Outcome: &conversationv1.AgentQuestionSuccess_Answered{
+					Answered: &conversationv1.AgentQuestionAnswers{},
+				},
+			})
+		}, wantWorking: true, wantAwaiting: false},
+		{name: "a question expired", act: func(h *harness) {
+			openQuestion("ask-1")(h)
+			h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+				Batch: twoQuestionBatch(),
+				Outcome: &conversationv1.AgentQuestionSuccess_Unanswered{
+					Unanswered: &conversationv1.AgentQuestionUnanswered{},
+				},
+			})
+		}, wantWorking: true, wantAwaiting: false},
+		{name: "a question that could not be put", act: func(h *harness) {
+			openQuestion("ask-1")(h)
+			h.pose("ask-1", &conversationv1.AgentQuestionFailure{})
+		}, wantWorking: true, wantAwaiting: false},
+		{name: "one of two asks settled", act: func(h *harness) {
+			openConsent("ask-1")(h)
+			openQuestion("ask-2")(h)
+			h.ask("ask-1", "unit-ask-1", &conversationv1.AgentPermissionFailure{})
+		}, wantWorking: true, wantAwaiting: true},
+		{name: "the turn ending under a standing ask", act: func(h *harness) {
+			openConsent("ask-1")(h)
+			h.queryDied(&conversationv1.SessionQueryDied{})
+		}, wantWorking: false, wantAwaiting: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the turn's prompt, working and not waiting.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "do the thing")
+
+			// Act.
+			tc.act(h)
+
+			// Assert.
+			if got := h.promptWorking("turn-1"); got != tc.wantWorking {
+				t.Fatalf("working = %v, want %v", got, tc.wantWorking)
+			}
+			if got := h.promptAwaiting("turn-1"); got != tc.wantAwaiting {
+				t.Fatalf("awaiting_user = %v, want %v", got, tc.wantAwaiting)
+			}
+		})
+	}
+}
+
+// THE PAUSE IS A PUBLICATION on each of its edges: a reader already following
+// the feed is pushed the prompt row awaiting the user when the ask opens, and
+// pushed it again no longer awaiting when the ask settles.
+func TestAnAsksEdgesRepublishItsTurnsPrompt(t *testing.T) {
+	// Arrange: a reader follows the feed while the turn works.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tailRows(ctx, tail)
+
+	// Act: the ask opens and settles, then a marker row bounds the read.
+	openConsent("ask-1")(h)
+	h.ask("ask-1", "unit-ask-1", &conversationv1.AgentPermissionFailure{})
+	h.deliverPrompt("turn-2", "marker")
+
+	// Assert: the prompt was pushed awaiting, then not, before the marker.
+	var pushed []bool
+	for row := range rows {
+		switch row.GetId().GetValue() {
+		case h.promptRowID("turn-1"):
+			pushed = append(pushed, row.GetUserPrompt().GetAwaitingUser())
+		case h.promptRowID("turn-2"):
+			if len(pushed) != 2 || !pushed[0] || pushed[1] {
+				t.Fatalf("prompt pushes awaiting_user = %v, want [true false]", pushed)
+			}
+			return
+		}
+	}
+	t.Fatal("the tail closed before the marker row")
+}
+
+// AN AGENT PROMPT PAUSES WITH THE TURN IT IS STAMPED WITH: a spawn's
+// commission awaits the user while an ask of the main turn stands.
+func TestAnAgentPromptAwaitsTheUserWhileAnAskOfItsTurnStands(t *testing.T) {
+	cases := []struct {
+		name         string
+		settle       bool
+		wantAwaiting bool
+	}{
+		{name: "while the ask stands", settle: false, wantAwaiting: true},
+		{name: "after the ask settles", settle: true, wantAwaiting: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "spawn an explorer")
+			created := &conversationv1.AgentId{Value: "agent-explore"}
+			h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+			commission := func() *frontendv1.FeedAgentPrompt {
+				for _, row := range h.rows(feedid.Feed{Agent: created}) {
+					if prompt := row.GetAgentPrompt(); prompt != nil {
+						return prompt
+					}
+				}
+				t.Fatal("no commission row on the subagent's feed")
+				return nil
+			}
+
+			// Act.
+			openConsent("ask-1")(h)
+			if tc.settle {
+				h.ask("ask-1", "unit-ask-1", &conversationv1.AgentPermissionFailure{})
+			}
+
+			// Assert.
+			if got := commission().GetAwaitingUser(); got != tc.wantAwaiting {
+				t.Fatalf("awaiting_user = %v, want %v", got, tc.wantAwaiting)
+			}
+		})
+	}
+}
+
+// isTurnPrompt picks the prompt rows a turn's edges move, and no others.
+func TestIsTurnPromptPicksOnlyThePromptsOfTheTurn(t *testing.T) {
+	stamped := func(turn string, row *frontendv1.FeedRow) *frontendv1.FeedRow {
+		if turn != "" {
+			row.Turn = &conversationv1.TurnId{Value: turn}
+		}
+		return row
+	}
+	user := func() *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}}
+	}
+	agent := func() *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{}}}
+	}
+	question := func() *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Question{Question: &frontendv1.FeedQuestion{}}}
+	}
+	cases := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want bool
+	}{
+		{name: "a user prompt of the turn", row: stamped("turn-1", user()), want: true},
+		{name: "an agent prompt of the turn", row: stamped("turn-1", agent()), want: true},
+		{name: "a user prompt of another turn", row: stamped("turn-2", user()), want: false},
+		{name: "an unstamped user prompt", row: stamped("", user()), want: false},
+		{name: "a non-prompt row of the turn", row: stamped("turn-1", question()), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := isTurnPrompt(tc.row, "turn-1")
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("isTurnPrompt = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

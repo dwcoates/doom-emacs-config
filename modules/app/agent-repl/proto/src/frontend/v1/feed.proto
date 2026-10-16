@@ -2413,7 +2413,9 @@ message FeedUserPrompt {
   // later copy (a history replay, a reconnect's page) of a turn it has seen
   // end UNSET. UNSET = the turn has ended, or the row names no turn, or the
   // row is a prompt a fork inherited (settled in its parent). The client
-  // draws the wave from this flag verbatim and from nothing else.
+  // draws the wave from this flag and `awaiting_user` and from nothing else:
+  // the bubble waves exactly while `working` is set and `awaiting_user` is
+  // not.
   bool working = 3;
   // THE KNOWN SLASH COMMANDS THE PROMPT'S TEXT NAMES, so the bubble marks
   // them as the Emacs composer marks them while they are typed. One entry per
@@ -2431,6 +2433,19 @@ message FeedUserPrompt {
   // and sentence punctuation — exactly when the word less its slash is in
   // this list, the composer's own rule. Empty while no catalog is known.
   repeated FeedUserPromptCommand commands = 4;
+  // SET while this prompt's turn is WORKING AND BLOCKED ON THE USER: a
+  // question (FeedQuestion) or a consent (FeedPermission) stamped with the
+  // same turn stands open. The wave PAUSES for exactly that span, because
+  // nothing is running while the turn waits on the person, and resumes when
+  // the last such ask settles, whichever way (answered, denied, expired,
+  // abandoned). A DAEMON FACT with two edges and no others: the daemon
+  // RE-PUBLISHES the turn's prompt rows when one of the turn's asks OPENS
+  // and when its last open ask SETTLES. Kept APART from `working` because
+  // the turn is still in flight across the pause: `working` keeps its own
+  // edges (the row's first draw, the turn's terminal) and its own meaning,
+  // so nothing that reads `working` as "this turn has not ended" mistakes a
+  // pause for an end. Never set while `working` is unset.
+  bool awaiting_user = 5;
 }
 
 // One known slash command a user prompt names.
@@ -2539,6 +2554,10 @@ message FeedAgentPrompt {
   // FeedUserPrompt.working, this row's sibling in every other way. UNSET =
   // that turn has ended, or the row names no turn.
   bool working = 6;
+  // SET while that turn is working and blocked on the user — the same daemon
+  // fact, the same edges and the same re-publication as
+  // FeedUserPrompt.awaiting_user. The wave pauses while it is set.
+  bool awaiting_user = 7;
 }
 message FeedAgentPromptQueuedToLive {}
 message FeedAgentPromptResumedRecipient {}

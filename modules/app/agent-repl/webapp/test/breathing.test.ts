@@ -2,7 +2,10 @@
 // The footer's breathing signal: a size oscillation that never resets, and a
 // color ramp that steps once per daemon-resolved progress view. Plus the
 // prompt bubble's thinking wave, which shares the footer's epoch mechanic.
+import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
+
+import { FeedAgentPromptSchema, FeedUserPromptSchema } from "../../proto/gen/ts/frontend/v1/feed_pb.js";
 
 import {
   AnimationEpoch,
@@ -24,9 +27,12 @@ import {
   StatusWave,
   WAVING_STATUS_ARMS,
   armPromptWave,
+  promptWaves,
   setPromptWave,
   statusWordWaves,
 } from "../src/breathing.js";
+import { drawFeedAgentPrompt } from "../src/feed/rows/agent-prompt.js";
+import { drawFeedUserPrompt } from "../src/feed/rows/user-prompt.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
@@ -522,6 +528,49 @@ describe("armPromptWave: a fresh prompt bubble waves iff its row says working", 
     // Assert
     expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
   });
+});
+
+describe("promptWaves: a prompt waves while its turn works and does not await the user", () => {
+  const cases = [
+    { working: true, awaitingUser: false, waves: true },
+    { working: true, awaitingUser: true, waves: false },
+    { working: false, awaitingUser: false, waves: false },
+    { working: false, awaitingUser: true, waves: false },
+  ];
+  for (const { working, awaitingUser, waves } of cases) {
+    it(`working=${String(working)} awaitingUser=${String(awaitingUser)} waves=${String(waves)}`, () => {
+      // Arrange, Act
+      const got = promptWaves({ working, awaitingUser });
+      // Assert
+      expect(got).toBe(waves);
+    });
+  }
+
+  // THE RENDERERS SHARE THE ONE READING: a prompt renderer that read the two
+  // flags its own way would fail here rather than drift silently.
+  for (const { working, awaitingUser, waves } of cases) {
+    it(`both prompt renderers wave as promptWaves says for working=${String(working)} awaitingUser=${String(awaitingUser)}`, () => {
+      // Arrange
+      const user = create(FeedUserPromptSchema, {
+        author: { label: "You" },
+        result: { case: "success", value: { body: { blocks: [] } } },
+        working,
+        awaitingUser,
+      });
+      const agent = create(FeedAgentPromptSchema, {
+        address: { text: "→ Explore" },
+        body: { blocks: [] },
+        working,
+        awaitingUser,
+      });
+      // Act
+      const drawn = [drawFeedUserPrompt(user), drawFeedAgentPrompt(agent)].map((el) =>
+        el.hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+      );
+      // Assert
+      expect(drawn).toEqual([waves, waves]);
+    });
+  }
 });
 
 describe("setPromptWave: the flag moves the wave on a drawn bubble", () => {

@@ -124,10 +124,12 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		Row: &frontendv1.FeedRow_Permission{Permission: card},
 	}
 	r.stampTurn(s, row, state.turn)
+	state.turn = row.GetTurn()
 	log.Debug("daemon.feed.permission",
 		"a consent card was upserted",
 		dlog.Context{"ask": askID, "row": state.row.GetValue(), "standing_offered": card.GetStandingOffered() != nil})
 	r.upsert(s, state.feed, row, true)
+	r.restateTurnPrompts(s, state.turn)
 }
 
 // triggerNote composes WHY the gate fired. The three facts are INDEPENDENT —

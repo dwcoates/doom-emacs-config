@@ -14,6 +14,7 @@
  * with no body.
  */
 import { log } from "../../log.js";
+import { promptWaves } from "../../breathing.js";
 import { USER_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -31,8 +32,9 @@ const PATH = "FeedUserPrompt";
 /**
  * The prompt bubble.
  *
- * IT WAVES EXACTLY WHILE ITS ROW SAYS ITS TURN IS WORKING (`msg.working`, the
- * daemon's fact). The one bubble stamps both halves of the signal: the mark
+ * IT WAVES EXACTLY WHILE ITS ROW SAYS ITS TURN IS WORKING AND NOT WAITING ON THE
+ * USER (`msg.working`, `msg.awaitingUser`, the daemon's facts, read by
+ * `promptWaves`). The one bubble stamps both halves of the signal: the mark
  * the `bubble-wave` rule keys on, drawn from that flag verbatim, and the
  * wave's PHASE as a negative inline `animation-delay` — the feed rebuilds a
  * row's body wholesale and a fresh node restarts a CSS animation at 0%, so
@@ -59,7 +61,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           role: "prompt",
           variant: "user",
           hooks: ["user"],
-          working: msg.working,
+          waving: promptWaves(msg),
           content: drawFeedUserPromptBody(
             requireMessage(result.value.body, `${PATH}.success.body`),
             `${PATH}.success.body`,

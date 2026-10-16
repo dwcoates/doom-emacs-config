@@ -210,8 +210,11 @@ export type PromptBubbleSpec = BubbleSpecBase &
   BubbleCapSpec & {
     role: "prompt";
     variant: PromptVariant;
-    /** The daemon's in-flight fact, drawn as the working wave. */
-    working: boolean;
+    /**
+     * Whether the wave runs: the prompt's turn is working and not waiting on
+     * the user (`promptWaves`, the one reading of the row's two flags).
+     */
+    waving: boolean;
   };
 
 /** A response bubble: left rail, purple, never waving. */
@@ -278,8 +281,8 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   if (spec.role === "prompt") {
     // A fresh bubble takes the wave's phase; a reused one keeps its own, so a
     // push that flips nothing but the flag never jumps the band.
-    if (reused === null) armPromptWave(bubble, spec.working);
-    else setPromptWave(bubble, spec.working);
+    if (reused === null) armPromptWave(bubble, spec.waving);
+    else setPromptWave(bubble, spec.waving);
   }
 
   const strip = keepSaid(liveChrome(bubble, "strip", scroll), spec.strip ?? []);

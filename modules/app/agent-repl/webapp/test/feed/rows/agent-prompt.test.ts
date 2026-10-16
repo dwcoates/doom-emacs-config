@@ -22,11 +22,12 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 
-function agentPrompt(address = "→ Explore", blocks: unknown[] = [], working = false) {
+function agentPrompt(address = "→ Explore", blocks: unknown[] = [], working = false, awaitingUser = false) {
   return create(FeedAgentPromptSchema, {
     address: { text: address },
     body: { blocks: blocks as never },
     working,
+    awaitingUser,
   });
 }
 
@@ -48,6 +49,12 @@ describe("drawFeedAgentPrompt", () => {
   it("does not wave when its row says the turn is not working", () => {
     expect(
       drawFeedAgentPrompt(agentPrompt("→ Explore", [], false)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+    ).toBe(false);
+  });
+
+  it("does not wave while its row says the working turn awaits the user", () => {
+    expect(
+      drawFeedAgentPrompt(agentPrompt("→ Explore", [], true, true)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
     ).toBe(false);
   });
 
