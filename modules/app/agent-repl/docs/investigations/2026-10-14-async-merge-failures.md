@@ -104,3 +104,4 @@ the log records that show it, so the failures can be fixed at their source.
 
 - `redundancy-stale-rows-land` (merge workspace `redundancy-stale-rows`), from `test-redundancy-measure`: LANDED as `bcb2acd6ad`.
 - `redundancy-discovery-bound-land` (merge workspace `redundancy-discovery-bound`), from `test-redundancy-measure`: LANDED as `39b88e175b`.
+- `slim-integration-deletions` (merge workspace `slim-integration-land`), made by this workspace as the owner's proxy: LANDED as `dfbf5e9d53`. It deletes 260 integration tests (162 daemon, 20 store, 78 sidecar) and 52 dead helpers. Coverage was measured before landing, with no system dropping more than 0.05 points.
