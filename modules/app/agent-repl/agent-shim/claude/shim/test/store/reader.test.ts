@@ -870,6 +870,22 @@ function storedLine(pointerValue: string, unitValue: string): storev1.StoreLineA
 }
 
 /** A page at its floor, holding `lines` newest-first. */
+/** The refusal the store gives for a book it holds no row for. */
+function noSuchBook(): storev1.OpenAgentSessionResponse {
+  return create(storev1.OpenAgentSessionResponseSchema, {
+    result: {
+      case: "failure",
+      value: create(storev1.OpenAgentSessionFailureSchema, {
+        detail: "no agent row",
+        kind: {
+          case: "unknownAgent",
+          value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+        },
+      }),
+    },
+  });
+}
+
 function floorPage(lines: storev1.StoreLineAt[]): storev1.AgentSessionPage {
   return create(storev1.AgentSessionPageSchema, {
     lines,
@@ -1988,22 +2004,6 @@ describe("a tail closed under a push", () => {
 });
 
 describe("the deferred book's own waiting", () => {
-  /** An open that refuses with `unknown_agent`, as a book with no rows is. */
-  function refusingOpen(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   /** An open that refuses because the store itself is broken. */
   function brokenOpen(): storev1.OpenAgentSessionResponse {
     return create(storev1.OpenAgentSessionResponseSchema, {
@@ -2026,7 +2026,7 @@ describe("the deferred book's own waiting", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2183,32 +2183,13 @@ describe("the deferred book's own waiting", () => {
 });
 
 describe("a book whose id this shim minted", () => {
-  /**
-   * An open that refuses `unknown_agent`, as the store does for a book it holds
-   * no row for. A minted id must never reach it at all.
-   */
-  function refusingOpen(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("opens without asking the store at all", async () => {
     // Arrange.
     let opens = 0;
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2222,7 +2203,7 @@ describe("a book whose id this shim minted", () => {
 
   it("serves an empty opening page at the floor", async () => {
     // Arrange.
-    const reader = readerOver({ openAgentSession: async () => refusingOpen() });
+    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
     reader.noteAgentMinted("book-1");
 
     // Act.
@@ -2239,7 +2220,7 @@ describe("a book whose id this shim minted", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2285,7 +2266,7 @@ describe("a book whose id this shim minted", () => {
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
-        return refusingOpen();
+        return noSuchBook();
       },
     });
     reader.noteAgentMinted("book-1");
@@ -2437,22 +2418,6 @@ describe("a read that stands no tail asks for no watch token", () => {
 });
 
 describe("readFirstPage on a book whose id this shim minted", () => {
-  /** The refusal the store gives for a book it holds no row for. */
-  function noSuchBook(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("ASKS the store, vouched, which the watch-side open of the same book does not", async () => {
     // Arrange.
     const requests: storev1.OpenAgentSessionRequest[] = [];
@@ -2583,22 +2548,6 @@ describe("readFirstPage on a book whose id this shim minted", () => {
 // disk contention that scan outlasted the teardown's budget (2026-10-06).
 // ---------------------------------------------------------------------------
 describe("readBookHead", () => {
-  /** The refusal the store gives for a book it holds no row for. */
-  function noSuchBook(): storev1.OpenAgentSessionResponse {
-    return create(storev1.OpenAgentSessionResponseSchema, {
-      result: {
-        case: "failure",
-        value: create(storev1.OpenAgentSessionFailureSchema, {
-          detail: "no agent row",
-          kind: {
-            case: "unknownAgent",
-            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-          },
-        }),
-      },
-    });
-  }
-
   it("asks for a TAIL-ONLY open, so the store reads no line", async () => {
     // Arrange.
     const requests: storev1.OpenAgentSessionRequest[] = [];
