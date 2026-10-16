@@ -122,9 +122,12 @@ func (t *Tailer) FileID() string { return t.fileID }
 // Poll reads any appended bytes and returns the resulting batch WITHOUT mutating
 // the committed cursor. The caller writes Entries+Next to the store, then calls
 // Commit(result) on a successful ack.
+//
+// A POLL THAT FINDS NOTHING AND MOVES NOTHING IS NO EVENT, and records
+// nothing: the sidecar polls every session's transcript on a timer, and the
+// start-and-nothing pair it recorded on each was its most frequent record
+// (2026-10-15). A poll that decodes bytes, or moves the cursor, is recorded.
 func (t *Tailer) Poll() (PollResult, error) {
-	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: t.fileID, Offset: logging.Off(t.offset)}).
-		LogVerbose("poll start carry_bytes=%d records=%d", len(t.carry), t.records)
 	fi, err := os.Stat(t.path)
 	if err != nil {
 		return PollResult{}, err
@@ -156,8 +159,10 @@ func (t *Tailer) Poll() (PollResult, error) {
 			Changed: offset != t.offset || fileID != t.fileID,
 		}
 		t.ctx.FileID = fileID
-		t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: fileID, Offset: logging.Off(offset)}).
-			LogVerbose("poll no-new-bytes size=%d cursor_changed=%t", size, result.Changed)
+		if result.Changed {
+			t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: fileID, Offset: logging.Off(offset)}).
+				LogVerbose("poll no-new-bytes size=%d cursor_changed=%t", size, result.Changed)
+		}
 		return result, nil
 	}
 

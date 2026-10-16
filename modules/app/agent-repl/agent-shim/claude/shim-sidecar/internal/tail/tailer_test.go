@@ -696,3 +696,32 @@ func TestAPollNeverHandsItsHandlerTheLastBatchsRetirements(t *testing.T) {
 		t.Fatalf("handler inherited %v and the poll carried %v, want nothing inherited and only prompt:u2", h.inherited[1], second.Retired)
 	}
 }
+
+func TestAPollThatFindsNothingRecordsNothing(t *testing.T) {
+	// Arrange — the file's bytes are all committed.
+	var sink bytes.Buffer
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	writeFile(t, p, `{"a":1}`+"\n")
+	tr := New(p, JSONLCodec{}, &stubHandler{}, &Context{SessionID: "s1"},
+		logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	tr.Commit(r1)
+	if !strings.Contains(sink.String(), "tailer-poll") {
+		t.Fatalf("a poll that decoded bytes was not recorded:\n%s", sink.String())
+	}
+	sink.Reset()
+
+	// Act
+	r2, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+
+	// Assert
+	if r2.Changed || sink.Len() != 0 {
+		t.Fatalf("an unchanged poll answered changed=%t and recorded:\n%s", r2.Changed, sink.String())
+	}
+}
