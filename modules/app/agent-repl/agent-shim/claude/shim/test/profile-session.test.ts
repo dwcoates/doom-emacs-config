@@ -10,6 +10,7 @@ import {
   ACTIVE_FILE,
   ARMED_DIR,
   DEFAULT_ROOT,
+  LOG_LEVEL_FILE,
   MAX_SECONDS,
   ROOT_ENV,
   SIGNAL,
@@ -24,6 +25,7 @@ interface SessionFixture {
   armed_dir: string;
   signal: string;
   max_seconds: number;
+  log_level_file: string;
   sessions: { id: string; valid: boolean }[];
 }
 
@@ -34,7 +36,7 @@ const fixture = JSON.parse(
 describe("the shared profiling session contract", () => {
   it("names the fixture's root, files, signal and window", () => {
     // Act
-    const got = [ROOT_ENV, `~/${DEFAULT_ROOT}`, ACTIVE_FILE, ARMED_DIR, SIGNAL, MAX_SECONDS];
+    const got = [ROOT_ENV, `~/${DEFAULT_ROOT}`, ACTIVE_FILE, ARMED_DIR, SIGNAL, MAX_SECONDS, LOG_LEVEL_FILE];
 
     // Assert
     expect(got).toEqual([
@@ -44,6 +46,7 @@ describe("the shared profiling session contract", () => {
       fixture.armed_dir,
       fixture.signal,
       fixture.max_seconds,
+      fixture.log_level_file,
     ]);
   });
 

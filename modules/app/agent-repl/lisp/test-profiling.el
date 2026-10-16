@@ -71,7 +71,8 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (should (equal (alist-get 'default_root f) (concat "~/" agent-repl-profiling-default-root)))
     (should (equal (alist-get 'active_file f) agent-repl-profiling-active-file))
     (should (equal (alist-get 'armed_dir f) agent-repl-profiling-armed-dir))
-    (should (equal (alist-get 'max_seconds f) agent-repl-profiling-max-seconds))))
+    (should (equal (alist-get 'max_seconds f) agent-repl-profiling-max-seconds))
+    (should (equal (alist-get 'log_level_file f) agent-repl-profiling-log-level-file))))
 
 (ert-deftest agent-repl-test-profiling-judges-every-fixture-session ()
   "Every session id in the fixture is judged as the fixture says."
