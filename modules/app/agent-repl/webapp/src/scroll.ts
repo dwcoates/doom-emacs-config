@@ -33,7 +33,7 @@
  * no implicit writer at all. `test/scroll.test.ts` scans every other source
  * module and fails on any scroll write found outside this one.
  */
-import { ancestorMatching } from "./dom.js";
+import { ancestorMatching, nodeLabel } from "./dom.js";
 import { log } from "./log.js";
 import { nextFrame } from "./frame.js";
 
@@ -982,14 +982,6 @@ export interface MoveWitnessReport {
   frames_since_mutation: number;
 }
 
-/** NODE as `tag.class`, from the element a text node sits in. */
-function witnessName(node: Node): string {
-  const el = node instanceof Element ? node : node.parentElement;
-  if (el === null) return node.nodeName.toLowerCase();
-  const classes = [...el.classList].join(".");
-  return classes === "" ? el.tagName.toLowerCase() : `${el.tagName.toLowerCase()}.${classes}`;
-}
-
 /**
  * THE WITNESS TO UNCAUSED MOVES (diagnosis, 2026-10-13). The feed's box moves
  * with no reader input and no named cause (`scroll.feed-moved-uncaused`) once a
@@ -1018,7 +1010,7 @@ export class MoveWitness {
 
   /** A change to the content landed, touching TARGETS. */
   mutated(targets: readonly Node[]): void {
-    const names = [...new Set(targets.map(witnessName))].slice(0, WITNESS_TARGETS);
+    const names = [...new Set(targets.map(nodeLabel))].slice(0, WITNESS_TARGETS);
     const change = {
       mutated: names,
       mutations: targets.length,

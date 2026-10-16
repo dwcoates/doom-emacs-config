@@ -23,6 +23,8 @@
  * removed once the attribution is done.
  */
 
+import { nodeLabel } from "./dom.js";
+
 /** The kinds of callback the probe tells apart. */
 export type BusyKind = "timer" | "frame" | "mutation" | "resize";
 
@@ -64,14 +66,6 @@ export interface BusyWindow {
 
 /** How many labels a report names, costliest first. */
 export const BUSY_TOP = 8;
-
-/** NODE as `tag.class`, the way the scroll witness names an element. */
-function targetLabel(node: Node): string {
-  const el = node instanceof Element ? node : node.parentElement;
-  if (el === null) return node.nodeName.toLowerCase();
-  const classes = [...el.classList].join(".");
-  return classes === "" ? el.tagName.toLowerCase() : `${el.tagName.toLowerCase()}.${classes}`;
-}
 
 /** A callback's own name, or `anonymous`. */
 function fnLabel(fn: { readonly name: string }): string {
@@ -142,7 +136,7 @@ export function installBusyProbe(win: BusyWindow, now: () => number = () => perf
     }
     private readonly named: { label: string };
     override observe(target: Node, options?: MutationObserverInit): void {
-      if (this.named.label === "unobserved") this.named.label = targetLabel(target);
+      if (this.named.label === "unobserved") this.named.label = nodeLabel(target);
       super.observe(target, options);
     }
   };
@@ -155,7 +149,7 @@ export function installBusyProbe(win: BusyWindow, now: () => number = () => perf
     }
     private readonly named: { label: string };
     override observe(target: Element, options?: ResizeObserverOptions): void {
-      if (this.named.label === "unobserved") this.named.label = targetLabel(target);
+      if (this.named.label === "unobserved") this.named.label = nodeLabel(target);
       super.observe(target, options);
     }
   };

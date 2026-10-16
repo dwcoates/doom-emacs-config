@@ -145,3 +145,15 @@ export function pageIntersectionObserver(): typeof IntersectionObserver | null {
   const Ctor = (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
   return Ctor ?? null;
 }
+
+/**
+ * NODE as `tag.class` (`div.bubble.md`), named from the element a text node
+ * sits in: how a diagnosis record names the element a change or a callback
+ * concerns.
+ */
+export function nodeLabel(node: Node): string {
+  const el = node instanceof Element ? node : node.parentElement;
+  if (el === null) return node.nodeName.toLowerCase();
+  const classes = [...el.classList].join(".");
+  return classes === "" ? el.tagName.toLowerCase() : `${el.tagName.toLowerCase()}.${classes}`;
+}
