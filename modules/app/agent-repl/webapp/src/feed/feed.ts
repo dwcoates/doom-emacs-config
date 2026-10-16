@@ -22,7 +22,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import {
-  READER_CLICK_EVENT,
+  READER_TOGGLE_EVENT,
   autoCollapseFor,
   cappedSectionsOf,
   collapseSection,
@@ -56,8 +56,10 @@ import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
+  holdViewOnClicks,
   installIntentScroll,
   observeScrollBox,
+  scrollFloor,
   feedAnchorRows,
   revealGeometry,
 } from "../scroll.js";
@@ -128,6 +130,12 @@ export interface FeedDeps {
    */
   scrollBox?: HTMLElement;
   /**
+   * Elements OUTSIDE the scroll box that draw part of the root feed (the
+   * page's gate dock, gate-dock.ts). A click in one holds the feed's view
+   * exactly as a click in the box does (`holdViewOnClicks`).
+   */
+  clickZones?: readonly HTMLElement[];
+  /**
    * Whether the host shows this page (`presence.ts`); the root feed frees its
    * older rows each time it stops (`unshown-trim.ts`). Defaults to the page's.
    */
@@ -165,24 +173,11 @@ export function mountFeed(
   log.info("mounting the feed", { operation: "feed.mount", context: {} });
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
-  const tail =
-    scrollBox === null
-      ? null
-      : new TailFollow(
-          scrollBox,
-          () => {
-            const entry = latestEntry(scrollBox);
-            return entry === null ? null : revealGeometry(scrollBox, entry);
-          },
-          // THE SCROLL ANCHOR'S ROWS: the root feed's own, in HOST. WebKit
-          // has no native scroll anchoring, so the tail owner holds the
-          // content under a reader who is off the tail (scroll.ts).
-          // THE ROWS ARE THE ROOT BODY'S ROW LIST, not the feed host's own
-          // children (the page-error slot and the body mount), which held one
-          // box for the whole feed and so never moved when a row above the
-          // reader changed height.
-          feedAnchorRows(scrollBox, () => rootRows(host)),
-        );
+  // THE SCROLL ANCHOR'S ROWS ARE THE ROOT BODY'S ROW LIST, not the feed
+  // host's own children (the page-error slot and the body mount), which held
+  // one box for the whole feed and so never moved when a row above the reader
+  // changed height.
+  const tail = scrollBox === null ? null : createFeedTail(scrollBox, () => rootRows(host));
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
   // The size half is the footer occlusion (see `observeScrollBox`) — the
@@ -192,6 +187,9 @@ export function mountFeed(
     scrollBox === null || tail === null
       ? null
       : observeScrollBox(scrollBox, tail);
+  // A click in a zone outside the box that draws part of the feed holds the
+  // view as a click in the box does.
+  const unholdZones = tail === null ? [] : (deps.clickZones ?? []).map((zone) => holdViewOnClicks(zone, tail));
   // INTENT-ARMED INNER SCROLLING, on the same box. A capped section keeps the
   // wheel only while the reader has deliberately entered it; otherwise the
   // wheel redirects to the feed. Without it, a section the feed scrolled under
@@ -252,14 +250,15 @@ export function mountFeed(
   // open section the reader scrolled away from or left, since that close goes
   // through the one collapse a click uses.
   //
-  // THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15,
-  // superseding the expand-centering rulings of 2026-09-29, 2026-09-30 and
-  // 2026-10-14). Expanding or collapsing any feed item BY CLICKING IT (a
-  // capped section this click owner toggles, a sub-feed bubble's fold) and
-  // pressing a merge bubble's control announce READER_CLICK_EVENT before
-  // anything changes, and the listener below holds the clicked row still
-  // (`TailFollow.readerClicked`). This is specific to the click: a jump that
-  // expands an entry, or a selection stepped from Emacs, still centers it.
+  // THE READER'S CLICK NEVER MOVES THE FEED (owner requests, 2026-10-15 and
+  // 2026-10-16, superseding the expand-centering rulings of 2026-09-29,
+  // 2026-09-30 and 2026-10-14). ANY click in the feed (expanding or
+  // collapsing an item, answering a question or a permission, pressing any
+  // card's control) holds the view before anything changes: the scroll box
+  // takes the hold itself on every click on its way in (`holdViewOnClicks`,
+  // scroll.ts), so no click site asks for it. This is specific to the click:
+  // a jump that expands an entry, or a selection stepped from Emacs, still
+  // centers it.
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
   // reader then toggled by hand is no longer the jump's to close. The one
@@ -284,12 +283,11 @@ export function mountFeed(
     },
     ownedBySelection,
   );
-  const onReaderClick = (event: Event): void => {
+  const onReaderToggle = (event: Event): void => {
     if (!(event.target instanceof Element)) return;
     releaseOutOfView(event.target);
-    tail?.readerClicked(event.target);
   };
-  host.addEventListener(READER_CLICK_EVENT, onReaderClick);
+  host.addEventListener(READER_TOGGLE_EVENT, onReaderToggle);
 
   const root: FeedController = createFeedController({
     ctx,
@@ -1100,10 +1098,11 @@ export function mountFeed(
     watch?.cancel();
     uninstallTrim();
     unobserve?.();
+    for (const unhold of unholdZones) unhold();
     intentScroll?.uninstall();
     uninstallExpand();
     uninstallSelect();
-    host.removeEventListener(READER_CLICK_EVENT, onReaderClick);
+    host.removeEventListener(READER_TOGGLE_EVENT, onReaderToggle);
     held?.dispose();
     uninstallClear?.();
     selectionVisibility?.dispose();
@@ -1170,6 +1169,27 @@ function bubbleOfRow(
 }
 
 /** The row's element, searched across the root feed and every OPEN sub-feed. */
+
+/**
+ * THE ROOT FEED'S TAIL OWNER over the scroll BOX, as every mount of the feed
+ * builds it: it reads the column's latest entry (`latestEntry`), anchors on
+ * the root rows in ROWS (WebKit has no native scroll anchoring, so the tail
+ * owner holds the content under a reader who is off the tail, scroll.ts), and
+ * keeps a click-held view out of the box's clamp with the box's own floor
+ * (`scrollFloor`). ROWS may be a reader of the rows' container, for a feed
+ * whose row list mounts after the tail owner is built.
+ */
+export function createFeedTail(box: HTMLElement, rows: Element | (() => Element)): TailFollow {
+  return new TailFollow(
+    box,
+    () => {
+      const entry = latestEntry(box);
+      return entry === null ? null : revealGeometry(box, entry);
+    },
+    feedAnchorRows(box, rows),
+    scrollFloor(box),
+  );
+}
 
 /**
  * THE FEED COLUMN'S LATEST ENTRY inside the scroll BOX: the last thing drawn in

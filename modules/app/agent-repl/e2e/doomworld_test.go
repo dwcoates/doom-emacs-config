@@ -242,81 +242,7 @@ func NewDoomWorld(t *testing.T, box sandbox) *DoomWorld {
 		StopDaemon:   fake.Stop,
 	})
 	e.EnsureDaemon()
-	w := &DoomWorld{Emacs: e, Fake: fake}
-	w.echoSelections(t)
-	return w
-}
-
-// echoSelections plays the daemon's answer to a selection: every
-// SelectWorkspace Emacs sends is followed by the roster naming that
-// workspace current (daemon/integration's
-// TestSelectWorkspaceStampsCurrentOnTheRoster pins the daemon doing so), in
-// the order the world last drew. Without it Emacs, which follows the
-// roster's current, would be pulled back to the last one the world named. It
-// stops before Emacs's teardown.
-func (w *DoomWorld) echoSelections(t *testing.T) {
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(pollInterval)
-		defer ticker.Stop()
-		echoed := 0
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-			}
-			raw, err := w.Fake.do(http.MethodGet, "/_fake/calls", nil)
-			if err != nil {
-				t.Errorf("doom: read the recorded calls to echo selections: %v", err)
-				return
-			}
-			var calls []fakeCall
-			if err := json.Unmarshal(raw, &calls); err != nil {
-				t.Errorf("doom: decode the recorded calls to echo selections: %v", err)
-				return
-			}
-			seen := 0
-			for _, c := range calls {
-				if c.Method != "SelectWorkspace" {
-					continue
-				}
-				if seen++; seen <= echoed {
-					continue
-				}
-				echoed = seen
-				var body struct {
-					Workspace struct {
-						ID string `json:"id"`
-					} `json:"workspace"`
-				}
-				if err := json.Unmarshal(c.Body, &body); err != nil {
-					t.Errorf("doom: decode a SelectWorkspace to echo: %v", err)
-					return
-				}
-				if err := w.echoCurrent(body.Workspace.ID); err != nil {
-					t.Errorf("doom: echo the selection of %s: %v", body.Workspace.ID, err)
-					return
-				}
-			}
-		}
-	}()
-	t.Cleanup(func() {
-		close(stop)
-		<-done
-	})
-}
-
-// echoCurrent re-authors the last drawn roster with ID current.
-func (w *DoomWorld) echoCurrent(id string) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if len(w.drawn) == 0 {
-		return nil
-	}
-	_, err := w.Fake.post("/_fake/push", map[string]any{"stream": "roster", "message": w.rosterLocked(id), "snapshot": true})
-	return err
+	return &DoomWorld{Emacs: e, Fake: fake}
 }
 
 // rosterLocked is the roster drawing w.drawn with CURRENT current. Called with
@@ -461,11 +387,26 @@ func (w *DoomWorld) land(t *testing.T, ws doomWorkspace, before []string) doomWo
 // order, CURRENT current, stored for any later subscriber too. Emacs follows
 // CURRENT once its tab is open, after the view, so a test that acts next
 // awaits that follow first.
+//
+// IT ALSO REGISTERS THE DAEMON'S ANSWER TO A SELECTION, first: for each drawn
+// workspace, this same roster naming that one current. The fake pushes it
+// from inside its SelectWorkspace handler (/_fake/selection-answers), so a
+// selection Emacs sent is ordered against this push by when it ARRIVED, as
+// the daemon's own stamp is. An echo read off the recorded calls afterwards
+// could land after a newer roster and pull Emacs back to a selection the
+// world had already moved past (2026-10-16: Emacs's own selection of `repo'
+// echoed 60ms late, after the roster naming the created workspace current).
 func (w *DoomWorld) pushRoster(t *testing.T, current doomWorkspace, workspaces ...doomWorkspace) {
 	t.Helper()
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.drawn = append([]doomWorkspace(nil), workspaces...)
-	roster := w.rosterLocked(current.ID)
-	w.mu.Unlock()
-	w.Fake.Push("roster", roster, true)
+	answers := make(map[string]json.RawMessage, len(w.drawn))
+	for _, ws := range w.drawn {
+		answers[ws.ID] = w.rosterLocked(ws.ID)
+	}
+	if _, err := w.Fake.post("/_fake/selection-answers", map[string]any{"answers": answers}); err != nil {
+		t.Fatalf("doom: register the daemon's answers to a selection: %v", err)
+	}
+	w.Fake.Push("roster", w.rosterLocked(current.ID), true)
 }

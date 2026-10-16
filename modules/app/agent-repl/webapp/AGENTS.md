@@ -584,15 +584,25 @@ hand any more:
   viewport top-aligned, clamped at the feed's edges); the walk opens only the
   containers selecting the row requires, and the landing then expands the
   entry itself (owner request, 2026-10-01). THE READER'S CLICK NEVER MOVES
-  THE FEED (owner request, 2026-10-15, superseding the expand-centering
-  rulings of 2026-09-29, 2026-09-30 and 2026-10-14): expanding or collapsing
-  any feed item BY CLICKING IT, and pressing a merge bubble's control, is no
-  cause. The click dispatches `READER_CLICK_EVENT` (`announceReaderClick`,
-  src/expand.ts) BEFORE it changes anything — a capped section's toggle, a
-  sub-feed bubble's fold, a merge control — and the root feed's listener
-  calls `TailFollow.readerClicked`: the follow ends, the latest-visible latch
+  THE FEED (owner requests, 2026-10-15 and 2026-10-16, superseding the
+  expand-centering rulings of 2026-09-29, 2026-09-30 and 2026-10-14): ANY
+  click in the feed is no cause, whatever it lands on — expanding or
+  collapsing an item, answering a question or a permission, pressing any
+  card's control, the docked gate's choice. The scroll box takes the hold
+  itself, captured, on every click on its way in (`holdViewOnClicks`,
+  src/scroll.ts), and so does every click zone outside it that draws part of
+  the feed (`FeedDeps.clickZones`: the gate dock), so no click site asks for
+  it. `TailFollow.readerClicked` ends the follow, the latest-visible latch
   waits for the reader's next input, and until then the anchoring holds the
-  clicked root row still, wherever its top sits. A click on a selection-governed
+  clicked root row still, wherever its top sits. THE BOX'S OWN CLAMP CANNOT
+  MOVE A HELD VIEW: content shrinking below it, or the box growing under it
+  (the gate dock hiding), would make the box clamp `scrollTop` upward, so the
+  scroll floor (`ScrollFloor`, `scrollFloor`) holds the box's scrollable
+  height at the held view's bottom, and a clamp the box made before its
+  resize observer ran is undone before the frame paints. Once the hold ends
+  the floor recedes with the reader's scroll and lifts when the content
+  reaches it; a named cause lifts it at once. The press that began a click
+  is no scroll gesture. A click on a selection-governed
   bubble goes through the daemon: its push carries
   `frontend.v1.FeedSelectionRowViewport.hold` (or
   `frontend.v1.FeedSelectionNone.viewport` `hold` for a click on the selected

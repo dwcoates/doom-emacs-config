@@ -11,15 +11,10 @@
  * This runs the real stylesheet and the real scroll module in real headless
  * WebKit (pinned-tail-page.ts).
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { GrowthResult, PinnedTailPage } from "./pinned-tail-page";
-import { bundlePage } from "./bundle";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import type { GrowthResult } from "./pinned-tail-page";
+import { bootPage, pageAssets } from "./boot-page";
 
 /** Painted frames measured after each growth: the correction lands in the first. */
 const FRAMES = 5;
@@ -31,19 +26,9 @@ describe("the pinned merge bubble's growth in WebKit", () => {
   let footer: GrowthResult;
 
   beforeAll(async () => {
-    const [script, css] = await Promise.all([
-      bundlePage(path.join(here, "pinned-tail-page.ts"), "pinnedTailPage"),
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
-    ]);
+    const assets = await pageAssets("pinned-tail-page.ts", "pinnedTailPage");
     browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 900, height: 800 } });
-    const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(err.message));
-    await page.setContent("<!doctype html><html><head></head><body></body></html>");
-    await page.addStyleTag({ content: css });
-    await page.addScriptTag({ content: script });
-    await page.waitForFunction(() => (window as { pinnedTail?: PinnedTailPage }).pinnedTail !== undefined);
-    if (errors.length > 0) throw new Error(`the page failed to boot: ${errors.join("; ")}`);
+    ({ page } = await bootPage(browser, { ...assets, global: "pinnedTail", viewport: { width: 900, height: 800 } }));
     await page.evaluate(() => window.pinnedTail.park());
     merge = await page.evaluate(([frames]) => window.pinnedTail.growMerge(200, frames), [FRAMES] as const);
     footer = await page.evaluate(([frames]) => window.pinnedTail.growFooter(60, frames), [FRAMES] as const);

@@ -181,7 +181,9 @@ func TestSandboxGoModuleWalk(t *testing.T) {
 // on the live checkout while other suites of the same run write into it, and
 // find fails the whole walk when a listed entry vanishes before it is
 // stat'ed (npm's .node_modules.lock, 2026-10-16). It also pins the walk off
-// array pops, which killed a gate's stamp with a bus error the same day.
+// shell globbing: Homebrew's bash 5.2 crashed with SIGBUS inside its own glob
+// matcher (gmatch <- glob_vector) on every bus error a gate's stamp died of
+// the same day, through an array-stack walk and a recursive one alike.
 func TestSandboxStampNeverRunsFind(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile(filepath.Join(filepath.Dir(sandboxScript(t)), "sandbox-image.sh"))
@@ -201,6 +203,9 @@ func TestSandboxStampNeverRunsFind(t *testing.T) {
 		}
 		if strings.HasPrefix(code, "unset '") {
 			calls = append(calls, fmt.Sprintf("%d: %s (an array pop, which killed a gate's stamp with a bus error)", i+1, code))
+		}
+		if strings.Contains(code, "shopt -s") || strings.Contains(code, `"/*`) {
+			calls = append(calls, fmt.Sprintf("%d: %s (a shell glob, which bash's glob matcher crashed on)", i+1, code))
 		}
 	}
 
@@ -223,5 +228,46 @@ func TestSandboxStampRefusesAMissingInput(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(out, "the stamp input webapp/package-lock.json is missing") {
 		t.Fatalf("stamp = %q, %v; want a refusal naming the missing lockfile", out, err)
+	}
+}
+
+func TestSandboxStampRefusesADirectoryItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a directory whatever its mode, so no read can be refused")
+	}
+	// Arrange: a directory the walk lists but cannot open.
+	module := stampTree(t)
+	locked := filepath.Join(module, "daemon", "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	// Act
+	out, err := stampOf(t, module)
+
+	// Assert
+	if err == nil || !strings.Contains(out, "the stamp walk cannot read ./daemon/locked") {
+		t.Fatalf("stamp = %q, %v; want a refusal naming the unreadable directory", out, err)
+	}
+}
+
+func TestSandboxStampSkipsADanglingSymlink(t *testing.T) {
+	// Arrange: a link whose target is gone, as an entry removed mid-walk leaves.
+	module := stampTree(t)
+	before, err := stampOf(t, module)
+	if err != nil {
+		t.Fatalf("stamp: %v: %s", err, before)
+	}
+	if err := os.Symlink(filepath.Join(module, "gone"), filepath.Join(module, "daemon", "dangling")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	after, err := stampOf(t, module)
+
+	// Assert
+	if err != nil || after != before {
+		t.Fatalf("stamp %q -> %q (%v) after a dangling link; want the same stamp", before, after, err)
 	}
 }

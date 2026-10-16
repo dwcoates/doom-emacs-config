@@ -65,35 +65,55 @@ sandbox_stamp_inputs() {
 }
 
 # sandbox_walk prints, NUL-separated, every regular file under ROOT outside
-# node_modules, without following symlinks. It walks with shell globs rather
-# than find: the stamp runs on the LIVE checkout while other suites of the
-# same run install packages into it, and find fails the whole walk when an
-# entry it listed (npm's .node_modules.lock, 2026-10-16) vanishes before it
-# stats it. A glob never stats what it lists, and an entry gone before its
-# own test is simply not a file or a directory, so a concurrent writer cannot
-# fail the stamp.
+# node_modules, without following symlinks.
 #
-# It recurses rather than keeping an array stack: an earlier walk popped a
-# bash array with `unset 'a[expr]'` inside this subshell function, and in a
-# merge gate the shell died of a bus error on it in 2 of 8 stamps
-# (2026-10-16). Plain recursion keeps no array at all.
-sandbox_walk() (
-  shopt -s dotglob nullglob
-  sandbox_walk_dir "$1"
-)
-
-sandbox_walk_dir() {
-  local e
-  for e in "$1"/*; do
-    if [[ -L $e ]]; then
-      continue
-    elif [[ -d $e ]]; then
-      [[ ${e##*/} == node_modules ]] || sandbox_walk_dir "$e"
-    elif [[ -f $e ]]; then
-      printf '%s\0' "$e"
-    fi
-  done
-  return 0
+# IT RUNS ON THE LIVE CHECKOUT while other suites of the same run install
+# packages into it, so an entry may vanish between being listed and being
+# read. That entry is simply not a file or a directory any more and is
+# skipped; any other failure to read the tree fails the stamp, loudly. find
+# cannot make that distinction: it fails the whole walk on the vanished
+# entry (npm's .node_modules.lock, 2026-10-16).
+#
+# IT NEVER EXPANDS A SHELL GLOB. Homebrew's bash 5.2 crashes in its own glob
+# matcher: every bus error the stamp died of on 2026-10-16 (eight crash
+# reports, through an array-stack walk and a recursive one alike) was SIGBUS
+# in gmatch <- glob_vector, reading past a buffer while expanding
+# `"$dir"/*`, on the live checkout and on tiny fixture trees alike. So the
+# directory is read by perl's readdir, which matches no pattern at all; perl
+# ships with macOS, and bin/background.sh already reads every test run's
+# niceness with it.
+sandbox_walk() {
+  perl -e '
+    use strict;
+    use warnings;
+    # An entry gone (or turned into a file) since its parent was listed.
+    sub vanished { return $!{ENOENT} || $!{ENOTDIR} }
+    sub walk {
+      my ($dir) = @_;
+      my $dh;
+      unless (opendir($dh, $dir)) {
+        return if vanished();
+        die "sandbox-image: the stamp walk cannot read $dir: $!\n";
+      }
+      my @names = grep { $_ ne "." && $_ ne ".." } readdir($dh);
+      closedir($dh);
+      for my $name (sort @names) {
+        my $path = "$dir/$name";
+        unless (lstat($path)) {
+          next if vanished();
+          die "sandbox-image: the stamp walk cannot stat $path: $!\n";
+        }
+        if (-l _) {
+          next;
+        } elsif (-d _) {
+          walk($path) unless $name eq "node_modules";
+        } elsif (-f _) {
+          print "$path\0";
+        }
+      }
+    }
+    walk($ARGV[0]);
+  ' -- "$1"
 }
 
 # sandbox_select_named_files filters sandbox_walk's NUL-separated paths by

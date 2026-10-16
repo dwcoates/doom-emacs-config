@@ -22,30 +22,35 @@ import (
 // context is the graceful close on this contract (elisp.md, "Stream
 // lifecycle").
 
-func openHost(t *testing.T, server *fakeServer, client agentreplv1connectClient, id string) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], context.CancelFunc) {
+// openStream opens one subscription with OPEN, under a context the returned
+// cancel closes, and returns once the server has registered it on STREAM
+// (keyed by WORKSPACEID for the host stream), so a push can never race it.
+func openStream[Res any](t *testing.T, server *fakeServer, stream, workspaceID string,
+	open func(context.Context) (*connect.ServerStreamForClient[Res], error)) (*connect.ServerStreamForClient[Res], context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-			Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: "/tmp/" + id}}))
+	opened, err := open(ctx)
 	if err != nil {
 		cancel()
-		t.Fatalf("WatchHostWorkspace(%s): %v", id, err)
+		t.Fatalf("open the %s stream %s: %v", stream, workspaceID, err)
 	}
-	server.mustAwaitSubscribers(t, streamHost, id, 1)
-	return stream, cancel
+	server.mustAwaitSubscribers(t, stream, workspaceID, 1)
+	return opened, cancel
+}
+
+func openHost(t *testing.T, server *fakeServer, client agentreplv1connectClient, id string) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], context.CancelFunc) {
+	t.Helper()
+	return openStream(t, server, streamHost, id, func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], error) {
+		return client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: "/tmp/" + id}}))
+	})
 }
 
 func openDaemon(t *testing.T, server *fakeServer, client agentreplv1connectClient) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], context.CancelFunc) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := client.WatchDaemon(ctx, connect.NewRequest(emacsWatchDaemon()))
-	if err != nil {
-		cancel()
-		t.Fatalf("WatchDaemon: %v", err)
-	}
-	server.mustAwaitSubscribers(t, streamDaemon, "", 1)
-	return stream, cancel
+	return openStream(t, server, streamDaemon, "", func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
+		return client.WatchDaemon(ctx, connect.NewRequest(emacsWatchDaemon()))
+	})
 }
 
 func TestPushReachesTheKeyedWorkspaceStream(t *testing.T) {

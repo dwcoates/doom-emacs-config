@@ -163,6 +163,50 @@ export type SubscribeInput = (onInput: () => void) => void;
 export type ReanchorBox = ScrollPosition;
 
 /**
+ * THE BOX'S SCROLL FLOOR: the least scrollable height the box keeps, however
+ * short its content. A box clamps `scrollTop` into its scrollable range, so
+ * content shrinking below the view, or the box growing under it, moves the
+ * view up with no one having asked. Under a view the reader's click holds,
+ * the floor makes that clamp impossible (`TailFollow.readerClicked`).
+ */
+export interface ScrollFloor {
+  /**
+   * Keep the box's scrollable height at EXTENT px or more; 0 lifts the floor.
+   * Answers the blank px the floor adds below the content to do it (0 when
+   * the content is tall enough on its own).
+   */
+  set(extent: number): number;
+}
+
+/** The class the scroll floor's blank wears (`scrollFloor`). */
+export const SCROLL_FLOOR_CLASS = "scroll-floor";
+
+/**
+ * The real floor of BOX: a blank block kept as the box's LAST child, as tall
+ * as the content falls short of the floor. It is laid out in the box's flow,
+ * so it is re-measured on every `set`: the tail owner sets the floor afresh on
+ * every size change while one stands.
+ */
+export function scrollFloor(box: HTMLElement): ScrollFloor {
+  const blank = box.ownerDocument.createElement("div");
+  blank.className = SCROLL_FLOOR_CLASS;
+  blank.setAttribute("aria-hidden", "true");
+  blank.hidden = true;
+  box.append(blank);
+  return {
+    set: (extent) => {
+      if (box.lastElementChild !== blank) box.append(blank);
+      const shown = blank.hidden ? 0 : blank.offsetHeight;
+      const content = box.scrollHeight - shown;
+      const px = extent <= 0 ? 0 : Math.max(0, Math.ceil(extent - content));
+      blank.hidden = px === 0;
+      blank.style.height = `${px.toString()}px`;
+      return px;
+    },
+  };
+}
+
+/**
  * Reading where the feed's LATEST ENTRY sits against the box's viewport, or
  * null when the feed has no entry drawn at all. Reading moves nothing.
  */
@@ -399,18 +443,35 @@ export class TailFollow {
   private seenSize: { scrollHeight: number; clientHeight: number };
   /** What the feed's content last changed, stated on every uncaused move (`witnessMoves`). */
   private witness: () => MoveWitnessReport | null = () => null;
+  /**
+   * The scrollable height the floor holds the box to (`ScrollFloor`), 0 when
+   * none stands: the held view's bottom while the reader's click holds it, and
+   * afterwards whatever of it the reader has not scrolled back above.
+   */
+  private floorExtent = 0;
+  /** The blank px the floor last added, so a change of it is recorded once. */
+  private floorBlank = 0;
+  /**
+   * Where the reader's click holds the view, while `clickHeld` stands: the
+   * position at the click, moved only by this owner's own anchoring. Kept
+   * apart from `lastTop`, which a scroll event folds the box's clamp into.
+   */
+  private heldTop = 0;
 
   /**
    * READLATEST is where the feed's latest entry sits; a box with no feed to
    * read (a fixture) has no latest entry, and the latest-visible latch never
    * fires on it. ROWS are the rows the anchoring reads; without them (a
    * fixture, a box with no feed) nothing is anchored, and a caller's own
-   * measure is all a compensation has.
+   * measure is all a compensation has. FLOOR is what keeps a view the
+   * reader's click holds out of the box's clamp (`ScrollFloor`); without it (a
+   * fixture) content shrinking under a held view moves it as it always did.
    */
   constructor(
     private readonly box: ReanchorBox,
     private readonly readLatest: ReadLatest = () => null,
     private readonly rows: AnchorRows | null = null,
+    private readonly floor: ScrollFloor | null = null,
   ) {
     this.lastTop = box.scrollTop;
     this.seenSize = { scrollHeight: box.scrollHeight, clientHeight: box.clientHeight };
@@ -424,31 +485,37 @@ export class TailFollow {
 
   /** A prompt this client sent was drawn: park at the tail and follow. */
   promptSent(): void {
+    this.supersedeClick();
     this.park("promptSent");
   }
 
   /** A held prompt's card was drawn for the first time: park at the tail and follow. */
   promptHeld(): void {
+    this.supersedeClick();
     this.park("promptHeld");
   }
 
   /** A feed's first paint: land at the tail and follow. */
   initialPlacement(): void {
+    this.supersedeClick();
     this.park("initialPlacement");
   }
 
   /** A page replace (re-open after reconnect or handover): land at the tail and follow. */
   replaceRestore(): void {
+    this.supersedeClick();
     this.park("replaceRestore");
   }
 
   /** The user switched to this page's workspace: land at the tail and follow. */
   workspaceSelected(): void {
+    this.supersedeClick();
     this.park("workspaceSelected");
   }
 
   /** The reader cleared the selection: return to the tail and follow. */
   selectionCleared(): void {
+    this.supersedeClick();
     this.selectionActive = false;
     this.park("selectionMoved");
   }
@@ -476,6 +543,7 @@ export class TailFollow {
    * selection the reader's click made centers nothing (`selectionClicked`).
    */
   selectionMoved(geometry: CenterGeometry | null): void {
+    this.supersedeClick();
     this.selectionActive = true;
     this.release();
     if (geometry !== null) this.shift("selectionMoved", centerDelta(geometry));
@@ -511,15 +579,21 @@ export class TailFollow {
   }
 
   /**
-   * THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15). The
-   * reader clicked TARGET: a bubble or a card they are expanding or collapsing
-   * by its own click, or a merge bubble's control (owner request, 2026-10-14),
-   * whose redraw changes the bubble's height. So the follow ends, the
+   * THE READER'S CLICK NEVER MOVES THE FEED (owner requests, 2026-10-15 and
+   * 2026-10-16). The reader clicked TARGET, anywhere in the feed's box or in
+   * a click zone that belongs to it (`holdViewOnClicks`): a bubble or a card
+   * they expand or collapse, a question's option, a permission's answer, a
+   * merge bubble's control, the docked gate's choice. Whatever the click then
+   * redraws, and whatever height that takes or gives, the view holds. So the
+   * follow ends, the
    * latest-visible latch is held off until the reader's NEXT input
    * (`onInput`), and until then the anchoring holds TARGET's root row still
    * (`takeAnchor`): its top stays where the reader sees it, and its own growth
    * or shrinking runs downward from there, however long it takes to land (a
-   * sub-feed drawn later, a redraw). Moves nothing.
+   * sub-feed drawn later, a redraw). Content shrinking below the held view,
+   * or the box growing under it, would make the box clamp it upward; the
+   * floor holds the box's scrollable height at the held view's bottom instead
+   * (`holdFloor`), so it cannot. Moves nothing.
    *
    * This is the CLICK, not the expansion. A jump that expands an entry
    * centers it (`entryJumped`), and a selection stepped from Emacs centers its
@@ -548,7 +622,13 @@ export class TailFollow {
   private holdUnderClick(target: Element | null, by: "click" | "selection-click" | "deselection-click"): void {
     this.release();
     this.clickHeld = true;
+    // The press that began the click is no gesture on the box: a movement
+    // after it is the click's redraw, never the reader's, so it is recorded
+    // as uncaused rather than taken for a scroll away from the tail.
+    this.touched = false;
     this.clickedRow = target === null ? null : this.rootRowOf(target);
+    this.heldTop = this.box.scrollTop;
+    this.holdFloor();
     this.takeAnchor();
     log.debug("the reader clicked; the view holds until the reader's next input", {
       operation: "scroll.click-held",
@@ -608,6 +688,7 @@ export class TailFollow {
    * entry the reader can see latches the follow.
    */
   onScroll(): void {
+    this.holdFloor();
     this.sync();
     if (this.strayed) {
       this.strayed = false;
@@ -615,6 +696,7 @@ export class TailFollow {
     }
     this.reanchor("scroll");
     this.latchIfLatestVisible("scroll");
+    this.recedeFloor();
   }
 
   /**
@@ -629,6 +711,72 @@ export class TailFollow {
   }
 
   /**
+   * A NAMED CAUSE MOVES THE FEED NEXT: it supersedes the reader's last click.
+   * The click hold ends and the floor is lifted, so the cause lands on the
+   * feed's own content, never on the blank a click held.
+   */
+  private supersedeClick(): void {
+    this.clickHeld = false;
+    this.clickedRow = null;
+    this.setFloor(0);
+  }
+
+  /**
+   * THE HELD VIEW CANNOT BE CLAMPED. While the reader's click holds the view,
+   * the floor is the held view's bottom: the box's scrollable height never
+   * drops below it, however far the content below shrinks or the box grows.
+   *
+   * The box clamps in its layout, before it tells anyone it resized, so a
+   * clamp may already stand when this runs: the box sits below the held
+   * position AND at the very end of its range, which nothing but the clamp
+   * leaves it at. That clamp is undone here, in the box's resize pass (before
+   * the frame paints) or in its scroll event, whichever the browser delivers
+   * first. Any other move is no clamp and is not undone: the held position
+   * becomes wherever the box now stands.
+   */
+  private holdFloor(): void {
+    if (!this.clickHeld || this.floor === null) return;
+    const top = this.box.scrollTop;
+    const end = this.box.scrollHeight - this.box.clientHeight;
+    const clamped = top < this.heldTop && top >= end - 1;
+    if (!clamped) this.heldTop = top;
+    this.setFloor(this.heldTop + this.box.clientHeight);
+    if (!clamped) return;
+    this.box.scrollTop = this.heldTop;
+    this.lastTop = this.box.scrollTop;
+    log.debug("the box clamped the view the reader's click holds; the floor put it back", {
+      operation: "scroll.click-floor-restored",
+      context: { from: top, to: this.box.scrollTop, floor: this.floorExtent },
+    });
+  }
+
+  /**
+   * ONCE THE HOLD ENDS the floor follows the reader up: it never reaches
+   * below the view's bottom, so blank the reader scrolled above is gone, and
+   * once the content itself is as tall the floor is lifted.
+   */
+  private recedeFloor(): void {
+    if (this.clickHeld || this.floorExtent === 0) return;
+    this.setFloor(Math.min(this.floorExtent, this.box.scrollTop + this.box.clientHeight));
+  }
+
+  /** Hold the box's scrollable height at EXTENT (0 lifts it), keeping it only while it holds anything or a click stands. */
+  private setFloor(extent: number): void {
+    if (this.floor === null) return;
+    if (extent === 0 && this.floorExtent === 0) return;
+    const blank = this.floor.set(extent);
+    const was = { extent: this.floorExtent, blank: this.floorBlank };
+    this.floorExtent = extent > 0 && (blank > 0 || this.clickHeld) ? extent : 0;
+    this.floorBlank = blank;
+    if (blank !== was.blank || this.floorExtent !== was.extent) {
+      log.debug("the scroll floor changed", {
+        operation: "scroll.floor-set",
+        context: { extent: this.floorExtent, blank, held: this.clickHeld },
+      });
+    }
+  }
+
+  /**
    * A resize of the box or of its content. A standing follow keeps the tail on
    * the settled layout (the docked footer taking height, a deferred card
    * settling); for a reader who scrolled away, the anchoring keeps the content
@@ -636,6 +784,8 @@ export class TailFollow {
    */
   onResize(): void {
     this.recordResize();
+    this.holdFloor();
+    this.recedeFloor();
     this.sync();
     this.reanchor("resize");
     this.follow();
@@ -714,6 +864,7 @@ export class TailFollow {
     cause: "detachedWorkSelected" | "entryJumped",
     delta: number,
   ): void {
+    this.supersedeClick();
     this.release();
     this.shift(cause, delta);
     this.takeAnchor();
@@ -724,8 +875,11 @@ export class TailFollow {
   private shift(cause: ScrollCause, delta: number): void {
     this.sync();
     const from = this.box.scrollTop;
+    // An anchoring correction under a click hold must reach its target too.
+    if (this.clickHeld) this.setFloor(from + delta + this.box.clientHeight);
     if (delta !== 0) this.box.scrollTop += delta;
     this.lastTop = this.box.scrollTop;
+    if (this.clickHeld) this.heldTop = this.lastTop;
     recordMove(cause, from, this.lastTop, false);
   }
 
@@ -1115,7 +1269,9 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
       }
     },
   );
+  const unholdClicks = holdViewOnClicks(box, tail);
   return () => {
+    unholdClicks();
     box.removeEventListener("scroll", onScroll);
     for (const kind of READER_INPUTS) {
       box.removeEventListener(kind, onInput, { capture: true });
@@ -1124,6 +1280,26 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
     content.disconnect();
     observer.disconnect();
     watched.clear();
+  };
+}
+
+/**
+ * THE ONE PLACE A CLICK HOLDS THE FEED'S VIEW (owner request, 2026-10-16):
+ * every click inside ZONE -- the feed's own scroll box, or an element outside
+ * it that draws part of the feed (the docked gate) -- takes the click hold
+ * (`TailFollow.readerClicked`) before anything the click does. Captured, so
+ * it runs ahead of every handler under ZONE, and so no click site has to
+ * remember to ask for the hold: a click anywhere in the feed holds the view,
+ * whatever it lands on. Keyboard activation of a control dispatches a click
+ * too, and holds the same way. Answers the uninstall.
+ */
+export function holdViewOnClicks(zone: HTMLElement, tail: TailFollow): () => void {
+  const onClick = (event: MouseEvent): void => {
+    if (event.target instanceof Element) tail.readerClicked(event.target);
+  };
+  zone.addEventListener("click", onClick, { capture: true });
+  return () => {
+    zone.removeEventListener("click", onClick, { capture: true });
   };
 }
 

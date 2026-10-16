@@ -7,6 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // The control plane rides the SAME mux as agentrepl.v1 under /_fake/, so a
@@ -23,6 +24,13 @@ type pushRequest struct {
 	WorkspaceID string          `json:"workspace_id"`
 	Message     json.RawMessage `json:"message"`
 	Snapshot    bool            `json:"snapshot"`
+}
+
+// selectionAnswersRequest is /_fake/selection-answers' body: the roster push
+// (protojson of the roster stream's response type) that answers a
+// SelectWorkspace of each workspace id.
+type selectionAnswersRequest struct {
+	Answers map[string]json.RawMessage `json:"answers"`
 }
 
 type gateRequest struct {
@@ -120,6 +128,28 @@ func (s *fakeServer) handlePush(w http.ResponseWriter, r *http.Request) {
 	}
 	delivered := s.push(body.Stream, body.WorkspaceID, msg, body.Snapshot)
 	writeJSON(w, http.StatusOK, map[string]any{"delivered": delivered, "snapshot": body.Snapshot})
+}
+
+// handleSelectionAnswers replaces the rosters that answer a SelectWorkspace.
+// Every answer must be a valid roster push, or none is taken.
+func (s *fakeServer) handleSelectionAnswers(w http.ResponseWriter, r *http.Request) {
+	var body selectionAnswersRequest
+	if err := decodeControlBody(r, &body); err != nil {
+		badRequest(w, "fakedaemon.control.selection-answers-unparseable", err)
+		return
+	}
+	answers := make(map[string]proto.Message, len(body.Answers))
+	for id, raw := range body.Answers {
+		msg := streamResponseTypes[streamRoster]()
+		if err := protojson.Unmarshal(raw, msg); err != nil {
+			badRequest(w, "fakedaemon.control.selection-answers-invalid-message",
+				fmt.Errorf("the answer to selecting %q is not a valid roster push: %w", id, err))
+			return
+		}
+		answers[id] = msg
+	}
+	s.setSelectionAnswers(answers)
+	writeJSON(w, http.StatusOK, map[string]any{"answers": len(answers)})
 }
 
 // connectCodes is the closed set of Connect error codes /_fake/end accepts.
@@ -242,6 +272,7 @@ func (s *fakeServer) registerControlPlane(mux *http.ServeMux, exit func()) {
 	}
 	mux.HandleFunc("/_fake/script", post("/_fake/script", s.handleScript))
 	mux.HandleFunc("/_fake/push", post("/_fake/push", s.handlePush))
+	mux.HandleFunc("/_fake/selection-answers", post("/_fake/selection-answers", s.handleSelectionAnswers))
 	mux.HandleFunc("/_fake/end", post("/_fake/end", s.handleEnd))
 	mux.HandleFunc("/_fake/gate", post("/_fake/gate", s.handleGate))
 	mux.HandleFunc("/_fake/reset", post("/_fake/reset", s.handleReset))

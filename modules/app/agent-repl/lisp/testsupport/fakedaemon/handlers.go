@@ -265,7 +265,11 @@ func (s *fakeServer) RegisterRepository(ctx context.Context, req *connect.Reques
 }
 
 func (s *fakeServer) SelectWorkspace(ctx context.Context, req *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error) {
-	return handleUnary[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse](ctx, s, "SelectWorkspace", req.Msg)
+	resp, err := handleUnary[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse](ctx, s, "SelectWorkspace", req.Msg)
+	if err == nil {
+		s.answerSelection(req.Msg.GetWorkspace().GetId())
+	}
+	return resp, err
 }
 
 func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {

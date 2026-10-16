@@ -23,16 +23,11 @@
  * included, so the owner's "the right looks bigger" was a perception and no
  * size was changed; these pin the equality.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bundlePage } from "./bundle";
+import { bootPage, pageAssets } from "./boot-page";
 import { screenshotPixels } from "./pixels";
-import type { StripMeasure, TopbarPage } from "./topbar-page";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import type { StripMeasure } from "./topbar-page";
 
 /**
  * The painted glyph may sit this far from the disc's center, in CSS px. The
@@ -91,19 +86,15 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
   const rig = { dpr } as Rig;
 
   beforeAll(async () => {
-    const [script, css] = await Promise.all([
-      bundlePage(path.join(here, "topbar-page.ts"), "topbarPage"),
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
-    ]);
+    const assets = await pageAssets("topbar-page.ts", "topbarPage");
     browser = await webkit.launch();
-    rig.page = await browser.newPage({ viewport: { width: 1200, height: 200 }, deviceScaleFactor: dpr });
-    const errors: string[] = [];
-    rig.page.on("pageerror", (err) => errors.push(err.message));
-    await rig.page.setContent(`<!doctype html><html><head></head><body style="margin:0;background:#fff"></body></html>`);
-    await rig.page.addStyleTag({ content: css });
-    await rig.page.addScriptTag({ content: script });
-    await rig.page.waitForFunction(() => (window as { topbarPage?: TopbarPage }).topbarPage !== undefined);
-    if (errors.length > 0) throw new Error(`the page failed to boot: ${errors.join("; ")}`);
+    ({ page: rig.page } = await bootPage(browser, {
+      ...assets,
+      global: "topbarPage",
+      viewport: { width: 1200, height: 200 },
+      deviceScaleFactor: dpr,
+      bodyStyle: "margin:0;background:#fff",
+    }));
   });
 
   afterAll(async () => {

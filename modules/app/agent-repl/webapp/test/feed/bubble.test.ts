@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { createControl, isControl } from "../../src/control.js";
-import { READER_CLICK_EVENT } from "../../src/expand.js";
+import { createControl } from "../../src/control.js";
+import { READER_TOGGLE_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clone, create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema, type OpenFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
@@ -796,18 +796,18 @@ describe("mountBubble: clicking the head is the toggle", () => {
     expect(h.calls.openFeed[0]?.feed?.value).toBe("b1");
   });
 
-  /** Record every reader click ELEMENT announces, with whether the bubble was expanded then. */
+  /** Record every reader toggle ELEMENT announces, with whether the bubble was expanded then. */
   function recordAnnouncements(
     bubble: { element: HTMLElement; isExpanded(): boolean },
   ): Array<{ target: EventTarget | null; expanded: boolean }> {
     const seen: Array<{ target: EventTarget | null; expanded: boolean }> = [];
-    bubble.element.addEventListener(READER_CLICK_EVENT, (e) => {
+    bubble.element.addEventListener(READER_TOGGLE_EVENT, (e) => {
       seen.push({ target: e.target, expanded: bubble.isExpanded() });
     });
     return seen;
   }
 
-  it("announces the reader's expanding head click from the bubble before it opens", async () => {
+  it("announces the reader's expanding head toggle from the bubble before it opens", async () => {
     const { bubble } = mount(subagentRow("b1"));
     const seen = recordAnnouncements(bubble);
     headOf(bubble).click();
@@ -815,7 +815,7 @@ describe("mountBubble: clicking the head is the toggle", () => {
     expect(seen).toEqual([{ target: bubble.element, expanded: false }]);
   });
 
-  it("announces the reader's collapsing head click from the bubble before it closes", async () => {
+  it("announces the reader's collapsing head toggle from the bubble before it closes", async () => {
     const { bubble } = mount(subagentRow("b1"));
     headOf(bubble).click();
     await settle();
@@ -2103,52 +2103,18 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
   });
 });
 
-describe("mountBubble: a press on a merge bubble's control holds the view", () => {
-  /** Record every reader click BUBBLE announces from one of its controls. */
-  function controlAnnouncements(bubble: { element: HTMLElement }): EventTarget[] {
-    const targets: EventTarget[] = [];
-    bubble.element.addEventListener(READER_CLICK_EVENT, (e) => {
-      if (e.target instanceof Element && isControl(e.target)) targets.push(e.target);
-    });
-    return targets;
-  }
-
-  /** A control placed in BUBBLE's sub-feed panel, as a merge tab is drawn there. */
-  function controlIn(bubble: { element: HTMLElement }): HTMLElement {
+describe("mountBubble: a press on a bubble's control is no fold", () => {
+  it("announces no reader toggle for a control pressed in a merge bubble", () => {
+    // Arrange -- a control in the sub-feed panel, as a merge tab is drawn there.
+    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true });
     const panel = bubble.element.querySelector<HTMLElement>("[data-subfeed]");
     if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
     const control = createControl();
     panel.append(control);
-    return control;
-  }
-
-  it("announces the reader's click from a control in a merge bubble", () => {
-    // Arrange
-    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true });
-    const seen = controlAnnouncements(bubble);
-    const control = controlIn(bubble);
+    const seen: EventTarget[] = [];
+    bubble.element.addEventListener(READER_TOGGLE_EVENT, (e) => seen.push(e.target as EventTarget));
     // Act
     control.click();
-    // Assert
-    expect(seen).toEqual([control]);
-  });
-
-  it("announces nothing from a control in a subagent bubble", () => {
-    // Arrange
-    const { bubble } = mount(subagentRow("b1"), harness());
-    const seen = controlAnnouncements(bubble);
-    // Act
-    controlIn(bubble).click();
-    // Assert
-    expect(seen).toEqual([]);
-  });
-
-  it("announces no control click when the merge bubble's bare head is clicked", () => {
-    // Arrange
-    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true });
-    const seen = controlAnnouncements(bubble);
-    // Act
-    bubble.element.querySelector<HTMLElement>(".bubble-head")?.click();
     // Assert
     expect(seen).toEqual([]);
   });

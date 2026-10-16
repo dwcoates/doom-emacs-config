@@ -70,6 +70,10 @@ type snapshotKey struct {
 }
 
 type fakeServer struct {
+	// pushMu serializes every delivery, from /_fake/push and from a
+	// selection's answer alike, so the order one stream's subscribers see is
+	// the order the pushes were made in (see answerSelection).
+	pushMu      sync.Mutex
 	mu          sync.Mutex
 	subChanged  *sync.Cond
 	callChanged *sync.Cond
@@ -77,6 +81,9 @@ type fakeServer struct {
 	scripts     map[string]json.RawMessage
 	subscribers map[int64]*subscriber
 	snapshots   map[snapshotKey][]proto.Message
+	// selectionAnswers is the roster push that answers a SelectWorkspace of
+	// each workspace id; see /_fake/selection-answers.
+	selectionAnswers map[string]proto.Message
 	// gates holds one channel per method whose answer is being withheld; see
 	// gate.go.
 	gates     map[string]chan struct{}
@@ -89,6 +96,8 @@ func newFakeServer() *fakeServer {
 		subscribers: map[int64]*subscriber{},
 		snapshots:   map[snapshotKey][]proto.Message{},
 		gates:       map[string]chan struct{}{},
+
+		selectionAnswers: map[string]proto.Message{},
 	}
 	s.subChanged = sync.NewCond(&s.mu)
 	s.callChanged = sync.NewCond(&s.mu)
@@ -282,6 +291,8 @@ func (s *fakeServer) matchingSubscribers(stream, workspaceID string) []*subscrib
 // push delivers MSG to every open subscriber of STREAM (and, for the host
 // stream, of WORKSPACEID).  Returns how many subscribers it reached.
 func (s *fakeServer) push(stream, workspaceID string, msg proto.Message, snapshot bool) int {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
 	if snapshot {
 		key := snapshotKey{stream, workspaceID}
 		s.mu.Lock()
@@ -419,11 +430,12 @@ func handleUnary[Req any, Res any](ctx context.Context, s *fakeServer, method st
 // resetCounts reports what a /_fake/reset threw away, so a caller sees that
 // the fake really was carrying state rather than guessing.
 type resetCounts struct {
-	Calls     int `json:"calls"`
-	Scripts   int `json:"scripts"`
-	Snapshots int `json:"snapshots"`
-	Gates     int `json:"gates"`
-	Ended     int `json:"ended"`
+	Calls            int `json:"calls"`
+	Scripts          int `json:"scripts"`
+	Snapshots        int `json:"snapshots"`
+	SelectionAnswers int `json:"selection_answers"`
+	Gates            int `json:"gates"`
+	Ended            int `json:"ended"`
 }
 
 // reset returns the fake to the state newFakeServer left it in, WITHOUT
@@ -446,10 +458,13 @@ func (s *fakeServer) reset() resetCounts {
 		Scripts:   len(s.scripts),
 		Snapshots: len(s.snapshots),
 		Gates:     len(s.gates),
+
+		SelectionAnswers: len(s.selectionAnswers),
 	}
 	s.calls = nil
 	s.scripts = map[string]json.RawMessage{}
 	s.snapshots = map[snapshotKey][]proto.Message{}
+	s.selectionAnswers = map[string]proto.Message{}
 	for method, gate := range s.gates {
 		delete(s.gates, method)
 		close(gate)
@@ -467,6 +482,38 @@ func (s *fakeServer) reset() resetCounts {
 	counts.Ended = len(subs)
 	logInfo("fakedaemon.reset", "reset the fake to its start-of-process state",
 		map[string]any{"calls": counts.Calls, "scripts": counts.Scripts,
-			"snapshots": counts.Snapshots, "gates": counts.Gates, "ended": counts.Ended})
+			"snapshots": counts.Snapshots, "selection_answers": counts.SelectionAnswers,
+			"gates": counts.Gates, "ended": counts.Ended})
 	return counts
+}
+
+// ---- selection answers ----
+
+// setSelectionAnswers replaces the roster pushes that answer a
+// SelectWorkspace, keyed by the selected workspace's id.
+func (s *fakeServer) setSelectionAnswers(answers map[string]proto.Message) {
+	s.mu.Lock()
+	s.selectionAnswers = answers
+	s.mu.Unlock()
+	logInfo("fakedaemon.selection-answers.set", "set the rosters that answer a selection",
+		map[string]any{"workspaces": len(answers)})
+}
+
+// answerSelection plays the daemon's answer to a SelectWorkspace of ID: the
+// roster naming ID current, pushed (and stored as the roster's snapshot) from
+// inside the handler, so it is ordered against every other push exactly by
+// when the selection ARRIVED, as the daemon's own stamp is. A selection the
+// scenario registered no answer for pushes nothing.
+func (s *fakeServer) answerSelection(id string) {
+	s.mu.Lock()
+	answer, ok := s.selectionAnswers[id]
+	s.mu.Unlock()
+	if !ok {
+		logInfo("fakedaemon.selection-answers.none", "no roster answers this selection",
+			map[string]any{"workspace_id": id})
+		return
+	}
+	delivered := s.push(streamRoster, "", answer, true)
+	logInfo("fakedaemon.selection-answers.pushed", "pushed the roster that answers a selection",
+		map[string]any{"workspace_id": id, "subscribers": delivered})
 }

@@ -18,15 +18,10 @@
  * Its browser is Playwright's WebKit build pinned by `playwright-core`
  * (package.json); `npx playwright-core install webkit` fetches it once.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { AnchoringPage, StepResult } from "./anchoring-page";
-import { bundlePage } from "./bundle";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import type { StepResult } from "./anchoring-page";
+import { bootPage, pageAssets } from "./boot-page";
 
 /** The reader's step, and how many of them one pass takes (as the reproduction did). */
 const STEP_PX = 150;
@@ -103,19 +98,9 @@ describe("the feed's scroll anchoring in WebKit", () => {
   let grownRecords: string[];
 
   beforeAll(async () => {
-    const [script, css] = await Promise.all([
-      bundlePage(path.join(here, "anchoring-page.ts"), "anchoringPage"),
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
-    ]);
+    const assets = await pageAssets("anchoring-page.ts", "anchoringPage");
     browser = await webkit.launch();
-    const page = await browser.newPage({ viewport: { width: 800, height: 800 } });
-    const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(err.message));
-    await page.setContent("<!doctype html><html><head></head><body></body></html>");
-    await page.addStyleTag({ content: css });
-    await page.addScriptTag({ content: script });
-    await page.waitForFunction(() => (window as { anchoring?: AnchoringPage }).anchoring !== undefined);
-    if (errors.length > 0) throw new Error(`the page failed to boot: ${errors.join("; ")}`);
+    const { page } = await bootPage(browser, { ...assets, global: "anchoring", viewport: { width: 800, height: 800 } });
     first = await scrollUpPass(page);
     firstRecords = await page.evaluate(() => window.anchoring.records());
     grown = await growAbovePass(page);

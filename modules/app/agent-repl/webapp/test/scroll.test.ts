@@ -25,6 +25,10 @@ import {
   revealGeometry,
   centerDelta,
   observeScrollBox,
+  holdViewOnClicks,
+  scrollFloor,
+  SCROLL_FLOOR_CLASS,
+  type ScrollFloor,
   latestEntryVisible,
   MoveWitness,
   type MoveWitnessReport,
@@ -1605,6 +1609,8 @@ describe("no scroll write outside scroll.ts", () => {
       .map((line) => line.trim());
     // Assert
     expect(writes).toEqual([
+      // The scroll floor undoing a clamp under a click-held view (`holdFloor`).
+      "this.box.scrollTop = this.heldTop;",
       "this.box.scrollTop = this.box.scrollHeight;",
       "if (delta !== 0) this.box.scrollTop += delta;",
       "feed.scrollTop += delta;",
@@ -3360,5 +3366,419 @@ describe("MoveWitness", () => {
     first?.mutated.push("tampered");
     // Assert
     expect(witness.report()?.mutated).toEqual(["span.q-when"]);
+  });
+});
+
+/**
+ * THE SCROLL FLOOR UNDER A CLICK-HELD VIEW (owner request, 2026-10-16): a
+ * reader's click never moves the feed, not even by the box's own clamp.
+ *
+ * The box here CLAMPS like a real one: `scrollTop` never sits past
+ * `scrollHeight - clientHeight`, and the floor's extent counts in
+ * `scrollHeight` exactly as the real floor's blank does.
+ */
+describe("TailFollow: the scroll floor under a click-held view", () => {
+  /** A clamping box over CONTENT px, a 300px viewport at TOP, with a fake floor. */
+  function floored(top: number, content = 1000) {
+    const state = { content, floor: 0, top, clientHeight: 300 };
+    const box: ReanchorBox = {
+      get clientHeight() {
+        return state.clientHeight;
+      },
+      get scrollHeight() {
+        return Math.max(state.content, state.floor);
+      },
+      get scrollTop() {
+        return state.top;
+      },
+      set scrollTop(v: number) {
+        state.top = Math.max(0, Math.min(v, Math.max(state.content, state.floor) - state.clientHeight));
+      },
+    };
+    const extents: number[] = [];
+    const floor: ScrollFloor = {
+      set: (extent) => {
+        extents.push(extent);
+        const blank = extent <= 0 ? 0 : Math.max(0, extent - state.content);
+        state.floor = blank > 0 ? extent : 0;
+        return blank;
+      },
+    };
+    let onScroll = (): void => {};
+    let onResize = (): void => {};
+    let onInput = (): void => {};
+    const tail = new TailFollow(box, () => null, null, floor);
+    tail.observe(
+      (cb) => (onScroll = cb),
+      (cb) => (onResize = cb),
+      (cb) => (onInput = cb),
+    );
+    /** The box lays out: its position re-clamped into the range, as a browser's layout does. */
+    const layout = (): void => {
+      box.scrollTop = state.top;
+    };
+    return {
+      tail,
+      box,
+      state,
+      extents,
+      layout,
+      scroll: () => onScroll(),
+      input: () => onInput(),
+      /** The content below the view shrinks by PX, the box lays out, then tells its owner. */
+      shrink: (px: number) => {
+        state.content -= px;
+        layout();
+        onResize();
+      },
+      /** The box's viewport grows by PX (the gate dock hiding), lays out, then tells its owner. */
+      grow: (px: number) => {
+        state.clientHeight += px;
+        layout();
+        onResize();
+      },
+    };
+  }
+
+  it("arms the floor at the held view's bottom when the reader clicks", () => {
+    // Arrange
+    const f = floored(700);
+    // Act
+    f.tail.readerClicked(document.createElement("div"));
+    // Assert
+    expect(f.extents).toEqual([1000]);
+  });
+
+  it("holds the view when the content below the clicked card shrinks", () => {
+    // Arrange -- at the tail: 700 + 300 is the whole content.
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    // Act -- the answered card redraws 200px shorter.
+    f.shrink(200);
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1000]);
+  });
+
+  it("holds the view when the box grows under it", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    // Act -- the docked gate hides, and the feed's viewport takes its 210px.
+    f.grow(210);
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1210]);
+  });
+
+  it("lets the floor down with the box when the box shrinks back", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.grow(210);
+    // Act -- Emacs shows the input window again, and the viewport gives the 210px back.
+    f.grow(-210);
+    // Assert -- nothing is left to scroll into below the held view.
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1000]);
+  });
+
+  it("undoes the clamp in the box's scroll event when that arrives before its resize pass", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    // Act -- the box laid out the shorter card and clamped; WebKit tells the scroll first.
+    f.state.content -= 200;
+    f.layout();
+    f.scroll();
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1000]);
+  });
+
+  it("does not undo a move under the hold that is no clamp", () => {
+    // Arrange -- content enough below that the box is nowhere near its end.
+    const f = floored(300, 2000);
+    f.tail.readerClicked(document.createElement("div"));
+    // Act -- the box moves up with no input behind it, and is not at its end.
+    f.box.scrollTop = 200;
+    f.scroll();
+    // Assert
+    expect(f.box.scrollTop).toBe(200);
+  });
+
+  it("holds the view where a move under the hold left it, against a later clamp", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.box.scrollTop = 600;
+    f.scroll();
+    // Act
+    f.shrink(300);
+    // Assert
+    expect(f.box.scrollTop).toBe(600);
+  });
+
+  it("records the clamp it undid", async () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("debug");
+    // Act
+    f.grow(210);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-floor-restored");
+    expect([record.level.case, record.context]).toMatchObject(["debug", { from: 490, to: 700, floor: 1210 }]);
+  });
+
+  it("recedes the floor as the reader scrolls back up once the hold ends", () => {
+    // Arrange -- the card shrank 200px under the held view.
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.shrink(200);
+    // Act -- the reader scrolls up 100px.
+    f.input();
+    f.box.scrollTop = 600;
+    f.scroll();
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([600, 900]);
+  });
+
+  it("lifts the floor once the reader is back above the blank", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.shrink(200);
+    // Act
+    f.input();
+    f.box.scrollTop = 400;
+    f.scroll();
+    // Assert
+    expect([f.box.scrollHeight, f.extents.at(-1)]).toEqual([800, 700]);
+  });
+
+  it("lifts the floor once new content fills the blank", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.shrink(200);
+    f.input();
+    // Act -- the next rows land, taller than the blank.
+    f.shrink(-300);
+    // Assert -- the content stands on its own, and the floor holds nothing.
+    expect([f.box.scrollHeight, f.state.floor]).toEqual([1100, 0]);
+  });
+
+  it("keeps a floor the reader has not scrolled above, after the hold ends", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.shrink(200);
+    // Act -- a wheel input that has not moved the view yet.
+    f.input();
+    f.scroll();
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1000]);
+  });
+
+  it("lifts the floor and lands on the content's own tail for a named cause", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.shrink(200);
+    // Act
+    f.tail.promptSent();
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight, f.tail.isFollowing()]).toEqual([500, 800, true]);
+  });
+
+  it("ends the click hold for a named cause, so the next shrink is no longer held", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 0, nodeHeight: 50 });
+    // Act
+    f.shrink(400);
+    // Assert -- the box's own clamp, which only a click hold resists.
+    expect(f.box.scrollTop).toBe(300);
+  });
+
+  it("takes the reader's press before the click for no gesture: a later move is uncaused", async () => {
+    // Arrange -- the pointerdown that began the click is an input on the box.
+    const box: ReanchorBox = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
+    let onScroll = (): void => {};
+    let onInput = (): void => {};
+    const tail = new TailFollow(box);
+    tail.observe(
+      (cb) => (onScroll = cb),
+      () => {},
+      (cb) => (onInput = cb),
+    );
+    onInput();
+    tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords();
+    // Act -- the box moves with nothing behind it but the click.
+    box.scrollTop = 600;
+    onScroll();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({ from: 700, to: 600 });
+  });
+});
+
+describe("holdViewOnClicks", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  /** A tail that records the clicks it was told of, and whether a target handler saw the hold first. */
+  function recording() {
+    const told: Element[] = [];
+    const tail = { readerClicked: (target: Element) => told.push(target) } as unknown as TailFollow;
+    return { told, tail };
+  }
+
+  it("holds the view on a click anywhere in the zone, with the clicked element", () => {
+    // Arrange
+    const zone = document.createElement("div");
+    const option = document.createElement("button");
+    zone.append(option);
+    document.body.append(zone);
+    const r = recording();
+    holdViewOnClicks(zone, r.tail);
+    // Act
+    option.click();
+    // Assert
+    expect(r.told).toEqual([option]);
+  });
+
+  it("takes the hold before the clicked element's own handler runs", () => {
+    // Arrange
+    const zone = document.createElement("div");
+    const option = document.createElement("button");
+    zone.append(option);
+    document.body.append(zone);
+    const r = recording();
+    holdViewOnClicks(zone, r.tail);
+    const heldFirst: boolean[] = [];
+    option.addEventListener("click", () => heldFirst.push(r.told.length === 1));
+    // Act
+    option.click();
+    // Assert
+    expect(heldFirst).toEqual([true]);
+  });
+
+  it("holds the view even when the clicked element stops the click's propagation", () => {
+    // Arrange
+    const zone = document.createElement("div");
+    const option = document.createElement("button");
+    option.addEventListener("click", (e) => e.stopPropagation());
+    zone.append(option);
+    document.body.append(zone);
+    const r = recording();
+    holdViewOnClicks(zone, r.tail);
+    // Act
+    option.click();
+    // Assert
+    expect(r.told).toEqual([option]);
+  });
+
+  it("holds nothing once uninstalled", () => {
+    // Arrange
+    const zone = document.createElement("div");
+    document.body.append(zone);
+    const r = recording();
+    holdViewOnClicks(zone, r.tail)();
+    // Act
+    zone.click();
+    // Assert
+    expect(r.told).toEqual([]);
+  });
+
+  it("is what observeScrollBox wires on the box: a click in the box holds the view", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    const card = document.createElement("div");
+    box.append(card);
+    document.body.append(box);
+    const tail = new TailFollow(box);
+    const unobserve = observeScrollBox(box, tail);
+    const capture = captureLogRecords("debug");
+    // Act
+    card.click();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    expect(record.context).toMatchObject({ by: "click" });
+    unobserve();
+  });
+});
+
+describe("scrollFloor", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  /** A box whose laid-out scroll height is CONTENT plus the floor's shown blank, as a browser's would be. */
+  function boxOver(content: number) {
+    const box = document.createElement("div");
+    box.append(document.createElement("main"));
+    document.body.append(box);
+    const floor = scrollFloor(box);
+    const blank = box.lastElementChild as HTMLElement;
+    const shown = (): number => (blank.hidden ? 0 : Number.parseFloat(blank.style.height));
+    Object.defineProperty(blank, "offsetHeight", { get: shown });
+    Object.defineProperty(box, "scrollHeight", { get: () => content + shown() });
+    return { box, floor, blank };
+  }
+
+  it("hangs a hidden blank as the box's last child", () => {
+    // Arrange + Act
+    const { box, blank } = boxOver(800);
+    // Assert
+    expect([blank.className, blank.hidden, box.lastElementChild === blank]).toEqual([SCROLL_FLOOR_CLASS, true, true]);
+  });
+
+  it("adds the blank the content falls short of the floor by", () => {
+    // Arrange
+    const { floor, blank } = boxOver(800);
+    // Act
+    const added = floor.set(1000);
+    // Assert
+    expect([added, blank.hidden, blank.style.height]).toEqual([200, false, "200px"]);
+  });
+
+  it("measures the content without the blank it already shows", () => {
+    // Arrange
+    const { floor } = boxOver(800);
+    floor.set(1000);
+    // Act
+    const added = floor.set(900);
+    // Assert
+    expect(added).toBe(100);
+  });
+
+  it("adds nothing when the content reaches the floor on its own", () => {
+    // Arrange
+    const { floor, blank } = boxOver(1200);
+    // Act
+    const added = floor.set(1000);
+    // Assert
+    expect([added, blank.hidden]).toEqual([0, true]);
+  });
+
+  it("hides the blank when the floor is lifted", () => {
+    // Arrange
+    const { floor, blank } = boxOver(800);
+    floor.set(1000);
+    // Act
+    const added = floor.set(0);
+    // Assert
+    expect([added, blank.hidden]).toEqual([0, true]);
+  });
+
+  it("moves the blank back to the end when something was appended after it", () => {
+    // Arrange
+    const { box, floor, blank } = boxOver(800);
+    box.append(document.createElement("section"));
+    // Act
+    floor.set(1000);
+    // Assert
+    expect(box.lastElementChild).toBe(blank);
   });
 });
