@@ -132,14 +132,41 @@ func AwaitNext[T any](t *testing.T, ctx context.Context, s *Stream[T], what stri
 // synchronizing on an event.
 func ExpectNoPush[T any](t *testing.T, s *Stream[T], probe time.Duration, what string) {
 	t.Helper()
+	if v, ok := firstPushMatching(s, probe, func(T) bool { return true }); ok {
+		t.Fatalf("got a push %v, want none: %s", v, what)
+	}
+}
+
+// ExpectNoPushMatching asserts that no push MATCH accepts arrives before the
+// probe deadline. A push it rejects is passed over: a view republished for
+// an unrelated fact (a bring-up's restated context reading, landing a moment
+// late) is not the change the assertion is about.
+func ExpectNoPushMatching[T any](t *testing.T, s *Stream[T], probe time.Duration, what string, match func(T) bool) {
+	t.Helper()
+	if v, ok := firstPushMatching(s, probe, match); ok {
+		t.Fatalf("got a push %v, want none like it: %s", v, what)
+	}
+}
+
+// firstPushMatching answers the first push on S that MATCH accepts before
+// PROBE ends, passing over the rest; ok is false when none came, or the
+// stream closed first.
+func firstPushMatching[T any](s *Stream[T], probe time.Duration, match func(T) bool) (T, bool) {
 	timer := time.NewTimer(probe)
 	defer timer.Stop()
-	select {
-	case v, ok := <-s.C:
-		if ok {
-			t.Fatalf("got a push %v, want none: %s", v, what)
+	var zero T
+	for {
+		select {
+		case v, ok := <-s.C:
+			if !ok {
+				return zero, false
+			}
+			if match(v) {
+				return v, true
+			}
+		case <-timer.C:
+			return zero, false
 		}
-	case <-timer.C:
 	}
 }
 

@@ -85,3 +85,38 @@ func TestStreamDrainKeepsAPumpFromWedging(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstPushMatching(t *testing.T) {
+	tests := []struct {
+		name   string
+		pushes []int
+		close  bool
+		want   int
+		wantOK bool
+	}{
+		{name: "passes over pushes it rejects and answers the first it accepts", pushes: []int{1, 3, 4, 6}, want: 4, wantOK: true},
+		{name: "answers nothing when every push is rejected", pushes: []int{1, 3}, wantOK: false},
+		{name: "answers nothing when the stream closes first", pushes: []int{1}, close: true, wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			ch := make(chan int, len(tc.pushes))
+			for _, v := range tc.pushes {
+				ch <- v
+			}
+			if tc.close {
+				close(ch)
+			}
+			s := &Stream[int]{C: ch, t: t, cancel: func() {}}
+
+			// Act
+			got, ok := firstPushMatching(s, 50*time.Millisecond, func(v int) bool { return v%2 == 0 })
+
+			// Assert
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("firstPushMatching = (%d, %t), want (%d, %t)", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
