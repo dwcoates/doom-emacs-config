@@ -3401,9 +3401,11 @@ html[data-page-unshown] *::after {
 
 /* --- AskUserQuestion picker ---------------------------------------------- */
 .q-block { margin: 0.4em 0 0.7em; }
-/* The header badge shares the option bubbles' fill and keeps its blue text. Its
-   size and corner are the settled verdict line's (.q-verdict .badge). */
-.q-chip { background: var(--q-opt-bg); color: var(--accent); }
+/* The header badge shares the option bubbles' fill. Its text is the tool card
+   command grey (owner request, 2026-10-16), the same grey as a Bash card's
+   `$ <command>` (.cmd). Its size and corner are the settled verdict line's
+   (.q-verdict .badge). */
+.q-chip { background: var(--q-opt-bg); color: var(--tool-command); }
 .q-text { margin: 0.3em 0 0.45em; font-weight: 600; font-style: italic; }
 /* Inline code inside the italic question / bold option label reads as code
    rather than inheriting the surrounding emphasis. */

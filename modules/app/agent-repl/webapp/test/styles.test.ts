@@ -4146,6 +4146,47 @@ describe("the tool card's command grey", () => {
 });
 
 /**
+ * THE QUESTION HEADER CHIP IS THE COMMAND GREY (owner request, 2026-10-16):
+ * a question's header badge reads in the same grey as a tool card's `.cmd`
+ * input line, where it was the `--accent` blue.
+ */
+describe("the question header chip's grey", () => {
+  it("colors the header chip with the command grey token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".q-chip");
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--tool-command\)/);
+  });
+
+  it("leaves the header chip out of the accent blue", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".q-chip") ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/var\(--accent\)/);
+  });
+
+  it("cascades the command grey onto a settled verdict's header chip", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const parent = document.createElement("div");
+    parent.className = "q-verdict";
+    const chip = document.createElement("span");
+    chip.className = "badge q-chip";
+    parent.append(chip);
+    document.body.replaceChildren(parent);
+
+    // Act
+    const color = cascadedValue(chip, "color");
+
+    // Assert
+    expect(color).toBe("var(--tool-command)");
+    teardown();
+  });
+});
+
+/**
  * THE PAGE-COLORED FILL (owner request, 2026-10-08): a thinking bubble and an
  * interim response are filled with the page's own `--bg`, so the bubble's
  * background is not there in either theme; every other response keeps the
