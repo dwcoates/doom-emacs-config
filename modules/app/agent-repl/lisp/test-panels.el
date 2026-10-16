@@ -5017,3 +5017,53 @@ the user switched away and back."
             ;; Assert
             (should scheduled))
         (kill-buffer view)))))
+
+;;;; ---- A gated workspace is laid out before the switch's first redisplay ----
+
+(defmacro agent-repl-test-panels--activating (gated input-live &rest body)
+  "Run BODY with workspace alpha current, GATED or not, its input window
+live when INPUT-LIVE, and every layout and scheduling call recorded in
+`calls'."
+  (declare (indent 2))
+  `(let ((calls nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
+               ((symbol-function 'agent-repl--foreign-perspective-p) (lambda (_ws) nil))
+               ((symbol-function 'agent-repl--capture-switch-trigger) #'ignore)
+               ((symbol-function 'agent-repl--ws-names-cache) (lambda () nil))
+               ((symbol-function 'agent-repl-input-hidden-p) (lambda (_ws) ,gated))
+               ((symbol-function 'agent-repl-window--panel-window)
+                (lambda (_kind &optional _ws _frame) (and ,input-live (selected-window))))
+               ((symbol-function 'agent-repl-window--ensure-layout) (lambda () (push :layout calls) t))
+               ((symbol-function 'agent-repl--schedule-switch-activation)
+                (lambda (ws) (push (list :scheduled ws) calls) 1)))
+       (let ((agent-repl--eager-open-in-progress nil))
+         ,@body))))
+
+(ert-deftest agent-repl-test-panels-a-gated-workspace-is-laid-out-before-its-pass-is-scheduled ()
+  "A restored layout still holding the input window under a standing gate
+is laid out at activation, before the redisplay the deferred pass waits
+behind, so the composer never flashes under the docked banner."
+  ;; Arrange
+  (agent-repl-test-panels--activating t t
+    ;; Act
+    (agent-repl--after-persp-activated)
+    ;; Assert
+    (should (equal (reverse calls) '(:layout (:scheduled "alpha"))))))
+
+(ert-deftest agent-repl-test-panels-an-ungated-workspace-is-left-to-its-pass ()
+  "With no gate standing, activation lays nothing out; the pass does."
+  ;; Arrange
+  (agent-repl-test-panels--activating nil t
+    ;; Act
+    (agent-repl--after-persp-activated)
+    ;; Assert
+    (should (equal calls '((:scheduled "alpha"))))))
+
+(ert-deftest agent-repl-test-panels-a-gated-workspace-without-its-input-window-is-already-laid-out ()
+  "A gate's layout with no input window on screen needs nothing."
+  ;; Arrange
+  (agent-repl-test-panels--activating t nil
+    ;; Act
+    (agent-repl--after-persp-activated)
+    ;; Assert
+    (should (equal calls '((:scheduled "alpha"))))))
