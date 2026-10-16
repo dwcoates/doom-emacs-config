@@ -57,11 +57,60 @@ sandbox_stamp_inputs() {
     [[ -f $f ]] || { printf 'sandbox-image: the stamp input %s is missing\n' "$f" >&2; return 1; }
   done
   {
-    find e2e/sandbox -type f -not -name '.*' -print0
+    sandbox_walk e2e/sandbox | sandbox_select_named_files sandbox
     printf '%s\0' agent-shim/claude/shim/package.json agent-shim/claude/shim/package-lock.json \
       webapp/package.json webapp/package-lock.json packages.el
-    find . \( -name go.mod -o -name go.sum \) -not -path '*/node_modules/*' -print0
+    sandbox_walk . | sandbox_select_named_files go
   } | LC_ALL=C sort -z
+}
+
+# sandbox_walk prints, NUL-separated, every regular file under ROOT outside
+# node_modules, without following symlinks. It walks with shell globs rather
+# than find: the stamp runs on the LIVE checkout while other suites of the
+# same run install packages into it, and find fails the whole walk when an
+# entry it listed (npm's .node_modules.lock, 2026-10-16) vanishes before it
+# stats it. A glob never stats what it lists, and an entry gone before its
+# own test is simply not a file or a directory, so a concurrent writer cannot
+# fail the stamp.
+sandbox_walk() (
+  shopt -s dotglob nullglob
+  local -a dirs=("$1")
+  local d e
+  while ((${#dirs[@]})); do
+    d=${dirs[${#dirs[@]}-1]}
+    unset 'dirs[${#dirs[@]}-1]'
+    for e in "$d"/*; do
+      if [[ -L $e ]]; then
+        continue
+      elif [[ -d $e ]]; then
+        [[ ${e##*/} == node_modules ]] || dirs+=("$e")
+      elif [[ -f $e ]]; then
+        printf '%s\0' "$e"
+      fi
+    done
+  done
+)
+
+# sandbox_select_named_files filters sandbox_walk's NUL-separated paths by
+# the stamp's two naming rules: `sandbox` keeps every file whose name does
+# not start with a dot, and `go` keeps go.mod and go.sum.
+sandbox_select_named_files() {
+  local f name
+  while IFS= read -r -d '' f; do
+    name=${f##*/}
+    case $1 in
+      sandbox) [[ $name == .* ]] || printf '%s\0' "$f" ;;
+      go) [[ $name == go.mod || $name == go.sum ]] && printf '%s\0' "$f" ;;
+      *) printf 'sandbox-image: no naming rule %s\n' "$1" >&2; return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# sandbox_go_module_files prints, NUL-separated and relative to the module,
+# every go.mod and go.sum outside node_modules.
+sandbox_go_module_files() {
+  sandbox_walk . | sandbox_select_named_files go
 }
 
 # sandbox_image prints the image THIS checkout's sandbox runs in: the one
