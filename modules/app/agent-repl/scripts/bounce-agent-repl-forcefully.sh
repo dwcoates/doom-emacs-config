@@ -181,6 +181,13 @@ stop_pids() {
             log "$name: pid(s) $(echo $left) outlived the ${GRACE}s grace; killing"
             # shellcheck disable=SC2086
             kill -KILL $left 2>/dev/null || true
+            # A KILLED PROCESS IS GONE ONLY ONCE IT HAS EXITED, which the
+            # kernel finishes after the signal is sent: "stopped" is said only
+            # when every pid has, and a pid that never does fails the bounce.
+            # shellcheck disable=SC2086
+            await_exit "$name" $left
+            # shellcheck disable=SC2086
+            [ -z "$OUTLIVED" ] || die "$name: pid(s) $(echo $OUTLIVED) survived SIGKILL"
             break
         fi
         sleep 1
