@@ -424,6 +424,45 @@ func TestDiagnosticsBeforeItsCardAreRecordedAtDebug(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsBeforeTheTerminalAreRetainedForIt(t *testing.T) {
+	// Arrange: a running edit, whose diagnostics land before its terminal.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Start{Start: &conversationv1.AgentEditStart{
+			Path: &conversationv1.ReadPath{Path: "render.ts"},
+		}},
+	}))
+	h.send(activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Diagnostics{Diagnostics: &conversationv1.AgentDiagnosticsReport{
+			Files: []*conversationv1.AgentDiagnosticsFile{{
+				Path: "render.ts",
+				Diagnostics: []*conversationv1.AgentDiagnostic{{
+					Severity:  conversationv1.AgentDiagnosticSeverity_AGENT_DIAGNOSTIC_SEVERITY_ERROR,
+					Message:   "'x' is never used",
+					StartLine: 213,
+				}},
+			}},
+		}},
+	}))
+
+	// Act: the terminal lands.
+	h.send(activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Success{Success: &conversationv1.AgentEditSuccess{
+			Path:  &conversationv1.ReadPath{Path: "render.ts"},
+			Patch: []*conversationv1.FilePatchHunk{{Lines: []string{"+const x = 1"}}},
+		}},
+	}))
+
+	// Assert: the settled card carries the retained lines, recorded at DEBUG.
+	lines := h.card().GetReturned().GetDiagnostics().GetLines()
+	if len(lines) != 1 || lines[0] != "render.ts:214 · error · 'x' is never used" {
+		t.Fatalf("diagnostics = %v", lines)
+	}
+	if !h.hasRecord("debug", "daemon.feed.diagnostics_before_terminal") || h.hasRecord("warn", "daemon.feed.diagnostics_before_terminal") {
+		t.Fatalf("records = %+v, want a DEBUG daemon.feed.diagnostics_before_terminal and no WARN", h.records())
+	}
+}
+
 // ---- GREP and GLOB ----
 
 func TestGrepContentDrawsItsMatchingLinesAndStatesTheOmitted(t *testing.T) {

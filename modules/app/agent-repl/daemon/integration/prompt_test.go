@@ -1308,8 +1308,13 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 		t.Fatalf("SetSessionModel stated cold_threshold_tokens = 0, which refuses every switch; want the daemon's policy")
 	}
 
-	// Assert: no push yet — the unary answer alone must not move the topbar.
-	harness.ExpectNoPush(t, topbar, harness.ProbeWindow, "the topbar must not update before the shim pushes model_changed")
+	// Assert: the unary answer alone must not move the topbar's model. A push
+	// for an unrelated fact (the bring-up's restated context reading, landing
+	// a moment late) may still arrive, and is not what this asserts.
+	harness.ExpectNoPushMatching(t, topbar, harness.ProbeWindow, "the topbar must not show sonnet before the shim pushes model_changed",
+		func(v *frontendv1.TopbarView) bool {
+			return v.GetModelSelector().GetSelected().GetModel().GetName() == "sonnet"
+		})
 
 	// Act: the shim confirms it on the standing stream.
 	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
@@ -1383,8 +1388,11 @@ func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdates
 	}
 	req := f.shim.ExpectSetSessionPermissionMode()
 
-	// Assert: no push yet.
-	harness.ExpectNoPush(t, topbar, harness.ProbeWindow, "the topbar must not update before the shim pushes permission_mode_changed")
+	// Assert: the topbar does not show the new mode yet.
+	harness.ExpectNoPushMatching(t, topbar, harness.ProbeWindow, "the topbar must not show the new mode before the shim pushes permission_mode_changed",
+		func(v *frontendv1.TopbarView) bool {
+			return v.GetPermissionModePicker().GetCurrent().GetMode() == target
+		})
 
 	// Act: the shim echoes it as the standing fact.
 	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{

@@ -976,8 +976,6 @@ export interface MoveWitnessReport {
   mutations: number;
   /** Milliseconds from the change to this report. */
   ms_since_mutation: number;
-  /** The box's position read in the change's own task, once its mutations had landed. */
-  top_after_mutation: number;
   /** Frames the browser started between the change and this report, counted up to `WITNESS_FRAMES`. */
   frames_since_mutation: number;
 }
@@ -990,20 +988,20 @@ export interface MoveWitnessReport {
  * the move happens, so the witness keeps the content's last change beside it:
  *
  * - which elements it touched, so the record names the stamp or rules it out;
- * - the box's position read in the change's own task: equal to the move's `to`,
- *   the change's own layout moved the box; equal to its `from`, the browser
- *   moved it later, in its frame;
  * - how many frames started since: zero means the move was reported before the
  *   next paint, so a correction made on it would never be seen.
  *
- * Reading the position forces the layout the browser would otherwise run at its
- * next frame, on the content the change left.
+ * IT READS NO POSITION. It used to read `scrollTop` in the change's own task,
+ * which forced a layout on every change of every page's feed, ticking ages
+ * included. That reading answered its question (the position at the change
+ * equals the move's `from`: the browser moves the box later, in its frame),
+ * and its cost was a share of every idle page's time (busy-probe census,
+ * 2026-10-16), so it is gone.
  */
 export class MoveWitness {
   private last: (Omit<MoveWitnessReport, "ms_since_mutation"> & { at: number }) | null = null;
 
   constructor(
-    private readonly box: Pick<ScrollPosition, "scrollTop">,
     private readonly now: () => number,
     private readonly nextFrame: (fn: () => void) => void,
   ) {}
@@ -1015,7 +1013,6 @@ export class MoveWitness {
       mutated: names,
       mutations: targets.length,
       at: this.now(),
-      top_after_mutation: this.box.scrollTop,
       frames_since_mutation: 0,
     };
     this.last = change;
@@ -1101,7 +1098,7 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
     }
   };
   const children = new MutationObserver(watchChildren);
-  const witness = new MoveWitness(box, () => performance.now(), nextFrame);
+  const witness = new MoveWitness(() => performance.now(), nextFrame);
   const content = new MutationObserver((records) => witness.mutated(records.map((r) => r.target)));
   content.observe(box, { subtree: true, childList: true, characterData: true, attributes: true });
   tail.witnessMoves(() => witness.report());
