@@ -17,7 +17,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { AttentionMarks, RailContext } from "./context.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { drawRosterRow, drawRosterRowWorkspace, expandVisibleRows, type RowPlace } from "./row.js";
+import { drawRosterRow, drawRosterRowWorkspace, drawnRowEntries, type RowPlace } from "./row.js";
 import { requireMessage } from "../rpc/strict.js";
 
 /** One drawn row: the wire it was drawn from, its element, and its scope. */
@@ -35,10 +35,7 @@ export interface KeyedRows {
 
 /** The rows the section draws: closed rows dropped unless HIDE_CLOSED is false. */
 function visible(u: RosterRows, path: string, hideClosed: boolean): Array<{ row: RosterRow; path: string; id: string }> {
-  const drawn = hideClosed
-    ? expandVisibleRows(u.rows, `${path}.rows`)
-    : u.rows.map((row, index) => ({ row, path: `${path}.rows[${index}]` }));
-  return drawn.map((entry) => ({
+  return drawnRowEntries(u.rows, `${path}.rows`, hideClosed).map((entry) => ({
     ...entry,
     id: drawRosterRowWorkspace(requireMessage(entry.row.workspace, `${entry.path}.workspace`), `${entry.path}.workspace`).id,
   }));

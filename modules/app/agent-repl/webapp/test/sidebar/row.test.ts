@@ -34,8 +34,10 @@ import {
   placeRowDetail,
   toggleRowMenu,
   type RowPlace,
+  drawnRowEntries,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
+import { codeOf } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
@@ -2337,3 +2339,45 @@ describe("appendRowKids", () => {
   });
 });
 
+
+describe("drawnRowEntries", () => {
+  it("answers every row in order when closed rows are kept", () => {
+    // Arrange
+    const rows = [row({ id: "a" }), row({ id: "b", closed: true })];
+
+    // Act
+    const got = drawnRowEntries(rows, "r", false);
+
+    // Assert
+    expect(got.map((e) => [e.row.workspace?.workspace?.id, e.path])).toEqual([
+      ["a", "r[0]"],
+      ["b", "r[1]"],
+    ]);
+  });
+
+  it("drops a closed row and promotes its family when closed rows are hidden", () => {
+    // Arrange
+    const rows = [row({ id: "a" }), row({ id: "b", closed: true, children: [row({ id: "c" })] })];
+
+    // Act
+    const got = drawnRowEntries(rows, "r", true);
+
+    // Assert
+    expect(got.map((e) => e.row.workspace?.workspace?.id)).toEqual(["a", "c"]);
+  });
+
+  it.each([
+    ["roster.ts", "drawRosterRows"],
+    ["keyed-rows.ts", "visible"],
+  ])("is how %s picks the rows it draws", (file, fn) => {
+    // Arrange
+    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
+    const start = source.indexOf(`function ${fn}(`);
+
+    // Act
+    const body = source.slice(start, source.indexOf("\n}\n", start));
+
+    // Assert
+    expect([body.includes("drawnRowEntries("), body.includes("expandVisibleRows(")]).toEqual([true, false]);
+  });
+});

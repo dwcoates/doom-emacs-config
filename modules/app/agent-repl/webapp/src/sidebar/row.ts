@@ -106,6 +106,16 @@ export function rowIsClosed(u: RosterRow, path: string): boolean {
  * vanishing with it: a live child cut from a killed parent's branch is still a
  * live workspace and keeps its row, one level up.
  */
+/**
+ * The rows a section draws from U, in order: every row, or, when HIDE_CLOSED,
+ * the open rows with each closed row's family promoted in its place
+ * (`expandVisibleRows`). The one answer the plain and the keyed drawing
+ * (`drawRosterRows`, `keyed-rows.ts`) both draw from.
+ */
+export function drawnRowEntries(rows: readonly RosterRow[], basePath: string, hideClosed: boolean): VisibleRow[] {
+  return hideClosed ? expandVisibleRows(rows, basePath) : rows.map((row, index) => ({ row, path: `${basePath}[${index}]` }));
+}
+
 export function expandVisibleRows(rows: readonly RosterRow[], basePath: string): VisibleRow[] {
   const out: VisibleRow[] = [];
   rows.forEach((row, index) => {

@@ -63,7 +63,7 @@ import {
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
   drawRosterRowWhenShown,
-  expandVisibleRows,
+  drawnRowEntries,
   mergedToday,
   tickPaint,
   type RowPlace,
@@ -911,10 +911,7 @@ export function drawRosterRows(
 ): HTMLElement {
   const rows = document.createElement("div");
   rows.className = "rows";
-  const drawn = hideClosed
-    ? expandVisibleRows(u.rows, `${path}.rows`)
-    : u.rows.map((row, index) => ({ row, path: `${path}.rows[${index}]` }));
-  for (const entry of drawn) {
+  for (const entry of drawnRowEntries(u.rows, `${path}.rows`, hideClosed)) {
     rows.appendChild(drawRosterRow(entry.row, sc, entry.path, place));
   }
   return rows;
