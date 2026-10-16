@@ -4166,3 +4166,202 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (while (string-match "(agent-repl-host-route-handover" source start)
       (setq count (1+ count) start (match-end 0)))
     (should (= count 1))))
+
+;;;; ---- Numbered answers ---------------------------------------------------
+
+(defvar agent-repl-test-input--standing-ask nil
+  "The `HostAsk' plist the stubbed host view reports for the composer's workspace.")
+
+(defvar agent-repl-test-input--answer-requests nil
+  "Every (VERB . REQUEST) a stubbed answer rpc received, newest first.")
+
+(defun agent-repl-test-input--question-ask (selection labels)
+  "A standing question ask whose shown question is SELECTION over LABELS."
+  (list :row '(:value "row-q")
+        :kind (list :arm :question
+                    :value (list :question-text "Which?"
+                                 :selection (list :arm selection
+                                                  :value (list :options
+                                                               (mapcar (lambda (l) (list :label l)) labels)))))))
+
+(defun agent-repl-test-input--permission-ask (standing)
+  "A standing permission ask, offering a standing form when STANDING."
+  (list :row '(:value "row-p")
+        :kind (list :arm :permission :value (list :standing-offered standing))))
+
+(defmacro agent-repl-test-input--with-ask (ask &rest body)
+  "Run BODY in a composer whose standing ask is ASK and whose answer rpcs succeed."
+  (declare (indent 1))
+  `(agent-repl-test-input--with
+     (let ((agent-repl-test-input--standing-ask ,ask)
+           (agent-repl-test-input--answer-requests nil)
+           (agent-repl-test-input--verb-answer '(:response (:arm :success :value nil))))
+       (cl-letf (((symbol-function 'agent-repl-host-standing-ask)
+                  (lambda (_ws) agent-repl-test-input--standing-ask))
+                 ((symbol-function 'agent-repl-rpc-update-question-draft)
+                  (lambda (conn request &rest keys)
+                    (push (cons :update-question-draft request) agent-repl-test-input--answer-requests)
+                    (apply #'agent-repl-test-input--stub-verb conn request keys)))
+                 ((symbol-function 'agent-repl-rpc-answer-permission)
+                  (lambda (conn request &rest keys)
+                    (push (cons :answer-permission request) agent-repl-test-input--answer-requests)
+                    (apply #'agent-repl-test-input--stub-verb conn request keys))))
+         (with-current-buffer agent-repl-test-input--buffer
+           ,@body)))))
+
+(defun agent-repl-test-input--type-digit (char)
+  "Type CHAR into the current composer through the digit command."
+  (let ((last-command-event char))
+    (agent-repl-input-digit)))
+
+(ert-deftest agent-repl-test-input-permission-buttons-follow-the-drawn-order ()
+  "Allow once, always allow only when offered, then deny."
+  (should (equal (agent-repl--input-permission-buttons '(:standing-offered nil))
+                 '(:allow-once :deny)))
+  (should (equal (agent-repl--input-permission-buttons '(:standing-offered t))
+                 '(:allow-once :allow-standing :deny))))
+
+(ert-deftest agent-repl-test-input-question-choices-are-its-options-in-order ()
+  "A question's choices are picks of its options, in the served order."
+  (should (equal (agent-repl--input-ask-choices
+                  (agent-repl-test-input--question-ask :single-select '("a" "b")))
+                 '((:verb :pick :row (:value "row-q") :question-text "Which?" :label "a")
+                   (:verb :pick :row (:value "row-q") :question-text "Which?" :label "b")))))
+
+(ert-deftest agent-repl-test-input-permission-choices-are-its-buttons ()
+  "A permission's choices are its buttons, naming the card's row."
+  (should (equal (agent-repl--input-ask-choices (agent-repl-test-input--permission-ask t))
+                 '((:verb :permission :row (:value "row-p") :answer :allow-once)
+                   (:verb :permission :row (:value "row-p") :answer :allow-standing)
+                   (:verb :permission :row (:value "row-p") :answer :deny)))))
+
+(ert-deftest agent-repl-test-input-an-unknown-ask-kind-fails-loudly ()
+  "An ask kind the composer cannot number is an error, never silence."
+  (should-error (agent-repl--input-ask-choices '(:row (:value "r") :kind (:arm :survey :value nil)))))
+
+(ert-deftest agent-repl-test-input-numbered-choice-cases ()
+  "A digit names a choice only from a blank composer, in range, with an ask standing."
+  (dolist (case `(("no ask" nil "" ?1 nil)
+                  ("in range" ,(agent-repl-test-input--question-ask :single-select '("a" "b")) "" ?2 "b")
+                  ("after whitespace" ,(agent-repl-test-input--question-ask :single-select '("a" "b")) "  \n " ?1 "a")
+                  ("after text" ,(agent-repl-test-input--question-ask :single-select '("a" "b")) "x" ?1 nil)
+                  ("out of range" ,(agent-repl-test-input--question-ask :single-select '("a" "b")) "" ?3 nil)
+                  ("zero" ,(agent-repl-test-input--question-ask :single-select '("a" "b")) "" ?0 nil)
+                  ("not a digit" ,(agent-repl-test-input--question-ask :single-select '("a" "b")) "" ?a nil)))
+    (pcase-let ((`(,name ,ask ,text ,char ,want) case))
+      (agent-repl-test-input--with-ask ask
+        (insert text)
+        (should (equal (list name (plist-get (agent-repl--input-numbered-choice "ws-one" char) :label))
+                       (list name want)))))))
+
+(ert-deftest agent-repl-test-input-a-digit-answers-a-single-select-at-once ()
+  "A digit in an empty composer picks the option, sends nothing else, inserts nothing."
+  (agent-repl-test-input--with-ask (agent-repl-test-input--question-ask :single-select '("a" "b"))
+    (agent-repl-test-input--type-digit ?2)
+    (should (equal agent-repl-test-input--answer-requests
+                   `((:update-question-draft
+                      :workspace ,agent-repl-test-input--ref :question (:value "row-q")
+                      :edit (:arm :pick :value (:question-text "Which?" :label "b"))))))
+    (should (equal (agent-repl-test-input--composer-text) ""))
+    (should-not agent-repl-test-input--submitted)))
+
+(ert-deftest agent-repl-test-input-a-digit-toggles-a-multi-select-option ()
+  "On a multi-select the digit is the same pick, which the daemon reads as a toggle."
+  (agent-repl-test-input--with-ask (agent-repl-test-input--question-ask :multi-select '("a" "b"))
+    (agent-repl-test-input--type-digit ?1)
+    (should (equal (plist-get (cdar agent-repl-test-input--answer-requests) :edit)
+                   '(:arm :pick :value (:question-text "Which?" :label "a"))))))
+
+(ert-deftest agent-repl-test-input-a-digit-presses-a-permission-button ()
+  "On a permission the digit presses the button in drawn order."
+  (dolist (case '((nil ?2 :deny) (t ?2 :allow-standing) (t ?3 :deny) (nil ?1 :allow-once)))
+    (pcase-let ((`(,standing ,char ,want) case))
+      (agent-repl-test-input--with-ask (agent-repl-test-input--permission-ask standing)
+        (agent-repl-test-input--type-digit char)
+        (should (equal agent-repl-test-input--answer-requests
+                       `((:answer-permission
+                          :workspace ,agent-repl-test-input--ref :permission (:value "row-p")
+                          :answer ,want))))))))
+
+(ert-deftest agent-repl-test-input-a-digit-with-no-card-is-typed ()
+  "With no card standing the digit is inserted and nothing is sent."
+  (agent-repl-test-input--with-ask nil
+    (agent-repl-test-input--type-digit ?1)
+    (should (equal (agent-repl-test-input--composer-text) "1"))
+    (should-not agent-repl-test-input--answer-requests)))
+
+(ert-deftest agent-repl-test-input-a-digit-after-text-is-typed ()
+  "A digit after other text is part of the text, even with a card standing."
+  (agent-repl-test-input--with-ask (agent-repl-test-input--question-ask :single-select '("a" "b"))
+    (insert "x")
+    (agent-repl-test-input--type-digit ?1)
+    (should (equal (agent-repl-test-input--composer-text) "x1"))
+    (should-not agent-repl-test-input--answer-requests)))
+
+(ert-deftest agent-repl-test-input-a-digit-out-of-range-is-typed ()
+  "A digit naming no choice of the card is typed."
+  (agent-repl-test-input--with-ask (agent-repl-test-input--permission-ask nil)
+    (agent-repl-test-input--type-digit ?3)
+    (should (equal (agent-repl-test-input--composer-text) "3"))
+    (should-not agent-repl-test-input--answer-requests)))
+
+(ert-deftest agent-repl-test-input-control-return-confirms-a-multi-select ()
+  "`C-RET' from an empty composer confirms the shown multi-select."
+  (agent-repl-test-input--with-ask (agent-repl-test-input--question-ask :multi-select '("a" "b"))
+    (agent-repl-input-control-return)
+    (should (equal agent-repl-test-input--answer-requests
+                   `((:update-question-draft
+                      :workspace ,agent-repl-test-input--ref :question (:value "row-q")
+                      :edit (:arm :confirm :value (:question-text "Which?"))))))
+    (should-not agent-repl-test-input--submitted)))
+
+(ert-deftest agent-repl-test-input-control-return-otherwise-sends-with-postfix ()
+  "`C-RET' with no multi-select standing, or with text, is the postfix send."
+  (dolist (case `((,(agent-repl-test-input--question-ask :single-select '("a")) "")
+                  (,(agent-repl-test-input--permission-ask nil) "")
+                  (,(agent-repl-test-input--question-ask :multi-select '("a")) "words")
+                  (nil "")))
+    (pcase-let ((`(,ask ,text) case))
+      (agent-repl-test-input--with-ask ask
+        (insert text)
+        (let ((sent nil))
+          (cl-letf (((symbol-function 'agent-repl-send-with-postfix) (lambda () (setq sent t))))
+            (agent-repl-input-control-return))
+          (should sent)
+          (should-not agent-repl-test-input--answer-requests))))))
+
+(ert-deftest agent-repl-test-input-a-settled-card-refusal-says-so ()
+  "A card that settled before the answer is refused, logged and flashed."
+  (agent-repl-test-input--with-ask (agent-repl-test-input--question-ask :single-select '("a"))
+    (let ((agent-repl-test-input--verb-answer
+           '(:response (:arm :error :value (:cause (:arm :ask-not-standing :value nil)))))
+          (warned nil))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        (agent-repl-test-input--type-digit ?1))
+      (should (cl-some (lambda (m) (string-match-p "elisp.input.answer-question-refused .*:label \"a\".*ask-not-standing" m))
+                       warned))
+      (should (equal (agent-repl-test-input--notice) "answer: the card was already answered")))))
+
+(ert-deftest agent-repl-test-input-answer-refusal-texts ()
+  "Each refusal a numbered answer can meet has its own sentence."
+  (should (equal (mapcar (lambda (arm) (agent-repl--input-answer-refusal-text (list :arm arm :value nil)))
+                         '(:ask-not-standing :unserved-value :no-standing-offer :no-session :other))
+                 '("the card was already answered" "the card no longer offers that choice"
+                   "the card offers no always allow" "the workspace has no session"
+                   "answer refused"))))
+
+(ert-deftest agent-repl-test-input-an-answer-of-no-verb-fails-loudly ()
+  "A numbered answer with a verb the composer has no rpc for is an error."
+  (should-error (agent-repl--input-answer-choice "ws-one" '(:verb :survey :row (:value "r")))))
+
+(ert-deftest agent-repl-test-input-digits-are-bound-to-the-numbered-answer ()
+  "1-9 run the numbered answer in the composer; 0 stays an ordinary key."
+  (dolist (digit (number-sequence ?1 ?9))
+    (should (eq (lookup-key agent-repl-input-mode-map (string digit)) #'agent-repl-input-digit)))
+  (should-not (eq (lookup-key agent-repl-input-mode-map "0") #'agent-repl-input-digit)))
+
+(ert-deftest agent-repl-test-input-control-return-is-bound ()
+  "`C-RET' runs the confirm-or-postfix command in the composer."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-<return>"))
+              #'agent-repl-input-control-return)))

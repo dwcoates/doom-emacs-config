@@ -108,6 +108,9 @@
 (declare-function agent-repl-command-completion-at-point "command-completion" ())
 (declare-function agent-repl--command-completion-on-change "command-completion" (beg end len))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
+(declare-function agent-repl-host-standing-ask "agent-repl-host" (ws))
+(declare-function agent-repl-rpc-update-question-draft "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-answer-permission "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-selection "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
@@ -2202,17 +2205,163 @@ sits behind a harness re-read."
   (agent-repl--prepend-to-input-buffer agent-repl-send-prefix)
   (agent-repl--send :user-sent-with-prefix))
 
+;;;; ---- Numbered answers (a lone digit, `C-RET' on a multi-select) ------
+;;
+;; A STANDING CARD IS ANSWERED BY NUMBER.  While a question or permission
+;; card stands on the root feed (the host view's `HostAsk'), a digit typed
+;; into an EMPTY composer -- nothing before it but whitespace -- that names
+;; one of the card's numbered choices is a click on that choice, sent at
+;; once with no `RET'.  On a single-select question it answers the shown
+;; question; on a multi-select it toggles the option's tick, and `C-RET'
+;; with the composer still empty confirms the ticks; on a permission it
+;; presses the button.  Anything else -- a digit after other text, a digit
+;; no choice carries, no card standing -- is typed as usual.
+;;
+;; THE ANSWER IS THE CARD'S OWN VERB, naming the card's row:
+;; `UpdateQuestionDraft' (pick, confirm) and `AnswerPermission', exactly as
+;; the webapp's clicks send them.  A card that settled before the answer
+;; arrived is refused as not standing and the composer says so; the answer
+;; can never land on another card.
+
+(defconst agent-repl--input-numbered-answer-prefix "answer"
+  "The composer-flash prefix a numbered answer speaks under.")
+
+(defun agent-repl--input-permission-buttons (permission)
+  "Return PERMISSION's buttons in drawn order, each an `AnswerPermission' arm.
+The order is `agentrepl.v1.HostAskPermission''s: allow once, always allow
+when the vendor offered a standing form, deny."
+  (append '(:allow-once)
+          (when (plist-get permission :standing-offered) '(:allow-standing))
+          '(:deny)))
+
+(defun agent-repl--input-ask-choices (ask)
+  "Return ASK's numbered choices in order; choice N is the Nth element.
+Each choice is the answer plist `agent-repl--input-answer-choice' sends:
+`(:verb :pick :row ROW :question-text TEXT :label LABEL)' for a question's
+option, `(:verb :permission :row ROW :answer ARM)' for a permission's
+button."
+  (let ((row (plist-get ask :row))
+        (kind (plist-get ask :kind)))
+    (pcase (plist-get kind :arm)
+      (:question
+       (let* ((question (plist-get kind :value))
+              (text (plist-get question :question-text)))
+         (mapcar (lambda (option)
+                   (list :verb :pick :row row :question-text text
+                         :label (plist-get option :label)))
+                 (plist-get (plist-get (plist-get question :selection) :value) :options))))
+      (:permission
+       (mapcar (lambda (answer) (list :verb :permission :row row :answer answer))
+               (agent-repl--input-permission-buttons (plist-get kind :value))))
+      (arm (error "agent-repl: a standing ask of kind %S has no choices" arm)))))
+
+(defun agent-repl--input-composer-blank-p ()
+  "Return non-nil when the current composer holds nothing but whitespace."
+  (string-blank-p (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun agent-repl--input-numbered-choice (ws char)
+  "Return the choice CHAR names on WS's standing ask, or nil.
+CHAR names a choice when it is a digit 1-9, the current composer holds
+nothing but whitespace, an ask stands, and the ask offers that many
+choices."
+  (let ((ask (agent-repl-host-standing-ask ws)))
+    (when (and ask
+               (characterp char) (<= ?1 char ?9)
+               (agent-repl--input-composer-blank-p))
+      (nth (- char ?1) (agent-repl--input-ask-choices ask)))))
+
+(defun agent-repl--input-confirm-choice (ws)
+  "Return the confirm `C-RET' sends for WS's standing ask, or nil.
+Only a multi-select question is confirmed, and only from an empty
+composer: with text in it `C-RET' sends that text as usual."
+  (let* ((ask (agent-repl-host-standing-ask ws))
+         (kind (plist-get ask :kind))
+         (question (plist-get kind :value)))
+    (when (and (eq (plist-get kind :arm) :question)
+               (eq (plist-get (plist-get question :selection) :arm) :multi-select)
+               (agent-repl--input-composer-blank-p))
+      (list :verb :confirm :row (plist-get ask :row)
+            :question-text (plist-get question :question-text)))))
+
+(defun agent-repl--input-answer-refusal-text (cause)
+  "Return the composer flash for a numbered answer's refusal CAUSE."
+  (pcase (plist-get cause :arm)
+    (:ask-not-standing "the card was already answered")
+    (:unserved-value "the card no longer offers that choice")
+    (:no-standing-offer "the card offers no always allow")
+    (:no-session "the workspace has no session")
+    (_ "answer refused")))
+
+(defun agent-repl--input-answer-choice (ws choice)
+  "Send CHOICE, a numbered answer to WS's standing card, on the card's verb.
+CHOICE is a plist `agent-repl--input-ask-choices' or
+`agent-repl--input-confirm-choice' built.  The card's new state arrives on
+the feed; the success says nothing more."
+  (let ((row (plist-get choice :row)))
+    (pcase-let ((`(,op ,rpc ,request)
+                 (pcase (plist-get choice :verb)
+                   (:pick
+                    (list "answer-question" #'agent-repl-rpc-update-question-draft
+                          (lambda (ref)
+                            (list :workspace ref :question row
+                                  :edit (list :arm :pick
+                                              :value (list :question-text (plist-get choice :question-text)
+                                                           :label (plist-get choice :label)))))))
+                   (:confirm
+                    (list "answer-question" #'agent-repl-rpc-update-question-draft
+                          (lambda (ref)
+                            (list :workspace ref :question row
+                                  :edit (list :arm :confirm
+                                              :value (list :question-text (plist-get choice :question-text)))))))
+                   (:permission
+                    (list "answer-permission" #'agent-repl-rpc-answer-permission
+                          (lambda (ref)
+                            (list :workspace ref :permission row :answer (plist-get choice :answer)))))
+                   (verb (error "agent-repl: a numbered answer of verb %S has no rpc" verb)))))
+      (agent-repl--input-call
+       ws :op op :prefix agent-repl--input-numbered-answer-prefix
+       :detail-name "choice" :detail choice
+       :rpc rpc :request request
+       :on-success (lambda (_value)
+                     (agent-repl--info ws "elisp.input.%s-answered ws=%s choice=%S" op ws choice))
+       :on-refused #'agent-repl--input-answer-refusal-text))))
+
+(defun agent-repl-input-digit ()
+  "Answer the standing card with the typed digit's choice, or type the digit.
+A digit typed into an empty composer that names one of the standing
+card's numbered choices sends that choice at once; any other digit is
+inserted as `self-insert-command' would."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (choice (agent-repl--input-numbered-choice ws last-command-event)))
+    (if choice
+        (agent-repl--input-answer-choice ws choice)
+      (setq this-command #'self-insert-command)
+      (call-interactively #'self-insert-command))))
+
+(defun agent-repl-input-control-return ()
+  "Confirm a standing multi-select from an empty composer, else send with postfix.
+`C-RET' finalizes the ticks a multi-select question was given by number;
+with no multi-select standing, or with text in the composer, it is
+`agent-repl-send-with-postfix'."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (confirm (agent-repl--input-confirm-choice ws)))
+    (if confirm
+        (agent-repl--input-answer-choice ws confirm)
+      (agent-repl-send-with-postfix))))
+
 ;;;; ---- Keybindings -----------------------------------------------------
 
 (map! :map agent-repl-input-mode-map
       :ni "RET"       #'agent-repl-send
       :ni "S-RET"     #'newline
-      :ni "C-RET"     #'agent-repl-send-with-postfix
+      :ni "C-RET"     #'agent-repl-input-control-return
       ;; Deferred-prompt enqueue lives on `SPC j RET' in the leader map
       ;; (keybindings.el) so it is reachable from any context with one
       ;; canonical chord.  Prefix-send stays reachable on macOS via
       ;; `S-s-RET' caught by the `[remap +default/newline-above]' entry.
-      [remap +default/newline-below] #'agent-repl-send-with-postfix
+      [remap +default/newline-below] #'agent-repl-input-control-return
       [remap +default/newline-above] #'agent-repl-send-with-prefix
       :ni "C-c C-c"   #'agent-repl-discard-input
       :n  "<up>"      #'agent-repl--history-prev
@@ -2249,6 +2398,14 @@ sits behind a harness re-read."
 ;; these change nothing there.
 (define-key agent-repl-input-mode-map (kbd "RET") #'agent-repl-send)
 (define-key agent-repl-input-mode-map (kbd "S-RET") #'newline)
+(define-key agent-repl-input-mode-map (kbd "C-<return>") #'agent-repl-input-control-return)
+
+;; NUMBERED ANSWERS.  The digits 1-9 are bound on the plain mode map, which
+;; insert and emacs state read; in normal state evil's motion map binds them
+;; to `digit-argument' and outranks it, so a count prefix is untouched.  `0'
+;; names no choice and stays an ordinary key.
+(dolist (digit (number-sequence ?1 ?9))
+  (define-key agent-repl-input-mode-map (string digit) #'agent-repl-input-digit))
 
 ;; FEED TEXT ZOOM.  Bound with `define-key' rather than through the `map!' form
 ;; above for the same reasons `C-c C-k' is: the binding is OBSERVABLE under

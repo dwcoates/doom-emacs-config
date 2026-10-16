@@ -227,6 +227,21 @@ The expanded footer lists the running background agents, shells and monitors, on
   - The "tokens" and "duration" headers sit above their columns.
   - Every row's figures line up under those headers, so a changing clock never moves the token count.
 
+## Answering a question or permission by number
+
+While the agent waits on a question or a permission card, type the choice's number into the empty input window. The answer is sent at once, with no `RET`.
+
+- **The numbers are the ones drawn on the card.**
+  - A question's options are numbered from `1.`, in order.
+  - A permission's buttons are numbered `1.` allow once, `2.` always allow when the card offers it, then deny.
+- **On a single-select question, the number answers the question.**
+- **On a multi-select question, the number ticks or unticks that option.**
+  - `C-RET` in the empty input window confirms the ticks.
+- **A number is typed as usual when it cannot be an answer.**
+  - This covers text already in the input window, a number the card has no choice for, `0`, and no card waiting.
+- **Typed text is still an answer.**
+  - A sent sentence answers the shown question in your own words, or denies the permission with that sentence as the reason.
+
 ## Replying to a response
 
 Select a final response with `M-s-k` / `M-s-j` and send a prompt with `RET`. The
