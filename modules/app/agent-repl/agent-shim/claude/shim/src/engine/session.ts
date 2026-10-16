@@ -116,7 +116,7 @@ import {
 import type { Engine } from "./engine.js";
 import { readTitleDigest } from "./title-digest.js";
 import { readTranscripts } from "./transcripts.js";
-import { planCut, readLiveChain, vendorCutRefusal, type GuardArming } from "./rollback.js";
+import { createTranscriptIndex, planCut, readLiveChain, vendorCutRefusal, type GuardArming, type TranscriptIndex } from "./rollback.js";
 import { settleable, type Settleable } from "./settleable.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
@@ -3326,6 +3326,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         vendorSessionId: identity.vendorSessionId,
         atMs: deps.nowMs(),
       });
+      // THE STOP KEY PARSES ONLY THE TURN IT STOPS: the transcript's index
+      // takes in this turn now, while nobody waits on it.
+      transcriptIndexOf(identity.vendorSessionId).refresh();
     }
     if (ended.keepalive) {
       // A KEEP-ALIVE'S END IS NOBODY'S TURN END. Nothing is pushed for it: the
@@ -4092,6 +4095,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /**
+   * The index of `vendorSessionId`'s transcript (engine/rollback.ts,
+   * `createTranscriptIndex`). One is kept, for the conversation's current
+   * transcript: a rotation to another vendor session starts a new one.
+   */
+  let transcriptIndex: TranscriptIndex | undefined;
+  function transcriptIndexOf(vendorSessionId: string): TranscriptIndex {
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
+    if (transcriptIndex?.file !== file) transcriptIndex = createTranscriptIndex(file);
+    return transcriptIndex;
+  }
+
   async function rollBack(
     request: shimv1.RollBackSessionRequest,
     current: SessionIdentity,
@@ -4099,8 +4114,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     restartBegins: () => void,
   ): Promise<shimv1.RollBackSessionResponse> {
     const restore = request.files.case === "restoreFiles";
-    const file = transcriptPath(deps.env.configDir, deps.env.cwd, current.vendorSessionId);
-    const read = readLiveChain(file, rolledBackPromptUuids());
+    const index = transcriptIndexOf(current.vendorSessionId);
+    const file = index.file;
+    const read = readLiveChain(index, rolledBackPromptUuids());
     if (read.kind === "unreadable") {
       throw new Error(`shim session: the vendor transcript ${file} could not be read to plan the rollback: ${read.detail}`);
     }
@@ -4323,8 +4339,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function resumeAtLiveEnd(vendorSessionId: string): { resumeSessionAt?: string } {
     if (rolledBackTurns.size === 0) return {};
-    const file = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
-    const read = readLiveChain(file, rolledBackPromptUuids());
+    const index = transcriptIndexOf(vendorSessionId);
+    const file = index.file;
+    const read = readLiveChain(index, rolledBackPromptUuids());
     const context = { vendor_session_id: vendorSessionId, rolled_back_turns: [...rolledBackTurns] };
     switch (read.kind) {
       case "unreadable":

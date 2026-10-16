@@ -2,7 +2,7 @@
  * engine/rollback.ts — the transcript chain RollBackSession plans its cut on,
  * the cut's plan, and the one reading of the vendor refusing a cut.
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,8 @@ import {
   isPromptRecord,
   liveEnd,
   planCut,
+  chainRecordOf,
+  createTranscriptIndex,
   readLiveChain,
   readTranscriptChain,
   RESUME_DROPS_TURN_REFUSAL_PREFIX,
@@ -481,7 +483,7 @@ describe("readLiveChain", () => {
     const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")]);
 
     // Act.
-    const read = readLiveChain(file, new Set(["p1"]));
+    const read = readLiveChain(createTranscriptIndex(file), new Set(["p1"]));
 
     // Assert.
     expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0"]);
@@ -492,7 +494,7 @@ describe("readLiveChain", () => {
     const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0")]);
 
     // Act.
-    const read = readLiveChain(file, new Set(["p9"]));
+    const read = readLiveChain(createTranscriptIndex(file), new Set(["p9"]));
 
     // Assert.
     expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0", "p1"]);
@@ -500,7 +502,10 @@ describe("readLiveChain", () => {
 
   it("answers no_transcript when the vendor wrote none", () => {
     // Arrange, Act.
-    const read = readLiveChain(path.join(os.tmpdir(), "shim-rollback-absent", "none.jsonl"), new Set(["p1"]));
+    const read = readLiveChain(
+      createTranscriptIndex(path.join(os.tmpdir(), "shim-rollback-absent", "none.jsonl")),
+      new Set(["p1"]),
+    );
 
     // Assert.
     expect(read.kind).toBe("no_transcript");
@@ -513,7 +518,7 @@ describe("readLiveChain", () => {
 
     // Act.
     const records = logRecordsDuring(() => {
-      kind = readLiveChain(file, new Set(["p0"])).kind;
+      kind = readLiveChain(createTranscriptIndex(file), new Set(["p0"])).kind;
     });
 
     // Assert.
@@ -561,5 +566,210 @@ describe("planCut, a turn the vendor refused for a usage limit", () => {
 
     // Assert.
     expect(plan).toMatchObject({ kind: "cut", promptUuid: "p1", forkPoint: "a0" });
+  });
+});
+
+/** LINES as transcript text, one JSON record per line. */
+const linesOf = (lines: Record<string, unknown>[]): string => lines.map((line) => `${JSON.stringify(line)}\n`).join("");
+
+describe("createTranscriptIndex", () => {
+  it("reads what the file gained since the last read", () => {
+    // Arrange.
+    const file = transcript([user("p0", null), assistant("a0", "p0")]);
+    const index = createTranscriptIndex(file);
+    index.read();
+    appendFileSync(file, linesOf([user("p1", "a0"), assistant("a1", "p1")]));
+
+    // Act.
+    const read = index.read();
+
+    // Assert.
+    expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0", "p1", "a1"]);
+  });
+
+  it("takes in what the file gained on a refresh, for the next read", () => {
+    // Arrange.
+    const file = transcript([user("p0", null)]);
+    const index = createTranscriptIndex(file);
+    index.refresh();
+    appendFileSync(file, linesOf([assistant("a0", "p0")]));
+    index.refresh();
+
+    // Act.
+    const read = index.read();
+
+    // Assert.
+    expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0"]);
+  });
+
+  it.each([
+    {
+      name: "a replaced file",
+      change: (file: string) => {
+        const next = `${file}.next`;
+        writeFileSync(next, linesOf([user("q0", null), assistant("q1", "q0")]));
+        renameSync(next, file);
+      },
+    },
+    { name: "a file that shrank", change: (file: string) => writeFileSync(file, linesOf([user("q0", null), assistant("q1", "q0")])) },
+  ])("reads $name again from its start", ({ change }) => {
+    // Arrange.
+    const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")]);
+    const index = createTranscriptIndex(file);
+    index.read();
+    change(file);
+
+    // Act.
+    const read = index.read();
+
+    // Assert.
+    expect(read.kind === "ok" ? [uuids(read.transcript), read.transcript.byUuid.has("p0")] : read.kind).toEqual([["q0", "q1"], false]);
+  });
+
+  it("reads an unterminated last line without keeping it, and reads it whole once its newline lands", () => {
+    // Arrange.
+    const file = transcript([user("p0", null)]);
+    const index = createTranscriptIndex(file);
+    const line = JSON.stringify(assistant("a0", "p0"));
+    appendFileSync(file, line);
+    const before = index.read();
+    appendFileSync(file, `\n${JSON.stringify(user("p1", "a0"))}\n`);
+
+    // Act.
+    const after = index.read();
+
+    // Assert.
+    expect([before, after].map((read) => (read.kind === "ok" ? uuids(read.transcript) : read.kind))).toEqual([
+      ["p0", "a0"],
+      ["p0", "a0", "p1"],
+    ]);
+  });
+
+  it("skips a torn last line, and reads it once it is written whole", () => {
+    // Arrange.
+    const file = transcript([user("p0", null)]);
+    const index = createTranscriptIndex(file);
+    const line = JSON.stringify(assistant("a0", "p0"));
+    appendFileSync(file, line.slice(0, 20));
+    const before = index.read();
+    appendFileSync(file, `${line.slice(20)}\n`);
+
+    // Act.
+    const after = index.read();
+
+    // Assert.
+    expect([before, after].map((read) => (read.kind === "ok" ? uuids(read.transcript) : read.kind))).toEqual([["p0"], ["p0", "a0"]]);
+  });
+
+  it("answers no_transcript for a file that went away, and reads it afresh when it returns", () => {
+    // Arrange.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-rollback-"));
+    const file = path.join(dir, "session.jsonl");
+    const index = createTranscriptIndex(file);
+    const absent = index.read();
+    writeFileSync(file, linesOf([user("p0", null)]));
+
+    // Act.
+    const present = index.read();
+
+    // Assert.
+    expect([absent.kind, present.kind === "ok" ? uuids(present.transcript) : present.kind]).toEqual(["no_transcript", ["p0"]]);
+  });
+
+  it("answers unreadable, at ERROR, when the file cannot be read", () => {
+    // Arrange: a directory where the transcript should be.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-rollback-"));
+    const file = path.join(dir, "session.jsonl");
+    mkdirSync(file);
+    let kind = "";
+
+    // Act.
+    const records = logRecordsDuring(() => {
+      kind = createTranscriptIndex(file).read().kind;
+    });
+
+    // Assert.
+    expect({ kind, record: records.find((record) => record.message.includes("could not be read for its chain")) }).toMatchObject({
+      kind: "unreadable",
+      record: { level: "error", context: { file } },
+    });
+  });
+
+  it("records a refresh that cannot read the file at ERROR", () => {
+    // Arrange.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-rollback-"));
+    const file = path.join(dir, "session.jsonl");
+    mkdirSync(file);
+
+    // Act.
+    const records = logRecordsDuring(() => {
+      createTranscriptIndex(file).refresh();
+    });
+
+    // Assert.
+    expect(records.find((record) => record.message.includes("could not be read to refresh its index"))).toMatchObject({
+      level: "error",
+      context: { file },
+    });
+  });
+});
+
+describe("chainRecordOf", () => {
+  it.each([
+    {
+      name: "a prompt keeps its text",
+      record: user("p0", null, "hello"),
+      want: { type: "user", uuid: "p0", parentUuid: null, message: { role: "user", content: "hello" } },
+    },
+    {
+      name: "a tool result keeps its block types, not its output",
+      record: user("r0", "a0", [{ type: "tool_result", tool_use_id: "t", content: "x".repeat(1000) }]),
+      want: { type: "user", uuid: "r0", parentUuid: "a0", message: { role: "user", content: [{ type: "tool_result" }] } },
+    },
+    {
+      name: "a text block keeps its text",
+      record: user("p1", "a0", [{ type: "text", text: "hi", cache_control: {} }]),
+      want: { type: "user", uuid: "p1", parentUuid: "a0", message: { role: "user", content: [{ type: "text", text: "hi" }] } },
+    },
+    {
+      name: "the chain's own fields are kept",
+      record: { type: "system", subtype: "compact_boundary", uuid: "b0", isMeta: true, isSidechain: false, isCompactSummary: true, origin: { kind: "x", extra: 1 } },
+      want: { type: "system", subtype: "compact_boundary", uuid: "b0", isMeta: true, isSidechain: false, isCompactSummary: true, origin: { kind: "x" } },
+    },
+  ])("slims a record: $name", ({ record, want }) => {
+    // Act.
+    const slim = chainRecordOf(record);
+
+    // Assert.
+    expect(slim).toEqual(want);
+  });
+});
+
+describe("what a read keeps of each record", () => {
+  /** An answer holding a text block and a tool call. */
+  const answerContent = [
+    { type: "text", text: "ok" },
+    { type: "tool_use", name: "Edit", input: { file_path: "/x" } },
+  ];
+
+  it.each([
+    { reader: "a one-shot read keeps the whole record", read: (file: string) => readTranscriptChain(file), want: answerContent },
+    {
+      reader: "an index keeps only the chain's slice",
+      read: (file: string) => createTranscriptIndex(file).read(),
+      want: [{ type: "text", text: "ok" }, { type: "tool_use" }],
+    },
+  ])("$reader", ({ read, want }) => {
+    // Arrange.
+    const file = transcript([
+      user("p0", null),
+      { type: "assistant", uuid: "a0", parentUuid: "p0", message: { role: "assistant", content: answerContent } },
+    ]);
+
+    // Act.
+    const got = read(file);
+
+    // Assert.
+    expect(got.kind === "ok" ? got.transcript.byUuid.get("a0")?.message?.content : got.kind).toEqual(want);
   });
 });
