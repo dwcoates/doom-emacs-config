@@ -13,15 +13,9 @@
  * Its browser is Playwright's WebKit build pinned by `playwright-core`
  * (package.json); `npx playwright-core install webkit` fetches it once.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ClickHoldPage } from "./click-hold-page";
-import { bundlePage } from "./bundle";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { bootPage, pageAssets } from "./boot-page";
 
 /** How much shorter the answered card redraws. */
 const SHRINK_PX = 300;
@@ -31,19 +25,11 @@ const FRAMES = 6;
 const TOLERANCE_PX = 1;
 
 let browser: Browser;
-let script: string;
-let css: string;
+let assets: { script: string; css: string };
 
 /** A fresh page over the click-hold shell, parked at its tail. */
 async function freshPage(): Promise<Page> {
-  const page = await browser.newPage({ viewport: { width: 800, height: 800 } });
-  const errors: string[] = [];
-  page.on("pageerror", (err) => errors.push(err.message));
-  await page.setContent("<!doctype html><html><head></head><body></body></html>");
-  await page.addStyleTag({ content: css });
-  await page.addScriptTag({ content: script });
-  await page.waitForFunction(() => (window as { clickHold?: ClickHoldPage }).clickHold !== undefined);
-  if (errors.length > 0) throw new Error(`the page failed to boot: ${errors.join("; ")}`);
+  const { page } = await bootPage(browser, { ...assets, global: "clickHold", viewport: { width: 800, height: 800 } });
   await page.evaluate(() => window.clickHold.park());
   return page;
 }
@@ -60,10 +46,7 @@ describe("a click in the feed holds its view, in WebKit", () => {
   let dockedRecords: string[];
 
   beforeAll(async () => {
-    [script, css] = await Promise.all([
-      bundlePage(path.join(here, "click-hold-page.ts"), "clickHoldPage"),
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
-    ]);
+    assets = await pageAssets("click-hold-page.ts", "clickHoldPage");
     browser = await webkit.launch();
     const control = await freshPage();
     unclicked = await control.evaluate(

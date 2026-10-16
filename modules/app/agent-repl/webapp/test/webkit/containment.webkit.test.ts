@@ -10,16 +10,10 @@
  * the page does not serve is a kind this guarantee does not cover, so the
  * served kinds must cover every FeedRow arm and every activity unit.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FeedRowSchema, FeedTurnActivitySchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import type { ContainmentPage } from "./containment-page";
-import { bundlePage } from "./bundle";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { bootPage, pageAssets } from "./boot-page";
 
 /** The FeedRow arms the feed never draws as a row of its own. */
 const NOT_A_ROW: ReadonlySet<string> = new Set([
@@ -45,18 +39,13 @@ describe("the feed stays inside its stream area, in WebKit", () => {
   let openMarkers: number;
 
   beforeAll(async () => {
-    const [script, css] = await Promise.all([
-      bundlePage(path.join(here, "containment-page.ts"), "containmentPage"),
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
-    ]);
+    const assets = await pageAssets("containment-page.ts", "containmentPage");
     browser = await webkit.launch();
-    const page = await browser.newPage({ viewport: { width: 700, height: 900 } });
-    const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(err.message));
-    await page.setContent("<!doctype html><html><head></head><body></body></html>");
-    await page.addStyleTag({ content: css });
-    await page.addScriptTag({ content: script });
-    await page.waitForFunction(() => (window as { containment?: ContainmentPage }).containment !== undefined);
+    const { page, errors } = await bootPage(browser, {
+      ...assets,
+      global: "containment",
+      viewport: { width: 700, height: 900 },
+    });
     drawn = await page.evaluate(() => window.containment.mount());
     if (errors.length > 0) throw new Error(`the page failed: ${errors.join("; ")}`);
     spills = await page.evaluate(() => window.containment.spills());
