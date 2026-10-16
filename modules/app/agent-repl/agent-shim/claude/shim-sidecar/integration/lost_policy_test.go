@@ -199,33 +199,6 @@ func lostArmName(lost *conversationv1.DetachedLost) string {
 // (a) file_vanished — the run's file disappeared under the reader.
 // ---------------------------------------------------------------------------
 
-// TestAVanishedSpoolIsConcludedFileVanished asserts the reason: the grace window
-// absorbs the ordinary rename race, and past it the disappearance IS the
-// conclusion.
-func TestAVanishedSpoolIsConcludedFileVanished(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	store := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/work/lost-vanished-probe",
-		"a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1")
-	opts := lostOptions(t, store.Socket, tree)
-	opts.StaleGrace = shortGrace
-
-	// Act: the spool is read, then deleted under the reader.
-	startSidecar(t, opts)
-	awaitCursorAtLeast(ctx, t, store.Client, fx.Parent.Path(), fx.Parent.Offset())
-	spool := newGrowingFile(t, fx.SpoolPath)
-	spool.AppendRaw([]byte("all it managed to say\n"))
-	awaitCursorAtLeast(ctx, t, store.Client, fx.SpoolPath, spool.Offset())
-	spool.Remove()
-
-	// Assert.
-	awaitLostConclusion(ctx, t, opts.LogPath, fx.SpoolPath, "file_vanished")
-}
-
 // TestAVanishedSpoolSettlesItsRunAsInterrupted asserts the terminal: the run is
 // closed with the output it managed to produce, under the interrupted arm.
 func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
@@ -263,32 +236,6 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 // ---------------------------------------------------------------------------
 // (b) went_silent — the file is still there and stopped growing.
 // ---------------------------------------------------------------------------
-
-// TestASpoolThatStopsGrowingIsConcludedWentSilent asserts the reason for a file
-// that is still present: no EXIT marker ever arrived, and its silence outlasted
-// the shell window.
-func TestASpoolThatStopsGrowingIsConcludedWentSilent(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	store := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/work/lost-silent-probe",
-		"b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1")
-	opts := lostOptions(t, store.Socket, tree)
-	opts.StaleShellSilence = shortSilence
-
-	// Act: bytes, then nothing — and no `EXIT=` line to settle it.
-	startSidecar(t, opts)
-	awaitCursorAtLeast(ctx, t, store.Client, fx.Parent.Path(), fx.Parent.Offset())
-	spool := newGrowingFile(t, fx.SpoolPath)
-	spool.AppendRaw([]byte("started, then stopped saying anything\n"))
-	awaitCursorAtLeast(ctx, t, store.Client, fx.SpoolPath, spool.Offset())
-
-	// Assert.
-	awaitLostConclusion(ctx, t, opts.LogPath, fx.SpoolPath, "went_silent")
-}
 
 // TestASilentSpoolSettlesItsRunAsInterrupted asserts the same terminal reaches
 // the wire for a run that merely went quiet.

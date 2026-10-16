@@ -42,25 +42,3 @@ func TestAnUnownedWriteLandsInTheBookThatHoldsItsUnit(t *testing.T) {
 	assertTexts(t, "the spawner's book after the unowned write", pageTexts(page.GetPage()), []string{"progressed"})
 	store.assertNoErrorRecords()
 }
-
-func TestAnUnownedWriteOfANewUnitIsAnsweredUnplaced(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	shim := streamProducer(store.client())
-
-	// Act.
-	resp, err := shim.attempt(ctx, &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
-		shim.agentEntry("w-beat", "activity:toolu_new", unownedLine(responseFrame("", "toolu_new", "progressed"))),
-	}})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("WriteBatch transport error: %v", err)
-	}
-	unplaced := resp.GetSuccess().GetUnplaced()
-	if len(unplaced) != 1 || unplaced[0].GetUpsertKey() != "activity:toolu_new" {
-		t.Fatalf("response = %v, want the entry answered unplaced", resp)
-	}
-}

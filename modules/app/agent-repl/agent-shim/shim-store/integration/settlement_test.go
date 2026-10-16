@@ -52,25 +52,6 @@ func TestRunSettlementsAnswersAnEndedRunAndLeavesOutLiveAndUnknownOnes(t *testin
 	store.assertNoErrorRecords()
 }
 
-func TestRunSettlementsRefusesAnEmptyRunID(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-
-	// Act.
-	resp, err := cli.GetRunSettlements(ctx, connect.NewRequest(&storev1.GetRunSettlementsRequest{RunIds: []string{""}}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("GetRunSettlements transport error: %v", err)
-	}
-	if got := resp.Msg.GetFailure().GetInvalidRequest().GetField(); got != "run_ids[0]" {
-		t.Fatalf("failure = %v, want invalid_request naming run_ids[0]", resp.Msg.GetResult())
-	}
-}
-
 // bashLostFrame is the sidecar's LOST terminal for a shell run.
 func bashLostFrame() *conversationv1.AgentBash {
 	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{

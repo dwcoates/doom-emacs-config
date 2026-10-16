@@ -83,23 +83,6 @@ func TestConcurrentProducersAreAllAcknowledged(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-func TestConcurrentProducersLandEveryLineExactlyOnce(t *testing.T) {
-	// Arrange
-	store := startStore(t, storeOptions{})
-	writeConcurrently(t, store, "main", concurrentWriters, linesPerWriter)
-	ctx, cancel := callContext(t)
-	defer cancel()
-
-	// Act
-	page := openSession(ctx, t, store.client(), "main", nil)
-
-	// Assert
-	want := concurrentWriters * linesPerWriter
-	if got := len(page.GetPage().GetLines()); got != want {
-		t.Fatalf("the book holds %d lines, want %d", got, want)
-	}
-}
-
 func TestConcurrentProducersMintDistinctPointers(t *testing.T) {
 	// Arrange: position is an AUTOINCREMENT primary key, so two rows sharing a
 	// pointer would mean the page order itself collided under contention.

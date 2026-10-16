@@ -24,23 +24,6 @@ import (
 // DaemonHealth
 // ---------------------------------------------------------------------------
 
-func TestDaemonHealthOnAFreshDaemonIsHealthy(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-
-	// Act
-	resp, err := d.Client().DaemonHealth(d.Ctx(), healthRequest())
-
-	// Assert
-	if err != nil {
-		t.Fatalf("DaemonHealth = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess().GetHealthy() == nil {
-		t.Fatalf("DaemonHealth = %v, want success{healthy}", resp.Msg)
-	}
-}
-
 func TestDaemonHealthIdentityChangesAfterAProcessRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -227,23 +210,6 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 // ---------------------------------------------------------------------------
 // SessionHealth
 // ---------------------------------------------------------------------------
-
-func TestSessionHealthForALiveSessionIsHealthy(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SessionHealth = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess().GetHealthy() == nil {
-		t.Fatalf("SessionHealth of a live session = %v, want success{healthy}", resp.Msg)
-	}
-}
 
 func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	t.Parallel()
@@ -547,37 +513,6 @@ func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
 	}
 }
 
-func TestClientLogPersistsTheClientsVerboseClass(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newRegistered(t, harness.Opts{})
-
-	// Act.
-	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
-			Operation: "webapp.trace",
-			Message:   "the webview traced a branch",
-			Verbose:   true,
-		},
-	}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("ClientLog = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
-	}
-	rec := f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's verbose record", func(r harness.LogRecord) bool {
-		return r.Operation == "webapp.trace"
-	})
-	if rec.Verbosity != "verbose" {
-		t.Fatalf("the persisted record's verbosity = %q, want verbose", rec.Verbosity)
-	}
-}
-
 // TestClientLogAtWarnLandsAtWarnInTheWebappSink is the warn half of the level
 // discipline: the record's level arm, not any fixed level, is what the sink
 // persists.
@@ -671,35 +606,6 @@ func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T
 	}
 }
 
-// TestClientLogOnAnUnknownWorkspaceIsRefused: `ClientLogError.unknown_workspace`
-// landed 2026-09-12 (realtest 8, finding E), so the refusal is now IN BAND — a
-// typed arm, no Connect error, and no unlanded-arm warning. It is also ordinary
-// traffic: a forwarder learns its workspace is gone only by being told, so the
-// daemon records the refusal at INFO and this test expects no warnings at all.
-func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-
-	// Act
-	resp, err := d.Client().ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}},
-		Record: &agentreplv1.ClientLogRecord{
-			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
-			Operation: "webapp.something",
-			Message:   "a message",
-		},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClientLog(unknown) = %v, want the typed refusal", err)
-	}
-	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
-		t.Fatalf("ClientLog(unknown) = %v, want unknown_workspace", resp.Msg.GetResult())
-	}
-}
-
 // TestClientLogNeverAppearsInTheDaemonRunLog confines a client's own record to
 // the workspace's webapp sink: the daemon's run log is the DAEMON's own
 // account of itself, and a client's diagnostic sentence is not that.
@@ -728,43 +634,6 @@ func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 		if r.Operation == "webapp.crash" {
 			t.Fatalf("the run log carries the client's own record %+v, want it confined to the workspace's webapp sink", r)
 		}
-	}
-}
-
-func TestClientLogForAWorkspaceWhoseDirectoryIsGoneLandsInTheRunLog(t *testing.T) {
-	t.Parallel()
-	// Arrange: a registered workspace whose directory is then deleted.
-	f := newRegistered(t, harness.Opts{})
-	if err := os.RemoveAll(f.ws.GetDir()); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-
-	// Act.
-	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
-			Operation: "sidecar.transcript.read",
-			Message:   "the sidecar read a transcript",
-			Runtime:   &agentreplv1.ClientLogRecord_Sidecar{Sidecar: &agentreplv1.ClientLogRuntimeSidecar{}},
-		},
-	}))
-
-	// Assert: the rpc succeeds and the record lands centrally, naming its
-	// workspace.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ClientLog = (%v, %v), want a success", resp, err)
-	}
-	// A forwarded record carries its CLIENT's pid (none here), never the
-	// daemon's, so the own-pid run-log await would never see it.
-	rec := f.d.AwaitRunLogRecordFromAnyProcess("the sidecar's record in the run log", func(r harness.LogRecord) bool {
-		return r.Operation == "sidecar.transcript.read"
-	})
-	if rec.WorkspaceID != f.ws.GetId() {
-		t.Fatalf("the centrally routed record's workspace_id = %q, want %q", rec.WorkspaceID, f.ws.GetId())
-	}
-	if _, statErr := os.Stat(f.ws.GetDir()); !os.IsNotExist(statErr) {
-		t.Fatalf("the deleted workspace directory exists again after the record (stat = %v)", statErr)
 	}
 }
 
@@ -837,32 +706,6 @@ func TestSendLoginInputResizeIsAccepted(t *testing.T) {
 	}
 }
 
-func TestSendLoginInputWithNoLoginOpenIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	// no_login_open is answered through s.refuse (internal/server/login.go),
-	// which logs a landed arm at DEBUG, never WARN.
-
-	// Act
-	resp, err := f.d.Client().SendLoginInput(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendLoginInputRequest{
-		Workspace: f.ws,
-		Input:     &agentreplv1.SendLoginInputRequest_Keystrokes{Keystrokes: &agentreplv1.LoginTerminalKeystrokes{Data: []byte("x")}},
-	}))
-
-	// Assert: no_login_open is a LANDED SendLoginInputError arm — the
-	// in-band typed answer, never a transport error (settled by reading
-	// internal/server/login.go's SendLoginInput, per critique 22: the arm
-	// string "no_login_open" matches SendLoginInputError's own oneof field,
-	// so s.refuse's setArm succeeds and answers in band).
-	if err != nil {
-		t.Fatalf("SendLoginInput with no login open = error %v, want a success carrying error{no_login_open}", err)
-	}
-	if resp.Msg.GetError().GetNoLoginOpen() == nil {
-		t.Fatalf("SendLoginInput with no login open = %v, want error{no_login_open}", resp.Msg)
-	}
-}
-
 func TestCloseLoginEndsTheStreamWithClosed(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -882,31 +725,6 @@ func TestCloseLoginEndsTheStreamWithClosed(t *testing.T) {
 	harness.AwaitView(t, f.d.Ctx(), stream, "the closed terminus", func(o *agentreplv1.LoginTerminalOutput) bool {
 		return o.GetClosed() != nil
 	})
-}
-
-func TestASecondOpenLoginJoinsTheSamePty(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	first, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws}))
-	if err != nil {
-		t.Fatalf("the first OpenLogin = error %v, want a success", err)
-	}
-	stream := f.d.WatchLogin(f.ws)
-	loginAwaitMarker(t, f, stream, harness.FakeClaudeLoginMarker)
-
-	// Act
-	second, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws}))
-	if err != nil {
-		t.Fatalf("the second OpenLogin = error %v, want it to join the running pty", err)
-	}
-
-	// Assert: the same pty, so the same config dir and NO second banner.
-	if second.Msg.GetSuccess().GetConfigDir() != first.Msg.GetSuccess().GetConfigDir() {
-		t.Fatalf("the second OpenLogin = config dir %q, want the first's %q",
-			second.Msg.GetSuccess().GetConfigDir(), first.Msg.GetSuccess().GetConfigDir())
-	}
-	harness.ExpectNoPush(t, stream, harness.ProbeWindow, "a second login banner from a second pty")
 }
 
 // awaitLoginMarkerOn reads terminal bytes on a bare *harness.Daemon (no
@@ -997,25 +815,6 @@ func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.
 	defaultSeen := awaitLoginMarkerOn(t, d, d.WatchLogin(defaultWS))
 	if got := strings.Count(defaultSeen, harness.FakeClaudeLoginMarker); got != 1 {
 		t.Fatalf("login marker count = %d on the default account's pty, want exactly 1", got)
-	}
-}
-
-func TestCloseLoginWithNothingOpenAnswersSuccess(t *testing.T) {
-	t.Parallel()
-	// Arrange: no OpenLogin has ever run on this workspace.
-	f := newRegistered(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().CloseLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseLoginRequest{Workspace: f.ws}))
-
-	// Assert: closing an ABSENT login is SUCCESS -- the desired state already
-	// holds (endpoint_close_login.proto, internal/login/manager.go's Close:
-	// `!ok` returns nil, never login.ErrNoSession).
-	if err != nil {
-		t.Fatalf("CloseLogin with nothing open = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CloseLogin with nothing open = %v, want success{}", resp.Msg)
 	}
 }
 

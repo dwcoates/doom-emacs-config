@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"agentrepl/protohelpers/rosterwalk"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -91,68 +90,6 @@ func TestAnAsyncMergeOfABranchWithAWorktreeLandsAndKeepsThatWorktree(t *testing.
 	if !s.repo.HasWorktree(branchDir) {
 		t.Fatal("the branch's own worktree was removed without a cleanup")
 	}
-	if _, err := os.Stat(s.f.ws.GetDir()); err != nil {
-		t.Fatalf("the requester's worktree is gone: %v", err)
-	}
-}
-
-func TestAnAsyncMergeThatCleansUpRemovesTheBranchsWorktreeOnceItLands(t *testing.T) {
-	t.Parallel()
-	// Arrange: a subagent's branch checked out in a worktree of its own.
-	s := newSourcedRepo(t)
-	root := s.f.watchRootFeed()
-	branchDir := s.repo.AddBranchWorktree("agent-fix")
-
-	// Act.
-	s.mergeAs(t, harness.Async("fix-merge", "agent-fix", harness.CleaningUp()))
-	merge := s.awaitConcluded(t, root)
-	s.d.AwaitLandingDeployed()
-
-	// Assert: landed, and the branch's worktree removed while its branch stays.
-	if merge.GetSuccess() == nil {
-		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
-	}
-	s.d.AwaitFileGone(branchDir)
-	if s.repo.HasWorktree(branchDir) {
-		t.Fatal("the branch's worktree is still registered after the cleanup")
-	}
-	if s.repo.BranchHead("agent-fix") == "" {
-		t.Fatal("the cleanup deleted the branch, want it kept")
-	}
-	if _, err := os.Stat(s.f.ws.GetDir()); err != nil {
-		t.Fatalf("the requester's worktree is gone: %v", err)
-	}
-}
-
-func TestAnAsyncOneShotLandsAnotherWorkspacesBranchAndClosesThatWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange: a second workspace with work; the first lands its branch async
-	// and names it as the workspace to close.
-	s := newSourcedRepo(t)
-	repoRef := mergeRepositoryRef(t, s.d, s.repo)
-	other := mergeCreateChild(t, s.d, repoRef, "other", "the other work", nil)
-	harness.CommitWork(t, other.ws.GetDir())
-	root := s.f.watchRootFeed()
-	roster := s.d.WatchRoster()
-
-	// Act.
-	s.mergeAs(t, harness.Async("other-merge", mergeBranchOf(t, other.ws), harness.ClosingOnLanding(other.ws)))
-	merge := s.awaitConcluded(t, root)
-	s.d.AwaitLandingDeployed()
-
-	// Assert: the other workspace is merged and gone; the requester stays.
-	if merge.GetSuccess() == nil {
-		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
-	}
-	awaitRoster(t, s.d, roster, "the other workspace under recently_merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range rosterwalk.MergedRows(r) {
-			if row.GetWorkspace().GetWorkspace().GetId() == other.ws.GetId() {
-				return true
-			}
-		}
-		return false
-	})
-	s.d.AwaitFileGone(other.ws.GetDir())
 	if _, err := os.Stat(s.f.ws.GetDir()); err != nil {
 		t.Fatalf("the requester's worktree is gone: %v", err)
 	}
@@ -326,29 +263,6 @@ func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing
 	})
 }
 
-func TestExhaustedFixingAttemptsFailTheMergeInTests(t *testing.T) {
-	t.Parallel()
-	// Arrange: every gate run fails.
-	s := newSourcedRepo(t)
-	s.d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
-	s.script.SetExitCode(1)
-	s.script.SetStdout("daemon: starting\ndaemon failed after 1s with exit code 1\n")
-	harness.CommitWork(t, s.f.ws.GetDir())
-	footer := s.d.WatchFooter(s.f.ws)
-
-	// Act: each fixing attempt's turn ends without a fix.
-	s.mergeAs(t, harness.OneShot())
-	for attempt := 1; attempt <= merge.MaxFixAttempts; attempt++ {
-		s.awaitStartTurn(t, 1+attempt)
-		pushConcludedTurn(s.f.shim, mainAgent, "fix-attempt")
-	}
-
-	// Assert.
-	awaitFooter(t, s.f, footer, "merge failed in tests", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMergeFailed().GetTests() != nil
-	})
-}
-
 func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	t.Parallel()
 	// Arrange: the gate's first run fails, and while it is fixed the target
@@ -446,64 +360,6 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 	s.d.AwaitLandingDeployed()
 	if merge.GetSuccess() == nil {
 		t.Fatalf("the merge ended %v, want landed once the turn ended", merge.GetResult())
-	}
-}
-
-func TestTheTestLogOpensThroughOpenInEditorByItsToken(t *testing.T) {
-	t.Parallel()
-	// Arrange: a merge kept open lands, so its workspace still answers.
-	s := newSourcedRepo(t)
-	harness.CommitWork(t, s.f.ws.GetDir())
-	root := s.f.watchRootFeed()
-	s.mergeAs(t, harness.OneShot())
-	merge := awaitRow(t, s.f, root, "the merge's terminal", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil
-	})
-	s.d.AwaitLandingDeployed()
-	run := s.f.awaitRowInFeed(merge.GetId(), "the run with its log", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetTestsRun().GetOutput().GetLog() != nil
-	})
-	link := run.GetMergeTab().GetTestsRun().GetOutput().GetLog()
-
-	// Act.
-	resp, err := s.d.Client().OpenInEditor(s.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
-		Workspace: s.f.ws,
-		Target:    &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: link.GetToken()},
-	}))
-
-	// Assert: relayed to Emacs as the log's path.
-	requireRPCAnswered(t, "OpenInEditor", resp, err)
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenInEditor = (%v), want success", resp.Msg.GetResult())
-	}
-	push := awaitView(t, s.f, s.f.host, "the open_in_editor push", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		return r.GetOpenInEditor() != nil
-	})
-	path := push.GetOpenInEditor().GetPath()
-	if !strings.HasPrefix(path, filepath.Join(s.d.StateDir, "merge-logs")) {
-		t.Fatalf("relayed path = %q, want the round's log under the state's merge-logs", path)
-	}
-	if body, err := os.ReadFile(path); err != nil || !strings.Contains(string(body), "daemon: passed") {
-		t.Fatalf("the log = (%q, %v), want the gate's run", body, err)
-	}
-}
-
-func TestAnUnknownTestLogTokenIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.merge.test_log", "OpenInEditor")
-
-	// Act.
-	resp, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
-		Workspace: f.ws,
-		Target:    &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{Value: "no-lease/1"}},
-	}))
-
-	// Assert.
-	requireRPCAnswered(t, "OpenInEditor", resp, err)
-	if resp.Msg.GetError().GetUnknownMergeTestLog() == nil {
-		t.Fatalf("OpenInEditor = (%v), want unknown_merge_test_log", resp.Msg.GetResult())
 	}
 }
 

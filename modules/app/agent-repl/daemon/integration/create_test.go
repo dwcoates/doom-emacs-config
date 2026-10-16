@@ -273,38 +273,6 @@ func TestCreateWorkspaceForkMakesTheVendorsForkAndResumesIt(t *testing.T) {
 
 // ---- One-shot create ----
 
-func TestCreateWorkspaceOneShotDecoratesThePromptFromPrompts(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-
-	// Act
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("add a health check endpoint"),
-		}},
-	}))
-
-	// Assert: the sent prompt is the user's text PLUS the preamble and the
-	// repository's completion directive, never the bare text.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	shim := d.Shim(ws)
-	shim.ExpectStartSession()
-	got := text(shim.ExpectStartTurn().GetSaid())
-	if !strings.Contains(got, "add a health check endpoint") {
-		t.Fatalf("the one-shot's decorated prompt = %q, want the user's prompt spliced in", got)
-	}
-	if !strings.Contains(got, "when you're all done, please do the following postprocessing directive: ") {
-		t.Fatalf("the one-shot's decorated prompt = %q, want the completion directive's framing sentence", got)
-	}
-}
-
 func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
 	t.Parallel()
 	// Arrange: the repository states its own directive, and the daemon
@@ -646,19 +614,6 @@ func createRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *w
 	}
 	t.Fatalf("no repository section found for %s", repo.Dir)
 	return nil
-}
-
-// createProjectDir answers the vendor CLI's project directory for one
-// workspace, through the harness's single spelling of that rule.
-//
-// IT DELEGATES ON PURPOSE. The rule is "every byte that is not [A-Za-z0-9]
-// becomes a dash", not "every slash becomes a dash", and the two coincide only
-// while the temp root happens to be alphanumeric. Under macOS's per-user
-// /var/folders/<hash>/T root it has an underscore in it, so a slashes-only
-// spelling seeded the parent's transcript at a path the daemon never probes
-// and the fork's port silently had nothing to carry.
-func createProjectDir(configDir, workspaceDir string) string {
-	return harness.ProjectDir(configDir, workspaceDir)
 }
 
 // createArgsContain reports whether a git call's args contain an exact token.

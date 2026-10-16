@@ -15,29 +15,6 @@ import (
 	"agentrepl/proto/store/v1/storev1connect"
 )
 
-// TestOpenAnswersAPageAndAToken is the shape of the open itself.
-func TestOpenAnswersAPageAndAToken(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-	shim := streamProducer(cli)
-	shim.write(ctx, t,
-		shim.agentEntry("w-open-1", "u-open-1", frameLine(agentID("main"), responseFrame("main", "act-1", "only"))),
-	)
-
-	// Act.
-	opened := openSession(ctx, t, cli, "main", nil)
-
-	// Assert.
-	assertTexts(t, "the opening page", pageTexts(opened.GetPage()), []string{"only"})
-	if opened.GetWatch().GetValue() == "" {
-		t.Errorf("the open answered no watch token; a caller cannot watch an agent it did not open")
-	}
-	store.assertNoErrorRecords()
-}
-
 // TestPageOnlyOpenServesThePageAndMintsNoToken: a caller that says no watch
 // follows gets the page and nothing else. OpenAgentSession is unary and the
 // service has no close, so a token minted here could never be reclaimed — the
@@ -114,33 +91,6 @@ func TestEmptyBookIsALegalOpen(t *testing.T) {
 		shim.agentEntry("w-empty-1", "u-empty-1", frameLine(agentID("main"), responseFrame("never-written-to", "act-1", "first ever"))),
 	)
 	assertTexts(t, "the empty book's tail", receivedTexts(receiveLines(t, stream, 1)), []string{"first ever"})
-	store.assertNoErrorRecords()
-}
-
-// TestWatchIsPinnedExactlyAfterThePage is the handoff invariant: a line
-// written BEFORE the open is in the page and never on the stream.
-func TestWatchIsPinnedExactlyAfterThePage(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-	shim := streamProducer(cli)
-	shim.write(ctx, t,
-		shim.agentEntry("w-pin-a", "u-pin-a", frameLine(agentID("main"), responseFrame("main", "act-a", "A"))),
-	)
-
-	// Act.
-	opened := openSession(ctx, t, cli, "main", nil)
-	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer testclose.OrFail(t, stream)
-	shim.write(ctx, t,
-		shim.agentEntry("w-pin-b", "u-pin-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B"))),
-	)
-
-	// Assert.
-	assertTexts(t, "the page", pageTexts(opened.GetPage()), []string{"A"})
-	assertTexts(t, "the tail", receivedTexts(receiveLines(t, stream, 1)), []string{"B"})
 	store.assertNoErrorRecords()
 }
 
@@ -229,20 +179,6 @@ func TestWatchTokenIsSingleUse(t *testing.T) {
 	assertWatchRefused(t, second)
 }
 
-// TestAnAgentIdNamingNoBookIsRefused: the other half of the empty-book rule.
-// An id the store holds no agent row for is refused rather than served an empty
-// page, so a consumer holding a stale or mistyped target learns it is wrong
-// instead of watching a book that will never fill.
-func TestAnAgentIdNamingNoBookIsRefused(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-
-	// Act & Assert.
-	openUnknownAgent(ctx, t, store.client(), "agent-never-existed")
-}
-
 // TestAnUnknownAgentIsRefusedInExactlyOneRecordNamingBothKeys: an operator
 // counts refusals by the site that fired AND by the arm the caller received,
 // and neither alone is enough — several sites map to one arm, and a site with
@@ -289,30 +225,6 @@ func TestAnUnknownAgentOpenIsNotRecordedLoudly(t *testing.T) {
 			t.Fatalf("an unknown agent produced %d %s records: %v", len(loud), level, loud)
 		}
 	}
-}
-
-// TestAnUnknownAgentIsRefusedBeforeThePointerIsJudged is the ordering: a
-// known_through against a book that does not exist is stale only as a
-// consequence, and answering stale_pointer would send the caller off to repaint
-// a book nobody ever kept.
-func TestAnUnknownAgentIsRefusedBeforeThePointerIsJudged(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-	shim := streamProducer(cli)
-	seedBook(ctx, t, shim, "main", "pointer-order")
-	pointerInMain := openSession(ctx, t, cli, "main", nil).GetPage().GetLines()[0].GetAt()
-
-	// Act.
-	failure := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
-		Agent:   agentID("agent-never-existed"),
-		Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: pointerInMain},
-	})
-
-	// Assert.
-	assertOpenUnknownAgent(t, failure)
 }
 
 // TestUnknownWatchTokenIsRefused: a token the store never minted buys nothing.

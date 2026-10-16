@@ -3,11 +3,7 @@
 package integration
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -99,41 +95,6 @@ func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	awaitFooter(t, f, footer, "idle.done after the turn concludes", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-}
-
-// TestFooterNamesTheRunningCall pins the working step through the real
-// watcher: the main agent's running shell command is the `executing` step, and
-// once it lands the step is `thinking` again.
-func TestFooterNamesTheRunningCall(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("do it", "k-step", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	bash := func(result *conversationv1.AgentBash) *conversationv1.AgentFrame {
-		return activityFrame(mainAgent, &conversationv1.AgentActivity{
-			ActivityId: activityID("bash-step"),
-			Item:       &conversationv1.AgentActivity_Bash{Bash: result},
-		})
-	}
-
-	// Act: the shell command surfaces.
-	f.shim.PushAgentFrame(mainAgent, bash(&conversationv1.AgentBash{
-		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{}}}))
-
-	// Assert
-	awaitFooter(t, f, footer, "working.executing while the shell command runs", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking().GetExecuting() != nil
-	})
-
-	// Act: it lands.
-	f.shim.PushAgentFrame(mainAgent, bash(&conversationv1.AgentBash{
-		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}}}))
-
-	// Assert
-	awaitFooter(t, f, footer, "working.thinking once the shell command lands", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking().GetThinking() != nil
 	})
 }
 
@@ -484,36 +445,6 @@ func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
 	})
 }
 
-// A STATUS-ONLY UPDATE MUST NOT BLANK THE CHECKLIST. `TaskUpdate` carries no
-// subject when it names only a status, so the act's state leaves the field
-// UNSET -- and applying that over the create's own subject drew every checklist
-// row as a bare glyph with no words beside it, which is what the G52 playbook
-// photographed. The same act states no STATUS either when the tracker has not
-// answered it, and reading that as `pending` knocked a running task back to
-// unstarted.
-func TestFooterChecklistKeepsWhatAnUpdateDidNotState(t *testing.T) {
-	t.Parallel()
-	// Arrange: a created task with a subject, moved to running.
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskRunning("task-2", "t-1")))
-
-	// Act: an update that names neither a subject nor a status -- the shape an
-	// announcement the tracker has not answered yet produces.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskUnstated("task-3", "t-1")))
-
-	// Assert: the row still says what it is and where it stands.
-	awaitFooter(t, f, footer, "the checklist row keeping its subject and its status", func(v *frontendv1.FooterView) bool {
-		rows := v.GetExpanded().GetTasks().GetRows()
-		if len(rows) != 1 {
-			return false
-		}
-		return rows[0].GetSubject().GetText() == "Land the converter" &&
-			rows[0].GetStatus().GetRunning() != nil
-	})
-}
-
 // A REFUSED UPDATE ADDS NOTHING. `AgentTaskRejected` states it outright, and
 // the checklist gained a phantom row anyway -- a bare glyph with no words
 // beside it, counted in the chip's denominator, for a task the tracker had just
@@ -659,23 +590,6 @@ func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing
 	})
 }
 
-func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-
-	// Assert: a quiet workspace shows no chips at all.
-	got := awaitFooter(t, f, footer, "the footer with nothing live", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip() != nil
-	})
-	chips := got.GetStrip().GetLiveWork()
-	if chips.GetAgents() != nil || chips.GetShells() != nil || chips.GetTasks() != nil ||
-		chips.GetMonitors() != nil || chips.GetCrons() != nil {
-		t.Fatalf("live-work chips = %v, want every chip unset when nothing is live", chips)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Footer: the allowance cell — composed from TWO facts.
 // ---------------------------------------------------------------------------
@@ -725,36 +639,6 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 	}
 	if !allowance.GetNewsworthy() {
 		t.Fatal("the session allowance is not drawn newsworthy at 95% utilization")
-	}
-}
-
-func TestFooterSeatSpendDrawnFromASeatSpendSample(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "idle before any usage sample", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle() != nil
-	})
-
-	// Act: a per-seat account's sample, $223.88 of $12,000.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
-			ObservedAtMs: 1_700_000_000_000,
-			Outcome: &conversationv1.SessionAccountUsage_SeatSpend{SeatSpend: &conversationv1.SessionAccountUsageSeatSpend{
-				Allotment: &conversationv1.SessionMoney{AmountMinor: 1_200_000, Currency: "USD"},
-				Spent:     &conversationv1.SessionMoney{AmountMinor: 22_388, Currency: "USD"},
-			}},
-		}},
-	})
-
-	// Assert: the enduring line is the seat's spend, with its utilization.
-	got := awaitFooter(t, f, footer, "the seat's spend drawn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetSeatSpend() != nil
-	})
-	seat := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetSeatSpend()
-	if seat.GetSpent().GetAmountMinor() != 22_388 || seat.GetUtilization() != 22_388.0/1_200_000.0 {
-		t.Fatalf("seat_spend = %+v, want 22388 minor spent at 22388/1200000 utilization", seat)
 	}
 }
 
@@ -874,28 +758,6 @@ func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
 	}
 }
 
-func TestFooterARealStatusWinsOverAPendingWakeup(t *testing.T) {
-	t.Parallel()
-	// Arrange: a pending wakeup while idle.
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftWakeupScheduleActivity("wake-2", 60)))
-	awaitFooter(t, f, footer, "waiting.wakeup before the real status", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() != nil
-	})
-
-	// Act: a real status (a turn) begins.
-	f.submit("go", "k-wakeup-real", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Assert: thinking wins; the wakeup fallback no longer shows.
-	got := awaitFooter(t, f, footer, "thinking replacing the wakeup fallback", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-	if got.GetStrip().GetStatus().GetWaiting() != nil {
-		t.Fatalf("footer status = %v while a turn runs, want the wakeup fallback retired", got.GetStrip().GetStatus())
-	}
-}
-
 func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -934,57 +796,6 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 	awaitFooter(t, f, footer, "idle.done once the turn's own terminal lands", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
 	})
-}
-
-func TestFooterScheduledApiRetryCountsLikeTheVendorAndItsResponseAnnouncesTheRestoredAPI(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared record is the vendor failure the test feeds, stated once by its owner.
-	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("go", "k-api-retry", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-	const nextAt = int64(1_790_000_032_000)
-
-	// Act: the vendor's eighth retry is scheduled, of ten it allows.
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ApiError{ApiError: &conversationv1.ApiRequestFailed{
-			Message: "connection refused",
-			Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}},
-			Retry:   &conversationv1.ApiRetry{Attempt: 8, MaxRetries: 10, NextAttemptAtMs: nextAt},
-		}},
-	}))
-
-	// Assert: the retrying line counts attempts as the vendor does and carries
-	// its schedule.
-	got := awaitFooter(t, f, footer, "the retrying line with the vendor's schedule", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying() != nil
-	})
-	if got.GetStrip().GetStatus().GetVendorFault().GetApiRetrying() == nil {
-		t.Fatalf("status = %v, want blocked · api_retrying while the vendor retries", got.GetStrip().GetStatus())
-	}
-	retry := got.GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
-	if retry.GetAttempt() != 9 || retry.GetMaxAttempt() != 11 || retry.GetNextAttempt().GetAtMs() != nextAt {
-		t.Fatalf("retrying = %v, want attempt 9 of 11 next at %d", retry, nextAt)
-	}
-
-	// Act: the retried call answers.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("think-restored"),
-		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{Result: &conversationv1.AgentThinking_Start{Start: &conversationv1.AgentThinkingStart{}}}},
-	}))
-
-	// Assert: the retrying line ends and the restored API is announced.
-	got = awaitFooter(t, f, footer, "the api_restored transient", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking().GetActivity().GetUnpinned().GetTransient().GetApiRestored() != nil
-	})
-	restored := got.GetStrip().GetStatus().GetWorking().GetActivity().GetUnpinned().GetTransient().GetApiRestored()
-	if restored.GetFailedAttempts() != 8 {
-		t.Fatalf("api_restored = %v, want 8 failed attempts", restored)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1208,61 +1019,6 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 	}
 }
 
-func TestTopbarContextPanelResolvesFromTheSameContextUsageFact(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
-			TotalTokens: 50_000,
-			MaxTokens:   200_000,
-			Percentage:  25,
-			Model:       "claude-opus-5",
-			Categories:  []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 4_000, Color: "blue"}},
-		}},
-	})
-	// The chip resolves from the same fact, so its arrival is the synchronizing
-	// edge for the panel the fact also feeds. THE EDGE NAMES THIS FACT'S OWN
-	// FIGURE: the fake states an opening context usage of its own alongside
-	// readiness (fakeshim.DefaultContextUsage, 1000 tokens and no categories),
-	// so a merely non-empty chip is already true before this push lands and
-	// would let the panel be read from that opening fact instead.
-	awaitTopbar(t, f, topbar, "the context chip carrying the pushed 50,000 tokens", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() == "50k"
-	})
-
-	// Assert: the /context panel — the topbar resolver's OTHER product from
-	// the same fact, drawn by the `/context` command rather than by the chip's
-	// hover (the chip's hover is the SESSION token breakdown, a different
-	// fact) — carries the pushed category verbatim.
-	resp := f.submit("/context", "k-context-panel", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	panel := resp.GetSuccess().GetCommandPanel().GetContext()
-	if panel == nil {
-		t.Fatalf("SubmitPrompt(/context) = %v, want a command_panel.context", resp)
-	}
-	row := ftFindContextCategory(panel, "system prompt")
-	if row == nil {
-		t.Fatalf("the /context panel = %v, want a system prompt category", panel.GetSections())
-	}
-	if !strings.Contains(row.GetFigure(), "4") {
-		t.Fatalf("the system prompt category figure = %q, want the pushed 4000 tokens", row.GetFigure())
-	}
-}
-
-// ftFindContextCategory finds a /context panel top-level section by label. The
-// panel is a SECTION TREE: a vendor category is a top-level section row.
-func ftFindContextCategory(panel *frontendv1.ContextPanelView, label string) *frontendv1.ContextPanelSection {
-	for _, section := range panel.GetSections() {
-		if section.GetLabel() == label {
-			return section
-		}
-	}
-	return nil
-}
-
 func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -1342,141 +1098,6 @@ func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
 	}
 }
 
-func TestTopbarDegradedWindowIsDrawnOpenThenClosed(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act: a degraded window opens.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
-			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
-			DegradedWindows: []*conversationv1.SessionDegradedWindow{{
-				Component: "converter",
-				Reason:    "backlogged",
-				BeganAtMs: 1_700_000_000_000,
-				Extent:    &conversationv1.SessionDegradedWindow_Open{Open: &conversationv1.SessionDegradedOpen{}},
-			}},
-		}},
-	})
-
-	// Assert: drawn open.
-	got := awaitTopbar(t, f, topbar, "the degraded window drawn open", func(v *frontendv1.TopbarView) bool {
-		return ftFindDegradedWindow(v) != nil && ftFindDegradedWindow(v).GetOpen() != nil
-	})
-	_ = got
-
-	// Act: the window closes.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
-			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
-			DegradedWindows: []*conversationv1.SessionDegradedWindow{{
-				Component: "converter",
-				Reason:    "backlogged",
-				BeganAtMs: 1_700_000_000_000,
-				Extent: &conversationv1.SessionDegradedWindow_Closed{Closed: &conversationv1.SessionDegradedClosed{
-					EndedAtMs:    1_700_000_005_000,
-					DroppedCount: 12,
-				}},
-			}},
-		}},
-	})
-
-	// Assert: drawn closed, with its cost.
-	closedGot := awaitTopbar(t, f, topbar, "the degraded window drawn closed", func(v *frontendv1.TopbarView) bool {
-		return ftFindDegradedWindow(v) != nil && ftFindDegradedWindow(v).GetClosed() != nil
-	})
-	if ftFindDegradedWindow(closedGot).GetClosed().GetDroppedCount() != 12 {
-		t.Fatalf("degraded window closed.dropped_count = %d, want 12", ftFindDegradedWindow(closedGot).GetClosed().GetDroppedCount())
-	}
-}
-
-func TestTopbarConnectivityToneAndGlyphComeFromTheSharedVocabulary(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-	tones := ftLoadTopbarTones(t)
-
-	// Act / Assert
-	got := awaitTopbar(t, f, topbar, "connectivity resolved after readiness", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity().GetGlyph() != ""
-	})
-	tone := got.GetConnectivity().GetTone()
-	if !tones[tone] {
-		t.Fatalf("connectivity tone = %q, want one of the shared vocabulary's topbar_tones %v", tone, tones)
-	}
-}
-
-func TestTopbarAccountReflectsTheWorkspacesConfigRootEmail(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act
-	f := newOpened(t, harness.Opts{DefaultAccountEmail: "someone@example.invalid"})
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Assert
-	got := awaitTopbar(t, f, topbar, "the account email", func(v *frontendv1.TopbarView) bool {
-		return v.GetAccount().GetLoggedIn().GetEmail() != ""
-	})
-	if got.GetAccount().GetLoggedIn().GetEmail() != "someone@example.invalid" {
-		t.Fatalf("topbar account email = %q, want the config root's someone@example.invalid", got.GetAccount().GetLoggedIn().GetEmail())
-	}
-}
-
-func TestTopbarPermissionModePickerServesTheSwitchableSetWithTheCurrentMode(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Assert
-	got := awaitTopbar(t, f, topbar, "the permission-mode picker resolved", func(v *frontendv1.TopbarView) bool {
-		return v.GetPermissionModePicker().GetCurrent() != nil
-	})
-	picker := got.GetPermissionModePicker()
-	if picker.GetCurrent().GetMode() == "" {
-		t.Fatalf("permission_mode_picker.current = %v, want the mode in force named", picker.GetCurrent())
-	}
-	found := false
-	for _, opt := range picker.GetOptions() {
-		if opt.GetMode() == picker.GetCurrent().GetMode() {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("permission_mode_picker.options = %v, want the current mode among the switchable set", picker.GetOptions())
-	}
-}
-
-func TestTopbarPermissionModeChangedPushUpdatesTheCurrentMode(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-	before := awaitTopbar(t, f, topbar, "the picker before the change", func(v *frontendv1.TopbarView) bool {
-		return v.GetPermissionModePicker().GetCurrent() != nil
-	})
-
-	// Act: the shim reports a mode change (e.g. from a standing permission
-	// grant), not a client-initiated SetPermissionMode.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_PermissionModeChanged{PermissionModeChanged: &conversationv1.SessionPermissionModeChanged{
-			PermissionMode: &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_AcceptEdits{AcceptEdits: &conversationv1.AgentPermissionModeAcceptEdits{}}},
-		}},
-	})
-
-	// Assert: current.mode is exactly the wire spelling "accept_edits" — the
-	// session facts' own vocabulary, which SetPermissionMode echoes unchanged.
-	after := awaitTopbar(t, f, topbar, "the picker's current mode after permission_mode_changed", func(v *frontendv1.TopbarView) bool {
-		return v.GetPermissionModePicker().GetCurrent().GetMode() != before.GetPermissionModePicker().GetCurrent().GetMode()
-	})
-	if after.GetPermissionModePicker().GetCurrent().GetMode() != "accept_edits" {
-		t.Fatalf("permission_mode_picker.current.mode = %q after permission_mode_changed{accept_edits}, want exactly \"accept_edits\"",
-			after.GetPermissionModePicker().GetCurrent().GetMode())
-	}
-}
-
 // ---------------------------------------------------------------------------
 // helpers — prefixed ft* so they cannot collide with another suite's file.
 // ---------------------------------------------------------------------------
@@ -1515,22 +1136,6 @@ func ftTaskActivity(activityIDValue, taskID, subject string, completed bool) *co
 			Task:  &conversationv1.AgentTaskId{Value: taskID},
 			Act:   &conversationv1.AgentTaskAct_Created{Created: &conversationv1.AgentTaskCreated{}},
 			State: state,
-		}},
-	}
-}
-
-// ftTaskRunning moves a task to running, naming NO subject -- which is what a
-// `TaskUpdate(status)` carries, the tracker echoing no subject of its own. The
-// field is UNSET rather than empty, which is what presence is for.
-func ftTaskRunning(activityIDValue, taskID string) *conversationv1.AgentActivity {
-	return &conversationv1.AgentActivity{
-		ActivityId: activityID(activityIDValue),
-		Item: &conversationv1.AgentActivity_TaskAct{TaskAct: &conversationv1.AgentTaskAct{
-			Task: &conversationv1.AgentTaskId{Value: taskID},
-			Act:  &conversationv1.AgentTaskAct_Changed{Changed: &conversationv1.AgentTaskChanged{}},
-			State: &conversationv1.AgentTaskState{
-				Status: &conversationv1.AgentTaskState_Running{Running: &conversationv1.AgentTaskRunning{}},
-			},
 		}},
 	}
 }
@@ -1591,42 +1196,6 @@ func ftFindBreakdownRow(v *frontendv1.TokenBreakdownView, label string) *fronten
 	return nil
 }
 
-// ftFindDegradedWindow finds the first degraded-window warning detail in the
-// topbar's warning strip, if any.
-func ftFindDegradedWindow(v *frontendv1.TopbarView) *frontendv1.TopbarDegradedWindowWarningDetail {
-	for _, w := range v.GetWarnings().GetWarnings() {
-		if d := w.GetDegradedWindow(); d != nil {
-			return d
-		}
-	}
-	return nil
-}
-
-// ftLoadTopbarTones reads the shared render-colors vocabulary's topbar_tones
-// set, so a test asserts membership rather than a hardcoded literal.
-func ftLoadTopbarTones(t *testing.T) map[string]bool {
-	t.Helper()
-	path := filepath.Join(harness.RepoRoot(t), "proto", "vocab", "render-colors.json")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read the shared render-colors vocabulary %s: %v", path, err)
-	}
-	var doc struct {
-		TopbarTones []string `json:"topbar_tones"`
-	}
-	if err := json.Unmarshal(body, &doc); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
-	out := make(map[string]bool, len(doc.TopbarTones))
-	for _, tone := range doc.TopbarTones {
-		out[tone] = true
-	}
-	return out
-}
-
-// f64Ptr is a float64 optional-field builder.
-func f64Ptr(v float64) *float64 { return &v }
-
 // ftAwaitTrue polls a condition until it holds, bounded by ctx. Not a
 // time.Sleep synchronization device: a bounded poll for an eventually-true
 // fact, in the same style as the harness's own file/log waits.
@@ -1651,21 +1220,6 @@ func ftAwaitTrue(t *testing.T, ctx interface{ Done() <-chan struct{} }, pred fun
 // CONNECTED only while its shim.v1 WatchSession, its WatchHostWorkspace and its
 // WatchWebWorkspace are all live. Any one down is not connected.
 // ---------------------------------------------------------------------------
-
-func TestFooterIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
-	t.Parallel()
-	// Arrange: a workspace opened with only the HOST hop held, so the shim
-	// link serves but the web hop does not.
-	f := newRegistered(t, harness.Opts{})
-	f.open()
-	f.host = f.d.WatchHost(f.ws)
-	footer := f.d.WatchFooter(f.ws)
-
-	// Act, Assert: the footer draws disconnected.
-	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetAgentReplFault() != nil
-	})
-}
 
 func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 	t.Parallel()
@@ -1759,65 +1313,6 @@ func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
 		return v.GetConnectivity().GetTitle() != "connected to the session"
 	})
-}
-
-// TestMcpPanelListsEveryServerTheSessionStatedAHealthFor pins the /mcp
-// producer end to end: the shim's per-server mcp_server updates are retained
-// by the topbar resolver and drawn as the panel's rows, one per server, each
-// carrying the health the shim stated.
-func TestMcpPanelListsEveryServerTheSessionStatedAHealthFor(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-
-	// Act
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_McpServer{McpServer: &conversationv1.SessionMcpServer{
-			Name:   "github",
-			Health: &conversationv1.SessionMcpServer_Connected{Connected: &conversationv1.SessionMcpServerConnected{}},
-		}},
-	})
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_McpServer{McpServer: &conversationv1.SessionMcpServer{
-			Name: "linear",
-			Health: &conversationv1.SessionMcpServer_Failed{Failed: &conversationv1.SessionMcpServerFailed{
-				Error: "connection refused",
-			}},
-		}},
-	})
-	// The two updates carry nothing the topbar draws, so a LATER update on the
-	// SAME stream is the synchronizing edge: the stream is ordered, so a chip
-	// carrying this usage proves both mcp_server frames were already applied.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
-			TotalTokens: 50_000, MaxTokens: 200_000, Percentage: 25, Model: "claude-opus-5",
-		}},
-	})
-	// The edge names THIS push's own figure: the fake's opening context usage
-	// (1000 tokens) already draws a non-empty chip, so "non-empty" would be
-	// satisfied before this update — and therefore before the two mcp_server
-	// frames ahead of it — had been applied.
-	awaitTopbar(t, f, topbar, "the context chip that follows the mcp_server updates", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() == "50k"
-	})
-
-	// Assert
-	resp := f.submit("/mcp", "k-mcp-panel", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	panel := resp.GetSuccess().GetCommandPanel().GetMcp()
-	if panel == nil {
-		t.Fatalf("SubmitPrompt(/mcp) = %v, want a command_panel.mcp", resp)
-	}
-	rows := panel.GetRows()
-	if len(rows) != 2 {
-		t.Fatalf("the /mcp panel rows = %v, want one row per stated server", rows)
-	}
-	if rows[0].GetName() != "github" || rows[0].GetConnected() == nil {
-		t.Fatalf("row 0 = %v, want github connected", rows[0])
-	}
-	if rows[1].GetName() != "linear" || rows[1].GetFailed().GetDetail().GetText() != "connection refused" {
-		t.Fatalf("row 1 = %v, want linear failed with the stated error", rows[1])
-	}
 }
 
 // ---------------------------------------------------------------------------

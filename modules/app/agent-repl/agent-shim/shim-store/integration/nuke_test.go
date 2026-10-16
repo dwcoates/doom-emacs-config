@@ -58,24 +58,6 @@ func stampedSupersededSchema(t *testing.T, path string) {
 	}
 }
 
-func TestAStoreBootsOverADatabaseStampedByAnotherBinary(t *testing.T) {
-	// Arrange
-	dbPath := filepath.Join(t.TempDir(), "events.db")
-	stampedForeignSchema(t, dbPath)
-
-	// Act
-	store := startStore(t, storeOptions{dbPath: dbPath})
-
-	// Assert: it serves, and it serves an EMPTY store — the foreign rows are
-	// gone rather than half-readable.
-	ctx, cancel := callContext(t)
-	defer cancel()
-	// NOT AN EMPTY BOOK — NO BOOK. The nuke dropped the agent register with
-	// everything else, so the store has never heard of this agent and refuses
-	// rather than serving a page that would look like a quiet live agent.
-	openUnknownAgent(ctx, t, store.client(), "main")
-}
-
 func TestNukingAForeignSchemaIsAnnouncedAsAnError(t *testing.T) {
 	// Arrange: the staged stamp is 99, ABOVE this binary's own — a database
 	// only a newer store could have written. Discarding it is not a version

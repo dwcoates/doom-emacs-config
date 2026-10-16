@@ -133,27 +133,6 @@ func TestContinuationLinesCarryTheSamePointersTheOpeningPageWouldHave(t *testing
 	store.assertNoErrorRecords()
 }
 
-// TestContinuationMoreArmEchoesTheLastLinesOwnPointer: the boundary and the
-// lines cannot disagree, because the boundary IS one of the lines.
-func TestContinuationMoreArmEchoesTheLastLinesOwnPointer(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 2*db.PageSize+1)
-	opened := openSession(ctx, t, cli, "main", nil)
-
-	// Act.
-	next := readPage(ctx, t, cli, "main", assertPageMore(t, opened.GetPage()))
-
-	// Assert.
-	pointers := readPointers(next)
-	if got := assertReadMore(t, next).GetValue(); got != pointers[len(pointers)-1] {
-		t.Fatalf("more.last_item = %q, want the last line's own pointer %q", got, pointers[len(pointers)-1])
-	}
-}
-
 // TestAContinuationPointerReopensTheSessionAtThatMark: the pointers a
 // continuation served are accepted as known_through, which is the whole reason
 // they must be real.

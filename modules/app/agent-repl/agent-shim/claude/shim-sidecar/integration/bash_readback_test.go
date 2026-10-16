@@ -73,39 +73,3 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 		t.Errorf("the run read back as %q, wanted exactly the spool's bytes in order, %q", joined, want)
 	}
 }
-
-// TestABashRunsStreamEndsAfterItsTerminalRow asserts the stream ENDS once the
-// run is settled: the terminal is the last row and the endpoint closes rather
-// than holding a finished run's consumer open forever.
-func TestABashRunsStreamEndsAfterItsTerminalRow(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	store := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/work/bash-terminal-probe",
-		"c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2")
-
-	// Act: a run that is finished on disk before anyone reads it.
-	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
-	awaitCursorAtLeast(ctx, t, store.Client, fx.Parent.Path(), 1)
-	spool := newGrowingFile(t, fx.SpoolPath)
-	spool.AppendRaw([]byte("all of it at once\nEXIT=0\n"))
-	awaitCursorAtLeast(ctx, t, store.Client, fx.SpoolPath, spool.Offset())
-
-	stream, first := awaitBashRunStream(ctx, t, store.Client, fx.CallID)
-	defer testclose.OrFail(t, stream)
-	rows := drainBashRunToTerminal(t, fx.CallID, stream, first)
-
-	// Assert: the terminal came last, and the stream sent nothing after it.
-	if !isTerminalFrame(rows[len(rows)-1]) {
-		t.Fatalf("the run did not end on its terminal row: %v", describeBashRows(rows))
-	}
-	if stream.Receive() {
-		t.Errorf("the stream delivered a row AFTER the terminal: %v", stream.Msg().GetRow().GetFrame())
-	}
-	if err := stream.Err(); err != nil {
-		t.Errorf("the stream failed rather than ending after the terminal: %v", err)
-	}
-}

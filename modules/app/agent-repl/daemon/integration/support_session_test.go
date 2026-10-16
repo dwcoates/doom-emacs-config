@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -89,25 +88,6 @@ func writeManifestFile(t *testing.T, path string, m rollout.Manifest) {
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("harness: write the intent manifest %s: %v", path, err)
 	}
-}
-
-// awaitHostFault waits for a workspace's host stream to carry an open fault
-// satisfying the predicate.
-func awaitHostFault(t *testing.T, d *harness.Daemon, host *harness.Stream[*agentreplv1.WatchHostWorkspaceResponse], what string, pred func(*agentreplv1.HostFault) bool) *agentreplv1.HostFault {
-	t.Helper()
-	var found *agentreplv1.HostFault
-	ctx, cancel := d.WaitCtx()
-	defer cancel()
-	harness.AwaitView(t, ctx, host, what, func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-		for _, f := range r.GetHost().GetExisting().GetLive().GetFaults() {
-			if pred(f) {
-				found = f
-				return true
-			}
-		}
-		return false
-	})
-	return found
 }
 
 // shortTimeout bounds a structural "is it already true" probe to a small

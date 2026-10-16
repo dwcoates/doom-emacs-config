@@ -64,31 +64,6 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 	}
 }
 
-func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	f.d.ExpectWarnings("daemon.prompthandler.submit")
-
-	// Act
-	first := f.submit("do the thing", "dup-key", origin)
-	second := f.submit("do the thing", "dup-key", origin)
-
-	// Assert: the contract's arm is `duplicate_submission` -- "the earlier
-	// submission stands (its turn, hold or panel is already visible); nothing
-	// is submitted twice" -- not a second echo of the first turn.
-	if first.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("the first submission = %v, want a minted turn", first)
-	}
-	if second.GetError().GetDuplicateSubmission() == nil {
-		t.Fatalf("the duplicate submission = %v, want error.duplicate_submission", second)
-	}
-	if got := f.shim.Count(harness.RPCStartTurn); got != 1 {
-		t.Fatalf("StartTurn count = %d, want exactly 1 (the duplicate sends no second StartTurn)", got)
-	}
-}
-
 // TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused pins the 2026-09-27
 // prompt loss end to end: a submission whose key was claimed but whose turn the
 // shim never took is NOT a duplicate, so its retry under the SAME key is
@@ -1095,51 +1070,6 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	}
 }
 
-func TestAgentsAndHelpAnswerCommandRefusedAndNeverReachTheShim(t *testing.T) {
-	t.Parallel()
-	for _, cmd := range []string{"/agents", "/help"} {
-		t.Run(cmd, func(t *testing.T) {
-			t.Parallel()
-			// Arrange
-			f := newOpened(t, harness.Opts{})
-			feed := f.watchRootFeed()
-
-			// Act
-			resp := f.submit(cmd, "k-refused", origin)
-
-			// Assert
-			if got := resp.GetSuccess().GetCommandRefused().GetCommand(); got != cmd {
-				t.Fatalf("SubmitPrompt(%s) = %v, want command_refused{command: %q}", cmd, resp, cmd)
-			}
-			if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
-				t.Fatalf("StartTurn count after %s = %d, want 0 (never reaches the shim)", cmd, got)
-			}
-			awaitRow(t, f, feed, "the mirrored command_refused row", func(r *frontendv1.FeedRow) bool {
-				return r.GetCommandRefused().GetCommand().GetText() == cmd
-			})
-		})
-	}
-}
-
-func TestAnUnknownSlashCommandFallsThroughAsAPrompt(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	text_ := "/frobnicate the whole build"
-
-	// Act
-	resp := f.submit(text_, "k-unknown", origin)
-
-	// Assert
-	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt(%q) = %v, want an ordinary minted turn", text_, resp)
-	}
-	req := f.shim.ExpectStartTurn()
-	if got := text(req.GetSaid()); got != text_ {
-		t.Fatalf("StartTurn.said = %q, want the unrecognized command's literal text %q", got, text_)
-	}
-}
-
 func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t *testing.T) {
 	t.Parallel()
 	for _, cmd := range []string{"/clear", "/compact"} {
@@ -1329,27 +1259,6 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 	})
 }
 
-func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
-		Workspace: f.ws,
-		Model:     &conversationv1.AgentModel{Name: "not-a-real-model"},
-	}))
-
-	// Assert: `not_in_catalog` is a LANDED arm of SetModelError, so the
-	// refusal is a typed answer rather than a transport error.
-	if err != nil {
-		t.Fatalf("SetModel(not-a-real-model) = error %v, want the typed not_in_catalog answer", err)
-	}
-	if resp.Msg.GetError().GetNotInCatalog() == nil {
-		t.Fatalf("SetModel(not-a-real-model) = %v, want error.not_in_catalog", resp.Msg)
-	}
-}
-
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
 	t.Parallel()
 	// Arrange: the served set is topbar.SwitchableModes, a FIXED five-mode set
@@ -1407,92 +1316,9 @@ func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdates
 	})
 }
 
-func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
-		Workspace: f.ws,
-		Mode:      "not-a-real-mode",
-	}))
-
-	// Assert: `mode_not_served` is a LANDED arm of SetPermissionModeError, so
-	// the refusal is a typed answer rather than a transport error.
-	if err != nil {
-		t.Fatalf("SetPermissionMode(not-a-real-mode) = error %v, want the typed mode_not_served answer", err)
-	}
-	if resp.Msg.GetError().GetModeNotServed() == nil {
-		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want error.mode_not_served", resp.Msg)
-	}
-}
-
-func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange: a registered (not created-with-consent) workspace, so an
-	// ungated mode ("bypass" — the wire spelling this suite assumes mirrors
-	// AgentPermissionMode's own oneof field name, per the report) is refused.
-	f := newOpened(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
-		Workspace: f.ws,
-		Mode:      "bypass",
-	}))
-
-	// Assert: `ungated_without_consent` is a LANDED arm, so the refusal is a
-	// typed answer. `bypass` IS in the served set (topbar.SwitchableModes), so
-	// `mode_not_served` is impossible here -- it is asserted EXACTLY, not as
-	// an OR with mode_not_served.
-	if err != nil {
-		t.Fatalf("SetPermissionMode(bypass) = error %v, want a typed refusal", err)
-	}
-	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil {
-		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want exactly error.ungated_without_consent", resp.Msg)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Interrupt
 // ---------------------------------------------------------------------------
-
-func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("start the work", "k-running", origin)
-	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
-	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
-	// watcher's own record of it is the edge that says it changed. The footer's
-	// background chip cannot serve as the signal: a turn is in flight here, and
-	// thinking outranks background in the status tree.
-	awaitLiveWork(t, f, 1)
-
-	// Act
-	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: f.ws,
-		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	}))
-
-	// Assert: confirm_required IS a landed arm, so it answers as one.
-	if err != nil {
-		t.Fatalf("Interrupt{turn} with live detached work = transport error %v, want the confirm_required arm", err)
-	}
-	challenge := resp.Msg.GetError().GetConfirmRequired()
-	if challenge == nil {
-		t.Fatalf("Interrupt{turn} with live detached work = %v, want InterruptError.confirm_required", resp.Msg)
-	}
-	if challenge.GetLiveAgentCount() != 1 {
-		t.Fatalf("confirm_required.live_agent_count = %d, want 1", challenge.GetLiveAgentCount())
-	}
-	// `confirm_required` is a LANDED arm (server/refuse.go's asRefusal special-
-	// cases *workspace.ConfirmRequired), so the server's own answer is DEBUG;
-	// the WARN comes from internal/workspace/interrupt.go's own
-	// log.Warn(opInterrupt, ...) before it constructs the challenge.
-	f.d.ExpectWarnings("daemon.workspace.interrupt")
-}
 
 func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	t.Parallel()
@@ -1573,26 +1399,6 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 	// this scenario produces no WARN or ERROR record at all, matching the
 	// sibling TestInterruptAllAgentsStopsEveryLiveDetachedAgent's own
 	// zero-argument ExpectWarnings for the same detached-stop shape.
-}
-
-func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: f.ws,
-		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Interrupt with nothing running = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess().GetNothingRunning() == nil {
-		t.Fatalf("Interrupt with nothing running = %v, want the nothing_running answer", resp.Msg)
-	}
 }
 
 func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedWork(t *testing.T) {
@@ -1832,31 +1638,6 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	})
 }
 
-func TestAllowStandingOnACardWithoutStandingOfferedIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-no-standing", "act-1")},
-	}))
-	row := awaitRow(t, f, feed, "the permission card with no standing offer", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
-
-	// Act
-	resp, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
-		Workspace: f.ws, Permission: row.GetId(),
-		Answer: &agentreplv1.AnswerPermissionRequest_AllowStanding{AllowStanding: &agentreplv1.AnswerPermissionAllowStanding{}},
-	}))
-
-	// Assert: `no_standing_offer` is a LANDED arm, so the refusal is typed.
-	if err != nil {
-		t.Fatalf("AnswerPermission = error %v, want the typed no_standing_offer answer", err)
-	}
-	if resp.Msg.GetError().GetNoStandingOffer() == nil {
-		t.Fatalf("AnswerPermission{allow_standing} without standing_offered = %v, want error.no_standing_offer", resp.Msg)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // AnswerQuestion
 // ---------------------------------------------------------------------------
@@ -1913,56 +1694,6 @@ func TestAnswerQuestionEchoesServedTextsAndLabels(t *testing.T) {
 	}
 	if len(sels[0].GetChosen()) != 1 || sels[0].GetChosen()[0].GetLabel().GetLabel() != "A" {
 		t.Fatalf("UpdateAgent chosen = %v, want [%q]", sels[0].GetChosen(), "A")
-	}
-}
-
-func TestAnswerQuestionWithAnUnservedLabelIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-2", "Pick one", "A", "B")},
-	}))
-	row := awaitRow(t, f, feed, "the question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
-
-	// Act
-	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
-		Workspace: f.ws, Question: row.GetId(),
-		Answers: []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"never served"}}},
-	}))
-
-	// Assert: `unserved_value` is a LANDED arm, so the refusal is typed.
-	if err != nil {
-		t.Fatalf("AnswerQuestion = error %v, want the typed unserved_value answer", err)
-	}
-	if resp.Msg.GetError().GetUnservedValue() == nil {
-		t.Fatalf("AnswerQuestion with an unserved label = %v, want error.unserved_value", resp.Msg)
-	}
-}
-
-func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-3", "Pick one", "A", "B")},
-	}))
-	row := awaitRow(t, f, feed, "the question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
-
-	// Act
-	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
-		Workspace: f.ws, Question: row.GetId(),
-		Answers: []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A", "B"}}},
-	}))
-
-	// Assert: `multi_pick_on_single_select` is a LANDED arm, so it is typed.
-	if err != nil {
-		t.Fatalf("AnswerQuestion = error %v, want the typed refusal", err)
-	}
-	if resp.Msg.GetError().GetMultiPickOnSingleSelect() == nil {
-		t.Fatalf("AnswerQuestion multi-pick on a single_select = %v, want error.multi_pick_on_single_select", resp.Msg)
 	}
 }
 

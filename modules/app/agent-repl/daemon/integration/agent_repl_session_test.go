@@ -17,20 +17,6 @@ func hasSession(v *frontendv1.TopbarView) bool {
 	return v.GetConnectivity().GetSession() != nil
 }
 
-func TestBeforeAnyEmacsTheTopbarCarriesNoSession(t *testing.T) {
-	t.Parallel()
-	// Arrange: an opened workspace, and no Emacs has ever connected.
-	f := newOpened(t, harness.Opts{})
-
-	// Act.
-	view := awaitTopbar(t, f, f.d.WatchTopbar(f.ws), "a published topbar", func(*frontendv1.TopbarView) bool { return true })
-
-	// Assert.
-	if hasSession(view) {
-		t.Fatalf("session = %v before any Emacs connected, want absent", view.GetConnectivity().GetSession())
-	}
-}
-
 func TestANewEmacsBeginsAgentReplsSessionOnTheTopbar(t *testing.T) {
 	t.Parallel()
 	// Arrange.

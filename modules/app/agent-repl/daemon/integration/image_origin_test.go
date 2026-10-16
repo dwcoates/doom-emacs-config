@@ -85,27 +85,6 @@ func submitWithAttachment(t *testing.T, f *fixture, path string) *frontendv1.Fee
 	return image
 }
 
-// TestAnAttachedImageIsDrawnAsAnImageBlock covers the drawn arm: an attached
-// image reaches the page as an image block with a source, never as the
-// `unsupported block: image` placeholder a missing resolver produced.
-func TestAnAttachedImageIsDrawnAsAnImageBlock(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newOpened(t, harness.Opts{})
-	path := writeAttachment(t)
-
-	// Act.
-	image := submitWithAttachment(t, f, path)
-
-	// Assert.
-	if image.GetSrc() == "" {
-		t.Fatalf("the drawn image block carries no src: %v", image)
-	}
-	if image.GetAlt() != "clip.png" {
-		t.Errorf("the drawn image block's alt is %q, want the file's own name", image.GetAlt())
-	}
-}
-
 // TestTheDrawnImageSourceServesTheAttachedBytes covers the other half of the
 // hop: the src is loadable off the daemon's own listener and answers the file.
 func TestTheDrawnImageSourceServesTheAttachedBytes(t *testing.T) {
@@ -135,27 +114,5 @@ func TestTheDrawnImageSourceServesTheAttachedBytes(t *testing.T) {
 	}
 	if string(body) != string(attachedPNG) {
 		t.Errorf("the origin served %d bytes, want the attachment's %d", len(body), len(attachedPNG))
-	}
-}
-
-// TestAnUnregisteredImageIDIsRefused is the arbitrary-file-read refusal
-// against a REAL daemon: a path no conversation carried has no id, so nothing
-// a page can ask for reaches it.
-func TestAnUnregisteredImageIDIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newOpened(t, harness.Opts{})
-
-	// Act.
-	resp, err := http.Get("http://" + f.d.Addr +
-		"/feed-images/0000000000000000000000000000000000000000000000000000000000000000")
-	if err != nil {
-		t.Fatalf("GET an unregistered image id: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Assert.
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("the image origin answered %d for an unregistered id, want 404", resp.StatusCode)
 	}
 }

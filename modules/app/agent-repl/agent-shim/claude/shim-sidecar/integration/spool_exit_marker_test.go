@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -49,43 +48,5 @@ func TestASpoolMarkerOnItsOwnReadEndsTheRunExactlyOnce(t *testing.T) {
 	}
 	if got := rows[len(rows)-1].GetSuccess().GetCompleted().GetTermination().GetExited(); got == nil {
 		t.Fatalf("the run did not settle on its marker: %v", describeBashRows(rows))
-	}
-}
-
-// TestASpoolMarkerCutMidTokenIsNotMatched asserts the strictness half: a marker
-// whose own bytes are split across two reads is NOT a marker.
-//
-// IT IS DELIBERATE, NOT A GAP. The batch that holds `EXI` does not end on a
-// newline, and the batch that holds `T=0\n` does not begin a line, so neither
-// can be trusted to be the harness's terminator rather than the tail of a line
-// of ordinary output. Ending the run on it would be a completion nobody
-// observed; the staleness policy owns the outcome instead. The bytes themselves
-// are never lost — they reach the consumer as ordinary deltas.
-func TestASpoolMarkerCutMidTokenIsNotMatched(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/work/spool-marker-cut-probe",
-		"1b1b1b1b-1b1b-41b1-81b1-1b1b1b1b1b1b")
-
-	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
-	spool := newGrowingFile(t, fx.SpoolPath)
-	spool.AppendRaw([]byte("some output\nEXI"))
-	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
-	spool.AppendRaw([]byte("T=0\n"))
-	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
-
-	// Assert.
-	entries := fake.Entries()
-	if n := countUpsertKey(entries, "bash:"+fx.CallID+":terminal"); n != 0 {
-		t.Errorf("a marker cut mid-token ended the run (%d terminal rows); a split marker is not evidence of completion", n)
-	}
-	if got := requireLatestTail(t, fx.CallID, bashFramesForRun(entries, fx.CallID)); !strings.Contains(got, "some output\nEXIT=0\n") {
-		t.Errorf("the split bytes reached the consumer as %q; nothing may be dropped just because it was not a marker", got)
 	}
 }

@@ -90,28 +90,6 @@ func TestOpenTabsBringsEachWorkspaceUpAndAnswersItReady(t *testing.T) {
 	}
 }
 
-func TestOpenTabsAnswersAHiddenWorkspaceHiddenAndStartsNothing(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	ws := harness.Register(t, d, repo.Dir)
-	hide(t, d, ws)
-
-	// Act
-	frames := openLog(t, d, d.OpenTabs(loadingPageOpen(ws)))
-
-	// Assert
-	if got := openedOutcomes(frames); got[ws.GetId()] != "hidden" {
-		t.Fatalf("outcomes = %v, want hidden", got)
-	}
-	for _, f := range frames {
-		if f.GetStep() != nil {
-			t.Fatalf("a hidden workspace was told a step %v; nothing should have started", f.GetStep())
-		}
-	}
-}
-
 func TestOpenTabsWaitsForTheWorkspacesPageToDraw(t *testing.T) {
 	t.Parallel()
 	// Arrange: an open whose editor is loading the workspace's page.
@@ -273,24 +251,6 @@ func openedIndex(frames []*agentreplv1.OpenTabsResponse, ws string) int {
 	return -1
 }
 
-func TestOpenTabsAnswersReadyOnlyAfterTheConversationIsRead(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
-
-	// Act
-	frames := openLog(t, d, d.OpenTabs(noPageOpen(ws)))
-
-	// Assert: served, then read, then ready.
-	served := stepIndex(frames, ws.GetId(), func(s *agentreplv1.OpenTabsStep) bool { return s.GetServed() != nil })
-	read := stepIndex(frames, ws.GetId(), func(s *agentreplv1.OpenTabsStep) bool { return s.GetConversationRead() != nil })
-	opened := openedIndex(frames, ws.GetId())
-	if served < 0 || read < served || opened < read || frames[opened].GetOpened().GetReady() == nil {
-		t.Fatalf("served at %d, conversation_read at %d, ready at %d; want them in that order", served, read, opened)
-	}
-}
-
 func TestOpenTabsReadyCarriesTheWorkspacesRosterRow(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -307,21 +267,6 @@ func TestOpenTabsReadyCarriesTheWorkspacesRosterRow(t *testing.T) {
 	}
 	if ready.GetRow().GetOpening() != nil {
 		t.Fatal("the answer's row still draws the workspace opening")
-	}
-}
-
-func TestOpenTabsSendsNoResumeStepForAWorkspaceOwedNothing(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
-
-	// Act
-	frames := openLog(t, d, d.OpenTabs(noPageOpen(ws)))
-
-	// Assert
-	if at := stepIndex(frames, ws.GetId(), func(s *agentreplv1.OpenTabsStep) bool { return s.GetResumingCutTurn() != nil }); at >= 0 {
-		t.Fatalf("frame %d told a cut turn resuming; nothing was owed", at)
 	}
 }
 

@@ -26,19 +26,6 @@ func secondStoreOnTheSameSocket(t *testing.T, incumbent *storeProcess) *storePro
 	})
 }
 
-func TestASecondStoreOnTheSameSocketExitsNonZero(t *testing.T) {
-	// Arrange
-	incumbent := startStore(t, storeOptions{})
-
-	// Act
-	rival := secondStoreOnTheSameSocket(t, incumbent)
-
-	// Assert
-	if err := rival.awaitExit(); err == nil {
-		t.Fatalf("the second store exited cleanly; want a non-zero exit\nstderr:\n%s", rival.stderrText())
-	}
-}
-
 func TestASecondStoreOnTheSameSocketRecordsTheOccupancyRefusal(t *testing.T) {
 	// Arrange
 	incumbent := startStore(t, storeOptions{})

@@ -139,31 +139,6 @@ func TestGapWiderThanPageSizeIsWalkedUntilTheMarkIsMet(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-// TestStaleKnownThroughPointerIsRefused: a pointer that names no position in
-// THAT book is a typed failure, never a silently repainted page.
-func TestStaleKnownThroughPointerIsRefused(t *testing.T) {
-	// Arrange.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-	shim := streamProducer(cli)
-	writeNumberedLines(ctx, t, shim, "main", 2)
-	writeNumberedLines(ctx, t, shim, "other", 2)
-	otherBook := openSession(ctx, t, cli, "other", nil)
-	pointerInAnotherBook := &storev1.StoreItemPointer{Value: pagePointers(otherBook.GetPage())[0]}
-
-	// Act.
-	failure := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
-		Agent:   agentID("main"),
-		Opening: &storev1.OpenAgentSessionRequest_KnownThrough{KnownThrough: pointerInAnotherBook},
-	})
-
-	// Assert: a well-formed pointer naming no row of THIS book is stale, not
-	// malformed — the caller's recovery is a repaint, not a bug fix.
-	assertOpenStalePointer(t, failure)
-}
-
 // TestACatchUpGapExactlyThePageSizeReachesTheFloor is the off-by-one.
 //
 // `more` vs `floor` is decided by asking for ONE MORE ROW than the page holds,

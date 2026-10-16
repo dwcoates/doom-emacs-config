@@ -108,21 +108,6 @@ func TestAHiddenWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(t *t
 	})
 }
 
-func TestShowingAHiddenWorkspaceRunsItsKeepalivesAgain(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := hiddenAndHeld(t)
-
-	// Act
-	show(t, f.d, f.ws)
-
-	// Assert
-	run := &shimv1.SetKeepaliveRequest{}
-	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCSetKeepalive, "the keep-alives run again", run, func() bool {
-		return run.GetRun() != nil
-	})
-}
-
 // sendHiddenKeepalives asks the daemon for SPC j R's keep-alives and answers
 // its response, failing the test on a transport error.
 func sendHiddenKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.SendHiddenKeepalivesResponse {

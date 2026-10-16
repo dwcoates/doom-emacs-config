@@ -603,14 +603,6 @@ func createTask(t *testing.T, f *fixture, title string) *agentreplv1.TaskRef {
 	return resp.Msg.GetSuccess().GetTask()
 }
 
-// assignTask assigns the fixture's workspace to a task.
-func assignTask(t *testing.T, f *fixture, task *agentreplv1.TaskRef) {
-	t.Helper()
-	if _, err := f.d.Client().AssignWorkspaceTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.AssignWorkspaceTaskRequest{Workspace: f.ws, Task: task})); err != nil {
-		t.Fatalf("AssignWorkspaceTask = error %v, want a success", err)
-	}
-}
-
 // openPermission is a permission ask in its opening state.
 func openPermission(id, gated string) *conversationv1.AgentPermission {
 	return &conversationv1.AgentPermission{

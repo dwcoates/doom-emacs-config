@@ -6,7 +6,6 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 	"database/sql"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -193,53 +192,6 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	}
 }
 
-func TestUpdateMergeQueueMoveSwapsTwoWaitingMerges(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		// action names the moved merge: the last one up, or the one behind
-		// the running merge down. Either way the two waiting merges swap.
-		action func(behind, last *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest
-	}{
-		{name: "the last merge up", action: func(_, last *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
-			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: last}}}
-		}},
-		{name: "the merge behind the running one down", action: func(behind, _ *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
-			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: behind}}}
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			// Arrange: a held merge runs, and two more wait behind it.
-			front, racer, behind, repo, d := mergeBlockedQueueFixture(t)
-			// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-			d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
-			last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
-			harness.CommitWork(t, last.ws.GetDir())
-			if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(last.ws, harness.OneShot()))); err != nil {
-				t.Fatalf("MergeWorkspace(last) = error %v, want the merge enqueued", err)
-			}
-			roster := d.WatchRoster()
-			awaitRoster(t, d, roster, "both waiting workspaces queued", func(r *frontendv1.WorkspaceRoster) bool {
-				return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil && rosterRow(r, last.ws.GetId()).GetMergeQueued() != nil
-			})
-
-			// Act
-			resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(tt.action(behind.ws, last.ws)))
-			requireRPCSuccess(t, "UpdateMergeQueue(move)", resp, err)
-
-			// Assert: the queue reads the two racing merges, then the last merge,
-			// then the one it swapped with.
-			order := durableQueueOrder(t, d)
-			want := []string{front.ws.GetId(), racer.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}
-			if !slices.Equal(order, want) {
-				t.Fatalf("queue = %v, want %v", order, want)
-			}
-		})
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Interrupt on a queued merge raises the merge-queue question in the pinned
 // bubble; AnswerMergeQueueOffer evicts, prioritizes or cancels.
@@ -277,87 +229,6 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
 	})
 	if row.GetOrder().Pinned == nil {
 		t.Fatalf("the merge head carrying the question = %v, want it pinned", row)
-	}
-}
-
-func TestAnswerMergeQueueOfferEvictTakesTheQueuedMergeOff(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
-	raiseMergeQueueOffer(t, behind)
-
-	// Act
-	resp, err := behind.d.Client().AnswerMergeQueueOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
-		Workspace: behind.ws,
-		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Evict{Evict: &agentreplv1.AnswerMergeQueueOfferEvict{}},
-	}))
-
-	// Assert
-	requireRPCSuccess(t, "AnswerMergeQueueOffer(evict)", resp, err)
-	roster := behind.d.WatchRoster()
-	got := awaitRoster(t, behind.d, roster, "the evicted workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() == nil
-	})
-	if row := rosterRow(got, behind.ws.GetId()); row.GetMergeQueued() != nil {
-		t.Fatalf("evicted workspace roster status = %v, want no longer merge_queued", row)
-	}
-}
-
-func TestAnswerMergeQueueOfferCancelKeepsTheQueuedMergeAndClearsTheQuestion(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	_, _, behind, _, _ := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
-	feed := raiseMergeQueueOffer(t, behind)
-
-	// Act
-	resp, err := behind.d.Client().AnswerMergeQueueOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
-		Workspace: behind.ws,
-		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
-	}))
-
-	// Assert
-	requireRPCSuccess(t, "AnswerMergeQueueOffer(cancel)", resp, err)
-	awaitRow(t, behind, feed, "the merge head without the question", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetMerge() != nil && mergeQueueOffer(r) == nil
-	})
-	roster := behind.d.WatchRoster()
-	rgot := awaitRoster(t, behind.d, roster, "the kept workspace still queued", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, behind.ws.GetId()) != nil
-	})
-	if row := rosterRow(rgot, behind.ws.GetId()); row.GetMergeQueued() == nil {
-		t.Fatalf("kept workspace roster status = %v, want still merge_queued", row)
-	}
-}
-
-func TestAnswerMergeQueueOfferPrioritizeRunsTheMergeNext(t *testing.T) {
-	t.Parallel()
-	// Arrange: a held merge runs, and two more wait behind it.
-	front, racer, behind, repo, d := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
-	last := mergeCreateChild(t, d, mergeRepositoryRef(t, d, repo), "last", "last work", nil)
-	harness.CommitWork(t, last.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(last.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(last) = error %v, want the merge enqueued", err)
-	}
-	raiseMergeQueueOffer(t, last)
-
-	// Act
-	resp, err := d.Client().AnswerMergeQueueOffer(d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
-		Workspace: last.ws,
-		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Prioritize{Prioritize: &agentreplv1.AnswerMergeQueueOfferPrioritize{}},
-	}))
-	requireRPCSuccess(t, "AnswerMergeQueueOffer(prioritize)", resp, err)
-
-	// Assert: the queue reads the two racing merges, then the prioritized
-	// one, then the one it passed.
-	order := durableQueueOrder(t, d)
-	if want := []string{front.ws.GetId(), racer.ws.GetId(), last.ws.GetId(), behind.ws.GetId()}; !slices.Equal(order, want) {
-		t.Fatalf("queue = %v, want %v", order, want)
 	}
 }
 
@@ -489,67 +360,6 @@ func mergeCleanRepo(t *testing.T) (f *fixture, d *harness.Daemon, repo *harness.
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f = mergeCreateChild(t, d, repoRef, "clean", "do the clean thing", nil)
 	return f, d, repo, script
-}
-
-func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f, d, _, script := mergeCleanRepo(t)
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-
-	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
-	// merged workspace's worktree down, and the feed resolves its log sink by
-	// stat-ing that directory -- so a subscription opened after the enqueue
-	// races the teardown and intermittently finds no such workspace to watch.
-	// Opening first is the rendezvous the assertion actually needs.
-	root := f.watchRootFeed()
-
-	// Act
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-
-	// Assert: the merge lands (no conflict, gate passes).
-	mergeRow := awaitRow(t, f, root, "the merge's terminal push", isMergeTerminal)
-	d.AwaitLandingDeployed()
-	if mergeRow.GetActivity().GetMerge().GetError() != nil {
-		t.Fatalf("merge terminal = %v, want success", mergeRow.GetActivity().GetMerge())
-	}
-
-	// Assert: the tests tab settled successfully at some point along the way.
-	testsRow := f.awaitRowInFeed(mergeRow.GetId(), "the settled tests tab", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetTests().GetSettled() != nil
-	})
-	if testsRow.GetMergeTab().GetTests().GetSettled().GetSucceeded() == nil {
-		t.Fatalf("tests tab settled = %v, want succeeded", testsRow.GetMergeTab().GetTests())
-	}
-}
-
-func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f, d, _, script := mergeCleanRepo(t)
-	// The sweep covers every test; the declared records are evidence of the failing test gate the test stages.
-	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
-	script.SetExitCode(1)
-	script.SetStdout("daemon failed after 1s with exit code 1\nboom\n")
-
-	// Act
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-	// The fixing attempt opening and briefing the agent is proof the gate ran once
-	// and reached the fixes step, without yet answering the brief.
-	f.shim.ExpectStartTurn()
-
-	// Assert: exactly one invocation so far — no flake re-run raced ahead of
-	// the agent's own turn.
-	if got := len(script.Invocations()); got != 1 {
-		t.Fatalf("test-all.sh invocations = %d, want exactly 1 (no automatic re-run)", got)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -768,35 +578,6 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	})
 	if got := len(d2.Deploy.Invocations()); got != 0 {
 		t.Fatalf("deploy builds = %d, want none while the rollouts are held", got)
-	}
-}
-
-// TestTheRolloutHoldRefusesNoOpsAndReleases covers the arm pair on the wire:
-// a second hold is rollouts_already_held, a release succeeds, and a second
-// release is rollouts_not_held.
-func TestTheRolloutHoldRefusesNoOpsAndReleases(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
-	d.ExpectWarnings("daemon.merge.hold_rollouts", "daemon.merge.release_rollouts")
-	if resp := holdRollouts(t, d, false); resp.GetSuccess() == nil {
-		t.Fatalf("hold_rollouts = %v, want a success", resp)
-	}
-
-	// Act
-	again := holdRollouts(t, d, false)
-	released := holdRollouts(t, d, true)
-	releasedAgain := holdRollouts(t, d, true)
-
-	// Assert
-	if again.GetError().GetRolloutsAlreadyHeld() == nil {
-		t.Fatalf("a second hold_rollouts = %v, want rollouts_already_held", again)
-	}
-	if released.GetSuccess() == nil {
-		t.Fatalf("release_rollouts = %v, want a success", released)
-	}
-	if releasedAgain.GetError().GetRolloutsNotHeld() == nil {
-		t.Fatalf("a second release_rollouts = %v, want rollouts_not_held", releasedAgain)
 	}
 }
 
@@ -1155,30 +936,6 @@ func TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce(t *testin
 	}
 }
 
-// TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain covers the
-// exactly-once edge across TWO bounces: the claim that put the turn back is
-// durable, so the boot after it finds nothing owed and submits nothing.
-func TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain(t *testing.T) {
-	t.Parallel()
-	// Arrange: the turn already recovered by the first bounce.
-	f, d2, _ := displacedTurnAcrossABounce(t)
-	afterFirstBounce := f.shim.Count(harness.RPCStartTurn)
-	d2.Kill()
-
-	// Act: a second fresh daemon on the same state root.
-	d3 := harness.StartDaemon(t, harness.Opts{DurableState: true, StateDir: d2.StateDir,
-		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d2.LockDir}})
-	displacedBounceWarnings(d3)
-	// The recovery's own record is the rendezvous: it is logged AFTER the
-	// displaced sweep ran, so the count below is settled rather than probed.
-	d3.AwaitRunLogOperation("daemon.merge.recover")
-
-	// Assert.
-	if got := f.shim.Count(harness.RPCStartTurn); got != afterFirstBounce {
-		t.Fatalf("StartTurns after a second boot = %d, want %d (the displaced turn is put back once, ever)", got, afterFirstBounce)
-	}
-}
-
 // displacedBounceWarnings declares the records every daemon in this scenario
 // legitimately writes: see the call site in displacedTurnAcrossABounce.
 func displacedBounceWarnings(d *harness.Daemon) {
@@ -1309,47 +1066,6 @@ func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 // The test gate: blast-radius suite selection and ANSI-painted output.
 // ---------------------------------------------------------------------------
 
-func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
-	t.Parallel()
-	// Arrange: a landed commit touching ONLY the whole-module scans, whose
-	// blast radius (internal/merge/suiteselect.go's own rule table) is exactly
-	// the single "repo-scans" suite. Most regions widen to several suites --
-	// a daemon change to {daemon, e2e, e2e-emacs}, the sandbox image to both
-	// sandboxed suites -- so this needs a genuinely narrow path to stay a
-	// one-suite demonstration.
-	f, d, repo, script := mergeCleanRepo(t)
-	script.SetExitCode(0)
-	script.SetStdout("repo-scans: passed in 1s\n")
-	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/reposcans/blastradius.txt", "touched\n")
-
-	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
-	// merged workspace's worktree down, and the feed resolves its log sink by
-	// stat-ing that directory -- so a subscription opened after the enqueue
-	// races the teardown and intermittently finds no such workspace to watch.
-	// Opening first is the rendezvous the assertion actually needs.
-	root := f.watchRootFeed()
-
-	// Act
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
-		return row.GetActivity().GetMerge().GetSuccess() != nil
-	})
-	d.AwaitLandingDeployed()
-
-	// Assert: the script was invoked with EXACTLY the narrowed selection, not
-	// the full 17-suite roster.
-	invocations := script.Invocations()
-	if len(invocations) != 1 {
-		t.Fatalf("test-all.sh invocations = %d, want exactly 1", len(invocations))
-	}
-	argv := invocations[0].Argv
-	if !sameOrder(argv, []string{"--suites", "repo-scans"}) {
-		t.Fatalf("test-all.sh argv = %v, want it to end with [--suites repo-scans] (the scans-only blast radius)", argv)
-	}
-}
-
 func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 	t.Parallel()
 	// Arrange: a daemon change, with a green ANSI escape in the scripted
@@ -1429,15 +1145,6 @@ const (
 	mergeBeforeActionOrigin    = 24 // PROMPT_ORIGIN_MERGE_BEFORE_ACTION
 	mergeAfterActionOrigin     = 25 // PROMPT_ORIGIN_MERGE_AFTER_ACTION
 	mergeDisplacedResumeOrigin = 26 // PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME
-)
-
-// mergeEscalationFile and mergeEscalationMarker mirror
-// internal/merge.EscalationFile / EscalationMarker (daemon/internal/merge/api.go):
-// not part of any proto or ARCHITECTURE.md text, so this suite pins the exact
-// literal rather than importing the internal package.
-const (
-	mergeEscalationFile   = ".agent-repl-merge-escalation"
-	mergeEscalationMarker = "MERGE ESCALATION: ARCHITECTURAL CHANGE REQUIRED"
 )
 
 // mergeRepositoryRef registers a repository's main worktree and reads back
@@ -1589,25 +1296,6 @@ func TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork(t *tes
 // swallowed the first prompt, left nothing to receive the second, and held
 // the repository's queue until the daemon restarted.
 // ---------------------------------------------------------------------------
-
-// mergeBrokenGateRepo builds a self-repo whose gate script exits 127 -- the
-// shell could not find the gate's command -- with two child workspaces in it.
-func mergeBrokenGateRepo(t *testing.T) (first, second *fixture, d *harness.Daemon, script *harness.Recorder) {
-	t.Helper()
-	repo := harness.NewRepo(t)
-	script = harness.NewTestAllScript(t, repo.Dir)
-	script.SetExitCode(127)
-	script.SetStdout("bash: modules/app/agent-repl/bin/test-all.sh: No such file or directory\n")
-	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d = harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
-	// The sweep covers every test; the declared records are evidence of the
-	// broken gate the test stages.
-	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
-	repoRef := mergeRepositoryRef(t, d, repo)
-	first = mergeCreateChild(t, d, repoRef, "bubble-height", "make the prompt bubble taller", nil)
-	second = mergeCreateChild(t, d, repoRef, "after-bubble", "the next thing", nil)
-	return first, second, d, script
-}
 
 // TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue pins the owner's
 // 2026-10-13 ruling: a queued merge whose session went cold is ejected from

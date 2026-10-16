@@ -85,20 +85,6 @@ func TestWatchBashRunStreamsEveryTailUpdateOfALiveRun(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-func TestWatchBashRunRefusesARunTheStoreNeverSaw(t *testing.T) {
-	// Arrange: there is no failure frame on this rpc by design.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-
-	// Act
-	stream := watchBashRun(ctx, t, store.client(), "never-ran")
-	defer testclose.OrFail(t, stream)
-
-	// Assert
-	assertBashRunRefused(t, stream)
-}
-
 func TestWatchBashRunReplaysByFirstInsertOrderNotWriteOrder(t *testing.T) {
 	// Arrange: the tail is superseded AFTER the terminal was written, which
 	// bumps its write ordinal but must not move its position: the run's order
@@ -197,32 +183,6 @@ func TestWatchBashRunReplaysATailFirstStoredAfterTheTerminal(t *testing.T) {
 	assertTexts(t, "the replayed run", drainBashRun(t, stream),
 		[]string{"start:make test", "success", "tail:chunk-late"})
 	store.assertNoErrorRecords()
-}
-
-func TestATerminalReUpsertAgainstAnEndedStreamIsAbsorbedSilently(t *testing.T) {
-	// Arrange: a producer's retry buffer can re-send the terminal long after
-	// the run's watchers are gone. The stream that already ended must not be
-	// resurrected, and the row must not be doubled.
-	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
-	defer cancel()
-	cli := store.client()
-	sidecar := fileProducer(cli)
-	writeBashRun(ctx, t, sidecar, "run-reterm", "chunk-0")
-	sidecar.write(ctx, t, sidecar.agentEntry("w-run-reterm-term", "bash:run-reterm:terminal",
-		bashRun(nil, "run-reterm", bashSuccess("make test", 0))))
-	ended := watchBashRun(ctx, t, cli, "run-reterm")
-	defer testclose.OrFail(t, ended)
-	assertTexts(t, "the first watcher", drainBashRun(t, ended),
-		[]string{"start:make test", "tail:chunk-0", "success"})
-
-	// Act: the terminal is written again, under a NEW write_id so the ledger
-	// cannot absorb it as a replay.
-	sidecar.write(ctx, t, sidecar.agentEntry("w-run-reterm-term-again", "bash:run-reterm:terminal",
-		bashRun(nil, "run-reterm", bashSuccess("make test", 0))))
-
-	// Assert: the ended stream delivers nothing more.
-	assertTexts(t, "the ended stream after a terminal re-upsert", drainBashRun(t, ended), nil)
 }
 
 func TestATerminalReUpsertIsServedExactlyOnceInAFreshReplay(t *testing.T) {

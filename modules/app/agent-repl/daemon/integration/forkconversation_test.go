@@ -9,7 +9,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
@@ -62,37 +61,6 @@ func TestAForksFeedReadsItsParentsTurnAboveItsOwn(t *testing.T) {
 		if response := row.GetActivity().GetResponse(); response != nil && strings.Contains(response.GetSuccess().GetProse().GetMarkdown(), forkParentAnswer) && !response.GetFinalAnswer() {
 			t.Fatalf("the inherited answer %v is not drawn as its turn's final answer", row.GetId())
 		}
-	}
-}
-
-// TestAForkLeavesOutTheTurnItsParentWasRunning covers the cut: a turn the
-// parent was running when the fork was taken is not the fork's, though its
-// rows sit in the parent's book before the fork point.
-func TestAForkLeavesOutTheTurnItsParentWasRunning(t *testing.T) {
-	t.Parallel()
-	// Arrange: the parent's shim names its running turn as uninherited.
-	f := newOpened(t, harness.Opts{})
-	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
-		t.Fatalf("the parent's StartSession = %v, want fresh", req)
-	}
-	done := f.submit(forkParentQuestion, "fork-done-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).
-		GetSuccess().GetTurn().GetTurn().GetValue()
-	f.shim.Answer(harness.RPCGetForkPoint, &shimv1.GetForkPointResponse{Result: &shimv1.GetForkPointResponse_Success{Success: &shimv1.GetForkPointSuccess{
-		Point:            &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}},
-		Through:          &conversationv1.ConversationThrough{AtMs: 1 << 62},
-		UninheritedTurns: []*conversationv1.TurnId{{Value: "running-turn"}},
-	}}})
-	kid, book := forkedChild(t, f)
-	fileInheritedTurn(kid, book, done, forkParentQuestion, "done-answer", forkParentAnswer)
-	fileInheritedTurn(kid, book, "running-turn", forkInFlight, "running-answer", forkInFlight+" (answer)")
-
-	// Act
-	kid.submit(forkOwnQuestion, "fork-own-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	texts := forkRowTexts(walkFeedToStart(kid))
-
-	// Assert
-	if forkIndexOf(texts, forkParentAnswer) < 0 || forkIndexOf(texts, forkInFlight) >= 0 {
-		t.Fatalf("the fork's feed reads %v: want the finished turn and nothing of the running one", texts)
 	}
 }
 

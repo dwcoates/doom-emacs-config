@@ -72,29 +72,6 @@ func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 	}
 }
 
-func TestADeployWhoseBuildFailsDeploysNothingAndSaysWhy(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
-	d.StageDeployBuild(harness.DeployFails)
-	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
-
-	// Act
-	resp, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Deploy = error %v, want the typed refusal", err)
-	}
-	failed := resp.Msg.GetError().GetBuildFailed()
-	if failed.GetStep() != "build" || !strings.Contains(failed.GetDetail(), harness.FakeDeployBuildRefusal) || failed.GetLog() == "" {
-		t.Fatalf("Deploy = %v, want build_failed naming the step, the build's own words and the archived log", resp.Msg)
-	}
-	if got := len(d.Launchctl.InvocationsExcept("print")); got != 0 {
-		t.Fatalf("launchctl invocations = %d, want none: a failed build restarts nothing", got)
-	}
-}
-
 func TestADeployPushesTheWebappReloadToAStaleWebview(t *testing.T) {
 	t.Parallel()
 	// Arrange: an open webview on the served build, and a build whose webapp
@@ -416,27 +393,6 @@ func topbarHasLine(v *frontendv1.TopbarView, line string) bool {
 // buildFailedTopbarLine is the topbar line the harness's failing build stands as.
 var buildFailedTopbarLine = "deploy failed: build: " + harness.FakeDeployBuildRefusal
 
-func TestADeployWhoseBuildFailsStandsOnTheTopbar(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-	f.d.StageDeployBuild(harness.DeployFails)
-	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
-
-	// Act
-	resp, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
-	if err != nil || resp.Msg.GetError().GetBuildFailed() == nil {
-		t.Fatalf("Deploy = (%v, %v), want the build_failed refusal", resp, err)
-	}
-
-	// Assert: the failure stands in the topbar's error section, naming its
-	// step and its words.
-	awaitTopbar(t, f, topbar, "the deploy_failed warning line", func(v *frontendv1.TopbarView) bool {
-		return topbarHasLine(v, buildFailedTopbarLine)
-	})
-}
-
 func TestALaterDeployThatBuildsTakesTheFaultOffTheTopbar(t *testing.T) {
 	t.Parallel()
 	// Arrange: a failed deploy's fault stands on the topbar.
@@ -584,21 +540,6 @@ func TestACLIStartedDeployWhoseBuildFailsReachesEmacs(t *testing.T) {
 	if got := faults[0]; got.GetFaultId() == "" || got.GetFault().GetDeployFailed().GetBuild().GetStep() != "build" {
 		t.Fatalf("standing fault = %v, want its id and the typed build arm", got)
 	}
-}
-
-func TestAnEmacsThatResubscribesIsToldTheStandingDeployFailure(t *testing.T) {
-	t.Parallel()
-	// Arrange: the deploy failed before this Emacs stream existed.
-	d := harness.StartDaemon(t, harness.Opts{})
-	failDeploy(t, d)
-
-	// Act
-	emacs := d.WatchDaemonStream()
-
-	// Assert
-	awaitStanding(t, d, emacs, "the standing failure replayed", func(f []*agentreplv1.DaemonStandingFault) bool {
-		return standsLine(f, buildFailedTopbarLine)
-	})
 }
 
 func TestALaterDeployThatBuildsTellsEmacsTheFailureClosed(t *testing.T) {

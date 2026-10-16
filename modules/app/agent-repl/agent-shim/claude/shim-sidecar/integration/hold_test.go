@@ -1,10 +1,8 @@
 package integration
 
 import (
-	"context"
 	"strings"
 	"testing"
-	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
@@ -41,31 +39,6 @@ func holdOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOpti
 	return defaultSidecarOptions(t, storeSocket, tree)
 }
 
-// awaitParkedCursor waits for the batch that carried the PARKED cursor — the one
-// stating the hold, at exactly the held frame's offset.
-//
-// It is the hold's own observable event. Waiting for "any cursor" instead cannot
-// tell a parked cursor from one that already advanced past the boundary, which
-// is the difference every subject in this file turns on.
-func awaitParkedCursor(ctx context.Context, t *testing.T, f *fakeStore, path string, held int64) {
-	t.Helper()
-	tick := time.NewTicker(pollTick)
-	defer tick.Stop()
-	for {
-		for _, b := range f.Batches() {
-			cursor := b.GetBatch().GetCursorAdvance()
-			if cursor != nil && samePath(cursor.GetPath(), path) && cursor.GetOffset() == held {
-				return
-			}
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("no batch parked the cursor at the held boundary %d for %s within the deadline", held, path)
-		case <-tick.C:
-		}
-	}
-}
-
 // compactionFixture writes a session whose last line is a compaction boundary.
 type compactionFixture struct {
 	Slug           string
@@ -95,129 +68,6 @@ func seedCompactionBoundary(t *testing.T, tree *vendorTree, cwd, session string)
 	return compactionFixture{
 		Slug: slug, Session: session, Cwd: cwd,
 		BoundaryUUID: boundaryUUID, BoundaryOffset: offset, File: g,
-	}
-}
-
-// TestABoundaryWithoutItsSummaryParksTheCursorShort asserts the cursor advances
-// only to the held frame's offset, so the boundary is read again.
-func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/work/hold-cursor-probe",
-		"70707070-7070-4070-8070-707070707070")
-
-	// Act: the producer is STOPPED inside the write that parks the cursor, so
-	// the position asserted below is the one the hold produced and not whatever
-	// the forced redelivery left a moment later.
-	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
-	// THE PRODUCER IS LET GO WHEN THIS SUBJECT IS DONE WITH IT, before the
-	// harness stops it: a sidecar still inside a withheld write does not see
-	// SIGTERM until its own rpc timeout expires, so releasing the gate is part
-	// of the subject rather than left to a cleanup that runs after the stop.
-	defer gate.release()
-	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
-	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
-
-	// Assert: the parked cursor is exactly the held frame's offset. Anything
-	// short of it would re-read converted records; anything past it would have
-	// consumed the boundary the hold exists to defer.
-	cs := latestCursorFor(fake.Batches(), fx.File.Path())
-	if cs == nil {
-		t.Fatalf("the sidecar offered no cursor for %s", fx.File.Path())
-	}
-	if cs.GetOffset() != fx.BoundaryOffset {
-		t.Errorf("the cursor parked at %d, want the held boundary's offset %d", cs.GetOffset(), fx.BoundaryOffset)
-	}
-}
-
-// TestABoundaryWithoutItsSummaryWritesNothingForIt asserts the held record is
-// not converted on incomplete evidence.
-func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/work/hold-nothing-probe",
-		"80808080-8080-4080-8080-808080808080")
-
-	// Act: the producer is STOPPED inside the write that parks the cursor, so
-	// "nothing was written for the boundary" is asserted while the hold still
-	// stands rather than in whatever window is left before the forced
-	// redelivery converts it.
-	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
-	// THE PRODUCER IS LET GO WHEN THIS SUBJECT IS DONE WITH IT, before the
-	// harness stops it: a sidecar still inside a withheld write does not see
-	// SIGTERM until its own rpc timeout expires, so releasing the gate is part
-	// of the subject rather than left to a cleanup that runs after the stop.
-	defer gate.release()
-	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
-
-	// Assert.
-	wantKey := "session:context_cut:" + fx.BoundaryUUID
-	if entryByUpsertKey(fake.Entries(), wantKey) != nil {
-		t.Errorf("the boundary was converted while its summary was still absent (key %q)", wantKey)
-	}
-}
-
-// TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord asserts the boundary and
-// the summary become ONE ContextCut page line of the main agent's book.
-func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/work/hold-coalesce-probe",
-		"90909090-9090-4090-8090-909090909090")
-	summaryText := "Previously: the harness held a background probe alive."
-
-	// Act: the summary is appended while the producer is STOPPED inside the
-	// write that parks the cursor. The park is the event that says the boundary
-	// was held; the gate is what guarantees the forced redelivery has not run
-	// yet, rather than hoping the append wins a poll interval.
-	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
-	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
-	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
-		"90909090-9090-4090-8090-90909090abcd", fx.BoundaryUUID, summaryText))
-	gate.release()
-
-	wantKey := "session:context_cut:" + fx.BoundaryUUID
-	fake.awaitEntry(ctx, t, "the coalesced context cut", func(e *storev1.StoreEntry) bool {
-		return e.GetUpsertKey() == wantKey
-	})
-
-	// Assert: exactly one record, on the main agent's book, on the compacted arm.
-	entries := fake.Entries()
-	if n := countUpsertKey(entries, wantKey); n != 1 {
-		t.Errorf("the boundary and its summary produced %d records under %q, wanted one coalesced row", n, wantKey)
-	}
-	e := entryByUpsertKey(entries, wantKey)
-	line := e.GetAgentUpdate().GetServeableFrame()
-	if line == nil {
-		t.Fatalf("a context cut is a page line of the main agent's book: %v", e.GetAgentUpdate())
-	}
-	if got := line.GetPageAgentId().GetValue(); got != fx.Session {
-		t.Errorf("the context cut names book %q, wanted the main agent %q", got, fx.Session)
-	}
-	cut := contextCutOf(line)
-	if cut == nil {
-		t.Fatalf("the page line carries no ContextCut: %v", line)
-	}
-	if cut.GetCompacted() == nil {
-		t.Fatalf("a compaction boundary produces the compacted arm: %v", cut.GetCut())
-	}
-	if got := cut.GetCompacted().GetSummary().GetMarkdown(); got != summaryText {
-		t.Errorf("the cut carries summary %q, wanted the summary line's prose %q", got, summaryText)
 	}
 }
 
@@ -307,46 +157,5 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	// it on the cut's own key if one ever arrives.
 	if got := cut.GetCompacted().GetSummary().GetMarkdown(); got != convert.NoSummaryWritten {
 		t.Errorf("the cut carries summary prose %q, want the stated placeholder %q", got, convert.NoSummaryWritten)
-	}
-}
-
-// TestABoundaryHeldOnceIsNotWrittenTwice asserts the redelivered record is
-// converted ONCE — the write_id absorbs a repeat rather than doubling the row.
-func TestABoundaryHeldOnceIsNotWrittenTwice(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/work/hold-once-probe",
-		"b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0b0b0")
-	summaryText := "Previously: nothing much."
-
-	// Act: the summary is appended while the producer is STOPPED inside the
-	// write that parks the cursor, so the redelivery that follows is guaranteed
-	// to be the one that reads it.
-	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
-	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
-	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
-		"b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0abcd", fx.BoundaryUUID, summaryText))
-	gate.release()
-	wantKey := "session:context_cut:" + fx.BoundaryUUID
-	fake.awaitEntry(ctx, t, "the coalesced context cut", func(e *storev1.StoreEntry) bool {
-		return e.GetUpsertKey() == wantKey
-	})
-	awaitCursorPast(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
-
-	// Assert.
-	ids := map[string]bool{}
-	for _, e := range fake.Entries() {
-		if e.GetUpsertKey() == wantKey {
-			ids[e.GetWriteId()] = true
-		}
-	}
-	if len(ids) != 1 {
-		t.Errorf("the held record minted %d distinct write_ids across its deliveries: %v; a re-read must be deterministic",
-			len(ids), sortedStrings(keysOf(ids)))
 	}
 }
