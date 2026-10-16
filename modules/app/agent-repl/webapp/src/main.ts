@@ -254,6 +254,9 @@ export async function boot(): Promise<void> {
       renderers: createRowRenderers(ctx),
       // The root feed's held section draws in the tail region after the rows.
       heldHost: shell.holdTray,
+      // The docked gate is drawn outside the scroll box; a choice clicked in
+      // it holds the feed's view as a click in the feed does.
+      clickZones: [shell.gateDock],
       // PER-BUBBLE COMPOSERS ARE DEV-MODE ONLY (R7): production's root
       // composer is host-native, and a webview that submits nothing has no
       // business drawing a text box inside a bubble either.

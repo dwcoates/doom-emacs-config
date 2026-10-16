@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { pagePresence } from "../../src/presence.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
-import { announceReaderClick } from "../../src/expand.js";
+import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -80,11 +80,12 @@ async function settle(): Promise<void> {
 }
 
 /** Mount the feed into a fresh host inside a scroll box. */
-function mount(h: Harness = harness()) {
+function mount(h: Harness = harness(), clickZones?: readonly HTMLElement[]) {
   const { scroll, host } = scrollHost();
   const feed = mountFeed(host, h.ctx, {
     renderers: stubRenderers(),
     scrollBox: scroll,
+    clickZones,
   });
   return { feed, host, h };
 }
@@ -2322,8 +2323,8 @@ describe("mountFeed: the reader's click never moves the feed", () => {
   }
 
   /** A mounted feed whose scroll box is scripted at 100 of 2000 under a 300px viewport. */
-  async function scripted(opts: { away: boolean }) {
-    const { feed, host } = mount();
+  async function scripted(opts: { away: boolean; clickZones?: readonly HTMLElement[] }) {
+    const { feed, host } = mount(harness(), opts.clickZones);
     await settle();
     const scroll = host.parentElement as HTMLElement;
     scriptFeedBox(scroll);
@@ -2377,32 +2378,54 @@ describe("mountFeed: the reader's click never moves the feed", () => {
     feed.dispose();
   });
 
-  it("holds the view on an announced reader click", async () => {
-    // Arrange
+  it("holds the view on a click on a card's control, which toggles nothing", async () => {
+    // Arrange -- a question's option, a permission's answer: a control in a card.
     const { feed, host } = await scripted({ away: false });
-    const inner = document.createElement("div");
-    rowAt(host, 500).append(inner);
+    const card = toolCardIn(rowAt(host, 500));
+    const option = createControl();
+    card.append(option);
     const capture = captureLogRecords("debug");
     // Act
-    announceReaderClick(inner);
+    option.click();
     // Assert
     const record = await forwardedRecord(capture, "scroll.click-held");
-    expect(record.context).toMatchObject({ by: "click", at: 100 });
+    expect([card.classList.contains("expanded"), record.context]).toMatchObject([false, { by: "click", at: 100 }]);
     feed.dispose();
   });
 
-  it("stops listening for reader clicks once disposed", async () => {
+  it("holds the view on a click in a click zone outside the scroll box", async () => {
+    // Arrange -- the docked gate's choice is drawn outside the box.
+    const dock = document.createElement("div");
+    const choice = createControl();
+    dock.append(choice);
+    document.body.append(dock);
+    const { feed } = await scripted({ away: false, clickZones: [dock] });
+    const capture = captureLogRecords("debug");
+    // Act
+    choice.click();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    expect(record.context).toMatchObject({ by: "click", at: 100, row: "none" });
+    feed.dispose();
+    dock.remove();
+  });
+
+  it("stops holding the view on clicks in the box or a click zone once disposed", async () => {
     // Arrange
-    const { feed, host } = await scripted({ away: false });
+    const dock = document.createElement("div");
+    document.body.append(dock);
+    const { feed, host } = await scripted({ away: false, clickZones: [dock] });
     const inner = document.createElement("div");
     rowAt(host, 500).append(inner);
     feed.dispose();
     const capture = captureLogRecords("debug");
     // Act
-    announceReaderClick(inner);
+    inner.click();
+    dock.click();
     // Assert
     await settle();
     expect(capture.sent.filter((r) => r.operation === "scroll.click-held")).toEqual([]);
+    dock.remove();
   });
 });
 

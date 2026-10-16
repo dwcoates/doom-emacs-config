@@ -42,7 +42,7 @@ import { drawToolHead } from "./cards/tool-head.js";
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { createConnectHookElement } from "../connect-hook.js";
 import { log } from "../log.js";
-import { announceReaderClick } from "../expand.js";
+import { announceReaderToggle } from "../expand.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -275,20 +275,6 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     }
     toggleFold();
   });
-  // A PRESS ON A MERGE BUBBLE'S CONTROL NEVER SCROLLS THE FEED (owner request,
-  // 2026-10-14): captured, so the view is held before the control redraws
-  // anything (`announceReaderClick`, `TailFollow.readerClicked`).
-  if (opts.merge === true) {
-    el.addEventListener(
-      "click",
-      (event) => {
-        if (isInteractiveTarget(event.target) && event.target instanceof Element) {
-          announceReaderClick(event.target);
-        }
-      },
-      { capture: true },
-    );
-  }
   // KEYBOARD PARITY WITH THE REMOVED BUTTON comes from `armButtonRole`
   // above: Enter and Space click the head, and the click is the toggle. A key
   // pressed while an inner control holds focus belongs to that control.
@@ -478,13 +464,12 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    */
   function toggleFold(): void {
     clearRefusal();
-    // THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15): the
-    // click is announced before the fold changes anything, and the root feed
-    // holds this bubble's row still while it collapses, or while its sub-feed
-    // is drawn and grows it (`TailFollow.readerClicked`). A jump that opens
-    // bubbles calls `expand` directly and announces nothing: it centers the
-    // entry it landed on itself.
-    announceReaderClick(el);
+    // THE READER'S FOLD MAKES THE ENTRY THEIRS: announced, so the root feed
+    // drops any jump's claim to close it (`announceReaderToggle`). The view is
+    // already held: the click that got here held it on its way in
+    // (`holdViewOnClicks`, scroll.ts). A jump that opens bubbles calls
+    // `expand` directly and announces nothing.
+    announceReaderToggle(el);
     if (expanded) {
       collapse();
       tellReaderFold(true);

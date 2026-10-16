@@ -4,7 +4,8 @@
  * Owner request, 2026-10-15, superseding the expand-centering rulings of
  * 2026-09-29, 2026-09-30 and 2026-10-14: expanding or collapsing a bubble BY
  * CLICKING IT holds the clicked row still where the reader sees it
- * (`TailFollow.readerClicked`), whether or not a follow stood. Only the click
+ * (`TailFollow.readerClicked`, which every click in the box takes on its way in,
+ * `holdViewOnClicks`), whether or not a follow stood. Only the click
  * holds the view: a jump that expands an entry still centers it.
  *
  * WHAT IS ASSERTED HERE and not in the unit suite: that the caret of a bubble

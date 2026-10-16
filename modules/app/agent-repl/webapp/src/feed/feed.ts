@@ -22,7 +22,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import {
-  READER_CLICK_EVENT,
+  READER_TOGGLE_EVENT,
   autoCollapseFor,
   cappedSectionsOf,
   collapseSection,
@@ -56,8 +56,10 @@ import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
+  holdViewOnClicks,
   installIntentScroll,
   observeScrollBox,
+  scrollFloor,
   feedAnchorRows,
   revealGeometry,
 } from "../scroll.js";
@@ -128,6 +130,12 @@ export interface FeedDeps {
    */
   scrollBox?: HTMLElement;
   /**
+   * Elements OUTSIDE the scroll box that draw part of the root feed (the
+   * page's gate dock, gate-dock.ts). A click in one holds the feed's view
+   * exactly as a click in the box does (`holdViewOnClicks`).
+   */
+  clickZones?: readonly HTMLElement[];
+  /**
    * Whether the host shows this page (`presence.ts`); the root feed frees its
    * older rows each time it stops (`unshown-trim.ts`). Defaults to the page's.
    */
@@ -182,6 +190,9 @@ export function mountFeed(
           // box for the whole feed and so never moved when a row above the
           // reader changed height.
           feedAnchorRows(scrollBox, () => rootRows(host)),
+          // THE FLOOR UNDER A CLICK-HELD VIEW: the box cannot clamp the view
+          // a reader's click holds (scroll.ts, `ScrollFloor`).
+          scrollFloor(scrollBox),
         );
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
@@ -192,6 +203,9 @@ export function mountFeed(
     scrollBox === null || tail === null
       ? null
       : observeScrollBox(scrollBox, tail);
+  // A click in a zone outside the box that draws part of the feed holds the
+  // view as a click in the box does.
+  const unholdZones = tail === null ? [] : (deps.clickZones ?? []).map((zone) => holdViewOnClicks(zone, tail));
   // INTENT-ARMED INNER SCROLLING, on the same box. A capped section keeps the
   // wheel only while the reader has deliberately entered it; otherwise the
   // wheel redirects to the feed. Without it, a section the feed scrolled under
@@ -252,14 +266,15 @@ export function mountFeed(
   // open section the reader scrolled away from or left, since that close goes
   // through the one collapse a click uses.
   //
-  // THE READER'S CLICK NEVER MOVES THE FEED (owner request, 2026-10-15,
-  // superseding the expand-centering rulings of 2026-09-29, 2026-09-30 and
-  // 2026-10-14). Expanding or collapsing any feed item BY CLICKING IT (a
-  // capped section this click owner toggles, a sub-feed bubble's fold) and
-  // pressing a merge bubble's control announce READER_CLICK_EVENT before
-  // anything changes, and the listener below holds the clicked row still
-  // (`TailFollow.readerClicked`). This is specific to the click: a jump that
-  // expands an entry, or a selection stepped from Emacs, still centers it.
+  // THE READER'S CLICK NEVER MOVES THE FEED (owner requests, 2026-10-15 and
+  // 2026-10-16, superseding the expand-centering rulings of 2026-09-29,
+  // 2026-09-30 and 2026-10-14). ANY click in the feed (expanding or
+  // collapsing an item, answering a question or a permission, pressing any
+  // card's control) holds the view before anything changes: the scroll box
+  // takes the hold itself on every click on its way in (`holdViewOnClicks`,
+  // scroll.ts), so no click site asks for it. This is specific to the click:
+  // a jump that expands an entry, or a selection stepped from Emacs, still
+  // centers it.
   //
   // A READER'S TOGGLE MAKES THE ENTRY THEIRS: an entry a jump expanded and the
   // reader then toggled by hand is no longer the jump's to close. The one
@@ -284,12 +299,11 @@ export function mountFeed(
     },
     ownedBySelection,
   );
-  const onReaderClick = (event: Event): void => {
+  const onReaderToggle = (event: Event): void => {
     if (!(event.target instanceof Element)) return;
     releaseOutOfView(event.target);
-    tail?.readerClicked(event.target);
   };
-  host.addEventListener(READER_CLICK_EVENT, onReaderClick);
+  host.addEventListener(READER_TOGGLE_EVENT, onReaderToggle);
 
   const root: FeedController = createFeedController({
     ctx,
@@ -1100,10 +1114,11 @@ export function mountFeed(
     watch?.cancel();
     uninstallTrim();
     unobserve?.();
+    for (const unhold of unholdZones) unhold();
     intentScroll?.uninstall();
     uninstallExpand();
     uninstallSelect();
-    host.removeEventListener(READER_CLICK_EVENT, onReaderClick);
+    host.removeEventListener(READER_TOGGLE_EVENT, onReaderToggle);
     held?.dispose();
     uninstallClear?.();
     selectionVisibility?.dispose();

@@ -27,8 +27,8 @@ import {
   autoCollapseFor,
   expandedSectionAt,
   expandedSectionsOf,
-  READER_CLICK_EVENT,
-  announceReaderClick,
+  READER_TOGGLE_EVENT,
+  announceReaderToggle,
 } from "../src/expand.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { BUBBLE_UNCAPPED, drawBubble, type BubbleCapLines } from "../src/bubble/draw.js";
@@ -1284,80 +1284,43 @@ describe("an uncapped bubble", () => {
 
 });
 
-describe("announceReaderClick", () => {
-  it("dispatches the reader-click event, bubbling, from the clicked element", () => {
+describe("announceReaderToggle", () => {
+  it("dispatches the reader-toggle event, bubbling, from the toggled element", () => {
     // Arrange
     const outer = document.createElement("div");
     const inner = document.createElement("div");
     outer.append(inner);
     const targets: EventTarget[] = [];
-    outer.addEventListener(READER_CLICK_EVENT, (e) => targets.push(e.target as EventTarget));
+    outer.addEventListener(READER_TOGGLE_EVENT, (e) => targets.push(e.target as EventTarget));
     // Act
-    announceReaderClick(inner);
+    announceReaderToggle(inner);
     // Assert
     expect(targets).toEqual([inner]);
   });
 });
 
-describe("installClickExpand announces the reader's click", () => {
+describe("installClickExpand tells a toggle through afterToggle alone", () => {
   let uninstall: () => void = () => {};
   afterEach(() => {
     uninstall();
     document.body.replaceChildren();
   });
 
-  /** A feed holding one capped section, armed, with every announcement's target and expanded state. */
-  function armedFeed(owned: (section: HTMLElement) => boolean = () => false) {
+  it("toggles a clicked section and announces no reader toggle event", () => {
+    // Arrange
     const feed = document.createElement("div");
     const section = document.createElement("div");
     section.className = "tool-fold";
     feed.append(section);
     document.body.append(feed);
-    const seen: Array<{ target: EventTarget | null; expanded: boolean }> = [];
-    feed.addEventListener(READER_CLICK_EVENT, (e) => {
-      seen.push({ target: e.target, expanded: section.classList.contains(EXPANDED_CLASS) });
-    });
-    uninstall = installClickExpand(feed, () => "", undefined, owned);
-    return { feed, section, seen };
-  }
-
-  it("announces an expanding click from the section, before the section expands", () => {
-    // Arrange
-    const f = armedFeed();
+    const announced: EventTarget[] = [];
+    feed.addEventListener(READER_TOGGLE_EVENT, (e) => announced.push(e.target as EventTarget));
+    const toggled: Array<[HTMLElement, boolean]> = [];
+    uninstall = installClickExpand(feed, () => "", (s, expanded) => toggled.push([s, expanded]));
     // Act
-    f.section.click();
+    section.click();
     // Assert
-    expect(f.seen).toEqual([{ target: f.section, expanded: false }]);
-  });
-
-  it("announces a collapsing click from the section, before the section collapses", () => {
-    // Arrange
-    const f = armedFeed();
-    f.section.click();
-    // Act
-    f.section.click();
-    // Assert
-    expect(f.seen[1]).toEqual({ target: f.section, expanded: true });
-  });
-
-  it("announces nothing for a click on a section another owner opens and closes", () => {
-    // Arrange
-    const f = armedFeed(() => true);
-    // Act
-    f.section.click();
-    // Assert
-    expect(f.seen).toEqual([]);
-  });
-
-  it("announces nothing when a section is collapsed without a click", () => {
-    // Arrange
-    const f = armedFeed();
-    f.section.click();
-    f.seen.length = 0;
-    // Act
-    autoCollapseFor(document).collapseOutside("windowBlur", null);
-    // Assert
-    expect([f.seen, f.section.classList.contains(EXPANDED_CLASS)]).toEqual([[], false]);
+    expect([announced, toggled]).toEqual([[], [[section, true]]]);
   });
 });
 
