@@ -9,20 +9,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// WaitProcessExit waits for pid's exit on a pidfd becoming readable, bounded
-// by ctx's deadline. A pid already gone when the pidfd is opened (ESRCH) has
-// exited.
+// awaitExitEvent waits for pid's exit on a pidfd becoming readable, bounded
+// by ctx's deadline, answering whether the exit was seen. pidfd_open(2) opens
+// a zombie too, so its ESRCH is a process already reaped, whose files are
+// released: seen.
 //
 // The pidfd needs no close-on-exec mark of its own: pidfd_open(2) always sets
 // O_CLOEXEC on the descriptor it answers, so it never leaks into a child.
-func WaitProcessExit(ctx context.Context, pid int) error {
-	_, err := awaitExitEvent(ctx, pid)
-	return err
-}
-
-// awaitExitEvent is WaitProcessExit, answering whether the exit was seen.
-// pidfd_open(2) opens a zombie too, so its ESRCH is a process already reaped,
-// whose files are released: seen.
 func awaitExitEvent(ctx context.Context, pid int) (seen bool, err error) {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {

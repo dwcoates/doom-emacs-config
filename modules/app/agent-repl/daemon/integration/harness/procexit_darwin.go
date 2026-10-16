@@ -10,16 +10,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// WaitProcessExit waits for pid's exit on a kqueue EVFILT_PROC/NOTE_EXIT
-// event, bounded by ctx's deadline. A pid the event cannot be registered on
-// (ESRCH) has begun exiting, or is gone.
-func WaitProcessExit(ctx context.Context, pid int) error {
-	_, err := awaitExitEvent(ctx, pid)
-	return err
-}
-
-// awaitExitEvent is WaitProcessExit, answering whether it saw the exit event
-// itself (seen) rather than a process it could not register on.
+// awaitExitEvent waits for pid's exit on a kqueue EVFILT_PROC/NOTE_EXIT
+// event, bounded by ctx's deadline, answering whether it saw the event itself
+// (seen) rather than a process it could not register on (ESRCH: one that has
+// begun exiting, or is gone).
 //
 // ON DARWIN ESRCH DOES NOT MEAN THE FILES ARE RELEASED. A process SIGKILLed a
 // moment before the registration can refuse it while its exit is still under

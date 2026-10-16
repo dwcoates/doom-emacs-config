@@ -3,7 +3,9 @@ package harness
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,6 +60,36 @@ func TestWaitProcessExit(t *testing.T) {
 			// Assert
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("WaitProcessExit = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestWaitProcessExitIsDefinedOnceForEveryPlatform pins that each platform
+// answers only awaitExitEvent, and WaitProcessExit reads it the same way on
+// both.
+func TestWaitProcessExitIsDefinedOnceForEveryPlatform(t *testing.T) {
+	for _, tt := range []struct {
+		file string
+		want int
+	}{
+		{file: "procexit.go", want: 1},
+		{file: "procexit_darwin.go", want: 0},
+		{file: "procexit_linux.go", want: 0},
+	} {
+		t.Run(tt.file, func(t *testing.T) {
+			// Arrange
+			src, err := os.ReadFile(tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			got := strings.Count(string(src), "func WaitProcessExit(")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("%s defines WaitProcessExit %d times, want %d", tt.file, got, tt.want)
 			}
 		})
 	}
