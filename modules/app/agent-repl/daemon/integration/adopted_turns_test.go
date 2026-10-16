@@ -29,10 +29,22 @@ type adoptedTurnCase struct {
 	finishUnwatched bool
 }
 
-var adoptedTurnCases = []adoptedTurnCase{
-	{name: "a turn that finished while no daemon watched is closed", finishUnwatched: true},
-	{name: "a turn the shim still runs stays open"},
-}
+var (
+	adoptedTurnFinishedUnwatched = adoptedTurnCase{name: "a turn that finished while no daemon watched is closed", finishUnwatched: true}
+	adoptedTurnStillRuns         = adoptedTurnCase{name: "a turn the shim still runs stays open"}
+	adoptedTurnCases             = []adoptedTurnCase{adoptedTurnFinishedUnwatched, adoptedTurnStillRuns}
+)
+
+// adoptedTurnStillRunsOnly is the one case a boot adoption and a forced
+// handover each run. Whichever route adopts the survivor, its open turn is
+// reconciled by one shared path (sessionwatcher's reconcileOpenAtAttachLocked,
+// then the prompt queue's lifecycle), unit-pinned for both outcomes in
+// sessionwatcher/watcher_test.go and promptqueue/lifecycle_test.go. What each
+// route adds is its own hand-over of the open turns, which the still-running
+// case exercises and the restored turn's later close completes. A turn that
+// finished while no daemon watched reaches that shared path the same way on
+// every route, so the takeover alone keeps it as the integration witness.
+var adoptedTurnStillRunsOnly = []adoptedTurnCase{adoptedTurnStillRuns}
 
 // openTurnOn submits one prompt and waits for the daemon to open its turn,
 // answering the turn's id.
@@ -97,7 +109,7 @@ func expectNoWorkspaceWarnings(t *testing.T, f *fixture) {
 
 func TestTheBootAdoptionOfASurvivorReconcilesItsOpenTurn(t *testing.T) {
 	t.Parallel()
-	for _, tc := range adoptedTurnCases {
+	for _, tc := range adoptedTurnStillRunsOnly {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: a turn in flight, then the daemon dies and the shim
@@ -107,9 +119,6 @@ func TestTheBootAdoptionOfASurvivorReconcilesItsOpenTurn(t *testing.T) {
 			turn := openTurnOn(t, f, "k-boot-adopt")
 			info := f.shim.Info()
 			f.d.Kill()
-			if tc.finishUnwatched {
-				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-			}
 			// The outgoing daemon meant to preserve the session, so the
 			// reconciliation records it PRESERVED rather than unaccounted for.
 			writeIntentManifest(t, f.d, rollout.ManifestSession{
@@ -239,7 +248,7 @@ func TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn(t *testing.T) {
 
 func TestAForcedHandoversAdoptionReconcilesItsOpenTurn(t *testing.T) {
 	t.Parallel()
-	for _, tc := range adoptedTurnCases {
+	for _, tc := range adoptedTurnStillRunsOnly {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: a turn in flight, with both participants open so the
@@ -265,12 +274,6 @@ func TestAForcedHandoversAdoptionReconcilesItsOpenTurn(t *testing.T) {
 			harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 				return r.GetTransferred() != nil
 			})
-			// The incumbent's watches outlive the transfer notice, so the
-			// turn ends on the shim with its end delivered to no stream:
-			// between the transfer and the adoption no daemon sees it end.
-			if tc.finishUnwatched {
-				f.shim.EndTurnUnwatched(mainAgent, successFrame(mainAgent, nil))
-			}
 			// Both participants adopt together: the rendezvous waits for both.
 			successor := drainDial(announced.GetAddress())
 			var wg sync.WaitGroup
