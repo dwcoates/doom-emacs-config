@@ -2,7 +2,10 @@ package harness
 
 import (
 	"bufio"
+	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,9 +16,8 @@ import (
 // is the script given, standing in for a daemon that stalled. It returns once
 // the child has said "ready", which every script does after its trap is set,
 // so no signal can land before the disposition it is testing.
-func startQuitChild(t *testing.T, script string) *exec.Cmd {
+func startQuitChild(t *testing.T, cmd *exec.Cmd) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command("/bin/sh", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -35,30 +37,58 @@ func startQuitChild(t *testing.T, script string) *exec.Cmd {
 	return cmd
 }
 
+// exitOnQuitStandIn makes this test binary, run with it set, a stand-in that
+// exits 2 on SIGQUIT (TestMain, runExitOnQuitStandIn).
+const exitOnQuitStandIn = "AGENT_REPL_TEST_EXIT_ON_SIGQUIT"
+
+// exitOnQuitCommand is this test binary as that stand-in.
+func exitOnQuitCommand() *exec.Cmd {
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), exitOnQuitStandIn+"=1")
+	return cmd
+}
+
+// runExitOnQuitStandIn is the stand-in for a process that exits on SIGQUIT,
+// as the Go runtime's own handler does.
+//
+// IT IS SUBSCRIBED BEFORE IT SAYS READY, so no SIGQUIT can arrive before the
+// handler that answers it. A shell's trap could not promise that: a trapped
+// signal landing just before the shell entered its wait stayed pending until
+// the 100s sleep it waited on ended, and the test's bound ran out first.
+func runExitOnQuitStandIn() int {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGQUIT)
+	fmt.Println("ready")
+	<-quit
+	return 2
+}
+
 func TestDumpOnStall(t *testing.T) {
 	tests := []struct {
-		name   string
-		script string
-		bound  time.Duration
-		want   string
+		name    string
+		standIn func() *exec.Cmd
+		bound   time.Duration
+		want    string
 	}{
 		{
-			name:   "a daemon that dumps and exits on SIGQUIT is reported as dumped",
-			script: `trap 'exit 2' QUIT; echo ready; while :; do sleep 100 & wait $!; done`,
-			bound:  DefaultTimeout,
-			want:   "the daemon.cmd.sigquit record below holds its goroutine dump",
+			name:    "a daemon that dumps and exits on SIGQUIT is reported as dumped",
+			standIn: exitOnQuitCommand,
+			bound:   DefaultTimeout,
+			want:    "the daemon.cmd.sigquit record below holds its goroutine dump",
 		},
 		{
-			name:   "a daemon that ignores SIGQUIT is reported as not having exited",
-			script: `trap '' QUIT; echo ready; while :; do sleep 100 & wait $!; done`,
-			bound:  50 * time.Millisecond,
-			want:   "did not exit within 50ms",
+			name: "a daemon that ignores SIGQUIT is reported as not having exited",
+			standIn: func() *exec.Cmd {
+				return exec.Command("/bin/sh", "-c", `trap '' QUIT; echo ready; while :; do sleep 100 & wait $!; done`)
+			},
+			bound: 50 * time.Millisecond,
+			want:  "did not exit within 50ms",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a bare Daemon carrying only what the dump touches.
-			cmd := startQuitChild(t, tc.script)
+			cmd := startQuitChild(t, tc.standIn())
 			d := &Daemon{t: t, cmd: cmd}
 
 			// Act
@@ -74,7 +104,7 @@ func TestDumpOnStall(t *testing.T) {
 
 func TestDumpOnStallNeverSignalsAReapedDaemon(t *testing.T) {
 	// Arrange: the reap has begun, so the pid may already name a stranger.
-	cmd := startQuitChild(t, `echo ready; while :; do sleep 100 & wait $!; done`)
+	cmd := startQuitChild(t, exec.Command("/bin/sh", "-c", `echo ready; while :; do sleep 100 & wait $!; done`))
 	d := &Daemon{t: t, cmd: cmd}
 	d.sigMu.Lock()
 	d.reapBegun = true

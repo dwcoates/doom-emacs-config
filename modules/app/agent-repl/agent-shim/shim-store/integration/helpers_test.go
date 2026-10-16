@@ -119,6 +119,9 @@ const (
 var storeBinary string
 
 func TestMain(m *testing.M) {
+	if os.Getenv(exitOnQuitStandIn) == "1" {
+		os.Exit(runExitOnQuitStandIn())
+	}
 	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
 		fmt.Fprintf(os.Stderr, "integration: setting AGENT_REPL_FORBID_VENDOR_CALLS: %v\n", err)
 		os.Exit(1)
