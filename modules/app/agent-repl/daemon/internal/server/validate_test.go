@@ -11,6 +11,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/internal/workspace"
 )
 
 // said is one well-formed composed prompt.
@@ -442,6 +444,19 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 				})
 			},
 			field: "fork_source.workspace",
+		},
+		{
+			name: "create of a one-shot whose context names no workspace",
+			check: func() *connect.Error {
+				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
+					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+					Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+						Prompt:  workspace.SaidText("fix the feed"),
+						Context: &agentreplv1.CreateWorkspaceOneShotContext{},
+					}},
+				})
+			},
+			field: "one_shot.context.workspace",
 		},
 		{
 			name: "set priority with no workspace",

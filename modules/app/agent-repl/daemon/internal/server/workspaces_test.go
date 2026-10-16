@@ -1787,6 +1787,77 @@ func TestCreateWorkspaceNamesAnUnknownForkSource(t *testing.T) {
 	}
 }
 
+// ---- CreateWorkspace: a one-shot's context workspace -------------------------
+
+// oneShotCreate builds a one-shot create request for repoRef naming the
+// context workspace about, when it is non-nil.
+func oneShotCreate(repoRef *workspacev1.RepositoryRef, about *workspacev1.WorkspaceRef) *agentreplv1.CreateWorkspaceRequest {
+	oneShot := &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("fix the feed")}
+	if about != nil {
+		oneShot.Context = &agentreplv1.CreateWorkspaceOneShotContext{Workspace: about}
+	}
+	return &agentreplv1.CreateWorkspaceRequest{
+		Repository: repoRef,
+		Form:       &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: oneShot},
+	}
+}
+
+func TestCreateWorkspaceMapsAOneShotContextToTheSpec(t *testing.T) {
+	tests := []struct {
+		name  string
+		about *workspacev1.WorkspaceRef
+		want  *ids.WorkspaceID
+	}{
+		{name: "a context names the resolved workspace", about: ref(), want: func() *ids.WorkspaceID { id := testWorkspaceID; return &id }()},
+		{name: "no context names none", about: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(oneShotCreate(repoRef, tt.about)))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+			}
+			spec := h.Verbs.createSpecs[0]
+			if !spec.OneShot || spec.Parent != nil || spec.ForkFrom != nil {
+				t.Fatalf("spec = one-shot %v, parent %v, fork from %v; want a top-level one-shot", spec.OneShot, spec.Parent, spec.ForkFrom)
+			}
+			if (spec.ContextWorkspace == nil) != (tt.want == nil) || (tt.want != nil && *spec.ContextWorkspace != *tt.want) {
+				t.Fatalf("context workspace = %v, want %v", spec.ContextWorkspace, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceNamesAnUnknownContextWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(oneShotCreate(repoRef, &workspacev1.WorkspaceRef{Id: "ws-nope"})))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	got := resp.Msg.GetError().GetUnknownContextWorkspace()
+	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_context_workspace naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.createSpecs) != 0 {
+		t.Fatalf("Create ran %d times, want none", len(h.Verbs.createSpecs))
+	}
+}
+
 func TestCreateWorkspaceAnswersTheBaseRefOffPrimaryBranchArm(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

@@ -1731,3 +1731,128 @@ func TestCreateNotesShareTheWorkspaceNoteComposition(t *testing.T) {
 		t.Fatalf("fork note = (%q, %v), shared = (%q, %v), want them equal", fork, forkErr, shared, sharedErr)
 	}
 }
+
+// ---- A one-shot's context workspace ----------------------------------------
+
+// contextBrief arranges the one-shot context note's brief.
+func contextBrief(f *fixture) {
+	f.briefs[BriefOneShotContext] = prompts.Prompt{
+		Name: BriefOneShotContext, Body: "ABOUT {{context}} AT {{context_dir}} ON {{context_branch}}\n",
+		Placeholders: []string{"context", "context_dir", "context_branch"},
+	}
+}
+
+func TestCreateOpensAOneShotWithTheNoteNamingItsContextWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	contextBrief(f)
+	about := f.workspace("about", t.TempDir())
+	spec := standardSpec(t, f)
+	spec.OneShot = true
+	spec.ContextWorkspace = &about.ID
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: the autonomous preamble, then the context note, then the user's
+	// words, then the directive.
+	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+	want := prompts.Wrap("PREAMBLE\n") +
+		prompts.Wrap("ABOUT "+about.Name+" AT "+about.Dir+" ON "+about.Branch+"\n") +
+		"fix the login bug" + prompts.Wrap("\n"+completionDirectiveLead+"DIRECTIVE")
+	if sent != want {
+		t.Fatalf("the one-shot prompt = %q, want %q", sent, want)
+	}
+}
+
+func TestCreateOfAOneShotWithAContextLeavesItTopLevel(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	contextBrief(f)
+	about := f.workspace("about", t.TempDir())
+	spec := standardSpec(t, f)
+	spec.OneShot = true
+	spec.ContextWorkspace = &about.ID
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
+		t.Fatalf("registered parent = %v, want none", *facts.Parent)
+	}
+	if len(f.db.pendingForks) != 0 {
+		t.Fatalf("pending forks = %+v, want none", f.db.pendingForks)
+	}
+}
+
+func TestCreateRefusesAOneShotWhoseContextNoteCannotBeComposed(t *testing.T) {
+	tests := []struct {
+		name     string
+		brief    bool
+		register bool
+	}{
+		{name: "the context brief is missing", brief: false, register: true},
+		{name: "the context workspace is not registered", brief: true, register: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			oneShotBriefs(f)
+			if tt.brief {
+				contextBrief(f)
+			}
+			about := ids.WorkspaceID("about")
+			if tt.register {
+				f.workspace(about, t.TempDir())
+			}
+			spec := standardSpec(t, f)
+			spec.OneShot = true
+			spec.ContextWorkspace = &about
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			asRefusal(t, err, ArmBriefMissing)
+			if len(f.queue.submissions) != 0 {
+				t.Fatalf("submissions = %d, want none", len(f.queue.submissions))
+			}
+			if !loggedAtError(f, opCreate) {
+				t.Fatal("the failed note was not logged at error")
+			}
+		})
+	}
+}
+
+func TestCreateRejectsAContextWorkspaceOutsideAOneShot(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	about := f.workspace("about", t.TempDir())
+	spec := standardSpec(t, f)
+	spec.ContextWorkspace = &about.ID
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Create succeeded, want the contradictory spec rejected")
+	}
+	if _, refused := AsRefusal(err); refused {
+		t.Fatalf("err = %v, want an invariant failure rather than a refusal", err)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the contradictory spec was not logged at error")
+	}
+}
