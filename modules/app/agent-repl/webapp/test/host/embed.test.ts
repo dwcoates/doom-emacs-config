@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // A workspace page's side of the host protocol. See src/host/embed.ts.
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
+import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
@@ -495,3 +496,13 @@ describe("the host's log level", () => {
   });
 });
 
+
+describe("the page's log level", () => {
+  it("is applied through LevelWindow.apply, never opened or closed by hand", () => {
+    // Act
+    const shape = levelApplyShapeOf("host/embed.ts");
+
+    // Assert
+    expect(shape).toEqual({ applies: true, handRolls: false });
+  });
+});

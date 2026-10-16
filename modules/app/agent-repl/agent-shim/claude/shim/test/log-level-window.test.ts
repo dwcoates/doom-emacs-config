@@ -219,19 +219,4 @@ describe("LevelWindow.apply", () => {
     expect(() => window.apply(level, untilMs)).toThrow();
     expect(window.level()).toBe("warn");
   });
-
-  it.each(["webapp/src/host/embed.ts", "webapp/src/host/host.ts"])(
-    "is how %s applies a level that travels between runtimes",
-    (path) => {
-      // Arrange
-      const source = readFileSync(fileURLToPath(new URL(`../../../../${path}`, import.meta.url)), "utf8");
-
-      // Act
-      const applies = source.includes(".apply(level, untilMs)");
-      const handRolls = /\.open\(level,|levelWindow\.close\(\)|env\.level\.close\(\)/.test(source);
-
-      // Assert
-      expect([applies, handRolls]).toEqual([true, false]);
-    },
-  );
 });

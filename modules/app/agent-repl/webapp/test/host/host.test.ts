@@ -2,6 +2,7 @@
 // The host page: one iframe per workspace, one shown, state replayed on hello,
 // facts mirrored for Emacs. See src/host/host.ts.
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
+import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -684,3 +685,13 @@ describe("setLogLevel", () => {
   });
 });
 
+
+describe("the webhost's log level", () => {
+  it("is applied through LevelWindow.apply, never opened or closed by hand", () => {
+    // Act
+    const shape = levelApplyShapeOf("host/host.ts");
+
+    // Assert
+    expect(shape).toEqual({ applies: true, handRolls: false });
+  });
+});

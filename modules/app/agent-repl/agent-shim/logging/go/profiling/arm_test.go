@@ -152,38 +152,3 @@ func TestDescriptionContext(t *testing.T) {
 		t.Fatalf("Context = %v", got)
 	}
 }
-
-// Every Go runtime that profiles arms and words its events through Arm and
-// Describe; a runtime that builds its own Profiler or words its own records
-// would drift from the others.
-func TestEveryGoRuntimeArmsAndRecordsThroughTheSharedShape(t *testing.T) {
-	callers := map[string]string{
-		"daemon":  "../../../../daemon/cmd/agent-repld/profiling.go",
-		"store":   "../../../shim-store/profiling.go",
-		"sidecar": "../../../claude/shim-sidecar/profiling.go",
-	}
-	for runtime, path := range callers {
-		t.Run(runtime, func(t *testing.T) {
-			// Arrange
-			src, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Act
-			text := string(src)
-
-			// Assert
-			for _, want := range []string{`profiling.Arm("` + runtime + `"`, `profiling.Describe("` + runtime + `"`} {
-				if !strings.Contains(text, want) {
-					t.Errorf("%s does not call %s", path, want)
-				}
-			}
-			for _, banned := range []string{"profiling.New(", "profiling.Watch(", "case profiling."} {
-				if strings.Contains(text, banned) {
-					t.Errorf("%s hand-rolls %s instead of Arm and Describe", path, banned)
-				}
-			}
-		})
-	}
-}
