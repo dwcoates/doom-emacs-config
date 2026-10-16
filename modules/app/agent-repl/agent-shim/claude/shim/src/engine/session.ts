@@ -872,9 +872,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * vendor at the fork point behind the answer (a vendor boot, some 1.7s,
    * measured 2026-10-16), so every call that needs the vendor waits on this
    * first (`afterRestart`): none can reach a query that is being replaced.
-   * It never rejects.
+   * Undefined when no restart is under way. It never rejects.
    */
-  let restartSettling: Promise<void> = Promise.resolve();
+  let restartSettling: Promise<void> | undefined;
   /** The most recent rollback's settle, restated on every new session watch. */
   let lastRollbackSettled: conversationv1.SessionRollbackSettled | undefined;
   /**
@@ -4198,7 +4198,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the files restored. The vendor judges the cut at its boot, and says how
     // on SessionRollbackSettled.
     restartBegins();
-    restartSettling = settleRestart(current, plan.forkPoint, dropsTurn, cut, context.dropped_turns, restored);
+    const settling = settleRestart(current, plan.forkPoint, dropsTurn, cut, context.dropped_turns, restored).finally(() => {
+      if (restartSettling === settling) restartSettling = undefined;
+    });
+    restartSettling = settling;
     LOGGER.info(
       { ...cut, resume_drops_turn: dropsTurn ?? "", restored_paths: restored ?? [] },
       "CUT MADE: the rollback is answered; the vendor restarts at the fork point behind the answer",
@@ -4274,11 +4277,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushes.push(create(conversationv1.SessionUpdateSchema, { update: { case: "rollbackSettled", value: settled } }));
   }
 
-  /** FN, run once any rollback's restart has settled (`restartSettling`). */
+  /**
+   * FN, run once any rollback's restart has settled (`restartSettling`).
+   *
+   * WITH NO RESTART UNDER WAY FN RUNS AT ONCE, in the caller's own turn:
+   * StartTurn registers its start synchronously, and a keep-alive that fires
+   * between the call and an await here would beat while a start is in flight.
+   */
   function afterRestart<A extends unknown[], R>(fn: (...args: A) => R | Promise<R>): (...args: A) => Promise<R> {
-    return async (...args: A) => {
-      await restartSettling;
-      return fn(...args);
+    return (...args: A) => {
+      const settling = restartSettling;
+      if (settling === undefined) return Promise.resolve(fn(...args));
+      return settling.then(() => fn(...args));
     };
   }
 
@@ -7254,7 +7264,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     forkSession: afterRestart(forkSession),
     resetKeepalives: afterRestart(resetKeepalives),
     standDown: async (reason: string) => {
-      await restartSettling;
+      if (restartSettling !== undefined) await restartSettling;
       await teardown(reason);
       return lostRowsAtStandDown > 0 ? 1 : 0;
     },
