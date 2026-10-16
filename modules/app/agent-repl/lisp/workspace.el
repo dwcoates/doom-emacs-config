@@ -1505,6 +1505,94 @@ inheriting the previous workspace's window configuration."
         (when (and fallback (car foreign) (window-live-p (car foreign)))
           (set-window-buffer (car foreign) fallback)))))))
 
+;;;; ---- The user's minibuffer holds every automatic frame move -----------
+
+;; NOTHING AGENT-REPL DOES ON ITS OWN ACCOUNT MOVES THE USER OUT OF A
+;; MINIBUFFER (owner ruling, 2026-10-16).  A workspace being created, merged
+;; or re-pointed builds into its own perspective, follows the daemon's
+;; selection or lands a registered workspace -- and every one of those
+;; switches perspectives and selects windows.  Run while the user types a
+;; one-shot prompt, they took the selected window out of the minibuffer.
+;;
+;; So that work is HELD while a minibuffer is active and released once the
+;; last one has exited.  The release is keyed on the exit itself
+;; (`minibuffer-exit-hook'), never on a delay: the hold cannot end while the
+;; user is still typing, whatever the timing.
+
+(defvar agent-repl--minibuffer-held nil
+  "Frame work held while the user types in a minibuffer, oldest first.
+Each element is (KEY SCOPE LABEL FN), as `agent-repl--when-minibuffer-free'
+documents.  Released by `agent-repl--minibuffer-release'.")
+
+(defvar agent-repl--minibuffer-release-armed nil
+  "Non-nil while a release of `agent-repl--minibuffer-held' is scheduled.")
+
+(defun agent-repl--minibuffer-active-p ()
+  "Return non-nil while any minibuffer is active.
+The one question the hold asks, so a test can answer it without a live
+minibuffer.  It is the depth alone, and never the current buffer: an
+inactive minibuffer buffer has no exit to wait on, so counting it would
+hold work that nothing ever releases."
+  (> (minibuffer-depth) 0))
+
+(defun agent-repl--when-minibuffer-free (scope label key fn)
+  "Call FN now unless a minibuffer is active, else hold it until none is.
+FN takes one argument, RELEASED: nil when it runs at once, t when it runs
+from the release, so FN can re-check, at release, what may have changed
+while the user typed.  Returns FN\='s value when it ran, or `:held'.
+
+SCOPE is the log scope the hold and its release are recorded under, and
+LABEL names the work for the record.  KEY, when non-nil, makes the newest
+hold under it replace an older one still waiting: work that re-reads the
+state it acts on only needs to run once."
+  (if (not (agent-repl--minibuffer-active-p))
+      (funcall fn nil)
+    (when key
+      (setq agent-repl--minibuffer-held
+            (cl-remove key agent-repl--minibuffer-held :key #'car :test #'equal)))
+    (setq agent-repl--minibuffer-held
+          (append agent-repl--minibuffer-held (list (list key scope label fn))))
+    (agent-repl--info scope "elisp.workspace.minibuffer-held label=%s key=%S held=%d depth=%d"
+                      label key (length agent-repl--minibuffer-held) (minibuffer-depth))
+    :held))
+
+(defun agent-repl--minibuffer-release-arm ()
+  "Schedule the release of the held frame work, on a minibuffer\='s exit.
+On `minibuffer-exit-hook', which runs while the exiting minibuffer is
+still active, so the release is a zero-delay timer: timers run from the
+command loop, after the exit has completed."
+  (when (and agent-repl--minibuffer-held (not agent-repl--minibuffer-release-armed))
+    (setq agent-repl--minibuffer-release-armed t)
+    (run-at-time 0 nil #'agent-repl--minibuffer-release)))
+
+(defun agent-repl--minibuffer-release ()
+  "Run every held frame work, oldest first, once no minibuffer is active.
+A minibuffer still active here -- a command that reads twice, or a
+recursive minibuffer -- keeps the work held, and its own exit arms the
+release again.  Each work runs even when one before it fails; a failure
+is recorded at ERROR and the first one is re-signalled after the rest ran."
+  (setq agent-repl--minibuffer-release-armed nil)
+  (if (agent-repl--minibuffer-active-p)
+      (agent-repl--info '(:agent-repl-central "the minibuffer hold spans every workspace")
+                        "elisp.workspace.minibuffer-release decision=still-active held=%d depth=%d"
+                        (length agent-repl--minibuffer-held) (minibuffer-depth))
+    (let ((held agent-repl--minibuffer-held)
+          (failure nil))
+      (setq agent-repl--minibuffer-held nil)
+      (dolist (entry held)
+        (pcase-let ((`(,key ,scope ,label ,fn) entry))
+          (agent-repl--info scope "elisp.workspace.minibuffer-released label=%s key=%S" label key)
+          (condition-case err
+              (funcall fn t)
+            (error
+             (agent-repl--error scope "elisp.workspace.minibuffer-release-failed label=%s key=%S err=%S"
+                                label key err)
+             (unless failure (setq failure err))))))
+      (when failure
+        (signal (car failure) (cdr failure))))))
+
+(add-hook 'minibuffer-exit-hook #'agent-repl--minibuffer-release-arm)
+
 (defun agent-repl--call-in-background-workspace (ws fn)
   "Call FN with WS transiently activated, then restore the caller's focus.
 
@@ -1533,13 +1621,25 @@ leaves the frame showing the PREVIOUS workspace's windows, and FN would
 build into them.  `agent-repl--clean-frame-foreign-windows' therefore
 runs before FN — even when WS was already current, since the invariant
 FN depends on is about the FRAME's contents, not about whether a switch
-happened."
-  (let ((agent-repl--eager-open-in-progress t))
-    (agent-repl--with-preserved-focus
-      (unless (equal ws (agent-repl--ws-current-name))
-        (agent-repl--ws-switch ws))
-      (agent-repl--clean-frame-foreign-windows ws)
-      (funcall fn))))
+happened.
+
+A MINIBUFFER HOLDS THE CALL (`agent-repl--when-minibuffer-free\='): the
+switch-in and the build select windows, which would take the user out of
+the prompt they are typing in.  A held call answers `:held\=' and runs FN
+once the minibuffer has exited -- unless WS was closed meanwhile, which
+leaves nothing to build into and is recorded rather than switched to."
+  (agent-repl--when-minibuffer-free
+   (agent-repl--ws-log-scope ws) (format "background-build ws=%s" ws) nil
+   (lambda (released)
+     (if (and released (not (member ws (agent-repl--ws-all-names))))
+         (agent-repl--info '(:agent-repl-central "a closed workspace owns no sink")
+                           "elisp.workspace.background-build-dropped ws=%s reason=workspace-gone" ws)
+       (let ((agent-repl--eager-open-in-progress t))
+         (agent-repl--with-preserved-focus
+           (unless (equal ws (agent-repl--ws-current-name))
+             (agent-repl--ws-switch ws))
+           (agent-repl--clean-frame-foreign-windows ws)
+           (funcall fn)))))))
 
 (defun agent-repl--ws-repaint-sidebar (ws reason)
   "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.

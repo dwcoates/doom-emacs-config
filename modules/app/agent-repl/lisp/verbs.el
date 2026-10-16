@@ -80,6 +80,7 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
 (declare-function agent-repl--ws-switch "agent-repl-workspace" (ws &rest args))
+(declare-function agent-repl--when-minibuffer-free "agent-repl-workspace" (scope label key fn))
 (declare-function agent-repl--pseudo-workspace-name-p "agent-repl-core" (ws))
 (declare-function agent-repl--log-note-workspace-departing "agent-repl-core" (ws))
 (declare-function agent-repl--log-forget-workspace-departure "agent-repl-core" (ws))
@@ -991,7 +992,7 @@ changes no editor state."
                                              merge-actions
                                              prompt
                                              parent fork fork-source model priority
-                                             allow-ungated select)
+                                             allow-ungated)
   "Create a workspace in REPOSITORY under FORM.
 FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 `:one-shot' -- and that arm\'s own fields ride as keyword arguments beside
@@ -1021,17 +1022,10 @@ fork fact lives inside the parent by construction, so there is no request
 that carries it alone -- encoding one would silently drop the fork and
 create a plain workspace the caller never asked for.
 
-SELECT makes the new workspace CURRENT once the daemon answers, unless
-the user has switched workspaces in Emacs since this create was
-dispatched (`agent-repl-verbs-select-minted\=').  The
-answer is the one place the minted identity exists before the roster push
-carries it: `CreateWorkspaceSuccess.workspace\' exists precisely because
-callers learn the identity from the response.  The selection is the SAME
-step `agent-repl-add-project-workspace\' takes after registering a
-directory -- `agent-repl-switch-to-project\' on the minted dir -- and
-reusing it is what keeps standing on a workspace you just made ONE
-behavior rather than two.  It is OFF by default because a one-shot is
-fire-and-forget and must not steal the user\'s place.
+CREATING A WORKSPACE NEVER MOVES THE USER (owner ruling, 2026-10-16).
+No creation -- dynamic, static, fork, one-shot or help -- selects what it
+made: the user may be typing in a minibuffer, or simply working where they
+stand, and the new tab appearing on the bar is the whole of the news.
 
 Nothing else happens on success: THE DAEMON names and creates everything,
 and the new workspace\'s tab arrives through the roster push."
@@ -1047,9 +1041,6 @@ and the new workspace\'s tab arrives through the roster push."
   ;; are registered BEFORE the send, so a progress event never outruns them.
   (let ((op-id (agent-repl-mutation-progress-new-op-id))
         (arrival-reason (if (or fork fork-source) "forked" "created"))
-        ;; THE DISPATCH IS THE MOMENT THE USER ASKED to stand on what this
-        ;; makes; a switch they make in Emacs after it withdraws the landing.
-        (dispatched-at (agent-repl-host-editor-switch-count))
         ;; THE ACK AND THE PROGRESS STREAM ARE TWO CHANNELS, so the daemon's
         ;; first stage push can overtake the rpc's own ack.  Once anything
         ;; later in the sequence has been shown, the ack has nothing left to
@@ -1068,11 +1059,9 @@ and the new workspace\'s tab arrives through the roster push."
              (name (plist-get value :name)))
          (agent-repl-workspace-progress-report :create :completed name)
          ;; The minted ref is the FIRST place this workspace has an identity;
-         ;; the arrival reason is claimed here so a one-shot (which never
-         ;; selects) still opens its panels when its tab arrives.
-         (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)
-         (when select
-           (agent-repl-verbs-select-minted ref dispatched-at))))
+         ;; the arrival reason is claimed here so the workspace, which is
+         ;; never selected, still opens its panels when its tab arrives.
+         (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)))
      :on-failed
      (lambda (arm detail)
        (setq progressed t)
@@ -1113,9 +1102,7 @@ and the new workspace\'s tab arrives through the roster push."
        (agent-repl-workspace-progress-report
         :create :completed (plist-get (plist-get success :workspace) :dir))
        (agent-repl--panels-note-arrival-reason
-        (plist-get (plist-get success :workspace) :id) arrival-reason)
-       (when select
-         (agent-repl-verbs--select-created success dispatched-at)))
+        (plist-get (plist-get success :workspace) :id) arrival-reason))
      :on-error
      ;; A SYNCHRONOUS refusal (validation, an unknown repository) is answered
      ;; on the rpc before the work detaches, so no progress will follow: the
@@ -1270,8 +1257,9 @@ function for why landing by DIRECTORY cannot be used there.
 THE ANSWER IS WHEN THE WORKSPACE EXISTS.  A minted `WorkspaceRef\' is the
 one place the identity is known before the roster push carries it, so
 every verb that stands on a workspace it just asked for stands on it HERE
--- `CreateWorkspaceSuccess.workspace\' for create and fork,
-`RegisterWorkspace\''s ref for onboarding a directory.  Standing on the
+-- `RegisterWorkspace\''s ref for onboarding a directory, the open of a
+closed workspace from the switcher.  A CREATE never comes here: no
+creation moves the user (`agent-repl-verb-create\=').  Standing on the
 directory any earlier is standing on a dir that is not a workspace yet:
 `agent-repl-switch-to-project\' finds nothing to arm and Doom\'s
 empty-project fallback lands the user on magit status instead of the
@@ -1294,8 +1282,9 @@ new workspace did not come up."
              '(:agent-repl-central
                "a minted workspace awaiting its roster row has no sink"))
            "elisp.verbs.select-minted dir=%s" dir)
-          ;; Owner ruling 2026-10-11: a created workspace is landed on when it
-          ;; becomes available, unless the user switched in Emacs meanwhile.
+          ;; Owner ruling 2026-10-11: a registered or reopened workspace is
+          ;; landed on when it becomes available, unless the user switched
+          ;; in Emacs meanwhile.
           (cond
            ((agent-repl-verbs--landing-withdrawn-p ref dispatched-at "answered"))
            (ws
@@ -1346,9 +1335,22 @@ be invisible.  EDGE names where the landing was judged, for the record."
 (defun agent-repl-verbs--land (ref why ws land)
   "Stand on WS named by REF through LAND, recording WHY.
 The move is Emacs\='s own, not a switch the user made
-(`agent-repl-host-automatic-switch\=')."
-  (let ((agent-repl-host-automatic-switch t))
-    (funcall land ref why ws)))
+(`agent-repl-host-automatic-switch\=').
+
+A MINIBUFFER HOLDS THE LANDING (`agent-repl--when-minibuffer-free\='): it
+arrives on a roster push, whenever that is, and moving the frame then
+would take the user out of the prompt they are typing in.  A landing
+released after its workspace left the roster has nowhere to stand, and
+is recorded rather than made."
+  (agent-repl--when-minibuffer-free
+   ws (format "landing why=%s" why) 'landing
+   (lambda (released)
+     (if (and released (not (equal (agent-repl--ws-by-ref-id (plist-get ref :id)) ws)))
+         (agent-repl--info '(:agent-repl-central "a landing whose workspace left owns no sink")
+                           "elisp.verbs.landing-dropped ws=%s id=%s reason=workspace-gone"
+                           ws (plist-get ref :id))
+       (let ((agent-repl-host-automatic-switch t))
+         (funcall land ref why ws))))))
 
 (defun agent-repl-verbs--land-on (ref why ws)
   "Stand on workspace WS named by REF, recording WHY the landing ran now."
@@ -1445,13 +1447,6 @@ pending ref is cleared before the landing runs or is withdrawn."
 ;; registration holds either way.
 (defvar agent-repl-roster-update-functions)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-verbs--pending-landing-fire)
-
-(defun agent-repl-verbs--select-created (success dispatched-at)
-  "Stand on the workspace CreateWorkspaceSuccess names.
-The identity lives in the success\'s own ref, which is handed to
-`agent-repl-verbs-select-minted\' -- the one landing every minted
-workspace comes up through -- with DISPATCHED-AT, as it documents."
-  (agent-repl-verbs-select-minted (plist-get success :workspace) dispatched-at))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
                                               merge-actions prompt)
@@ -2256,9 +2251,8 @@ It is cut from the repository\='s primary branch and merges into it; a
 workspace that merges into another one is a CHILD FORK
 \(`agent-repl-verbs--create-fork\').
 
-THE NEW WORKSPACE IS SELECTED.  Creating one is a statement about where
-you intend to work next, so this stands on it the moment the daemon
-answers -- the same step registering a directory takes.
+THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
+\(`agent-repl-verb-create\=').
 
 COMMAND is the interactive command running this body; its invocation is
 recorded before any question is asked, and a question it abandons is
@@ -2282,7 +2276,6 @@ recorded before the abandonment propagates."
     (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-standard mode=%s" mode)
     (apply #'agent-repl-verb-create
            repository :standard
-           :select t
            (if (eq mode 'static)
                (list :name name)
              (list :initial-prompt
@@ -2301,7 +2294,7 @@ the one way to make a workspace that merges into another, and naming a
 repository or a name by hand is the STATIC mode\='s
 business (`agent-repl-create-workspace-static\=').
 
-THE NEW WORKSPACE IS SELECTED."
+THE NEW WORKSPACE IS NOT SELECTED: its tab arrives and the user stays put."
   (interactive)
   (agent-repl-verbs--create-standard 'agent-repl-create-workspace 'dynamic))
 
@@ -2314,8 +2307,8 @@ at all, so the workspace comes up idle and waits for the user.
 It never makes a child: `agent-repl-fork-workspace-static\=' is the named
 child fork.
 
-THE NEW WORKSPACE IS SELECTED, for the same reason the dynamic create\='s
-is."
+THE NEW WORKSPACE IS NOT SELECTED, exactly as the dynamic create\='s is
+not."
   (interactive)
   (agent-repl-verbs--create-standard 'agent-repl-create-workspace-static 'static))
 
@@ -2329,8 +2322,8 @@ It is a DYNAMIC mode (owner ruling, 2026-09-12), so it asks for the
 prompt alone: the repository is the current workspace's, and the daemon
 mints the name.
 
-THE FORK IS SELECTED, exactly as a plain create is: you forked in order
-to work in the fork.
+THE FORK IS NOT SELECTED, exactly as a plain create is not: no creation
+moves the user (`agent-repl-verb-create\=').
 
 `agent-repl-fork-workspace-static\=' is the NAMED variant."
   (interactive)
@@ -2340,7 +2333,7 @@ to work in the fork.
   "Fork the current workspace into a NAMED child (`SPC TAB C\='), no prompt.
 Exactly `agent-repl-fork-workspace\=' -- the repository is the current
 workspace\='s, the parent is the current workspace, the conversation is
-forked, the fork is SELECTED -- except it asks for a REQUIRED name instead
+forked, the fork is NOT selected -- except it asks for a REQUIRED name instead
 of a prompt and sends NO initial prompt, so the fork comes up idle on the
 forked conversation.  It relates to the fork as `SPC TAB N\=' relates to
 `SPC TAB n\=', but it never asks for a repository: a fork\='s repository is
@@ -2387,7 +2380,6 @@ recorded before the abandonment propagates."
                       mode (and into-primary t))
     (apply #'agent-repl-verb-create
            repository :standard
-           :select t
            (append
             (if into-primary
                 (list :fork-source source)
@@ -2404,7 +2396,7 @@ conversation is copied.  Asks for the prompt alone, and the daemon mints
 the name.  `agent-repl-fork-workspace-into-primary-static\=' is the NAMED
 variant, and `agent-repl-fork-workspace\=' the CHILD fork.
 
-THE FORK IS SELECTED."
+THE FORK IS NOT SELECTED."
   (interactive)
   (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-into-primary 'dynamic t))
 
@@ -2413,7 +2405,7 @@ THE FORK IS SELECTED."
 Exactly `agent-repl-fork-workspace-into-primary\=', except it asks for a
 name and sends no prompt, so the workspace starts idle.
 
-THE FORK IS SELECTED."
+THE FORK IS NOT SELECTED."
   (interactive)
   (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-into-primary-static 'static t))
 
@@ -2572,7 +2564,8 @@ creates a standard workspace in agent-repl\='s own repository
 \(`agent-repl-verbs--help-repository\=') whose opening prompt is the
 question behind `agent-repl-help-preamble'.  The daemon mints the name.
 
-THE NEW WORKSPACE IS SELECTED: the user asked in order to read the answer."
+THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
+\(`agent-repl-verb-create\='), so the answer waits on its tab."
   (interactive)
   (let ((command 'agent-repl-create-help-workspace))
     (agent-repl-verbs--create-invoked command)
@@ -2588,8 +2581,7 @@ THE NEW WORKSPACE IS SELECTED: the user asked in order to read the answer."
                         "elisp.verbs.create-help repository=%s" (plist-get repository :dir))
       (agent-repl-verb-create
        repository :standard
-       :initial-prompt (agent-repl-verbs--help-prompt question)
-       :select t))))
+       :initial-prompt (agent-repl-verbs--help-prompt question)))))
 
 ;;;; ---- Shutdown and merge-queue commands --------------------------------
 

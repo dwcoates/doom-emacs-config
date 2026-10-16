@@ -3483,6 +3483,260 @@ from memory -- is what this now pins, plus the rejoin that follows it."
                 (should (equal target next)))))
         (delete-directory project t)))))
 
+;;;; ---- The minibuffer hold (agent-repl--when-minibuffer-free) ----
+
+(defmacro agent-repl-test-ws--with-hold (active &rest body)
+  "Run BODY with an empty hold and a minibuffer ACTIVE or not.
+ACTIVE is an expression re-read on every ask, so BODY may close the
+minibuffer by setting a variable it names.  Every `agent-repl--info' and
+`agent-repl--error' record is pushed onto `infos' and `errors' as its
+formatted line, and every `run-at-time' onto `timers' as its function."
+  (declare (indent 1))
+  `(let ((agent-repl--minibuffer-held nil)
+         (agent-repl--minibuffer-release-armed nil)
+         (infos nil)
+         (errors nil)
+         (timers nil))
+     (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () ,active))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) infos)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors)))
+               ((symbol-function 'run-at-time)
+                (lambda (_time _repeat fn &rest _) (push fn timers) nil)))
+       ,@body)))
+
+(defun agent-repl-test-ws--logged-p (lines prefix)
+  "Non-nil when one of LINES starts with PREFIX."
+  (cl-find-if (lambda (line) (string-prefix-p prefix line)) lines))
+
+(ert-deftest agent-repl-test-minibuffer-free-runs-at-once-without-a-minibuffer ()
+  "With no minibuffer the work runs now, unreleased, and its value is returned."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold nil
+      (let ((seen 'unset))
+        ;; Act
+        (let ((value (agent-repl--when-minibuffer-free
+                      "ws" "work" nil (lambda (released) (setq seen released) 'done))))
+          ;; Assert
+          (should (eq value 'done))
+          (should (null seen))
+          (should (null agent-repl--minibuffer-held)))))))
+
+(ert-deftest agent-repl-test-minibuffer-free-holds-while-a-minibuffer-is-active ()
+  "An active minibuffer holds the work: it does not run, and `:held' is returned."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      (let ((ran nil))
+        ;; Act
+        (let ((value (agent-repl--when-minibuffer-free
+                      "ws" "work" nil (lambda (_) (setq ran t)))))
+          ;; Assert
+          (should (eq value :held))
+          (should-not ran)
+          (should (= (length agent-repl--minibuffer-held) 1)))))))
+
+(ert-deftest agent-repl-test-minibuffer-free-records-the-hold-at-info ()
+  "A held work is said, with its label, so a frame that did not move is visible."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      ;; Act
+      (agent-repl--when-minibuffer-free "ws" "roster-follow" 'k #'ignore)
+      ;; Assert
+      (should (agent-repl-test-ws--logged-p
+               infos "elisp.workspace.minibuffer-held label=roster-follow key=k held=1")))))
+
+(ert-deftest agent-repl-test-minibuffer-free-a-newer-hold-replaces-one-under-its-key ()
+  "Under one KEY only the newest hold waits: it re-reads what it acts on."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      (agent-repl--when-minibuffer-free "ws" "old" 'k #'ignore)
+      ;; Act
+      (agent-repl--when-minibuffer-free "ws" "new" 'k #'ignore)
+      ;; Assert
+      (should (equal (mapcar #'caddr agent-repl--minibuffer-held) '("new"))))))
+
+(ert-deftest agent-repl-test-minibuffer-free-unkeyed-holds-all-wait-in-order ()
+  "Holds with no KEY never replace one another and keep their arrival order."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      (agent-repl--when-minibuffer-free "ws" "first" nil #'ignore)
+      ;; Act
+      (agent-repl--when-minibuffer-free "ws" "second" nil #'ignore)
+      ;; Assert
+      (should (equal (mapcar #'caddr agent-repl--minibuffer-held) '("first" "second"))))))
+
+(ert-deftest agent-repl-test-minibuffer-active-p-ignores-an-inactive-minibuffer-buffer ()
+  "Only an ACTIVE minibuffer holds: an inactive one has no exit to release on."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (with-current-buffer (window-buffer (minibuffer-window))
+      ;; Act / Assert
+      (should-not (agent-repl--minibuffer-active-p)))))
+
+(ert-deftest agent-repl-test-minibuffer-release-is-armed-on-the-exit-hook ()
+  "The release is keyed on the minibuffer's exit, never on a delay."
+  ;; Arrange / Act / Assert
+  (should (memq #'agent-repl--minibuffer-release-arm minibuffer-exit-hook)))
+
+(ert-deftest agent-repl-test-minibuffer-release-arm-schedules-one-release ()
+  "An exit with work held schedules exactly one release, however often it fires."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      (agent-repl--when-minibuffer-free "ws" "work" nil #'ignore)
+      ;; Act
+      (agent-repl--minibuffer-release-arm)
+      (agent-repl--minibuffer-release-arm)
+      ;; Assert
+      (should (equal timers (list #'agent-repl--minibuffer-release))))))
+
+(ert-deftest agent-repl-test-minibuffer-release-arm-with-nothing-held-schedules-nothing ()
+  "An exit with nothing held costs nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold nil
+      ;; Act
+      (agent-repl--minibuffer-release-arm)
+      ;; Assert
+      (should (null timers))
+      (should-not agent-repl--minibuffer-release-armed))))
+
+(ert-deftest agent-repl-test-minibuffer-release-keeps-work-held-while-still-active ()
+  "A command that reads twice is still typing: the work stays held and the
+next exit arms the release again."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      (let ((ran nil))
+        (agent-repl--when-minibuffer-free "ws" "work" nil (lambda (_) (setq ran t)))
+        (agent-repl--minibuffer-release-arm)
+        ;; Act
+        (agent-repl--minibuffer-release)
+        ;; Assert
+        (should-not ran)
+        (should (= (length agent-repl--minibuffer-held) 1))
+        (should-not agent-repl--minibuffer-release-armed)
+        (should (agent-repl-test-ws--logged-p
+                 infos "elisp.workspace.minibuffer-release decision=still-active held=1"))))))
+
+(ert-deftest agent-repl-test-minibuffer-release-runs-held-work-in-order-as-released ()
+  "Once the minibuffer is gone every held work runs, oldest first, released."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((active t))
+      (agent-repl-test-ws--with-hold active
+        (let ((ran nil))
+          (agent-repl--when-minibuffer-free "ws" "a" nil (lambda (r) (push (list 'a r) ran)))
+          (agent-repl--when-minibuffer-free "ws" "b" nil (lambda (r) (push (list 'b r) ran)))
+          (setq active nil)
+          ;; Act
+          (agent-repl--minibuffer-release)
+          ;; Assert
+          (should (equal (nreverse ran) '((a t) (b t))))
+          (should (null agent-repl--minibuffer-held))
+          (should (agent-repl-test-ws--logged-p
+                   infos "elisp.workspace.minibuffer-released label=a")))))))
+
+(ert-deftest agent-repl-test-minibuffer-release-runs-past-a-failure-and-resignals-it ()
+  "A failing work is recorded at ERROR, the rest still run, and the first
+failure is re-signalled rather than swallowed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((active t))
+      (agent-repl-test-ws--with-hold active
+        (let ((ran nil))
+          (agent-repl--when-minibuffer-free "ws" "bad" nil (lambda (_) (error "boom")))
+          (agent-repl--when-minibuffer-free "ws" "good" nil (lambda (_) (setq ran t)))
+          (setq active nil)
+          ;; Act
+          (let ((err (should-error (agent-repl--minibuffer-release))))
+            ;; Assert
+            (should (equal (cadr err) "boom"))
+            (should ran)
+            (should (null agent-repl--minibuffer-held))
+            (should (agent-repl-test-ws--logged-p
+                     errors "elisp.workspace.minibuffer-release-failed label=bad key=nil err=(error \"boom\")"))))))))
+
+(ert-deftest agent-repl-test-call-in-background-is-held-while-a-minibuffer-is-active ()
+  "A background build never switches perspectives under an open minibuffer."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl-test-ws--with-hold t
+      (let ((switches 0) (ran nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller-ws"))
+                  ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) (cl-incf switches)))
+                  ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+          ;; Act
+          (let ((value (agent-repl--call-in-background-workspace
+                        "target-ws" (lambda () (setq ran t)))))
+            ;; Assert
+            (should (eq value :held))
+            (should-not ran)
+            (should (zerop switches))))))))
+
+(ert-deftest agent-repl-test-call-in-background-held-build-runs-on-release ()
+  "A held build runs in its workspace once the minibuffer has exited."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((active t) (current "caller-ws") (seen nil))
+      (agent-repl-test-ws--with-hold active
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () current))
+                  ((symbol-function 'agent-repl--ws-all-names) (lambda () '("caller-ws" "target-ws")))
+                  ((symbol-function 'agent-repl--ws-switch) (lambda (ws &rest _) (setq current ws)))
+                  ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+          (agent-repl--call-in-background-workspace "target-ws" (lambda () (setq seen current)))
+          (setq active nil)
+          ;; Act
+          (agent-repl--minibuffer-release)
+          ;; Assert
+          (should (equal seen "target-ws"))
+          (should (equal current "caller-ws")))))))
+
+(ert-deftest agent-repl-test-call-in-background-held-build-of-a-closed-workspace-is-dropped ()
+  "A workspace closed while the user typed is not switched to: the drop is recorded."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((active t) (switches 0) (ran nil))
+      (agent-repl-test-ws--with-hold active
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller-ws"))
+                  ((symbol-function 'agent-repl--ws-all-names) (lambda () '("caller-ws")))
+                  ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) (cl-incf switches)))
+                  ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+          (agent-repl--call-in-background-workspace "target-ws" (lambda () (setq ran t)))
+          (setq active nil)
+          ;; Act
+          (agent-repl--minibuffer-release)
+          ;; Assert
+          (should-not ran)
+          (should (zerop switches))
+          (should (agent-repl-test-ws--logged-p
+                   infos "elisp.workspace.background-build-dropped ws=target-ws reason=workspace-gone")))))))
+
+(ert-deftest agent-repl-test-every-automatic-frame-move-goes-through-the-minibuffer-hold ()
+  "The background build, the roster's follow and a minted workspace's landing
+each reach the frame through `agent-repl--when-minibuffer-free', so none of
+them can take the user out of a minibuffer by a path of its own."
+  (dolist (spec '(("workspace.el" . "agent-repl--call-in-background-workspace")
+                  ("roster.el" . "agent-repl-roster-apply-current")
+                  ("verbs.el" . "agent-repl-verbs--land")))
+    (with-temp-buffer
+      ;; Arrange
+      (insert-file-contents (expand-file-name (car spec) agent-repl-test--module-dir))
+      (emacs-lisp-mode)
+      (goto-char (point-min))
+      (re-search-forward (concat "^(defun " (regexp-quote (cdr spec)) " "))
+      (beginning-of-defun)
+      ;; Act
+      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
+        ;; Assert
+        (should (string-match-p "(agent-repl--when-minibuffer-free" body))))))
+
 ;;;; ---- agent-repl--call-in-background-workspace ----
 
 (ert-deftest agent-repl-test-call-in-background-switches-in-before-fn-runs ()

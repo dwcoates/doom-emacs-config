@@ -134,6 +134,8 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-verbs--pending-landing nil)
          (agent-repl-verbs--pending-landing-dispatched-at nil)
          (agent-repl-verbs--pending-landing-lander nil)
+         (agent-repl--minibuffer-held nil)
+         (agent-repl--minibuffer-release-armed nil)
          (agent-repl-host--editor-switches 0)
          (agent-repl-test-verbs--tab-switched nil)
          (agent-repl-test-verbs--torn-down nil)
@@ -2053,21 +2055,6 @@ current workspace rides as the fork source, and no parent is sent."
         (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
                        (agent-repl-test-verbs--repo-ref)))))))
 
-(ert-deftest agent-repl-verbs-named-fork-selects-the-created-workspace ()
-  "`SPC TAB F\=' stands on the fork, exactly as `SPC TAB f\=' does."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'read-string) (lambda (&rest _) "named-fork")))
-      ;; Act.
-      (agent-repl-fork-workspace-static)
-      (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
-      ;; Assert.
-      (should (equal agent-repl-test-verbs--selected
-                     '("/tmp/agent-repl-test/fork"))))))
-
 ;;;; ---- Create: invocation and abandoned-read logging ----
 
 (defconst agent-repl-test-verbs--creation-commands
@@ -2170,105 +2157,6 @@ A fork that left no trace was indistinguishable from one never run."
 
 ;;;; ---- Create: standing on what was just created ----
 
-(ert-deftest agent-repl-verbs-create-command-selects-the-created-workspace ()
-  "`SPC TAB n' stands on the workspace it just made.
-Creating one is a statement about where the user intends to work next, so
-the create selects it the same way registering a directory does."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
-              ((symbol-function 'read-string) (lambda (&rest _) "")))
-      ;; Act.
-      (agent-repl-create-workspace)
-      (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
-      ;; Assert.
-      (should (equal agent-repl-test-verbs--selected
-                     '("/tmp/agent-repl-test/new"))))))
-
-(ert-deftest agent-repl-verbs-fork-command-selects-the-created-workspace ()
-  "`SPC TAB f' stands on the fork: you forked in order to work in the fork."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
-      ;; Act.
-      (agent-repl-fork-workspace)
-      (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
-      ;; Assert.
-      (should (equal agent-repl-test-verbs--selected
-                     '("/tmp/agent-repl-test/fork"))))))
-
-(ert-deftest agent-repl-verbs-create-lands-on-the-panel-not-magit ()
-  "The workspace `SPC TAB n\' just made comes up on ITS OWN PANEL.
-The recorded selection runs the real landing policy, so a magit status
-opened over the new workspace\'s panel shows up here as a magit call."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
-    (let (magit-dirs)
-      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
-                ((symbol-function 'read-string) (lambda (&rest _) ""))
-                ((symbol-function 'agent-repl--ws-name-for-dir)
-                 (lambda (dir) (and (equal dir "/tmp/agent-repl-test/new") "new-ws")))
-                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
-                ((symbol-function 'agent-repl--magit-status-same-window)
-                 (lambda (dir) (push dir magit-dirs)))
-                ((symbol-function 'agent-repl-switch-to-project)
-                 (lambda (dir)
-                   (push dir agent-repl-test-verbs--selected)
-                   (agent-repl--ws-switch-project-display dir))))
-        ;; Act.
-        (agent-repl-create-workspace)
-        (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
-        ;; Assert.
-        (should agent-repl-test-verbs--selected)
-        (should-not magit-dirs)))))
-
-(ert-deftest agent-repl-verbs-fork-lands-on-the-panel-not-magit ()
-  "A fork comes up on its own panel too: the fork is where you meant to work."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
-    (let (magit-dirs)
-      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-                ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it"))
-                ((symbol-function 'agent-repl--ws-name-for-dir)
-                 (lambda (dir) (and (equal dir "/tmp/agent-repl-test/fork") "fork-ws")))
-                ((symbol-function 'doom-real-buffer-list) (lambda (&optional _b) nil))
-                ((symbol-function 'agent-repl--magit-status-same-window)
-                 (lambda (dir) (push dir magit-dirs)))
-                ((symbol-function 'agent-repl-switch-to-project)
-                 (lambda (dir)
-                   (push dir agent-repl-test-verbs--selected)
-                   (agent-repl--ws-switch-project-display dir))))
-        ;; Act.
-        (agent-repl-fork-workspace)
-        (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
-        ;; Assert.
-        (should agent-repl-test-verbs--selected)
-        (should-not magit-dirs)))))
-
-(ert-deftest agent-repl-verbs-create-does-not-land-before-the-tab-arrives ()
-  "A minted ref whose tab has not reached the roster moves the user NOWHERE.
-Standing on a directory that is not a workspace yet arms no panels and
-lands the user on Doom's empty-project fallback, so the landing waits."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
-    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-      ;; Act.
-      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t)
-      ;; Assert.
-      (should-not agent-repl-test-verbs--selected))))
-
 (ert-deftest agent-repl-verbs-a-second-mint-supersedes-a-waiting-landing ()
   "The user stands in ONE place, so a newer mint replaces one still waiting."
   ;; Arrange.
@@ -2280,25 +2168,14 @@ lands the user on Doom's empty-project fallback, so the landing waits."
       ;; Assert.
       (should (equal (plist-get agent-repl-verbs--pending-landing :id) "second")))))
 
-(ert-deftest agent-repl-verbs-create-without-select-stands-still ()
-  "A create that did not ask to be selected moves the user NOWHERE.
-`select' is off by default because a one-shot is fire-and-forget and must
-not steal the user's place."
+(ert-deftest agent-repl-verbs-select-minted-without-a-dir-is-reported ()
+  "A minted ref carrying no dir is REPORTED, never silently skipped.
+The decoder already refuses an answer without the ref, so a missing dir
+is a contract breach and the user is owed the reason nothing came up."
   ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+  (agent-repl-test-verbs--with nil
     ;; Act.
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
-    ;; Assert.
-    (should-not agent-repl-test-verbs--selected)))
-
-(ert-deftest agent-repl-verbs-create-select-without-a-dir-is-reported ()
-  "A success whose ref carries no dir is REPORTED, never silently skipped.
-The decoder already refuses a success without the ref, so a missing dir is
-a contract breach and the user is owed the reason nothing came up."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created (list :id "no-dir" :dir ""))
-    ;; Act.
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t)
+    (agent-repl-verbs-select-minted (list :id "no-dir" :dir "") 0)
     ;; Assert.
     (should-not agent-repl-test-verbs--selected)
     (should (agent-repl-test-verbs--messaged-p "no directory to switch to"))))
@@ -2720,6 +2597,125 @@ trailing-slash removal alone, so the fixture directories need not exist."
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
               :rows (list :rows (list (agent-repl-test-verbs--row))))))
+
+;;;; ---- Create: no creation moves the user ----
+
+(defmacro agent-repl-test-verbs--with-create-commands (&rest body)
+  "Run BODY with the creation commands' questions answered.
+The repository is the current workspace's section, the prompt and the
+name are fixed, and agent-repl's own repository is the help target."
+  (declare (indent 0))
+  `(let ((agent-repl-roster-view
+          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
+                                         (agent-repl-test-verbs--help-sections))))
+     (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
+       (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+                 ((symbol-function 'agent-repl-verbs--read-repository)
+                  (lambda (&rest _) (agent-repl-test-verbs--repo-ref)))
+                 ((symbol-function 'agent-repl-verbs--read-prompt)
+                  (lambda (_p &optional _history-file _unseeded) "do a thing"))
+                 ((symbol-function 'agent-repl-verbs--read-required-prompt)
+                  (lambda (_p _refusal &optional _history-file _unseeded) "a question"))
+                 ((symbol-function 'read-string) (lambda (&rest _) "named")))
+         ,@body))))
+
+(defconst agent-repl-test-verbs--standard-creation-commands
+  '(agent-repl-create-workspace
+    agent-repl-create-workspace-static
+    agent-repl-fork-workspace
+    agent-repl-fork-workspace-static
+    agent-repl-fork-workspace-into-primary
+    agent-repl-fork-workspace-into-primary-static
+    agent-repl-create-help-workspace)
+  "Every command that creates a standard workspace from a keybinding.")
+
+(defun agent-repl-test-verbs--create-and-arrive (command)
+  "Run creation COMMAND, then deliver the roster arrival of its tab.
+Answers the moves the user saw: every workspace switched to and every
+project landed on."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
+    (agent-repl-test-verbs--with-create-commands
+      (funcall command)
+      (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
+      (list :landed agent-repl-test-verbs--selected
+            :switched agent-repl-test-verbs--tab-switched
+            :requested agent-repl-test-verbs--switch-requests
+            :pending agent-repl-verbs--pending-landing))))
+
+(ert-deftest agent-repl-verbs-dynamic-create-stands-still ()
+  "`SPC TAB n' leaves the user where they are once its tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-create-workspace)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-static-create-stands-still ()
+  "`SPC TAB N' leaves the user where they are once its tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-create-workspace-static)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-child-fork-stands-still ()
+  "`SPC TAB c' leaves the user on the parent once the fork's tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-fork-workspace)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-named-child-fork-stands-still ()
+  "`SPC TAB C' leaves the user on the parent once the fork's tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-fork-workspace-static)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-primary-fork-stands-still ()
+  "`SPC TAB f' leaves the user where they are once the fork's tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-fork-workspace-into-primary)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-named-primary-fork-stands-still ()
+  "`SPC TAB F' leaves the user where they are once the fork's tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive
+                'agent-repl-fork-workspace-into-primary-static)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-help-create-stands-still ()
+  "`SPC o h' leaves the user where they are once the help tab arrives."
+  ;; Arrange / Act.
+  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-create-help-workspace)))
+    ;; Assert.
+    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
+
+(ert-deftest agent-repl-verbs-no-creation-command-asks-to-select ()
+  "Every creation command creates through `agent-repl-verb-create' with no
+selection argument at all, so a new creation path cannot select by habit."
+  (dolist (command agent-repl-test-verbs--standard-creation-commands)
+    ;; Arrange.
+    (let (args)
+      (cl-letf (((symbol-function 'agent-repl-verb-create)
+                 (lambda (&rest a) (setq args a))))
+        (agent-repl-test-verbs--with nil
+          (agent-repl-test-verbs--with-create-commands
+            ;; Act.
+            (funcall command))))
+      ;; Assert.
+      (should args)
+      (should-not (plist-member (cddr args) :select)))))
+
+(ert-deftest agent-repl-verbs-create-refuses-a-select-argument ()
+  "`agent-repl-verb-create' has no SELECT key: asking it to select is an error."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    ;; Act / Assert.
+    (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t))))
 
 (ert-deftest agent-repl-verbs-help-prompt-meta-wraps-the-preamble ()
   "The preamble is an injected span ahead of the question, which stays bare."
@@ -3872,18 +3868,55 @@ came back CLOSED left behind."
       ;; Assert.
       (should automatic))))
 
-(ert-deftest agent-repl-verbs-create-switched-away-from-while-minting-moves-nothing ()
-  "A create the user switched away from in Emacs does not land on arrival."
+(ert-deftest agent-repl-verbs-a-landing-is-held-while-a-minibuffer-is-active ()
+  "A landing whose tab arrives while the user types moves nothing yet."
   ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
-                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
+  (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t))
-    (agent-repl-test-verbs--user-switches)
-    ;; Act.
-    (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+    (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () t)))
+      ;; Act.
+      (agent-repl-test-verbs--tab-arrives "new" "new-ws"))
     ;; Assert.
-    (should-not agent-repl-test-verbs--selected)))
+    (should-not agent-repl-test-verbs--selected)
+    (should (equal (mapcar #'car agent-repl--minibuffer-held) '(landing)))))
+
+(ert-deftest agent-repl-verbs-a-held-landing-lands-once-the-minibuffer-exits ()
+  "The held landing is made when the minibuffer has gone, as Emacs's own move."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let ((active t) automatic)
+      (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () active))
+                ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "new-ws"))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (dir)
+                   (setq automatic agent-repl-host-automatic-switch)
+                   (push dir agent-repl-test-verbs--selected))))
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0)
+        (setq active nil)
+        ;; Act.
+        (agent-repl--minibuffer-release))
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--selected '("/tmp/n")))
+      (should automatic))))
+
+(ert-deftest agent-repl-verbs-a-held-landing-whose-workspace-left-is-dropped ()
+  "A workspace gone from the roster by the release is not landed on: the drop is said."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let ((active t) (tab "new-ws") infos)
+      (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () active))
+                ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) tab))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0)
+        (setq active nil tab nil)
+        ;; Act.
+        (agent-repl--minibuffer-release))
+      ;; Assert.
+      (should-not agent-repl-test-verbs--selected)
+      (should (member "elisp.verbs.landing-dropped ws=new-ws id=new reason=workspace-gone"
+                      infos)))))
 
 ;;;; ---- The arrival reason a verb leaves for the roster (owner ruling #6) ----
 

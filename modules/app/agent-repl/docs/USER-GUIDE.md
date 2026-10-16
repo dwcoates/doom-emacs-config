@@ -300,6 +300,16 @@ The one-shot commission prompt (`SPC TAB o`) saves what you type to its history 
 - The text also stays in the history when you press `C-g`.
 - The history is shared by every workspace, in `~/.claude-emacs/oneshot-commission-history.el`.
 
+## Creating a workspace leaves you where you are
+
+No way of creating a workspace switches you to it.
+
+- This covers `SPC TAB n`, `SPC TAB N`, the forks (`SPC TAB c`, `SPC TAB C`, `SPC TAB f`, `SPC TAB F`), `SPC TAB o` and `SPC o h`.
+  - The new workspace's tab appears on the bar, and you switch to it when you want.
+- Nothing agent-repl does on its own takes you out of a minibuffer prompt.
+  - While you type, a workspace's panels being built, a switch made from the sidebar or by an agent, and the landing on a registered or reopened workspace all wait.
+  - They happen as soon as the prompt closes.
+
 ## When creating a workspace fails
 
 A workspace that fails to be created is reported in two places.

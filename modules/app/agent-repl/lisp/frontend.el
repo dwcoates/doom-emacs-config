@@ -1030,22 +1030,28 @@ The mount runs through `agent-repl--call-in-background-workspace', which
 activates WS for the duration of the display and restores the caller's
 focus afterward: `--display-webview' deletes and re-lays the frame's
 main-area windows, so a mis-anchored mount would evict the looked-at
-workspace's layout.  The anchor is inert when WS is already current."
+workspace's layout.  The anchor is inert when WS is already current.
+
+A mount the anchor HOLDS for an active minibuffer answers `:pending': the
+display, and the placeholder's finish with it, run once the minibuffer
+has exited, so the open still owns its own outcome."
   (agent-repl--log ws "elisp.frontend.gui-open: begin ws=%s" ws)
   (agent-repl--frontend-require-xwidget ws)
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (agent-repl--open-progress-note ws :acked)
-  (agent-repl--call-in-background-workspace
-   ws
-   (lambda ()
-     (let ((buf (agent-repl--frontend-ensure-webview-buffer ws)))
-       (agent-repl--frontend-display-webview ws buf)
-       ;; The real panel is on the frame; the placeholder has nothing left
-       ;; to say and goes away in the same call that replaced it.
-       (agent-repl--open-progress-finish ws)
-       (agent-repl--info ws "elisp.frontend.gui-open: displayed ws=%s buffer=%s"
-                         ws (and (buffer-live-p buf) (buffer-name buf)))
-       buf))))
+  (let ((outcome
+         (agent-repl--call-in-background-workspace
+          ws
+          (lambda ()
+            (let ((buf (agent-repl--frontend-ensure-webview-buffer ws)))
+              (agent-repl--frontend-display-webview ws buf)
+              ;; The real panel is on the frame; the placeholder has nothing left
+              ;; to say and goes away in the same call that replaced it.
+              (agent-repl--open-progress-finish ws)
+              (agent-repl--info ws "elisp.frontend.gui-open: displayed ws=%s buffer=%s"
+                                ws (and (buffer-live-p buf) (buffer-name buf)))
+              buf)))))
+    (if (eq outcome :held) :pending outcome)))
 
 (defun agent-repl--gui-boot (ws &optional _project-dir-hint _active-env-hint)
   "The gui frontend's boot capability (registry `:boot-fn').

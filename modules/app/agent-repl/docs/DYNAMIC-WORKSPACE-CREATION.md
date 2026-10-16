@@ -93,13 +93,12 @@ The daemon calls Haiku for the name only, with structured output, and
 continues in-process. It does NOT route through the dispatch JSON channel;
 that channel stays for genuinely out-of-band callers. The reasons, stated:
 
-- `CreateWorkspace` answers Emacs **synchronously**, and Emacs selects the
-  result: `agent-repl-verb-create`'s `:select` calls
-  `agent-repl-verbs--select-created` on `CreateWorkspaceSuccess.workspace`,
-  which is documented as the one place the minted identity exists before the
-  roster push carries it (`lisp/verbs.el`,
-  `agent-repl-verbs-select-minted`). A create that detoured through a file
-  channel would have no answer to select on.
+- `CreateWorkspace` answers Emacs **synchronously**, and Emacs claims the
+  arrival on the answer: `agent-repl-verb-create` records why the minted
+  `CreateWorkspaceSuccess.workspace` is about to arrive, the one place the
+  minted identity exists before the roster push carries it (`lisp/verbs.el`).
+  A create that detoured through a file channel would have no answer to claim
+  on. (Since 2026-10-16 no create selects what it made.)
 - Refusals must reach the caller. The whole refusal vocabulary of
   `CreateWorkspaceError` exists because the rpc answers the client; the
   command-file route has no caller and quarantines instead
@@ -347,8 +346,7 @@ rejected). **Open question (Q5).**
 
 **No.** `CreateWorkspace` is a unary rpc and Emacs waits for the answer:
 `agent-repl-verb-create` passes an `:on-success` that messages
-`agent-repl: workspace requested` and then, for `:select`, calls
-`agent-repl-verbs--select-created`. The transport dial itself is a blocking
+`agent-repl: workspace requested` and claims the minted workspace's arrival. The transport dial itself is a blocking
 loopback connect by design (`agent-repl-connect--open-socket`; module
 `AGENTS.md`, "ITS CONNECT BLOCKS, AND THAT IS NOT A TUNING CHOICE"), and the
 answer is what carries the minted `WorkspaceRef` the selection stands on.
