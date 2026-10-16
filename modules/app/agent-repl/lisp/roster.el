@@ -989,9 +989,13 @@ the decisions.  The FIRST judgment of an id is INFO, its repeats DEBUG.")
   "Move the frame to the workspace the roster's `current' names, if needed.
 THE ROSTER IS THE ONE SOURCE OF THE SELECTION.  Every switch -- a key, a
 picker, a notification, a sidebar row, a merge-queue entry -- is a
-SelectWorkspace, and the frame moves here and nowhere else, when the last
-accepted roster (`agent-repl-roster-view') names a workspace other than
-the one shown.  Returns the workspace switched to, or nil.
+SelectWorkspace, and the frame follows here when the last accepted roster
+\(`agent-repl-roster-view') names a workspace other than the one shown.  A
+switch Emacs requested moves the frame at once as well
+\(`agent-repl-host-request-switch'); the roster stays the authority, since
+every push while that request is pending is deferred, and the answer
+re-applies the roster, which moves the frame back if the daemon refused.
+Returns the workspace switched to, or nil.
 
 Takes no argument and reads the roster NOW, so any caller that has just
 made a switch possible may call it: the roster push itself, a selection
@@ -1069,14 +1073,23 @@ A roster with no `current' decides nothing and says so at DEBUG."
                         (agent-repl-roster--ms-since
                          (and (equal (car agent-repl-host-last-request) name)
                               (cdr agent-repl-host-last-request))))
-      (let ((agent-repl-roster-following t))
-        (agent-repl--ws-switch name))
-      ;; LAND IN THE INPUT WINDOW AT ONCE, before the next redisplay, rather
-      ;; than only on the deferred switch pass: a frame redisplayed with the
-      ;; webview selected hands the page a focus event and a repaint from
-      ;; blank -- the flash keyboard switches showed and sidebar ones did not.
-      (agent-repl--maybe-autoselect-input name)
+      (agent-repl-roster-move-frame name)
       name))))
+
+(defun agent-repl-roster-move-frame (name)
+  "Move the frame to workspace NAME, landing in its input window.
+The one way the frame moves to a selected workspace: the roster's follow
+\(`agent-repl-roster-apply-current') and Emacs's own switch request, which
+moves the frame at once rather than after the daemon's answer and push
+\(`agent-repl-host-request-switch').  Bound as a follow, so the activation
+is never counted as a second switch (`agent-repl-host--editor-switches')."
+  (let ((agent-repl-roster-following t))
+    (agent-repl--ws-switch name))
+  ;; LAND IN THE INPUT WINDOW AT ONCE, before the next redisplay, rather
+  ;; than only on the deferred switch pass: a frame redisplayed with the
+  ;; webview selected hands the page a focus event and a repaint from
+  ;; blank -- the flash keyboard switches showed and sidebar ones did not.
+  (agent-repl--maybe-autoselect-input name))
 
 ;;;; ---- The finish edge --------------------------------------------------
 

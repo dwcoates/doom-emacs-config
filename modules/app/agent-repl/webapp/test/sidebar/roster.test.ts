@@ -1473,6 +1473,66 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     expect(repoElement(second, "a")).toBe(before);
   });
 
+  it("redraws only the two rows a switch moves the highlight between, keeping their section", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (ids: string, current: string) =>
+      roster({ repos: [repoSection({ id: "a", rows: ids.split("").map((id) => row({ id, current: id === current })) })] });
+    const first = drawer.draw(at("xyz", "x"));
+    const section = first.querySelector(".repo-section");
+    const [x, y, z] = ["x", "y", "z"].map((id) => first.querySelector(`[data-roster-row='${id}']`));
+
+    // Act
+    const second = drawer.draw(at("xyz", "y"));
+
+    // Assert
+    const now = (id: string) => second.querySelector(`[data-roster-row='${id}']`);
+    expect([second.querySelector(".repo-section") === section, now("x") === x, now("y") === y, now("z") === z]).toEqual([
+      true,
+      false,
+      false,
+      true,
+    ]);
+    expect(second.querySelector("[data-current]")?.getAttribute("data-roster-row")).toBe("y");
+  });
+
+  it("keeps both repositories' sections when a switch crosses between them", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (current: string) =>
+      roster({
+        repos: [
+          repoSection({ id: "a", rows: [row({ id: "x", current: current === "x" })] }),
+          repoSection({ id: "b", rows: [row({ id: "y", current: current === "y" })] }),
+        ],
+      });
+    const first = drawer.draw(at("x"));
+    const sections = [...first.querySelectorAll(".repo-section")];
+
+    // Act
+    const second = drawer.draw(at("y"));
+
+    // Assert
+    expect([...second.querySelectorAll(".repo-section")]).toEqual(sections);
+    expect(second.querySelector("[data-current]")?.getAttribute("data-roster-row")).toBe("y");
+  });
+
+  it("redraws a section whose rows changed order", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (ids: string[]) => roster({ repos: [repoSection({ id: "a", rows: ids.map((id) => row({ id })) })] });
+    const section = drawer.draw(at(["x", "y"])).querySelector(".repo-section");
+
+    // Act
+    const after = drawer.draw(at(["y", "x"])).querySelector(".repo-section");
+
+    // Assert
+    expect([after === section, [...after!.querySelectorAll("[data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))]).toEqual([
+      false,
+      ["y", "x"],
+    ]);
+  });
+
   it("redraws a repository section the push changed", () => {
     // Arrange
     const sc = sidebarContext();

@@ -2,7 +2,10 @@ package integration
 
 import (
 	"bufio"
+	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,9 +16,8 @@ import (
 // the script given, returning once it has said "ready" (every script says so
 // after its trap is set, so no signal lands before the disposition under
 // test).
-func startStalledStore(t *testing.T, script string) *storeProcess {
+func startStalledStore(t *testing.T, cmd *exec.Cmd) *storeProcess {
 	t.Helper()
-	cmd := exec.Command("/bin/sh", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -40,30 +42,58 @@ func startStalledStore(t *testing.T, script string) *storeProcess {
 	return s
 }
 
+// exitOnQuitStandIn makes this test binary, run with it set, a stand-in that
+// exits 2 on SIGQUIT (TestMain, runExitOnQuitStandIn).
+const exitOnQuitStandIn = "AGENT_REPL_TEST_EXIT_ON_SIGQUIT"
+
+// exitOnQuitCommand is this test binary as that stand-in.
+func exitOnQuitCommand() *exec.Cmd {
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), exitOnQuitStandIn+"=1")
+	return cmd
+}
+
+// runExitOnQuitStandIn is the stand-in for a process that exits on SIGQUIT,
+// as the Go runtime's own handler does.
+//
+// IT IS SUBSCRIBED BEFORE IT SAYS READY, so no SIGQUIT can arrive before the
+// handler that answers it. A shell's trap could not promise that: a trapped
+// signal landing just before the shell entered its wait stayed pending until
+// the 100s sleep it waited on ended, and the test's bound ran out first.
+func runExitOnQuitStandIn() int {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGQUIT)
+	fmt.Println("ready")
+	<-quit
+	return 2
+}
+
 func TestDumpOnStall(t *testing.T) {
 	tests := []struct {
-		name   string
-		script string
-		bound  time.Duration
-		want   string
+		name    string
+		standIn func() *exec.Cmd
+		bound   time.Duration
+		want    string
 	}{
 		{
-			name:   "a store that dumps and exits on SIGQUIT is reported as dumped",
-			script: `trap 'exit 2' QUIT; echo ready; while :; do sleep 100 & wait $!; done`,
-			bound:  dumpBound,
-			want:   "goroutine dump is in the stderr below",
+			name:    "a store that dumps and exits on SIGQUIT is reported as dumped",
+			standIn: exitOnQuitCommand,
+			bound:   dumpBound,
+			want:    "goroutine dump is in the stderr below",
 		},
 		{
-			name:   "a store that ignores SIGQUIT is reported as not having exited",
-			script: `trap '' QUIT; echo ready; while :; do sleep 100 & wait $!; done`,
-			bound:  50 * time.Millisecond,
-			want:   "did not exit within 50ms",
+			name: "a store that ignores SIGQUIT is reported as not having exited",
+			standIn: func() *exec.Cmd {
+				return exec.Command("/bin/sh", "-c", `trap '' QUIT; echo ready; while :; do sleep 100 & wait $!; done`)
+			},
+			bound: 50 * time.Millisecond,
+			want:  "did not exit within 50ms",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			s := startStalledStore(t, tc.script)
+			s := startStalledStore(t, tc.standIn())
 
 			// Act
 			got := s.dumpOnStall(tc.bound)
@@ -78,7 +108,7 @@ func TestDumpOnStall(t *testing.T) {
 
 func TestDumpOnStallOfAStoreAlreadyGone(t *testing.T) {
 	// Arrange: the store has exited and been reaped.
-	s := startStalledStore(t, `echo ready; exit 0`)
+	s := startStalledStore(t, exec.Command("/bin/sh", "-c", `echo ready; exit 0`))
 	<-s.done
 
 	// Act

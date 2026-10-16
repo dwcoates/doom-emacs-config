@@ -4032,3 +4032,85 @@ itself is a second copy free to drift from it."
               (push (format "%s:%d" (file-name-nondirectory file) (line-number-at-pos))
                     offenders))))))
     (should-not offenders)))
+
+;;;; ---- A switch request moves the frame at once ----
+
+(defmacro agent-repl-test-host--moving (shown tabbed &rest body)
+  "Run BODY with SHOWN on screen, the workspaces in TABBED having tabs, and
+every frame move recorded in `moved'."
+  (declare (indent 2))
+  `(let ((moved nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+               ((symbol-function 'agent-repl-open-tabs-holds-p) (lambda (_id) nil))
+               ((symbol-function 'agent-repl--ws-by-ref-id)
+                (lambda (id) (cl-find-if (lambda (ws) (equal (format "ws-id-%s" (substring ws 3)) id)) ,tabbed)))
+               ((symbol-function 'agent-repl-roster-move-frame) (lambda (ws) (push ws moved)))
+               ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
+               ((symbol-function 'agent-repl-webhost-show) (lambda (ws) (push (list :shown ws) moved))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-host-a-switch-request-moves-the-frame-at-once ()
+  "The frame moves on the request, before the daemon answers: the roster's
+follow came some 50ms later (2026-10-15 switch-bench)."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-test-host--moving "ws-1" '("ws-1" "ws-2")
+      ;; Act
+      (agent-repl-host-request-switch "ws-2" 'cycle)
+      ;; Assert: the page is shown first, so WebKit paints it while Emacs
+      ;; switches its own view.
+      (should (equal (reverse moved) '((:shown "ws-2") "ws-2")))
+      (should (equal (agent-repl-test-host--selected-ids) '("ws-id-2"))))))
+
+(ert-deftest agent-repl-test-host-a-switch-request-with-no-page-moves-the-frame-alone ()
+  "A workspace whose page the host does not hold yet moves the frame; the
+switch pass shows its page once it is made."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-test-host--moving "ws-1" '("ws-1" "ws-2")
+      (cl-letf (((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) nil)))
+        ;; Act
+        (agent-repl-host-request-switch "ws-2" 'cycle)
+        ;; Assert
+        (should (equal moved '("ws-2")))
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.move-on-request ws=ws-2 decision=moved from=ws-1 page=none"))))))
+
+(ert-deftest agent-repl-test-host-a-switch-request-moves-on-every-press ()
+  "Every press moves the frame, though only the first select is on the wire."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-test-host--moving "ws-1" '("ws-1" "ws-2" "ws-3")
+      ;; Act
+      (agent-repl-host-request-switch "ws-2" 'cycle)
+      (agent-repl-host-request-switch "ws-3" 'cycle)
+      ;; Assert
+      (should (equal (reverse moved) '((:shown "ws-2") "ws-2" (:shown "ws-3") "ws-3"))))))
+
+(ert-deftest agent-repl-test-host-a-switch-request-to-a-workspace-with-no-tab-moves-nothing ()
+  "A workspace with no tab yet is landed on by the roster's follow once its
+tab opens, never here."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-test-host--moving "ws-1" '("ws-1")
+      ;; Act
+      (agent-repl-host-request-switch "ws-2" 'cycle)
+      ;; Assert
+      (should (null moved))
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.move-on-request ws=ws-2 decision=no-tab-yet")))))
+
+(ert-deftest agent-repl-test-host-a-switch-request-to-the-shown-workspace-moves-nothing ()
+  "Asking for the workspace on screen moves nothing."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-test-host--moving "ws-2" '("ws-1" "ws-2")
+      ;; Act
+      (agent-repl-host-request-switch "ws-2" 'cycle)
+      ;; Assert
+      (should (null moved)))))
