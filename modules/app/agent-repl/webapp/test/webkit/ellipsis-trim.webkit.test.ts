@@ -225,7 +225,7 @@ describe("a collapsed one-line clamp's ellipsis in WebKit", () => {
   beforeAll(async () => {
     let page: Page;
     ({ browser, page } = await openFeedPage({ width: 800, height: 9000, deviceScaleFactor: 1, styles: [SENTINEL] }));
-    await page.addScriptTag({ content: await bundlePage(path.join(here, "ellipsis-trim-page.ts"), "EllipsisTrim") });
+    await page.addScriptTag({ content: await bundlePage(path.join(here, "bubble-more-page.ts"), "EllipsisTrim") });
     for (const key of Object.keys(TEXTS) as TextKey[]) {
       titles[key] = await shownAcross(page, TITLE, TEXTS[key], WIDTHS);
       bubbles[key] = await shownAcross(page, BUBBLE, TEXTS[key], BUBBLE_WIDTHS);

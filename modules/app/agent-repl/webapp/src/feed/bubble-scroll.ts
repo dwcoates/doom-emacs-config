@@ -28,6 +28,8 @@
  * only thing built here is the nesting the two rules assume.
  */
 import { bubbleBodyOf, installHasMore, refreshHasMore } from "./bubble-more.js";
+import { followContainingWidth } from "./collapsed-width.js";
+import type { BubbleBody } from "../bubble/body.js";
 
 /** The class the stylesheet caps, scrolls and paints a scrollbar on. */
 export const BUBBLE_SCROLL_CLASS = "bubble-scroll";
@@ -48,7 +50,7 @@ export const BUBBLE_BOX_CLASS = "bubble-box";
  * reach it, and it arms no has-more measurer, having nothing to hide. Which a
  * box is, is fixed when it is built: a redraw that changes it builds a new one.
  */
-export function bubbleBox(body: HTMLElement, capped: boolean): HTMLElement {
+export function bubbleBox(body: BubbleBody, capped: boolean): HTMLElement {
   const box = document.createElement("div");
   box.className = capped ? `${BUBBLE_SCROLL_CLASS} ${BUBBLE_BOX_CLASS}` : BUBBLE_BOX_CLASS;
   box.append(body);
@@ -57,6 +59,9 @@ export function bubbleBox(body: HTMLElement, capped: boolean): HTMLElement {
   // bubbles ONLY lives in refreshHasMore (bubble-more.ts) — this factory is
   // shared, so the observer is armed on every capped bubble and self-restricts.
   if (capped) installHasMore(box, refreshHasMore, bubbleBodyOf);
+  // A fitted collapsed box keeps its width when the column grows around it,
+  // so the column's width is followed too (collapsed-width.ts).
+  if (capped) followContainingWidth(body, refreshHasMore);
   return box;
 }
 

@@ -13,6 +13,7 @@ import {
   isBubbleBody,
   markdownSlot,
   measureTreeCols,
+  observeContainingBlock,
   paintBody,
   paintGeneration,
   proseNeedsWidth,
@@ -711,5 +712,57 @@ describe("isBubbleBody", () => {
 
   it("refuses any other element", () => {
     expect(isBubbleBody(document.createElement("div"))).toBe(false);
+  });
+});
+
+describe("observeContainingBlock: the one observer of a bubble's column", () => {
+  it("hands the bubble's parent to the callback once the frame comes", () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    const body = stageBody();
+    const column = body.closest(".bubble")!.parentElement!;
+    const rewrap = vi.fn();
+    observeContainingBlock(body, rewrap);
+
+    // Act
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+
+    // Assert
+    expect(rewrap.mock.calls).toEqual([[column]]);
+  });
+
+  it("coalesces a burst of resizes into one call", () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    const body = stageBody();
+    const column = body.closest(".bubble")!.parentElement!;
+    const rewrap = vi.fn();
+    observeContainingBlock(body, rewrap);
+
+    // Act
+    fireResize(column);
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+
+    // Assert
+    expect(rewrap).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a body in no bubble, and records it at error", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const body = document.createElement("div");
+    document.body.append(body);
+
+    // Act
+    const observe = (): ResizeObserver => observeContainingBlock(body, vi.fn());
+
+    // Assert
+    expect(observe).toThrow();
+    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
+    expect(record.level.case).toBe("error");
   });
 });

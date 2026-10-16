@@ -38,6 +38,7 @@ import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { EXPANDED_CLASS } from "../expand.js";
 import { pageResizeObserver } from "../dom.js";
 import { log } from "../log.js";
+import { applyCollapsedWidth, clearCollapsedWidth, collapsedWidthOf } from "./collapsed-width.js";
 import { applyEllipsisTrim, clearEllipsisTrim } from "./ellipsis-trim.js";
 import { onDiscard } from "./ticking.js";
 
@@ -151,6 +152,11 @@ export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
  * violation, recorded once and thrown, never read as "nothing hidden".
  */
 export function hidesContentBeyondCap(box: HTMLElement): boolean {
+  return renderedLinesHeight(box, requireBody(box)) > box.clientHeight;
+}
+
+/** The body BOX, a bubble's scroll box, holds; its absence is the invariant violation above. */
+function requireBody(box: HTMLElement): HTMLElement {
   const body = box.querySelector<HTMLElement>(BODY_SELECTOR);
   if (body === null) {
     log.error("a bubble's has-more cannot be measured: its scroll box holds no body", {
@@ -159,13 +165,17 @@ export function hidesContentBeyondCap(box: HTMLElement): boolean {
     });
     throw new Error("has-more unmeasurable: the bubble's scroll box holds no body");
   }
-  return renderedLinesHeight(box, body) > box.clientHeight;
+  return body;
 }
 
 /** The height of BODY's rendered lines, clamped or not (see `hidesContentBeyondCap`). */
 function renderedLinesHeight(box: HTMLElement, body: HTMLElement): number {
-  const clamped = box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS;
-  return clamped ? body.scrollHeight : body.offsetHeight;
+  return isEllipsisBox(box) ? body.scrollHeight : body.offsetHeight;
+}
+
+/** Whether BOX is the box of a bubble in the ellipsis mode, whose body is its clamp. */
+function isEllipsisBox(box: HTMLElement): boolean {
+  return box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS;
 }
 
 /**
@@ -183,6 +193,11 @@ interface MoreKind {
    * ellipsis-trim.ts places; null for a box that draws no `…` (a fade bubble).
    */
   clamp(box: HTMLElement): HTMLElement | null;
+  /**
+   * Whether a collapsed box of this kind is as wide as the lines it shows
+   * (collapsed-width.ts): a bubble is, a title fold spans its card.
+   */
+  readonly fitsWidth: boolean;
 }
 
 /**
@@ -195,16 +210,15 @@ const MORE_KINDS: readonly MoreKind[] = [
     selector: MORE_BUBBLE_SELECTOR,
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
     hidesContent: hidesContentBeyondCap,
-    clamp: (box) =>
-      box.parentElement?.getAttribute(BUBBLE_MORE_ATTRIBUTE) === BUBBLE_MORE_ELLIPSIS
-        ? box.querySelector<HTMLElement>(BODY_SELECTOR)
-        : null,
+    clamp: (box) => (isEllipsisBox(box) ? box.querySelector<HTMLElement>(BODY_SELECTOR) : null),
+    fitsWidth: true,
   },
   {
     selector: `.${TITLE_FOLD_CLASS}`,
     isOpen: (box) => box.matches(TITLE_FOLD_OPEN_SELECTOR),
     hidesContent: overflowsCap,
     clamp: (box) => box,
+    fitsWidth: false,
   },
 ];
 
@@ -225,17 +239,24 @@ export function shouldShowMore(box: HTMLElement): boolean {
 }
 
 /**
- * Add or drop `has-more` on BOX to match its current overflow and state, and
- * place a clamp's `…` (ellipsis-trim.ts). The clamp's trim is cleared BEFORE
- * the overflow is measured, since a trim narrows the line and a stale one
- * could make text that now fits read as overflowing; it is put back only on a
- * collapsed box whose clamp is writing its `…`.
+ * Add or drop `has-more` on BOX to match its current overflow and state, fit a
+ * collapsed bubble's width to the lines it shows (collapsed-width.ts), and
+ * place a clamp's `…` (ellipsis-trim.ts). The clamp's trim and the bubble's
+ * width are cleared BEFORE the overflow is measured, since each narrows the
+ * lines and a stale one could make text that now fits read as overflowing.
+ * Each is put back only on a collapsed box that hides content: the width
+ * first, since the `…` is placed on the line the fitted box lays out.
  */
 export function refreshHasMore(box: HTMLElement): void {
-  const clamp = kindOf(box)?.clamp(box) ?? null;
+  const kind = kindOf(box);
+  const clamp = kind?.clamp(box) ?? null;
+  const fits = kind?.fitsWidth === true;
+  const fitted = collapsedWidthOf(box);
   if (clamp !== null) clearEllipsisTrim(clamp);
+  if (fits) clearCollapsedWidth(box);
   const more = shouldShowMore(box);
   box.classList.toggle(HAS_MORE_CLASS, more);
+  if (fits && more) applyCollapsedWidth(box, requireBody(box), isEllipsisBox(box), fitted);
   if (clamp !== null && more) applyEllipsisTrim(clamp);
 }
 

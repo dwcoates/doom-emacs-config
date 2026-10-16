@@ -26,12 +26,13 @@ import {
   refreshHasMore,
   shouldShowMore,
 } from "../../src/feed/bubble-more.js";
-import { BUBBLE_BODY_CLASS } from "../../src/bubble/body.js";
+import { BUBBLE_BODY_CLASS, createBubbleBody } from "../../src/bubble/body.js";
 import { quoteSlot } from "../../src/bubble/quote.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { BUBBLE_SCROLL_CLASS, bubbleBox as sharedBubbleBox } from "../../src/feed/bubble-scroll.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { stopTicking } from "../../src/feed/ticking.js";
+import { COLLAPSED_FIT_CLASS, COLLAPSED_WIDTH_PROPERTY, collapsedWidthOf } from "../../src/feed/collapsed-width.js";
 import { fireResize } from "../resize-observer.js";
 import { ELLIPSIS_TRIM_PROPERTY, ELLIPSIS_TRIM_SLACK } from "../../src/feed/ellipsis-trim.js";
 
@@ -229,8 +230,7 @@ describe("shouldShowMore: the four conditions", () => {
     // Arrange — the box an uncapped bubble is drawn with, its body far taller.
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    const body = document.createElement("div");
-    body.className = BUBBLE_BODY_CLASS;
+    const body = createBubbleBody();
     const box = sharedBubbleBox(body, false);
     bubble.append(box);
     Object.defineProperty(box, "clientHeight", { configurable: true, value: 540 });
@@ -490,8 +490,7 @@ describe("installHasMore: a box that writes an ellipsis follows its text", () =>
 function bubble(kind: "assistant" | "user", overflow: boolean): HTMLElement {
   const el = document.createElement("div");
   el.className = `bubble ${kind}`;
-  const body = document.createElement("div");
-  body.className = BUBBLE_BODY_CLASS;
+  const body = createBubbleBody();
   const scroll = sharedBubbleBox(body, true);
   el.append(scroll);
   Object.defineProperty(scroll, "clientHeight", { configurable: true, value: 540 });
@@ -514,8 +513,7 @@ describe("installHasMore: the box tracks its own overflow", () => {
 
   it("arms no measurer on an uncapped bubble's box", () => {
     // Arrange — an uncapped box has nothing hidden to point at.
-    const body = document.createElement("div");
-    body.className = BUBBLE_BODY_CLASS;
+    const body = createBubbleBody();
     const box = sharedBubbleBox(body, false);
 
     // Act / Assert — the stub throws on a resize nothing observes.
@@ -683,5 +681,88 @@ describe("installHasMore: a caller's refresh", () => {
 
     // Assert
     expect(seen).toEqual([box]);
+  });
+});
+
+describe("refreshHasMore: a collapsed bubble's width follows the text it shows", () => {
+  it("fits a collapsed bubble that hides content", () => {
+    // Arrange -- jsdom lays out no line, so the fit is the zero-line one.
+    const box = bubbleBox({ lines: CAP_LINES + 5 });
+
+    // Act
+    refreshHasMore(box);
+
+    // Assert
+    expect([box.classList.contains(COLLAPSED_FIT_CLASS), collapsedWidthOf(box)]).toEqual([true, "0px"]);
+  });
+
+  it("leaves a collapsed bubble that hides nothing at its natural width", () => {
+    // Arrange
+    const box = bubbleBox({ lines: CAP_LINES });
+
+    // Act
+    refreshHasMore(box);
+
+    // Assert
+    expect([box.classList.contains(COLLAPSED_FIT_CLASS), collapsedWidthOf(box)]).toEqual([false, ""]);
+  });
+
+  it("drops the fit once the bubble is expanded", () => {
+    // Arrange
+    const box = bubbleBox({ lines: CAP_LINES + 5 });
+    refreshHasMore(box);
+    box.classList.add(EXPANDED_CLASS);
+
+    // Act
+    refreshHasMore(box);
+
+    // Assert
+    expect([box.classList.contains(COLLAPSED_FIT_CLASS), collapsedWidthOf(box)]).toEqual([false, ""]);
+  });
+
+  it("measures the overflow at the natural width, never a stale fit", () => {
+    // Arrange -- the measurement reads the box with its old fit already gone.
+    const box = bubbleBox({ lines: CAP_LINES + 5 });
+    box.style.setProperty(COLLAPSED_WIDTH_PROPERTY, "40px");
+    box.classList.add(COLLAPSED_FIT_CLASS);
+    let seen: string | null = null;
+    Object.defineProperty(box, "clientHeight", {
+      configurable: true,
+      get: () => {
+        seen ??= collapsedWidthOf(box);
+        return CAP_LINES * LINE_PX;
+      },
+    });
+
+    // Act
+    refreshHasMore(box);
+
+    // Assert
+    expect(seen).toBe("");
+  });
+
+  it("fits a collapsed ellipsis bubble that hides content", () => {
+    // Arrange
+    const box = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+
+    // Act
+    refreshHasMore(box);
+
+    // Assert
+    expect(box.classList.contains(COLLAPSED_FIT_CLASS)).toBe(true);
+  });
+
+  it("never fits a title fold, which spans its card", () => {
+    // Arrange
+    const title = titleUnder("tool-fold", false);
+
+    // Act
+    refreshHasMore(title);
+
+    // Assert
+    expect([title.classList.contains(HAS_MORE_CLASS), title.classList.contains(COLLAPSED_FIT_CLASS)]).toEqual([
+      true,
+      false,
+    ]);
   });
 });
