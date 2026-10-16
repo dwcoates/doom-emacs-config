@@ -656,7 +656,6 @@ export type RollBackSessionCause =
   | { readonly kind: "promptNotRecorded" }
   | { readonly kind: "firstPrompt" }
   | { readonly kind: "unseenPrompt"; readonly vendorPromptUuid: string }
-  | { readonly kind: "vendorRefused"; readonly vendorMessage: string }
   | { readonly kind: "filesNotRestorable"; readonly vendorMessage: string };
 
 /** The base constructor for `shim.v1.RollBackSessionFailure`. */
@@ -677,11 +676,6 @@ function rollBackSessionFailureArm(cause: RollBackSessionCause): shimv1.RollBack
       return {
         case: "unseenPrompt",
         value: create(shimv1.RollBackSessionUnseenPromptSchema, { vendorPromptUuid: cause.vendorPromptUuid }),
-      };
-    case "vendorRefused":
-      return {
-        case: "vendorRefused",
-        value: create(shimv1.RollBackSessionVendorRefusedSchema, { vendorMessage: cause.vendorMessage }),
       };
     case "filesNotRestorable":
       return {

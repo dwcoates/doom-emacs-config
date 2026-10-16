@@ -186,7 +186,6 @@ describe("shimRoutes RollBackSession outcomes", () => {
     ["prompt_not_recorded", failures.rollBackSessionRefused({ kind: "promptNotRecorded" }, "d")],
     ["first_prompt", failures.rollBackSessionRefused({ kind: "firstPrompt" }, "d")],
     ["unseen_prompt", failures.rollBackSessionRefused({ kind: "unseenPrompt", vendorPromptUuid: "u-9" }, "d")],
-    ["vendor_refused", failures.rollBackSessionRefused({ kind: "vendorRefused", vendorMessage: "no" }, "d")],
     ["files_not_restorable", failures.rollBackSessionRefused({ kind: "filesNotRestorable", vendorMessage: "no" }, "d")],
   ] as const)("answers %s unchanged", async (_arm, answer) => {
     // Arrange.

@@ -785,7 +785,7 @@ describe("StartSession, fresh", () => {
 
     await started(h);
 
-    expect(freshSessionId(h.queries[0]!.spec)).toBe("11111111-1111-4111-8111-111111111111");
+    expect(freshSessionId(h.queries[0].spec)).toBe("11111111-1111-4111-8111-111111111111");
   });
 
   it("mints a fresh conversation's vendor session id at random when none is injected", async () => {
@@ -795,7 +795,7 @@ describe("StartSession, fresh", () => {
     await started(first);
     await started(second);
 
-    expect(freshSessionId(first.queries[0]!.spec)).not.toBe(freshSessionId(second.queries[0]!.spec));
+    expect(freshSessionId(first.queries[0].spec)).not.toBe(freshSessionId(second.queries[0].spec));
   });
 
   it("refuses a SECOND StartSession — one shim serves exactly one session", async () => {
@@ -14386,6 +14386,34 @@ describe("a prompt's vendor uuid is derived from its turn id", () => {
 describe("RollBackSession", () => {
   const rollBack = rollBackSessionRequestFor;
 
+  /** The settles each harness's rollbacks stated, in order. */
+  const settles = new WeakMap<Harness, conversationv1.SessionRollbackSettled[]>();
+
+  /**
+   * Roll back, and when the answer is success wait for the restart behind it to
+   * settle (SessionRollbackSettled), recording the settle in `settles`.
+   */
+  async function settleRollBack(h: Harness, request: shimv1.RollBackSessionRequest): Promise<shimv1.RollBackSessionResponse> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    try {
+      const response = await h.engine.rollBackSession(request);
+      if (response.result.case !== "success") return response;
+      for (;;) {
+        const next = await stream.next();
+        if (next.done === true) throw new Error("the session's pushes ended before the rollback settled");
+        if (next.value.update.case === "rollbackSettled") {
+          settles.set(h, [...(settles.get(h) ?? []), next.value.update.value]);
+          return response;
+        }
+      }
+    } finally {
+      await stream.return?.();
+    }
+  }
+
+  /** The outcome arm of the last settle H's rollbacks stated. */
+  const lastSettle = (h: Harness): conversationv1.SessionRollbackSettled | undefined => settles.get(h)?.at(-1);
+
   /** A user prompt record of `turn`, chained under `parent`. */
   const promptLine = (turn: string, parent: string | null): Record<string, unknown> => ({
     type: "user",
@@ -14452,7 +14480,7 @@ describe("RollBackSession", () => {
     const h = harness();
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+    const response = await settleRollBack(h, rollBack("turn-1", ["turn-1"]));
 
     // Assert
     expect(outcome(response)).toBe("noSession");
@@ -14464,7 +14492,7 @@ describe("RollBackSession", () => {
     await started(h);
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+    const response = await settleRollBack(h, rollBack("turn-1", ["turn-1"]));
 
     // Assert
     expect(outcome(response)).toBe("promptNotRecorded");
@@ -14475,7 +14503,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-9", ["turn-9"]));
+    const response = await settleRollBack(h, rollBack("turn-9", ["turn-9"]));
 
     // Assert
     expect(outcome(response)).toBe("promptNotRecorded");
@@ -14486,7 +14514,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-0", ["turn-0", "turn-1", "turn-2"]));
+    const response = await settleRollBack(h, rollBack("turn-0", ["turn-0", "turn-1", "turn-2"]));
 
     // Assert
     expect(outcome(response)).toBe("firstPrompt");
@@ -14497,7 +14525,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+    const response = await settleRollBack(h, rollBack("turn-1", ["turn-1"]));
 
     // Assert
     expect(
@@ -14512,7 +14540,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-1", ["turn-1", "turn-2"]));
+    const response = await settleRollBack(h, rollBack("turn-1", ["turn-1", "turn-2"]));
 
     // Assert
     expect({ outcome: outcome(response), spec: h.queries[1]?.spec.resumeSessionAt }).toEqual({
@@ -14526,7 +14554,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-1", ["turn-1", "turn-2"]));
+    const response = await settleRollBack(h, rollBack("turn-1", ["turn-1", "turn-2"]));
 
     // Assert
     expect(response.result.case === "success" ? response.result.value.filesRestored : "failed").toBeUndefined();
@@ -14537,7 +14565,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect(h.queries[1]?.spec.resumeDropsTurn).toBe(promptVendorUuid("turn-2"));
@@ -14548,7 +14576,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript(threeTurns());
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-1", ["turn-1", "turn-2"]));
+    await settleRollBack(h, rollBack("turn-1", ["turn-1", "turn-2"]));
 
     // Assert
     expect(h.queries[1]?.spec).not.toHaveProperty("resumeDropsTurn");
@@ -14560,7 +14588,7 @@ describe("RollBackSession", () => {
     const vendorSessionId = freshSessionId((await untilQuery(h, 0)).spec);
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect(h.queries[1]?.spec.binding).toEqual({ kind: "resume", resumeSessionId: vendorSessionId });
@@ -14575,7 +14603,7 @@ describe("RollBackSession", () => {
     before.rewindDryRun = { canRewind: false, error: "No file checkpoint found for this message" };
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"], "restore"));
 
     // Assert
     expect({
@@ -14599,7 +14627,7 @@ describe("RollBackSession", () => {
     before.rewindDryRun = { canRewind: false, error: "No file checkpoint found for this message" };
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"], "restore"));
 
     // Assert
     expect(
@@ -14617,7 +14645,7 @@ describe("RollBackSession", () => {
     before.rewindReal = { canRewind: true, filesChanged: ["/ws/a.ts", "/ws/b.ts"] };
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"], "restore"));
 
     // Assert
     expect(response.result.case === "success" ? response.result.value.filesRestored?.paths : []).toEqual([
@@ -14633,7 +14661,7 @@ describe("RollBackSession", () => {
     if (before === undefined) throw new Error("no query");
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"], "restore"));
 
     // Assert
     expect(before.calls.filter((call) => call.startsWith("rewindFiles") || call === "close")).toEqual([
@@ -14655,7 +14683,7 @@ describe("RollBackSession", () => {
     if (before === undefined) throw new Error("no query");
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-1", ["turn-1", "turn-2"], "restore"));
+    await settleRollBack(h, rollBack("turn-1", ["turn-1", "turn-2"], "restore"));
 
     // Assert
     expect(before.stoppedTasks).toEqual(["t1", "t2"]);
@@ -14671,7 +14699,7 @@ describe("RollBackSession", () => {
     if (before === undefined) throw new Error("no query");
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect(before.stoppedTasks).toEqual([]);
@@ -14695,7 +14723,7 @@ describe("RollBackSession", () => {
     expect({ restartedBeforeStop, outcome: outcome(response) }).toEqual({ restartedBeforeStop: 1, outcome: "success" });
   });
 
-  it("answers vendor_refused with the vendor's words when the restarted query refuses the cut at boot", async () => {
+  it("answers success at the cut, then settles refused with the vendor's words when the restarted query refuses it at boot", async () => {
     // Arrange
     const refusal = "Resume rejected by --resume-drops-turn: resuming at a1 would discard entries";
     const h = await withTranscript(threeTurns(), {
@@ -14708,15 +14736,18 @@ describe("RollBackSession", () => {
     });
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
-    expect(
-      response.result.case === "failure" && response.result.value.cause.case === "vendorRefused"
-        ? response.result.value.cause.value.vendorMessage
-        : "",
-    ).toBe(refusal);
+    const settled = lastSettle(h);
+    expect({
+      answer: outcome(response),
+      settled: settled?.outcome.case,
+      words: settled?.outcome.case === "refused" ? settled.outcome.value.vendorMessage : "",
+      dropped: settled?.droppedTurns.map((turn) => turn.value),
+    }).toEqual({ answer: "success", settled: "refused", words: refusal, dropped: ["turn-2"] });
   });
+
 
   it("resumes the session plainly after the vendor refuses, and never retries the cut", async () => {
     // Arrange
@@ -14730,13 +14761,13 @@ describe("RollBackSession", () => {
     });
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect(h.queries.map((created) => created.spec.resumeSessionAt ?? "plain")).toEqual(["plain", "a1", "plain"]);
   });
 
-  it("fails loudly, after resuming whole, when the restarted query dies at boot without refusing the cut", async () => {
+  it("settles failed, after resuming whole, when the restarted query dies at boot without refusing the cut", async () => {
     // Arrange
     const h = await withTranscript(threeTurns(), {
       onQueryCreated: (query, _spec, index) => {
@@ -14747,12 +14778,14 @@ describe("RollBackSession", () => {
     });
 
     // Act
-    const rolling = h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
-    await expect(rolling).rejects.toThrow(/did not boot/);
+    const settled = lastSettle(h);
+    expect(settled?.outcome.case === "failed" ? settled.outcome.value.detail : "").toMatch(/could not be created|did not|ended/);
     expect(h.queries.map((created) => created.spec.resumeSessionAt ?? "plain")).toEqual(["plain", "a1", "plain"]);
   });
+
 
   it("keeps the refused boot's error result out of the fold", async () => {
     // Arrange
@@ -14766,19 +14799,94 @@ describe("RollBackSession", () => {
     });
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect(h.fold.seen.filter((message) => message.uuid === "55555555-5555-4555-8555-555555555555")).toEqual([]);
   });
 
+  /** A harness whose restarted query's boot waits until `release` is called. */
+  async function withHeldBoot(): Promise<{ h: Harness; release: () => void }> {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = await withTranscript(threeTurns(), {
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 1) return;
+        const boot = query.supportedModels.bind(query);
+        query.supportedModels = () => held.then(() => boot());
+      },
+    });
+    return { h, release };
+  }
+
+  it("answers success at the cut while the restarted vendor is still booting", async () => {
+    // Arrange
+    const { h, release } = await withHeldBoot();
+
+    // Act
+    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+
+    // Assert
+    expect({ answer: outcome(response), restarted: h.queries.length }).toEqual({ answer: "success", restarted: 2 });
+    release();
+  });
+
+  it("holds a StartTurn sent while the restart settles until the vendor has booted", async () => {
+    // Arrange
+    const { h, release } = await withHeldBoot();
+    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    let started = false;
+
+    // Act
+    const sending = realPrompt(h, "turn-3").then(() => {
+      started = true;
+    });
+    await settledUntil(() => h.queries.length === 2);
+    const startedBeforeBoot = started;
+    release();
+    await sending;
+
+    // Assert
+    expect({ startedBeforeBoot, started }).toEqual({ startedBeforeBoot: false, started: true });
+  });
+
+  it("restates the last rollback's settle on every new session watch", async () => {
+    // Arrange
+    const h = await withTranscript(threeTurns());
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
+
+    // Act
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    // THE OPENING IS THREE FRAMES: the seeded diagnostics, the re-announced
+    // start, then the restated settle (no query has died).
+    const frames: shimv1.WatchSessionResponse[] = [];
+    for (let i = 0; i < 3; i++) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      frames.push(next.value);
+    }
+    await iterator.return?.();
+
+    // Assert
+    const restated = frames.find(
+      (frame) => frame.frame.case === "update" && frame.frame.value.update.case === "rollbackSettled",
+    );
+    expect(
+      restated?.frame.case === "update" && restated.frame.value.update.case === "rollbackSettled"
+        ? restated.frame.value.update.value.outcome.case
+        : "none",
+    ).toBe("resumedAtCut");
+  });
+
   it("plans a second rollback on the conversation the vendor resumed, not on the dropped branch", async () => {
     // Arrange
     const h = await withTranscript(threeTurns());
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+    const response = await settleRollBack(h, rollBack("turn-1", ["turn-1"]));
 
     // Assert
     expect({ outcome: outcome(response), fork: h.queries[2]?.spec.resumeSessionAt }).toEqual({
@@ -14793,7 +14901,7 @@ describe("RollBackSession", () => {
     const from = logSinkMark();
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect({
@@ -14818,7 +14926,7 @@ describe("RollBackSession", () => {
     const from = logSinkMark();
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+    await settleRollBack(h, rollBack("turn-1", ["turn-1"]));
 
     // Assert
     expect(logContextFor(from, "a prompt the caller did not name")).toMatchObject({
@@ -14840,7 +14948,7 @@ describe("RollBackSession", () => {
     const from = logSinkMark();
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect({
@@ -14872,7 +14980,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript([...threeTurns(), keepaliveLine("k2", "a2")]);
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect({ outcome: outcome(response), armed: h.queries[1]?.spec !== undefined && "resumeDropsTurn" in h.queries[1].spec }).toEqual({
@@ -14887,7 +14995,7 @@ describe("RollBackSession", () => {
     const from = logSinkMark();
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect({
@@ -14904,7 +15012,7 @@ describe("RollBackSession", () => {
     if (before === undefined) throw new Error("no query");
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"], "restore"));
 
     // Assert
     expect({
@@ -14924,7 +15032,7 @@ describe("RollBackSession", () => {
     const from = logSinkMark();
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"], "restore"));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"], "restore"));
 
     // Assert
     expect({
@@ -14941,7 +15049,7 @@ describe("RollBackSession", () => {
     const h = await withTranscript([...threeTurns(), notificationLine("n2", "a2")]);
 
     // Act
-    const response = await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    const response = await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Assert
     expect({ outcome: outcome(response), fork: h.queries[1]?.spec.resumeSessionAt }).toEqual({
@@ -14960,10 +15068,10 @@ describe("RollBackSession", () => {
         query.end();
       },
     });
-    await h.engine.rollBackSession(rollBack("turn-2", ["turn-2"]));
+    await settleRollBack(h, rollBack("turn-2", ["turn-2"]));
 
     // Act
-    await h.engine.rollBackSession(rollBack("turn-1", ["turn-1"]));
+    await settleRollBack(h, rollBack("turn-1", ["turn-1"]));
 
     // Assert
     expect(h.queries.map((created) => created.spec.resumeSessionAt ?? "plain")).toEqual(["plain", "a1", "a0", "a1"]);

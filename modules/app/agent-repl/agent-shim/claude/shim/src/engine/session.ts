@@ -860,11 +860,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** Settled when the held {@link stopCommand} retires: the stopped turn's result was folded. */
   let stopRetired: Settleable<void> | undefined;
   /**
-   * THE ROLLBACK IN PROGRESS, from its first step to its answer. While it
-   * stands the keep-alive does not beat and the network resume does not
-   * deliver: either would send onto a query the rollback is about to replace.
+   * THE ROLLBACK IN PROGRESS, from its first step until its restart has
+   * settled. While it stands the keep-alive does not beat and the network
+   * resume does not deliver: either would send onto a query the rollback is
+   * about to replace.
    */
   let rollingBack = false;
+  /**
+   * THE RESTART A ROLLBACK ANSWERED BEFORE, settling; resolved when none is
+   * under way. RollBackSession answers once its cut is made and restarts the
+   * vendor at the fork point behind the answer (a vendor boot, some 1.7s,
+   * measured 2026-10-16), so every call that needs the vendor waits on this
+   * first (`afterRestart`): none can reach a query that is being replaced.
+   * It never rejects.
+   */
+  let restartSettling: Promise<void> = Promise.resolve();
+  /** The most recent rollback's settle, restated on every new session watch. */
+  let lastRollbackSettled: conversationv1.SessionRollbackSettled | undefined;
   /**
    * THE RESTARTED QUERY'S BOOT, while a rollback waits on it.
    *
@@ -4067,10 +4079,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throw new Error("shim session: a RollBackSession arrived while another is still in progress");
     }
     rollingBack = true;
+    let restarting = false;
     try {
-      return await rollBack(request, current, context);
+      const answer = await rollBack(request, current, context, () => {
+        restarting = true;
+      });
+      return answer;
     } finally {
-      rollingBack = false;
+      // A CUT THAT WAS MADE KEEPS THE ROLLBACK STANDING until its restart
+      // settles (`settleRestart`); any other ending ends it here.
+      if (!restarting) rollingBack = false;
     }
   }
 
@@ -4078,6 +4096,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     request: shimv1.RollBackSessionRequest,
     current: SessionIdentity,
     context: { to_before: string; dropped_turns: string[]; files: string },
+    restartBegins: () => void,
   ): Promise<shimv1.RollBackSessionResponse> {
     const restore = request.files.case === "restoreFiles";
     const file = transcriptPath(deps.env.configDir, deps.env.cwd, current.vendorSessionId);
@@ -4174,34 +4193,93 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // where it would let every entry past the fork point go; otherwise the
     // plan's own check stands in.
     const dropsTurn = armedGuard(plan.guard, cut);
-    const boot = await restartAtFork(current, plan.forkPoint, dropsTurn);
-    switch (boot.kind) {
-      case "booted":
-        // THE KEEP-ALIVE STATE STARTS OVER: its anchor and every keep-alive
-        // turn it owed lie past the fork point, in the branch just dropped.
-        rewind.clearAnchor("the conversation was rolled back past it");
-        rewind.settled();
-        rewindWatch = undefined;
-        for (const turn of context.dropped_turns) rolledBackTurns.add(turn);
-        LOGGER.info(
-          { ...cut, resume_drops_turn: dropsTurn ?? "", outcome: "success", restored_paths: restored ?? [] },
-          "ROLLED BACK: the vendor resumed the conversation at the fork point",
-        );
-        return rollBackSessionSucceeded(restored);
-      case "refused":
-        LOGGER.error(
-          { ...cut, resume_drops_turn: dropsTurn ?? "", outcome: "vendor_refused", detail: boot.vendorMessage },
-          "the vendor REFUSED the rollback's cut at resume; resuming the session whole, without retrying",
-        );
-        await resumeWholeAfterRollback(current, boot.vendorMessage);
-        return rollBackSessionRefused(
-          { kind: "vendorRefused", vendorMessage: boot.vendorMessage },
-          `the vendor refused to resume at ${plan.forkPoint}; the session was resumed whole`,
-        );
-      case "failed":
-        await resumeWholeAfterRollback(current, boot.detail);
-        throw new Error(`shim session: the rollback's restarted query did not boot: ${boot.detail}`);
+    // THE ANSWER GOES NOW, THE RESTART BEHIND IT. Everything the shim can know
+    // before the vendor boots is known: the cut is planned, the turn stopped,
+    // the files restored. The vendor judges the cut at its boot, and says how
+    // on SessionRollbackSettled.
+    restartBegins();
+    restartSettling = settleRestart(current, plan.forkPoint, dropsTurn, cut, context.dropped_turns, restored);
+    LOGGER.info(
+      { ...cut, resume_drops_turn: dropsTurn ?? "", restored_paths: restored ?? [] },
+      "CUT MADE: the rollback is answered; the vendor restarts at the fork point behind the answer",
+    );
+    return rollBackSessionSucceeded(restored);
+  }
+
+  /**
+   * Restart the vendor at the fork point behind a rollback's answer, and state
+   * how it settled (SessionRollbackSettled). NEVER REJECTS: every call that
+   * needs the vendor waits on it (`restartSettling`), so every ending is caught,
+   * recorded and stated here.
+   */
+  async function settleRestart(
+    current: SessionIdentity,
+    forkPoint: string,
+    dropsTurn: string | undefined,
+    cut: Record<string, unknown>,
+    droppedTurns: readonly string[],
+    restored: readonly string[] | undefined,
+  ): Promise<void> {
+    let outcome: conversationv1.SessionRollbackSettled["outcome"];
+    try {
+      const boot = await restartAtFork(current, forkPoint, dropsTurn);
+      switch (boot.kind) {
+        case "booted":
+          // THE KEEP-ALIVE STATE STARTS OVER: its anchor and every keep-alive
+          // turn it owed lie past the fork point, in the branch just dropped.
+          rewind.clearAnchor("the conversation was rolled back past it");
+          rewind.settled();
+          rewindWatch = undefined;
+          for (const turn of droppedTurns) rolledBackTurns.add(turn);
+          LOGGER.info(
+            { ...cut, resume_drops_turn: dropsTurn ?? "", outcome: "success", restored_paths: restored ?? [] },
+            "ROLLED BACK: the vendor resumed the conversation at the fork point",
+          );
+          outcome = { case: "resumedAtCut", value: create(conversationv1.SessionRollbackResumedAtCutSchema, {}) };
+          break;
+        case "refused":
+          LOGGER.error(
+            { ...cut, resume_drops_turn: dropsTurn ?? "", outcome: "vendor_refused", detail: boot.vendorMessage },
+            "the vendor REFUSED the rollback's cut at resume; resuming the session whole, without retrying",
+          );
+          outcome = {
+            case: "refused",
+            value: create(conversationv1.SessionRollbackRefusedSchema, { vendorMessage: boot.vendorMessage }),
+          };
+          await resumeWholeAfterRollback(current, boot.vendorMessage);
+          break;
+        case "failed":
+          LOGGER.error(
+            { ...cut, outcome: "failed", detail: boot.detail },
+            "the rollback's restarted query did not boot; resuming the session whole",
+          );
+          outcome = { case: "failed", value: create(conversationv1.SessionRollbackFailedSchema, { detail: boot.detail }) };
+          await resumeWholeAfterRollback(current, boot.detail);
+          break;
+      }
+    } catch (err) {
+      // THE WHOLE RESUME FAILED TOO: the session's query is lost, which
+      // `resumeWholeAfterRollback` has already stated as its death.
+      const detail = err instanceof Error ? err.message : String(err);
+      LOGGER.error({ ...cut, outcome: "failed", detail }, "the rollback's restart could not settle the session");
+      outcome = { case: "failed", value: create(conversationv1.SessionRollbackFailedSchema, { detail }) };
+    } finally {
+      rollingBack = false;
     }
+    const settled = create(conversationv1.SessionRollbackSettledSchema, {
+      droppedTurns: droppedTurns.map((value) => create(conversationv1.TurnIdSchema, { value })),
+      outcome,
+    });
+    lastRollbackSettled = settled;
+    pushes.push(create(conversationv1.SessionUpdateSchema, { update: { case: "rollbackSettled", value: settled } }));
+  }
+
+  /** FN, run once any rollback's restart has settled (`restartSettling`). */
+  function afterRestart<A extends unknown[], R>(fn: (...args: A) => R | Promise<R>): (...args: A) => Promise<R> {
+    return async (...args: A) => {
+      await restartSettling;
+      return fn(...args);
+    };
   }
 
   /** The prompt uuid the guard is armed with, or absence, logging why it is not armed. */
@@ -7150,29 +7228,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
     // the daemon unable to tell "not ready" from "refused".
-    watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath),
-    setSessionModel,
-    setSessionEffort,
-    setSessionPermissionMode,
-    hibernate,
-    setKeepalive,
-    sendKeepalive,
-    killSession,
-    startTurn: (request, signal) => turns.startTurn(request, signal),
+    watchSession: () =>
+      watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath, () => lastRollbackSettled),
+    // EVERY CALL THAT NEEDS THE VENDOR WAITS FOR A ROLLBACK'S RESTART TO SETTLE
+    // (`restartSettling`); reads and watches do not.
+    setSessionModel: afterRestart(setSessionModel),
+    setSessionEffort: afterRestart(setSessionEffort),
+    setSessionPermissionMode: afterRestart(setSessionPermissionMode),
+    hibernate: afterRestart(hibernate),
+    setKeepalive: afterRestart(setKeepalive),
+    sendKeepalive: afterRestart(sendKeepalive),
+    killSession: afterRestart(killSession),
+    startTurn: afterRestart((request: shimv1.StartTurnRequest, signal?: AbortSignal) => turns.startTurn(request, signal)),
     watchAgent: (request, signal) => turns.watchAgent(request, signal),
-    updateAgent: (request) => turns.updateAgent(request),
-    killTurn: (request) => turns.killTurn(request),
-    rollBackSession,
+    updateAgent: afterRestart((request: shimv1.UpdateAgentRequest) => turns.updateAgent(request)),
+    killTurn: afterRestart((request: shimv1.KillTurnRequest) => turns.killTurn(request)),
+    rollBackSession: afterRestart(rollBackSession),
     watchBash: (request) => turns.watchBash(request),
-    stopBash: (request) => turns.stopBash(request),
-    detachForeground: (request) => turns.detachForeground(request),
+    stopBash: afterRestart((request: shimv1.StopBashRequest) => turns.stopBash(request)),
+    detachForeground: afterRestart((request: shimv1.DetachForegroundRequest) => turns.detachForeground(request)),
     readHistory: (request) => turns.readHistory(request),
     readTranscripts: () => Promise.resolve(readTranscriptsHere()),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     getForkPoint: () => Promise.resolve(getForkPoint()),
-    forkSession,
-    resetKeepalives,
+    forkSession: afterRestart(forkSession),
+    resetKeepalives: afterRestart(resetKeepalives),
     standDown: async (reason: string) => {
+      await restartSettling;
       await teardown(reason);
       return lostRowsAtStandDown > 0 ? 1 : 0;
     },
@@ -7200,6 +7282,7 @@ async function* watchSessionFrames(
   updates: AsyncIterable<conversationv1.SessionUpdate>,
   reannounce: () => Promise<conversationv1.SessionStarted | undefined>,
   standingDeath: () => conversationv1.SessionQueryDied | undefined,
+  lastRollback: () => conversationv1.SessionRollbackSettled | undefined,
 ): AsyncIterable<shimv1.WatchSessionResponse> {
   let opened = false;
   for await (const update of updates) {
@@ -7220,6 +7303,17 @@ async function* watchSessionFrames(
         frame: {
           case: "update",
           value: create(conversationv1.SessionUpdateSchema, { update: { case: "queryDied", value: died } }),
+        },
+      });
+    }
+    // THE LAST ROLLBACK'S SETTLE IS RESTATED, so a daemon whose watch was
+    // re-opened while a restart settled still learns how it did.
+    const settled = lastRollback();
+    if (settled !== undefined) {
+      yield create(shimv1.WatchSessionResponseSchema, {
+        frame: {
+          case: "update",
+          value: create(conversationv1.SessionUpdateSchema, { update: { case: "rollbackSettled", value: settled } }),
         },
       });
     }
