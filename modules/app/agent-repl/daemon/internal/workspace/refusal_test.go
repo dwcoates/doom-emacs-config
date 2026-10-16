@@ -3,9 +3,11 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 func TestRefusalRendersTheLedgerMessage(t *testing.T) {
@@ -189,5 +191,44 @@ func TestWithRpcKeepsTheArmsFieldValues(t *testing.T) {
 	// Assert.
 	if got := renamed.Fields["ref"]; got != "origin/nope" {
 		t.Fatalf("WithRpc dropped the arm's fields: %v", renamed.Fields)
+	}
+}
+
+func TestRefuseUnrestorableRefusesUnderTheUnrestorableArm(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	got := refuseUnrestorable(log, "OpenWorkspace", wsm.Workspace{Dir: "/w/gone", Branch: "feature/gone"}, "both gone")
+
+	// Assert.
+	if got.Rpc != "OpenWorkspace" || got.Arm != ArmWorktreeUnrestorable || got.Reason != "both gone" {
+		t.Fatalf("refusal = %+v, want OpenWorkspace's worktree_unrestorable saying both gone", got)
+	}
+}
+
+func TestRefuseUnrestorableCarriesTheRecordedDirAndBranch(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	got := refuseUnrestorable(log, "OpenWorkspace", wsm.Workspace{Dir: "/w/gone", Branch: "feature/gone"}, "both gone")
+
+	// Assert.
+	if got.Fields["dir"] != "/w/gone" || got.Fields["branch"] != "feature/gone" {
+		t.Fatalf("fields = %v, want the recorded dir and branch", got.Fields)
+	}
+}
+
+// TestOnlyRefuseUnrestorableRaisesTheUnrestorableArm pins refuseUnrestorable as
+// the one place this package raises worktree_unrestorable, so no refusal of it
+// can leave out the evidence the arm carries.
+func TestOnlyRefuseUnrestorableRaisesTheUnrestorableArm(t *testing.T) {
+	// Arrange, Act.
+	got := functionsReferencing(t, "ArmWorktreeUnrestorable")
+
+	// Assert.
+	if !slices.Equal(got, []string{"refuseUnrestorable"}) {
+		t.Fatalf("functions naming ArmWorktreeUnrestorable = %v, want only refuseUnrestorable", got)
 	}
 }

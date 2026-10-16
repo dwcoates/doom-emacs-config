@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/tempdirs"
+	"agent-repld/internal/wsm"
 )
 
 // opRefusal is the operation a verb's typed refusal is logged under. A refusal
@@ -353,6 +354,15 @@ func temporaryRefusal(log dlog.Logger, rpc string, err error) *Refusal {
 // package goes through here, so every verb's refusal is recorded the same way.
 func refuse(log dlog.Logger, rpc, arm, reason string, notFound bool) *Refusal {
 	return refuseWith(log, rpc, arm, reason, notFound, nil)
+}
+
+// refuseUnrestorable refuses RPC with ArmWorktreeUnrestorable for RECORD:
+// nothing is left to check its worktree out from. The arm carries the
+// recorded directory and branch as its evidence beside DETAIL, the sentence
+// naming which of them is gone.
+func refuseUnrestorable(log dlog.Logger, rpc string, record wsm.Workspace, detail string) *Refusal {
+	return refuseWith(log, rpc, ArmWorktreeUnrestorable, detail, false,
+		map[string]any{"dir": record.Dir, "branch": record.Branch})
 }
 
 // refuseWith is refuse for an arm that carries its OWN fields as evidence. A

@@ -265,8 +265,7 @@ func (v *verbs) RestoreMissingWorktree(ctx context.Context, ws wsm.Workspace) (b
 // boot's missing-directory step.
 func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm.Workspace, progress OpenProgress, rpc string) (dlog.Logger, error) {
 	unrestorable := func(detail string) error {
-		return refuseWith(log, rpc, ArmWorktreeUnrestorable, detail, false,
-			map[string]any{"dir": record.Dir, "branch": record.Branch})
+		return refuseUnrestorable(log, rpc, record, detail)
 	}
 	// A MERGED WORKSPACE IS RESTORED LIKE ANY OTHER: the merge keeps its
 	// branch, and opening one is the user taking it back to revise it.

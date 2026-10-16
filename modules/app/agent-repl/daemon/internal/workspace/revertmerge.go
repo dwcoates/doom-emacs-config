@@ -71,10 +71,7 @@ func (v *verbs) OpenToRevertMerge(ctx context.Context, ws ids.WorkspaceID, progr
 	if err := v.Open(ctx, ws, progress); err != nil {
 		return err
 	}
-	submission := daemonSubmission(ws, wsm.NewTurnID(), SaidText(brief), conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
-	// DEFERRED: the brief never interjects a turn the reopened session runs;
-	// it runs as the next turn and wakes an idle agent.
-	submission.Delivery = wsm.DeliveryDeferred
+	submission := deferredBrief(ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
 	disposition, err := v.deps.Queue.Submit(ctx, submission)
 	if err != nil {
 		log.Error(opRevertMerge, "the reopened workspace's queue did not accept the merge-revert brief", dlog.Context{
@@ -98,9 +95,8 @@ func (v *verbs) OpenToRevertMerge(ctx context.Context, ws ids.WorkspaceID, progr
 // and nothing to name in the brief, so it refuses as the open itself would.
 func (v *verbs) landedCommit(ctx context.Context, log dlog.Logger, record wsm.Workspace) (string, error) {
 	if record.Branch == "" {
-		return "", refuseWith(log, "OpenWorkspace", ArmWorktreeUnrestorable,
-			fmt.Sprintf("workspace %q recorded no branch, so its landed merge cannot be found", record.Name),
-			false, map[string]any{"dir": record.Dir, "branch": record.Branch})
+		return "", refuseUnrestorable(log, "OpenWorkspace", record,
+			fmt.Sprintf("workspace %q recorded no branch, so its landed merge cannot be found", record.Name))
 	}
 	repoDir, err := v.repoDirOf(ctx, record)
 	if err != nil {
@@ -113,9 +109,8 @@ func (v *verbs) landedCommit(ctx context.Context, log dlog.Logger, record wsm.Wo
 		return "", fmt.Errorf("revert the merge of %q: probe branch %q: %w", record.ID, record.Branch, err)
 	}
 	if !exists {
-		return "", refuseWith(log, "OpenWorkspace", ArmWorktreeUnrestorable,
-			fmt.Sprintf("the branch %s of workspace %q no longer exists, so its landed merge cannot be found", record.Branch, record.Name),
-			false, map[string]any{"dir": record.Dir, "branch": record.Branch})
+		return "", refuseUnrestorable(log, "OpenWorkspace", record,
+			fmt.Sprintf("the branch %s of workspace %q no longer exists, so its landed merge cannot be found", record.Branch, record.Name))
 	}
 	landed, err := v.deps.Git.ResolveRef(ctx, repoDir, "refs/heads/"+record.Branch)
 	if err != nil {
