@@ -329,6 +329,8 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
       return "the workspace to fork from has no conversation to copy";
     case "nameReserved":
       return `the name ${cause.value.branch} is reserved for a requested merge workspace`;
+    case "unknownContextWorkspace":
+      return "the daemon does not know the workspace the one-shot is about";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("CreateWorkspaceError.cause", other.case);
