@@ -35,7 +35,7 @@
  * `ResizeObserver` included. A card therefore folds its title AFTER that stop,
  * as the final step of its draw.
  */
-import { pageResizeObserver } from "../dom.js";
+import { pageResizeObserver, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import type { RowContext } from "./cards/context.js";
 import { revealTitle } from "./title-reveal.js";
@@ -93,7 +93,7 @@ export function foldTitle(title: HTMLElement, owner: TitleFoldOwner, rc: RowCont
  * and the title's own box may not resize.
  */
 export function refreshTitleFolds(root: Element): void {
-  const titles = [...root.querySelectorAll<HTMLElement>(`.${TITLE_FOLD_CLASS}`)];
+  const titles = [...queryAll<HTMLElement>(root, `.${TITLE_FOLD_CLASS}`)];
   if (root instanceof HTMLElement && root.classList.contains(TITLE_FOLD_CLASS)) titles.unshift(root);
   for (const title of titles) refreshTitle(title);
 }

@@ -52,6 +52,7 @@ import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../held/held-prompt.js";
+import { queryAll } from "../dom.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -535,5 +536,5 @@ function bubbleRefusedSentence(refused: SubmitPromptBubbleRefused): string {
 }
 
 function clearRefusal(root: HTMLElement): void {
-  root.querySelectorAll(".composer-refusal").forEach((node) => node.remove());
+  queryAll(root, ".composer-refusal").forEach((node) => node.remove());
 }

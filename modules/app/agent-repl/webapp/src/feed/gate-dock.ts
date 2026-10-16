@@ -26,6 +26,7 @@
  * Only a ROOT-feed gate docks: a sub-feed's rows belong to their bubble.
  */
 import { log } from "../log.js";
+import { queryAll } from "../dom.js";
 
 /** The class the docked card wears. */
 export const DOCKED_CARD_CLASS = "cold-gate-docked";
@@ -90,7 +91,7 @@ function rootRowOf(feed: HTMLElement, card: HTMLElement): HTMLElement | null {
 
 /** A standing gate card on the root feed itself, with its row; null when none. */
 function standingRootGate(feed: HTMLElement): { card: HTMLElement; row: HTMLElement } | null {
-  for (const card of feed.querySelectorAll<HTMLElement>(STANDING)) {
+  for (const card of queryAll<HTMLElement>(feed, STANDING)) {
     const row = rootRowOf(feed, card);
     if (row !== null) return { card, row };
   }

@@ -14,6 +14,8 @@
  * runs against a real DOM and against a plain object in a test alike.
  */
 
+import { log } from "./log.js";
+
 /** The SVG namespace every drawn glyph's elements are created in. */
 export const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -156,4 +158,57 @@ export function nodeLabel(node: Node): string {
   if (el === null) return node.nodeName.toLowerCase();
   const classes = [...el.classList].join(".");
   return classes === "" ? el.tagName.toLowerCase() : `${el.tagName.toLowerCase()}.${classes}`;
+}
+
+/**
+ * Every element under ROOT that matches SELECTOR, in document order: what
+ * `querySelectorAll` answers, and the ONE way this webapp asks it.
+ *
+ * WHY NOT `querySelectorAll` (WebKit, measured 2026-10-16). A
+ * `querySelectorAll` that matches anything leaves its answer cached on ROOT,
+ * and nothing but a later change under ROOT drops it. A document unloaded
+ * while such an answer stands is never freed: the cached list holds its
+ * elements and they hold their document, so every webhost reload and every
+ * page reload kept the old document's whole realm alive (537 documents and
+ * 11.6 GB in one web process after 26 hours), and each full garbage
+ * collection marked all of it. Walking the elements and asking each whether
+ * it `matches` answers the same set and caches nothing.
+ *
+ * `:scope` IS REFUSED. `matches` reads `:scope` as the element being tested,
+ * not ROOT, so a scoped selector would silently match nothing here; a caller
+ * after ROOT's own children asks `childrenMatching`.
+ */
+export function queryAll<E extends Element = Element>(root: ParentNode, selector: string): E[] {
+  refuseScope("queryAll", selector);
+  const doc = root instanceof Document ? root : root.ownerDocument;
+  if (doc === null) throw new Error(`queryAll: a ${root.nodeName} root belongs to no document`);
+  // A malformed selector throws the SyntaxError `querySelectorAll` would,
+  // even under a ROOT with nothing to test; `querySelector` caches nothing.
+  doc.createDocumentFragment().querySelector(selector);
+  const found: E[] = [];
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const el = node as Element;
+    if (el.matches(selector)) found.push(el as E);
+  }
+  return found;
+}
+
+/**
+ * PARENT's own children that match SELECTOR, in order: the `:scope > X` of a
+ * `querySelectorAll`, asked without one (see `queryAll`).
+ */
+export function childrenMatching<E extends Element = Element>(parent: Element, selector: string): E[] {
+  refuseScope("childrenMatching", selector);
+  return [...parent.children].filter((child): child is E => child.matches(selector));
+}
+
+/** Refuse a `:scope` selector, which `matches` would silently misread. */
+function refuseScope(helper: string, selector: string): void {
+  if (!selector.includes(":scope")) return;
+  log.error(`${helper} was handed a :scope selector, which matches() reads as the tested element`, {
+    operation: "dom.query-scope-refused",
+    context: { helper, selector },
+  });
+  throw new Error(`${helper}: ":scope" selectors are refused (${selector})`);
 }

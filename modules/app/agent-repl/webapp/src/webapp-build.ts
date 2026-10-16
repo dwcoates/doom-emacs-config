@@ -25,6 +25,7 @@
  * from it.
  */
 import { log } from "./log.js";
+import { queryAll } from "./dom.js";
 
 /** The same shape `write_webapp_build_id` reads out of the built `index.html`. */
 const ENTRY_SCRIPT_SRC_PATTERN = /^\/assets\/index-([A-Za-z0-9_-]+)\.js$/;
@@ -48,7 +49,7 @@ export class WebappBuildUnknown extends Error {
  * built (a dev shell, a malformed serve).
  */
 export function readWebappBuild(doc: Document = document): string {
-  for (const script of doc.querySelectorAll('script[type="module"]')) {
+  for (const script of queryAll(doc, 'script[type="module"]')) {
     const src = script.getAttribute("src");
     if (src === null) continue;
     const match = ENTRY_SCRIPT_SRC_PATTERN.exec(src);

@@ -24,6 +24,7 @@
  * (test/control.test.ts) fails any module that builds a `<button>` itself.
  */
 import { log } from "./log.js";
+import { queryAll } from "./dom.js";
 
 /** The control's tag: a type selector, as `button` was. */
 export const CONTROL_TAG = "ar-button";
@@ -157,5 +158,5 @@ export function labelledControl(spec: LabelledControlSpec): Control {
  */
 export function setControlsDisabled(root: Element | null, disabled: boolean): void {
   if (root === null) return;
-  for (const control of root.querySelectorAll<Control>(CONTROL_SELECTOR)) control.disabled = disabled;
+  for (const control of queryAll<Control>(root, CONTROL_SELECTOR)) control.disabled = disabled;
 }

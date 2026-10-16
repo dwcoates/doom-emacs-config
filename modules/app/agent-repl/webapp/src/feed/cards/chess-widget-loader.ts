@@ -13,6 +13,7 @@
  * widget is a new URL, never a stale cached module.
  */
 import { log } from "../../log.js";
+import { queryAll } from "../../dom.js";
 
 /** The widget's handle, as the card uses it (the widget's `CeeWebWidgetHandle`). */
 export interface ChessWidgetHandle {
@@ -48,7 +49,7 @@ export async function loadChessWidget(url: string): Promise<ChessWidgetModule> {
 
 /** Load the widget's stylesheet into the page, once per URL. */
 export function ensureChessWidgetStylesheet(doc: Document, url: string): void {
-  for (const link of doc.head.querySelectorAll<HTMLLinkElement>("link[data-chess-widget]")) {
+  for (const link of queryAll<HTMLLinkElement>(doc.head, "link[data-chess-widget]")) {
     if (link.getAttribute("href") === url) return;
   }
   const link = doc.createElement("link");

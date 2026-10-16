@@ -27,7 +27,7 @@
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
 import { log } from "../../log.js";
-import { placeChildren, placeOptional, repaintMark } from "../../dom.js";
+import { childrenMatching, placeChildren, placeOptional, repaintMark } from "../../dom.js";
 import { requireCase, requireMessage } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
@@ -151,7 +151,7 @@ export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLEleme
  */
 export function updateTestSuites(el: HTMLElement, suites: readonly FeedMergeTestSuite[]): void {
   const held = new Map<string, HTMLElement>();
-  for (const child of el.querySelectorAll<HTMLElement>(":scope > .merge-suite")) {
+  for (const child of childrenMatching<HTMLElement>(el, ".merge-suite")) {
     held.set(child.getAttribute(SUITE_NAME_ATTRIBUTE) ?? "", child);
   }
   const next = suitesInListOrder(suites).map((suite) => {

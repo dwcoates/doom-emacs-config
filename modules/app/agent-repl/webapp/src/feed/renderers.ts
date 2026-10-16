@@ -37,7 +37,7 @@ import { drawFeedMerge } from "./merge/merge.js";
 import { mergeBubbleBody } from "./merge/merge-body.js";
 import type { Handle } from "../failure/local.js";
 import { log } from "../log.js";
-import { placeChildren } from "../dom.js";
+import { placeChildren, queryAll } from "../dom.js";
 import { stopTicking } from "./ticking.js";
 import {
   createToolGroupStore,
@@ -314,13 +314,13 @@ export function arrangeSubfeedRows(
   // did not put back is stopped, below. Grouped members sit inside their group's
   // panel, still descendants of the host, so this descendant query still finds
   // them and a member merely regrouped is never mistaken for a dropped one.
-  const before = [...host.querySelectorAll("[data-feed-row]")];
+  const before = [...queryAll(host, "[data-feed-row]")];
   // Every nesting slot drawn before this pass is re-placed at the end, empty if
   // nothing lands in it now, so a row that stopped being in the feed (deletion
   // is ROW OMISSION on the next push) cannot linger inside a container that is
   // still drawn.
   const nests = new Map<Element, HTMLElement[]>();
-  for (const slot of host.querySelectorAll(`[${NEST_ATTRIBUTE}]`)) nests.set(slot, []);
+  for (const slot of queryAll(host, `[${NEST_ATTRIBUTE}]`)) nests.set(slot, []);
   const placed = new Map<string, HTMLElement>();
   const top: HTMLElement[] = [];
   const rows = view.rows();

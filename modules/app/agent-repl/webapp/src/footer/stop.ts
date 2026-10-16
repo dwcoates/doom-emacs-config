@@ -44,6 +44,7 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { INTERRUPT_OUTCOME_MS } from "../feed/stop-control.js";
 import { stopTicking, tick } from "../feed/ticking.js";
+import { queryAll } from "../dom.js";
 
 /** The stop glyph: a filled square, the one shape a stop control has. */
 export const STOP_GLYPH = "■";
@@ -374,7 +375,7 @@ const STOP_ANSWER_SELECTOR = ".footer-stop-note, .footer-stop-confirm, .footer-s
 
 /** Drop whatever the previous click left, so a re-click starts clean. */
 function clearAnswer(wrapper: HTMLElement): void {
-  for (const el of wrapper.querySelectorAll(STOP_ANSWER_SELECTOR)) {
+  for (const el of queryAll(wrapper, STOP_ANSWER_SELECTOR)) {
     el.remove();
   }
 }

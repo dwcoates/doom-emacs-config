@@ -48,7 +48,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import type { HeldContext } from "./context.js";
 import { drawHeldPrompt } from "./held-prompt.js";
 import { ClassifierUpdateForms } from "./classifier-update.js";
-import { placeChildren } from "../dom.js";
+import { childrenMatching, placeChildren, queryAll } from "../dom.js";
 import { installClickExpand } from "../expand.js";
 import { refreshHasMore } from "../feed/bubble-more.js";
 import { stopTicking } from "../feed/ticking.js";
@@ -264,7 +264,7 @@ export function drawSection(
   list.className = SECTION_LIST_CLASS;
 
   const cards = new Map<string, HTMLElement>();
-  for (const card of list.querySelectorAll<HTMLElement>(`:scope > [${HELD_ITEM_ATTRIBUTE}]`)) {
+  for (const card of childrenMatching<HTMLElement>(list, `[${HELD_ITEM_ATTRIBUTE}]`)) {
     cards.set(card.getAttribute(HELD_ITEM_ATTRIBUTE) ?? "", card);
   }
   const items = u.items.map((item, index) =>
@@ -285,7 +285,7 @@ export function drawSection(
 
 /** The card HOST draws for the held item ID, or null when it draws none. */
 function heldCard(host: HTMLElement, id: string): HTMLElement | null {
-  for (const card of host.querySelectorAll<HTMLElement>(HELD_ENTRY_SELECTOR)) {
+  for (const card of queryAll<HTMLElement>(host, HELD_ENTRY_SELECTOR)) {
     if (card.getAttribute(HELD_ITEM_ATTRIBUTE) === id) return card;
   }
   return null;
@@ -297,7 +297,7 @@ function heldCard(host: HTMLElement, id: string): HTMLElement | null {
  * none is a broken DOM, thrown rather than read as some default turn.
  */
 function heldTurns(host: HTMLElement): string[] {
-  return [...host.querySelectorAll(`.${SECTION_LIST_CLASS} > [data-held-turn]`)].map((card) => {
+  return [...queryAll(host, `.${SECTION_LIST_CLASS} > [data-held-turn]`)].map((card) => {
     const turn = card.getAttribute("data-held-turn");
     if (turn === null) throw new Error("a held prompt card lost its data-held-turn while it was read");
     return turn;

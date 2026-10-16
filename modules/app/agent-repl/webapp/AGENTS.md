@@ -229,6 +229,19 @@ hand any more:
 
 ## Standing rules
 
+- **NEVER `querySelectorAll`; ASK `queryAll` OR `childrenMatching`**
+  (src/dom.ts; measured in WebKit 2026-10-16). A `querySelectorAll` that
+  matches anything leaves its answer cached on the node it was asked of, and
+  only a later change under that node drops it. A document unloaded while
+  such an answer stands is never freed, with its whole JS realm: one web
+  process held 537 dead documents and 11.6 GB after 26 hours, and every full
+  garbage collection marked them, stalling the main thread about 0.5 s each
+  time. `queryAll` walks the subtree and asks each element whether it
+  `matches`, which answers the same set and caches nothing;
+  `childrenMatching` is the `:scope > X` form, since `matches` cannot read
+  `:scope`. `test/dom.test.ts` fails on any source that calls
+  `querySelectorAll`. `querySelector`, `getElementsByClassName` and
+  `getElementsByTagName` do not leave such an answer and stay allowed.
 - **STATELESS RENDERER.** No phase-to-word tables, no state-to-color mapping
   beyond a CSS class per arm, no counting rows to label chips, no token
   arithmetic, no ANSI parsing, no per-tool knowledge. Whole-view pushes replace

@@ -80,6 +80,7 @@ import type { RefusalCause } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
+import { childrenMatching } from "../dom.js";
 
 /** The verbs a row's menu offers, exactly as `data-verb` spells them. */
 export type Verb =
@@ -741,7 +742,7 @@ export function refusalDetail(cause: RefusalCause & { case: string }): HTMLEleme
 
 /** Drop whatever a previous attempt at this control left behind. */
 export function clearRefusal(control: HTMLElement): void {
-  for (const stale of control.parentElement?.querySelectorAll(":scope > .sb-refusal") ?? []) {
+  for (const stale of control.parentElement === null ? [] : childrenMatching(control.parentElement, ".sb-refusal")) {
     stale.remove();
   }
 }
