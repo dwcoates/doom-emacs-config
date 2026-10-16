@@ -117,6 +117,7 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		"a question card was upserted",
 		dlog.Context{"ask": askID, "questions": len(card.GetQuestions())})
 	r.upsert(s, at, row, true)
+	r.restateTurnPrompts(s, served.turn)
 }
 
 // questionItems draws the batch. The ORDER IS PRESENTATIONAL ONLY — every

@@ -248,7 +248,7 @@ func MergeHandbackLabel(said *conversationv1.UserSaid) string {
 
 // ① THE PROMPT'S WORKING FLAG. FeedUserPrompt.working / FeedAgentPrompt.working
 // state whether the prompt's turn is still running — a DAEMON FACT the client
-// draws the prompt wave from verbatim. It has two edges and no others:
+// draws the prompt wave from. It has two edges and no others:
 //
 //   - SET from the row's first draw, by stampPromptWorking on every upsert of
 //     a prompt row whose turn has not ended;
@@ -257,19 +257,65 @@ func MergeHandbackLabel(said *conversationv1.UserSaid) string {
 //
 // An interim response or a final answer drawn before the terminal moves
 // neither edge: only the terminal ends the turn.
+//
+// ①' THE PROMPT'S AWAITING-USER FLAG. FeedUserPrompt.awaiting_user /
+// FeedAgentPrompt.awaiting_user state that the working turn is BLOCKED ON THE
+// USER — a question or a consent stamped with it stands open — and the client
+// pauses the wave for exactly that span. stampPromptWorking states it from the
+// asks the resolver holds, and restateTurnPrompts re-publishes the turn's
+// prompts on each of its edges: an ask of the turn opening, and one settling.
 
-// stampPromptWorking states on a prompt row whether its turn is working. A row
-// that is not a prompt is untouched; a prompt naming no turn is not working,
-// because there is no turn for it to be waiting on.
+// stampPromptWorking states on a prompt row whether its turn is working, and
+// whether that working turn is waiting on the user. A row that is not a prompt
+// is untouched; a prompt naming no turn is not working, because there is no
+// turn for it to be waiting on.
 func stampPromptWorking(s *wsState, row *frontendv1.FeedRow) {
 	turn := row.GetTurn().GetValue()
 	working := turn != "" && !s.endedTurns[ids.TurnID(turn)]
+	awaiting := working && turnAwaitingUser(s, ids.TurnID(turn))
 	switch kind := row.GetRow().(type) {
 	case *frontendv1.FeedRow_UserPrompt:
 		kind.UserPrompt.Working = working
+		kind.UserPrompt.AwaitingUser = awaiting
 	case *frontendv1.FeedRow_AgentPrompt:
 		kind.AgentPrompt.Working = working
+		kind.AgentPrompt.AwaitingUser = awaiting
 	}
+}
+
+// turnAwaitingUser answers whether TURN is blocked on the user: a consent card
+// or a question card stamped with it stands open.
+func turnAwaitingUser(s *wsState, turn ids.TurnID) bool {
+	for _, p := range s.permissionRows {
+		if p.card.GetOpen() != nil && p.turn.GetValue() == string(turn) {
+			return true
+		}
+	}
+	for _, q := range s.questionAsks {
+		if q.open && q.turn.GetValue() == string(turn) {
+			return true
+		}
+	}
+	return false
+}
+
+// restateTurnPrompts re-publishes every prompt row stamped with TURN, so each
+// restates its `awaiting_user` after one of the turn's asks opened or settled.
+// A prompt whose flags did not move upserts to an equal snapshot, which upsert
+// drops as churn, so an ask frame that changes nothing about the turn's
+// blocking re-publishes nothing. An unstamped ask names no turn to restate.
+func (r *resolver) restateTurnPrompts(s *wsState, turn *conversationv1.TurnId) {
+	if turn.GetValue() == "" {
+		return
+	}
+	restated := r.republishRows(s, func(row *frontendv1.FeedRow) bool {
+		return row.GetTurn().GetValue() == turn.GetValue() &&
+			(row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil)
+	})
+	r.logger(s.id).Debug("daemon.feed.turn_prompts_restated",
+		"an ask of the turn opened or settled; its prompt rows were re-published",
+		dlog.Context{"turn": turn.GetValue(), "rows": restated,
+			"awaiting_user": turnAwaitingUser(s, ids.TurnID(turn.GetValue()))})
 }
 
 // settleTurnPrompts is the turn's END for its prompts: the turn is recorded as
