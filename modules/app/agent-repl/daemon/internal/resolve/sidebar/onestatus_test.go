@@ -2,6 +2,7 @@ package sidebar_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -475,8 +476,8 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 			if !ok {
 				t.Fatalf("walk row names merge state %q, which mergeStates does not hold", row.merge)
 			}
-			lc := linkCaseNamed(t, row.link)
-			tc := turnCaseNamed(t, row.turn)
+			lc := caseNamed(t, "link", linkCases, func(c linkCase) string { return c.name }, row.link)
+			tc := caseNamed(t, "turn", turnCases, func(c turnCase) string { return c.name }, row.turn)
 			var session *wsm.Session
 			if lc.session || row.parked {
 				session = &wsm.Session{Workspace: theWS}
@@ -504,30 +505,18 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 	}
 }
 
-// linkCaseNamed answers the link case NAME names; a walk row naming none is a
-// broken table and fails.
-func linkCaseNamed(t *testing.T, name string) linkCase {
+// caseNamed answers the case of CASES whose nameOf is NAME; a walk row
+// naming none is a broken table and fails, naming KIND.
+func caseNamed[C any](t testing.TB, kind string, cases []C, nameOf func(C) string, name string) C {
 	t.Helper()
-	for _, lc := range linkCases {
-		if lc.name == name {
-			return lc
+	for _, c := range cases {
+		if nameOf(c) == name {
+			return c
 		}
 	}
-	t.Fatalf("walk row names link case %q, which linkCases does not hold", name)
-	return linkCase{}
-}
-
-// turnCaseNamed answers the turn case NAME names; a walk row naming none is a
-// broken table and fails.
-func turnCaseNamed(t *testing.T, name string) turnCase {
-	t.Helper()
-	for _, tc := range turnCases {
-		if tc.name == name {
-			return tc
-		}
-	}
-	t.Fatalf("walk row names turn case %q, which turnCases does not hold", name)
-	return turnCase{}
+	t.Fatalf("walk row names %s case %q, which no case holds", kind, name)
+	var none C
+	return none
 }
 
 // TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches covers the roster
@@ -650,4 +639,45 @@ func (s *surfaces) ackedTurn() {
 	s.startTurn()
 	s.footer.AckTurn(theWS)
 	s.roster.AckTurn(theWS)
+}
+
+// fatalRecorder is a testing.TB that records a Fatalf and stops the caller
+// there, as the real one does, by panicking with itself.
+type fatalRecorder struct {
+	testing.TB
+	fatal string
+}
+
+func (f *fatalRecorder) Helper() {}
+
+func (f *fatalRecorder) Fatalf(format string, args ...any) {
+	f.fatal = fmt.Sprintf(format, args...)
+	panic(f)
+}
+
+func TestCaseNamedAnswersTheCaseItNames(t *testing.T) {
+	// Act
+	got := caseNamed(t, "turn", turnCases, func(c turnCase) string { return c.name }, "thinking")
+
+	// Assert
+	if got.name != "thinking" {
+		t.Fatalf("caseNamed answered %q, want thinking", got.name)
+	}
+}
+
+func TestCaseNamedFailsNamingTheKindAndTheMissingName(t *testing.T) {
+	// Arrange
+	rec := &fatalRecorder{TB: t}
+	defer func() {
+		// Assert
+		if recover() != rec {
+			t.Fatal("caseNamed returned for a name no case holds, want a fatal")
+		}
+		if !strings.Contains(rec.fatal, "link") || !strings.Contains(rec.fatal, `"no such link"`) {
+			t.Fatalf("fatal = %q, want it to name the kind and the missing name", rec.fatal)
+		}
+	}()
+
+	// Act
+	caseNamed(rec, "link", linkCases, func(c linkCase) string { return c.name }, "no such link")
 }
