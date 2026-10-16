@@ -147,3 +147,4 @@ invariant), how common it is, and example situations.
 | 1 | self | main | main | yes | common | tangential fix landed while work goes on; parallel subtask; trying a second approach; handing the work off with its context |
 | 2 | self | self | self | yes | common | splitting a feature still in progress into pieces that land back into it; addressing review findings on the feature before it lands on main |
 | 3 | self | self | main | DEFERRED (owner leans no: it can carry the requester's unfinished work to main prematurely, and any useful case could branch from main instead; revisit) | rare | handing off the landing of finished work |
+| 4 | self | other | main | yes | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
