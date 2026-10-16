@@ -21,6 +21,26 @@ contract yet: each section says what the owner has ruled and what is open.
 - Skill names start with `agent-repl-`; slash completion matches by substring
   (landed 2026-10-16), so `/profile` still finds `/agent-repl-profile`.
 
+## No defaults (ruled 2026-10-16)
+
+- Creating and merging workspaces have NO defaults. Every create names its
+  branch source, its merge target and its context origin explicitly; every
+  merge names what it lands. Each field and each of its values is documented in
+  the proto comments and in the skills that use it, so every call is a
+  specific, intentional one.
+- The combinations are settled one at a time with the owner (see "The
+  combinations" below): for each, whether the API supports it, how common it
+  is, and example situations, to guide the skills' text.
+
+## Delivery (ruled 2026-10-16)
+
+- The whole change lands at once, on a `contract/` integration branch that
+  reaches master only when every system is green.
+- The editor's and the webapp's create commands are ported to the new fields
+  with their behavior unchanged.
+- The CEE pull request removing `/create-or-update-workspace` opens only after
+  the doom side has landed, confirmed with the owner first.
+
 ## Topology (ruled; see workspace-source-and-context.md)
 
 - A create has three independent fields: branches from, merges into, and an
@@ -106,3 +126,19 @@ fire-and-forget command file whose result arrives later as a prompt.
   point is its last concluded turn).
 - Whether the command-file ingress is retired entirely, which needs its other
   writers (Emacs) moved onto RPCs.
+
+## The combinations
+
+Three axes, each with three values, from the requester's point of view:
+
+- CONTEXT ORIGIN: self (fork the requester's transcript), other (fork another
+  workspace X's transcript), fresh.
+- BRANCH SOURCE: self (the requester's branch), other (another branch), main.
+- MERGE TARGET: self (the requester's branch), other (another workspace's
+  branch), main.
+
+Each of the 27 combinations records: supported or refused (with the real
+invariant), how common it is, and example situations.
+
+| # | context | branch source | merge target | supported | prevalence | example situations |
+|---|---|---|---|---|---|---|
