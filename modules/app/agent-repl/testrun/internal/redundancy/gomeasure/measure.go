@@ -38,10 +38,14 @@ const (
 	// ToolTimeout bounds one `go tool covdata`: measured under 0.2s.
 	ToolTimeout = 10 * time.Second
 	// FirstContactTimeout bounds a test process before anything about it is
-	// measured (discovery): the slowest internal/workspace top-level test
-	// measured 0.03s and the slowest daemon integration test 14s (the
-	// scheduler's history), so a test past this is broken, not slow.
-	FirstContactTimeout = 30 * time.Second
+	// measured (discovery, the coverage runs): go test's own package default.
+	// Nothing measured bounds a test yet, and one run here takes far longer
+	// than the scheduler's history says, since -test.parallel=1 runs a
+	// parallel test's subtests one after another
+	// (TestRosterAndFooterAgreeOnBlocked: 16 subtests of about 2s, 19s in the
+	// history, 32s here, past the 30s this was). Only a test past go test's
+	// own bound is broken rather than slow.
+	FirstContactTimeout = 10 * time.Minute
 	// TimeoutSlack is added to twice a process's measured healthy latency:
 	// its start-up varies by more than twice its few milliseconds of tests.
 	TimeoutSlack = 500 * time.Millisecond
