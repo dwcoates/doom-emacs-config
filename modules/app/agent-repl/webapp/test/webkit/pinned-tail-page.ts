@@ -9,14 +9,13 @@
  * of known height, the last of them a merge bubble's row, as the row pinned to
  * the feed's bottom (FeedRowOrder.pinned) is drawn.
  *
- * WHAT IT MEASURES IS WHAT IS PAINTED, as anchoring-page.ts does: a frame's
- * sample is taken in a ResizeObserver created AFTER the feed's own, whose
- * target is resized on every animation frame, so it reads the layout the
- * feed's own corrections left — the frame the reader sees.
+ * WHAT IT MEASURES IS WHAT IS PAINTED: every sample is a painted frame's
+ * (`paintedFrames`, painted-frames.ts), the frame the reader sees.
  */
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { observeScrollBox } from "../../src/scroll.js";
 import { createFeedTail, latestEntry } from "../../src/feed/feed.js";
+import { paintedFrames } from "./painted-frames";
 import { MERGE_BUBBLE_ATTRIBUTE } from "../../src/feed/merge-bubble.js";
 
 /** What one growth saw across the frames it painted. */
@@ -80,26 +79,7 @@ rows.append(pinned);
 const tail = createFeedTail(box, rows);
 observeScrollBox(box, tail);
 
-const sentinel = document.createElement("div");
-sentinel.style.cssText = "position:fixed;left:0;top:0;height:1px;width:1px;visibility:hidden";
-document.body.append(sentinel);
-let waiting: (() => void) | null = null;
-new ResizeObserver(() => {
-  const next = waiting;
-  waiting = null;
-  next?.();
-}).observe(sentinel);
-let wide = false;
-/** Resolves with READ's answer, taken in the next rendering update after the feed's own. */
-function frame<T>(read: () => T): Promise<T> {
-  return new Promise<T>((resolve) => {
-    requestAnimationFrame(() => {
-      wide = !wide;
-      sentinel.style.width = wide ? "2px" : "1px";
-      waiting = () => resolve(read());
-    });
-  });
-}
+const frame = paintedFrames();
 
 /** The gap between the latest entry's bottom and the box's bottom. */
 const gap = (): number => {

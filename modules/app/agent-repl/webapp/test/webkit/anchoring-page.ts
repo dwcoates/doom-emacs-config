@@ -8,18 +8,13 @@
  * `.feed-item` wrappers holding one block of a fixed, varied height, which a
  * test can grow to stand in for a row above the reader changing height.
  *
- * WHAT IT MEASURES IS WHAT IS PAINTED. A frame's sample is taken in a
- * ResizeObserver created AFTER the feed's own, whose target is resized on
- * every animation frame: the rendering update runs the scroll events, the
- * animation frames, layout, then the resize observers in creation order, and
- * only then paints. So the sample sees the layout the feed's own corrections
- * left, which is the frame the reader sees. Reading layout anywhere else -- a
- * task between two frames -- sees growth no rendering update has corrected
- * yet, a state that is never painted.
+ * WHAT IT MEASURES IS WHAT IS PAINTED: every sample is a painted frame's
+ * (`paintedFrames`, painted-frames.ts).
  */
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { observeScrollBox, type TailFollow } from "../../src/scroll.js";
 import { createFeedTail } from "../../src/feed/feed.js";
+import { paintedFrames } from "./painted-frames";
 
 /** The rows the page draws, and the real height of row I (60px to 759px). */
 const ROWS = 400;
@@ -78,32 +73,6 @@ function mount(): { box: HTMLElement; host: HTMLElement; tail: TailFollow } {
   const tail = createFeedTail(box, host);
   observeScrollBox(box, tail);
   return { box, host, tail };
-}
-
-/**
- * A painted-frame clock: each call resolves with READ's answer, taken in the
- * resize-observer phase of the next rendering update, after the feed's own.
- */
-function paintedFrames(): <T>(read: () => T) => Promise<T> {
-  const sentinel = document.createElement("div");
-  sentinel.style.cssText = "position:fixed;left:0;top:0;height:1px;width:1px;visibility:hidden";
-  document.body.append(sentinel);
-  let waiting: (() => void) | null = null;
-  const observer = new ResizeObserver(() => {
-    const next = waiting;
-    waiting = null;
-    next?.();
-  });
-  observer.observe(sentinel);
-  let wide = false;
-  return <T>(read: () => T) =>
-    new Promise<T>((resolve) => {
-      requestAnimationFrame(() => {
-        wide = !wide;
-        sentinel.style.width = wide ? "2px" : "1px";
-        waiting = () => resolve(read());
-      });
-    });
 }
 
 /** The row under the viewport's top plus OFFSET, or the first one below it. */
