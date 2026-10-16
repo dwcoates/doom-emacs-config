@@ -5,8 +5,9 @@
 ;; The composer is spellchecked by `flyspell-mode' running hunspell against
 ;; ONE dictionary: SCOWL size 80, the largest size SCOWL recommends for
 ;; spellchecking.  `bin/requirements.sh' installs it as the `spell-dictionary'
-;; entry of `requirements.json' (a `download' kind, pinned by sha256), and the
-;; `hunspell' entry installs the program.
+;; entry of `lisp/requirements.json' (a `download' kind, pinned by sha256),
+;; and that manifest's `hunspell' entry installs the program.  The manifest
+;; sits in `lisp/', beside the code that reads it.
 ;;
 ;; THE MANIFEST IS THE ONE RECORD of where the dictionary lives and what it is
 ;; called.  This file reads the `spell-dictionary' entry rather than naming
@@ -84,9 +85,9 @@ after it."
   "The id of the manifest entry that installs the composer's dictionary.")
 
 (defconst agent-repl--spell-manifest
-  (expand-file-name "../requirements.json"
+  (expand-file-name "requirements.json"
                     (file-name-directory (or load-file-name buffer-file-name)))
-  "The module's root requirement manifest, which declares the dictionary.")
+  "The Emacs layer's requirement manifest, which declares the dictionary.")
 
 ;;;; ---- The dictionary, as the manifest declares it ----------------------
 
@@ -115,7 +116,7 @@ is signalled, on WS's log."
 
 (defun agent-repl--spell-dictionary (ws &optional manifest)
   "Return the composer's dictionary as (:name NAME :dir DIR :files FILES).
-Read from MANIFEST's `spell-dictionary' entry (the module's own manifest
+Read from MANIFEST's `spell-dictionary' entry (the Emacs layer's own manifest
 when nil): DIR is the cache dir it installs into, FILES the absolute path
 of every file it installs, and NAME the hunspell dictionary name, the one
 `.aff' file's name without its extension.  An entry that installs no

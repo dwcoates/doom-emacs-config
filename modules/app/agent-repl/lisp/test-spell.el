@@ -97,7 +97,7 @@ FILES is a list of installed names (the entries' `to')."
 ;;;; ---- Tests: the dictionary, as the manifest declares it ----
 
 (ert-deftest agent-repl-test-spell-dictionary-reads-the-real-manifest ()
-  "The module's own manifest names the dictionary the runner installs."
+  "The Emacs layer's own manifest names the dictionary the runner installs."
   (agent-repl-test-spell--with-cache cache
     (let ((dictionary (agent-repl--spell-dictionary "ws")))
       (should (equal (plist-get dictionary :name) "en_US-scowl80"))

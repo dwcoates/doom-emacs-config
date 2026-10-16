@@ -1712,7 +1712,7 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
 
 - **Where entries live.**
   - `requirements.json` at the module root holds agent-repl-wide entries: Emacs, Doom, the Claude CLI, the banner program, environment variables, skills, the pre-commit hook, and module-wide dev tools.
-  - Each system keeps its own `requirements.json` beside its code (`daemon/`, `webapp/`, `proto/`, `e2e/`, `agent-shim/claude/shim/`, `agent-shim/shim-lock/`, `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and the root's `includes` names every one of them.
+  - Each system keeps its own `requirements.json` beside its code (`lisp/`, `daemon/`, `webapp/`, `proto/`, `e2e/`, `agent-shim/claude/shim/`, `agent-shim/shim-lock/`, `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and the root's `includes` names every one of them.
   - An id two systems share (a toolchain like `go` or `node`) is declared identically in each, and the runner refuses any difference.
 - **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `git_hook`, `launchd_service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.

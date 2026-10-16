@@ -9,7 +9,8 @@
     "agent-shim/shim-store/requirements.json",
     "agent-shim/claude/shim-sidecar/requirements.json",
     "webapp/requirements.json",
-    "e2e/requirements.json"
+    "e2e/requirements.json",
+    "lisp/requirements.json"
   ],
   "requirements": [
     {
@@ -89,20 +90,6 @@
       }
     },
     {
-      "id": "hunspell",
-      "kind": "program",
-      "why": "the composer's spellchecker (lisp/spell.el) runs it with the spell-dictionary below",
-      "profile": "run",
-      "platforms": [
-        "darwin",
-        "linux"
-      ],
-      "command": "hunspell",
-      "install": {
-        "brew": "hunspell"
-      }
-    },
-    {
       "id": "curl",
       "kind": "program",
       "why": "bin/requirements.sh downloads the download-kind entries (spell-dictionary) with it; macOS ships it",
@@ -143,27 +130,6 @@
       "install": {
         "manual": "Install perl's shasum with your distribution's package manager."
       }
-    },
-    {
-      "id": "spell-dictionary",
-      "kind": "download",
-      "why": "the composer's spellchecker (lisp/spell.el) checks against this hunspell dictionary: SCOWL size 80, the largest size SCOWL recommends for spellchecking (size 95 adds words obscure enough to hide real misspellings), American spelling with common variants, accented forms, hacker words and roman numerals",
-      "profile": "run",
-      "url": "https://app.aspell.net/create?max_size=80&spelling=US&max_variant=1&diacritic=both&special=hacker&special=roman-numerals&download=hunspell&encoding=utf-8&format=inline",
-      "archive": "zip",
-      "dest": "dictionaries",
-      "files": [
-        {
-          "from": "en_US-custom.aff",
-          "to": "en_US-scowl80.aff",
-          "sha256": "f272dbc2528af36bb51d2dcf87fbedc044cb07c253d5a43a823b4654c5268de4"
-        },
-        {
-          "from": "en_US-custom.dic",
-          "to": "en_US-scowl80.dic",
-          "sha256": "ed356f00d0731262c8f12edc676cc5e48564e65ded657820bac5c979e0a3b1fe"
-        }
-      ]
     },
     {
       "id": "claude",
