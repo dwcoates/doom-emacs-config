@@ -511,6 +511,8 @@ settled `:superseded' so its caller is not left waiting.")
 
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl-roster-move-frame "roster" (name))
+(declare-function agent-repl-webhost-has-page-p "webhost" (ws))
+(declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl-link-up-p "daemon-link" ())
 
@@ -779,7 +781,14 @@ decision is recorded at INFO, as the roster's follow records its own."
           (not (equal (agent-repl--ws-by-ref-id id) ws)))
       (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=no-tab-yet" ws))
      (t
-      (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s" ws shown)
+      ;; THE PAGE IS SHOWN FIRST, so WebKit paints it while Emacs switches its
+      ;; own view; the switch pass's own show then finds it already shown.
+      ;; Nothing is painted that the switch would not paint: rapid presses
+      ;; show each page, and WebKit draws only the one shown at each frame.
+      (let ((page (agent-repl-webhost-has-page-p ws)))
+        (when page (agent-repl-webhost-show ws))
+        (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s"
+                          ws shown (if page "shown" "none")))
       (agent-repl-roster-move-frame ws)))))
 
 (defun agent-repl-host-mark-viewed (ws)
