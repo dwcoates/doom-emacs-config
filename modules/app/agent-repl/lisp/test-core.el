@@ -450,8 +450,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their prompt could not be held, with its words")
     ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
      "confirms the interactive source reload")
-    ("magit.el" agent-repl-magit-toggle-tags-in-log "magit commit-list tags %s"
-     "confirms the interactive Magit display toggle")
     ("magit.el" agent-repl-magit-copy-commit-link
      "GitHub commit link copied to clipboard: %s"
      "confirms an interactive clipboard write")

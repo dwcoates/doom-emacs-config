@@ -175,7 +175,6 @@ Scope keys, shared by every generated diff family: `w` worktree, `s` staged,
 | `agent-repl-magit-status-main-worktree` | Open `magit-status` for the repository's main worktree in the selected window. | `SPC g G` | leader | leader |
 | `agent-repl-magit-open-commit-in-github` | Open the commit at point on GitHub. | `SPC g O`, `g C` | leader, magit status | leader, works |
 | `agent-repl-magit-copy-commit-link` | Copy the GitHub link of the commit at point. | `g c` | magit status | works |
-| `agent-repl-magit-toggle-tags-in-log` | Toggle tag refs in magit commit listings. | `g T` | magit status | works |
 | `magit-jump-to-unpushed-to-upstream` (stock) | Jump to the recent-commits section. | `g r` | magit section maps | works |
 | `magit-diff-visit-worktree-file` / `magit-diff-visit-file` (stock) | Visit the file at point. | `RET` / `C-RET` | magit file and hunk sections | works |
 | `magit-diff-visit-file-other-window` (stock) | Visit the file at point in another window. | `C-RET` | magit status and diff sections | works |
