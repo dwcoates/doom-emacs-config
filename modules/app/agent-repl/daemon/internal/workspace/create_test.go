@@ -1637,3 +1637,97 @@ func TestEveryAncestryCheckGoesThroughRequireOnPrimary(t *testing.T) {
 		t.Fatalf("Git.IsAncestor( calls per file = %v, want %v", perFile, want)
 	}
 }
+
+// ---- decorateWithWorkspaceNote: the shared create note about a workspace ----
+
+// noteBrief is a brief naming a workspace by its name and branch.
+const noteBrief = "test-workspace-note"
+
+func TestDecorateWithWorkspaceNote(t *testing.T) {
+	tests := []struct {
+		name      string
+		brief     *prompts.Prompt
+		subject   ids.WorkspaceID
+		register  bool
+		want      string
+		wantError bool
+	}{
+		{
+			name:     "opens the prompt with the wrapped note spliced from the record",
+			brief:    &prompts.Prompt{Name: noteBrief, Body: "ABOUT {{name}} ON {{branch}}\n", Placeholders: []string{"name", "branch"}},
+			subject:  "subject",
+			register: true,
+			want:     prompts.Wrap("ABOUT sample ON ABC/sample\n") + "raw words",
+		},
+		{
+			name:      "an unregistered workspace fails",
+			brief:     &prompts.Prompt{Name: noteBrief, Body: "ABOUT {{name}}\n", Placeholders: []string{"name"}},
+			subject:   "ws-nope",
+			wantError: true,
+		},
+		{
+			name:      "a missing brief fails",
+			subject:   "subject",
+			register:  true,
+			wantError: true,
+		},
+		{
+			name:      "a brief declaring a placeholder the values lack fails",
+			brief:     &prompts.Prompt{Name: noteBrief, Body: "ABOUT {{dir}}\n", Placeholders: []string{"dir"}},
+			subject:   "subject",
+			register:  true,
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			if tt.brief != nil {
+				f.briefs[noteBrief] = *tt.brief
+			}
+			if tt.register {
+				f.workspace(tt.subject, t.TempDir())
+			}
+			values := func(ws wsm.Workspace) map[string]string {
+				return map[string]string{"name": ws.Name, "branch": ws.Branch}
+			}
+
+			// Act.
+			got, err := f.mutable(t).decorateWithWorkspaceNote(context.Background(), f.log.logger, "raw words", noteBrief, tt.subject, values)
+
+			// Assert.
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("decorated = %q, want an error", got)
+				}
+				if !loggedAtError(f, opCreate) {
+					t.Fatal("the failure was not logged at error")
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("decorated = (%q, %v), want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateNotesShareTheWorkspaceNoteComposition(t *testing.T) {
+	// Arrange: the fork-into-primary note is the shared composition with its
+	// own brief and values, so the two agree byte for byte.
+	f := newFixture(t)
+	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
+	source := f.workspace("source", t.TempDir())
+	v := f.mutable(t)
+
+	// Act.
+	fork, forkErr := v.decorateForkIntoPrimary(context.Background(), f.log.logger, "raw", source.ID)
+	shared, sharedErr := v.decorateWithWorkspaceNote(context.Background(), f.log.logger, "raw", BriefForkIntoPrimary, source.ID,
+		func(ws wsm.Workspace) map[string]string { return map[string]string{"origin": ws.Name} })
+
+	// Assert.
+	if forkErr != nil || sharedErr != nil || fork != shared {
+		t.Fatalf("fork note = (%q, %v), shared = (%q, %v), want them equal", fork, forkErr, shared, sharedErr)
+	}
+}

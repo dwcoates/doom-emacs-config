@@ -754,20 +754,38 @@ const BriefForkIntoPrimary = "workspace-fork-into-primary-preamble"
 // will not load or splice fails the create loudly rather than sending the
 // prompt undecorated.
 func (v *verbs) decorateForkIntoPrimary(ctx context.Context, log dlog.Logger, raw string, from ids.WorkspaceID) (string, error) {
-	origin, err := v.deps.DB.Workspace(ctx, from)
+	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefForkIntoPrimary, from,
+		func(origin wsm.Workspace) map[string]string { return map[string]string{"origin": origin.Name} })
+}
+
+// decorateWithWorkspaceNote opens raw with the meta-wrapped note BRIEF, spliced
+// from the registered workspace SUBJECT the note names. It is the one
+// composition every create note about another workspace shares: the record is
+// read, the brief is loaded from the daemon's own corpus, the values are
+// spliced, and any failure is logged once here and returned, so a create never
+// sends its prompt without the note it owes.
+func (v *verbs) decorateWithWorkspaceNote(
+	ctx context.Context,
+	log dlog.Logger,
+	raw, brief string,
+	subject ids.WorkspaceID,
+	values func(wsm.Workspace) map[string]string,
+) (string, error) {
+	fields := dlog.Context{"brief": brief, "workspace": string(subject)}
+	record, err := v.deps.DB.Workspace(ctx, subject)
 	if err != nil {
-		log.Error(opCreate, "could not read the workspace a fork into the primary branch copies", dlog.Context{"fork_from": string(from), "cause": err.Error()})
-		return "", fmt.Errorf("read the fork source %q: %w", from, err)
+		log.Error(opCreate, "could not read the workspace a create's note names", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the workspace %q the %s brief names: %w", subject, brief, err)
 	}
-	brief, err := v.load(v.deps.PromptsDir, BriefForkIntoPrimary)
+	loaded, err := v.load(v.deps.PromptsDir, brief)
 	if err != nil {
-		log.Error(opCreate, "could not read the fork-into-primary brief", dlog.Context{"brief": BriefForkIntoPrimary, "cause": err.Error()})
-		return "", fmt.Errorf("read the %s brief: %w", BriefForkIntoPrimary, err)
+		log.Error(opCreate, "could not read a create note's brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the %s brief: %w", brief, err)
 	}
-	note, err := v.splice(brief, map[string]string{"origin": origin.Name})
+	note, err := v.splice(loaded, values(record))
 	if err != nil {
-		log.Error(opCreate, "could not splice the fork-into-primary brief", dlog.Context{"brief": BriefForkIntoPrimary, "cause": err.Error()})
-		return "", fmt.Errorf("splice the %s brief: %w", BriefForkIntoPrimary, err)
+		log.Error(opCreate, "could not splice a create note's brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("splice the %s brief: %w", brief, err)
 	}
 	return prompts.Wrap(note) + raw, nil
 }
