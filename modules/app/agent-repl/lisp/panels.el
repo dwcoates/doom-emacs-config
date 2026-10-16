@@ -1023,7 +1023,24 @@ events (kill, switch, add) are traceable."
                               (agent-repl--ws-current-name))
     (agent-repl--supersede-switch-activation (agent-repl--ws-current-name)))
    (t
+    (agent-repl--gate-layout-before-redisplay (agent-repl--ws-current-name))
     (agent-repl--schedule-switch-activation (agent-repl--ws-current-name)))))
+
+(defun agent-repl--gate-layout-before-redisplay (ws)
+  "Lay WS out for its standing gate now, before the switch's first redisplay.
+persp-mode restores WS\='s saved window layout as it activates it, and a
+layout saved before the gate stood up still holds the input window, which
+the gate hides (`agent-repl-input-hidden-p').  Left to the deferred switch
+pass, that input window was on screen for the redisplay between the two:
+a flash of the composer under the gate's docked banner, visible once a
+switch took a frame (owner, 2026-10-16).  The repair is the layout
+reconciler's own (`agent-repl-window--ensure-layout'), run here so the
+first redisplay already shows the gate's layout; the deferred pass then
+finds it complete.  Answers non-nil when it laid WS out."
+  (when (and ws (agent-repl-input-hidden-p ws)
+             (window-live-p (agent-repl-window--panel-window :input ws)))
+    (agent-repl--info ws "elisp.panels.gate-layout-before-redisplay ws=%s" ws)
+    (agent-repl-window--ensure-layout)))
 
 (when (modulep! :ui workspaces)
   (agent-repl--ws-add-before-deactivate-hook #'agent-repl--before-persp-deactivate)
