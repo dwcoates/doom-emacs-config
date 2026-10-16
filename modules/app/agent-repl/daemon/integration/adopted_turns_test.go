@@ -154,6 +154,11 @@ func TestTheBootAdoptionStandsTheGateTheSurvivorHoldsOpen(t *testing.T) {
 				Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
 					Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
 						Question: &conversationv1.AgentQuestionText{Text: "Which approach?"},
+						// The set arm is the question's mode (conversation.v1
+						// AgentQuestionAsked.choices): a question with none is malformed.
+						Choices: &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{
+							Options: []*conversationv1.AgentQuestionOption{{Label: &conversationv1.AgentQuestionOptionLabel{Label: "the first"}}},
+						}},
 					}}},
 					StartedAt: startedAt(1),
 				}},
