@@ -174,7 +174,8 @@ invariant), how common it is, and example situations.
 | O5 | other (Y) | main | any other branch | NO (owner, 2026-10-16) | never | none |
 | F1 | fresh | main | main | yes, situational (owner, 2026-10-16) | situational | a truly tangential bug the current context does not help with; a review that must not be biased by the existing context |
 | F2 | fresh | W | W | yes, situational; W arbitrates and lands, since the new workspace did not fork W's context (owner, 2026-10-16) | situational | as F1, on W's unlanded work |
-| U1 | forked from the workspace that spawned the subagent (owner, 2026-10-16) | a branch no workspace owns (the subagent's) | main | yes | common | landing a subagent's work: the spawning workspace knows why the subagent was dispatched and how to work with it, which is enough context to repair and land the work |
+| U1 | forked from the workspace that spawned the subagent (owner, 2026-10-16) | a branch no workspace owns (the subagent's) | main | yes | common | landing a subagent's work directly on main |
+| U2 | forked from the workspace that spawned the subagent | a branch no workspace owns (the subagent's) | the spawning workspace's branch | yes (owner, 2026-10-16) | common | many concurrent subagents landing into the requester's branch as each finishes |
 
 ## Enforcement and its gaps
 
@@ -197,3 +198,22 @@ today, and what it lacks:
   that each exists.
 - A call from a directory that is no workspace (e.g. a subagent's worktree) has
   no requester and is refused.
+
+## Subagent merges (owner, 2026-10-16)
+
+- Landing a subagent's work is always an ASYNC MERGE, of a special kind: one
+  that names the subagent it derives from. It never makes a full workspace;
+  its merge workspace stays hidden, like every async merge's.
+- U1 (onto main) and U2 (into the spawning workspace's branch) are equally
+  valid uses.
+- The request names the subagent's id; the daemon finds the spawning workspace
+  by locating the subagent's transcript under that workspace's session, so no
+  owner field states the same fact a second time.
+- EVERY async merge (not only a subagent's) creates its merge workspace, and
+  forks its context, WHEN THE MERGE STARTS, not when it is requested, so the
+  fork carries every landing that happened while the merge waited (B, landing
+  after A and C, knows they landed). The fork point is still the requester's
+  last concluded turn; a turn in flight is left out, which is acceptable.
+- Queue racing is being removed (owner, 2026-10-16), so merges run one at a
+  time and each forks after the previous one landed. (On master as of
+  2026-10-16 racing is still present: `daemon/internal/merge/racing.go`.)
