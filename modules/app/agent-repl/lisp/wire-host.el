@@ -55,6 +55,8 @@
 (declare-function agent-repl-wire-decode-daemon-fault "wire-verbs")
 (declare-function agent-repl-wire-decode-persistent-wifi-state "wire-verbs")
 (declare-function agent-repl-wire--raw "wire-common")
+(declare-function agent-repl-wire--present-p "wire-common")
+(declare-function agent-repl-wire-decode-feed-id "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
@@ -469,15 +471,97 @@ presence still stands."
                                         agent-repl-wire-host-gate-arms t)
          (list :arm nil :value nil)))))
 
+;;;; ---- The standing ask ----
+
+(defun agent-repl-wire-decode-host-ask-question-option (value)
+  "Decode VALUE as `HostAskQuestionOption', a plist `(:label)'.
+LABEL is the served option label, echoed verbatim by a pick."
+  (let ((object (agent-repl-wire--object "HostAskQuestionOption" value)))
+    (agent-repl-wire--check-keys "HostAskQuestionOption" object '(label))
+    (agent-repl-wire--decoded
+     "HostAskQuestionOption"
+     (list :label (agent-repl-wire--decode-string "HostAskQuestionOption" 'label object)))))
+
+(defun agent-repl-wire--decode-host-ask-options (message-name value)
+  "Decode VALUE as MESSAGE-NAME, a message whose one field is `options'.
+Both selection arms of `HostAskQuestion' carry exactly that shape, so the
+plist is `(:options OPTIONS)' for either, OPTIONS in the served order."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(options))
+    (agent-repl-wire--decoded
+     message-name
+     (list :options (agent-repl-wire--decode-repeated
+                     message-name 'options object
+                     #'agent-repl-wire-decode-host-ask-question-option)))))
+
+(defun agent-repl-wire-decode-host-ask-question-single-select (value)
+  "Decode VALUE as `HostAskQuestionSingleSelect', a plist `(:options)'."
+  (agent-repl-wire--decode-host-ask-options "HostAskQuestionSingleSelect" value))
+
+(defun agent-repl-wire-decode-host-ask-question-multi-select (value)
+  "Decode VALUE as `HostAskQuestionMultiSelect', a plist `(:options)'."
+  (agent-repl-wire--decode-host-ask-options "HostAskQuestionMultiSelect" value))
+
+(defun agent-repl-wire-decode-host-ask-question (value)
+  "Decode VALUE as `HostAskQuestion', a plist `(:question-text :selection)'.
+SELECTION is `(:arm :single-select|:multi-select :value (:options))'; an
+unset selection is a contract breach."
+  (let ((object (agent-repl-wire--object "HostAskQuestion" value)))
+    (agent-repl-wire--check-keys "HostAskQuestion" object
+                                 '(questionText singleSelect multiSelect))
+    (agent-repl-wire--decoded
+     "HostAskQuestion"
+     (list :question-text (agent-repl-wire--decode-string
+                           "HostAskQuestion" 'questionText object)
+           :selection (agent-repl-wire--decode-oneof
+                       "HostAskQuestion" 'selection object
+                       '((singleSelect :single-select
+                                       agent-repl-wire-decode-host-ask-question-single-select)
+                         (multiSelect :multi-select
+                                      agent-repl-wire-decode-host-ask-question-multi-select)))))))
+
+(defun agent-repl-wire-decode-host-ask-permission-standing-offered (value)
+  "Decode VALUE as the empty message `HostAskPermissionStandingOffered'."
+  (agent-repl-wire--decode-empty "HostAskPermissionStandingOffered" value))
+
+(defun agent-repl-wire-decode-host-ask-permission (value)
+  "Decode VALUE as `HostAskPermission', a plist `(:standing-offered)'.
+STANDING-OFFERED is t when the field is present: presence is the fact."
+  (let ((object (agent-repl-wire--object "HostAskPermission" value)))
+    (agent-repl-wire--check-keys "HostAskPermission" object '(standingOffered))
+    (agent-repl-wire--decode-optional-message
+     "HostAskPermission" 'standingOffered object
+     #'agent-repl-wire-decode-host-ask-permission-standing-offered)
+    (agent-repl-wire--decoded
+     "HostAskPermission"
+     (list :standing-offered (and (agent-repl-wire--present-p object 'standingOffered) t)))))
+
+(defun agent-repl-wire-decode-host-ask (value)
+  "Decode VALUE as `HostAsk', a plist `(:row :kind)'.
+ROW is the card's `FeedId' plist, echoed by the answer verbs.  KIND is
+`(:arm :question|:permission :value V)'; an unset kind is a contract
+breach."
+  (let ((object (agent-repl-wire--object "HostAsk" value)))
+    (agent-repl-wire--check-keys "HostAsk" object '(row question permission))
+    (agent-repl-wire--decoded
+     "HostAsk"
+     (list :row (agent-repl-wire--decode-message
+                 "HostAsk" 'row object #'agent-repl-wire-decode-feed-id)
+           :kind (agent-repl-wire--decode-oneof
+                  "HostAsk" 'kind object
+                  '((question :question agent-repl-wire-decode-host-ask-question)
+                    (permission :permission agent-repl-wire-decode-host-ask-permission)))))))
+
 (defun agent-repl-wire-decode-host-workspace (value)
   "Decode VALUE as `HostWorkspace'.
-The plist is `(:session :naming :held-prompt-edit :gate)'.
+The plist is `(:session :naming :held-prompt-edit :gate :ask)'.
 `naming' is a REQUIRED message sitting beside the session oneof; its two
 fields are the optional halves, not the message.  `held_prompt_edit' is
 absent when no held-prompt edit stands, and its absence is that fact.
-`gate' is absent when no gate stands, likewise."
+`gate' is absent when no gate stands, likewise, and `ask' when no question
+or permission card stands on the root feed."
   (let ((object (agent-repl-wire--object "HostWorkspace" value)))
-    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit gate))
+    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit gate ask))
     (agent-repl-wire--decoded
      "HostWorkspace"
      (list :session (agent-repl-wire-decode-host-workspace-session object)
@@ -489,7 +573,10 @@ absent when no held-prompt edit stands, and its absence is that fact.
                               #'agent-repl-wire-decode-host-held-prompt-edit)
            :gate (agent-repl-wire--decode-optional-message
                   "HostWorkspace" 'gate object
-                  #'agent-repl-wire-decode-host-gate)))))
+                  #'agent-repl-wire-decode-host-gate)
+           :ask (agent-repl-wire--decode-optional-message
+                 "HostWorkspace" 'ask object
+                 #'agent-repl-wire-decode-host-ask)))))
 
 ;;;; ---- The notification click push ----
 

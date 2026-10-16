@@ -227,6 +227,14 @@ two of them disagree about what live means."
         (when (eq (plist-get standing :arm) :live)
           (plist-get standing :value))))))
 
+(defun agent-repl-host-standing-ask (ws)
+  "Return WS's standing `HostAsk' plist off the last host push, or nil.
+The root feed's oldest open question or permission card, as the daemon
+projects it for an answer by number: `(:row FEEDID :kind (:arm
+:question|:permission :value V))'.  Nil is the ordinary state whenever no
+such card stands, and before the first push."
+  (plist-get (agent-repl-host-state ws) :ask))
+
 (defun agent-repl-host-backfill (ws)
   "Return WS's backfill arm keyword, or nil.
 One of `:none', `:pending', `:done', `:failed'.  Nil when there is no

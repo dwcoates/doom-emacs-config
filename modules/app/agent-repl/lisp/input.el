@@ -108,6 +108,9 @@
 (declare-function agent-repl-command-completion-at-point "command-completion" ())
 (declare-function agent-repl--command-completion-on-change "command-completion" (beg end len))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
+(declare-function agent-repl-host-standing-ask "agent-repl-host" (ws))
+(declare-function agent-repl-rpc-update-question-draft "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-answer-permission "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-selection "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
@@ -755,59 +758,102 @@ The mirror of `agent-repl-response-search-forward'."
   (interactive)
   (agent-repl--response-search #'evil-ex-search-backward))
 
+(defun agent-repl--input-endpoints (ws op prefix detail-name detail)
+  "Return WS's (REF . CONN) for the composer verb OP, or nil after saying why.
+With no daemon-minted ref, or no connection, nothing can be sent: the miss
+is logged at WARN as `elisp.input.OP-no-ref' / `-no-conn' carrying DETAIL
+under DETAIL-NAME, and the composer flashes under PREFIX.  THE ONE GUARD
+every composer verb sends behind."
+  (let ((ref (agent-repl-host-ref ws))
+        (conn (agent-repl-host-conn-or-primary ws))
+        (shown (concat detail-name "=%S")))
+    (cond
+     ((null ref)
+      (agent-repl--warn ws (concat "elisp.input." op "-no-ref ws=%s " shown) ws detail)
+      (agent-repl--input-flash ws (format "%s: workspace not ready" prefix))
+      nil)
+     ((null conn)
+      (agent-repl--warn ws (concat "elisp.input." op "-no-conn ws=%s " shown) ws detail)
+      (agent-repl--input-flash ws (format "%s: no daemon connection" prefix))
+      nil)
+     (t (cons ref conn)))))
+
+(defun agent-repl--input-report-refusal (ws slug cause flash warn-format &rest warn-args)
+  "Report a composer verb's refusal CAUSE for WS and flash FLASH.
+A handover arm is routed to host.el's handover walk under
+`SLUG-handover-refusal' (logged at INFO there) instead of logged as a
+refusal; any other is logged at WARN with WARN-FORMAT and WARN-ARGS.  The
+flash stands either way, because the verb did not happen.  THE ONE
+REFUSAL REPORT every composer verb shares."
+  (unless (agent-repl-host-route-handover ws cause (concat slug "-handover-refusal"))
+    (apply #'agent-repl--warn ws warn-format warn-args))
+  (agent-repl--input-flash ws flash))
+
+(cl-defun agent-repl--input-call (ws &key op prefix detail-name detail rpc request
+                                      on-success on-refused)
+  "Send the composer verb OP for WS through RPC and report how it went.
+THE ONE SHAPE every asynchronous composer verb call takes, so each answers
+alike:
+- no daemon-minted ref, or no connection: nothing is sent
+  (`agent-repl--input-endpoints');
+- otherwise RPC is called with REQUEST (a function of the ref answering
+  the request plist), logged at INFO;
+- a success hands its value to ON-SUCCESS;
+- a refusal is reported (`agent-repl--input-report-refusal') with the
+  text ON-REFUSED answers for its cause, flashed under PREFIX;
+- an answer arm the composer does not know is an ERROR;
+- a transport failure is logged at WARN and flashed.
+Every record is the operation `elisp.input.OP...' and carries DETAIL
+under DETAIL-NAME, so a log line names what was asked."
+  (when-let* ((endpoints (agent-repl--input-endpoints ws op prefix detail-name detail)))
+    (let ((slug (concat "elisp.input." op))
+          (shown (concat detail-name "=%S")))
+      (agent-repl--info ws (concat slug " ws=%s " shown) ws detail)
+      (funcall
+       rpc (cdr endpoints) (funcall request (car endpoints))
+       :on-response
+       (lambda (response)
+         (pcase (plist-get response :arm)
+           (:success (funcall on-success (plist-get response :value)))
+           (:error
+            (let ((cause (plist-get (plist-get response :value) :cause)))
+              (agent-repl--input-report-refusal
+               ws slug cause (format "%s: %s" prefix (funcall on-refused cause))
+               (concat slug "-refused ws=%s " shown " cause=%S") ws detail cause)))
+           (other
+            (agent-repl--error ws (concat slug "-unknown-arm ws=%s arm=%S") ws other))))
+       :on-failure
+       (lambda (failure)
+         (agent-repl--warn ws (concat slug "-failure ws=%s " shown " detail=%S")
+                           ws detail failure)
+         (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix)))))))
+
 (defun agent-repl--input-select-feed-row (ws move)
   "Send the `SelectFeedRow' MOVE for WS and report how it went.
 MOVE is (:arm ARM :value V): ARM `:turn-boundary' with V
 \(:direction `:older'/`:newer'), or `:clear' with V nil.  THE ONE SEND of
-every composer selection move, so each answers alike: the outcome is the
-daemon's, and its push on the host watch is what changes Emacs's state; a
-step that finds nothing of its kind says so; a refusal or transport
-failure flashes the composer and is logged -- error coverage is never
-dropped just because the daemon is the authority."
-  (let* ((arm (plist-get move :arm))
-         (prefix (cdr (assq arm agent-repl--input-selection-flash-prefixes)))
-         (ref (agent-repl-host-ref ws))
-         (conn (agent-repl-host-conn-or-primary ws)))
-    (cond
-     ((null ref)
-      (agent-repl--warn ws "elisp.input.select-feed-row-no-ref ws=%s move=%S" ws move)
-      (agent-repl--input-flash ws (format "%s: workspace not ready" prefix)))
-     ((null conn)
-      (agent-repl--warn ws "elisp.input.select-feed-row-no-conn ws=%s move=%S" ws move)
-      (agent-repl--input-flash ws (format "%s: no daemon connection" prefix)))
-     (t
-      (agent-repl--info ws "elisp.input.select-feed-row ws=%s move=%S" ws move)
-      (agent-repl-rpc-select-feed-row
-       conn (list :workspace ref :move move)
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            (let ((outcome (plist-get (plist-get response :value) :outcome)))
-              (agent-repl--info ws "elisp.input.select-feed-row-answered ws=%s move=%S outcome=%S"
-                                ws move (plist-get outcome :arm))
-              ;; A step that lands on NOTHING means there is no row of its
-              ;; kind: say so rather than leave the gesture silent.
-              (when (eq (plist-get outcome :arm) :nothing-selectable)
-                (agent-repl--input-flash
-                 ws (cdr (assq arm agent-repl--input-selection-nothing-selectable-flashes))))))
-           (:error
-            (let ((cause (plist-get (plist-get response :value) :cause)))
-              ;; A handover arm is news, not a fault: host.el walks it.  The
-              ;; move itself did not happen, so the composer still says so.
-              (unless (agent-repl-host-route-handover
-                       ws cause "elisp.input.select-feed-row-handover-refusal")
-                (agent-repl--warn ws "elisp.input.select-feed-row-refused ws=%s move=%S cause=%S"
-                                  ws move cause))
-              (agent-repl--input-flash ws (format "%s: selection refused" prefix))))
-           (other
-            (agent-repl--error ws "elisp.input.select-feed-row-unknown-arm ws=%s arm=%S"
-                               ws other))))
-       :on-failure
-       (lambda (detail)
-         (agent-repl--warn ws "elisp.input.select-feed-row-failure ws=%s move=%S detail=%S"
-                           ws move detail)
-         (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix))))))))
+every composer selection move, so each answers alike (see
+`agent-repl--input-call'): the outcome is the daemon's, and its push on
+the host watch is what changes Emacs's state; a step that finds nothing of
+its kind says so."
+  (let ((arm (plist-get move :arm)))
+    (agent-repl--input-call
+     ws :op "select-feed-row"
+     :prefix (cdr (assq arm agent-repl--input-selection-flash-prefixes))
+     :detail-name "move" :detail move
+     :rpc #'agent-repl-rpc-select-feed-row
+     :request (lambda (ref) (list :workspace ref :move move))
+     :on-success
+     (lambda (value)
+       (let ((outcome (plist-get value :outcome)))
+         (agent-repl--info ws "elisp.input.select-feed-row-answered ws=%s move=%S outcome=%S"
+                           ws move (plist-get outcome :arm))
+         ;; A step that lands on NOTHING means there is no row of its kind:
+         ;; say so rather than leave the gesture silent.
+         (when (eq (plist-get outcome :arm) :nothing-selectable)
+           (agent-repl--input-flash
+            ws (cdr (assq arm agent-repl--input-selection-nothing-selectable-flashes))))))
+     :on-refused (lambda (_cause) "selection refused"))))
 
 (defun agent-repl--input-select-step (direction)
   "Step the current workspace's selection through the turn boundaries.
@@ -918,10 +964,10 @@ They come in the order the confirmation lists them."
 A handover arm is routed to host.el's handover walk (logged at INFO there)
 instead of logged as a refusal; the flash stands either way, because the
 rollback did not happen and the key must be pressed again."
-  (unless (agent-repl-host-route-handover
-           ws cause (format "elisp.input.rollback-%s-handover-refusal" verb))
-    (agent-repl--warn ws "elisp.input.rollback-refused ws=%s verb=%s cause=%S" ws verb cause))
-  (agent-repl--input-flash ws (agent-repl--input-rollback-refusal-text cause)))
+  (agent-repl--input-report-refusal
+   ws (format "elisp.input.rollback-%s" verb) cause
+   (agent-repl--input-rollback-refusal-text cause)
+   "elisp.input.rollback-refused ws=%s verb=%s cause=%S" ws verb cause))
 
 (defun agent-repl--input-rollback-failed (ws verb detail)
   "Log and flash WS's VERB transport failure DETAIL."
@@ -978,19 +1024,8 @@ WARN and flashed, never silently lost."
   "Return WS's (REF . CONN) for a rollback rpc, or nil after saying why not.
 CONTEXT is the request's own fields, logged when the workspace is not
 ready or no daemon connection stands; the composer flashes either way.
-The one guard every rollback rpc sends behind."
-  (let ((ref (agent-repl-host-ref ws))
-        (conn (agent-repl-host-conn-or-primary ws)))
-    (cond
-     ((null ref)
-      (agent-repl--warn ws "elisp.input.rollback-no-ref ws=%s context=%S" ws context)
-      (agent-repl--input-flash ws "rollback: workspace not ready")
-      nil)
-     ((null conn)
-      (agent-repl--warn ws "elisp.input.rollback-no-conn ws=%s context=%S" ws context)
-      (agent-repl--input-flash ws "rollback: no daemon connection")
-      nil)
-     (t (cons ref conn)))))
+The one guard every rollback rpc sends behind (`agent-repl--input-endpoints')."
+  (agent-repl--input-endpoints ws "rollback" "rollback" "context" context))
 
 (defun agent-repl--input-rollback (ws files &optional prompt)
   "Plan a rollback of WS's conversation, confirm it, and perform it.
@@ -2170,17 +2205,163 @@ sits behind a harness re-read."
   (agent-repl--prepend-to-input-buffer agent-repl-send-prefix)
   (agent-repl--send :user-sent-with-prefix))
 
+;;;; ---- Numbered answers (a lone digit, `C-RET' on a multi-select) ------
+;;
+;; A STANDING CARD IS ANSWERED BY NUMBER.  While a question or permission
+;; card stands on the root feed (the host view's `HostAsk'), a digit typed
+;; into an EMPTY composer -- nothing before it but whitespace -- that names
+;; one of the card's numbered choices is a click on that choice, sent at
+;; once with no `RET'.  On a single-select question it answers the shown
+;; question; on a multi-select it toggles the option's tick, and `C-RET'
+;; with the composer still empty confirms the ticks; on a permission it
+;; presses the button.  Anything else -- a digit after other text, a digit
+;; no choice carries, no card standing -- is typed as usual.
+;;
+;; THE ANSWER IS THE CARD'S OWN VERB, naming the card's row:
+;; `UpdateQuestionDraft' (pick, confirm) and `AnswerPermission', exactly as
+;; the webapp's clicks send them.  A card that settled before the answer
+;; arrived is refused as not standing and the composer says so; the answer
+;; can never land on another card.
+
+(defconst agent-repl--input-numbered-answer-prefix "answer"
+  "The composer-flash prefix a numbered answer speaks under.")
+
+(defun agent-repl--input-permission-buttons (permission)
+  "Return PERMISSION's buttons in drawn order, each an `AnswerPermission' arm.
+The order is `agentrepl.v1.HostAskPermission''s: allow once, always allow
+when the vendor offered a standing form, deny."
+  (append '(:allow-once)
+          (when (plist-get permission :standing-offered) '(:allow-standing))
+          '(:deny)))
+
+(defun agent-repl--input-ask-choices (ask)
+  "Return ASK's numbered choices in order; choice N is the Nth element.
+Each choice is the answer plist `agent-repl--input-answer-choice' sends:
+`(:verb :pick :row ROW :question-text TEXT :label LABEL)' for a question's
+option, `(:verb :permission :row ROW :answer ARM)' for a permission's
+button."
+  (let ((row (plist-get ask :row))
+        (kind (plist-get ask :kind)))
+    (pcase (plist-get kind :arm)
+      (:question
+       (let* ((question (plist-get kind :value))
+              (text (plist-get question :question-text)))
+         (mapcar (lambda (option)
+                   (list :verb :pick :row row :question-text text
+                         :label (plist-get option :label)))
+                 (plist-get (plist-get (plist-get question :selection) :value) :options))))
+      (:permission
+       (mapcar (lambda (answer) (list :verb :permission :row row :answer answer))
+               (agent-repl--input-permission-buttons (plist-get kind :value))))
+      (arm (error "agent-repl: a standing ask of kind %S has no choices" arm)))))
+
+(defun agent-repl--input-composer-blank-p ()
+  "Return non-nil when the current composer holds nothing but whitespace."
+  (string-blank-p (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun agent-repl--input-numbered-choice (ws char)
+  "Return the choice CHAR names on WS's standing ask, or nil.
+CHAR names a choice when it is a digit 1-9, the current composer holds
+nothing but whitespace, an ask stands, and the ask offers that many
+choices."
+  (let ((ask (agent-repl-host-standing-ask ws)))
+    (when (and ask
+               (characterp char) (<= ?1 char ?9)
+               (agent-repl--input-composer-blank-p))
+      (nth (- char ?1) (agent-repl--input-ask-choices ask)))))
+
+(defun agent-repl--input-confirm-choice (ws)
+  "Return the confirm `C-RET' sends for WS's standing ask, or nil.
+Only a multi-select question is confirmed, and only from an empty
+composer: with text in it `C-RET' sends that text as usual."
+  (let* ((ask (agent-repl-host-standing-ask ws))
+         (kind (plist-get ask :kind))
+         (question (plist-get kind :value)))
+    (when (and (eq (plist-get kind :arm) :question)
+               (eq (plist-get (plist-get question :selection) :arm) :multi-select)
+               (agent-repl--input-composer-blank-p))
+      (list :verb :confirm :row (plist-get ask :row)
+            :question-text (plist-get question :question-text)))))
+
+(defun agent-repl--input-answer-refusal-text (cause)
+  "Return the composer flash for a numbered answer's refusal CAUSE."
+  (pcase (plist-get cause :arm)
+    (:ask-not-standing "the card was already answered")
+    (:unserved-value "the card no longer offers that choice")
+    (:no-standing-offer "the card offers no always allow")
+    (:no-session "the workspace has no session")
+    (_ "answer refused")))
+
+(defun agent-repl--input-answer-choice (ws choice)
+  "Send CHOICE, a numbered answer to WS's standing card, on the card's verb.
+CHOICE is a plist `agent-repl--input-ask-choices' or
+`agent-repl--input-confirm-choice' built.  The card's new state arrives on
+the feed; the success says nothing more."
+  (let ((row (plist-get choice :row)))
+    (pcase-let ((`(,op ,rpc ,request)
+                 (pcase (plist-get choice :verb)
+                   (:pick
+                    (list "answer-question" #'agent-repl-rpc-update-question-draft
+                          (lambda (ref)
+                            (list :workspace ref :question row
+                                  :edit (list :arm :pick
+                                              :value (list :question-text (plist-get choice :question-text)
+                                                           :label (plist-get choice :label)))))))
+                   (:confirm
+                    (list "answer-question" #'agent-repl-rpc-update-question-draft
+                          (lambda (ref)
+                            (list :workspace ref :question row
+                                  :edit (list :arm :confirm
+                                              :value (list :question-text (plist-get choice :question-text)))))))
+                   (:permission
+                    (list "answer-permission" #'agent-repl-rpc-answer-permission
+                          (lambda (ref)
+                            (list :workspace ref :permission row :answer (plist-get choice :answer)))))
+                   (verb (error "agent-repl: a numbered answer of verb %S has no rpc" verb)))))
+      (agent-repl--input-call
+       ws :op op :prefix agent-repl--input-numbered-answer-prefix
+       :detail-name "choice" :detail choice
+       :rpc rpc :request request
+       :on-success (lambda (_value)
+                     (agent-repl--info ws "elisp.input.%s-answered ws=%s choice=%S" op ws choice))
+       :on-refused #'agent-repl--input-answer-refusal-text))))
+
+(defun agent-repl-input-digit ()
+  "Answer the standing card with the typed digit's choice, or type the digit.
+A digit typed into an empty composer that names one of the standing
+card's numbered choices sends that choice at once; any other digit is
+inserted as `self-insert-command' would."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (choice (agent-repl--input-numbered-choice ws last-command-event)))
+    (if choice
+        (agent-repl--input-answer-choice ws choice)
+      (setq this-command #'self-insert-command)
+      (call-interactively #'self-insert-command))))
+
+(defun agent-repl-input-control-return ()
+  "Confirm a standing multi-select from an empty composer, else send with postfix.
+`C-RET' finalizes the ticks a multi-select question was given by number;
+with no multi-select standing, or with text in the composer, it is
+`agent-repl-send-with-postfix'."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (confirm (agent-repl--input-confirm-choice ws)))
+    (if confirm
+        (agent-repl--input-answer-choice ws confirm)
+      (agent-repl-send-with-postfix))))
+
 ;;;; ---- Keybindings -----------------------------------------------------
 
 (map! :map agent-repl-input-mode-map
       :ni "RET"       #'agent-repl-send
       :ni "S-RET"     #'newline
-      :ni "C-RET"     #'agent-repl-send-with-postfix
+      :ni "C-RET"     #'agent-repl-input-control-return
       ;; Deferred-prompt enqueue lives on `SPC j RET' in the leader map
       ;; (keybindings.el) so it is reachable from any context with one
       ;; canonical chord.  Prefix-send stays reachable on macOS via
       ;; `S-s-RET' caught by the `[remap +default/newline-above]' entry.
-      [remap +default/newline-below] #'agent-repl-send-with-postfix
+      [remap +default/newline-below] #'agent-repl-input-control-return
       [remap +default/newline-above] #'agent-repl-send-with-prefix
       :ni "C-c C-c"   #'agent-repl-discard-input
       :n  "<up>"      #'agent-repl--history-prev
@@ -2217,6 +2398,14 @@ sits behind a harness re-read."
 ;; these change nothing there.
 (define-key agent-repl-input-mode-map (kbd "RET") #'agent-repl-send)
 (define-key agent-repl-input-mode-map (kbd "S-RET") #'newline)
+(define-key agent-repl-input-mode-map (kbd "C-<return>") #'agent-repl-input-control-return)
+
+;; NUMBERED ANSWERS.  The digits 1-9 are bound on the plain mode map, which
+;; insert and emacs state read; in normal state evil's motion map binds them
+;; to `digit-argument' and outranks it, so a count prefix is untouched.  `0'
+;; names no choice and stays an ordinary key.
+(dolist (digit (number-sequence ?1 ?9))
+  (define-key agent-repl-input-mode-map (string digit) #'agent-repl-input-digit))
 
 ;; FEED TEXT ZOOM.  Bound with `define-key' rather than through the `map!' form
 ;; above for the same reasons `C-c C-k' is: the binding is OBSERVABLE under

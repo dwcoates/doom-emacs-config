@@ -149,6 +149,16 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 	log.Debug(op, "published the host view", nil)
 }
 
+// followHostAsks republishes the host view of every workspace whose standing
+// ask moved, until ctx ends. It is the one consumer of the feed's ask stream,
+// so the recompositions it drives run one at a time, each after the move it
+// answers: the last move is always followed by a composition that reads it.
+func (s *server) followHostAsks(ctx context.Context, moves <-chan ids.WorkspaceID) {
+	for ws := range moves {
+		s.PublishHostWorkspace(ctx, ws)
+	}
+}
+
 // composeHostWorkspace builds the WHOLE host view, reporting false when it
 // cannot prove one. A view is never published in part: the alternative to an
 // unprovable session arm is an invented one, and Emacs gates its composer and
@@ -204,6 +214,13 @@ func (s *server) composeHostWorkspace(
 	if kind, standing := s.deps.SessionFacts.StandingGate(ws); standing {
 		view.Gate = hostGate(log, kind)
 		log.Debug(op, "the host view carries the standing gate", dlog.Context{"kind": int(kind)})
+	}
+
+	// THE STANDING ASK is state too: the feed's snapshot of the root feed's
+	// oldest open card, read off the feed's lock (feed.Resolver.HostAsk).
+	if ask := s.deps.Feed.HostAsk(ws); ask != nil {
+		view.Ask = ask
+		log.Debug(op, "the host view carries the standing ask", dlog.Context{"row": ask.GetRow().GetValue()})
 	}
 
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)

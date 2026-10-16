@@ -6781,8 +6781,10 @@ ar-button.outcome-marker-pill {
    when the daemon's draft holds it; a typed answer is the editor's, drawn as a
    quiet line under the options. */
 .q-tabs { margin-bottom: 0.3rem; }
-/* The option's number, the one a send of option numbers picks it by. */
-.q-opt-number {
+/* A choice's number, the one a typed number answers it by: a question
+   option's here, a permission button's (src/feed/asks/permission.ts) too. */
+.q-opt-number,
+.perm-number {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   margin-right: 0.35em;

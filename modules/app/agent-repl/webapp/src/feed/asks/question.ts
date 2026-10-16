@@ -38,6 +38,7 @@
  */
 import { drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
 import { ASK_WAITING_WORD } from "./ask-words.js";
+import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import { setInlineMarkdown } from "../../markdown.js";
@@ -353,10 +354,7 @@ export function drawFeedQuestionOption(
   el.classList.toggle("selected", selected);
   el.setAttribute("aria-pressed", selected ? "true" : "false");
 
-  const numeral = document.createElement("span");
-  numeral.className = "q-opt-number";
-  numeral.setAttribute("data-question-option-number", String(number));
-  numeral.textContent = optionNumeral(number);
+  const numeral = drawChoiceNumeral(number, "q-opt-number", "data-question-option-number");
 
   const text = document.createElement("span");
   text.className = "q-opt-label";
@@ -370,11 +368,6 @@ export function drawFeedQuestionOption(
     el.append(description);
   }
   return el;
-}
-
-/** The numeral prefix option NUMBER is drawn with, `1.` for the first. */
-export function optionNumeral(number: number): string {
-  return `${String(number)}.`;
 }
 
 /** The head's badge: the ask's state, in the question card's own words. */

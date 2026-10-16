@@ -4162,3 +4162,22 @@ afresh."
     (should (null agent-repl-host--confirming))
     (should (agent-repl-test-host--logged-p
              :info "elisp.host.select-unconfirmed ws=ws-2 awaited=7 reason=the roster stream closed"))))
+
+(ert-deftest agent-repl-test-host-standing-ask-is-read-off-the-push ()
+  "The standing ask is the last push's `ask', nil when none stands."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((ask '(:row (:value "row-p") :kind (:arm :permission :value (:standing-offered nil)))))
+      (agent-repl-test-host--push
+       "ws-1" (list :arm :host :value (append (agent-repl-test-host--live) (list :ask ask))))
+      ;; Act / Assert
+      (should (equal (agent-repl-host-standing-ask "ws-1") ask)))
+    (agent-repl-test-host--push "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+    (should-not (agent-repl-host-standing-ask "ws-1"))))
+
+(ert-deftest agent-repl-test-host-standing-ask-is-nil-before-any-push ()
+  "Before the first push no ask is known to stand."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--subscribe "ws-1")
+    (should-not (agent-repl-host-standing-ask "ws-1"))))

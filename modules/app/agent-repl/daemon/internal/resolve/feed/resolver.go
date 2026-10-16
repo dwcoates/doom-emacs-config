@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -17,6 +18,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/paint"
+	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
@@ -49,6 +51,12 @@ type resolver struct {
 	// here rather than on wsState so a bind's reset, which empties the feed,
 	// keeps what the prompt queue and the merge orchestrator still hold.
 	held map[ids.WorkspaceID]*heldState
+	// askMu guards hostAsks, which is read OFF mu (hostask.go).
+	askMu sync.Mutex
+	// hostAsks is each workspace's standing ask as the host view carries it.
+	hostAsks map[ids.WorkspaceID]*agentreplv1.HostAsk
+	// askChanges announces every workspace whose hostAsks entry moved.
+	askChanges publish.Events[ids.WorkspaceID]
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -593,6 +601,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		tokens:     map[string]*watchToken{},
 		loggers:    map[ids.WorkspaceID]dlog.Logger{},
 		held:       map[ids.WorkspaceID]*heldState{},
+		hostAsks:   map[ids.WorkspaceID]*agentreplv1.HostAsk{},
 	}
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.

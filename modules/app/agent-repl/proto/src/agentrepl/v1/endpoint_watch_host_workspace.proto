@@ -14,6 +14,7 @@ import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
+import "frontend/v1/feed.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -121,7 +122,89 @@ message HostWorkspace {
   // bring-up before StartSession). The webapp reads the same daemon state
   // through its feed (FeedColdGate.standing) and footer.
   optional HostGate gate = 5;
+  // THE ASK A TYPED NUMBER ANSWERS, absent when none stands. It is the OLDEST
+  // question or permission ask standing open on the workspace's ROOT feed —
+  // the same ask a plain typed send answers (SubmitPromptAskAnswered) — and
+  // it names every numbered choice that ask offers, so Emacs can take a lone
+  // number typed into an empty composer as a click on that choice instead of
+  // as text. STATE, not an event: a subscriber always reads the ask that
+  // stands now, and the field goes absent the moment the card settles. The
+  // answer is sent on the ask's own verbs (UpdateQuestionDraft,
+  // AnswerPermission), naming `row`; an ask that settled before the answer
+  // arrived is refused there as not standing, so a stale view can never
+  // answer a different card than the one it named.
+  optional HostAsk ask = 6;
 }
+
+// The standing ask Emacs answers by number. The card it names is drawn by the
+// webapp from the feed; this is the host's projection of the same daemon
+// state, carrying only what an answer echoes back.
+message HostAsk {
+  // The card's feed row, exactly as the feed served it: the identity the
+  // answer verbs (UpdateQuestionDraftRequest.question,
+  // AnswerPermissionRequest.permission) take, echoed unchanged.
+  frontend.v1.FeedId row = 1;
+  // WHICH CARD the ask is, and so what its numbers mean. The arms exclude
+  // each other because a row is exactly one card.
+  oneof kind {
+    // A question batch: the numbers are the SHOWN question's options.
+    HostAskQuestion question = 2;
+    // A consent card: the numbers are its buttons.
+    HostAskPermission permission = 3;
+  }
+}
+
+// A standing question batch, as its SHOWN question (the draft's active one,
+// frontend.v1.FeedQuestionOpen.active) offers it. The batch's other
+// questions are reached by answering this one or by a tab click on the card;
+// the view follows the shown question as it moves.
+message HostAskQuestion {
+  // The shown question's text, verbatim: what UpdateQuestionDraft echoes to
+  // name the question.
+  string question_text = 1;
+  // HOW A NUMBER ACTS on the shown question. The arms exclude each other
+  // because a question is either single- or multi-select.
+  oneof selection {
+    // A number answers the question with that option.
+    HostAskQuestionSingleSelect single_select = 2;
+    // A number toggles that option's tick; a confirm answers the question
+    // with the ticks.
+    HostAskQuestionMultiSelect multi_select = 3;
+  }
+}
+
+// A single-select question: option N is `options[N-1]`, numbered from 1 in
+// the served order, exactly as the card numbers it.
+message HostAskQuestionSingleSelect {
+  // The options in the served order.
+  repeated HostAskQuestionOption options = 1;
+}
+
+// A multi-select question: option N is `options[N-1]`, numbered from 1 in
+// the served order, exactly as the card numbers it.
+message HostAskQuestionMultiSelect {
+  // The options in the served order.
+  repeated HostAskQuestionOption options = 1;
+}
+
+// One numbered option of the shown question.
+message HostAskQuestionOption {
+  // The option's label, verbatim: what UpdateQuestionDraftPick.label echoes.
+  string label = 1;
+}
+
+// A standing consent card. ITS NUMBERS ARE ITS BUTTONS IN DRAWN ORDER, and
+// the order is fixed: 1 is "allow once"; when `standing_offered` is present
+// 2 is "always allow" and 3 is "deny"; when it is absent 2 is "deny". The
+// webapp numbers the buttons the same way.
+message HostAskPermission {
+  // PRESENT iff the vendor offered a standing form, so "always allow" is a
+  // choice (frontend.v1.FeedPermission.standing_offered).
+  optional HostAskPermissionStandingOffered standing_offered = 1;
+}
+
+// The standing offer's presence. Empty: presence is the whole fact.
+message HostAskPermissionStandingOffered {}
 
 // One standing gate. THE ARM IS THE KIND; set-but-unassigned is a gate this
 // schema revision does not name, which Emacs treats as a gate (it hides the

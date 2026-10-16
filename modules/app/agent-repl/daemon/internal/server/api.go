@@ -479,6 +479,12 @@ func New(deps Deps) (Server, error) {
 		feedTextScale: wsm.DefaultFeedTextScale,
 	}
 
+	// THE STANDING ASK moves on the feed's edges, not on any of the host
+	// view's other publish sites, so the server follows the feed's own stream
+	// of them for its whole life. Subscribed before New returns, so no move
+	// after construction is missed.
+	go s.followHostAsks(life, deps.Feed.WatchHostAsks(life))
+
 	mux := http.NewServeMux()
 	path, handler := agentreplv1connect.NewAgentReplHandler(&requestLoggingServer{server: s})
 	mux.Handle(path, handler)

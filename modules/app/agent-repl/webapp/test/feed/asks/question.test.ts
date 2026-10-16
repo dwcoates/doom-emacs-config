@@ -29,7 +29,6 @@ import {
   ANSWERED_TEXT,
   QUESTION_TITLE,
   TAB_GLYPHS,
-  optionNumeral,
   TYPED_LABEL,
 } from "../../../src/feed/asks/question.js";
 import { drawFeedTab, FEED_TAB_CLASS, FEED_TAB_STRIP_CLASS } from "../../../src/feed/tabs.js";
@@ -218,10 +217,6 @@ describe("the standing batch", () => {
     const el = drawFeedQuestion(open([item({ options: [{ label: "a" }, { label: "b" }, { label: "c" }] })]), askHarness().rc);
     const numbers = [...el.querySelectorAll(".q-opt .q-opt-number")].map((n) => n.textContent);
     expect(numbers).toEqual(["1.", "2.", "3."]);
-  });
-
-  it("writes an option's numeral as its number and a dot", () => {
-    expect([optionNumeral(1), optionNumeral(12)]).toEqual(["1.", "12."]);
   });
 
   it("draws the number before the label, outside the hook's served value", () => {

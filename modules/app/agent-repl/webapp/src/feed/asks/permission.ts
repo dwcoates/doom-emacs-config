@@ -32,6 +32,11 @@
  * verdict), and the head's clock, which counts the wait while the ask stands
  * and freezes at the answer.
  *
+ * EVERY BUTTON IS NUMBERED, `1.` first in drawn order, because a number typed
+ * into the editor's empty composer presses the button it names
+ * (agentrepl.v1.HostAskPermission states the order: allow once, always allow
+ * when offered, deny).
+ *
  * A DENY WITH A REASON IS TYPED IN THE EDITOR. The card's deny button refuses
  * with no reason; a plain send made while the card stands denies it with the
  * text as the reason relayed to the agent (agentrepl.v1.
@@ -40,6 +45,7 @@
 import { drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
 import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawAskHint } from "./hint.js";
+import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import {
@@ -311,7 +317,13 @@ function drawOpenActions(u: FeedPermission, rc: RowContext): HTMLElement {
     const button = createControl();
     button.className = `perm-button perm-${kind}`;
     button.setAttribute("data-permission", kind);
-    button.textContent = BUTTON_LABELS[kind];
+    // NUMBERED IN DRAWN ORDER, the order agentrepl.v1.HostAskPermission
+    // states, because a number typed into the editor's empty composer presses
+    // the button it names.
+    const label = document.createElement("span");
+    label.className = "perm-label";
+    label.textContent = BUTTON_LABELS[kind];
+    button.append(drawChoiceNumeral(buttons.length + 1, "perm-number", "data-permission-number"), label);
     button.addEventListener("click", () => {
       void answer(rc, actions, buttons, { kind });
     });

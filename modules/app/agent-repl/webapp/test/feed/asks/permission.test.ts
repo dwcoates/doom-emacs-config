@@ -176,6 +176,31 @@ describe("the standing card", () => {
     );
     expect(el.querySelector('[data-permission="allowStanding"]')).not.toBeNull();
   });
+
+  it.each([
+    { name: "without a standing offer", standing: false, want: [["allowOnce", "1"], ["deny", "2"]] },
+    {
+      name: "with a standing offer",
+      standing: true,
+      want: [["allowOnce", "1"], ["allowStanding", "2"], ["deny", "3"]],
+    },
+  ])("numbers its buttons from 1 in drawn order $name", ({ standing, want }) => {
+    const el = drawFeedPermission(permission({ case: "open", value: {} }, { standing }), askHarness().rc);
+    const got = [...el.querySelectorAll("[data-permission]")].map((n) => [
+      n.getAttribute("data-permission"),
+      n.querySelector(".perm-number")?.getAttribute("data-permission-number"),
+    ]);
+    expect(got).toEqual(want);
+  });
+
+  it("draws a button's number before its label", () => {
+    const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
+    const button = el.querySelector('[data-permission="allowOnce"]');
+    expect([...(button?.children ?? [])].map((c) => [c.className, c.textContent])).toEqual([
+      ["perm-number", "1."],
+      ["perm-label", "allow once"],
+    ]);
+  });
 });
 
 describe("answering", () => {
