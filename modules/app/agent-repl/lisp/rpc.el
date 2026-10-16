@@ -107,6 +107,10 @@
 (declare-function agent-repl-wire-encode-edit-held-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-edit-held-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-select-feed-row-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-update-question-draft-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-update-question-draft-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-answer-permission-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-answer-permission-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-plan-rollback-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-plan-rollback-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-roll-back-request "wire-verbs" (request))
@@ -443,6 +447,24 @@ edit carried, and its `action' arm is the step: `commit' replaces the
 prompt's content whole (it keeps its queue place and is reclassified),
 `cancel' ends the edit with the content unchanged.  The begin is the
 webapp tray card's own; the resulting state arrives on the host stream.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-update-question-draft
+  "UpdateQuestionDraft"
+  agent-repl-wire-encode-update-question-draft-request
+  agent-repl-wire-decode-update-question-draft-response
+  "Click one option of, or confirm, a standing question card.
+The request names the card by the row the host view's standing ask
+carried and the shown question by its served text; a `pick' names the
+option by its served label.  The card's new state arrives on the feed.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-answer-permission
+  "AnswerPermission"
+  agent-repl-wire-encode-answer-permission-request
+  agent-repl-wire-decode-answer-permission-response
+  "Press one button of a standing consent card.
+The request names the card by the row the host view's standing ask
+carried; the answer is allow once, allow with standing, or deny with no
+reason.  The card's new state arrives on the feed.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-select-feed-row
   "SelectFeedRow"

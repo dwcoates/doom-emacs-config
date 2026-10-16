@@ -5230,6 +5230,134 @@ workspace, in the registry's order; empty when the section is."
    #'agent-repl-wire-decode-send-hidden-keepalives-success
    #'agent-repl-wire-decode-send-hidden-keepalives-error))
 
+;;;; ---- UpdateQuestionDraft --------------------------------------------
+;;
+;; One click on a standing question card, sent from the composer when a
+;; lone number names one of the shown question's options (the host view's
+;; `HostAsk').  THE ARM IS THE CLICK on the request: Emacs sends a `pick'
+;; (an option number) or a `confirm' (`C-RET' on a multi-select), and never
+;; a tab's `show', which is the webapp's alone.  Every arm names its
+;; question by ECHOING the served text.  See
+;; endpoint_update_question_draft.proto.
+
+(defun agent-repl-wire-encode-update-question-draft-pick (value)
+  "Encode UpdateQuestionDraftPick from plist VALUE (:question-text :label).
+Both are REQUIRED echoes of what the host view served."
+  (let ((message "UpdateQuestionDraftPick"))
+    (list (cons 'questionText (agent-repl-wire-verbs--require-string
+                               message "question_text" (plist-get value :question-text)))
+          (cons 'label (agent-repl-wire-verbs--require-string
+                        message "label" (plist-get value :label))))))
+
+(defun agent-repl-wire-encode-update-question-draft-confirm (value)
+  "Encode UpdateQuestionDraftConfirm from plist VALUE (:question-text).
+The text is a REQUIRED echo of what the host view served."
+  (list (cons 'questionText (agent-repl-wire-verbs--require-string
+                             "UpdateQuestionDraftConfirm" "question_text"
+                             (plist-get value :question-text)))))
+
+(defun agent-repl-wire-encode-update-question-draft-request (request)
+  "Encode UpdateQuestionDraftRequest from plist REQUEST.
+\(:workspace REF :question FEEDID :edit EDIT), all REQUIRED.  EDIT is
+\(:arm :pick|:confirm :value V); an incomplete request errors here rather
+than reaching the wire."
+  (let ((message "UpdateQuestionDraftRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'question
+                (agent-repl-wire-encode-feed-id
+                 (agent-repl-wire-verbs--require message "question" (plist-get request :question))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "edit" (agent-repl-wire-verbs--require message "edit" (plist-get request :edit))
+           (list (list :pick 'pick #'agent-repl-wire-encode-update-question-draft-pick)
+                 (list :confirm 'confirm #'agent-repl-wire-encode-update-question-draft-confirm))))))
+
+(defun agent-repl-wire-decode-update-question-draft-unserved-value (json)
+  "Decode UpdateQuestionDraftUnservedValue from JSON into (:text STRING)."
+  (let ((message "UpdateQuestionDraftUnservedValue"))
+    (agent-repl-wire-verbs--check-keys message json '(text))
+    (list :text (agent-repl-wire-verbs--decode-string message 'text json))))
+
+(defun agent-repl-wire-decode-update-question-draft-error (json)
+  "Decode UpdateQuestionDraftError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
+  (let ((message "UpdateQuestionDraftError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    askNotStanding unservedValue noSession))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "UpdateQuestionDraft")
+                   (list (list 'askNotStanding :ask-not-standing
+                               (agent-repl-wire-verbs--empty-arm "UpdateQuestionDraftAskNotStanding"))
+                         (list 'unservedValue :unserved-value
+                               #'agent-repl-wire-decode-update-question-draft-unserved-value)
+                         (list 'noSession :no-session
+                               (agent-repl-wire-verbs--empty-arm "UpdateQuestionDraftNoSession"))))))))
+
+(defun agent-repl-wire-decode-update-question-draft-response (json)
+  "Decode UpdateQuestionDraftResponse from JSON into (:arm ARM :value V).
+The success is EMPTY: the card's new state is the feed's push."
+  (agent-repl-wire-verbs--decode-result
+   "UpdateQuestionDraftResponse" json
+   (agent-repl-wire-verbs--empty-arm "UpdateQuestionDraftSuccess")
+   #'agent-repl-wire-decode-update-question-draft-error))
+
+;;;; ---- AnswerPermission -----------------------------------------------
+;;
+;; A consent card's button, pressed from the composer when a lone number
+;; names it (the host view's `HostAsk').  THE ARM IS THE BUTTON.  Emacs
+;; never sends a deny WITH a reason here: a reason is typed text, which a
+;; plain send delivers (SubmitPromptAskAnswered).  See
+;; endpoint_answer_permission.proto.
+
+(defun agent-repl-wire-encode-answer-permission-request (request)
+  "Encode AnswerPermissionRequest from plist REQUEST.
+\(:workspace REF :permission FEEDID :answer ANSWER), all REQUIRED.  ANSWER
+is `:allow-once', `:allow-standing' or `:deny' (a deny with no reason)."
+  (let ((message "AnswerPermissionRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'permission
+                (agent-repl-wire-encode-feed-id
+                 (agent-repl-wire-verbs--require message "permission" (plist-get request :permission))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "answer"
+           (list :arm (agent-repl-wire-verbs--require message "answer" (plist-get request :answer))
+                 :value nil)
+           (list (list :allow-once 'allowOnce #'ignore)
+                 (list :allow-standing 'allowStanding #'ignore)
+                 (list :deny 'deny #'ignore))))))
+
+(defun agent-repl-wire-decode-answer-permission-error (json)
+  "Decode AnswerPermissionError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
+  (let ((message "AnswerPermissionError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    askNotStanding noStandingOffer noSession))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "AnswerPermission")
+                   (list (list 'askNotStanding :ask-not-standing
+                               (agent-repl-wire-verbs--empty-arm "AnswerPermissionAskNotStanding"))
+                         (list 'noStandingOffer :no-standing-offer
+                               (agent-repl-wire-verbs--empty-arm "AnswerPermissionNoStandingOffer"))
+                         (list 'noSession :no-session
+                               (agent-repl-wire-verbs--empty-arm "AnswerPermissionNoSession"))))))))
+
+(defun agent-repl-wire-decode-answer-permission-response (json)
+  "Decode AnswerPermissionResponse from JSON into (:arm ARM :value V).
+The success is EMPTY: the card's new state is the feed's push."
+  (agent-repl-wire-verbs--decode-result
+   "AnswerPermissionResponse" json
+   (agent-repl-wire-verbs--empty-arm "AnswerPermissionSuccess")
+   #'agent-repl-wire-decode-answer-permission-error))
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here

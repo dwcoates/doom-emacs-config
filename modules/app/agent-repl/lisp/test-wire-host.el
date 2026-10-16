@@ -418,7 +418,8 @@
                                                       :value nil)))))))
                    :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")
                    :held-prompt-edit nil
-                   :gate nil))))
+                   :gate nil
+                   :ask nil))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
   "A terminal session states whether reopening can rehydrate it."
@@ -472,6 +473,78 @@
                             #'agent-repl-wire-decode-host-workspace
                             "{\"none\":{},\"naming\":{}}")
                            :held-prompt-edit))))
+
+;;;; ---- The standing ask ----
+
+(defun agent-repl-test-wire-host--ask (ask-json)
+  "Decode a no-session HostWorkspace carrying ASK-JSON as its ask."
+  (plist-get (agent-repl-test-wire-host--decode
+              #'agent-repl-wire-decode-host-workspace
+              (concat "{\"none\":{},\"naming\":{},\"ask\":" ask-json "}"))
+             :ask))
+
+(ert-deftest agent-repl-test-wire-host-workspace-without-an-ask-carries-none ()
+  "An absent ask is the fact that no card stands."
+  (should-not (plist-get (agent-repl-test-wire-host--decode
+                          #'agent-repl-wire-decode-host-workspace
+                          "{\"none\":{},\"naming\":{}}")
+                         :ask)))
+
+(ert-deftest agent-repl-test-wire-host-ask-decodes-a-single-select-question ()
+  "A question ask carries its row, its shown question and its options in order."
+  (should (equal (agent-repl-test-wire-host--ask
+                  (concat "{\"row\":{\"value\":\"row-q\"},\"question\":{"
+                          "\"questionText\":\"Which auth?\","
+                          "\"singleSelect\":{\"options\":[{\"label\":\"OAuth\"},{\"label\":\"API key\"}]}}}"))
+                 '(:row (:value "row-q")
+                   :kind (:arm :question
+                          :value (:question-text "Which auth?"
+                                  :selection (:arm :single-select
+                                              :value (:options ((:label "OAuth")
+                                                                (:label "API key"))))))))))
+
+(ert-deftest agent-repl-test-wire-host-ask-decodes-a-multi-select-question ()
+  "A multi-select question decodes as its own arm."
+  (should (equal (plist-get
+                  (plist-get (plist-get (agent-repl-test-wire-host--ask
+                                         (concat "{\"row\":{\"value\":\"row-q\"},\"question\":{"
+                                                 "\"questionText\":\"Which suites?\","
+                                                 "\"multiSelect\":{\"options\":[{\"label\":\"daemon\"}]}}}"))
+                                        :kind)
+                             :value)
+                  :selection)
+                 '(:arm :multi-select :value (:options ((:label "daemon")))))))
+
+(ert-deftest agent-repl-test-wire-host-ask-decodes-a-permission-standing-offer ()
+  "A permission's standing offer is presence: t when present, nil when absent."
+  (should (equal (agent-repl-test-wire-host--ask
+                  "{\"row\":{\"value\":\"row-p\"},\"permission\":{\"standingOffered\":{}}}")
+                 '(:row (:value "row-p")
+                   :kind (:arm :permission :value (:standing-offered t)))))
+  (should (equal (plist-get (agent-repl-test-wire-host--ask
+                             "{\"row\":{\"value\":\"row-p\"},\"permission\":{}}")
+                            :kind)
+                 '(:arm :permission :value (:standing-offered nil)))))
+
+(ert-deftest agent-repl-test-wire-host-an-ask-without-a-kind-is-a-breach ()
+  "An unset kind names no card: refused."
+  (should (agent-repl-test-wire-host--breach
+           #'agent-repl-wire-decode-host-ask "{\"row\":{\"value\":\"r\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-an-ask-without-a-row-is-a-breach ()
+  "The row is required: an ask with nothing to answer by is refused."
+  (should (agent-repl-test-wire-host--breach
+           #'agent-repl-wire-decode-host-ask "{\"permission\":{}}")))
+
+(ert-deftest agent-repl-test-wire-host-a-question-without-a-selection-is-a-breach ()
+  "A shown question with no selection arm is refused."
+  (should (agent-repl-test-wire-host--breach
+           #'agent-repl-wire-decode-host-ask-question "{\"questionText\":\"q?\"}")))
+
+(ert-deftest agent-repl-test-wire-host-a-standing-offer-carrying-a-field-is-a-breach ()
+  "The standing offer is empty: a field riding it is refused."
+  (should (agent-repl-test-wire-host--breach
+           #'agent-repl-wire-decode-host-ask-permission "{\"standingOffered\":{\"x\":1}}")))
 
 ;;;; ---- The standing gate ----
 

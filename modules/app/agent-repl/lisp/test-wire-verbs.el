@@ -5182,3 +5182,132 @@ instead diverges from it unseen."
                         "UpdatePersistentWifiModeRequest")
                        #'string<)
                  '("off" "on" "toggle"))))
+
+;;;; ---- UpdateQuestionDraft ----
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-pick-shape ()
+  "A pick echoes the card's row, the shown question and the option's label."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-question-draft-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :question '(:value "row-q")
+                           :edit '(:arm :pick :value (:question-text "Which auth?" :label "OAuth")))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"question\":{\"value\":\"row-q\"},\"pick\":{\"questionText\":\"Which auth?\",\"label\":\"OAuth\"}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-confirm-shape ()
+  "A confirm echoes the card's row and the shown question."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-question-draft-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :question '(:value "row-q")
+                           :edit '(:arm :confirm :value (:question-text "Which suites?")))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"question\":{\"value\":\"row-q\"},\"confirm\":{\"questionText\":\"Which suites?\"}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-incomplete-requests-refused ()
+  "Every field is REQUIRED, and the tab's `show' has no Emacs spelling."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (request (list (list :question '(:value "q") :edit '(:arm :confirm :value (:question-text "q?")))
+                           (list :workspace agent-repl-test-wire-verbs--ref
+                                 :edit '(:arm :confirm :value (:question-text "q?")))
+                           (list :workspace agent-repl-test-wire-verbs--ref :question '(:value "q"))
+                           (list :workspace agent-repl-test-wire-verbs--ref :question '(:value "q")
+                                 :edit '(:arm :pick :value (:question-text "q?")))
+                           (list :workspace agent-repl-test-wire-verbs--ref :question '(:value "q")
+                                 :edit '(:arm :show :value (:question-text "q?")))))
+      (should-error (agent-repl-wire-encode-update-question-draft-request request)
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-edit-arms-pinned ()
+  "The request's edit oneof is exactly what the schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_question_draft.pb.go"
+                        "UpdateQuestionDraftRequest")
+                       #'string<)
+                 '("confirm" "pick" "show"))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-success-decodes ()
+  "The success is empty: the card's new state is the feed's push."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-question-draft-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-refusals-decode ()
+  "Each refusal decodes as its arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-question-draft-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"askNotStanding\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :ask-not-standing :value nil)))))
+    (should (equal (agent-repl-wire-decode-update-question-draft-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"unservedValue\":{\"text\":\"OAuth\"}}}"))
+                   '(:arm :error :value (:cause (:arm :unserved-value :value (:text "OAuth"))))))
+    (should (equal (agent-repl-wire-decode-update-question-draft-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"noSession\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :no-session :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-error-arms-pinned ()
+  "The error's cause oneof is exactly what the schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_question_draft.pb.go"
+                        "UpdateQuestionDraftError")
+                       #'string<)
+                 '("askNotStanding" "noSession" "notYetAdopted" "transferringAway"
+                   "unknownWorkspace" "unservedValue" "workspaceRefMismatch"))))
+
+;;;; ---- AnswerPermission ----
+
+(ert-deftest agent-repl-test-wire-verbs-answer-permission-request-shapes ()
+  "Each button is its own empty arm beside the echoed row."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '((:allow-once . "allowOnce") (:allow-standing . "allowStanding") (:deny . "deny")))
+      (should (equal (json-serialize
+                      (agent-repl-wire-encode-answer-permission-request
+                       (list :workspace agent-repl-test-wire-verbs--ref
+                             :permission '(:value "row-p")
+                             :answer (car case))))
+                     (format "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"permission\":{\"value\":\"row-p\"},\"%s\":{}}"
+                             (cdr case)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-answer-permission-incomplete-requests-refused ()
+  "Every field is REQUIRED, and an unknown button is refused before the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (request (list (list :permission '(:value "p") :answer :deny)
+                           (list :workspace agent-repl-test-wire-verbs--ref :answer :deny)
+                           (list :workspace agent-repl-test-wire-verbs--ref :permission '(:value "p"))
+                           (list :workspace agent-repl-test-wire-verbs--ref :permission '(:value "p")
+                                 :answer :maybe)))
+      (should-error (agent-repl-wire-encode-answer-permission-request request)
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-answer-permission-answer-arms-pinned ()
+  "The request's answer oneof is exactly what the schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_answer_permission.pb.go"
+                        "AnswerPermissionRequest")
+                       #'string<)
+                 '("allowOnce" "allowStanding" "deny"))))
+
+(ert-deftest agent-repl-test-wire-verbs-answer-permission-responses-decode ()
+  "The success is empty and each refusal decodes as its arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-answer-permission-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))
+    (dolist (case '(("askNotStanding" . :ask-not-standing)
+                    ("noStandingOffer" . :no-standing-offer)
+                    ("noSession" . :no-session)))
+      (should (equal (agent-repl-wire-decode-answer-permission-response
+                      (agent-repl-test-wire-verbs--parse
+                       (format "{\"error\":{\"%s\":{}}}" (car case))))
+                     (list :arm :error :value (list :cause (list :arm (cdr case) :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-answer-permission-error-arms-pinned ()
+  "The error's cause oneof is exactly what the schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_answer_permission.pb.go"
+                        "AnswerPermissionError")
+                       #'string<)
+                 '("askNotStanding" "noSession" "noStandingOffer" "notYetAdopted"
+                   "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))

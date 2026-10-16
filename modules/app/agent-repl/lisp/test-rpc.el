@@ -120,6 +120,12 @@ would abort the very branch a test is asserting."
     ("SelectFeedRow" agent-repl-rpc-select-feed-row
      agent-repl-wire-encode-select-feed-row-request
      agent-repl-wire-decode-select-feed-row-response)
+    ("UpdateQuestionDraft" agent-repl-rpc-update-question-draft
+     agent-repl-wire-encode-update-question-draft-request
+     agent-repl-wire-decode-update-question-draft-response)
+    ("AnswerPermission" agent-repl-rpc-answer-permission
+     agent-repl-wire-encode-answer-permission-request
+     agent-repl-wire-decode-answer-permission-response)
     ("PlanRollback" agent-repl-rpc-plan-rollback
      agent-repl-wire-encode-plan-rollback-request
      agent-repl-wire-decode-plan-rollback-response)
