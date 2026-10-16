@@ -37,7 +37,7 @@
  * (`src/fake/`) reads its own files through the same reader, so both sides of
  * an offline test agree on what the chain is.
  */
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { bindLog } from "../log.js";
 import { promptText, userRecordText, type TitleDigestRecord } from "../convert/title-digest.js";
 import { isKeepalivePrompt } from "./keepalive.js";
@@ -116,18 +116,97 @@ export type ChainRead =
  * `unreadable`: the cut would be planned on a conversation that does not exist.
  */
 export function readTranscriptChain(file: string, head?: string): ChainRead {
-  let contents: string;
-  try {
-    contents = readFileSync(file, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "no_transcript" };
-    const detail = err instanceof Error ? err.message : String(err);
-    LOGGER.error({ file, cause: detail }, "the vendor transcript could not be read for its chain");
-    return { kind: "unreadable", detail };
+  return createTranscriptIndex(file, wholeRecord).read(head);
+}
+
+/** A parsed record as it stands: what a one-shot read holds only briefly. */
+function wholeRecord(record: Partial<ChainRecord>): ChainRecord {
+  return record as ChainRecord;
+}
+
+/**
+ * One transcript, read once and then only as it grows.
+ *
+ * WHY IT EXISTS. The rollback plans its cut on the transcript's chain, and the
+ * transcript of a long conversation is tens of megabytes: reading and parsing
+ * it whole put ~170ms between the stop key and the cut (36 MB, measured
+ * 2026-10-16). The chain changes only by appending, so the index keeps what it
+ * parsed and reads only the bytes written since; a turn's end refreshes it
+ * (session.ts), so a stop parses only the turn it stops.
+ *
+ * THE SAME READING AS A WHOLE READ, line for line: a record parsed earlier is
+ * the record a whole read would parse, and a later line with the same uuid
+ * replaces it as it would. A file that was replaced (another inode) or that
+ * shrank is read again from its start.
+ *
+ * AN UNTERMINATED LAST LINE IS READ, NEVER KEPT. It may be a line still being
+ * written, so it is parsed for this read alone (a whole read would parse it
+ * too) and read again, whole, once its newline lands.
+ *
+ * WHAT IT HOLDS is what `project` keeps of each record: by default the slice
+ * the chain and the cut read ({@link chainRecordOf}), since a kept tool result
+ * or answer's text would hold the whole conversation in the shim's memory. A
+ * one-shot read ({@link readTranscriptChain}) keeps whole records: the mocked
+ * vendor reads an answer's tool calls off them.
+ *
+ * THE MAPS ONLY GROW. A read adds to the map an earlier read answered, and a
+ * restart replaces it with a new one, so a chain a caller holds stays the one
+ * it was read as.
+ */
+export interface TranscriptIndex {
+  /** The transcript's path. */
+  readonly file: string;
+  /** The chain walked from `head`, or from the newest main-thread record. */
+  read(head?: string): ChainRead;
+  /** Take in what the file gained since the last read, without walking a chain. */
+  refresh(): void;
+}
+
+/** What the index has taken in from its file. */
+interface Ingested {
+  readonly byUuid: Map<string, ChainRecord>;
+  last: string | undefined;
+}
+
+/** RECORD's slice that the chain and the cut read, from a parsed line. */
+export function chainRecordOf(record: Partial<ChainRecord>): ChainRecord {
+  // ASSIGNED, NOT SPREAD: this runs once per line of a transcript tens of
+  // megabytes long, and building each slice through a chain of spreads made a
+  // whole read seven times slower than the parse itself.
+  const slice: { -readonly [K in keyof ChainRecord]?: ChainRecord[K] } = { uuid: record.uuid };
+  if (record.parentUuid !== undefined) slice.parentUuid = record.parentUuid;
+  if (record.type !== undefined) slice.type = record.type;
+  if (record.subtype !== undefined) slice.subtype = record.subtype;
+  if (record.isMeta !== undefined) slice.isMeta = record.isMeta;
+  if (record.isSidechain !== undefined) slice.isSidechain = record.isSidechain;
+  if (record.isCompactSummary !== undefined) slice.isCompactSummary = record.isCompactSummary;
+  if (record.origin !== undefined) slice.origin = { kind: (record.origin as { kind?: unknown } | null)?.kind };
+  const message = record.message as { role?: unknown; content?: unknown } | null | undefined;
+  if (message !== undefined && message !== null) {
+    const content = message.content;
+    if (typeof content === "string") {
+      slice.message = { role: message.role, content };
+    } else if (Array.isArray(content)) {
+      const blocks: unknown[] = [];
+      for (const block of content as unknown[]) {
+        if (typeof block !== "object" || block === null) {
+          blocks.push(block);
+          continue;
+        }
+        const { type, text } = block as { type?: unknown; text?: unknown };
+        blocks.push(type === "text" ? { type, text } : { type });
+      }
+      slice.message = { role: message.role, content: blocks };
+    } else {
+      slice.message = { role: message.role };
+    }
   }
-  const byUuid = new Map<string, ChainRecord>();
-  let last: string | undefined;
-  for (const raw of contents.split("\n")) {
+  return slice as ChainRecord;
+}
+
+/** Parse the complete lines of TEXT into INTO, each record as PROJECT keeps it. */
+function ingest(text: string, into: Ingested, project: (record: Partial<ChainRecord>) => ChainRecord): void {
+  for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;
     let parsed: unknown;
@@ -139,10 +218,88 @@ export function readTranscriptChain(file: string, head?: string): ChainRead {
     if (typeof parsed !== "object" || parsed === null) continue;
     const record = parsed as Partial<ChainRecord>;
     if (typeof record.uuid !== "string" || record.uuid === "") continue;
-    byUuid.set(record.uuid, record as ChainRecord);
-    if (record.isSidechain !== true) last = record.uuid;
+    into.byUuid.set(record.uuid, project(record));
+    if (record.isSidechain !== true) into.last = record.uuid;
   }
-  const start = head ?? last;
+}
+
+/** The index of the transcript at FILE, read on its first use. */
+export function createTranscriptIndex(
+  file: string,
+  project: (record: Partial<ChainRecord>) => ChainRecord = chainRecordOf,
+): TranscriptIndex {
+  let identity: { readonly dev: number; readonly ino: number } | undefined;
+  let offset = 0;
+  let taken: Ingested = { byUuid: new Map(), last: undefined };
+
+  /**
+   * Take in what FILE gained, answering its unterminated tail, `absent` when
+   * there is no file, or the read's failure.
+   */
+  const takeIn = (): { kind: "read"; tail: string } | { kind: "absent" } | { kind: "failed"; detail: string } => {
+    let fd: number;
+    try {
+      fd = openSync(file, "r");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        identity = undefined;
+        offset = 0;
+        taken = { byUuid: new Map(), last: undefined };
+        return { kind: "absent" };
+      }
+      return { kind: "failed", detail: err instanceof Error ? err.message : String(err) };
+    }
+    try {
+      const stat = fstatSync(fd);
+      if (identity === undefined || stat.ino !== identity.ino || stat.dev !== identity.dev || stat.size < offset) {
+        identity = { dev: stat.dev, ino: stat.ino };
+        offset = 0;
+        taken = { byUuid: new Map(), last: undefined };
+      }
+      if (stat.size === offset) return { kind: "read", tail: "" };
+      const grown = Buffer.alloc(stat.size - offset);
+      const got = readSync(fd, grown, 0, grown.length, offset);
+      const bytes = grown.subarray(0, got);
+      const newline = bytes.lastIndexOf(0x0a);
+      if (newline >= 0) {
+        ingest(bytes.toString("utf8", 0, newline), taken, project);
+        offset += newline + 1;
+      }
+      return { kind: "read", tail: bytes.toString("utf8", newline + 1) };
+    } catch (err) {
+      return { kind: "failed", detail: err instanceof Error ? err.message : String(err) };
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  return {
+    file,
+    read(head) {
+      const result = takeIn();
+      if (result.kind === "absent") return { kind: "no_transcript" };
+      if (result.kind === "failed") {
+        LOGGER.error({ file, cause: result.detail }, "the vendor transcript could not be read for its chain");
+        return { kind: "unreadable", detail: result.detail };
+      }
+      let view: Ingested = taken;
+      if (result.tail.trim() !== "") {
+        view = { byUuid: new Map(taken.byUuid), last: taken.last };
+        ingest(result.tail, view, project);
+      }
+      return walkChain(file, view.byUuid, head ?? view.last);
+    },
+    refresh() {
+      const result = takeIn();
+      if (result.kind === "failed") {
+        LOGGER.error({ file, cause: result.detail }, "the vendor transcript could not be read to refresh its index");
+      }
+    },
+  };
+}
+
+/** The chain of BYUUID walked from START, oldest first. */
+function walkChain(file: string, byUuid: ReadonlyMap<string, ChainRecord>, start: string | undefined): ChainRead {
   const chain: ChainRecord[] = [];
   const seen = new Set<string>();
   let at = start;
@@ -376,8 +533,9 @@ export type LiveChainRead =
  * invariant (a rollback never cuts before the first prompt) and answers
  * `unreadable`.
  */
-export function readLiveChain(file: string, rolledBackPromptUuids: ReadonlySet<string>): LiveChainRead {
-  const read = readTranscriptChain(file);
+export function readLiveChain(index: TranscriptIndex, rolledBackPromptUuids: ReadonlySet<string>): LiveChainRead {
+  const file = index.file;
+  const read = index.read();
   if (read.kind !== "ok") return read;
   const end = liveEnd(read.transcript, rolledBackPromptUuids);
   switch (end.kind) {
