@@ -2246,6 +2246,13 @@ func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 	})
 	footer := f.d.WatchFooter(f.ws)
 	killShim(t, f, shim)
+	// THE DAEMON HAS REAPED THE DEATH before the answer, as the scenario
+	// needs: the process being gone is not the daemon having seen it go, and
+	// an answer racing the reap dials the dead socket instead of reading the
+	// reaped client.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the daemon's record of the shim's death", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.shimclient.exit" && r.Level == "error"
+	})
 
 	// Act
 	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{

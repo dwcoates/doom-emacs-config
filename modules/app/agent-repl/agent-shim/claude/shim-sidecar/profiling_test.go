@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"agentrepl/logging/profiling"
+	"agentrepl/logging/profiling/profilingtest"
 )
 
 func TestRecordProfilingEvent(t *testing.T) {
@@ -20,6 +21,8 @@ func TestRecordProfilingEvent(t *testing.T) {
 		{name: "a start is info", event: profiling.Event{Kind: profiling.Started, Session: "s1"}, level: "info", operation: "profiling.started"},
 		{name: "a stop is info", event: profiling.Event{Kind: profiling.Stopped, Session: "s1", Reason: "exit"}, level: "info", operation: "profiling.stopped"},
 		{name: "a failure is error", event: profiling.Event{Kind: profiling.Failed, Err: errors.New("boom")}, level: "error", operation: "profiling.failed"},
+		{name: "a level window opened is info", event: profiling.Event{Kind: profiling.LevelOpened, Session: "s1", Level: "debug"}, level: "info", operation: "profiling.level_opened"},
+		{name: "a level window closed is info", event: profiling.Event{Kind: profiling.LevelClosed, Session: "s1", Level: "debug", Reason: "session_closed"}, level: "info", operation: "profiling.level_closed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,5 +90,21 @@ func TestStartRuntimeProfilingStopsCleanlyWithNoSession(t *testing.T) {
 	// Assert
 	if records := decodeSidecarPprofRecords(t, durable); len(records) != 0 {
 		t.Fatalf("records = %+v, want none when no session was ever open", records)
+	}
+}
+
+func TestProfilingTakesTheSharedShape(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile("profiling.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	problems := profilingtest.SharedShapeProblems(string(source), "sidecar")
+
+	// Assert
+	for _, p := range problems {
+		t.Error("profiling.go " + p)
 	}
 }

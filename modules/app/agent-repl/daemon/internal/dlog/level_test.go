@@ -99,7 +99,7 @@ func TestOpenSurfacesRefusesAnInvalidProcessLogLevel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
 
 	// Act.
-	surfaces, err := OpenSurfaces(path)
+	surfaces, _, err := OpenSurfaces(path)
 
 	// Assert.
 	if err == nil {
@@ -183,7 +183,7 @@ func TestOpenSurfacesStartsALeftoverDebugLevelAtInfo(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
 
 	// Act.
-	opened, err := OpenSurfaces(path)
+	opened, _, err := OpenSurfaces(path)
 	if err != nil {
 		t.Fatalf("OpenSurfaces: %v", err)
 	}
@@ -202,6 +202,31 @@ func TestOpenSurfacesStartsALeftoverDebugLevelAtInfo(t *testing.T) {
 	}
 }
 
+func TestOpenSurfacesAnswersTheWindowItsRecordsAreAdmittedBy(t *testing.T) {
+	// Arrange. The daemon starts at info, then a window opens live.
+	t.Setenv(LevelEnvironment, "")
+	t.Setenv(logging.UntilEnvironment, "")
+	path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+	opened, window, err := OpenSurfaces(path)
+	if err != nil {
+		t.Fatalf("OpenSurfaces: %v", err)
+	}
+
+	// Act.
+	if _, err := window.Open(logging.LevelDebug, time.Minute); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	opened.Global().Debug("daemon.level.live-window", "admitted", nil)
+	if err := opened.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	if !hasOperation(readRecords(t, path), "daemon.level.live-window") {
+		t.Error("a debug record was dropped while the answered window held debug")
+	}
+}
+
 func TestOpenSurfacesRefusesAMalformedLevelWindow(t *testing.T) {
 	// Arrange.
 	t.Setenv(LevelEnvironment, LevelDebug)
@@ -209,7 +234,7 @@ func TestOpenSurfacesRefusesAMalformedLevelWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
 
 	// Act.
-	opened, err := OpenSurfaces(path)
+	opened, _, err := OpenSurfaces(path)
 
 	// Assert.
 	if err == nil {

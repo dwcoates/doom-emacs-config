@@ -1476,5 +1476,12 @@ func (r *run) stopping(err error) bool {
 // it: an abandon or the daemon's exit took the run away mid-command, so the
 // error says nothing about the step, and the run's end records why.
 func (r *run) cut(err error) bool {
-	return ctxend.Is(err) && r.ctx.Err() != nil
+	return cutUnder(r.ctx, err)
+}
+
+// cutUnder reports whether a step's error is ctx ending under it, so the
+// error says nothing about the step: the run's own context (run.cut), or a
+// narrower one a step ran under, such as a gate's.
+func cutUnder(ctx context.Context, err error) bool {
+	return ctxend.Is(err) && ctx.Err() != nil
 }

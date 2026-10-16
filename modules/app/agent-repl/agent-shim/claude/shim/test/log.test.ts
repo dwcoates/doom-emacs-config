@@ -42,6 +42,25 @@ describe("shim runtime logging", () => {
     return log;
   }
 
+  it("answers the configured logger's live level window", async () => {
+    // Arrange
+    const log = await configured();
+
+    // Act
+    const window = log.logLevelWindow();
+
+    // Assert
+    expect(window.level()).toBe("debug");
+  });
+
+  it("refuses the level window before the logger is configured", async () => {
+    // Arrange
+    const log = await freshLog();
+
+    // Act / Assert
+    expect(() => log.logLevelWindow()).toThrow("has not been configured");
+  });
+
   function stderr(): string[] {
     const records: string[] = [];
     vi.spyOn(process.stderr, "write").mockImplementation((record) => { records.push(String(record)); return true; });

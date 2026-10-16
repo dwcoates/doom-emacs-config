@@ -29,6 +29,7 @@
  */
 
 import { isClientFailureArm, type ClientFailureArm } from "../failure/sink.js";
+import type { WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 
 /** The tag every message of this protocol carries. */
 export const HOST_CHANNEL = "agent-repl-host";
@@ -96,8 +97,23 @@ interface WebhostFailuresMessage {
   readonly failures: readonly WebhostFailure[];
 }
 
+/**
+ * host -> page: the log level the page records at. A level other than info is
+ * a window ending at UNTILMS (epoch ms; proto/vocab/log-level-window.json); info,
+ * with no end, closes any window. A profiling session raises every page this
+ * way while it runs, and the host replays a standing window to a page that
+ * says hello before it ends.
+ */
+interface LogLevelMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "logLevel";
+  readonly level: WindowLevel;
+  readonly untilMs: number | null;
+}
+
 /** Every message the host sends a page. */
 export type HostToPage =
+  | LogLevelMessage
   | PresenceMessage
   | InputBackgroundMessage
   | GateDockMessage
@@ -178,6 +194,15 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         : null;
     case "dismissDigest":
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };
+    case "logLevel": {
+      if (!isWindowLevel(data.level)) return null;
+      if (data.level === "info") {
+        return data.untilMs === null ? { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null } : null;
+      }
+      return typeof data.untilMs === "number" && Number.isFinite(data.untilMs)
+        ? { channel: HOST_CHANNEL, kind: "logLevel", level: data.level, untilMs: data.untilMs }
+        : null;
+    }
     case "sidebarDock":
       return typeof data.docked === "boolean" ? { channel: HOST_CHANNEL, kind: "sidebarDock", docked: data.docked } : null;
     case "webhostFailures": {
@@ -190,6 +215,11 @@ export function parseHostToPage(data: unknown): HostToPage | null {
     default:
       return null;
   }
+}
+
+/** Whether VALUE names a log level of the shared vocabulary. */
+function isWindowLevel(value: unknown): value is WindowLevel {
+  return value === "debug" || value === "info" || value === "warn" || value === "error";
 }
 
 /** DATA as one webhost failure, or null when it is not one. */

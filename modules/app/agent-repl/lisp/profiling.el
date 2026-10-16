@@ -38,6 +38,8 @@
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "workspace" (ws key))
+(declare-function agent-repl--set-log-level-window "core" (level))
+(declare-function agent-repl-webhost-set-log-level "webhost" (level until-ms))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
 (declare-function agent-repl-webhost-buffer "webhost" ())
 (defvar agent-repl--global-log-scope)
@@ -63,6 +65,14 @@ Emacs is called rather than signaled, so it writes no marker of its own.")
 
 (defvar agent-repl-profiling--timer nil
   "The max-duration stop of the running profile.")
+
+(defconst agent-repl-profiling-log-level-file "log-level"
+  "The file in a session's directory naming a log level every runtime raises
+itself to while it profiles into the session (proto/vocab/profile-session.json).")
+
+(defvar agent-repl-profiling--level-open nil
+  "Non-nil while this profile's session holds Emacs and the webhost at a raised
+log level, which the profile's stop closes.")
 
 (defvar agent-repl-profiling--generation 0
   "Counts the profiles started, so an old max-duration stop ends no later one.")
@@ -107,9 +117,44 @@ Signals an error when the file names no valid session."
     (setq agent-repl-profiling--timer
           (run-at-time agent-repl-profiling-max-seconds nil
                        #'agent-repl-profiling--expire armed)))
-  (let ((pages (agent-repl-profiling--pages 'start session)))
+  (let ((pages (agent-repl-profiling--pages 'start session))
+        (level (agent-repl-profiling--open-level session)))
     (agent-repl--info agent-repl--global-log-scope "profiling: started into session %s (%d pages sampled)" session pages)
-    (format "started %s pages=%d" session pages)))
+    (format "started %s pages=%d%s" session pages (if level (format " level=%s" level) ""))))
+
+(defun agent-repl-profiling--open-level (session)
+  "Raise Emacs, the webhost and every page to the level SESSION names.
+Answers the level, or nil when the session names none.  An unreadable or
+unknown level is recorded at error and leaves every level as it was; the
+profile still runs."
+  (let ((file (expand-file-name agent-repl-profiling-log-level-file
+                                (expand-file-name session (agent-repl-profiling-root)))))
+    (when (file-exists-p file)
+      (let* ((name (string-trim (with-temp-buffer (insert-file-contents file) (buffer-string))))
+             (level (intern name)))
+        (if (not (memq level '(debug warn error)))
+            (progn
+              (agent-repl--error agent-repl--global-log-scope
+                                 "profiling: the session %s names log level %S, not one of debug warn error; levels left as they are"
+                                 session name)
+              nil)
+          (let ((until (agent-repl--set-log-level-window level)))
+            (setq agent-repl-profiling--level-open t)
+            (agent-repl-webhost-set-log-level level (round (* 1000 until)))
+            (agent-repl--info agent-repl--global-log-scope
+                              "profiling: raised Emacs, the webhost and every page to %s for session %s until %s"
+                              level session (format-time-string "%FT%T%z" (seconds-to-time until)))
+            level))))))
+
+(defun agent-repl-profiling--close-level (session)
+  "Return Emacs, the webhost and every page to info after SESSION's window."
+  (when agent-repl-profiling--level-open
+    (setq agent-repl-profiling--level-open nil)
+    (agent-repl--set-log-level-window 'info)
+    (agent-repl-webhost-set-log-level 'info nil)
+    (agent-repl--info agent-repl--global-log-scope
+                      "profiling: closed session %s's log level window; Emacs, the webhost and every page are back at info"
+                      session)))
 
 (defun agent-repl-profiling--expire (armed)
   "Stop the profile of generation ARMED at its max duration."
@@ -157,6 +202,7 @@ Answers the files written."
           (push data files)
           (push text files))))
     (setq files (nreverse files))
+    (agent-repl-profiling--close-level session)
     (let ((pages (agent-repl-profiling--pages 'stop session)))
       (agent-repl--info agent-repl--global-log-scope "profiling: stopped session %s (%s), wrote %s; %d pages answering"
                         session reason (string-join files ", ") pages)
@@ -267,12 +313,12 @@ profile.  Answers what it did as a string for the collector:
 ;; report), never this timer.
 
 (defconst agent-repl-profiling-switch-tour-interval 1.5
-  "Seconds between two keys of a switch tour.")
+  "Seconds between two keys of a switch tour that names no pace of its own.")
 
 (defvar agent-repl-profiling--tour nil
   "The running switch tour, or nil: a plist of the keys still to queue
-\(:keys), how many it was asked for each way (:count), and its pending
-step (:timer).")
+\(:keys), how many it was asked for each way (:count), the seconds between
+keys (:interval), its label (:label), and its pending step (:timer).")
 
 (defun agent-repl-profiling--tour-refuse (fmt &rest args)
   "Record a refused switch tour at error, and signal it.  FMT and ARGS word it."
@@ -280,24 +326,34 @@ step (:timer).")
     (agent-repl--error agent-repl--global-log-scope "profiling.switch-tour-refused: %s" why)
     (error "Switch tour refused: %s" why)))
 
-(defun agent-repl-profiling-switch-tour (count)
+(defun agent-repl-profiling-switch-tour (count &optional interval label)
   "Switch right COUNT times with `s-}', then back COUNT times with `s-{'.
-Each key is queued as a keystroke, `agent-repl-profiling-switch-tour-interval'
-seconds after the one before, and the tour ends on the workspace it began on.
+Each key is queued as a keystroke INTERVAL seconds after the one before
+\(`agent-repl-profiling-switch-tour-interval' when nil), and the tour ends on
+the workspace it began on.  LABEL (default \"tour\") names the tour in every
+record it writes, so a report can tell two tours of one session apart.
 Answers at once, while the tour runs on its own timer."
   (interactive "nSwitches each way: ")
+  (setq interval (or interval agent-repl-profiling-switch-tour-interval)
+        label (or label "tour"))
   (unless (and (integerp count) (> count 0))
     (agent-repl-profiling--tour-refuse "the count %S is not a positive integer" count))
+  (unless (and (numberp interval) (> interval 0))
+    (agent-repl-profiling--tour-refuse "the interval %S is not a positive number of seconds" interval))
+  (unless (and (stringp label) (string-match-p "\\`[A-Za-z0-9._-]+\\'" label))
+    (agent-repl-profiling--tour-refuse "the label %S is not one word of letters, digits, dots, dashes or underscores" label))
   (when agent-repl-profiling--tour
     (agent-repl-profiling--tour-refuse "a tour is already running, %d keys left"
                                        (length (plist-get agent-repl-profiling--tour :keys))))
   (setq agent-repl-profiling--tour
         (list :keys (append (make-list count "s-}") (make-list count "s-{"))
               :count count
+              :interval interval
+              :label label
               :timer nil))
   (agent-repl--info agent-repl--global-log-scope
-                    "profiling.switch-tour-started count=%d interval=%s"
-                    count agent-repl-profiling-switch-tour-interval)
+                    "profiling.switch-tour-started label=%s count=%d interval=%s"
+                    label count interval)
   (agent-repl-profiling--tour-step)
   (format "touring %d switches" (* 2 count)))
 
@@ -306,19 +362,28 @@ Answers at once, while the tour runs on its own timer."
 With no key left, the tour ends."
   (let ((keys (plist-get agent-repl-profiling--tour :keys)))
     (if (null keys)
-        (let ((count (plist-get agent-repl-profiling--tour :count)))
+        (let ((count (plist-get agent-repl-profiling--tour :count))
+              (label (plist-get agent-repl-profiling--tour :label)))
           (setq agent-repl-profiling--tour nil)
           (agent-repl--info agent-repl--global-log-scope
-                            "profiling.switch-tour-done switches=%d" (* 2 count)))
+                            "profiling.switch-tour-done label=%s switches=%d" label (* 2 count)))
       (setq unread-command-events
             (append unread-command-events (listify-key-sequence (kbd (car keys)))))
       (agent-repl--info agent-repl--global-log-scope
-                        "profiling.switch-tour-key key=%s remaining=%d"
-                        (car keys) (length (cdr keys)))
+                        "profiling.switch-tour-key label=%s key=%s remaining=%d"
+                        (plist-get agent-repl-profiling--tour :label) (car keys) (length (cdr keys)))
       (setq agent-repl-profiling--tour
             (plist-put (plist-put agent-repl-profiling--tour :keys (cdr keys))
-                       :timer (run-at-time agent-repl-profiling-switch-tour-interval nil
+                       :timer (run-at-time (plist-get agent-repl-profiling--tour :interval) nil
                                            #'agent-repl-profiling--tour-step))))))
+
+(defun agent-repl-profiling-switch-tour-state ()
+  "Answers the running tour as \"running LABEL KEYS-LEFT\", or \"idle\".
+What a driver outside Emacs waits on (bin/profile-agent-repl.sh switch-bench)."
+  (if agent-repl-profiling--tour
+      (format "running %s %d" (plist-get agent-repl-profiling--tour :label)
+              (length (plist-get agent-repl-profiling--tour :keys)))
+    "idle"))
 
 (defun agent-repl-profiling-switch-tour-cancel ()
   "Stop the running switch tour before its next key; answers what it did."

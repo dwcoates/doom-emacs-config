@@ -67,9 +67,17 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 	begun := r.o.deps.Now()
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
+	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
+		states: map[string]suiteState{}, sources: map[string]string{}, counts: newSuiteCounts(), release: release, begun: begun}
 	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
 	if err != nil && (r.stopping(err) || r.cut(err)) {
 		return gateVerdict{}, err
+	}
+	// A READ CUT BY THE GATE'S OWN END is no unreadable branch: the merge
+	// ahead moved, or the gate's admission was taken back, and the gate ends
+	// the way a cut wait for its turn does, with nothing to run.
+	if err != nil && cutUnder(ctx, err) {
+		return gateVerdict{}, g.unrun(ctx, err)
 	}
 	var selection SuiteSelection
 	if err != nil {
@@ -85,8 +93,6 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 	if selection.Empty() {
 		return r.gateNothing(ctx, round, paths, selection, begun)
 	}
-	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
-		states: map[string]suiteState{}, sources: map[string]string{}, counts: newSuiteCounts(), release: release, begun: begun}
 	r.setStep(ctx, footer.StepTesting, nil)
 	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
 	r.openTesting(round)

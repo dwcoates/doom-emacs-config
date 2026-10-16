@@ -943,6 +943,37 @@ func TestRunCutNamesOnlyItsOwnContextEndingUnderTheError(t *testing.T) {
 	}
 }
 
+func TestCutUnder(t *testing.T) {
+	tests := []struct {
+		name  string
+		ended bool
+		err   error
+		want  bool
+	}{
+		{name: "a cancellation under an ended context is a cut", ended: true, err: fmt.Errorf("git diff: %w", context.Canceled), want: true},
+		{name: "a cancellation under a live context is not", ended: false, err: fmt.Errorf("git diff: %w", context.Canceled), want: false},
+		{name: "another error under an ended context is not", ended: true, err: errors.New("git diff failed"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			if tt.ended {
+				cancel(errBaseMoved)
+			}
+
+			// Act.
+			got := cutUnder(ctx, tt.err)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("cutUnder(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTheMergeAsksWhetherAContextEndedOnlyThroughItsTwoHelpers(t *testing.T) {
 	// Act.
 	var sites []string
@@ -954,8 +985,8 @@ func TestTheMergeAsksWhetherAContextEndedOnlyThroughItsTwoHelpers(t *testing.T) 
 		}
 	}
 
-	// Assert: one in run.cut (process.go), one in recordFailed (run.go).
+	// Assert: one in cutUnder (process.go), one in recordFailed (run.go).
 	if len(sites) != 2 || !strings.HasPrefix(sites[0], "process.go:") || !strings.HasPrefix(sites[1], "run.go:") {
-		t.Fatalf("ctxend is asked at %v, want only inside run.cut and recordFailed", sites)
+		t.Fatalf("ctxend is asked at %v, want only inside cutUnder and recordFailed", sites)
 	}
 }

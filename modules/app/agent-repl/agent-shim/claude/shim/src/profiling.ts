@@ -16,10 +16,17 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 
-import { ACTIVE_FILE, ARMED_DIR, MAX_SECONDS, profilesRoot, validSession } from "../../../logging/ts/profile-session.js";
+import { ACTIVE_FILE, ARMED_DIR, LOG_LEVEL_FILE, MAX_SECONDS, profilesRoot, validSession } from "../../../logging/ts/profile-session.js";
+import { parseWindowLevel, WINDOW_SECONDS, type LevelExpiry, type WindowLevel } from "../../../logging/ts/level-window.js";
 
 /** What a reconcile did. */
-export type ProfilingEventKind = "started" | "stopped" | "failed";
+export type ProfilingEventKind = "started" | "stopped" | "failed" | "level_opened" | "level_closed";
+
+/** The runtime's live log threshold a session's LOG_LEVEL_FILE raises (LevelWindow). */
+export interface LevelWindowPort {
+  open(level: WindowLevel, lastingMs: number): number;
+  close(): LevelExpiry | null;
+}
 
 /** One thing a reconcile did, for the shim to record: started and stopped at info, failed at error. */
 export interface ProfilingEvent {
@@ -28,6 +35,10 @@ export interface ProfilingEvent {
   /** Why a profile stopped: session_closed, session_changed, max_duration or exit. */
   reason?: string;
   files: string[];
+  /** The log level a level_opened or level_closed event is about. */
+  level?: WindowLevel;
+  /** When that window ends (level_opened) or ended (level_closed), epoch ms. */
+  untilMs?: number;
   error?: Error;
 }
 
@@ -48,6 +59,8 @@ export interface RuntimeProfilerOptions {
   root: string;
   pid: number;
   events: (event: ProfilingEvent) => void;
+  /** The runtime's live log threshold, which a session's LOG_LEVEL_FILE raises. */
+  level: LevelWindowPort;
   /** A fresh inspector session; the default is node's own. */
   inspector?: () => InspectorPort;
   /** Schedules the max-duration stop; the default is an unref'd setTimeout. */
@@ -68,6 +81,8 @@ export class RuntimeProfiler {
   private port: InspectorPort | undefined;
   private timer: StopTimer | undefined;
   private generation = 0;
+  /** Whether this profile's session opened a log level window, which its stop closes. */
+  private levelOpen = false;
   private chain: Promise<void> = Promise.resolve();
 
   constructor(opts: RuntimeProfilerOptions) {
@@ -163,10 +178,36 @@ export class RuntimeProfiler {
       });
     });
     this.opts.events({ kind: "started", session, files: [] });
+    this.openLevel(session);
+  }
+
+  /** Opens the log level window SESSION's LOG_LEVEL_FILE names, when it names one. */
+  private openLevel(session: string): void {
+    let raw: string;
+    try {
+      raw = readFileSync(join(this.opts.root, session, LOG_LEVEL_FILE), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      this.opts.events({ kind: "failed", session, files: [], error: new Error(`profiling: read the session's log level: ${(err as Error).message}`, { cause: err }) });
+      return;
+    }
+    try {
+      const level = parseWindowLevel(raw.trim(), "the session's log level");
+      const untilMs = this.opts.level.open(level, WINDOW_SECONDS * 1000);
+      this.levelOpen = true;
+      this.opts.events({ kind: "level_opened", session, files: [], level, untilMs });
+    } catch (err) {
+      this.opts.events({ kind: "failed", session, files: [], error: err as Error });
+    }
   }
 
   private async stopNow(reason: string): Promise<void> {
     const session = this.session;
+    if (this.levelOpen) {
+      this.levelOpen = false;
+      const closed = this.opts.level.close();
+      if (closed !== null) this.opts.events({ kind: "level_closed", session, reason, files: [], level: closed.from, untilMs: closed.untilMs });
+    }
     const port = this.port as InspectorPort;
     this.timer?.clear();
     this.session = "";
@@ -200,7 +241,7 @@ export interface ProfilingLogger {
   error(fields: Record<string, unknown>, message: string): void;
 }
 
-/** Records one profiling event: a start or a stop at info, a failure at error. */
+/** Records one profiling event: a start, a stop, or a session's log level window opening or closing at info; a failure at error. */
 export function recordProfilingEvent(log: ProfilingLogger, event: ProfilingEvent): void {
   const fields: Record<string, unknown> = { session: event.session, files: event.files };
   if (event.reason) fields.reason = event.reason;
@@ -210,6 +251,18 @@ export function recordProfilingEvent(log: ProfilingLogger, event: ProfilingEvent
       return;
     case "stopped":
       log.info({ ...fields, operation: "shim.profiling.stopped" }, "runtime profiling stopped and wrote its profiles");
+      return;
+    case "level_opened":
+      log.info(
+        { ...fields, operation: "shim.profiling.level_opened", level: event.level, until: Math.floor((event.untilMs ?? 0) / 1000) },
+        "the profiling session raised the shim's log level for its window",
+      );
+      return;
+    case "level_closed":
+      log.info(
+        { ...fields, operation: "shim.profiling.level_closed", level: event.level },
+        "the profiling session's log level window closed; the shim is back at info",
+      );
       return;
     default:
       log.error(
@@ -236,6 +289,8 @@ export interface ArmDeps {
   pid: number;
   onSignal: (signal: "SIGWINCH", handler: () => void) => void;
   onExit: (handler: () => void) => void;
+  /** The shim's live log threshold (log.ts, logLevelWindow). */
+  level: LevelWindowPort;
 }
 
 /**
@@ -253,6 +308,7 @@ export function armRuntimeProfiling(log: ProfilingLogger, deps: ArmDeps): Runtim
       root: profilesRoot(deps.env, deps.home),
       pid: deps.pid,
       events: (event) => recordProfilingEvent(log, event),
+      level: deps.level,
     });
     marker = profiler.arm();
   } catch (err) {

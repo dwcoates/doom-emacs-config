@@ -137,7 +137,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("agent-repld: the state root cannot hold a shim socket: %w", err)
 	}
 
-	surfaces, err := dlog.OpenSurfaces(layout.RunLog())
+	surfaces, levelWindow, err := dlog.OpenSurfaces(layout.RunLog())
 	if err != nil {
 		return fmt.Errorf("agent-repld: open the run log: %w", err)
 	}
@@ -179,7 +179,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
-	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)
+	stopProfiling, err := startRuntimeProfiling(log, levelWindow, os.Getenv, os.UserHomeDir)
 	if err != nil {
 		log.Error("daemon.cmd.profiling", "the runtime profiler could not be armed", dlog.Context{"error": err.Error()})
 		return err

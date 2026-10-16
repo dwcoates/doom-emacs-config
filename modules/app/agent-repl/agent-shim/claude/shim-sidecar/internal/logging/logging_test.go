@@ -1332,3 +1332,20 @@ func TestNoteLevelSelectionIsSilentForTheDefault(t *testing.T) {
 		t.Fatalf("default selection wrote %q", file.String())
 	}
 }
+
+func TestLevelWindowRaisesEveryBoundCopy(t *testing.T) {
+	// Arrange: an info logger and a bound copy taken before the window opens.
+	l, _, file := sinks(t, false)
+	bound := l.With(Context{Operation: "cycle"})
+
+	// Act.
+	if _, err := bound.LevelWindow().Open(sharedlogging.LevelDebug, time.Minute); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	l.With(Context{Operation: "other"}).LogVerbose("chatter")
+
+	// Assert.
+	if file.Len() == 0 {
+		t.Fatal("a debug record was dropped while the shared window held debug")
+	}
+}

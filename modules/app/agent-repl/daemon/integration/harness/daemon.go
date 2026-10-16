@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1383,7 +1384,7 @@ func (d *Daemon) killGroup() bool {
 	// nothing said so until an operator dumped the test binary. The wait goes
 	// on unbounded after the report; the report says what was awaited and
 	// what the kernel showed.
-	if err := awaitKilledLeader(pgid, leaderExitReportAfter, WaitProcessExit, d.leaderStalled); err != nil {
+	if _, err := awaitKilledLeader(pgid, leaderExitReportAfter, awaitExitEvent, d.leaderStalled); err != nil {
 		d.t.Errorf("harness: await the daemon's exit before killing its group: %v", err)
 	}
 	if d.afterLeaderExit != nil {
@@ -1405,7 +1406,7 @@ func (d *Daemon) killGroup() bool {
 	// Kill returned, read that dying member as its incumbent serving and
 	// refused to boot (2026-10-15, TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain:
 	// the killed daemon was forking its desktop notifier).
-	if err := awaitGroupEnd(pgid, leaderExitReportAfter, procgroup.UnendedMembers, WaitProcessExit, d.memberStalled); err != nil {
+	if err := awaitGroupEnd(pgid, leaderExitReportAfter, procgroup.UnendedMembers, awaitExitEvent, d.memberStalled); err != nil {
 		d.t.Errorf("harness: await the exit of the killed daemon's group %d: %v", pgid, err)
 	}
 	return true
@@ -1415,29 +1416,45 @@ func (d *Daemon) killGroup() bool {
 // that list answers, through awaitKilledLeader (so a stuck one is reported
 // while the wait goes on). It lists the group again after each round, so a
 // member forked while the kill was under way is awaited too, and it ends once
-// every member listed is one it has seen exit: an exited process stays listed
-// until it turns zombie, and is never awaited twice.
+// every member listed is one whose exit it has SEEN: an exited process stays
+// listed until it turns zombie, and is never awaited twice.
+//
+// A MEMBER WHOSE EXIT WAS NOT SEEN IS NOT ENDED. On Darwin a member already
+// exiting refuses the exit event while it still holds its files
+// (awaitExitEvent), so it stays unended and is listed again, until the
+// listing drops it as a zombie: its files are released on the way there.
+// That last stretch is the kernel finishing an exit already under way, the
+// one wait here with no event to block on, so the relisting yields between
+// rounds rather than spinning the core.
 func awaitGroupEnd(pgid int, reportAfter time.Duration, list func(int) ([]procgroup.Member, error),
-	wait func(context.Context, int) error, stalled func(pid int, waited time.Duration)) error {
+	wait func(context.Context, int) (bool, error), stalled func(pid int, waited time.Duration)) error {
 	exited := map[int]bool{}
 	for {
 		members, err := list(pgid)
 		if err != nil {
 			return err
 		}
-		awaited := 0
+		pending, unseen := 0, 0
 		for _, m := range members {
 			if exited[m.Pid] {
 				continue
 			}
-			if err := awaitKilledLeader(m.Pid, reportAfter, wait, stalled); err != nil {
+			pending++
+			seen, err := awaitKilledLeader(m.Pid, reportAfter, wait, stalled)
+			if err != nil {
 				return fmt.Errorf("member %d (%s, %s): %w", m.Pid, m.Comm, m.State, err)
 			}
+			if !seen {
+				unseen++
+				continue
+			}
 			exited[m.Pid] = true
-			awaited++
 		}
-		if awaited == 0 {
+		if pending == 0 {
 			return nil
+		}
+		if unseen == pending {
+			runtime.Gosched()
 		}
 	}
 }
@@ -1451,13 +1468,14 @@ const leaderExitReportAfter = 15 * reapGrace
 
 // awaitKilledLeader waits, unbounded, for the exit of a leader whose SIGKILL
 // was accepted, and calls stalled once if the exit has not come within
-// reportAfter. It answers the wait's own failure, never the stall.
-func awaitKilledLeader(pid int, reportAfter time.Duration, wait func(context.Context, int) error, stalled func(pid int, waited time.Duration)) error {
+// reportAfter. It answers whether the exit itself was seen (awaitExitEvent),
+// and the wait's own failure, never the stall.
+func awaitKilledLeader(pid int, reportAfter time.Duration, wait func(context.Context, int) (bool, error), stalled func(pid int, waited time.Duration)) (seen bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), reportAfter)
-	err := wait(ctx, pid)
+	seen, err = wait(ctx, pid)
 	cancel()
 	if !errors.Is(err, context.DeadlineExceeded) {
-		return err
+		return seen, err
 	}
 	stalled(pid, reportAfter)
 	return wait(context.Background(), pid)

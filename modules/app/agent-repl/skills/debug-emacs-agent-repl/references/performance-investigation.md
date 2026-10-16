@@ -24,6 +24,14 @@ Prefer historical first. It is read-only, covers all five runtimes, and needs
 no reproduction. Escalate to fresh sampling only when the log-derived answer
 stops inside Emacs and cannot name the function.
 
+For workspace switching, one command does the whole fresh measurement:
+`bin/profile-agent-repl.sh switch-bench` (`/profile-agent-repl`, step 5,
+LEAD SESSION ONLY and with the owner's agreement, since it drives the live
+editor). It raises every runtime to debug for its run, drives a slow switch
+tour and a fast one (a held key's pace) through Emacs's key loop, turns the
+level back down, and reports each tour's switches, superseded switch passes,
+phase table, main-thread stalls and rail draws, beside the debug logs it read.
+
 ## Historical latency from structured logs
 
 Select the workspace, runtime, session, or process first, exactly as in
@@ -119,7 +127,9 @@ session, and request.
   code measures the old artifact. Confirm freshness through
   `health-and-readiness.md` first.
 - Verbose records are absent by default, so a hot path can look instantaneous
-  purely because its intermediate records were never persisted.
+  purely because its intermediate records were never persisted. A profiling
+  session opened with `--log-level debug` persists every runtime's debug
+  records for its window; its own extra logging is part of what it measures.
 - Wall-clock gaps include time the machine spent elsewhere. One slow workspace
   among many concurrently active ones is contention, not that workspace's bug.
 - Never derive a duration by subtracting timestamps across runtimes without

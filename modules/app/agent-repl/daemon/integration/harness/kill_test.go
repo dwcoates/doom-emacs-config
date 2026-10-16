@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -585,21 +586,21 @@ func TestAwaitKilledLeaderReportsAStuckExitAndKeepsWaiting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			waits, stalls := 0, 0
-			wait := func(ctx context.Context, pid int) error {
+			wait := func(ctx context.Context, pid int) (bool, error) {
 				waits++
 				if tt.failWith != nil {
-					return tt.failWith
+					return false, tt.failWith
 				}
 				if _, bounded := ctx.Deadline(); bounded && tt.exitsAfter {
 					<-ctx.Done()
-					return context.DeadlineExceeded
+					return false, context.DeadlineExceeded
 				}
-				return nil
+				return true, nil
 			}
 			stalled := func(int, time.Duration) { stalls++ }
 
 			// Act
-			err := awaitKilledLeader(4242, time.Millisecond, wait, stalled)
+			_, err := awaitKilledLeader(4242, time.Millisecond, wait, stalled)
 
 			// Assert
 			if !errors.Is(err, tt.wantErr) {
@@ -819,18 +820,23 @@ func TestAwaitGroupEnd(t *testing.T) {
 	errWait := errors.New("the exit event could not be registered")
 	m := func(pid int) procgroup.Member { return procgroup.Member{Pid: pid, Comm: "c", State: "running"} }
 	tests := []struct {
-		name      string
-		listings  [][]procgroup.Member // answered in turn; the last repeats
-		listErr   error
-		waitErr   error
-		wantWaits []int
-		wantErr   error
+		name     string
+		listings [][]procgroup.Member // answered in turn; the last repeats
+		listErr  error
+		waitErr  error
+		// unseenWaits is how many of a pid's waits answer an exit not seen.
+		unseenWaits map[int]int
+		wantWaits   []int
+		wantErr     error
 	}{
 		{name: "an empty group awaits nothing", listings: [][]procgroup.Member{nil}},
 		{name: "each member is awaited once though it stays listed until it is a zombie",
 			listings: [][]procgroup.Member{{m(1), m(2)}}, wantWaits: []int{1, 2}},
 		{name: "a member forked during the kill is awaited on the next listing",
 			listings: [][]procgroup.Member{{m(1)}, {m(1), m(3)}}, wantWaits: []int{1, 3}},
+		{name: "a member whose exit was not seen is awaited again until the listing drops it",
+			listings: [][]procgroup.Member{{m(1), m(2)}, {m(2)}, {m(2)}, {}}, unseenWaits: map[int]int{2: 2},
+			wantWaits: []int{1, 2, 2, 2}},
 		{name: "a listing that fails is answered", listErr: errList, wantErr: errList},
 		{name: "a wait that fails is answered", listings: [][]procgroup.Member{{m(1)}}, waitErr: errWait,
 			wantWaits: []int{1}, wantErr: errWait},
@@ -848,9 +854,14 @@ func TestAwaitGroupEnd(t *testing.T) {
 				return l, nil
 			}
 			var waits []int
-			wait := func(_ context.Context, pid int) error {
+			unseen := maps.Clone(tt.unseenWaits)
+			wait := func(_ context.Context, pid int) (bool, error) {
 				waits = append(waits, pid)
-				return tt.waitErr
+				if unseen[pid] > 0 {
+					unseen[pid]--
+					return false, nil
+				}
+				return tt.waitErr == nil, tt.waitErr
 			}
 			stalled := func(int, time.Duration) { t.Error("a stall was reported") }
 

@@ -22,6 +22,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	logging "agentrepl/logging"
 )
 
 // RootEnvironment names the profiles root override.
@@ -47,6 +49,19 @@ var Signal os.Signal = syscall.SIGWINCH
 // MaxDuration is how long a profile runs before the runtime stops it by
 // itself.
 const MaxDuration = 30 * time.Minute
+
+// LogLevelFile, in a session's directory, names a log level every runtime
+// raises itself to while it profiles into that session: a level window
+// (logging.Window.Open) lasting logging.WindowMax at most, closed when the
+// profile stops. Absent, the session leaves every level as it is.
+const LogLevelFile = "log-level"
+
+// LevelWindow is the runtime's live log threshold a session's LogLevelFile
+// opens and its stop closes (logging.Window).
+type LevelWindow interface {
+	Open(level logging.Level, lasting time.Duration) (time.Time, error)
+	Close() *logging.Expiry
+}
 
 // sessionPattern is a valid session id: one path component, no leading dot.
 var sessionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -77,6 +92,10 @@ const (
 	Stopped EventKind = "stopped"
 	// Failed is a reconcile that could not do what the session asked.
 	Failed EventKind = "failed"
+	// LevelOpened is a session's log level window opened in this runtime.
+	LevelOpened EventKind = "level_opened"
+	// LevelClosed is that window closed by the profile's stop.
+	LevelClosed EventKind = "level_closed"
 )
 
 // Event is one thing a reconcile did, for the runtime to record in its own
@@ -89,6 +108,10 @@ type Event struct {
 	Reason string
 	// Files are the profiles a stop wrote.
 	Files []string
+	// Level is the log level a LevelOpened or LevelClosed event is about,
+	// and Until when it ends (LevelOpened) or ended (LevelClosed).
+	Level string
+	Until time.Time
 	Err   error
 }
 
@@ -105,6 +128,9 @@ type Options struct {
 	Max time.Duration
 	// After schedules the max-duration stop; nil is time.AfterFunc.
 	After func(time.Duration, func()) Timer
+	// Level is the runtime's live log threshold, which a session's
+	// LogLevelFile raises. Required: every runtime that profiles logs.
+	Level LevelWindow
 }
 
 // Timer is the part of *time.Timer the max-duration stop needs.
@@ -123,6 +149,9 @@ type Profiler struct {
 	// generation counts the profiles started, so a max-duration stop armed
 	// for one profile can never end a later one.
 	generation int
+	// levelOpen reports a log level window this profile's session opened,
+	// which its stop closes.
+	levelOpen bool
 }
 
 // New builds a Profiler. It starts nothing.
@@ -134,6 +163,8 @@ func New(opts Options) (*Profiler, error) {
 		return nil, errors.New("profiling: a profiler needs the profiles root")
 	case opts.Events == nil:
 		return nil, errors.New("profiling: a profiler needs somewhere to record its events")
+	case opts.Level == nil:
+		return nil, errors.New("profiling: a profiler needs its runtime's log level window")
 	}
 	if opts.Max == 0 {
 		opts.Max = MaxDuration
@@ -236,11 +267,44 @@ func (p *Profiler) startLocked(session string) {
 	armed := p.generation
 	p.timer = p.opts.After(p.opts.Max, func() { p.expire(armed) })
 	p.opts.Events(Event{Kind: Started, Session: session, Files: []string{path}})
+	p.openLevelLocked(session, dir)
+}
+
+// openLevelLocked opens the log level window SESSION's LogLevelFile names,
+// when it names one, for the longest window a level may last.
+func (p *Profiler) openLevelLocked(session, dir string) {
+	raw, err := os.ReadFile(filepath.Join(dir, LogLevelFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		p.opts.Events(Event{Kind: Failed, Session: session, Err: fmt.Errorf("profiling: read the session's log level: %w", err)})
+		return
+	}
+	name := strings.TrimSpace(string(raw))
+	level, err := logging.ParseLevel(name)
+	if err != nil {
+		p.opts.Events(Event{Kind: Failed, Session: session, Err: fmt.Errorf("profiling: the session's log level: %w", err)})
+		return
+	}
+	until, err := p.opts.Level.Open(level, logging.WindowMax)
+	if err != nil {
+		p.opts.Events(Event{Kind: Failed, Session: session, Err: fmt.Errorf("profiling: open the session's log level window: %w", err)})
+		return
+	}
+	p.levelOpen = true
+	p.opts.Events(Event{Kind: LevelOpened, Session: session, Level: level.String(), Until: until})
 }
 
 // stopLocked ends the CPU profile and writes the heap profile beside it.
 func (p *Profiler) stopLocked(reason string) {
 	session := p.session
+	if p.levelOpen {
+		p.levelOpen = false
+		if closed := p.opts.Level.Close(); closed != nil {
+			p.opts.Events(Event{Kind: LevelClosed, Session: session, Reason: reason, Level: closed.From.String(), Until: closed.Until})
+		}
+	}
 	p.timer.Stop()
 	pprof.StopCPUProfile()
 	files := []string{p.cpuPath}

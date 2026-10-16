@@ -31,8 +31,17 @@
     "",
     "SIGWINCH, NOT SIGUSR1 OR SIGUSR2: node's SIGUSR1 opens its inspector and",
     "the shim's SIGUSR2 is its keep-alive reset; none of these runtimes has a",
-    "terminal that would send SIGWINCH for its own reason."
+    "terminal that would send SIGWINCH for its own reason.",
+    "",
+    "A SESSION MAY RAISE EVERY RUNTIME'S LOG LEVEL. <root>/<id>/<log_level_file>,",
+    "one line naming a level (debug, warn or error), is written before the",
+    "session opens. Each runtime that starts profiling into the session opens",
+    "that level as a log level window (proto/vocab/log-level-window.json) for",
+    "the longest a window may last, and closes it when its profile stops; the",
+    "window reverts by itself at its end either way. An unreadable or unknown",
+    "level is a failed reconcile, recorded at error, and the profile still runs."
   ],
+  "log_level_file": "log-level",
   "root_env": "AGENT_REPL_PROFILE_ROOT",
   "default_root": "~/.cache/agent-repl/profiles",
   "active_file": "active",

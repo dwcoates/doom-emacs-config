@@ -22,6 +22,7 @@
  * that column, ending above the gate band of the page on screen (host.ts
  * `SIDEBAR_BOTTOM_PROPERTY`).
  */
+import type { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createTicker } from "../clock.js";
 import { mintConnectionId } from "../connection-id.js";
 import { createLocalFailures } from "../failure/local.js";
@@ -48,6 +49,8 @@ export interface WebhostSidebarStartDeps {
   mount?: typeof mountWebhostSidebar;
   /** Install the load census; the real one times the webhost's own document. */
   installCensus?: (doc: Document) => LoadCensus;
+  /** The webhost's live log threshold (`Host.setLogLevel`); info when absent. */
+  level?: LevelWindow;
 }
 
 /**
@@ -67,7 +70,7 @@ export function startWebhostSidebar(
   const client = deps.client ?? createAgentReplClient(createDaemonTransport(win.location.origin));
   const connectionId = mintConnectionId();
   bindLogContext({ connection_id: connectionId });
-  installForwardingLogger(() => client, { case: "webhost", value: {} }, "info", deps.installLogger ?? setLogger);
+  installForwardingLogger(() => client, { case: "webhost", value: {} }, deps.level ?? "info", deps.installLogger ?? setLogger);
 
   // THE WEBHOST'S FAILURES ARE LISTED IN EVERY PAGE'S CHIP: the whole set,
   // every time it changes.

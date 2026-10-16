@@ -25,6 +25,12 @@
  * tells every page whether it is docked and which of the webhost's failures
  * stand, and ends the sidebar above the gate band of the page on screen.
  */
+import {
+  parseWindowLevel,
+  type AppliedLevel,
+  type LevelWindow,
+  type WindowLevel,
+} from "../../../agent-shim/logging/ts/level-window.js";
 import { selectedText } from "../selection.js";
 import {
   type WebhostFailure,
@@ -42,6 +48,10 @@ export interface HostEnv {
   readonly win: Window;
   /** Where the workspace iframes go; the document's body when omitted. */
   readonly frames?: HTMLElement;
+  /** The webhost's own live log threshold, which `setLogLevel` raises. */
+  readonly level: LevelWindow;
+  /** Epoch ms now; the default is the document's clock. */
+  readonly now?: () => number;
 }
 
 /**
@@ -100,6 +110,12 @@ export interface Host {
   setSidebarDocked(docked: boolean): void;
   /** Tell every page the webhost's own failures standing now. */
   setFailures(failures: readonly WebhostFailure[]): void;
+  /**
+   * Record at LEVEL, the webhost and every page, until UNTILMS (epoch ms): a
+   * log level window, replayed to a page that loads before it ends. Info, with
+   * no end, closes it. A profiling session calls it from Emacs.
+   */
+  setLogLevel(level: string, untilMs: number | null): string;
   /** Stop listening and drop every page. */
   dispose(): void;
 }
@@ -133,6 +149,9 @@ export function createHost(env: HostEnv): Host {
   let sidebarDocked = false;
   let failures: readonly WebhostFailure[] = [];
   let notes: HostNote[] = [];
+  const now = env.now ?? Date.now;
+  /** The log level window every page is told, while one stands. */
+  let logLevel: { level: WindowLevel; untilMs: number } | null = null;
 
   const note = (level: HostNote["level"], text: string): void => {
     notes.push({ level, text });
@@ -188,6 +207,9 @@ export function createHost(env: HostEnv): Host {
         pixels: frame.gateDock.pixels,
         background: frame.gateDock.background,
       });
+    }
+    if (logLevel !== null && logLevel.untilMs > now()) {
+      post(frame, { channel: HOST_CHANNEL, kind: "logLevel", level: logLevel.level, untilMs: logLevel.untilMs });
     }
   };
 
@@ -379,6 +401,35 @@ export function createHost(env: HostEnv): Host {
     setFailures(next) {
       failures = next;
       broadcast(failuresMessage());
+    },
+    setLogLevel(name, untilMs) {
+      let level: WindowLevel;
+      try {
+        level = parseWindowLevel(name, "the webhost's log level");
+      } catch (err) {
+        note("warn", (err as Error).message);
+        return answer("setLogLevel", null, "refused");
+      }
+      let applied: AppliedLevel;
+      try {
+        applied = env.level.apply(level, untilMs);
+      } catch (err) {
+        note("warn", (err as Error).message);
+        return answer("setLogLevel", null, "refused");
+      }
+      switch (applied.outcome) {
+        case "closed":
+          logLevel = null;
+          broadcast({ channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null });
+          return answer("setLogLevel", null, "closed");
+        case "expired":
+          note("warn", `a ${level} log level window that ended at ${applied.untilMs} has nothing left to open`);
+          return answer("setLogLevel", null, "refused");
+        case "opened":
+          logLevel = { level: applied.level, untilMs: applied.untilMs };
+          broadcast({ channel: HOST_CHANNEL, kind: "logLevel", level: applied.level, untilMs: applied.untilMs });
+          return answer("setLogLevel", null, "opened", { level, until_ms: applied.untilMs, pages: frames.size });
+      }
     },
     ids() {
       return answer("ids", null, "listed", { ids: [...frames.keys()], shown: shownId });

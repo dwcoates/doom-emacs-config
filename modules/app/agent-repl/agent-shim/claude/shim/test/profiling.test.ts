@@ -10,6 +10,7 @@ import {
   type InspectorPort,
   type ProfilingEvent,
 } from "../src/profiling.js";
+import { LevelWindow, WINDOW_SECONDS } from "../../../logging/ts/level-window.js";
 
 interface Captured {
   level: "info" | "error";
@@ -31,6 +32,7 @@ function captureLog(): { log: { info: (f: Record<string, unknown>, m: string) =>
 let root: string;
 let events: ProfilingEvent[];
 let armed: (() => void)[];
+let level: LevelWindow;
 
 function profiler(inspector?: () => InspectorPort): RuntimeProfiler {
   return new RuntimeProfiler({
@@ -38,6 +40,7 @@ function profiler(inspector?: () => InspectorPort): RuntimeProfiler {
     root,
     pid: 4242,
     events: (event) => events.push(event),
+    level,
     inspector,
     after: (_ms, fn) => {
       armed.push(fn);
@@ -58,6 +61,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "prof-"));
   events = [];
   armed = [];
+  level = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
 });
 
 afterEach(() => {
@@ -323,6 +327,7 @@ describe("armRuntimeProfiling", () => {
       onExit: (handler) => {
         exitHandler = handler;
       },
+      level,
     });
 
     // Assert
@@ -343,6 +348,7 @@ describe("armRuntimeProfiling", () => {
       home: "",
       pid: 77,
       onSignal: () => undefined,
+      level,
       onExit: () => undefined,
     });
 
@@ -351,3 +357,85 @@ describe("armRuntimeProfiling", () => {
     expect(records.map((r) => [r.level, r.fields.operation])).toEqual([["error", "shim.profiling.failed"]]);
   });
 });
+
+describe("RuntimeProfiler: a session's log level", () => {
+  /** Write NAME into SESSION's log level file. */
+  function askLevel(session: string, name: string): void {
+    mkdirSync(join(root, session), { recursive: true });
+    writeFileSync(join(root, session, "log-level"), `${name}\n`);
+  }
+
+  it("raises the shim to the session's level for the longest window", async () => {
+    // Arrange
+    const p = profiler();
+    askLevel("s1", "debug");
+    open("s1");
+
+    // Act
+    await p.reconcile();
+
+    // Assert
+    expect([level.level(), events.at(-1)?.kind, events.at(-1)?.untilMs]).toEqual(["debug", "level_opened", 1_000_000 + WINDOW_SECONDS * 1000]);
+    await p.stop("test_cleanup");
+  });
+
+  it("opens no window for a session naming no level", async () => {
+    // Arrange
+    const p = profiler();
+    open("s1");
+
+    // Act
+    await p.reconcile();
+
+    // Assert
+    expect([level.level(), events.map((e) => e.kind)]).toEqual(["info", ["started"]]);
+    await p.stop("test_cleanup");
+  });
+
+  it("fails loudly on an unknown level and keeps the profile", async () => {
+    // Arrange
+    const p = profiler();
+    askLevel("s1", "trace");
+    open("s1");
+
+    // Act
+    await p.reconcile();
+
+    // Assert
+    expect([events.at(-1)?.kind, p.current(), level.level()]).toEqual(["failed", "s1", "info"]);
+    await p.stop("test_cleanup");
+  });
+
+  it("closes the window when the profile stops", async () => {
+    // Arrange
+    const p = profiler();
+    askLevel("s1", "debug");
+    open("s1");
+    await p.reconcile();
+    close();
+
+    // Act
+    await p.reconcile();
+
+    // Assert
+    const closed = events.find((e) => e.kind === "level_closed");
+    expect([level.level(), closed?.level, closed?.reason]).toEqual(["info", "debug", "session_closed"]);
+  });
+});
+
+describe("recordProfilingEvent: a session's log level", () => {
+  it.each([
+    ["level_opened", "shim.profiling.level_opened"],
+    ["level_closed", "shim.profiling.level_closed"],
+  ] as const)("records %s at info as %s", (kind, operation) => {
+    // Arrange
+    const { log, records } = captureLog();
+
+    // Act
+    recordProfilingEvent(log, { kind, session: "s1", files: [], level: "debug", untilMs: 1_000_000 });
+
+    // Assert
+    expect([records[0]?.level, records[0]?.fields.operation]).toEqual(["info", operation]);
+  });
+});
+

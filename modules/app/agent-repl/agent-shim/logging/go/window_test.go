@@ -255,3 +255,94 @@ func TestExpiryContextNamesTheRevert(t *testing.T) {
 		t.Errorf("context = %v", ctx)
 	}
 }
+
+func TestWindowOpenRaisesTheLevelUntilItsEnd(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{at: time.Unix(1000000, 0)}
+	w := NewWindow(Selection{Level: LevelInfo}, clock.now)
+
+	// Act
+	until, err := w.Open(LevelDebug, time.Minute)
+
+	// Assert
+	allowed, _ := w.Allows("debug")
+	if err != nil || until.Unix() != 1000060 || !allowed {
+		t.Errorf("Open = %v, %v; debug allowed %v; want 1000060, nil, true", until, err, allowed)
+	}
+}
+
+func TestWindowOpenedLiveRevertsAtItsEnd(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{at: time.Unix(1000000, 0)}
+	w := NewWindow(Selection{Level: LevelInfo}, clock.now)
+	if _, err := w.Open(LevelDebug, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	clock.at = time.Unix(1000060, 0)
+
+	// Act
+	allowed, expired := w.Allows("debug")
+
+	// Assert
+	if allowed || expired == nil {
+		t.Errorf("Allows(debug) at the end = %v, %v; want false and an expiry", allowed, expired)
+	}
+}
+
+func TestWindowOpenRefuses(t *testing.T) {
+	tests := []struct {
+		name    string
+		level   Level
+		lasting time.Duration
+	}{
+		{name: "info", level: LevelInfo, lasting: time.Minute},
+		{name: "longer than the window max", level: LevelDebug, lasting: WindowMax + time.Second},
+		{name: "no duration", level: LevelDebug, lasting: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{at: time.Unix(1000000, 0)}
+			w := NewWindow(Selection{Level: LevelInfo}, clock.now)
+
+			// Act
+			_, err := w.Open(tt.level, tt.lasting)
+
+			// Assert
+			if err == nil || w.Level() != LevelInfo {
+				t.Errorf("Open(%s, %s) = %v with level %s; want a refusal and info", tt.level, tt.lasting, err, w.Level())
+			}
+		})
+	}
+}
+
+func TestWindowCloseRevertsAnOpenWindowNow(t *testing.T) {
+	// Arrange
+	clock := &fakeClock{at: time.Unix(1000000, 0)}
+	w := NewWindow(Selection{Level: LevelInfo}, clock.now)
+	if _, err := w.Open(LevelDebug, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	clock.at = time.Unix(1000010, 0)
+
+	// Act
+	closed := w.Close()
+
+	// Assert
+	if closed == nil || closed.From != LevelDebug || closed.Until.Unix() != 1000010 || w.Level() != LevelInfo {
+		t.Errorf("Close = %+v, level %s; want from debug at 1000010 and info", closed, w.Level())
+	}
+}
+
+func TestWindowCloseWithNoWindowOpenAnswersNil(t *testing.T) {
+	// Arrange
+	w := NewWindow(Selection{Level: LevelInfo}, time.Now)
+
+	// Act
+	closed := w.Close()
+
+	// Assert
+	if closed != nil {
+		t.Errorf("Close = %+v, want nil", closed)
+	}
+}

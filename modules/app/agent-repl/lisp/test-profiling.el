@@ -71,7 +71,8 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (should (equal (alist-get 'default_root f) (concat "~/" agent-repl-profiling-default-root)))
     (should (equal (alist-get 'active_file f) agent-repl-profiling-active-file))
     (should (equal (alist-get 'armed_dir f) agent-repl-profiling-armed-dir))
-    (should (equal (alist-get 'max_seconds f) agent-repl-profiling-max-seconds))))
+    (should (equal (alist-get 'max_seconds f) agent-repl-profiling-max-seconds))
+    (should (equal (alist-get 'log_level_file f) agent-repl-profiling-log-level-file))))
 
 (ert-deftest agent-repl-test-profiling-judges-every-fixture-session ()
   "Every session id in the fixture is judged as the fixture says."
@@ -230,6 +231,79 @@ shares a main thread with, by symbol."
     (agent-repl-profiling--page-started "{\"ok\":true}")
     (should-not logged)))
 
+;;;; ---- a session's log level ---------------------------------------------
+
+(defmacro agent-repl-test-profiling--with-levels (&rest body)
+  "Run BODY in a profiles root with Emacs's and the webhost's level setters recorded.
+Binds `levels' to the Emacs levels set and `hosted' to the (LEVEL . UNTIL-MS)
+the webhost was told, newest first."
+  (declare (indent 0))
+  `(agent-repl-test-profiling--with-root
+     (let ((levels nil) (hosted nil) (agent-repl-profiling--level-open nil))
+       (cl-letf (((symbol-function 'agent-repl--set-log-level-window)
+                  (lambda (level) (push level levels) (unless (eq level 'info) 1792000300.0)))
+                 ((symbol-function 'agent-repl-webhost-set-log-level)
+                  (lambda (level until-ms) (push (cons level until-ms) hosted) t)))
+         ,@body))))
+
+(defun agent-repl-test-profiling--ask-level (root session name)
+  "Write NAME into SESSION's log level file under ROOT."
+  (let ((dir (expand-file-name session root)))
+    (make-directory dir t)
+    (with-temp-file (expand-file-name "log-level" dir) (insert name "\n"))))
+
+(ert-deftest agent-repl-test-profiling-a-session-level-raises-emacs ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--ask-level root "s1" "debug")
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (should (equal levels '(debug)))))
+
+(ert-deftest agent-repl-test-profiling-a-session-level-raises-the-webhost-to-the-same-end ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--ask-level root "s1" "debug")
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (should (equal hosted '((debug . 1792000300000))))))
+
+(ert-deftest agent-repl-test-profiling-a-session-level-is-answered-to-the-collector ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--ask-level root "s1" "debug")
+    (agent-repl-test-profiling--open root "s1")
+    (should (equal (agent-repl-profiling-reconcile) "started s1 pages=0 level=debug"))))
+
+(ert-deftest agent-repl-test-profiling-a-session-naming-no-level-raises-nothing ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (should (and (null levels) (null hosted)))))
+
+(ert-deftest agent-repl-test-profiling-an-unknown-session-level-is-an-error-and-raises-nothing ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--ask-level root "s1" "trace")
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (should (and (null levels) (null hosted) (profiler-running-p)))
+    (should (seq-some (lambda (r) (and (eq (car r) 'error) (string-search "names log level \"trace\"" (cdr r)))) logged))))
+
+(ert-deftest agent-repl-test-profiling-the-stop-returns-every-level-to-info ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--ask-level root "s1" "debug")
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (agent-repl-test-profiling--close root)
+    (agent-repl-profiling-reconcile)
+    (should (equal levels '(info debug)))
+    (should (equal (car hosted) '(info)))))
+
+(ert-deftest agent-repl-test-profiling-a-stop-with-no-level-window-touches-no-level ()
+  (agent-repl-test-profiling--with-levels
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (agent-repl-test-profiling--close root)
+    (agent-repl-profiling-reconcile)
+    (should (and (null levels) (null hosted)))))
+
 ;;;; ---- the switch tour ---------------------------------------------------
 
 (defmacro agent-repl-test-profiling--with-tour (&rest body)
@@ -278,12 +352,12 @@ Binds what `agent-repl-test-profiling--with-root' binds."
     (agent-repl-profiling-switch-tour 1)
     (dotimes (_ 2) (agent-repl-test-profiling--run-step armed))
     (should (null agent-repl-profiling--tour))
-    (should (member '(info . "profiling.switch-tour-done switches=2") logged))))
+    (should (member '(info . "profiling.switch-tour-done label=tour switches=2") logged))))
 
 (ert-deftest agent-repl-test-profiling-tour-records-each-key-it-queues ()
   (agent-repl-test-profiling--with-tour
     (agent-repl-profiling-switch-tour 1)
-    (should (member '(info . "profiling.switch-tour-key key=s-} remaining=1") logged))))
+    (should (member '(info . "profiling.switch-tour-key label=tour key=s-} remaining=1") logged))))
 
 (ert-deftest agent-repl-test-profiling-tour-refuses-a-count-that-is-not-positive ()
   (agent-repl-test-profiling--with-tour
@@ -305,6 +379,39 @@ Binds what `agent-repl-test-profiling--with-root' binds."
     (should (equal (agent-repl-profiling-switch-tour-cancel) "cancelled with 3 keys left"))
     (should (null agent-repl-profiling--tour))
     (should (member '(info . "profiling.switch-tour-cancelled keys-left=3") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-spaces-keys-by-the-pace-it-names ()
+  (agent-repl-test-profiling--with-tour
+    (let (seconds)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (secs _repeat _fn &rest _args) (push secs seconds) (timer-create))))
+        (agent-repl-profiling-switch-tour 1 0.25 "fast"))
+      (should (equal seconds '(0.25))))))
+
+(ert-deftest agent-repl-test-profiling-tour-names-its-label-in-every-record ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 1 0.25 "fast")
+    (should (member '(info . "profiling.switch-tour-started label=fast count=1 interval=0.25") logged))
+    (should (member '(info . "profiling.switch-tour-key label=fast key=s-} remaining=1") logged))))
+
+(ert-deftest agent-repl-test-profiling-tour-refuses-a-pace-that-is-not-positive ()
+  (agent-repl-test-profiling--with-tour
+    (should-error (agent-repl-profiling-switch-tour 1 0 "fast"))
+    (should (null agent-repl-profiling--tour))))
+
+(ert-deftest agent-repl-test-profiling-tour-refuses-a-label-of-more-than-one-word ()
+  (agent-repl-test-profiling--with-tour
+    (should-error (agent-repl-profiling-switch-tour 1 1 "two words"))
+    (should (null agent-repl-profiling--tour))))
+
+(ert-deftest agent-repl-test-profiling-tour-state-names-a-running-tour ()
+  (agent-repl-test-profiling--with-tour
+    (agent-repl-profiling-switch-tour 2 1 "slow")
+    (should (equal (agent-repl-profiling-switch-tour-state) "running slow 3"))))
+
+(ert-deftest agent-repl-test-profiling-tour-state-is-idle-with-no-tour ()
+  (agent-repl-test-profiling--with-tour
+    (should (equal (agent-repl-profiling-switch-tour-state) "idle"))))
 
 (ert-deftest agent-repl-test-profiling-tour-cancel-with-no-tour-says-so ()
   (agent-repl-test-profiling--with-tour

@@ -203,6 +203,10 @@ type Logger struct {
 	pid       func() int
 }
 
+// LevelWindow is the process's live threshold, shared by every With copy: a
+// profiling session raises it (agentrepl/logging/profiling).
+func (l *Logger) LevelWindow() *sharedlogging.Window { return l.threshold }
+
 type sinkState struct {
 	mu       sync.Mutex
 	poisoned error

@@ -196,3 +196,35 @@ func (w *Window) Level() Level {
 	defer w.mu.Unlock()
 	return w.level
 }
+
+// Open raises a running runtime to level for lasting, from now: the same
+// window AGENT_REPL_LOG_LEVEL opens at startup, opened live (a profiling
+// session asking for one, profiling.Options.Level). It answers the window's
+// end. A level of info, or a window longer than WindowMax, is refused: a level
+// other than info is a window, never a standing setting. An open window is
+// replaced, so the newest ask decides the end.
+func (w *Window) Open(level Level, lasting time.Duration) (time.Time, error) {
+	if level == LevelInfo {
+		return time.Time{}, fmt.Errorf("logging: a level window opens a level other than info")
+	}
+	if lasting <= 0 || lasting > WindowMax {
+		return time.Time{}, fmt.Errorf("logging: a level window lasts more than nothing and at most %s, not %s", WindowMax, lasting)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.level, w.until = level, w.now().Add(lasting)
+	return w.until, nil
+}
+
+// Close ends an open window now and answers its Expiry for the caller to
+// record at info, or nil when no window was open (the threshold is info).
+func (w *Window) Close() *Expiry {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.until.IsZero() {
+		return nil
+	}
+	closed := &Expiry{From: w.level, Until: w.now()}
+	w.level, w.until = LevelInfo, time.Time{}
+	return closed
+}

@@ -146,6 +146,14 @@ the revert at info (operation `*.level-window`, outcome `window_ended`). A
 leftover `AGENT_REPL_LOG_LEVEL` without a live UNTIL starts every runtime at
 `info` and says so at info.
 
+To raise EVERY RUNNING runtime at once, with no restart, open a profiling
+session at that level: `bin/profile-agent-repl.sh start --log-level debug`
+(`/profile-agent-repl`). The daemon, store, sidecar and every shim open the
+window live; Emacs opens its own and tells the webhost and every page. The
+stop closes every window, and each ends by itself at five minutes either way.
+Read the session's records with `bin/profile-agent-repl.sh report --level
+debug`, which keeps them in `<session>/logs.jsonl`.
+
 The per-workspace buffer threshold has no dedicated command; set
 `agent-repl-log-buffer-level` directly (`setq`, or via `/runtime-eval-code`)
 when a workspace buffer needs to show ordinary or verbose activity.
