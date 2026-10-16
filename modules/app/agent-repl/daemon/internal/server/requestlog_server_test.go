@@ -247,8 +247,8 @@ func TestEveryWrapperIsOneCallToTheSharedBoundary(t *testing.T) {
 }
 
 // TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation pins the
-// four records every rpc's boundary writes, under the operation its name
-// spells.
+// two records every recorded rpc's boundary writes, under the operation its
+// name spells.
 func TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation(t *testing.T) {
 	// Arrange.
 	log := &recordingLogger{}
@@ -259,7 +259,7 @@ func TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation(t *testing.
 	boundary.enter()(&failed)
 
 	// Assert.
-	want := []string{"entered the rpc handler", "resolved the rpc request scope", "delegated the rpc request", "completed the rpc handler"}
+	want := []string{"entered the rpc handler", "completed the rpc handler"}
 	if len(log.records) != len(want) {
 		t.Fatalf("records = %+v, want %d", log.records, len(want))
 	}
@@ -268,7 +268,24 @@ func TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation(t *testing.
 			t.Fatalf("record %d = %+v, want DEBUG %q under daemon.server.set_workspace_parent", i, record, want[i])
 		}
 	}
-	if log.records[3].Context["outcome"] != "error" {
-		t.Fatalf("completion = %+v, want the error outcome", log.records[3])
+	if log.records[1].Context["outcome"] != "error" {
+		t.Fatalf("completion = %+v, want the error outcome", log.records[1])
+	}
+}
+
+// TestAnUnrecordedRPCsBoundaryRecordsNothing pins that ClientLog's boundary
+// writes no records of its own, failed or not.
+func TestAnUnrecordedRPCsBoundaryRecordsNothing(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	boundary := requestBoundary{log: log, rpc: "ClientLog", unrecorded: unrecordedRPCs["ClientLog"]}
+	failed := errors.New("refused")
+
+	// Act.
+	boundary.enter()(&failed)
+
+	// Assert.
+	if len(log.records) != 0 {
+		t.Fatalf("records = %+v, want none", log.records)
 	}
 }

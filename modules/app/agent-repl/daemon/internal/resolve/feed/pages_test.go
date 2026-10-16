@@ -1062,3 +1062,32 @@ func (h *harness) rowKey(id string) string {
 	}
 	return rank.key
 }
+
+func TestAComposedPageIsOneRecordCountingItsRows(t *testing.T) {
+	// Arrange: the order names a row the feed does not hold.
+	h := newHarness(t)
+	s := h.resolver.state(testWorkspace)
+	f := &feedState{key: "root", order: []string{"a", "b", "gone"},
+		rows: map[string]*frontendv1.FeedRow{"a": {}, "b": {}}}
+	before := len(h.records())
+
+	// Act
+	page := h.resolver.composePageRange(s, f, f.order, 0, 3, true)
+
+	// Assert
+	if got := len(page.GetSuccess().GetRows()); got != 2 {
+		t.Fatalf("rows = %d, want the two held", got)
+	}
+	var composed []map[string]any
+	for _, rec := range h.records()[before:] {
+		if rec.Operation == "daemon.feed.row_decision" && rec.Context["condition"] == "row, ok := f.rows[id]; ok" {
+			t.Fatalf("a held row was recorded on its own: %+v", rec)
+		}
+		if rec.Operation == "daemon.feed.page_composed" {
+			composed = append(composed, rec.Context)
+		}
+	}
+	if len(composed) != 1 || composed[0]["rows"] != 2 || composed[0]["absent"] != 1 || composed[0]["more"] != true {
+		t.Fatalf("page records = %v, want one counting 2 rows and 1 absent", composed)
+	}
+}

@@ -1325,7 +1325,6 @@ and logging its own resolution would recurse through the same boundary."
     ("load-priority-images:" . "shared image loading is process-wide")
     ("ws-rewrite-source-back-refs:" . "source-reference migration spans workspaces")
     ("ws-put:" . "workspace registry validation can precede sink ownership")
-    ("ws-by-ref-id:" . "reverse workspace lookup can return no workspace")
     ("ws-persp-identity:" . "the record reports a non-workspace perspective")
     ("ws-registered-names:" . "workspace registry enumeration spans workspaces")
     ("ws-switch-project-display:" . "project display can precede activation")

@@ -50,6 +50,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -383,6 +384,9 @@ type sidecar struct {
 	// as its slice bound needs. Nil between passes: the next tick opens a fresh
 	// one over whatever is watched then.
 	pass *pollPass
+	// lastPassSet is the set of files the last drained pass walked, as
+	// recordPassSet keys it: a pass is recorded only when its set differs.
+	lastPassSet string
 	// suspensionStated remembers that the WARNING opening this outage has been
 	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
 	// store is in an outage exactly like one whose store died mid-run — so the
@@ -1605,8 +1609,31 @@ func (s *sidecar) pollAll() {
 	// this exit reaches here: an abandoned pass and a spent slice both return
 	// early above, and neither has drained the corpus. The pass is retired so
 	// the next tick enrolls the watched set afresh.
+	s.recordPassSet(s.pass.seen)
 	s.pass = nil
 	s.drainedPass = true
+}
+
+// recordPassSet records the files a drained pass walked, when they are not the
+// files the last drained pass walked.
+//
+// THE SET IS THE EVIDENCE, NOT EACH POLL. A poll that finds nothing records
+// nothing (tail.Tailer.Poll), so which files a tick reads is stated here, once
+// per change: that the reader walks the live workspaces' files and none of the
+// corpus beside them is on the record without a record per file per tick.
+func (s *sidecar) recordPassSet(walked map[string]bool) {
+	paths := make([]string, 0, len(walked))
+	for path := range walked {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	key := strings.Join(paths, "\n")
+	if key == s.lastPassSet {
+		return
+	}
+	s.lastPassSet = key
+	s.log.With(logging.Context{Operation: "poll-pass"}).LogVerbose(
+		"a poll pass walked %d file(s), unlike the last pass: %s", len(paths), strings.Join(paths, ", "))
 }
 
 // pollOnce reads one bounded batch of one watched file, writes it, and commits

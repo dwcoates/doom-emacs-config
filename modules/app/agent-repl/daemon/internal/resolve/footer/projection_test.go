@@ -67,6 +67,20 @@ func TestStatusResolvesAWorkspaceTheFooterNeverSawFromTheDaemonFaults(t *testing
 	}
 }
 
+func TestAStatusQueryRecordsNoDecisions(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	before := len(h.log.Records())
+
+	// Act
+	_ = h.r.Status(ids.WorkspaceID("ws-never-seen"))
+
+	// Assert
+	if got := h.log.Records()[before:]; len(got) != 0 {
+		t.Fatalf("a status query recorded %+v, want nothing", got)
+	}
+}
+
 func TestTheStatusEdgeIsToldWhenTheArmMoves(t *testing.T) {
 	// Arrange
 	h, edges := newEdgeHarness(t)

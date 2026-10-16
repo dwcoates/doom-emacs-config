@@ -883,16 +883,19 @@ dead shadow never counts as the owner."
 
 ;;;; ---- Tests: --ws-by-ref-id records only a miss ----
 
-(ert-deftest agent-repl-test-ws-by-ref-id-records-a-miss ()
-  "A ref id no workspace answers to is recorded."
+(ert-deftest agent-repl-test-ws-by-ref-id-records-no-miss ()
+  "A ref id no workspace answers to is an ordinary answer, not an event:
+every caller treats a miss as one, and recording each wrote 812 records per
+switch (2026-10-15)."
   (agent-repl-test--with-clean-state
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+                 (lambda (_ws _level _verbosity fmt args &rest _)
+                   (push (apply #'format fmt args) logged))))
         ;; Act
         (agent-repl--ws-by-ref-id "nobody")
         ;; Assert
-        (should (equal logged '("ws-by-ref-id: id=nobody ws=nil")))))))
+        (should (null logged))))))
 
 (ert-deftest agent-repl-test-ws-by-ref-id-records-no-hit ()
   "A lookup that finds its workspace is not an event."
@@ -2359,6 +2362,90 @@ The screen must only demote names that could not be routed at all."
     (agent-repl--ws-put "alpha" :killed-at (current-time))
     ;; Act / Assert
     (should (null (agent-repl--ws-by-ref-id "ws-1")))))
+
+(ert-deftest agent-repl-test-ws-ref-id-table-maps-each-live-id-to-its-name ()
+  "Every live workspace with a ref id answers by its id."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    (agent-repl--ws-put "beta" :ref '(:id "ws-2" :dir "/w/2"))
+    ;; Act
+    (let ((table (agent-repl--ws-ref-id-table)))
+      ;; Assert
+      (should (equal (list (gethash "ws-1" table) (gethash "ws-2" table)
+                           (hash-table-count table))
+                     '("alpha" "beta" 2))))))
+
+(ert-deftest agent-repl-test-ws-ref-id-table-leaves-out-a-tombstone ()
+  "A tombstone has no tab, as `agent-repl--ws-by-ref-id' answers."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    (agent-repl--ws-put "alpha" :killed-at (current-time))
+    ;; Act / Assert
+    (should (zerop (hash-table-count (agent-repl--ws-ref-id-table))))))
+
+(ert-deftest agent-repl-test-ws-ref-id-table-leaves-out-a-workspace-with-no-ref ()
+  "A workspace with no ref id answers to no id, nil included."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :project-dir "/tmp")
+    ;; Act / Assert
+    (should (zerop (hash-table-count (agent-repl--ws-ref-id-table))))))
+
+(ert-deftest agent-repl-test-ws-live-ref-id ()
+  "A live entry answers its ref id; a tombstone and an entry with no ref none."
+  (dolist (case '(((:ref (:id "ws-1")) . "ws-1")
+                  ((:ref (:id "ws-1") :killed-at (0 0)) . nil)
+                  ((:project-dir "/tmp") . nil)))
+    ;; Act / Assert
+    (should (equal (agent-repl--ws-live-ref-id (car case)) (cdr case)))))
+
+(ert-deftest agent-repl-test-both-ref-id-lookups-share-one-rule ()
+  "`agent-repl--ws-by-ref-id' and `agent-repl--ws-ref-id-table' find a
+workspace by `agent-repl--ws-live-ref-id', and neither reads :killed-at
+itself, so the two cannot drift apart."
+  (dolist (fn '("agent-repl--ws-by-ref-id" "agent-repl--ws-ref-id-table"))
+    (with-temp-buffer
+      ;; Arrange
+      (insert-file-contents (expand-file-name "workspace.el" agent-repl-test--module-dir))
+      (emacs-lisp-mode)
+      (goto-char (point-min))
+      (re-search-forward (concat "^(defun " (regexp-quote fn) " "))
+      (beginning-of-defun)
+      ;; Act
+      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
+        ;; Assert
+        (should (string-match-p "agent-repl--ws-live-ref-id" body))
+        (should-not (string-match-p ":killed-at)" body))))))
+
+(ert-deftest agent-repl-test-ws-ref-id-table-answers-a-shared-id-as-the-lookup-does ()
+  "Two live workspaces carrying one id answer as `agent-repl--ws-by-ref-id'."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "alpha" :ref '(:id "ws-1" :dir "/w/1"))
+    (agent-repl--ws-put "beta" :ref '(:id "ws-1" :dir "/w/2"))
+    ;; Act / Assert
+    (should (equal (gethash "ws-1" (agent-repl--ws-ref-id-table))
+                   (agent-repl--ws-by-ref-id "ws-1")))))
+
+(ert-deftest agent-repl-test-roster-wide-walks-resolve-rows-through-the-ref-id-table ()
+  "The walks over every roster row read one table per push, never one
+registry scan per row (`agent-repl--ws-ref-id-table')."
+  (dolist (spec '(("status.el" . "agent-repl-status-sync-attention")
+                  ("roster.el" . "agent-repl-roster--walk-status-transitions")))
+    (with-temp-buffer
+      ;; Arrange
+      (insert-file-contents (expand-file-name (car spec) agent-repl-test--module-dir))
+      (emacs-lisp-mode)
+      (goto-char (point-min))
+      (re-search-forward (concat "^(defun " (regexp-quote (cdr spec)) " "))
+      (beginning-of-defun)
+      ;; Act
+      (let ((body (buffer-substring (point) (progn (end-of-defun) (point)))))
+        ;; Assert
+        (should (string-match-p "agent-repl--ws-ref-id-table" body))
+        (should-not (string-match-p "agent-repl--ws-by-ref-id" body))))))
 
 (ert-deftest agent-repl-test-ws-by-ref-id-does-not-match-on-the-dir ()
   "The dir is display, never a key: paths have many spellings."

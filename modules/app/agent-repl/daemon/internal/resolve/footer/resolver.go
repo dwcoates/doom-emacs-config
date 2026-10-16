@@ -428,6 +428,13 @@ func (r *resolver) TurnClock(ws ids.WorkspaceID) *frontendv1.FooterClock {
 // published view, or, before any, RESOLVE over what the footer holds for the
 // workspace (a fresh state when it holds nothing). A query is not a frame, so
 // an unbound workspace resolves on the global sink.
+//
+// A QUERY RECORDS NO DEBUG DECISIONS. Every roster row reads its workspace's
+// status through here, and a workspace with nothing published (every Recently
+// Merged one) resolved the same "default" branch on every read: some 400
+// records per workspace switch (2026-10-15). What a strip shows is recorded
+// when its published arm changes; a query's warnings and errors still reach
+// the log (dlog.WithoutDebug).
 func publishedOrResolved[T any](r *resolver, ws ids.WorkspaceID, published func(*wsState) *T, resolve func(*wsState, dlog.Logger) *T) *T {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -445,7 +452,7 @@ func publishedOrResolved[T any](r *resolver, ws ids.WorkspaceID, published func(
 	if log == nil {
 		log = r.log.Global().With(dlog.Context{"workspace_id": string(ws)})
 	}
-	return resolve(s, log)
+	return resolve(s, dlog.WithoutDebug(log))
 }
 
 // log writes the publication's records, after the lock is released.

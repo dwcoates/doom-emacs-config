@@ -4424,7 +4424,10 @@ on SelectWorkspace and re-pushes the roster."
   `(cl-letf (((symbol-function 'agent-repl-roster-walk)
               (lambda (_roster) (list (list :row (list :attention ,attention)))))
              ((symbol-function 'agent-repl-roster-row-id) (lambda (_row) "id-alpha"))
-             ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "alpha"))
+             ((symbol-function 'agent-repl--ws-ref-id-table)
+              (lambda () (let ((table (make-hash-table :test 'equal)))
+                           (puthash "id-alpha" "alpha" table)
+                           table)))
              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
              ((symbol-function 'agent-repl--cancel-timer-key) #'ignore))
      ,@body))
@@ -4947,3 +4950,24 @@ extent's color — and gains the underline besides."
 (provide 'test-status)
 
 ;;; test-status.el ends here
+
+(ert-deftest agent-repl-test-status-a-push-of-many-tabless-rows-records-nothing ()
+  "A push walks every roster row, most of them Recently Merged rows with no
+tab: none of them is an event, so the walk records nothing however many
+rows the roster holds (812 records per switch before, 2026-10-15)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--marker-on (make-hash-table :test 'equal))
+          (rows (mapcar (lambda (i) (list :row (list :ref (list :id (format "merged-%d" i)))))
+                        (number-sequence 1 300)))
+          (records 0))
+      (agent-repl--ws-put "alpha" :ref '(:id "id-alpha" :dir "/w/a"))
+      (cl-letf (((symbol-function 'agent-repl-roster-walk) (lambda (_roster) rows))
+                ((symbol-function 'agent-repl-roster-row-id)
+                 (lambda (row) (plist-get (plist-get row :ref) :id)))
+                ((symbol-function 'agent-repl--emit-log-record)
+                 (lambda (&rest _) (setq records (1+ records)))))
+        ;; Act
+        (agent-repl-status-sync-attention nil)
+        ;; Assert
+        (should (zerop records))))))

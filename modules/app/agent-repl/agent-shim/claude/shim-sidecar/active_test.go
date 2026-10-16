@@ -558,18 +558,20 @@ func corpus(tb testing.TB, total, active int, level sharedlogging.Level) *harnes
 func TestThePollWalksOnlyActiveFiles(t *testing.T) {
 	// Arrange: 200 transcripts, 5 of them live.
 	h := corpus(t, 200, 5, sharedlogging.LevelDebug)
-	before := len(h.ops(t, "tailer-poll"))
 
 	// Act.
 	h.tick()
 
-	// Assert: every poll is stated by its tailer, so the records name the files.
-	polled := map[string]bool{}
-	for _, rec := range h.ops(t, "tailer-poll")[before:] {
-		polled[ctxString(t, rec, "path")] = true
+	// Assert: a drained pass states the set it walked, and an unchanged set
+	// is stated once.
+	passes := h.ops(t, "poll-pass")
+	if len(passes) != 1 || !strings.Contains(passes[0].Message, "walked 5 file(s)") {
+		t.Fatalf("pass records = %v, want one naming the 5 live files", passes)
 	}
-	if len(polled) != 5 {
-		t.Fatalf("one tick polled %d file(s) over a 200-file corpus with 5 live, want 5: %v", len(polled), polled)
+	for i := 0; i < 5; i++ {
+		if !strings.Contains(passes[0].Message, fmt.Sprintf("sess-%04d", i)) {
+			t.Fatalf("the pass record %q does not name live transcript sess-%04d", passes[0].Message, i)
+		}
 	}
 }
 
@@ -618,5 +620,23 @@ func TestAHealingDormantTranscriptIsNeverDropped(t *testing.T) {
 	// Assert.
 	if _, watched := h.sc.watchers[path]; !watched {
 		t.Fatal("a transcript was dropped with its re-derivation still owed")
+	}
+}
+
+// TestAPassWhoseSetChangedIsRecordedAgain pins the other half: a workspace that
+// goes live changes the set a pass walks, and that pass is stated.
+func TestAPassWhoseSetChangedIsRecordedAgain(t *testing.T) {
+	// Arrange: 5 live transcripts, already walked once.
+	h := corpus(t, 5, 5, sharedlogging.LevelDebug)
+	h.transcript(t, "sess-late", promptLine, assistantLine)
+
+	// Act.
+	h.tick()
+
+	// Assert.
+	passes := h.ops(t, "poll-pass")
+	if len(passes) != 2 || !strings.Contains(passes[1].Message, "walked 6 file(s)") ||
+		!strings.Contains(passes[1].Message, "sess-late") {
+		t.Fatalf("pass records = %v, want a second naming the 6 files with sess-late", passes)
 	}
 }

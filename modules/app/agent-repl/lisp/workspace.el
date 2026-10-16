@@ -936,18 +936,41 @@ so answering with one would resurrect a closed workspace."
   (let ((found nil))
     (maphash (lambda (name plist)
                (when (and (null found)
-                          (null (plist-get plist :killed-at))
-                          (equal (plist-get (plist-get plist :ref) :id) id))
+                          (equal (agent-repl--ws-live-ref-id plist) id))
                  (setq found name)))
              agent-repl--workspaces)
-    ;; A lookup that finds its workspace is not an event; one that finds
-    ;; none is, and is recorded.  Recording every hit was the single largest
-    ;; record of a workspace switch (1,412 for two switches, 2026-10-12).
-    (unless found
-      (agent-repl--log-verbose
-       '(:agent-repl-central "an unmatched roster reference has no workspace")
-       "ws-by-ref-id: id=%s ws=nil" id))
+    ;; A LOOKUP IS NOT AN EVENT, found or not.  Every caller treats a miss as
+    ;; an ordinary answer (a roster row with no tab, a closed workspace), and
+    ;; one for which a miss means something records it in its own terms.
+    ;; Recording every miss here was the single largest record of a switch
+    ;; (812 per switch, the roster's Recently Merged rows; 2026-10-15).
     found))
+
+(defun agent-repl--ws-ref-id-table ()
+  "Return a fresh table from each live workspace's ref id to its name.
+A walk that resolves EVERY ROSTER ROW builds this once and looks each row
+up in it: resolving row by row through `agent-repl--ws-by-ref-id' scans
+every workspace per row, so a push's walk cost rows times workspaces
+\(some 800 rows by 43 workspaces, 2026-10-15).  Built per walk, it cannot
+answer for a registry that has since changed.  It answers as
+`agent-repl--ws-by-ref-id' does: tombstones and workspaces with no ref id
+are absent, and where two live workspaces carry one id the first the
+registry yields answers."
+  (let ((table (make-hash-table :test 'equal)))
+    (maphash (lambda (name plist)
+               (let ((id (agent-repl--ws-live-ref-id plist)))
+                 (when (and id (null (gethash id table)))
+                   (puthash id name table))))
+             agent-repl--workspaces)
+    table))
+
+(defun agent-repl--ws-live-ref-id (plist)
+  "Return the ref id the workspace whose entry is PLIST answers to, or nil.
+A tombstone answers to none: it has no tab.  The one rule
+`agent-repl--ws-by-ref-id' and `agent-repl--ws-ref-id-table' both find a
+workspace by, so the two can never disagree."
+  (and (null (plist-get plist :killed-at))
+       (plist-get (plist-get plist :ref) :id)))
 
 ;;;; ---- Render state: the roster row's status arm ---------------------
 ;;

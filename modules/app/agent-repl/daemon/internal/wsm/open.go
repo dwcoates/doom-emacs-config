@@ -621,6 +621,11 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 // read runs fn against the handle and logs a failed load at ERROR. Reads are
 // all-or-nothing: fn returns the whole result or an error, never a partial one.
 //
+// A READ THAT SUCCEEDS IS NOT AN EVENT, and records nothing. A sidebar view
+// reads every workspace's session, so recording each read wrote some 500
+// records per workspace switch (2026-10-15); what the reads were for is the
+// caller's record to make.
+//
 // A LOOKUP THAT FINDS NOTHING IS AN ANSWER, not a failure. ErrNotFound is what
 // every per-workspace rpc's unknown-workspace refusal is built from, so
 // recording it at ERROR would put an error line on an ordinary refusal path
@@ -641,7 +646,6 @@ func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn fun
 		ctxend.Log(err, s.log.Info, s.log.Error, op, "the read ended when its caller's context was cancelled", "refused the read", withError(fields, err))
 		return err
 	}
-	s.log.Debug(op, "read durable state", fields)
 	return nil
 }
 
