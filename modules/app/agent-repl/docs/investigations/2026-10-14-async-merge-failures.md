@@ -106,3 +106,4 @@ the log records that show it, so the failures can be fixed at their source.
 - `redundancy-discovery-bound-land` (merge workspace `redundancy-discovery-bound`), from `test-redundancy-measure`: LANDED as `39b88e175b`.
 - `slim-integration-deletions` (merge workspace `slim-integration-land`), made by this workspace as the owner's proxy: LANDED as `dfbf5e9d53`. It deletes 260 integration tests (162 daemon, 20 store, 78 sidecar) and 52 dead helpers. Coverage was measured before landing, with no system dropping more than 0.05 points.
 - `e2e-step-d-land`, from `test-tier-audit-e2e`: LANDED as `0c312d41fa`. It deletes 51 host e2e tests and 22 e2e-emacs tests, with no coverage loss.
+- `test-shared-setup`'s shared-World work (22 commits): LANDED as `615c85c01a`. No system lost coverage beyond 0.07 points.
