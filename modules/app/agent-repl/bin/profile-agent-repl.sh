@@ -2,10 +2,11 @@
 # profile-agent-repl.sh -- system-wide runtime profiling of a live agent-repl.
 #
 # Usage:
-#   bin/profile-agent-repl.sh start [--interval SECONDS]
+#   bin/profile-agent-repl.sh start [--interval SECONDS] [--log-level LEVEL]
 #   bin/profile-agent-repl.sh stop
 #   bin/profile-agent-repl.sh status
-#   bin/profile-agent-repl.sh report [SESSION] [--startup RFC3339]
+#   bin/profile-agent-repl.sh report [SESSION] [--startup RFC3339] [--level LEVEL]
+#   bin/profile-agent-repl.sh switch-bench [--slow N:SECONDS] [--fast N:SECONDS]
 #
 # start opens a session under the profiles root (AGENT_REPL_PROFILE_ROOT, else
 # ~/.cache/agent-repl/profiles): it names the session in <root>/active, sends
@@ -16,8 +17,27 @@
 # write its CPU and heap profiles into the session directory, and stops the
 # sampler. report summarizes a session (the newest by default): per-process
 # CPU and memory, the hottest frames per runtime, and the user-visible
-# latencies from the session's INFO log edges, ranked against their budgets.
-# --startup adds the startup assessment from the editor's launch instant.
+# latencies from the session's log edges, ranked against their budgets. It
+# reads the session's logs from --level up (info by default) into
+# <session>/logs.jsonl; --startup adds the startup assessment from the
+# editor's launch instant.
+#
+# --log-level (debug, warn or error) raises every runtime -- daemon, store,
+# sidecar, every shim, Emacs, the webhost and every page -- to that level for
+# the session, as a log level window of at most five minutes that the stop
+# closes (proto/vocab/log-level-window.json); the window ends by itself either
+# way.
+#
+# switch-bench measures workspace switching end to end, in one run: it opens a
+# session at debug, drives a SLOW switch tour (default 8 switches each way,
+# 1.5s apart) and then a FAST one (default 40 each way, 0.25s apart) through
+# Emacs's own key loop (agent-repl-profiling-switch-tour), closes the session,
+# and writes the report, read from the session's debug-level logs, with a
+# section per tour, into the session's summary.md beside those logs
+# (logs.jsonl).
+# It takes over the live editor while it runs, so it is run with the owner's
+# agreement. A rollout during the run (the daemon or Emacs replaced) makes the
+# run invalid: it says so and exits non-zero. Exit 0 is a complete run.
 #
 # The contract is proto/vocab/profile-session.json. Every runtime stops by
 # itself after 30 minutes, so a forgotten session cannot run on, but stop it
@@ -25,8 +45,13 @@
 #
 # Environment: AGENT_REPL_PROFILE_ROOT (root), AGENT_REPL_EMACS_SOCKET (an
 # emacsclient -s socket; default is Emacs's own default server),
-# AGENT_REPL_PROFILE_LOGS_SH (the log reader; default bin/logs.sh, a seam for
-# the harness).
+# AGENT_REPL_EMACSCLIENT (the emacsclient to use; default the one on PATH, else
+# the one inside /Applications/Emacs.app), AGENT_REPL_PROFILE_LOGS_SH (the log
+# reader; default bin/logs.sh, a seam for the harness),
+# AGENT_REPL_PROFILE_TOUR_MARGIN (seconds a tour may overrun twice its planned
+# length before it is cancelled; default 30) and AGENT_REPL_PROFILE_SETTLE
+# (seconds a bench waits after its last tour before closing; default 3), both
+# seams for the harness.
 
 set -euo pipefail
 
@@ -41,7 +66,7 @@ die() {
 }
 
 usage() {
-    sed -n '3,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # expected_comm RUNTIME -- the process name a runtime's marker must belong to.
@@ -87,16 +112,33 @@ signal_armed() {
     done
 }
 
+# emacsclient_path -- the emacsclient to use, or nothing when there is none.
+emacsclient_path() {
+    if [ -n "${AGENT_REPL_EMACSCLIENT:-}" ]; then
+        printf '%s' "$AGENT_REPL_EMACSCLIENT"
+    elif command -v emacsclient >/dev/null 2>&1; then
+        command -v emacsclient
+    elif [ -x /Applications/Emacs.app/Contents/MacOS/bin/emacsclient ]; then
+        printf '/Applications/Emacs.app/Contents/MacOS/bin/emacsclient'
+    fi
+}
+
+# eval_emacs FORM -- evaluate FORM in the running Emacs and print its value.
+eval_emacs() {
+    local client args=()
+    client="$(emacsclient_path)"
+    [ -n "$client" ] || {
+        printf 'no emacsclient: not on PATH, not in /Applications/Emacs.app, and AGENT_REPL_EMACSCLIENT unset\n' >&2
+        return 1
+    }
+    [ -z "${AGENT_REPL_EMACS_SOCKET:-}" ] || args=(-s "$AGENT_REPL_EMACS_SOCKET")
+    "$client" "${args[@]}" --eval "$1"
+}
+
 # call_emacs -- ask Emacs to reconcile; prints its answer or why it could not.
 call_emacs() {
-    local args=()
-    [ -z "${AGENT_REPL_EMACS_SOCKET:-}" ] || args=(-s "$AGENT_REPL_EMACS_SOCKET")
-    if ! command -v emacsclient >/dev/null 2>&1; then
-        printf 'emacs: emacsclient is not on PATH\n'
-        return 0
-    fi
     local answer
-    if answer="$(emacsclient "${args[@]}" --eval '(if (fboundp (quote agent-repl-profiling-reconcile)) (agent-repl-profiling-reconcile) "failed: this Emacs has no agent-repl profiling")' 2>&1)"; then
+    if answer="$(eval_emacs '(if (fboundp (quote agent-repl-profiling-reconcile)) (agent-repl-profiling-reconcile) "failed: this Emacs has no agent-repl profiling")' 2>&1)"; then
         printf 'emacs: %s\n' "$answer"
     else
         printf 'emacs: unreachable: %s\n' "$answer"
@@ -133,10 +175,16 @@ sampler() {
 
 # newest_session -- the most recent session directory's id.
 newest_session() {
-    local d
-    d="$(ls -1t "$ROOT" 2>/dev/null | grep -vx -e active -e armed | sed -n 1p || true)"
-    [ -n "$d" ] || die "no session under $ROOT"
-    printf '%s' "$d"
+    local d newest=""
+    for d in "$ROOT"/*/; do
+        d="${d%/}"
+        [ -d "$d" ] && [ "${d##*/}" != armed ] || continue
+        if [ -z "$newest" ] || [ "$d" -nt "$newest" ]; then
+            newest="$d"
+        fi
+    done
+    [ -n "$newest" ] || die "no session under $ROOT"
+    printf '%s' "${newest##*/}"
 }
 
 # report_helper -- build the report helper once per source fingerprint.
@@ -162,20 +210,28 @@ report_helper() {
 }
 
 cmd_start() {
-    local interval=2
+    local interval=2 level=""
     while [ $# -gt 0 ]; do
         case $1 in
             --interval) interval="${2:?--interval needs seconds}"; shift 2 ;;
+            --log-level) level="${2:?--log-level needs a level}"; shift 2 ;;
             *) die "start: unknown argument $1" ;;
         esac
     done
     [[ $interval =~ ^[0-9]+$ ]] && [ "$interval" -ge 1 ] || die "start: --interval must be a whole number of seconds"
+    case $level in
+        "" | debug | warn | error) ;;
+        *) die "start: --log-level must be debug, warn or error, not $level" ;;
+    esac
     [ ! -e "$ACTIVE" ] || die "a session is already open: $(cat "$ACTIVE"); stop it first"
     local id dir
     id="$(date -u +%Y%m%dT%H%M%SZ)"
     dir="$ROOT/$id"
     mkdir -p "$dir" || die "could not create $dir"
     printf '{"started_at":"%s","interval_s":%d}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$interval" >"$dir/meta.json"
+    # THE LEVEL IS WRITTEN BEFORE THE SESSION OPENS, so every runtime that
+    # reconciles into it reads it (proto/vocab/profile-session.json).
+    [ -z "$level" ] || printf '%s\n' "$level" >"$dir/log-level"
     printf '%s\n' "$id" >"$ACTIVE"
     { signal_armed; call_emacs; } | tee -a "$dir/control.log"
     sampler "$dir" "$interval" </dev/null >/dev/null 2>"$dir/sampler.err" &
@@ -222,10 +278,13 @@ cmd_status() {
 }
 
 cmd_report() {
-    local id="" startup=""
+    local id="" startup="" level=info
     while [ $# -gt 0 ]; do
         case $1 in
             --startup) startup="${2:?--startup needs an RFC3339 instant}"; shift 2 ;;
+            --level)
+                level="${2:?--level needs debug, info, warn or error}"; shift 2
+                case $level in debug|info|warn|error) ;; *) die "report: --level must be debug, info, warn or error, not $level" ;; esac ;;
             -*) die "report: unknown argument $1" ;;
             *) id="$1"; shift ;;
         esac
@@ -240,7 +299,7 @@ cmd_report() {
     until=""
     [ ! -f "$dir/stopped.json" ] || until="$(sed -n 's/.*"stopped_at":"\([^"]*\)".*/\1/p' "$dir/stopped.json")"
     logs="$dir/logs.jsonl"
-    local args=(--all --json --level info --since "$since")
+    local args=(--all --json --level "$level" --since "$since")
     [ -z "$until" ] || args+=(--until "$until")
     "${AGENT_REPL_PROFILE_LOGS_SH:-$THIS_DIR/logs.sh}" "${args[@]}" >"$logs" 2>"$dir/logs.err" || die "bin/logs.sh failed; see $dir/logs.err"
     local report_args=(--session "$dir" --logs "$logs")
@@ -248,11 +307,94 @@ cmd_report() {
     "$helper" "${report_args[@]}" | tee "$dir/summary.md"
 }
 
+# parse_leg SPEC -- "N:SECONDS" as "N SECONDS", or a refusal.
+parse_leg() {
+    local n="${1%%:*}" seconds="${1#*:}"
+    [[ $1 == *:* && $n =~ ^[0-9]+$ && $n -ge 1 && $seconds =~ ^[0-9]+(\.[0-9]+)?$ ]] ||
+        die "switch-bench: a tour is N:SECONDS (switches each way, seconds between keys), not $1"
+    awk -v s="$seconds" 'BEGIN { exit !(s > 0) }' || die "switch-bench: a tour's pace must be more than no seconds, not $1"
+    printf '%s %s' "$n" "$seconds"
+}
+
+# runtime_pids -- "daemon=PID emacs=PID", the processes a rollout replaces.
+runtime_pids() {
+    local daemon marker
+    daemon="none"
+    for marker in "$ARMED"/daemon-*; do
+        [ -e "$marker" ] && daemon="${marker##*-}"
+    done
+    printf 'daemon=%s emacs=%s' "$daemon" "$(eval_emacs '(emacs-pid)' 2>/dev/null || printf none)"
+}
+
+# run_tour LABEL N SECONDS -- drive one switch tour in Emacs and wait for it to
+# end, by its own state, within twice its planned length plus a margin.
+run_tour() {
+    local label="$1" n="$2" seconds="$3" answer deadline state
+    answer="$(eval_emacs "(agent-repl-profiling-switch-tour $n $seconds \"$label\")" 2>&1)" ||
+        { printf 'tour %s: Emacs refused it: %s\n' "$label" "$answer"; return 1; }
+    printf 'tour %s: %s\n' "$label" "$answer"
+    deadline=$(($(date +%s) + $(awk -v n="$n" -v s="$seconds" -v m="${AGENT_REPL_PROFILE_TOUR_MARGIN:-30}" 'BEGIN { printf "%d", 2 * (2 * n * s) + m }')))
+    while :; do
+        state="$(eval_emacs '(agent-repl-profiling-switch-tour-state)' 2>&1)" ||
+            { printf 'tour %s: Emacs stopped answering: %s\n' "$label" "$state"; return 1; }
+        [ "$state" != '"idle"' ] || break
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            eval_emacs '(agent-repl-profiling-switch-tour-cancel)' >/dev/null 2>&1 || true
+            printf 'tour %s: still %s past its deadline; cancelled\n' "$label" "$state"
+            return 1
+        fi
+        sleep 0.5
+    done
+    printf 'tour %s: done\n' "$label"
+}
+
+cmd_switch_bench() {
+    local slow="8:1.5" fast="40:0.25"
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --slow) slow="${2:?--slow needs N:SECONDS}"; shift 2 ;;
+            --fast) fast="${2:?--fast needs N:SECONDS}"; shift 2 ;;
+            *) die "switch-bench: unknown argument $1" ;;
+        esac
+    done
+    local slow_n slow_s fast_n fast_s planned
+    read -r slow_n slow_s <<<"$(parse_leg "$slow")"
+    read -r fast_n fast_s <<<"$(parse_leg "$fast")"
+    # THE WHOLE RUN FITS ITS LOG LEVEL WINDOW, which ends at five minutes.
+    planned="$(awk -v a="$slow_n" -v b="$slow_s" -v c="$fast_n" -v d="$fast_s" 'BEGIN { printf "%d", 2 * a * b + 2 * c * d + 10 }')"
+    [ "$planned" -le 240 ] || die "switch-bench: the tours plan ${planned}s; they must fit in 240s, inside the 300s log level window"
+    [ ! -e "$ACTIVE" ] || die "a session is already open: $(cat "$ACTIVE"); stop it first"
+    local ready
+    ready="$(eval_emacs '(fboundp (quote agent-repl-profiling-switch-tour-state))' 2>&1)" ||
+        die "switch-bench: Emacs is unreachable: $ready"
+    [ "$ready" = "t" ] || die "switch-bench: this Emacs has no switch tour (agent-repl-profiling-switch-tour-state); load lisp/profiling.el"
+    local before after id dir ok=1
+    before="$(runtime_pids)"
+    cmd_start --log-level debug
+    id="$(cat "$ACTIVE")"
+    dir="$ROOT/$id"
+    printf '{"slow":"%s","fast":"%s","before":"%s"}\n' "$slow" "$fast" "$before" >"$dir/bench.json"
+    if ! run_tour slow "$slow_n" "$slow_s" | tee -a "$dir/control.log"; then ok=0; fi
+    if [ "$ok" -eq 1 ] && ! run_tour fast "$fast_n" "$fast_s" | tee -a "$dir/control.log"; then ok=0; fi
+    # LATE FRAMES AND RECORDS LAND before the session closes on them.
+    sleep "${AGENT_REPL_PROFILE_SETTLE:-3}"
+    cmd_stop
+    after="$(runtime_pids)"
+    if [ "$before" != "$after" ]; then
+        printf 'switch-bench: INVALID RUN: a rollout replaced a runtime during it (before %s, after %s)\n' "$before" "$after" | tee -a "$dir/control.log" >&2
+        ok=0
+    fi
+    cmd_report "$id" --level debug >/dev/null
+    printf 'switch-bench: report %s/summary.md, debug logs %s/logs.jsonl\n' "$dir" "$dir"
+    [ "$ok" -eq 1 ] || die "switch-bench: the run did not complete; see $dir/control.log"
+}
+
 case "${1:-}" in
     start) shift; cmd_start "$@" ;;
     stop) shift; cmd_stop "$@" ;;
     status) shift; cmd_status "$@" ;;
     report) shift; cmd_report "$@" ;;
+    switch-bench) shift; cmd_switch_bench "$@" ;;
     -h|--help) usage ;;
     *) usage >&2; exit 2 ;;
 esac

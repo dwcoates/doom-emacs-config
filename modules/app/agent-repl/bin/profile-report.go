@@ -103,6 +103,7 @@ func report(w io.Writer, session, logs, startup string) error {
 	}
 	latencyTable(w, records)
 	switchPhaseTable(w, records)
+	switchTourTables(w, records)
 	if startup != "" {
 		since, err := time.Parse(time.RFC3339, startup)
 		if err != nil {
@@ -603,6 +604,15 @@ var switchPhases = []struct {
 // it crossed, each from the edge before it, so a slow switch names its owner.
 // A switch missing any edge is left out, and counted.
 func switchPhaseTable(w io.Writer, records []record) {
+	took, incomplete := switchPhaseDurations(records)
+	fmt.Fprintln(w, "## Switch to a shown workspace, by phase")
+	fmt.Fprintln(w)
+	printPhaseRows(w, took, incomplete)
+}
+
+// switchPhaseDurations answers each phase's durations over every switch to a
+// shown workspace in RECORDS that crossed every edge, and how many did not.
+func switchPhaseDurations(records []record) ([][]time.Duration, int) {
 	took := make([][]time.Duration, len(switchPhases))
 	incomplete := 0
 	for i, r := range records {
@@ -630,8 +640,12 @@ func switchPhaseTable(w io.Writer, records []record) {
 			took[k] = append(took[k], d)
 		}
 	}
-	fmt.Fprintln(w, "## Switch to a shown workspace, by phase")
-	fmt.Fprintln(w)
+	return took, incomplete
+}
+
+// printPhaseRows prints the phase table of TOOK, and how many switches were
+// left out for a missing edge.
+func printPhaseRows(w io.Writer, took [][]time.Duration, incomplete int) {
 	fmt.Fprintln(w, "| phase | n | p50 | p90 | max |")
 	fmt.Fprintln(w, "|---|---|---|---|---|")
 	for k, p := range switchPhases {
@@ -646,6 +660,118 @@ func switchPhaseTable(w io.Writer, records []record) {
 		fmt.Fprintf(w, "\n%d switches left out: an edge of theirs is missing from the logs.\n", incomplete)
 	}
 	fmt.Fprintln(w)
+}
+
+// A switch tour (lisp/profiling.el) names itself in the records it writes.
+func tourStarted(r record) (label string, ok bool) {
+	if r.Runtime != "emacs" || !strings.HasPrefix(r.Message, "profiling.switch-tour-started ") {
+		return "", false
+	}
+	return messageField(r.Message, "label"), true
+}
+
+func tourDone(r record, label string) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "profiling.switch-tour-done ") && messageField(r.Message, "label") == label
+}
+
+func tourKey(r record, label string) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "profiling.switch-tour-key ") && messageField(r.Message, "label") == label
+}
+
+// messageField answers KEY's value in a "op key=value key=value" message.
+func messageField(message, key string) string {
+	for _, field := range strings.Fields(message) {
+		if value, ok := strings.CutPrefix(field, key+"="); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+// tourSettle is how long after a tour's last key its switches may still be
+// landing, and are still the tour's.
+const tourSettle = 3 * time.Second
+
+// switchTourTables prints a section per switch tour in RECORDS: the keys it
+// queued, what Emacs, the webhost and the pages did with them, each switch's
+// phases, and the main-thread stalls and rail draws inside it.
+func switchTourTables(w io.Writer, records []record) {
+	for i, r := range records {
+		label, ok := tourStarted(r)
+		if !ok {
+			continue
+		}
+		end := time.Time{}
+		for _, later := range records[i+1:] {
+			if tourDone(later, label) {
+				end = later.at.Add(tourSettle)
+				break
+			}
+		}
+		fmt.Fprintf(w, "## Switch tour %s (%s each way, %ss apart)\n\n", label, messageField(r.Message, "count"), messageField(r.Message, "interval"))
+		if end.IsZero() {
+			fmt.Fprintln(w, "The tour never recorded its end: it was cancelled or its Emacs went away. Nothing of it is summarized.")
+			fmt.Fprintln(w)
+			continue
+		}
+		var inside []record
+		for _, x := range records[i:] {
+			if x.at.After(end) {
+				break
+			}
+			inside = append(inside, x)
+		}
+		var keys, switches, won, superseded, told, frames, draws int
+		var stalls, drawMs []time.Duration
+		for _, x := range inside {
+			switch {
+			case tourKey(x, label):
+				keys++
+			case isEditorSwitch(x):
+				switches++
+			case isActivationWon(x):
+				won++
+			case x.Runtime == "emacs" && strings.HasPrefix(x.Message, "elisp.panels.switch-activation-superseded "):
+				superseded++
+			case isPageSwitchedTo(x):
+				told++
+			case isPageShownFrame(x):
+				frames++
+			case x.Runtime == "webapp" && x.Operation == "webhost.stall":
+				stalls = append(stalls, contextMillis(x, "blocked_ms"))
+			case x.Runtime == "webapp" && x.Operation == "sidebar.roster-draw":
+				draws++
+				drawMs = append(drawMs, contextMillis(x, "draw_ms"))
+			}
+		}
+		fmt.Fprintln(w, "| keys queued | editor switches | switch passes run | passes superseded | pages told shown | first shown frames |")
+		fmt.Fprintln(w, "|---|---|---|---|---|---|")
+		fmt.Fprintf(w, "| %d | %d | %d | %d | %d | %d |\n\n", keys, switches, won, superseded, told, frames)
+		var blocked, longest time.Duration
+		for _, d := range stalls {
+			blocked += d
+			if d > longest {
+				longest = d
+			}
+		}
+		fmt.Fprintf(w, "Main-thread stalls: %d, %s blocked in all, the longest %s.\n", len(stalls), ms(blocked), ms(longest))
+		if len(drawMs) > 0 {
+			sort.Slice(drawMs, func(a, b int) bool { return drawMs[a] < drawMs[b] })
+			fmt.Fprintf(w, "Rail draws: %d, script %s median, %s at most.\n", draws, ms(percentile(drawMs, 0.5)), ms(drawMs[len(drawMs)-1]))
+		} else {
+			fmt.Fprintln(w, "Rail draws: none.")
+		}
+		fmt.Fprintln(w)
+		took, incomplete := switchPhaseDurations(inside)
+		printPhaseRows(w, took, incomplete)
+	}
+}
+
+// contextMillis answers a record's context number KEY as milliseconds; zero
+// when it is absent or not a number.
+func contextMillis(r record, key string) time.Duration {
+	v, _ := r.Context[key].(float64)
+	return time.Duration(v * float64(time.Millisecond))
 }
 
 // startupTable prints the startup assessment: launch to each workspace's

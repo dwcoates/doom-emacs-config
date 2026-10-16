@@ -278,6 +278,51 @@ if grep -q '1 switches left out: an edge of theirs is missing from the logs.' <<
 else
     fail "a repeat switch missing an edge is left out of the phases, and counted" "$report"
 fi
+cat >"$R/tour-logs.jsonl" <<'EOF'
+{"timestamp":"2026-10-12T12:01:00.000-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=fast count=2 interval=0.25","workspace_id":""}
+{"timestamp":"2026-10-12T12:01:00.010-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-key label=fast key=next remaining=1","workspace_id":""}
+{"timestamp":"2026-10-12T12:01:00.020-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=b origin=cycle count=4","workspace_id":"B"}
+{"timestamp":"2026-10-12T12:01:00.100-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-superseded ws=b generation=4 newest=5","workspace_id":"B"}
+{"timestamp":"2026-10-12T12:01:00.260-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-key label=fast key=next remaining=0","workspace_id":""}
+{"timestamp":"2026-10-12T12:01:00.270-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=5","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:01:00.300-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-won ws=a generation=5 waited-ms=30","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:01:00.320-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:01:00.330-04:00","runtime":"webapp","operation":"webhost.stall","message":"stalled","workspace_id":"","context":{"blocked_ms":120}}
+{"timestamp":"2026-10-12T12:01:00.340-04:00","runtime":"webapp","operation":"sidebar.roster-draw","message":"drew","workspace_id":"","context":{"draw_ms":6}}
+{"timestamp":"2026-10-12T12:01:00.350-04:00","runtime":"webapp","operation":"page.switched-to","message":"switched","workspace_id":"A","context":{"connection_id":"c1"}}
+{"timestamp":"2026-10-12T12:01:00.400-04:00","runtime":"webapp","operation":"page.shown-frame","message":"frame","workspace_id":"A","context":{"connection_id":"c1"}}
+{"timestamp":"2026-10-12T12:01:00.500-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=fast switches=2","workspace_id":""}
+{"timestamp":"2026-10-12T12:01:09.000-04:00","runtime":"webapp","operation":"webhost.stall","message":"stalled","workspace_id":"","context":{"blocked_ms":900}}
+{"timestamp":"2026-10-12T12:01:10.000-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=slow count=8 interval=1.5","workspace_id":""}
+EOF
+tour_report="$("$HELPER" --session "$R/sess" --logs "$R/tour-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
+fast="$(sed -n '/^## Switch tour fast/,/^## Switch tour slow/p' <<<"$tour_report")"
+if grep -q '^## Switch tour fast (2 each way, 0.25s apart)' <<<"$fast" && grep -q '| 2 | 2 | 1 | 1 | 1 | 1 |' <<<"$fast"; then
+    pass "a switch tour's section counts its keys, switches, passes run and superseded, and pages shown"
+else
+    fail "a switch tour's section counts its keys, switches, passes run and superseded, and pages shown" "$tour_report"
+fi
+if grep -q 'Main-thread stalls: 1, 120ms blocked in all, the longest 120ms.' <<<"$fast"; then
+    pass "a switch tour's stalls are only those inside its window"
+else
+    fail "a switch tour's stalls are only those inside its window" "$tour_report"
+fi
+if grep -q 'Rail draws: 1, script 6ms median, 6ms at most.' <<<"$fast"; then
+    pass "a switch tour's section gives its rail draws"
+else
+    fail "a switch tour's section gives its rail draws" "$tour_report"
+fi
+if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 30ms |' <<<"$fast" &&
+    grep -q '| the page, to its first shown frame | 1 | 50ms |' <<<"$fast"; then
+    pass "a switch tour's section splits its own switches into phases"
+else
+    fail "a switch tour's section splits its own switches into phases" "$tour_report"
+fi
+if grep -q '^## Switch tour slow' <<<"$tour_report" && grep -q 'The tour never recorded its end' <<<"$tour_report"; then
+    pass "a tour that never ended is named and left unsummarized"
+else
+    fail "a tour that never ended is named and left unsummarized" "$tour_report"
+fi
 if grep -q '| page boot to first feed paint | 300ms | 1 | 450ms |' <<<"$report" &&
     grep -q '| workspace open (tab opened to session up) | 300ms | 1 | 200ms |' <<<"$report" &&
     grep -q '| prompt echo (submit to the prompt drawn) | 100ms | 1 | 250ms |' <<<"$report"; then
@@ -331,6 +376,119 @@ if grep -q '# Profile session 20261012T160000Z' <<<"$out" && [ -f "$W/root/20261
     pass "report reads the newest session's window at info and keeps the summary beside it"
 else
     fail "report reads the newest session's window at info and keeps the summary beside it" "$out $(cat "$W/logs-args" 2>&1)"
+fi
+env AGENT_REPL_PROFILE_ROOT="$W/root" AGENT_REPL_PROFILE_LOGS_SH="$W/logs.sh" AGENT_REPL_PROFILE_BUILD_DIR="$TMP/build" bash "$SCRIPT" report --level debug >/dev/null
+if grep -qx -- '--all --json --level debug --since 2026-10-12T16:00:00Z' "$W/logs-args"; then
+    pass "report reads the session's window at the level asked"
+else
+    fail "report reads the session's window at the level asked" "$(cat "$W/logs-args" 2>&1)"
+fi
+if out="$(env AGENT_REPL_PROFILE_ROOT="$W/root" AGENT_REPL_PROFILE_LOGS_SH="$W/logs.sh" AGENT_REPL_PROFILE_BUILD_DIR="$TMP/build" bash "$SCRIPT" report --level verbose 2>&1)"; then
+    fail "report refuses an unknown level" "$out"
+elif grep -q 'report: --level must be debug, info, warn or error, not verbose' <<<"$out"; then
+    pass "report refuses an unknown level"
+else
+    fail "report refuses an unknown level" "$out"
+fi
+
+# --- switch-bench ----------------------------------------------------------------
+# A stub Emacs that answers each form the bench sends: whether it has a tour,
+# its pid (one per line of $STUB_EMACS_PIDS, the last repeated), the tour's
+# acceptance, its state ($STUB_TOUR_STATE, default idle), and the reconcile.
+BENCH_STUBS="$TMP/bench-stubs"
+mkdir -p "$BENCH_STUBS"
+cat >"$BENCH_STUBS/emacsclient" <<'EOF'
+#!/usr/bin/env bash
+form="${*: -1}"
+printf 'emacsclient %s\n' "$form" >>"$STUB_LOG"
+case $form in
+    *fboundp*switch-tour-state*) printf '%s\n' "${STUB_EMACS_TOUR:-t}" ;;
+    *emacs-pid*)
+        n="$(wc -l <"$STUB_LOG.pids" 2>/dev/null || printf 0)"
+        printf 'x\n' >>"$STUB_LOG.pids"
+        pid="$(sed -n "$((n + 1))p" "$STUB_EMACS_PIDS")"
+        [ -n "$pid" ] || pid="$(tail -1 "$STUB_EMACS_PIDS")"
+        printf '%s\n' "$pid" ;;
+    *switch-tour-state*) printf '"%s"\n' "${STUB_TOUR_STATE:-idle}" ;;
+    *switch-tour-cancel*) printf '"cancelled"\n' ;;
+    *switch-tour*) printf '"touring"\n' ;;
+    *) printf '"started"\n' ;;
+esac
+EOF
+chmod +x "$BENCH_STUBS/emacsclient"
+
+# bench ARGS... -- run switch-bench in a fresh world, its answer in $out and $rc.
+bench() {
+    fresh_world "bench-$RANDOM"
+    printf '999\n' >"$W/pids"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >%q\ncat %q\n' "$W/logs-args" "$R/logs.jsonl" >"$W/logs.sh"
+    chmod +x "$W/logs.sh"
+    set +e
+    out="$(env PATH="$BENCH_STUBS:$STUBS:$PATH" AGENT_REPL_PROFILE_ROOT="$W/root" STUB_PS_TABLE="$W/ps-table" \
+        STUB_PS_ALL="$W/ps-all" STUB_LOG="$W/log" STUB_EMACS_PIDS="${BENCH_PIDS:-$W/pids}" \
+        AGENT_REPL_PROFILE_LOGS_SH="$W/logs.sh" AGENT_REPL_PROFILE_BUILD_DIR="$TMP/build" \
+        AGENT_REPL_PROFILE_TOUR_MARGIN=1 AGENT_REPL_PROFILE_SETTLE=0 bash "$SCRIPT" switch-bench "$@" 2>&1)"
+    rc=$?
+    set -e
+    BENCH_SESSION=""
+    local d
+    for d in "$W"/root/*/; do
+        d="${d%/}"
+        [ "${d##*/}" = armed ] || BENCH_SESSION="${d##*/}"
+    done
+}
+
+bench --slow 2:0.1 --fast 3:0.05
+if [ "$rc" -eq 0 ] && grep -q 'switch-tour 2 0.1 "slow"' "$W/log" && grep -q 'switch-tour 3 0.05 "fast"' "$W/log"; then
+    pass "switch-bench drives the slow tour, then the fast one, at the paces asked"
+else
+    fail "switch-bench drives the slow tour, then the fast one, at the paces asked" "rc=$rc out=$out log=$(cat "$W/log")"
+fi
+if [ "$(cat "$W/root/$BENCH_SESSION/log-level" 2>/dev/null)" = debug ]; then
+    pass "switch-bench opens its session at debug"
+else
+    fail "switch-bench opens its session at debug" "$(ls "$W/root/$BENCH_SESSION" 2>&1)"
+fi
+if [ ! -e "$W/root/active" ] && [ -f "$W/root/$BENCH_SESSION/summary.md" ] && [ -f "$W/root/$BENCH_SESSION/logs.jsonl" ]; then
+    pass "switch-bench closes its session and leaves the report beside the logs it read"
+else
+    fail "switch-bench closes its session and leaves the report beside the logs it read" "$out"
+fi
+if grep -q -- '--level debug' "$W/logs-args" 2>/dev/null; then
+    pass "switch-bench reports from the session's debug-level logs"
+else
+    fail "switch-bench reports from the session's debug-level logs" "$(cat "$W/logs-args" 2>&1)"
+fi
+
+bench --slow 100:1.5
+if [ "$rc" -ne 0 ] && grep -q 'must fit in 240s' <<<"$out" && [ ! -e "$W/root/active" ]; then
+    pass "switch-bench refuses tours that would outlast the log level window"
+else
+    fail "switch-bench refuses tours that would outlast the log level window" "rc=$rc out=$out"
+fi
+
+STUB_EMACS_TOUR=nil bench
+if [ "$rc" -ne 0 ] && grep -q 'has no switch tour' <<<"$out" && [ ! -e "$W/root/active" ]; then
+    pass "switch-bench refuses an Emacs with no switch tour, opening nothing"
+else
+    fail "switch-bench refuses an Emacs with no switch tour, opening nothing" "rc=$rc out=$out"
+fi
+
+BENCH_PIDS="$TMP/changed-pids"
+printf '999\n1000\n' >"$BENCH_PIDS"
+bench --slow 1:0.05 --fast 1:0.05
+unset BENCH_PIDS
+if [ "$rc" -ne 0 ] && grep -q 'INVALID RUN: a rollout replaced a runtime' <<<"$out" && [ ! -e "$W/root/active" ]; then
+    pass "switch-bench fails a run during which a rollout replaced a runtime, and closes its session"
+else
+    fail "switch-bench fails a run during which a rollout replaced a runtime, and closes its session" "rc=$rc out=$out"
+fi
+
+STUB_TOUR_STATE="running slow 1" bench --slow 1:0.05 --fast 1:0.05
+if [ "$rc" -ne 0 ] && grep -q 'past its deadline; cancelled' <<<"$out" && grep -q 'switch-tour-cancel' "$W/log" && [ ! -e "$W/root/active" ]; then
+    pass "switch-bench cancels a tour that overruns its deadline, fails the run and closes its session"
+else
+    fail "switch-bench cancels a tour that overruns its deadline, fails the run and closes its session" "rc=$rc out=$out"
 fi
 
 printf '\ntest-profile-agent-repl.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
