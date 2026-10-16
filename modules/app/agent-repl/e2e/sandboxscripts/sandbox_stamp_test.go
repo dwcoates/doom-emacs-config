@@ -180,7 +180,8 @@ func TestSandboxGoModuleWalk(t *testing.T) {
 // TestSandboxStampNeverRunsFind pins the stamp's walk off find: the stamp runs
 // on the live checkout while other suites of the same run write into it, and
 // find fails the whole walk when a listed entry vanishes before it is
-// stat'ed (npm's .node_modules.lock, 2026-10-16).
+// stat'ed (npm's .node_modules.lock, 2026-10-16). It also pins the walk off
+// array pops, which killed a gate's stamp with a bus error the same day.
 func TestSandboxStampNeverRunsFind(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile(filepath.Join(filepath.Dir(sandboxScript(t)), "sandbox-image.sh"))
@@ -198,11 +199,14 @@ func TestSandboxStampNeverRunsFind(t *testing.T) {
 		if strings.HasPrefix(code, "find ") || strings.Contains(code, "| find ") || strings.Contains(code, "$(find ") {
 			calls = append(calls, fmt.Sprintf("%d: %s", i+1, code))
 		}
+		if strings.HasPrefix(code, "unset '") {
+			calls = append(calls, fmt.Sprintf("%d: %s (an array pop, which killed a gate's stamp with a bus error)", i+1, code))
+		}
 	}
 
 	// Assert
 	if len(calls) != 0 {
-		t.Fatalf("sandbox-image.sh runs find, which a concurrent writer can fail:\n%s", strings.Join(calls, "\n"))
+		t.Fatalf("sandbox-image.sh walks in a way a gate can fail:\n%s", strings.Join(calls, "\n"))
 	}
 }
 

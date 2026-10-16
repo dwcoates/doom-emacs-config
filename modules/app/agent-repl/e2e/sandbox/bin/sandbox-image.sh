@@ -72,24 +72,29 @@ sandbox_stamp_inputs() {
 # stats it. A glob never stats what it lists, and an entry gone before its
 # own test is simply not a file or a directory, so a concurrent writer cannot
 # fail the stamp.
+#
+# It recurses rather than keeping an array stack: an earlier walk popped a
+# bash array with `unset 'a[expr]'` inside this subshell function, and in a
+# merge gate the shell died of a bus error on it in 2 of 8 stamps
+# (2026-10-16). Plain recursion keeps no array at all.
 sandbox_walk() (
   shopt -s dotglob nullglob
-  local -a dirs=("$1")
-  local d e
-  while ((${#dirs[@]})); do
-    d=${dirs[${#dirs[@]}-1]}
-    unset 'dirs[${#dirs[@]}-1]'
-    for e in "$d"/*; do
-      if [[ -L $e ]]; then
-        continue
-      elif [[ -d $e ]]; then
-        [[ ${e##*/} == node_modules ]] || dirs+=("$e")
-      elif [[ -f $e ]]; then
-        printf '%s\0' "$e"
-      fi
-    done
-  done
+  sandbox_walk_dir "$1"
 )
+
+sandbox_walk_dir() {
+  local e
+  for e in "$1"/*; do
+    if [[ -L $e ]]; then
+      continue
+    elif [[ -d $e ]]; then
+      [[ ${e##*/} == node_modules ]] || sandbox_walk_dir "$e"
+    elif [[ -f $e ]]; then
+      printf '%s\0' "$e"
+    fi
+  done
+  return 0
+}
 
 # sandbox_select_named_files filters sandbox_walk's NUL-separated paths by
 # the stamp's two naming rules: `sandbox` keeps every file whose name does
