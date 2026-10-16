@@ -526,6 +526,7 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
+(declare-function agent-repl--frontend-fit-webviews "frontend" (&optional frame))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl-link-up-p "daemon-link" ())
 
@@ -824,15 +825,22 @@ decision is recorded at INFO, as the roster's follow records its own."
           (not (equal (agent-repl--ws-by-ref-id id) ws)))
       (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=no-tab-yet" ws))
      (t
-      ;; THE PAGE IS SHOWN FIRST, so WebKit paints it while Emacs switches its
-      ;; own view; the switch pass's own show then finds it already shown.
-      ;; Nothing is painted that the switch would not paint: rapid presses
-      ;; show each page, and WebKit draws only the one shown at each frame.
+      (agent-repl-roster-move-frame ws)
+      ;; THE WEBVIEW TAKES ITS NEW SIZE BEFORE THE PAGE IS SHOWN, so WebKit
+      ;; paints the page once, at the size it is shown at.  The frame move
+      ;; laid out WS's windows, and a workspace whose gate hides the input
+      ;; gives the webview the input's space too; fitted only by the
+      ;; redisplay after the command, the size reached WebKit after the
+      ;; show, and the page painted at the old height, the Emacs window
+      ;; showing below it, then painted again at the new one some 50ms later
+      ;; (owner, 2026-10-16).  Nothing is painted that the switch would not
+      ;; paint: rapid presses show each page, and WebKit draws only the one
+      ;; shown at each frame.
+      (agent-repl--frontend-fit-webviews)
       (let ((page (agent-repl-webhost-has-page-p ws)))
         (when page (agent-repl-webhost-show ws))
         (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s"
-                          ws shown (if page "shown" "none")))
-      (agent-repl-roster-move-frame ws)))))
+                          ws shown (if page "shown" "none")))))))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
