@@ -74,7 +74,7 @@ beforeEach(() => {
   webhostFailures = createWebhostFailureView();
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, now: () => clock });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow });
 });
 
 afterEach(() => {
@@ -261,7 +261,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, now: () => clock });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow });
 
     // Assert
     await delivered();
@@ -400,7 +400,7 @@ describe("the gate band", () => {
     dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
     pageDoc.body.append(dock);
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, now: () => clock });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow });
     return dock;
   }
 

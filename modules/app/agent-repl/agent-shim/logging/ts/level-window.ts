@@ -121,6 +121,12 @@ export function expiryContext(expiry: LevelExpiry): Record<string, unknown> {
   return { from_level: expiry.from, until: Math.floor(expiry.untilMs / 1000), effective_level: "info", outcome: "window_ended" };
 }
 
+/** What applying a level until an instant did (LevelWindow.apply). */
+export type AppliedLevel =
+  | { outcome: "opened"; level: WindowLevel; untilMs: number }
+  | { outcome: "closed"; closed: LevelExpiry | null }
+  | { outcome: "expired"; level: WindowLevel; untilMs: number };
+
 /**
  * A runtime's live threshold. When it is not info it reverts to info once its
  * window ends; the first `allows` call to find that hands the expiry back for
@@ -171,6 +177,25 @@ export class LevelWindow {
     this.current = level;
     this.untilMs = this.now() + lastingMs;
     return this.untilMs;
+  }
+
+  /**
+   * Hold LEVEL until UNTILMS (epoch ms), the way a level travels between
+   * runtimes: info, with no end, closes any window; any other level opens a
+   * window to that instant, unless the instant has already passed. Info with
+   * an end, another level without one, or a window past WINDOW_SECONDS is
+   * refused, leaving the threshold as it was.
+   */
+  apply(level: WindowLevel, untilMs: number | null): AppliedLevel {
+    if (level === "info") {
+      if (untilMs !== null) throw new Error("logging: an info log level carries no window end");
+      return { outcome: "closed", closed: this.close() };
+    }
+    if (untilMs === null) throw new Error(`logging: a ${level} log level needs its window's end`);
+    const lastingMs = untilMs - this.now();
+    if (lastingMs <= 0) return { outcome: "expired", level, untilMs };
+    this.open(level, lastingMs);
+    return { outcome: "opened", level, untilMs };
   }
 
   /** End an open window now; answers its expiry, or null when none was open. */

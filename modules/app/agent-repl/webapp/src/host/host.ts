@@ -25,7 +25,12 @@
  * tells every page whether it is docked and which of the webhost's failures
  * stand, and ends the sidebar above the gate band of the page on screen.
  */
-import { parseWindowLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
+import {
+  parseWindowLevel,
+  type AppliedLevel,
+  type LevelWindow,
+  type WindowLevel,
+} from "../../../agent-shim/logging/ts/level-window.js";
 import { selectedText } from "../selection.js";
 import {
   type WebhostFailure,
@@ -405,29 +410,26 @@ export function createHost(env: HostEnv): Host {
         note("warn", (err as Error).message);
         return answer("setLogLevel", null, "refused");
       }
-      if (level === "info") {
-        if (untilMs !== null) {
-          note("warn", "an info log level carries no window end");
-          return answer("setLogLevel", null, "refused");
-        }
-        logLevel = null;
-        env.level.close();
-        broadcast({ channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null });
-        return answer("setLogLevel", null, "closed");
-      }
-      if (untilMs === null) {
-        note("warn", `a ${level} log level needs its window's end`);
-        return answer("setLogLevel", null, "refused");
-      }
+      let applied: AppliedLevel;
       try {
-        env.level.open(level, untilMs - now());
+        applied = env.level.apply(level, untilMs);
       } catch (err) {
         note("warn", (err as Error).message);
         return answer("setLogLevel", null, "refused");
       }
-      logLevel = { level, untilMs };
-      broadcast({ channel: HOST_CHANNEL, kind: "logLevel", level, untilMs });
-      return answer("setLogLevel", null, "opened", { level, until_ms: untilMs, pages: frames.size });
+      switch (applied.outcome) {
+        case "closed":
+          logLevel = null;
+          broadcast({ channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null });
+          return answer("setLogLevel", null, "closed");
+        case "expired":
+          note("warn", `a ${level} log level window that ended at ${applied.untilMs} has nothing left to open`);
+          return answer("setLogLevel", null, "refused");
+        case "opened":
+          logLevel = { level: applied.level, untilMs: applied.untilMs };
+          broadcast({ channel: HOST_CHANNEL, kind: "logLevel", level: applied.level, untilMs: applied.untilMs });
+          return answer("setLogLevel", null, "opened", { level, until_ms: applied.untilMs, pages: frames.size });
+      }
     },
     ids() {
       return answer("ids", null, "listed", { ids: [...frames.keys()], shown: shownId });

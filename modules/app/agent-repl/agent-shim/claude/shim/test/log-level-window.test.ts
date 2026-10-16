@@ -156,3 +156,82 @@ describe("LevelWindow.close", () => {
     expect(window.close()).toBeNull();
   });
 });
+
+describe("LevelWindow.apply", () => {
+  it("opens a window to the instant named", () => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+
+    // Act
+    const applied = window.apply("debug", 1_060_000);
+
+    // Assert
+    expect([applied, window.allows("debug").allowed]).toEqual([
+      { outcome: "opened", level: "debug", untilMs: 1_060_000 },
+      true,
+    ]);
+  });
+
+  it("closes an open window on info", () => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+    window.open("debug", 60_000);
+
+    // Act
+    const applied = window.apply("info", null);
+
+    // Assert
+    expect([applied, window.level()]).toEqual([
+      { outcome: "closed", closed: { from: "debug", untilMs: 1_000_000 } },
+      "info",
+    ]);
+  });
+
+  it("answers no expiry for info with no window open", () => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+
+    // Act / Assert
+    expect(window.apply("info", null)).toEqual({ outcome: "closed", closed: null });
+  });
+
+  it.each([1_000_000, 999_000])("answers an instant already passed (%d) as expired, opening nothing", (untilMs) => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+
+    // Act
+    const applied = window.apply("debug", untilMs);
+
+    // Assert
+    expect([applied, window.level()]).toEqual([{ outcome: "expired", level: "debug", untilMs }, "info"]);
+  });
+
+  it.each([
+    ["info with an end", "info", 1_060_000],
+    ["debug with no end", "debug", null],
+    ["debug past the window", "debug", 1_000_000 + WINDOW_SECONDS * 1000 + 1],
+  ] as const)("refuses %s, leaving the threshold as it was", (_name, level, untilMs) => {
+    // Arrange
+    const window = new LevelWindow({ level: "info", untilMs: null }, () => 1_000_000);
+    window.open("warn", 60_000);
+
+    // Act / Assert
+    expect(() => window.apply(level, untilMs)).toThrow();
+    expect(window.level()).toBe("warn");
+  });
+
+  it.each(["webapp/src/host/embed.ts", "webapp/src/host/host.ts"])(
+    "is how %s applies a level that travels between runtimes",
+    (path) => {
+      // Arrange
+      const source = readFileSync(fileURLToPath(new URL(`../../../../${path}`, import.meta.url)), "utf8");
+
+      // Act
+      const applies = source.includes(".apply(level, untilMs)");
+      const handRolls = /\.open\(level,|levelWindow\.close\(\)|env\.level\.close\(\)/.test(source);
+
+      // Assert
+      expect([applies, handRolls]).toEqual([true, false]);
+    },
+  );
+});
