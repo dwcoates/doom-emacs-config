@@ -155,6 +155,66 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
   "No catalog offers nothing."
   (should-not (agent-repl--command-completion-candidates nil)))
 
+;;;; ---- The completion table's own category ----
+
+(defun agent-repl-test-command-completion--all (query candidates)
+  "Return QUERY's unpropertized matches against CANDIDATES, under the table's
+own category and styles (via `completion-all-completions'), as plain strings."
+  (let* ((table (agent-repl--command-completion-table candidates))
+         (metadata (completion-metadata query table nil))
+         (all (completion-all-completions query table nil (length query) metadata))
+         (strings nil))
+    ;; `completion-all-completions' may tack a base-size onto the last cons,
+    ;; making ALL an improper list; walk only its proper (string) cells.
+    (while (consp all)
+      (push (substring-no-properties (car all)) strings)
+      (setq all (and (consp (cdr all)) (cdr all))))
+    (nreverse strings)))
+
+(ert-deftest agent-repl-test-command-completion-table-states-its-category ()
+  "The table answers `metadata' with this capf's own category."
+  (let ((table (agent-repl--command-completion-table '("/merge-queue"))))
+    (should (equal (funcall table "" nil 'metadata)
+                   `(metadata (category . ,agent-repl--command-completion-category))))))
+
+(ert-deftest agent-repl-test-command-completion-category-default-is-substring ()
+  "The table's category is registered in `completion-category-defaults', not
+in `completion-category-overrides', with the `substring' style."
+  (should (equal (cdr (assq agent-repl--command-completion-category
+                            completion-category-defaults))
+                 '((styles substring basic))))
+  (should-not (assq agent-repl--command-completion-category
+                     completion-category-overrides)))
+
+(ert-deftest agent-repl-test-command-completion-table-completes-a-substring ()
+  "`/profile' completes to a candidate it names only as a substring."
+  (should (equal (agent-repl-test-command-completion--all
+                  "/profile" '("/agent-repl-profile"))
+                 '("/agent-repl-profile"))))
+
+(ert-deftest agent-repl-test-command-completion-table-completes-a-short-substring ()
+  "`/prof' -- a shorter substring -- also completes to the same candidate."
+  (should (equal (agent-repl-test-command-completion--all
+                  "/prof" '("/agent-repl-profile"))
+                 '("/agent-repl-profile"))))
+
+(ert-deftest agent-repl-test-command-completion-table-still-completes-a-prefix ()
+  "A plain prefix -- `/agent-repl-p' -- still completes under the substring style."
+  (should (equal (agent-repl-test-command-completion--all
+                  "/agent-repl-p" '("/agent-repl-profile"))
+                 '("/agent-repl-profile"))))
+
+(ert-deftest agent-repl-test-command-completion-table-completes-an-alias-by-substring ()
+  "An alias is offered by substring exactly as a name is."
+  (should (equal (agent-repl-test-command-completion--all
+                  "/sta" '("/usage" "/cost" "/stats"))
+                 '("/stats"))))
+
+(ert-deftest agent-repl-test-command-completion-table-no-match-is-empty ()
+  "A string naming no candidate, by substring or prefix, completes to nothing."
+  (should-not (agent-repl-test-command-completion--all
+               "/zzz" '("/agent-repl-profile"))))
+
 (ert-deftest agent-repl-test-command-completion-annotation-hint-and-description ()
   "The annotation is the argument hint, then the description."
   ;; Arrange: wide enough that the cut (tested below) plays no part.
