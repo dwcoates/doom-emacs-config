@@ -167,7 +167,11 @@ call_emacs() {
 sampler() {
     local dir="$1" interval="$2"
     while :; do
-        ps -A -o pid=,rss=,time=,comm=,args= | awk -v t="$(date +%s)" '
+        # THE EXECUTABLE IS ARGS' FIRST WORD: macOS cuts the comm column to 16
+        # characters when columns follow it, so a daemon, Emacs or WebKit
+        # process read by comm matched nothing, and only the shims (whose comm
+        # is a short "node") were ever sampled (2026-10-16).
+        ps -A -o pid=,rss=,time=,args= | awk -v t="$(date +%s)" '
             function seconds(s,   n, p) {
                 n = split(s, p, /[:-]/)
                 if (n == 2) return p[1] * 60 + p[2]
@@ -176,14 +180,14 @@ sampler() {
             }
             {
                 comm = $4; sub(/.*\//, "", comm)
-                args = ""; for (i = 5; i <= NF; i++) args = args " " $i
+                args = ""; for (i = 4; i <= NF; i++) args = args " " $i
                 name = ""
                 if (comm == "agent-repld") name = "daemon"
                 else if (comm == "shim-store") name = "store"
                 else if (comm == "shim-claude-sidecar") name = "sidecar"
                 else if (comm == "node" && args ~ /main\.js --listen/) name = "shim"
                 else if (comm == "Emacs" || comm == "Emacs-arm64-11") name = "emacs"
-                else if (comm ~ /^com\.apple\.WebKit\./) name = "webkit:" substr(comm, 16)
+                else if (comm ~ /^com\.apple\.WebKit\./) name = "webkit:" substr(comm, length("com.apple.WebKit.") + 1)
                 if (name != "") printf "{\"t\":%d,\"pid\":%d,\"cpu_s\":%.2f,\"rss_kb\":%d,\"name\":\"%s\"}\n", t, $1, seconds($3), $2, name
             }' >>"$dir/samples.jsonl"
         sleep "$interval"

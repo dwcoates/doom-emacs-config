@@ -63,7 +63,8 @@ fresh_world() {
     : >"$W/root/armed/store-202"
     : >"$W/root/armed/sidecar-303"
     printf '101 /x/agent-repld\n303 /bin/zsh\n' >"$W/ps-table"
-    printf '  101  51200     0:01.50 /x/agent-repld /x/agent-repld --serve\n  404  20480     1:02.00 node node /x/dist/main.js --listen /s.sock\n  505  10240     0:00.10 /bin/zsh -zsh\n' >"$W/ps-all"
+    # pid, rss, cpu time, args: the columns the sampler asks ps for.
+    printf '  101  51200     0:01.50 /Users/someone/.config/doom/modules/app/agent-repl/daemon/bin/agent-repld --serve\n  404  20480     1:02.00 node /x/dist/main.js --listen /s.sock\n  505  10240     0:00.10 /bin/zsh -zsh\n  606  40960     3:00.00 /Applications/Emacs.app/Contents/MacOS/Emacs\n  707  81920     4:00.00 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n' >"$W/ps-all"
     : >"$W/log"
 }
 
@@ -117,6 +118,12 @@ for _ in $(seq 1 100); do
     [ -s "$W/root/$session/samples.jsonl" ] && break
     sleep 0.05
 done
+if grep -q '"pid":606,"cpu_s":180.00,"rss_kb":40960,"name":"emacs"' "$W/root/$session/samples.jsonl" &&
+    grep -q '"pid":707,"cpu_s":240.00,"rss_kb":81920,"name":"webkit:WebContent"' "$W/root/$session/samples.jsonl"; then
+    pass "the sampler records Emacs and the WebKit processes by their executable, not ps's cut-down comm"
+else
+    fail "the sampler records Emacs and the WebKit processes by their executable, not ps's cut-down comm" "$(cat "$W/root/$session/samples.jsonl" 2>&1)"
+fi
 if grep -q '"pid":101,"cpu_s":1.50,"rss_kb":51200,"name":"daemon"' "$W/root/$session/samples.jsonl" &&
     grep -q '"pid":404,"cpu_s":62.00,"rss_kb":20480,"name":"shim"' "$W/root/$session/samples.jsonl" &&
     ! grep -q '"pid":505' "$W/root/$session/samples.jsonl"; then
