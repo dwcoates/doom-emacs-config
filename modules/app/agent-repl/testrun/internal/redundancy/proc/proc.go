@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -125,19 +127,35 @@ func readLines(r io.Reader, start time.Time) []Line {
 	}
 }
 
+// DefaultProcs is a measurement's process cap: one test process at a time
+// on two cores keeps the host's load near the two-digit range its other
+// work needs (parent ruling, 2026-10-16: under about 24).
+const DefaultProcs = 2
+
 // Counter runs processes through Exec, counting each and its CPU, and ends
 // a cancelled measurement: a process an interrupt cut short would
 // otherwise read as a hang, and a hang as a kill.
 type Counter struct {
 	Exec Exec
 	// Name prefixes its errors (the adapter's package).
-	Name      string
+	Name string
+	// Procs caps every process it runs, and every process those spawn, at
+	// GOMAXPROCS=Procs: go build's -p and compile workers, a test binary,
+	// the systems an integration test starts. One measurement then holds a
+	// few cores, not the host.
+	Procs     int
 	Processes int
 	CPU       time.Duration
 }
 
 // Run runs one process.
 func (c *Counter) Run(ctx context.Context, cmd Cmd) (Result, error) {
+	if c.Procs < 1 {
+		return Result{}, fmt.Errorf("%s: the process cap must be at least 1, got %d", c.Name, c.Procs)
+	}
+	// Last, so it wins over any GOMAXPROCS the command or the measurement's
+	// own environment carries.
+	cmd.Env = append(slices.Clone(cmd.Env), "GOMAXPROCS="+strconv.Itoa(c.Procs))
 	if ctx.Err() != nil {
 		return Result{}, fmt.Errorf("%s: interrupted: %w", c.Name, context.Cause(ctx))
 	}

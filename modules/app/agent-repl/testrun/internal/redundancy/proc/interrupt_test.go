@@ -45,7 +45,7 @@ func TestCounterNamesTheSignalThatInterruptedIt(t *testing.T) {
 	defer stop()
 	signals <- syscall.SIGINT
 	<-ctx.Done()
-	c := &Counter{Name: "gomeasure", Exec: func(context.Context, Cmd) (Result, error) { return Result{}, nil }}
+	c := &Counter{Name: "gomeasure", Procs: 1, Exec: func(context.Context, Cmd) (Result, error) { return Result{}, nil }}
 
 	// Act
 	_, err := c.Run(ctx, Cmd{Path: "/x/cover-1.test"})
