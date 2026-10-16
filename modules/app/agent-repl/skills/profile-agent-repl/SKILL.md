@@ -85,7 +85,7 @@ which every runtime stops by itself.
     | Phase | Ends at |
     |---|---|
     | Emacs, before its switch pass runs (its redisplay and hooks) | `elisp.panels.switch-activation-won` |
-    | Emacs's switch pass, to its view shown | `elisp.panels.webview-on-switch` |
+    | Emacs's switch pass, to the webhost told to show the page | `elisp.webhost.show` (recorded at the call) |
     | the webhost, to the page told it is shown | webapp `page.switched-to` |
     | the page, to its first shown frame | webapp `page.shown-frame` |
   - e. Write what the session found into the perf-sensitive list (step 6).

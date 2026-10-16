@@ -213,6 +213,7 @@ cat >"$R/logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:00:11.300-04:00","runtime":"webapp","operation":"feed.page-placed","message":"placed","workspace_id":"B","context":{"connection_id":"c2"}}
 {"timestamp":"2026-10-12T12:00:20.000-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=2","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.025-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-won ws=a generation=2 waited-ms=25","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:00:20.035-04:00","runtime":"emacs","operation":"x","message":"elisp.webhost.show ws=a id=s1","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.040-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:00:20.070-04:00","runtime":"webapp","operation":"page.switched-to","message":"switched","workspace_id":"A","context":{"connection_id":"c1"}}
 {"timestamp":"2026-10-12T12:00:20.130-04:00","runtime":"webapp","operation":"page.shown-frame","message":"frame","workspace_id":"A","context":{"connection_id":"c1"}}
@@ -267,8 +268,8 @@ else
     fail "a repeat switch is measured from the keystroke to the page's first shown frame" "$report"
 fi
 if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 | 25ms |' <<<"$report" &&
-    grep -q "| Emacs's switch pass, to its view shown | 1 | 15ms |" <<<"$report" &&
-    grep -q '| the webhost, to the page told it is shown | 1 | 30ms |' <<<"$report" &&
+    grep -q "| Emacs's switch pass, to the webhost told to show the page | 1 | 10ms |" <<<"$report" &&
+    grep -q '| the webhost, to the page told it is shown | 1 | 35ms |' <<<"$report" &&
     grep -q '| the page, to its first shown frame | 1 | 60ms |' <<<"$report"; then
     pass "a repeat switch is split into its Emacs, webhost and page phases"
 else
@@ -287,6 +288,7 @@ cat >"$R/tour-logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:01:00.260-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-key label=fast key=next remaining=0","workspace_id":""}
 {"timestamp":"2026-10-12T12:01:00.270-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=5","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:01:00.300-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.switch-activation-won ws=a generation=5 waited-ms=30","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:01:00.310-04:00","runtime":"emacs","operation":"x","message":"elisp.webhost.show ws=a id=s2","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:01:00.320-04:00","runtime":"emacs","operation":"x","message":"elisp.panels.webview-on-switch: ws=a command=nil from-window=nil window=w windows=1 size=1x1 xwidgets=1 view=same selected=nil","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:01:00.330-04:00","runtime":"webapp","operation":"webhost.stall","message":"stalled","workspace_id":"","context":{"blocked_ms":120}}
 {"timestamp":"2026-10-12T12:01:00.340-04:00","runtime":"webapp","operation":"sidebar.roster-draw","message":"drew","workspace_id":"","context":{"draw_ms":6}}
@@ -295,6 +297,14 @@ cat >"$R/tour-logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:01:00.500-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=fast switches=2","workspace_id":""}
 {"timestamp":"2026-10-12T12:01:09.000-04:00","runtime":"webapp","operation":"webhost.stall","message":"stalled","workspace_id":"","context":{"blocked_ms":900}}
 {"timestamp":"2026-10-12T12:01:10.000-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=slow count=8 interval=1.5","workspace_id":""}
+EOF
+cat >"$R/overlap-logs.jsonl" <<'EOF'
+{"timestamp":"2026-10-12T12:02:00.000-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=slow count=1 interval=1.5","workspace_id":""}
+{"timestamp":"2026-10-12T12:02:00.010-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=b origin=cycle count=1","workspace_id":"B"}
+{"timestamp":"2026-10-12T12:02:01.500-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=slow switches=1","workspace_id":""}
+{"timestamp":"2026-10-12T12:02:01.800-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-started label=fast count=1 interval=0.25","workspace_id":""}
+{"timestamp":"2026-10-12T12:02:01.810-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=2","workspace_id":"A"}
+{"timestamp":"2026-10-12T12:02:02.100-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=fast switches=1","workspace_id":""}
 EOF
 tour_report="$("$HELPER" --session "$R/sess" --logs "$R/tour-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
 fast="$(sed -n '/^## Switch tour fast/,/^## Switch tour slow/p' <<<"$tour_report")"
@@ -318,6 +328,12 @@ if grep -q '| Emacs, before its switch pass runs (its redisplay and hooks) | 1 |
     pass "a switch tour's section splits its own switches into phases"
 else
     fail "a switch tour's section splits its own switches into phases" "$tour_report"
+fi
+overlap_report="$("$HELPER" --session "$R/sess" --logs "$R/overlap-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
+if sed -n '/^## Switch tour slow/,/^## Switch tour fast/p' <<<"$overlap_report" | grep -q '| 0 | 1 | 0 | 0 | 0 | 0 |'; then
+    pass "a tour's window ends where the next tour starts, inside its settle margin"
+else
+    fail "a tour's window ends where the next tour starts, inside its settle margin" "$overlap_report"
 fi
 if grep -q '^## Switch tour slow' <<<"$tour_report" && grep -q 'The tour never recorded its end' <<<"$tour_report"; then
     pass "a tour that never ended is named and left unsummarized"

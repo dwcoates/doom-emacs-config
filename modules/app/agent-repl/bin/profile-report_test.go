@@ -75,3 +75,22 @@ func TestOnlySpreadOfReadsPercentiles(t *testing.T) {
 		t.Fatalf("percentile is called from %v, want spreadOf alone", callers)
 	}
 }
+
+func TestNextForNeverAnswersAnEdgeBeforeItsStart(t *testing.T) {
+	// Arrange: a matching record sorted after the start's index, but stamped
+	// before the start, then the real edge.
+	base := time.Unix(1000, 0)
+	match := func(r record) bool { return r.Message == "edge" }
+	records := []record{
+		{Message: "edge", WorkspaceID: "A", at: base.Add(5 * time.Millisecond)},
+		{Message: "edge", WorkspaceID: "A", at: base.Add(10 * time.Millisecond)},
+	}
+
+	// Act
+	got, ok := nextFor(records, 0, "A", base.Add(7*time.Millisecond), match)
+
+	// Assert
+	if !ok || !got.at.Equal(base.Add(10*time.Millisecond)) {
+		t.Fatalf("nextFor = %v at %v, want the edge at +10ms", ok, got.at)
+	}
+}
