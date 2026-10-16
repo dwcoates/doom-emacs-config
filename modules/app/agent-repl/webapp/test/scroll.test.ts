@@ -1871,7 +1871,6 @@ describe("observeScrollBox", () => {
       to: 684,
       mutated: ["span.q-when"],
       mutations: 1,
-      top_after_mutation: 700,
     });
   });
 
@@ -3243,14 +3242,12 @@ describe("feedAnchorRows", () => {
  * browser made on its own.
  */
 describe("MoveWitness", () => {
-  /** A witness on a box at TOP, its clock and frames driven by hand. */
-  function witnessAt(top: number) {
-    const box = { scrollTop: top };
+  /** A witness, its clock and frames driven by hand. */
+  function witnessAt() {
     let now = 1000;
     const frames = frameQueue();
-    const witness = new MoveWitness(box, () => now, frames.frame);
+    const witness = new MoveWitness(() => now, frames.frame);
     return {
-      box,
       witness,
       advance: (ms: number) => {
         now += ms;
@@ -3269,7 +3266,7 @@ describe("MoveWitness", () => {
 
   it("reports nothing before any change has landed", () => {
     // Arrange
-    const { witness } = witnessAt(700);
+    const { witness } = witnessAt();
     // Act
     const report = witness.report();
     // Assert
@@ -3287,7 +3284,7 @@ describe("MoveWitness", () => {
     { name: "a detached text node by its node name", target: () => document.createTextNode("x"), want: "#text" },
   ])("names $name", ({ target, want }) => {
     // Arrange
-    const { witness } = witnessAt(700);
+    const { witness } = witnessAt();
     // Act
     witness.mutated([target()]);
     // Assert
@@ -3296,7 +3293,7 @@ describe("MoveWitness", () => {
 
   it("names each element once, however many of its mutations landed", () => {
     // Arrange
-    const { witness } = witnessAt(700);
+    const { witness } = witnessAt();
     const stamp = el("span", "q-when");
     // Act
     witness.mutated([stamp, stamp, stamp]);
@@ -3306,7 +3303,7 @@ describe("MoveWitness", () => {
 
   it("names at most six elements of a large change, and counts every mutation", () => {
     // Arrange
-    const { witness } = witnessAt(700);
+    const { witness } = witnessAt();
     const targets = Array.from({ length: 9 }, (_, i) => el("div", `c${i.toString()}`));
     // Act
     witness.mutated(targets);
@@ -3317,19 +3314,9 @@ describe("MoveWitness", () => {
     });
   });
 
-  it("reads the box's position in the change's own task", () => {
-    // Arrange
-    const { box, witness } = witnessAt(700);
-    // Act — the position at the change, then a later move.
-    witness.mutated([el("span")]);
-    box.scrollTop = 684;
-    // Assert
-    expect(witness.report()?.top_after_mutation).toBe(700);
-  });
-
   it("states how long ago the change landed", () => {
     // Arrange
-    const { witness, advance } = witnessAt(700);
+    const { witness, advance } = witnessAt();
     witness.mutated([el("span")]);
     // Act
     advance(12.4);
@@ -3344,7 +3331,7 @@ describe("MoveWitness", () => {
     { frames: 5, want: 2 },
   ])("counts $frames started frames as $want", ({ frames, want }) => {
     // Arrange
-    const { witness, frame } = witnessAt(700);
+    const { witness, frame } = witnessAt();
     witness.mutated([el("span")]);
     // Act
     for (let i = 0; i < frames; i++) frame();
@@ -3354,7 +3341,7 @@ describe("MoveWitness", () => {
 
   it("reports only the latest change, its frames counted afresh", () => {
     // Arrange
-    const { witness, frame } = witnessAt(700);
+    const { witness, frame } = witnessAt();
     witness.mutated([el("div", "old")]);
     frame();
     frame();
@@ -3366,7 +3353,7 @@ describe("MoveWitness", () => {
 
   it("hands out a copy its caller cannot alter", () => {
     // Arrange
-    const { witness } = witnessAt(700);
+    const { witness } = witnessAt();
     witness.mutated([el("span", "q-when")]);
     const first: MoveWitnessReport | null = witness.report();
     // Act
