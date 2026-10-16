@@ -172,3 +172,29 @@ invariant), how common it is, and example situations.
 | O3 | other (Y) | Y | main | NO: a workspace's branch lands only into that workspace (owner, 2026-10-16) | never | none |
 | O4 | other (Y) | any branch | a different branch | NO: with another workspace's context, branch source and merge target never differ, except main into main (owner, 2026-10-16) | never | none |
 | O5 | other (Y) | main | any other branch | NO (owner, 2026-10-16) | never | none |
+| F1 | fresh | main | main | yes, situational (owner, 2026-10-16) | situational | a truly tangential bug the current context does not help with; a review that must not be biased by the existing context |
+| F2 | fresh | W | W | yes, situational; W arbitrates and lands, since the new workspace did not fork W's context (owner, 2026-10-16) | situational | as F1, on W's unlanded work |
+| U1 | the subagent's own context (typically) | a branch no workspace owns (the subagent's) | main | yes (owner, 2026-10-16) | common | landing a subagent's work: a workspace bootstrapped from the subagent's branch and the subagent's context, so it can repair and land that work |
+
+## Enforcement and its gaps
+
+The daemon refuses every combination the rules above refuse; the rules are
+also written into the proto comments and the skills. What the daemon knows
+today, and what it lacks:
+
+- Branch ownership: derivable from the workspace registry (each workspace row
+  records its branch). A closed workspace still owns its branch (it is reopened
+  when needed); a forgotten one does not.
+- An unowned branch: resolvable as a git ref; its worktree may or may not still
+  exist, which does not matter since a create always cuts from the branch tip.
+- GAP: a SUBAGENT'S CONTEXT. A subagent's transcript lives under its parent
+  session (`<session>/subagents/agent-<id>.jsonl`, sidechain records), and
+  nothing today forks it: ForkSession forks only a workspace's main
+  transcript. The context origin needs a fourth kind, "subagent S of
+  workspace W", and the shim must fork a sidechain transcript into a session
+  of its own.
+- GAP: tying a subagent to its branch. Nothing records which branch a
+  subagent worked on, so the request names both and the daemon can only check
+  that each exists.
+- A call from a directory that is no workspace (e.g. a subagent's worktree) has
+  no requester and is refused.
