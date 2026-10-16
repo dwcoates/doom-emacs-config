@@ -516,6 +516,23 @@ func loggedOperation(log *dlog.TestLogger, operation, level string) bool {
 // ANSWER, not a failure. ErrNotFound is what every per-workspace rpc's
 // unknown-workspace refusal is built from, so an error line here would sit on
 // an ordinary refusal path and drown the reads that really did break.
+func TestASuccessfulReadRecordsNothing(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	before := len(log.Records())
+
+	// Act
+	if _, err := s.Workspace(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert
+	if after := log.Records()[before:]; len(after) != 0 {
+		t.Fatalf("a successful read recorded %v, want nothing", after)
+	}
+}
+
 func TestAnAbsentRecordIsReadAtDebug(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
