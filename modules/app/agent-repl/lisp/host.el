@@ -509,6 +509,19 @@ has already moved past is never sent, because the daemon would stamp it
 `current' only for the next one to overwrite it.  The one it replaces is
 settled `:superseded' so its caller is not left waiting.")
 
+(defvar agent-repl-host--confirming nil
+  "A selection the daemon accepted whose roster has not arrived, or nil.
+A cons (WS . REVISION): the daemon answered WS's SelectWorkspace with the
+roster revision the selection is in (agentrepl.v1
+SelectWorkspaceSuccess.roster_revision).  THE ANSWER AND THE ROSTER RIDE
+SEPARATE STREAMS, so the roster Emacs holds when the answer lands can be
+one from before the selection; followed, it moved the frame back to the
+workspace the user had left, and the next push moved it forward again
+\(measured 2026-10-16: three passes per switch).  While this stands WS is
+the pending selection (`agent-repl-host-pending-selection'), so such a
+roster is deferred; `agent-repl-roster-apply-current' releases it once the
+roster it holds is at REVISION or later.")
+
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
@@ -521,9 +534,34 @@ settled `:superseded' so its caller is not left waiting.")
 The queued selection when there is one, else the one in flight.  Adjacent
 keys step from it while it stands (so rapid presses walk before the roster
 catches up), and `agent-repl-roster-apply-current' defers any `current'
-naming another workspace until it is answered."
+naming another workspace until it is answered.  An answered selection
+whose roster has not arrived is pending too (`agent-repl-host--confirming')."
   (or (car agent-repl-host--select-queued)
-      agent-repl-host--select-in-flight))
+      agent-repl-host--select-in-flight
+      (car agent-repl-host--confirming)))
+
+(defun agent-repl-host-release-confirmed (revision)
+  "Release the answered selection once the roster held is at REVISION.
+REVISION is the revision of the roster Emacs holds; the selection awaiting
+its roster (`agent-repl-host--confirming') is released when REVISION has
+reached the one its answer named."
+  (when (and agent-repl-host--confirming
+             (>= revision (cdr agent-repl-host--confirming)))
+    (agent-repl--log (car agent-repl-host--confirming)
+                     "elisp.host.select-confirmed ws=%s revision=%d awaited=%d"
+                     (car agent-repl-host--confirming) revision (cdr agent-repl-host--confirming))
+    (setq agent-repl-host--confirming nil)))
+
+(defun agent-repl-host-forget-confirming (reason)
+  "Stop awaiting an answered selection's roster, for REASON.
+The roster stream that would have carried it has ended, and the next
+daemon's revisions start afresh: awaiting one of this daemon's would hold
+the selection pending forever."
+  (when agent-repl-host--confirming
+    (agent-repl--info (car agent-repl-host--confirming)
+                      "elisp.host.select-unconfirmed ws=%s awaited=%d reason=%s"
+                      (car agent-repl-host--confirming) (cdr agent-repl-host--confirming) reason)
+    (setq agent-repl-host--confirming nil)))
 
 (defun agent-repl-host-select (ws &optional on-settled)
   "Tell the daemon the user switched to workspace WS.
@@ -659,7 +697,12 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      ;; would leave Emacs disagreeing with the daemon about which
      ;; workspace is current.
      (setq agent-repl-host-last-selected-id (plist-get ref :id))
-     (agent-repl--log ws "elisp.host.selected ws=%s id=%S" ws (plist-get ref :id))
+     ;; THE ROSTER CARRYING THE SELECTION IS AWAITED, or one resolved before
+     ;; it would move the frame back (`agent-repl-host--confirming').
+     (setq agent-repl-host--confirming
+           (cons ws (plist-get (plist-get response :value) :roster-revision)))
+     (agent-repl--log ws "elisp.host.selected ws=%s id=%S roster-revision=%d"
+                      ws (plist-get ref :id) (cdr agent-repl-host--confirming))
      (when on-settled (funcall on-settled :success)))
     ((and :error
           (guard (eq (plist-get (plist-get (plist-get response :value) :cause) :arm)

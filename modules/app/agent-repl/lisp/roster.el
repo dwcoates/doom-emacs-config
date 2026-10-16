@@ -971,6 +971,8 @@ workspace already shown; recording that at INFO on each push would bury
 the decisions.  The FIRST judgment of an id is INFO, its repeats DEBUG.")
 
 (declare-function agent-repl-host-pending-selection "host" ())
+(declare-function agent-repl-host-release-confirmed "host" (revision))
+(declare-function agent-repl-host-forget-confirming "host" (reason))
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl--maybe-autoselect-input "panels" (ws))
 
@@ -1018,6 +1020,10 @@ be invisible:
     milliseconds since Emacs's own request for this workspace, if any.
 
 A roster with no `current' decides nothing and says so at DEBUG."
+  ;; An answered selection is released once the roster held carries it,
+  ;; before the selection pending is read below.
+  (when agent-repl-roster-view
+    (agent-repl-host-release-confirmed (or (plist-get agent-repl-roster-view :revision) 0)))
   (let* ((roster agent-repl-roster-view)
          (id (and roster (agent-repl-roster--current-id roster)))
          ;; A workspace still held for its open has no tab to land on yet;
@@ -1390,6 +1396,7 @@ the caller did not name the stream."
           (departing agent-repl-roster--stream-conn))
       (setq agent-repl-roster--stream nil
             agent-repl-roster--stream-conn nil)
+      (agent-repl-host-forget-confirming "the roster stream closed")
       (pcase (car-safe reason)
         (:cancelled (agent-repl--log '(:agent-repl-central "the roster stream spans workspaces")
                                       "elisp.roster.stream-close: reason=cancelled"))
