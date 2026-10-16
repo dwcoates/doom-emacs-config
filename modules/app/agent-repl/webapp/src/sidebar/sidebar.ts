@@ -42,6 +42,7 @@ import { applySearch, createRailSearch, type RailSearch } from "./search.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
+import { placeChildren } from "./children.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -322,7 +323,7 @@ function mountSidebarIn(
     const drawn = drawWorkspaceRoster(roster, rail);
     attention.endPass();
     mark("build");
-    body.replaceChildren(drawn);
+    placeChildren(body, [drawn]);
     mark("mount");
     // THE LAYOUT IS MEASURED ON ITS OWN: the hooks below read rectangles, so
     // the style and layout the mount caused are paid here either way.
