@@ -124,10 +124,17 @@ fire-and-forget command file whose result arrives later as a prompt.
 - `/agent-repl-install`'s description change: run on its own when a dependency
   is missing, or update its manifests when a change adds one, or both.
 - What `SPC o h` becomes once `/agent-repl-help` is removed.
-- The fork source's default leaves out the requester's current turn (the fork
-  point is its last concluded turn).
 - Whether the command-file ingress is retired entirely, which needs its other
   writers (Emacs) moved onto RPCs.
+- How common O1 and O2 are, and their example situations.
+
+## Settled along the way (owner, 2026-10-16)
+
+- A fork cuts at the forked workspace's last concluded turn; leaving out a
+  turn in flight is acceptable.
+- The notices also cover a derived workspace that closes without landing.
+- Landing into a workspace's checkout while its agent is working there is
+  acceptable; no extra guard.
 
 ## Rules the combinations reduce to (owner, 2026-10-16)
 
