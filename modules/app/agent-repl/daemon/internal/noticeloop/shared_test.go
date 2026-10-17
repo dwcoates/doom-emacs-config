@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/mergenotice"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/workspacenotice"
 	"agent-repld/internal/workspacesubs"
 )
@@ -18,6 +19,7 @@ func TestEveryNotifierDeliversThroughTheSharedLoop(t *testing.T) {
 		"mergenotice.Service":     reflect.TypeOf(mergenotice.Service{}),
 		"workspacenotice.Service": reflect.TypeOf(workspacenotice.Service{}),
 		"workspacesubs.Service":   reflect.TypeOf(workspacesubs.Service{}),
+		"workspace.SelfCloses":    reflect.TypeOf(workspace.SelfCloses{}),
 	}
 	for name, typ := range notifiers {
 		t.Run(name, func(t *testing.T) {

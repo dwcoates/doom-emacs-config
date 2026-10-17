@@ -312,6 +312,14 @@ type Verbs interface {
 	// manifests in the footer, not only in the answer. BY is who asked for it,
 	// which the close record keeps.
 	Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error
+	// CloseSelf is the workspace's own agent closing it: the asking turn is
+	// never a blocker, and a workspace whose turn still runs is marked to
+	// close when that turn ends, answering true (close.go). A workspace with
+	// no turn running closes now, answering false.
+	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// CarryOutSelfClose carries out the close a workspace asked of itself,
+	// when one is marked (SelfCloses calls it at each turn's end).
+	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
 	// Kill is the big red button: forced session death, never blocks, data
 	// survives. It is BeginKill and its Teardown, run in one call.
 	Kill(ctx context.Context, ws ids.WorkspaceID) error

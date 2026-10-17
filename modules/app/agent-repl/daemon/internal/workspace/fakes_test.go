@@ -178,6 +178,12 @@ type fakeDB struct {
 	resolvedForks    []resolvedFork
 	bindSessionCalls []wsm.Session
 	closedFlags      map[ids.WorkspaceID]bool
+	// onMarkSelfClose runs once a self-close mark is written, for a test that
+	// moves the session between the mark and the recheck; markSelfCloseErr
+	// fails the mark and takeSelfCloseErr the take.
+	onMarkSelfClose  func()
+	markSelfCloseErr error
+	takeSelfCloseErr error
 	// reopened records every Reopen, in order.
 	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
@@ -582,6 +588,35 @@ func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error
 	}
 	d.swaps = append(d.swaps, [2]ids.WorkspaceID{ws, target})
 	return nil
+}
+
+// MarkCloseWhenTurnEnds marks the fake's record.
+func (d *fakeDB) MarkCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.markSelfCloseErr != nil {
+		return d.markSelfCloseErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	ws.CloseWhenTurnEnds = &at
+	d.workspaces[id] = ws
+	if d.onMarkSelfClose != nil {
+		d.onMarkSelfClose()
+	}
+	return nil
+}
+
+// TakeCloseWhenTurnEnds clears the fake's mark, answering whether one stood.
+func (d *fakeDB) TakeCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.takeSelfCloseErr != nil {
+		return false, d.takeSelfCloseErr
+	}
+	ws := d.workspaces[id]
+	taken := ws.CloseWhenTurnEnds != nil
+	ws.CloseWhenTurnEnds = nil
+	d.workspaces[id] = ws
+	return taken, nil
 }
 
 func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {
