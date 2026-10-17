@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
 )
@@ -64,7 +65,7 @@ type Workspaces interface {
 // CompactCommand is what a requester whose detached merge landed and asked to
 // compact after it is sent (MergeOrigin.CompactAfter): the vendor's own
 // /compact, recognized by the prompt handler as the context cut it is.
-const CompactCommand = "/compact"
+var CompactCommand = sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 
 // Prompts submits the handback, and a compaction asked for after a landing, to
 // the requester's session.

@@ -125,3 +125,37 @@ func TestContextCut(t *testing.T) {
 		})
 	}
 }
+
+func TestLiteralIsTheSchemasCanonicalSpelling(t *testing.T) {
+	tests := []struct {
+		command conversationv1.SessionCommand
+		want    string
+	}{
+		{command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, want: "/compact"},
+		{command: conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, want: "/clear"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command.String(), func(t *testing.T) {
+			// Act
+			got := Literal(tt.command)
+
+			// Assert
+			if got != tt.want || Specs()[got].Command != tt.command {
+				t.Errorf("Literal = %q, want %q, the spec it keys", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLiteralFailsHardOnACommandWithNoSpec(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("Literal(UNSPECIFIED) did not panic")
+		}
+	}()
+
+	// Act
+	Literal(conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED)
+}

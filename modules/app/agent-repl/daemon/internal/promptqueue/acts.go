@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
 
@@ -392,8 +393,9 @@ func actKindOf(command conversationv1.SessionCommand) string {
 // contextCutCommand names the session command an act kind is, and the literal
 // the vendor's CLI answers.
 func contextCutCommand(kind string) (conversationv1.SessionCommand, string) {
+	command := conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
 	if kind == ActCompact {
-		return conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, "/compact"
+		command = conversationv1.SessionCommand_SESSION_COMMAND_COMPACT
 	}
-	return conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, "/clear"
+	return command, sessioncommand.Literal(command)
 }

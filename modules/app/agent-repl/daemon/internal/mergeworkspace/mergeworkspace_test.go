@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"agent-repld/internal/wsm"
 )
@@ -1523,5 +1524,18 @@ func TestAHandBackCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
 	}
 	if _, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-handback"); !ok {
 		t.Fatalf("records = %+v, want the cut-short handback at INFO", f.logs.Records())
+	}
+}
+
+// TestTheCompactionIsSpelledOnlyBySessionCommand pins that the merge
+// workspace service spells no /compact by hand: sessioncommand.Literal reads
+// it off the schema.
+func TestTheCompactionIsSpelledOnlyBySessionCommand(t *testing.T) {
+	// Act
+	n := sourcescan.Count(t, `"/compact"`)
+
+	// Assert
+	if n != 0 {
+		t.Errorf("the service's sources spell /compact by hand %d times", n)
 	}
 }
