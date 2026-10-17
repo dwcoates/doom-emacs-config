@@ -643,6 +643,102 @@ The current tab's page, not shown here, is the nearest of all."
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "ensure"))))))
 
+;;;; ---- The callback by name ----
+
+(defmacro agent-repl-test-wh--with-props (props &rest body)
+  "Run BODY with the xwidget's properties held in the plist variable PROPS."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'xwidget-get) (lambda (_xw prop) (plist-get ,props prop)))
+             ((symbol-function 'xwidget-put)
+              (lambda (_xw prop value) (setq ,props (plist-put ,props prop value)))))
+     ,@body))
+
+(ert-deftest agent-repl-test-wh-the-load-watch-installs-the-callback-by-name ()
+  "The host's callback is a symbol, so a hot reload reaches it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((props (list 'callback 'xwidget-webkit-callback)))
+      (agent-repl-test-wh--with-props props
+        ;; Act
+        (agent-repl--webhost-watch-load 'host-xwidget))
+      ;; Assert
+      (should (eq (plist-get props 'callback) 'agent-repl--webhost-callback)))))
+
+(ert-deftest agent-repl-test-wh-the-installed-callback-reaches-a-redefined-handler ()
+  "A handler redefined after the host was watched is the one a load runs."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((props nil) (seen nil))
+      (agent-repl-test-wh--with-props props
+        (agent-repl--webhost-watch-load 'host-xwidget)
+        (cl-letf (((symbol-function 'agent-repl--webhost-on-load)
+                   (lambda (event-type &optional _status) (push event-type seen))))
+          ;; Act
+          (funcall (plist-get props 'callback) 'host-xwidget 'load-changed)))
+      ;; Assert
+      (should (equal seen '(load-changed))))))
+
+(ert-deftest agent-repl-test-wh-a-rewatch-replaces-an-earlier-builds-closure ()
+  "A host an earlier build wrapped in a closure is put back on the callback by name."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((props (list 'callback (lambda (_xw _event) 'earlier-build))))
+      (agent-repl-test-wh--with-props props
+        ;; Act
+        (agent-repl--webhost-rewatch))
+      ;; Assert
+      (should (eq (plist-get props 'callback) 'agent-repl--webhost-callback)))))
+
+(ert-deftest agent-repl-test-wh-a-rewatch-restores-the-creators-handler-as-prior ()
+  "The closure held the creator's handler, so that handler runs first again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((props (list 'callback (lambda (_xw _event) 'earlier-build))))
+      (agent-repl-test-wh--with-props props
+        ;; Act
+        (agent-repl--webhost-rewatch))
+      ;; Assert
+      (should (eq (plist-get props 'agent-repl-prior-callback) 'xwidget-webkit-callback)))))
+
+(ert-deftest agent-repl-test-wh-a-rewatch-keeps-a-host-already-called-by-name ()
+  "A host already on the callback by name keeps the prior handler it was watched with."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let* ((prior (lambda (_xw _event) 'prior))
+           (props (list 'callback prior)))
+      (agent-repl-test-wh--with-props props
+        (agent-repl--webhost-watch-load 'host-xwidget)
+        ;; Act
+        (agent-repl--webhost-rewatch))
+      ;; Assert
+      (should (eq (plist-get props 'agent-repl-prior-callback) prior)))))
+
+(ert-deftest agent-repl-test-wh-a-rewatch-without-a-host-touches-nothing ()
+  "With no host there is no callback to put back."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl-test-wh--host nil) (props nil))
+      (agent-repl-test-wh--with-props props
+        ;; Act
+        (agent-repl--webhost-rewatch))
+      ;; Assert
+      (should (null props)))))
+
+(ert-deftest agent-repl-test-wh-a-rewatch-is-logged ()
+  "Putting a host back on the callback by name is recorded with what it replaced."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let* ((closure (lambda (_xw _event) 'earlier-build))
+           (props (list 'callback closure))
+           (logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl-test-wh--with-props props
+          ;; Act
+          (agent-repl--webhost-rewatch)))
+      ;; Assert
+      (should (member (format "elisp.webhost.rewatched replaced=%s" (type-of closure)) logged)))))
+
 ;;;; ---- Reload ----
 
 (ert-deftest agent-repl-test-wh-a-reload-burst-reloads-the-host-once ()
