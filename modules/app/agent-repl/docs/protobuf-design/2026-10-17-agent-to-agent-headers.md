@@ -98,7 +98,7 @@ their border and to be marked by their header alone:
 ### 5. `frontend.v1.FeedPeerMessage.from` and `frontend.v1.FeedAgentPromptAddress` oneof
 
 - WHAT, received side: `FeedPeerMessage.sender` (string) is retired.
-  - It is replaced by `from {name, oneof sender {workspace, outside_session, unnamed}}`.
+  - It is replaced by `from {name, oneof sender {workspace, unresolved, unnamed}}`.
   - The client draws a left arrow icon, then the name.
 - WHAT, sent side: `FeedAgentPromptAddress.text` is retired.
   - It is replaced by `oneof address {in_session {text}, peer_session {name, oneof recipient {workspace, unresolved}}, unclassified {name}}`.
