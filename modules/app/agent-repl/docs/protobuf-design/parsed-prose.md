@@ -97,6 +97,13 @@ wrong labels). That needs one parse, in one place, that every program reads.
     parents never change. A node may gain a code block once a later line shows the
     block was beneath it. The digits of a label still being typed on the last line are
     not drawn as text.
+  - The held card draws `body` through the same block vocabulary as the prompt row
+    it becomes, so an image is the daemon's resolved `src`: a host-path image draws
+    as the picture rather than its path, and one the daemon cannot resolve arrives
+    as an unsupported block, which the held card draws as nothing.
+  - The webapp's tests draw trees from the daemon's own parse: the daemon's prose
+    suite writes `webapp/test/fixtures/parsed-prose.json` from
+    `prose-inputs.json` and fails while it is stale.
   - The golden answers recorded from the old webapp parser
     (`tree-sitter-tldr/tldr/test/golden/golden.json`) move to the daemon: its reading
     of the grammar's parse is held to them, below the structure and repair layers.
@@ -120,7 +127,7 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - Only the main tree is repaired in `source`; a tree inside a code fence keeps its
     written labels there. A quoted response was already repaired when it was served,
     so its quote carries repaired labels anyway.
-  - The webapp ignores `source`.
+  - The webapp reads `source` only to count a text's characters for its log records.
 - **Retraction of change 1's rejoin consequence:** rejoining wrapped lines by
   structure is not needed. The tree region already ends at the first line that is
   neither a root, a branch, a blank line nor an interior fence (findTreeRegion's rule,
