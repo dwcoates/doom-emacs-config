@@ -94,6 +94,8 @@ export interface Host {
   ensure(id: string, url: string, inTurn?: boolean): string;
   /** Show workspace ID's page and hide every other. */
   show(id: string): string;
+  /** Tell LISTENER the id of every page shown from now on; answers the stop. */
+  onShown(listener: (id: string) => void): () => void;
   /** Drop workspace ID's page. */
   remove(id: string): string;
   /** Load workspace ID's page again from its URL. */
@@ -175,6 +177,8 @@ export function createHost(env: HostEnv): Host {
    * in flight, and `inTurnBound` its bound (`IN_TURN_BOUND_MS`).
    */
   const waiting: string[] = [];
+  /** Who is told every page shown (`onShown`): the webhost's sidebar. */
+  const shownListeners = new Set<(id: string) => void>();
   let loadingInTurn: string | null = null;
   let inTurnBound: number | null = null;
 
@@ -428,10 +432,16 @@ export function createHost(env: HostEnv): Host {
       applyShown(next, true);
       post(next, presenceOf(next));
       placeSidebar();
+      // THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same turn.
+      for (const listener of shownListeners) listener(id);
       // The keyboard follows the page on screen: Emacs focused this web view,
       // so the focus within it moves to the page now shown.
       if (doc.hasFocus()) next.iframe.focus();
       return answer("show", id, "shown", { previous: previous?.id ?? null, ...(jumped ? { jumped: true } : {}) });
+    },
+    onShown(listener) {
+      shownListeners.add(listener);
+      return () => shownListeners.delete(listener);
     },
     remove(id) {
       return withFrame("remove", id, (frame) => {

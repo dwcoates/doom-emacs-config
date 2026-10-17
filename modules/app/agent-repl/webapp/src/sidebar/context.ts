@@ -65,6 +65,12 @@ export interface RailContext {
   reveal: RowReveal;
   /** The blink a row selected from the rail runs, across redraws (`selection-blink.ts`). */
   selectionBlink: SelectionBlink;
+  /**
+   * The workspace whose page the webhost shows, while the roster has not yet
+   * named it current (`markShown`, sidebar.ts), or null. While it stands, it
+   * and not `RosterRowCurrent.current` decides which row is highlighted.
+   */
+  shownAhead(): string | null;
 }
 
 /** What one drawn section of the rail is handed: the rail's context, bound to the section's scope. */

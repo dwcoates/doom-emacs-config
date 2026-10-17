@@ -66,6 +66,49 @@ function inTurn(h: Host, id: string): Record<string, unknown> {
 /** Whether ID's page has started loading. */
 const loading = (id: string): boolean => frame(id).getAttribute("src") !== null;
 
+describe("onShown", () => {
+  it("tells a listener every page shown, and nothing for the page already shown", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const told: string[] = [];
+    host.onShown((id) => told.push(id));
+
+    // Act
+    host.show("a");
+    host.show("a");
+    host.show("b");
+
+    // Assert
+    expect(told).toEqual(["a", "b"]);
+  });
+
+  it("tells nothing for a page it does not hold", () => {
+    // Arrange
+    const told: string[] = [];
+    host.onShown((id) => told.push(id));
+
+    // Act
+    host.show("absent");
+
+    // Assert
+    expect(told).toEqual([]);
+  });
+
+  it("tells a stopped listener nothing", () => {
+    // Arrange
+    pages(host, "a");
+    const told: string[] = [];
+    const stopListening = host.onShown((id) => told.push(id));
+    stopListening();
+
+    // Act
+    host.show("a");
+
+    // Assert
+    expect(told).toEqual([]);
+  });
+});
+
 describe("ensure in turn", () => {
   it("loads the first page in turn at once", () => {
     // Act

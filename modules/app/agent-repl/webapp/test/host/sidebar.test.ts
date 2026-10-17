@@ -21,10 +21,20 @@ afterEach(() => {
 
 /** A webhost that records what the sidebar tells it. */
 function recordingHost() {
-  const told = { docked: [] as boolean[], failures: [] as Array<readonly WebhostFailure[]> };
+  const told = {
+    docked: [] as boolean[],
+    failures: [] as Array<readonly WebhostFailure[]>,
+    shown: null as ((id: string) => void) | null,
+  };
   const host = {
     setSidebarDocked: (docked: boolean) => told.docked.push(docked),
     setFailures: (failures: readonly WebhostFailure[]) => told.failures.push(failures),
+    onShown: (listener: (id: string) => void) => {
+      told.shown = listener;
+      return () => {
+        told.shown = null;
+      };
+    },
   } as unknown as Host;
   return { host, told };
 }
@@ -51,7 +61,7 @@ describe("startWebhostSidebar", () => {
         installed = logger;
         setLogger(logger);
       },
-      mount: () => ({ dispose: () => undefined }),
+      mount: () => ({ dispose: () => undefined, markShown: () => undefined }),
     });
 
     // Act
@@ -72,7 +82,7 @@ describe("startWebhostSidebar", () => {
     start(host, {
       mount: (_nav, _ctx, deps) => {
         deps?.revealed?.();
-        return { dispose: () => undefined };
+        return { dispose: () => undefined, markShown: () => undefined };
       },
     });
 
@@ -85,7 +95,7 @@ describe("startWebhostSidebar", () => {
     const { host, told } = recordingHost();
 
     // Act
-    start(host, { mount: () => ({ dispose: () => undefined }) });
+    start(host, { mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
 
     // Assert
     expect(told.docked).toEqual([]);
@@ -98,7 +108,7 @@ describe("startWebhostSidebar", () => {
     start(host, {
       mount: (_nav, c) => {
         ctx = c;
-        return { dispose: () => undefined };
+        return { dispose: () => undefined, markShown: () => undefined };
       },
     });
 
@@ -142,6 +152,32 @@ describe("startWebhostSidebar", () => {
     expect([record?.level.case, record?.context?.["cause"]]).toEqual(["error", "Error: no roster"]);
   });
 
+  it("moves the rail's highlight to every page the webhost shows", () => {
+    // Arrange
+    const { host, told } = recordingHost();
+    const marked: string[] = [];
+    start(host, { mount: () => ({ dispose: () => undefined, markShown: (id) => void marked.push(id) }) });
+
+    // Act
+    told.shown?.("ws-b");
+
+    // Assert
+    expect(marked).toEqual(["ws-b"]);
+  });
+
+  it("stops following the shown page once stopped", () => {
+    // Arrange
+    const { host, told } = recordingHost();
+    start(host, { mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+
+    // Act
+    stop?.dispose();
+    stop = null;
+
+    // Assert
+    expect(told.shown).toBeNull();
+  });
+
   it("closes the sidebar when stopped", () => {
     // Arrange
     const { host } = recordingHost();
@@ -151,6 +187,7 @@ describe("startWebhostSidebar", () => {
         dispose: () => {
           disposed = true;
         },
+        markShown: () => undefined,
       }),
     });
 
@@ -169,7 +206,7 @@ describe("startWebhostSidebar", () => {
 
     // Act
     start(host, {
-      mount: () => ({ dispose: () => undefined }),
+      mount: () => ({ dispose: () => undefined, markShown: () => undefined }),
       installCensus: (doc) => {
         installedOn.push(doc);
         return { stop: () => undefined };
@@ -185,7 +222,7 @@ describe("startWebhostSidebar", () => {
     const { host } = recordingHost();
     let stopped = 0;
     start(host, {
-      mount: () => ({ dispose: () => undefined }),
+      mount: () => ({ dispose: () => undefined, markShown: () => undefined }),
       installCensus: () => ({ stop: () => void stopped++ }),
     });
 

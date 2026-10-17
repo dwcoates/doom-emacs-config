@@ -951,6 +951,105 @@ describe("mounting the rail: a page no one can see", () => {
   });
 });
 
+/** A roster stream the test pushes into, one roster at a time. */
+function pushedRosters(): { impl: Partial<ServiceImpl<typeof AgentRepl>>; push(roster: WorkspaceRoster): void } {
+  const queue: WorkspaceRoster[] = [];
+  let wake: (() => void) | null = null;
+  return {
+    impl: {
+      watchWorkspaceRoster: async function* () {
+        for (;;) {
+          const next = queue.shift();
+          if (next === undefined) {
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+            continue;
+          }
+          yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: next } });
+        }
+      },
+    },
+    push(roster) {
+      queue.push(roster);
+      wake?.();
+      wake = null;
+    },
+  };
+}
+
+/** The ids of HOST's highlighted rows. */
+function highlighted(host: HTMLElement): string[] {
+  return [...host.querySelectorAll("[data-roster-row].current")].map((el) => el.getAttribute("data-roster-row") ?? "");
+}
+
+/** A roster of rows ws-1 and ws-2, CURRENT the one the daemon names current. */
+function twoRows(current: string): WorkspaceRoster {
+  return roster({
+    current,
+    repos: [
+      repoSection({
+        id: "repo-1",
+        rows: [row({ id: "ws-1", current: current === "ws-1" }), row({ id: "ws-2", current: current === "ws-2" })],
+      }),
+    ],
+  });
+}
+
+describe("the webhost's page on screen leads the roster", () => {
+  it("moves the highlight to the shown page's row at once", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const sidebar = mountWebhostSidebar(host, ctxFor([twoRows("ws-1")]), { storage: null, timers: fakeTimers() });
+    await settle();
+
+    // Act
+    sidebar.markShown("ws-2");
+
+    // Assert
+    expect([highlighted(host), host.querySelector("[data-roster-row='ws-1']")?.hasAttribute("data-current")]).toEqual([
+      ["ws-2"],
+      false,
+    ]);
+  });
+
+  it("keeps the highlight on the shown row through a push from before the daemon took the select", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    stream.push(twoRows("ws-1"));
+    await settle();
+    sidebar.markShown("ws-2");
+
+    // Act
+    stream.push(twoRows("ws-1"));
+    await settle();
+
+    // Assert
+    expect(highlighted(host)).toEqual(["ws-2"]);
+  });
+
+  it("follows the roster again once a push names the shown workspace current", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    stream.push(twoRows("ws-1"));
+    await settle();
+    sidebar.markShown("ws-2");
+    stream.push(twoRows("ws-2"));
+    await settle();
+
+    // Act
+    stream.push(twoRows("ws-1"));
+    await settle();
+
+    // Assert
+    expect(highlighted(host)).toEqual(["ws-1"]);
+  });
+});
+
 describe("mounting the webhost's sidebar", () => {
   afterEach(() => {
     // The page's own presence is shared by every test in the file: put it back.

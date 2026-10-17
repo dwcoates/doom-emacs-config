@@ -101,7 +101,13 @@ export function startWebhostSidebar(
         host.setSidebarDocked(true);
       },
     });
+    // A SWITCH MOVES THE RAIL'S HIGHLIGHT WITH THE PAGE (sidebar.ts
+    // `markShown`), not a daemon round trip later.
+    const stopShown = host.onShown((id) => {
+      sidebar.markShown(id);
+    });
     stop = () => {
+      stopShown();
       sidebar.dispose();
       ctx.quiesce();
     };
