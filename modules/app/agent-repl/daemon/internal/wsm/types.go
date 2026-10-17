@@ -68,6 +68,9 @@ type Workspace struct {
 	// RequestedBy is the workspace whose agent asked for this one's creation,
 	// nil when the user asked or the workspace was registered.
 	RequestedBy *WorkspaceID
+	// CloseWhenTurnEnds is when the workspace asked to close itself, set while
+	// it waits for that asking turn to end (selfclose.go); nil otherwise.
+	CloseWhenTurnEnds *time.Time
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
 	// Closure is when the workspace was closed and by whom (MarkClosed); nil
