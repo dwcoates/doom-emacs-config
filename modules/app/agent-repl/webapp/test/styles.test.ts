@@ -3621,6 +3621,23 @@ describe("the held prompt's fill: the response bubble's own token", () => {
   });
 });
 
+/**
+ * AN AGENT-TO-AGENT BUBBLE TAKES THE FINAL RESPONSE'S FILL (owner request,
+ * 2026-10-17): the agent-addressed prompt and the peer message both feed
+ * --bubble-bg from the response bubble's own token, never a copied value.
+ */
+describe("the agent-to-agent bubbles' fill: the final response's own token", () => {
+  it.each([["agent"], ["peer"]] as const)("feeds the %s variant's --bubble-bg from --assistant", (variant) => {
+    // Arrange / Act
+    const fills = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.trim() === `.bubble[data-variant="${variant}"]`))
+      .map((rule) => /--bubble-bg:\s*([^;]+);/.exec(rule.declarations)?.[1]?.trim())
+      .filter((fill) => fill !== undefined);
+    // Assert
+    expect(fills).toEqual(["var(--assistant)"]);
+  });
+});
+
 describe("the compaction summary's border is the compaction divider bar's", () => {
   it("borders the summary with the divider bar's own token", () => {
     // Arrange / Act

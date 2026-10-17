@@ -1829,6 +1829,14 @@ pre {
 .bubble[data-variant="held"] {
   --bubble-bg: var(--assistant);
 }
+/* AN AGENT-TO-AGENT BUBBLE takes the final response's fill (owner request,
+   2026-10-17): the RESPONSE bubble's own token, `--assistant`, exactly, as the
+   held prompt does. The agent-addressed prompt and the peer message are
+   prompt-role bubbles, so this is the one place their fill leaves the blue. */
+.bubble[data-variant="agent"],
+.bubble[data-variant="peer"] {
+  --bubble-bg: var(--assistant);
+}
 /* THE VERTICAL PADDING LADDER: the gap between a bubble's top and bottom edge
    and its content, as a share of the base. Vertical only: the left and right
    insets and the gaps between rows never read it. Kinds not named here (the
