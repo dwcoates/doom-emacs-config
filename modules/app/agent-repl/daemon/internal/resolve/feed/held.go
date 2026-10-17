@@ -171,6 +171,12 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 			})
 			continue
 		}
+		// The card draws what it holds through the same function a prompt row
+		// draws what was said (DrawUserBlocks), so the held card shows exactly
+		// the blocks its row will once the prompt lands.
+		card.Prompt.Body = &frontendv1.FeedUserPromptBody{
+			Blocks: DrawUserBlocks(card.Prompt.GetSaid().GetContent(), r.deps.StripSentinels, r.resolveImage, log),
+		}
 		items = append(items, &frontendv1.FeedHeldItem{
 			Id:   id,
 			Item: &frontendv1.FeedHeldItem_Prompt{Prompt: card.Prompt},

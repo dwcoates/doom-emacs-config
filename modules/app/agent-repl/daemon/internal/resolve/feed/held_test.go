@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"context"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func mirrorOf(turn, text string) *frontendv1.FeedRow {
 		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
 			Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
 				Body: &frontendv1.FeedUserPromptBody{Blocks: []*frontendv1.FeedUserPromptBlock{{
-					Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: text}},
+					Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParseForTest(text)}},
 				}}},
 			}},
 		}},

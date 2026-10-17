@@ -355,7 +355,7 @@ func TestDrawUserBlocksKeepsTheComposedOrder(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("the drawn blocks are %v, want the words then the image", blocks)
 	}
-	if got := blocks[0].GetText().GetText(); got != "look" {
+	if got := blocks[0].GetText().GetProse().GetSource().GetMarkdown(); got != "look" {
 		t.Errorf("the first block draws %q, want the words", got)
 	}
 	if got := blocks[1].GetImage().GetSrc(); got != "/feed-images/abc" {

@@ -81,7 +81,7 @@ func sfAwaitConclusion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, tur
 	t.Helper()
 	awaitFeedRow(t, w, ws, "the scenario's settled response bubble ("+want+")", func(row *frontendv1.FeedRow) bool {
 		return row.GetTurn().GetValue() == turn.GetValue() &&
-			row.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == want
+			row.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == want
 	})
 }
 

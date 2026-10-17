@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -208,7 +209,7 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		compacted := arm.Compacted
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: compactionLabel(compacted)}
 		separation.Kind = &frontendv1.FeedSessionSeparation_Compacted{Compacted: &frontendv1.FeedContextCutCompacted{
-			Summary: &frontendv1.FeedContextCutSummary{Markdown: compacted.GetSummary().GetMarkdown()},
+			Summary: &frontendv1.FeedContextCutSummary{Prose: r.parsedProse(s, compacted.GetSummary().GetMarkdown(), prose.Settled)},
 		}}
 		// BOTH SIDES ARE FORMATTED HERE. The client renders them verbatim and
 		// does no arithmetic and no unit rounding of its own.

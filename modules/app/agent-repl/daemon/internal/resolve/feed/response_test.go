@@ -133,7 +133,7 @@ func TestResponseStartDrawsTheEmptyBubble(t *testing.T) {
 	// Assert: an update arm with no prose is what makes the agent visibly begin
 	// answering before the first token lands.
 	update := h.response().GetUpdate()
-	if update == nil || update.GetProse().GetMarkdown() != "" {
+	if update == nil || update.GetProse().GetProse().GetSource().GetMarkdown() != "" {
 		t.Fatalf("bubble = %+v, want an empty update", h.response())
 	}
 }
@@ -151,7 +151,7 @@ func TestResponseFragmentsAccumulateDaemonSide(t *testing.T) {
 		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), nil, nil)
 
 	// Assert: the row carries the whole, not the last delta.
-	if got := h.response().GetUpdate().GetProse().GetMarkdown(); got != "Hello, world" {
+	if got := h.response().GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(); got != "Hello, world" {
 		t.Fatalf("prose = %q, want the accumulated whole", got)
 	}
 }
@@ -169,7 +169,7 @@ func TestTheTerminalRestatesTheWholeAndSelfCorrectsALostFragment(t *testing.T) {
 		}, nil), nil, nil)
 
 	// Assert: the settled bubble is right even though the fold was wrong.
-	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "Hello, world" {
+	if got := h.response().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != "Hello, world" {
 		t.Fatalf("settled prose = %q, want the restated whole", got)
 	}
 }
@@ -193,7 +193,7 @@ func TestAFragmentAfterTheTerminalCannotReopenTheBubble(t *testing.T) {
 	// are not ordered against one another, so a delta behind a settled whole
 	// is a routine interleave rather than a producer fault, and the daemon
 	// cannot tell the two cases apart.
-	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "done" {
+	if got := h.response().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != "done" {
 		t.Fatalf("prose = %q, want the settled whole unchanged", got)
 	}
 	if !h.hasRecord("debug", "daemon.feed.response_fragment_after_settle") {
@@ -222,7 +222,7 @@ func TestASettledWholeFromOnePlaneOutrunsTheOthersTrailingDeltas(t *testing.T) {
 		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "t I found."}, nil), nil, nil)
 
 	// Assert: the bubble reads as the settled whole, with nothing doubled.
-	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "Here is what I found." {
+	if got := h.response().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != "Here is what I found." {
 		t.Fatalf("prose = %q, want the settled whole with no delta folded in behind it", got)
 	}
 }
@@ -260,7 +260,7 @@ func TestResponseFailureKeepsWhatLandedAndMarksItBroken(t *testing.T) {
 
 	// Assert: WHY it died is the turn's terminal row, not this bubble's.
 	broken := h.response().GetError()
-	if broken == nil || broken.GetProse().GetMarkdown() != "half an ans" {
+	if broken == nil || broken.GetProse().GetProse().GetSource().GetMarkdown() != "half an ans" {
 		t.Fatalf("bubble = %+v, want the broken arm keeping what landed", h.response())
 	}
 }
@@ -514,7 +514,7 @@ func TestASynthesizedNoticesProseIsKeptVerbatimWithNoHeadingSplicedIn(t *testing
 		}, nil), nil, nil)
 
 	// Assert.
-	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "you have hit your monthly spend limit" {
+	if got := h.response().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != "you have hit your monthly spend limit" {
 		t.Fatalf("prose = %q, want the vendor's own words byte for byte", got)
 	}
 }
@@ -548,7 +548,7 @@ func TestAModelAuthoredResponseCarriesNoNoticeHeading(t *testing.T) {
 		}, nil), nil, nil)
 
 	// Assert.
-	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "here is the answer" {
+	if got := h.response().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != "here is the answer" {
 		t.Fatalf("prose = %q, want the model's words untouched", got)
 	}
 }
@@ -582,7 +582,7 @@ func (h *harness) settle(markdown string) string {
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
 		}, nil), nil, nil)
-	return h.response().GetSuccess().GetProse().GetMarkdown()
+	return h.response().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown()
 }
 
 func TestASettledTreeWiderThanTheOldLimitIsServedVerbatim(t *testing.T) {
@@ -601,9 +601,11 @@ func TestASettledTreeWiderThanTheOldLimitIsServedVerbatim(t *testing.T) {
 }
 
 func TestASettledTreeInsideTheOldLimitIsAlsoServedVerbatim(t *testing.T) {
-	// Arrange, Act.
+	// Arrange, Act: a tree whose labels are already the labels of their places,
+	// so the one rewrite the daemon makes to a tree (internal/prose repairs its
+	// labels) leaves it untouched, and nothing else alters it.
 	h := newHarness(t)
-	tree := "1. 🎯 Root\n├── 1.1. Short.\n└── 1.2. Also short."
+	tree := "1 🎯 Root\n├── 1.1 Short.\n└── 1.2 Also short."
 	got := h.settle(tree)
 
 	// Assert.
@@ -620,7 +622,7 @@ func TestASettledArmMatchesTheStreamingDeltaArmForTheSameProse(t *testing.T) {
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: tree}, nil), nil, nil)
-	delta := h.response().GetUpdate().GetProse().GetMarkdown()
+	delta := h.response().GetUpdate().GetProse().GetProse().GetSource().GetMarkdown()
 
 	// Act: the settled success restates the whole.
 	got := h.settle(tree)
@@ -675,9 +677,9 @@ func TestADivergentPlaneSettleLeavesOneSettledRowNotTwo(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("response rows = %d, want exactly one for a block delivered under two ids", len(rows))
 	}
-	if rows[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "hello world" {
+	if rows[0].GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() != "hello world" {
 		t.Fatalf("the surviving row is not the settled whole: %q",
-			rows[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown())
+			rows[0].GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown())
 	}
 }
 

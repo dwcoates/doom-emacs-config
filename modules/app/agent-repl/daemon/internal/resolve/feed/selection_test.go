@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -185,7 +186,7 @@ func promptRowWith(texts ...string) *frontendv1.FeedRow {
 	blocks := make([]*frontendv1.FeedUserPromptBlock, 0, len(texts))
 	for _, text := range texts {
 		blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
-			Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: text}},
+			Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParseForTest(text)}},
 		})
 	}
 	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
@@ -200,7 +201,7 @@ func agentPromptRowWith(texts ...string) *frontendv1.FeedRow {
 	blocks := make([]*frontendv1.FeedAgentPromptBlock, 0, len(texts))
 	for _, text := range texts {
 		blocks = append(blocks, &frontendv1.FeedAgentPromptBlock{
-			Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: text}},
+			Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParseForTest(text)}},
 		})
 	}
 	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
@@ -218,7 +219,7 @@ func responseRowWith(response *frontendv1.FeedResponse) *frontendv1.FeedRow {
 // settled is a response's success arm carrying MARKDOWN.
 func settled(markdown string) *frontendv1.FeedResponse_Success {
 	return &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-		Prose: &frontendv1.FeedResponseProse{Markdown: markdown},
+		Prose: &frontendv1.FeedResponseProse{Prose: prose.ParseForTest(markdown)},
 	}}
 }
 
@@ -241,10 +242,10 @@ func TestSelectableMarkdownIsTheOneRule(t *testing.T) {
 		{name: "a final response flagged interim stays selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("the answer"), Interim: true, FinalAnswer: true}), wantOK: true, wantMarkup: "the answer"},
 		{name: "a thinking response is never selectable", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: false},
 		{name: "a response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},
+			Prose: &frontendv1.FeedResponseProse{Prose: prose.ParseForTest("partial")},
 		}}}), wantOK: false},
 		{name: "a broken response", row: responseRowWith(&frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
-			Prose: &frontendv1.FeedResponseProse{Markdown: "cut"},
+			Prose: &frontendv1.FeedResponseProse{Prose: prose.ParseForTest("cut")},
 		}}}), wantOK: false},
 		{name: "a vendor notice", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("interrupted"), Notice: &frontendv1.FeedResponseNotice{}}), wantOK: false},
 		{name: "a tool call", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
@@ -279,7 +280,7 @@ func TestBubbleMarkdownAdmitsEveryLandedBubble(t *testing.T) {
 		{name: "a thinking response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("pondering"), Thinking: true}), wantOK: true, wantMarkup: "pondering"},
 		{name: "an interim response", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("meanwhile"), Interim: true}), wantOK: true, wantMarkup: "meanwhile"},
 		{name: "a thinking response still arriving", row: responseRowWith(&frontendv1.FeedResponse{Thinking: true, Result: &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose: &frontendv1.FeedResponseProse{Markdown: "partial"},
+			Prose: &frontendv1.FeedResponseProse{Prose: prose.ParseForTest("partial")},
 		}}}), wantOK: false},
 		{name: "a vendor notice", row: responseRowWith(&frontendv1.FeedResponse{Result: settled("interrupted"), Notice: &frontendv1.FeedResponseNotice{}}), wantOK: false},
 	}

@@ -71,9 +71,9 @@ func noticeText(row *frontendv1.FeedRow) (string, bool) {
 		return "", false
 	}
 	if success := resp.GetSuccess(); success != nil {
-		return success.GetProse().GetMarkdown(), true
+		return success.GetProse().GetProse().GetSource().GetMarkdown(), true
 	}
-	return resp.GetUpdate().GetProse().GetMarkdown(), true
+	return resp.GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(), true
 }
 
 // faultEndingMarker is ROW's marker when ROW is a turn ending that raised a

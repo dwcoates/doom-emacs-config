@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -78,7 +79,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.notice = false
 		resetPacing(fold)
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose: &frontendv1.FeedResponseProse{Markdown: ""},
+			Prose: &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, "", prose.Arriving)},
 		}}
 	case *conversationv1.AgentResponse_Update:
 		if fold.settled {
@@ -132,7 +133,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			r.observeFragment(fold, pace, state.Update.GetNewMarkdown())
 		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose:      &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose:      &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Arriving)},
 			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentResponse_Success:
@@ -173,7 +174,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		r.settlePacing(s, fold, pace)
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose:      &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose:      &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
 			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentResponse_Failure:
@@ -198,7 +199,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
 		resetPacing(fold)
 		broken := &frontendv1.FeedResponseError{
-			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose: &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
 		}
 		// A TURN WHOSE ENDING OFFERS THE SIGN-IN ACTION offers it inside its
 		// broken bubble too (signin.go). A bubble drawn before that ending is

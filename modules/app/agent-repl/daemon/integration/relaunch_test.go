@@ -48,7 +48,7 @@ func relaunchAnswerEntry() *conversationv1.HistoryEntry {
 // pageProse reports whether a page carries a settled answer with this prose.
 func pageProse(page *frontendv1.FeedPage, markdown string) bool {
 	for _, row := range page.GetSuccess().GetRows() {
-		if row.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == markdown {
+		if row.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == markdown {
 			return true
 		}
 	}

@@ -118,7 +118,7 @@ func TestPeerMessageCarriesTheBodyForExpansion(t *testing.T) {
 	h.peerMessage("p1", "Explore", "the whole message body")
 
 	// Assert.
-	if got := h.only(rootFeed()).GetPeerMessage().GetBody(); got != "the whole message body" {
+	if got := h.only(rootFeed()).GetPeerMessage().GetProse().GetSource().GetMarkdown(); got != "the whole message body" {
 		t.Fatalf("body = %q, want the message body", got)
 	}
 }
@@ -165,7 +165,7 @@ func TestPeerMessageRowKeyedOnItsStableId(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want exactly 1 (both deliveries of id p1 collapse)", len(rows))
 	}
-	if got := rows[0].GetPeerMessage().GetBody(); got != "corrected observation" {
+	if got := rows[0].GetPeerMessage().GetProse().GetSource().GetMarkdown(); got != "corrected observation" {
 		t.Fatalf("body = %q, want the second delivery to upsert the first", got)
 	}
 }

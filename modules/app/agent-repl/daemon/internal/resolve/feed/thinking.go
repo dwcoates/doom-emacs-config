@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -102,7 +103,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 			return nil, errNotARow
 		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose:      &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose:      &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Arriving)},
 			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentThinking_Success:
@@ -132,7 +133,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 			return nil, errNotARow
 		}
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose:      &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose:      &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
 			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentThinking_Failure:
@@ -142,7 +143,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 		fold.settled = true
 		resetPacing(fold)
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
-			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			Prose: &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},
 		}}
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawThinking", "branch": "default"})

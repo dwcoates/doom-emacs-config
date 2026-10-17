@@ -267,10 +267,10 @@ func text(u *conversationv1.UserSaid) string {
 func promptText(row *frontendv1.FeedRow) string {
 	out := ""
 	for _, b := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
-		out += b.GetText().GetText()
+		out += b.GetText().GetProse().GetSource().GetMarkdown()
 	}
 	for _, b := range row.GetAgentPrompt().GetBody().GetBlocks() {
-		out += b.GetText().GetText()
+		out += b.GetText().GetProse().GetSource().GetMarkdown()
 	}
 	return out
 }

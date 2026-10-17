@@ -117,7 +117,7 @@ func TestARestartedColdGatedWorkspacesGateStandsBelowItsConversation(t *testing.
 
 	// Assert: the gate, made after every entry of the conversation, sorts below it.
 	answer := rowIndex(page, func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == relaunchAnswer
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == relaunchAnswer
 	})
 	if gate := rowIndex(page, isGate); gate < answer {
 		t.Fatalf("the cold gate stands at row %d above the answer at row %d, want it below the conversation it postdates", gate, answer)
@@ -188,7 +188,7 @@ func TestARestartedWorkspacesNewestPageReachesItsReaderWhenTheShimComesUp(t *tes
 
 	// Assert.
 	awaitRow(t, f, tail, "the store's answer pushed to the waiting reader", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == relaunchAnswer
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == relaunchAnswer
 	})
 }
 

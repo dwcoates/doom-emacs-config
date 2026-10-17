@@ -90,7 +90,7 @@ func TestThinkingTextDeltasAccumulate(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows = %d, want 1", len(got))
 	}
-	if md := got[0].GetUpdate().GetProse().GetMarkdown(); md != "first second" {
+	if md := got[0].GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(); md != "first second" {
 		t.Fatalf("thinking markdown = %q, want %q", md, "first second")
 	}
 }
@@ -116,7 +116,7 @@ func TestThinkingSuccessSettlesTheBubble(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows = %d, want 1", len(got))
 	}
-	if md := got[0].GetSuccess().GetProse().GetMarkdown(); md != "the whole reasoning" {
+	if md := got[0].GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); md != "the whole reasoning" {
 		t.Fatalf("settled thinking markdown = %q, want %q", md, "the whole reasoning")
 	}
 }
@@ -204,7 +204,7 @@ func TestThinkingFailureKeepsPartialReasoning(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows = %d, want 1", len(got))
 	}
-	if md := got[0].GetError().GetProse().GetMarkdown(); md != "half a thought" {
+	if md := got[0].GetError().GetProse().GetProse().GetSource().GetMarkdown(); md != "half a thought" {
 		t.Fatalf("broken thinking markdown = %q, want %q", md, "half a thought")
 	}
 }
@@ -302,7 +302,7 @@ func TestAWithheldThinkingLeadingBlockLeavesOnlyTheGreenedProse(t *testing.T) {
 	if prose.GetActivity().GetResponse().GetThinking() {
 		t.Fatalf("the surviving row is flagged thinking; want the prose row")
 	}
-	if md := prose.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "the real answer" {
+	if md := prose.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); md != "the real answer" {
 		t.Fatalf("surviving prose = %q, want %q", md, "the real answer")
 	}
 	if answer := h.terminalRow("turn-1").GetConcluded().GetAnswer().GetValue(); answer != prose.GetId().GetValue() {
@@ -447,7 +447,7 @@ func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows after first delta = %d, want 1", len(got))
 	}
-	if md := got[0].GetUpdate().GetProse().GetMarkdown(); md != "first " {
+	if md := got[0].GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(); md != "first " {
 		t.Fatalf("markdown after first delta = %q, want %q", md, "first ")
 	}
 
@@ -460,7 +460,7 @@ func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows after second delta = %d, want 1", len(got))
 	}
-	if md := got[0].GetUpdate().GetProse().GetMarkdown(); md != "first second" {
+	if md := got[0].GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(); md != "first second" {
 		t.Fatalf("markdown after second delta = %q, want %q", md, "first second")
 	}
 
@@ -477,7 +477,7 @@ func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows after settle = %d, want 1", len(got))
 	}
-	if md := got[0].GetSuccess().GetProse().GetMarkdown(); md != "first second" {
+	if md := got[0].GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); md != "first second" {
 		t.Fatalf("settled markdown = %q, want %q", md, "first second")
 	}
 }
@@ -507,7 +507,7 @@ func TestAShownThinkingBlockSurvivesSettlement(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("thinking rows = %d, want 1 (the shown block survives)", len(got))
 	}
-	if md := got[0].GetSuccess().GetProse().GetMarkdown(); md != "weighing options" {
+	if md := got[0].GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); md != "weighing options" {
 		t.Fatalf("settled thinking markdown = %q, want %q", md, "weighing options")
 	}
 }

@@ -705,7 +705,7 @@ func TestUpsertReplacesARowWholeAndKeepsItsPlace(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (an upsert replaces, never appends)", len(rows))
 	}
-	first := rows[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()[0].GetText().GetText()
+	first := rows[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown()
 	if first != "first, corrected" {
 		t.Fatalf("first row text = %q, want the corrected text", first)
 	}

@@ -561,7 +561,7 @@ func TestTwoCompactionsOpenAtTheNewestDividerAndItsSummary(t *testing.T) {
 	if len(got) != 1 || got[0] != h.separationRowID("entry-second") {
 		t.Fatalf("page rows = %v, want only the newest divider", got)
 	}
-	summary := rows[0].GetSeparation().GetCompacted().GetSummary().GetMarkdown()
+	summary := rows[0].GetSeparation().GetCompacted().GetSummary().GetProse().GetSource().GetMarkdown()
 	if summary != "the second account" {
 		t.Fatalf("summary = %q, want the newest compaction's", summary)
 	}

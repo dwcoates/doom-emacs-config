@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"fmt"
 	"strings"
 
@@ -83,7 +84,7 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 		case *conversationv1.AgentPlanModeSuccess_Exited:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPlan", "branch": "case *conversationv1.AgentPlanModeSuccess_Exited"})
 			planned := &frontendv1.FeedPlanPlanned{
-				Prose: &frontendv1.FeedPlanProse{Markdown: outcome.Exited.GetPlan().GetMarkdown()},
+				Prose: &frontendv1.FeedPlanProse{Prose: r.parsedProse(s, outcome.Exited.GetPlan().GetMarkdown(), prose.Settled)},
 			}
 			// The edit affordance draws only when the vendor NAMED the file.
 			if outcome.Exited.FilePath != nil && outcome.Exited.GetFilePath() != "" {

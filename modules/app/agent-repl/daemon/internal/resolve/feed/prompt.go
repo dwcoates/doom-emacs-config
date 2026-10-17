@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"fmt"
 	"strings"
 
@@ -474,7 +475,7 @@ func DrawUserBlocks(
 				continue
 			}
 			blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
-				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: drawn}},
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.Parse(log, drawn, prose.Settled)}},
 			})
 		case *conversationv1.UserContentBlock_Image:
 			src, alt, err := resolveImage(b.Image)

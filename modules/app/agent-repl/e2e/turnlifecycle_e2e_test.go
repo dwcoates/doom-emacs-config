@@ -73,7 +73,7 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 		if success == nil {
 			t.Fatalf("response row %s has no settled Success prose (result=%v)", id.GetValue(), resp.GetResult())
 		}
-		return success.GetProse().GetMarkdown()
+		return success.GetProse().GetProse().GetSource().GetMarkdown()
 	}
 	t.Fatalf("no feed row found with FeedId %s", id.GetValue())
 	return ""

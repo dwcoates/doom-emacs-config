@@ -217,8 +217,8 @@ func TestACompactionDrawsItsSummaryFoldedWithBothFormattedSides(t *testing.T) {
 	// Assert: the client renders both sides verbatim and does no arithmetic.
 	separation := h.separationRow().GetSeparation()
 	compacted := separation.GetCompacted()
-	if compacted.GetSummary().GetMarkdown() != "we were fixing the flaky test" {
-		t.Fatalf("summary = %q", compacted.GetSummary().GetMarkdown())
+	if compacted.GetSummary().GetProse().GetSource().GetMarkdown() != "we were fixing the flaky test" {
+		t.Fatalf("summary = %q", compacted.GetSummary().GetProse().GetSource().GetMarkdown())
 	}
 	if separation.GetTokens().GetBeforeText() != "180k" || separation.GetTokens().GetAfterText() != "12k" {
 		t.Fatalf("tokens = %+v, want the formatted 180k → 12k", separation.GetTokens())

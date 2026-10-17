@@ -102,8 +102,8 @@ func TestAReplayedCompactShowsOnlyItsDividerAndSummary(t *testing.T) {
 
 	// Assert: the compacted divider carries its summary, and no prompt/response.
 	sep := h.separationRow().GetSeparation()
-	if sep.GetCompacted().GetSummary().GetMarkdown() != "what survived" {
-		t.Fatalf("compacted summary = %q, want the survived account", sep.GetCompacted().GetSummary().GetMarkdown())
+	if sep.GetCompacted().GetSummary().GetProse().GetSource().GetMarkdown() != "what survived" {
+		t.Fatalf("compacted summary = %q, want the survived account", sep.GetCompacted().GetSummary().GetProse().GetSource().GetMarkdown())
 	}
 	if got := len(h.userPromptRows()); got != 0 {
 		t.Fatalf("user-prompt rows = %d, want none on replay of a /compact", got)
