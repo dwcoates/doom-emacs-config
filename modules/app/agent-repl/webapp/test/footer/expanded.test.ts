@@ -14,6 +14,7 @@ import {
   FOOTER_PANELS,
   countdownClock,
   createJumpNotices,
+  rowText,
   drawFooterExpanded,
   type ExpandedDeps,
   type FooterPanel,
@@ -30,6 +31,7 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import stylesheet from "../../src/styles.css?raw";
+import expandedSource from "../../src/footer/expanded.ts?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 const NOW = 1_800_000_000_000;
@@ -1105,6 +1107,22 @@ describe("the crons panel", () => {
     expect(() =>
       drawPanel("crons", { wakeup: { wakeAt: { wakeAtMs: BigInt(Number.MAX_SAFE_INTEGER) + 1n } } }),
     ).toThrow(MalformedView);
+  });
+});
+
+describe("rowText", () => {
+  it("draws its text verbatim under its class", () => {
+    const span = rowText("footer-row-label", "every 5 min");
+    expect([span.tagName, span.className, span.textContent]).toEqual([
+      "SPAN",
+      "footer-row-label",
+      "every 5 min",
+    ]);
+  });
+
+  it("is the one way a row's text span is built", () => {
+    const source = withoutBlockComments(expandedSource);
+    expect(source).not.toMatch(/\.className = "footer-row-(label|description|command)";\n\s*\w+\.textContent/);
   });
 });
 

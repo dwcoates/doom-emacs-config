@@ -615,18 +615,12 @@ export function drawFooterAgentRowWaitingForApi(
 
 /** The subagent's type label, verbatim. */
 export function drawFooterAgentRowLabel(u: FooterAgentRowLabel): HTMLElement {
-  const label = document.createElement("span");
-  label.className = "footer-row-label";
-  label.textContent = u.text;
-  return label;
+  return rowText("footer-row-label", u.text);
 }
 
 /** The commission's description, verbatim; never synthesized when unset. */
 export function drawFooterAgentRowDescription(u: FooterAgentRowDescription): HTMLElement {
-  const description = document.createElement("span");
-  description.className = "footer-row-description";
-  description.textContent = u.text;
-  return description;
+  return rowText("footer-row-description", u.text);
 }
 
 /** The subagent's running token sum, daemon-formatted. */
@@ -751,10 +745,7 @@ export function drawFooterShellRow(
 
 /** The command line, verbatim — what arrives is what is drawn. */
 export function drawFooterShellRowCommand(u: FooterShellRowCommand): HTMLElement {
-  const command = document.createElement("span");
-  command.className = "footer-row-command";
-  command.textContent = u.text;
-  return command;
+  return rowText("footer-row-command", u.text);
 }
 
 /** The shell's ticking runtime, from the ORIGINAL start instant. */
@@ -809,10 +800,7 @@ export function drawFooterMonitorRow(
 
 /** What is being watched, verbatim. */
 export function drawFooterMonitorRowDescription(u: FooterMonitorRowDescription): HTMLElement {
-  const description = document.createElement("span");
-  description.className = "footer-row-description";
-  description.textContent = u.text;
-  return description;
+  return rowText("footer-row-description", u.text);
 }
 
 /** The monitor's ticking runtime, from the arm instant. */
@@ -847,10 +835,7 @@ export function drawFooterWakeupRow(
   const row = plainRow("crons");
   row.setAttribute("data-wakeup", "");
   row.appendChild(glyph("crons", "◷"));
-  const label = document.createElement("span");
-  label.className = "footer-row-label";
-  label.textContent = "wakeup";
-  row.appendChild(label);
+  row.appendChild(rowText("footer-row-label", "wakeup"));
   if (u.reason !== undefined) row.appendChild(drawFooterWakeupRowReason(u.reason));
   if (u.wakeAt !== undefined) {
     const figures = document.createElement("span");
@@ -863,10 +848,7 @@ export function drawFooterWakeupRow(
 
 /** The agent's reason for the wakeup, verbatim. */
 export function drawFooterWakeupRowReason(u: FooterWakeupRowReason): HTMLElement {
-  const reason = document.createElement("span");
-  reason.className = "footer-row-description";
-  reason.textContent = u.text;
-  return reason;
+  return rowText("footer-row-description", u.text);
 }
 
 /** The countdown to the wakeup, ticking from the daemon's instant. */
@@ -903,18 +885,12 @@ export function drawFooterCronRow(
 
 /** The vendor-composed human schedule, verbatim. */
 export function drawFooterCronRowSchedule(u: FooterCronRowSchedule): HTMLElement {
-  const schedule = document.createElement("span");
-  schedule.className = "footer-row-label";
-  schedule.textContent = u.text;
-  return schedule;
+  return rowText("footer-row-label", u.text);
 }
 
 /** The job's prompt, daemon-truncated; what arrives is what is drawn. */
 export function drawFooterCronRowPrompt(u: FooterCronRowPrompt): HTMLElement {
-  const prompt = document.createElement("span");
-  prompt.className = "footer-row-description";
-  prompt.textContent = u.text;
-  return prompt;
+  return rowText("footer-row-description", u.text);
 }
 
 /**
@@ -1116,6 +1092,14 @@ function emptyRow(text: string): HTMLElement {
   empty.setAttribute("data-empty", "");
   empty.textContent = text;
   return empty;
+}
+
+/** One of a row's text spans: its label, description or command, verbatim. */
+export function rowText(className: string, text: string): HTMLElement {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  return span;
 }
 
 /** A named glyph element, so the suite can target the glyph and not the text. */
