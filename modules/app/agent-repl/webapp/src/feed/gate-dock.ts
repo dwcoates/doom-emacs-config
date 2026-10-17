@@ -6,9 +6,10 @@
  * stands, Emacs hides the workspace's input window (it reads
  * `HostWorkspace.gate`) and this webview grows into that space; the gate's
  * banner is drawn in the exact slot the input had: `#gate-dock`, below the
- * footer, at the input window's height. The daemon resolves both from the ONE
- * cold-gate standing, which this page reads as the root feed's standing
- * `FeedColdGate` row, so the hidden input and the docked banner move together.
+ * footer, at least the input window's height and growing to fit a taller
+ * gate. The daemon resolves both from the ONE cold-gate standing, which
+ * this page reads as the root feed's standing `FeedColdGate` row, so the
+ * hidden input and the docked banner move together.
  *
  * THE CARD MOVES; THE ROW STAYS. The feed view owns the row element (upserts,
  * retirement, positional inserts), so the row stays in the feed, hidden, and
