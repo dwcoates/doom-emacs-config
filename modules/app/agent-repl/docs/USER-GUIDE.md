@@ -25,7 +25,7 @@ and the daemon Emacs starts, see them.
 | Your work account | Sign in to Claude with `~/.claude-chesscom` as the config dir. Its email is read from `~/.claude-chesscom/.claude.json`. | Workspaces under `$MULTI_REPO_ROOT`, and the GNS login rule in `metaprompt.md`. | Those workspaces run logged out. An agent that needs to renew a GNS token stops and says so. |
 | A Chrome profile per account | Sign each account's email in to its own Chrome profile. | Links clicked in a workspace open in the profile signed in as that workspace's account. A logged-out workspace opens links with no profile chosen. | The click fails with `launch_failed`, naming the email that no profile is signed in as. |
 | `AGENT_REPL_PERSISTENT_WIFI_HOTSPOT` | Your phone hotspot's name, in your shell profile. Either apostrophe spelling joins. | Persistent-wifi mode, which joins the hotspot when it turns on and leaves it when it turns off. | Turning the mode on or off still changes the power settings. The hotspot step fails, naming the variable. |
-| `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-workspace` and `/create-or-update-skill` skills from `$MULTI_REPO_ROOT/explanation-engine`, and workspaces worked under the work account. | Those two skills are not linked, and the installer reports it. |
+| `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-workspace` and `/create-or-update-skill` skills from `$MULTI_REPO_ROOT/explanation-engine`, workspaces worked under the work account, and `SPC TAB O`, which makes its one-shot in `$MULTI_REPO_ROOT/explanation-engine`. | Those two skills are not linked, and the installer reports it. `SPC TAB O` refuses, naming the variable. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
 
 ## Asking about agent-repl
@@ -339,6 +339,18 @@ The input window underlines misspelled words as you type.
   - It is cut from the primary branch and merges back into it.
   - It copies nothing from this workspace's conversation or worktree.
   - `SPC u SPC TAB C-o` asks for the model too.
+
+## A one-shot in explanation-engine
+
+`SPC TAB O` makes a one-shot in the explanation-engine repository, whichever workspace you press it in.
+
+- The repository is always `$MULTI_REPO_ROOT/explanation-engine` (see Setup).
+  - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
+- Otherwise it is an ordinary `SPC TAB o` one-shot.
+  - `SPC u SPC TAB O` asks for the model too.
+- What happens when the work is done is explanation-engine's own policy, in `.agent-repl/prompts/` at its main checkout.
+  - The policy merges the one-shot through the merge queue, then runs `/create-or-update-pr --add-to-merge-queue` once the merge lands.
+- Re-opening a closed workspace is `SPC TAB C-r`.
 
 ## One-shot commissions across a crash
 

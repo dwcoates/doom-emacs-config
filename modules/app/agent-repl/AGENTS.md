@@ -1605,7 +1605,7 @@ excludes them at its source.
 Picking one is TWO behaviors and exactly two. A workspace whose tab is
 standing is an editor-local `agent-repl--ws-switch` and costs no round trip.
 Anything else goes through `agent-repl-verb-open` — the same `OpenWorkspace`
-verb `SPC TAB O` runs, with the same `mutation-progress.el` stage reporting —
+verb `SPC TAB C-r` runs, with the same `mutation-progress.el` stage reporting —
 and the landing is registered with `agent-repl-verbs-select-minted` under
 `agent-repl-verbs--land-on-tab`, so it fires when the roster push brings the
 tab and lands BY IDENTITY rather than by directory. Never add a second open

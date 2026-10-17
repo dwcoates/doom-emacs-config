@@ -2325,10 +2325,13 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
           ;; Act.
           (agent-repl-create-oneshot nil)
           (agent-repl-create-oneshot-for-current-workspace t)
+          (agent-repl-create-explanation-engine-oneshot t)
           ;; Assert.
           (should (equal (reverse calls)
                          '((agent-repl-create-oneshot nil nil agent-repl-verbs--oneshot-repository)
-                           (agent-repl-create-oneshot-for-current-workspace t t agent-repl-verbs--oneshot-repository)))))))))
+                           (agent-repl-create-oneshot-for-current-workspace t t agent-repl-verbs--oneshot-repository)
+                           (agent-repl-create-explanation-engine-oneshot
+                            t nil agent-repl-verbs--explanation-engine-repository)))))))))
 
 (ert-deftest agent-repl-verbs-oneshot-repository-is-the-current-workspaces ()
   "The ordinary one-shots take the repository the current workspace sits in."
@@ -2338,17 +2341,118 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
       ;; Act / Assert.
       (should (equal (agent-repl-verbs--oneshot-repository) (agent-repl-test-verbs--repo-ref))))))
 
+;;;; ---- Create: the explanation-engine one-shot ----
+
+(defvar agent-repl-daemon-multi-repo-root)
+
+(defun agent-repl-test-verbs--ee-sections ()
+  "Return two sections: the explanation-engine checkout, and the current workspace's."
+  (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
+                                       "ee-repo" "/tmp/agent-repl-test/work/explanation-engine"))
+              :header (list :label (list :text "explanation-engine"))
+              :rows (list :rows nil))
+        (list :key (list :repository (agent-repl-test-verbs--repo-ref))
+              :header (list :label (list :text "repo-one"))
+              :rows (list :rows (list (agent-repl-test-verbs--row))))))
+
+(defmacro agent-repl-test-verbs--with-ee (root &rest body)
+  "Run BODY with `MULTI_REPO_ROOT\=' at ROOT and the explanation-engine roster.
+Paths canonicalize by trailing-slash removal alone, so the fixture
+directories need not exist."
+  (declare (indent 1))
+  `(let ((agent-repl-daemon-multi-repo-root ,root)
+         (agent-repl-roster-view
+          (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--ee-sections))))
+     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+       ,@body)))
+
+(ert-deftest agent-repl-verbs-explanation-engine-oneshot-creates-in-the-explanation-engine-repository ()
+  "`SPC TAB O\=' sends a one-shot to the explanation-engine checkout, not the current repository."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (_p &optional _history-file _unseeded) "commission")))
+        ;; Act.
+        (agent-repl-create-explanation-engine-oneshot nil)
+        ;; Assert.
+        (let ((request (agent-repl-test-verbs--request :create)))
+          (should (equal (plist-get request :repository)
+                         (agent-repl-test-verbs--repo-ref
+                          "ee-repo" "/tmp/agent-repl-test/work/explanation-engine")))
+          (should (eq (plist-get (plist-get request :form) :arm) :one-shot)))))))
+
+(ert-deftest agent-repl-verbs-explanation-engine-oneshot-sends-no-context ()
+  "The explanation-engine one-shot names no context workspace."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (_p &optional _history-file _unseeded) "commission")))
+        ;; Act.
+        (agent-repl-create-explanation-engine-oneshot nil)
+        ;; Assert.
+        (should-not (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
+                                          :value)
+                               :context))))))
+
+(ert-deftest agent-repl-verbs-explanation-engine-oneshot-needs-no-current-workspace ()
+  "The repository is fixed, so commissioning from no workspace still creates."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (_p &optional _history-file _unseeded) "commission")))
+        ;; Act.
+        (agent-repl-create-explanation-engine-oneshot nil)
+        ;; Assert.
+        (should (agent-repl-test-verbs--request :create))))))
+
+(ert-deftest agent-repl-verbs-explanation-engine-oneshot-refuses-without-multi-repo-root ()
+  "An unset `MULTI_REPO_ROOT\=' is refused, logged as an error, before the commission is read."
+  ;; Arrange.
+  (let (logged)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-ee nil
+        (cl-letf (((symbol-function 'agent-repl--error)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                  ((symbol-function 'agent-repl-verbs--read-prompt)
+                   (lambda (_p &optional _history-file _unseeded) (error "the commission must not be read"))))
+          ;; Act.
+          (let ((err (should-error (agent-repl-create-explanation-engine-oneshot nil) :type 'user-error)))
+            ;; Assert.
+            (should (string-match-p "MULTI_REPO_ROOT is unset" (cadr err)))
+            (should-not agent-repl-test-verbs--sent)
+            (should (member "elisp.verbs.explanation-engine-repository-unresolved cause=multi-repo-root-unset"
+                            logged))))))))
+
+(ert-deftest agent-repl-verbs-explanation-engine-oneshot-refuses-when-the-repository-is-not-on-the-roster ()
+  "An explanation-engine checkout missing from the roster is refused and logged as a warning."
+  ;; Arrange.
+  (let (logged)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/elsewhere"
+        (cl-letf (((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                  ((symbol-function 'agent-repl-verbs--read-prompt)
+                   (lambda (_p &optional _history-file _unseeded) (error "the commission must not be read"))))
+          ;; Act.
+          (let ((err (should-error (agent-repl-create-explanation-engine-oneshot nil) :type 'user-error)))
+            ;; Assert.
+            (should (string-match-p "not on the roster; register it with SPC TAB C-n" (cadr err)))
+            (should-not agent-repl-test-verbs--sent)
+            (should (member (concat "elisp.verbs.explanation-engine-repository-unregistered"
+                                    " root=/tmp/agent-repl-test/elsewhere"
+                                    " main=/tmp/agent-repl-test/elsewhere/explanation-engine")
+                            logged))))))))
+
 ;;;; ---- Create: the roster lookup of a fixed repository ----
 
 (ert-deftest agent-repl-verbs-roster-repository-at-answers-the-matching-section ()
   "The section whose canonical directory is MAIN answers its `RepositoryRef'."
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections))))
-    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
-      ;; Act / Assert.
-      (should (equal (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/doom")
-                     (agent-repl-test-verbs--repo-ref
-                      "agent-repl-repo" "/tmp/agent-repl-test/doom"))))))
+  (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+    ;; Act / Assert.
+    (should (equal (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/work/explanation-engine")
+                   (agent-repl-test-verbs--repo-ref
+                    "ee-repo" "/tmp/agent-repl-test/work/explanation-engine")))))
 
 (ert-deftest agent-repl-verbs-roster-repository-at-canonicalizes-the-section-directory ()
   "A section directory with a trailing slash still matches its canonical MAIN."
@@ -2365,23 +2469,25 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
 
 (ert-deftest agent-repl-verbs-roster-repository-at-answers-nil-for-no-section ()
   "A directory no section carries answers nil, leaving the refusal to the caller."
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections))))
-    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
-      ;; Act / Assert.
-      (should-not (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/nowhere")))))
+  (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+    ;; Act / Assert.
+    (should-not (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/nowhere"))))
 
-(ert-deftest agent-repl-verbs-help-repository-uses-the-shared-roster-lookup ()
-  "The help repository is found by `agent-repl-verbs--roster-repository-at'."
+(ert-deftest agent-repl-verbs-fixed-repository-creates-share-the-roster-lookup ()
+  "The help and explanation-engine repositories are both found by `agent-repl-verbs--roster-repository-at'."
   ;; Arrange.
   (let (asked)
-    (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
-      (cl-letf (((symbol-function 'agent-repl-verbs--roster-repository-at)
-                 (lambda (main) (push main asked) (list :id main))))
-        ;; Act.
-        (agent-repl-verbs--help-repository)
-        ;; Assert.
-        (should (equal asked '("/tmp/agent-repl-test/doom")))))))
+    (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+      (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--roster-repository-at)
+                   (lambda (main) (push main asked) (list :id main))))
+          ;; Act.
+          (agent-repl-verbs--help-repository)
+          (agent-repl-verbs--explanation-engine-repository)
+          ;; Assert.
+          (should (equal (reverse asked)
+                         '("/tmp/agent-repl-test/doom"
+                           "/tmp/agent-repl-test/work/explanation-engine"))))))))
 
 ;;;; ---- Create: the shared one-shot composition ----
 
