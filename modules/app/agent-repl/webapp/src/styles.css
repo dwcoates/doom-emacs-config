@@ -404,7 +404,7 @@
      NAME LINE below it (owner ruling, 2026-10-17: "the topbar should be
      slightly taller, with the extra space being downward"). */
   --topbar-band-h: 2.75rem;
-  --topbar-name-h: 0.95rem;
+  --topbar-name-h: 0.75rem;
   --topbar-h: calc(var(--topbar-band-h) + var(--topbar-name-h));
   /* THE STRIP'S FRAME MEASURE (owner ruling 1, 2026-09-13, narrowed
      2026-09-14). The padding at the strip's own left and right edges and the
@@ -7313,7 +7313,7 @@ ar-button.outcome-marker-pill {
 .topbar-workspace-name {
   grid-row: 2;
   align-self: start;
-  margin-top: -0.3rem;
+  margin-top: -0.5rem;
   font-size: 0.95rem;
   font-weight: 700;
   line-height: 1;

@@ -79,4 +79,4 @@ and that the workspace's name gets a line of its own beneath it.
   - "White" is the theme's foreground color: white in the dark theme, and the
     light theme's dark foreground there, because literal white would vanish on
     the light background.
-  - The name line grows to fit the larger text (`--topbar-name-h` 0.95rem).
+  - The name line grows to fit the larger text, lifted 0.5rem toward the summary (`--topbar-name-h` 0.75rem).
