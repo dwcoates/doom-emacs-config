@@ -8,9 +8,12 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { clearClientFailures, standingClientFailure } from "../../src/rpc/link.js";
 import { clientLogSink } from "../../src/rpc/client-log-sink.js";
 import { clientLogRecorder } from "./client-log-recorder.js";
+import { beginPage, endPage } from "../../src/page-teardown.js";
+import { settledByNextTask } from "../settled.js";
 
 afterEach(() => {
   clearClientFailures();
+  beginPage();
 });
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -102,5 +105,16 @@ describe("clientLogSink", () => {
     // Assert
     await expect(sent).rejects.toThrow();
     expect(standingClientFailure()?.kind).toBe("client_log_failed");
+  });
+
+  it("never settles a record the page's end cut off, and tells the footer nothing", async () => {
+    // Arrange
+    const { client } = clientAnswering("throws");
+    const sink = clientLogSink(() => client, { case: "webhost", value: {} });
+    endPage();
+    // Act
+    const settled = await settledByNextTask(sink(RECORD));
+    // Assert
+    expect([settled, standingClientFailure()]).toEqual([false, null]);
   });
 });

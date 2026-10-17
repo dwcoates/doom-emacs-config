@@ -52,4 +52,25 @@ describe("createDaemonTransport", () => {
     // ASSERT
     expect(seen[0]).toBe("application/proto");
   });
+
+  it.each([
+    { name: "carries no signal of its own", own: undefined },
+    { name: "carries a signal of its own", own: new AbortController().signal },
+  ])("hands every request a signal the page's end aborts, when the call $name", async ({ own }) => {
+    // Arrange
+    const page = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Response(new Uint8Array(), { status: 500 });
+    });
+    const client = createAgentReplClient(
+      createDaemonTransport("http://localhost:8080", { fetch: fetchFn as unknown as typeof globalThis.fetch, signal: page.signal }),
+    );
+    await expect(client.daemonHealth({}, own === undefined ? {} : { signal: own })).rejects.toBeDefined();
+    // Act
+    page.abort();
+    // Assert
+    expect(signal?.aborted).toBe(true);
+  });
 });

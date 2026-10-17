@@ -55,7 +55,7 @@ import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../..
 import { installPagePresenceLog } from "./page-presence.js";
 import { installPageCensus } from "./page-census.js";
 import { pageAfter } from "./every.js";
-import { stopAtPageTeardown } from "./page-teardown.js";
+import { beginPage, endPageAtPagehide, pageEnding, stopAtPageTeardown } from "./page-teardown.js";
 import { connectToHost } from "./host/embed.js";
 import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
 import { mintConnectionId } from "./connection-id.js";
@@ -111,7 +111,12 @@ export async function boot(): Promise<void> {
     const address = pageAddress(window.location.search);
     const workspace = workspaceRef(address.workspaceId, address.workspaceDir);
 
-    const transport = createDaemonTransport(window.location.origin);
+    // THE PAGE ENDS AT ITS UNLOAD (page-teardown.ts): every request this
+    // transport makes is aborted then, and nothing it asked for answers into
+    // a page that is gone.
+    beginPage();
+    endPageAtPagehide(window);
+    const transport = createDaemonTransport(window.location.origin, { signal: pageEnding() });
     const client = createAgentReplClient(transport);
 
     const connectionId = mintConnectionId();

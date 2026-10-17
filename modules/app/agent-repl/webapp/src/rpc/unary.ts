@@ -26,6 +26,7 @@ import { clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
 import { assertNoUnknownFields, requireCase } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
+import { abandonedAtPageEnd, pageEnded } from "../page-teardown.js";
 
 /** The slice of the context a unary call needs; the whole AppContext fits. */
 export interface UnaryContext {
@@ -70,6 +71,9 @@ export async function callUnary<Res extends Message>(
   try {
     response = await fn(ctx.client);
   } catch (err) {
+    // THE PAGE ENDED with the call in flight (page-teardown.ts): there is no
+    // page left to answer, so nothing awaiting the call runs.
+    if (pageEnded()) return abandonedAtPageEnd();
     // The transport failed, so there is no answer to switch on. Logged here,
     // once, by the layer that owns the call; rethrown as ConnectError so every
     // caller has one type to catch regardless of what the fetch threw.

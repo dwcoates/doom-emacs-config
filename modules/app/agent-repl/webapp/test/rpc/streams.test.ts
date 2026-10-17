@@ -23,6 +23,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
+import { beginPage, endPage } from "../../src/page-teardown.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const UNKNOWN = [{ no: 999, wireType: 0, data: new Uint8Array([1]) }];
@@ -490,6 +491,35 @@ function openWithEnding(
     backoff: BACKOFF,
   });
 }
+
+describe("watchStream: the page ending", () => {
+  afterEach(() => beginPage());
+
+  it("files nothing for a stream the page's end cut off", async () => {
+    // Arrange
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([new ConnectError("the page was unloaded", Code.Canceled)]);
+    endPage();
+    // Act
+    open(contextFor(client, sink), () => {});
+    await settle();
+    // Assert
+    expect(sink.reported).toEqual([]);
+  });
+
+  it("never reopens a stream the page's end cut off", async () => {
+    // Arrange
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([new ConnectError("the page was unloaded", Code.Canceled), []]);
+    endPage();
+    // Act
+    open(contextFor(client, sink), () => {});
+    await settle();
+    await advance(250);
+    // Assert
+    expect(state.openCount).toBe(1);
+  });
+});
 
 describe("watchStream: a planned ending", () => {
   it("files NO daemonUnreachable when the run ends cleanly after the ending", async () => {

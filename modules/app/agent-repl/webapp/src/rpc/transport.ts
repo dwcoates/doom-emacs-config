@@ -21,13 +21,29 @@ export interface DaemonTransportOptions {
    * gets the page's `globalThis.fetch`.
    */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Aborts every request the transport makes: the page's end
+   * (page-teardown.ts `pageEnding`), so nothing the page asked for answers
+   * into a page that is gone.
+   */
+  signal?: AbortSignal;
 }
 
 /** A Connect transport pointed at the daemon serving this page. */
 export function createDaemonTransport(baseUrl: string, opts: DaemonTransportOptions = {}): Transport {
+  // The page's fetch is read at each call, as the library itself reads it.
+  const fetch: typeof globalThis.fetch = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  const signal = opts.signal;
   return createConnectTransport({
     baseUrl,
     useBinaryFormat: true,
-    ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+    fetch:
+      signal === undefined
+        ? fetch
+        : (input, init) =>
+            fetch(input, {
+              ...init,
+              signal: init?.signal == null ? signal : AbortSignal.any([init.signal, signal]),
+            }),
   });
 }
