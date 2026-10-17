@@ -2,13 +2,18 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // This file is the bubble's two PARENT tabs (frontend.v1.FeedMergeTab): the
@@ -112,11 +117,92 @@ func (s *span) settle(nowMS int64, failure string) {
 type rebaseView struct {
 	Span span `json:"span"`
 	// Lines is the rebase-wide narration, across every replay.
-	Lines []string `json:"lines,omitempty"`
+	Lines []rebaseLine `json:"lines,omitempty"`
 	// Replay is the current replay's number, 1-based; zero before the first.
 	Replay int `json:"replay"`
 	// Commits are the current replay's commits, in replay order.
 	Commits []commitView `json:"commits,omitempty"`
+}
+
+// rebaseLine is one line of the rebase-wide narration: a sentence drawn
+// verbatim, or one replay beginning, drawn from its parts. Exactly one is set.
+type rebaseLine struct {
+	Text      string         `json:"text,omitempty"`
+	Replaying *replayingLine `json:"replaying,omitempty"`
+}
+
+// textLine is a narration sentence, drawn verbatim.
+func textLine(text string) rebaseLine { return rebaseLine{Text: text} }
+
+// UnmarshalJSON reads a line recorded as an object, and a line recorded as a
+// bare string: the shape every line had before replays were recorded from
+// their parts, which a merge in flight across the upgrade still carries.
+func (l *rebaseLine) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*l = textLine(text)
+		return nil
+	}
+	type plain rebaseLine
+	var out plain
+	if err := json.Unmarshal(data, &out); err != nil {
+		return fmt.Errorf("merge: a rebase narration line is neither a string nor a line object: %w", err)
+	}
+	*l = rebaseLine(out)
+	return nil
+}
+
+// replayingLine is one replay beginning: Commits commits of Branch replayed
+// onto TargetBranch, checked out in TargetDir, at Tip.
+type replayingLine struct {
+	Commits      int    `json:"commits"`
+	Branch       string `json:"branch"`
+	TargetBranch string `json:"target_branch"`
+	TargetDir    string `json:"target_dir"`
+	Tip          string `json:"tip"`
+	// TargetWorkspace is the workspace registered on TargetDir, nil when the
+	// checkout is no workspace's.
+	TargetWorkspace *workspaceRefDoc `json:"target_workspace,omitempty"`
+}
+
+// replaying is the narration of a replay of commits of branch beginning onto
+// targetBranch at tip, naming the workspace registered on the target's
+// checkout when there is one.
+func (r *run) replaying(ctx context.Context, commits int, branch, targetBranch, tip string) (rebaseLine, error) {
+	dir := r.subject.targetDir
+	line := &replayingLine{Commits: commits, Branch: branch, TargetBranch: targetBranch, TargetDir: dir, Tip: tip}
+	record, err := r.o.deps.DB.WorkspaceByDir(ctx, dir)
+	switch {
+	case errors.Is(err, wsm.ErrNotFound):
+		// The target's checkout is no workspace: the target is drawn as text.
+	case err != nil:
+		return rebaseLine{}, fmt.Errorf("merge: reading the workspace registered on the target's checkout %s: %w", dir, err)
+	default:
+		line.TargetWorkspace = &workspaceRefDoc{ID: record.ID, Dir: record.Dir}
+	}
+	return rebaseLine{Replaying: line}, nil
+}
+
+// workspaceRefDoc is a workspace as a replay line names it: its id and its
+// registered directory.
+type workspaceRefDoc struct {
+	ID  ids.WorkspaceID `json:"id"`
+	Dir string          `json:"dir"`
+}
+
+// drawn is the line as the rebasing tab draws it.
+func (l rebaseLine) drawn() *frontendv1.FeedMergeRebaseLine {
+	if l.Replaying == nil {
+		return &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Text{Text: l.Text}}
+	}
+	p := l.Replaying
+	target := &frontendv1.FeedMergeRebaseTarget{Branch: p.TargetBranch, RepositoryDir: p.TargetDir}
+	if p.TargetWorkspace != nil {
+		target.Workspace = &workspacev1.WorkspaceRef{Id: string(p.TargetWorkspace.ID), Dir: p.TargetWorkspace.Dir}
+	}
+	return &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Replaying{Replaying: &frontendv1.FeedMergeRebaseReplaying{
+		Commits: uint32(p.Commits), Branch: p.Branch, Target: target, Tip: p.Tip, TipShortSha: short(p.Tip),
+	}}}
 }
 
 // commitView is one commit's subtab.
@@ -148,7 +234,18 @@ func (v *rebaseView) clone() *rebaseView {
 		return nil
 	}
 	out := *v
-	out.Lines = append([]string(nil), v.Lines...)
+	out.Lines = nil
+	for _, line := range v.Lines {
+		if line.Replaying != nil {
+			replaying := *line.Replaying
+			if replaying.TargetWorkspace != nil {
+				ref := *replaying.TargetWorkspace
+				replaying.TargetWorkspace = &ref
+			}
+			line.Replaying = &replaying
+		}
+		out.Lines = append(out.Lines, line)
+	}
 	out.Commits = make([]commitView, len(v.Commits))
 	for i, c := range v.Commits {
 		c.Lines = append([]string(nil), c.Lines...)
@@ -215,7 +312,7 @@ func (v *rebaseView) rebasingTab(waiting bool) *frontendv1.FeedMergeTab {
 	replayed, total := v.progress()
 	inner := &frontendv1.FeedMergeTabRebasing{
 		Progress: &frontendv1.FeedMergeRebaseProgress{Replayed: uint32(replayed), Total: uint32(total)},
-		Lines:    rebaseLines(v.Lines),
+		Lines:    drawnLines(v.Lines),
 	}
 	st := v.Span.state(waiting)
 	if w := st.waitingOnUser(); w != nil {
@@ -234,10 +331,7 @@ func (v *rebaseView) rebasingTab(waiting bool) *frontendv1.FeedMergeTab {
 // commitTab builds commit i's subtab at WAITING.
 func (v *rebaseView) commitTab(i int, waiting bool) *frontendv1.FeedMergeTab {
 	c := v.Commits[i]
-	inner := &frontendv1.FeedMergeTabRebaseCommit{
-		Commit: &frontendv1.FeedMergeRebaseCommitIdentity{ShortSha: short(c.SHA), Subject: c.Subject},
-		Lines:  rebaseLines(c.Lines),
-	}
+	inner := &frontendv1.FeedMergeTabRebaseCommit{Lines: textLines(c.Lines)}
 	switch {
 	case !c.Span.begun():
 		inner.State = &frontendv1.FeedMergeTabRebaseCommit_Pending{Pending: &frontendv1.FeedMergeRebaseCommitPending{}}
@@ -267,16 +361,28 @@ func (v *rebaseView) commitTab(i int, waiting bool) *frontendv1.FeedMergeTab {
 		inner.Conflict = conflict
 	}
 	return &frontendv1.FeedMergeTab{
-		Label: &frontendv1.FeedMergeTabLabel{Text: commitLine(c.SHA, c.Subject), Round: uint32(v.Replay)},
-		Kind:  &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: inner},
+		Label: &frontendv1.FeedMergeTabLabel{
+			Words: &frontendv1.FeedMergeTabLabel_Commit{Commit: &frontendv1.FeedMergeRebaseCommitIdentity{ShortSha: short(c.SHA), Subject: c.Subject}},
+			Round: uint32(v.Replay),
+		},
+		Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: inner},
 	}
 }
 
-// rebaseLines wraps narration lines as drawn line elements.
-func rebaseLines(lines []string) []*frontendv1.FeedMergeRebaseLine {
+// textLines wraps narration sentences as drawn line elements.
+func textLines(lines []string) []*frontendv1.FeedMergeRebaseLine {
 	out := make([]*frontendv1.FeedMergeRebaseLine, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, &frontendv1.FeedMergeRebaseLine{Text: line})
+		out = append(out, textLine(line).drawn())
+	}
+	return out
+}
+
+// drawnLines wraps the rebase-wide narration as drawn line elements.
+func drawnLines(lines []rebaseLine) []*frontendv1.FeedMergeRebaseLine {
+	out := make([]*frontendv1.FeedMergeRebaseLine, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, line.drawn())
 	}
 	return out
 }
@@ -310,7 +416,7 @@ func runTab(n int, st tabState, suites []*frontendv1.FeedMergeTestSuite, log *fr
 		inner.State = &frontendv1.FeedMergeTabTestsRun_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{
-		Label: &frontendv1.FeedMergeTabLabel{Text: runLabel(n), Round: 1},
+		Label: textLabel(runLabel(n), 1),
 		Kind:  &frontendv1.FeedMergeTab_TestsRun{TestsRun: inner},
 	}
 }
@@ -330,7 +436,7 @@ func fixingTab(st tabState, attempt int) *frontendv1.FeedMergeTab {
 		inner.State = &frontendv1.FeedMergeTabTestsRunFixing_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{
-		Label: &frontendv1.FeedMergeTabLabel{Text: "fixing", Round: 1},
+		Label: textLabel("fixing", 1),
 		Kind:  &frontendv1.FeedMergeTab_TestsRunFixing{TestsRunFixing: inner},
 	}
 }

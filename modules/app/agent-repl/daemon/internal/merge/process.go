@@ -240,7 +240,7 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 func (r *run) alreadyOn(ctx context.Context, targetBranch string) (outcome, error) {
 	round := r.openTab(ctx, TabRebasing)
 	r.rebasing.Span.relive(round.started.UnixMilli())
-	r.rebasing.Lines = append(r.rebasing.Lines, fmt.Sprintf("already on %s; nothing to merge", targetBranch))
+	r.rebasing.Lines = append(r.rebasing.Lines, textLine(fmt.Sprintf("already on %s; nothing to merge", targetBranch)))
 	r.rebasing.Span.settle(r.o.nowMS(), "")
 	r.publishRebasing(false)
 	r.closeTab(ctx, round, "succeeded")
@@ -312,7 +312,7 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 		p.done = len(commits)
 		now := r.o.nowMS()
 		r.rebasing.reachCommit(len(commits), now)
-		r.rebasing.Lines = append(r.rebasing.Lines, fmt.Sprintf("%s is already on %s's tip; nothing to replay", branch, targetBranch))
+		r.rebasing.Lines = append(r.rebasing.Lines, textLine(fmt.Sprintf("%s is already on %s's tip; nothing to replay", branch, targetBranch)))
 		r.rebasing.Span.settle(now, "")
 		r.setStep(ctx, footer.StepRebasing, func(f *footer.MergeFacts) { f.Replayed, f.Total = p.done, len(commits) })
 		r.publishReplay()
@@ -327,11 +327,15 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 	if err != nil {
 		return nil, fmt.Errorf("merge: resolving %s before its rebase: %w", branch, err)
 	}
+	replaying, err := r.replaying(ctx, len(commits), branch, targetBranch, tip)
+	if err != nil {
+		return nil, err
+	}
 	r.setStep(ctx, footer.StepRebasing, func(f *footer.MergeFacts) {
 		f.Total = len(commits)
 		f.Line = rebaseCommandLine(pickLine(commits[0]))
 	})
-	r.rebasing.Lines = append(r.rebasing.Lines, fmt.Sprintf("replaying %d commits of %s onto %s at %s", len(commits), branch, targetBranch, short(tip)))
+	r.rebasing.Lines = append(r.rebasing.Lines, replaying)
 	r.rebasing.reachCommit(0, r.o.nowMS())
 	r.publishReplay()
 	// THE REBASE'S RECORD NAMES THE TIP, THE COMMITS AND THE BRANCH'S HEAD
@@ -563,7 +567,7 @@ func (r *run) rebaseFailed(ctx context.Context, p *replay, err error) {
 		}
 		c.Span.settle(now, summary)
 	} else {
-		r.rebasing.Lines = append(r.rebasing.Lines, "failed: "+line)
+		r.rebasing.Lines = append(r.rebasing.Lines, textLine("failed: "+line))
 	}
 	r.settleRebasing(ctx, p, summary)
 }

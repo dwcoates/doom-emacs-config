@@ -2127,6 +2127,86 @@ func TestEveryReplayedCommitIsASubtabSettledOnTheTip(t *testing.T) {
 	}
 }
 
+func TestTheReplayHeaderNamesItsPartsAndTheTargetsWorkspace(t *testing.T) {
+	tests := []struct {
+		name       string
+		registered bool
+	}{
+		{name: "a target checkout that is a workspace is named by it", registered: true},
+		{name: "a target checkout that is no workspace names none", registered: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			landing(h, 2)
+			if tt.registered {
+				h.db.mu.Lock()
+				h.db.workspaces["ws-target"] = wsm.Workspace{ID: "ws-target", Dir: h.targetD}
+				h.db.mu.Unlock()
+			}
+
+			// Act.
+			admitted(t, h)
+
+			// Assert.
+			lines := h.feed.lastTabOfKind(TabRebasing).GetRebasing().GetLines()
+			if len(lines) != 1 || lines[0].GetReplaying() == nil {
+				t.Fatalf("rebasing lines = %v, want the one replay header", lines)
+			}
+			replaying := lines[0].GetReplaying()
+			if replaying.GetCommits() != 2 || replaying.GetBranch() != "feature" || replaying.GetTarget().GetRepositoryDir() != h.targetD {
+				t.Fatalf("replay header = %v, want 2 commits of feature onto %s", replaying, h.targetD)
+			}
+			if replaying.GetTip() == "" || replaying.GetTipShortSha() != short(replaying.GetTip()) {
+				t.Fatalf("replay header tip = %q (%q), want the tip and its short hash", replaying.GetTip(), replaying.GetTipShortSha())
+			}
+			workspace := replaying.GetTarget().GetWorkspace()
+			if tt.registered && (workspace.GetId() != "ws-target" || workspace.GetDir() != h.targetD) {
+				t.Fatalf("target workspace = %v, want ws-target at %s", workspace, h.targetD)
+			}
+			if !tt.registered && workspace != nil {
+				t.Fatalf("target workspace = %v, want none", workspace)
+			}
+		})
+	}
+}
+
+func TestAReplayWhoseTargetWorkspaceCannotBeReadFailsBeforeGitStarts(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 2)
+	h.db.mu.Lock()
+	h.db.byDirErr = errors.New("the state client is gone")
+	h.db.mu.Unlock()
+
+	// Act.
+	admitted(t, h)
+
+	// Assert: the merge failed on the read, the rebase never started, and the
+	// failure is recorded with its cause.
+	h.git.mu.Lock()
+	commands := slices.Clone(h.git.rebaseCommands)
+	h.git.mu.Unlock()
+	if len(commands) != 0 {
+		t.Fatalf("rebase commands = %v, want none after the failed read", commands)
+	}
+	if lines := h.feed.lastTabOfKind(TabRebasing).GetRebasing().GetLines(); slices.ContainsFunc(lines, func(l *frontendv1.FeedMergeRebaseLine) bool { return l.GetReplaying() != nil }) {
+		t.Fatalf("rebasing lines = %v, want no replay header for a replay that never began", lines)
+	}
+	logged := false
+	for _, rec := range h.logs.Records() {
+		for _, v := range rec.Context {
+			if text, ok := v.(string); ok && strings.Contains(text, "reading the workspace registered on the target's checkout") && strings.Contains(text, "the state client is gone") {
+				logged = true
+			}
+		}
+	}
+	if !logged {
+		t.Fatalf("no record carries the failed read with its cause: %+v", h.logs.Records())
+	}
+}
+
 func TestEveryCommitSubtabIsParentedToTheRebasingTab(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

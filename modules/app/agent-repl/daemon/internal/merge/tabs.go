@@ -56,7 +56,12 @@ func tabRef(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey) feedid.Ref {
 // first and draws nothing for round one, so the round travels as a number
 // rather than baked into the text.
 func tabLabel(kind string, round int) *frontendv1.FeedMergeTabLabel {
-	return &frontendv1.FeedMergeTabLabel{Text: tabWord(kind), Round: uint32(round)}
+	return textLabel(tabWord(kind), round)
+}
+
+// textLabel is a tab label of words, drawn verbatim, at round.
+func textLabel(text string, round int) *frontendv1.FeedMergeTabLabel {
+	return &frontendv1.FeedMergeTabLabel{Words: &frontendv1.FeedMergeTabLabel_Text{Text: text}, Round: uint32(round)}
 }
 
 // tabWord is the drawn word for a tab kind.
