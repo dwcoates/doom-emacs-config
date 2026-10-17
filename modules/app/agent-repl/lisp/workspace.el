@@ -20,7 +20,7 @@
 ;;   - `agent-repl--ws-rewrite-source-back-refs'
 ;;                                         rewrite renamed-source references
 ;;   - `agent-repl--ws-put'                set one plist key (logs stub-create)
-;;   - `agent-repl--ws-put-caller-trace'   diagnostic helper for `--ws-put'
+;;   - `agent-repl--ws-caller-trace'       diagnostic caller chain
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
 ;;   - `agent-repl--ws-forget'             hard-remove a tombstone (archived first)
 ;;   - `agent-repl--ws-live-p'             entry exists AND not tombstoned
@@ -358,26 +358,26 @@ arguments signal `user-error' before any workspace is mutated."
                      canonical-old canonical-new rewritten)
     rewritten))
 
-(defun agent-repl--ws-put-caller-trace ()
+(defun agent-repl--ws-caller-trace (skip)
   "Return a short caller chain string for diagnostic logging.
-Used by `agent-repl--ws-put' to identify the producer of stub-create
-calls (entries written without `:project-dir').  Filters
-`backtrace-frames' to function-call frames only (the `EVALD' slot is
-t for fully-evaluated function calls, nil for special-form / macro
-frames), so the trace is named-function symbols rather than
-`let'/`and'/`if' noise.  Returns at most 8 frames joined with ` <- `.
-Wrapped in `ignore-errors' at the call site so any failure here
-cannot break `--ws-put' itself."
+The one caller trace of the workspace registry's diagnostic records: a
+record that must name who asked for it (a `--ws-put' stub-create, a
+perspective kill) carries this string.  Filters `backtrace-frames' to
+function-call frames only (the `EVALD' slot is t for fully-evaluated
+function calls, nil for special-form / macro frames), so the trace is
+named-function symbols rather than `let'/`and'/`if' noise.  Frames whose
+function is in SKIP, the recording machinery itself, are left out, as are
+this function and `backtrace-frames'.  Returns at most 8 frames, innermost
+first, joined with ` <- ', or \"<no-trace>\"."
   (let ((frames (and (fboundp 'backtrace-frames) (backtrace-frames)))
+        (skipped (append '(agent-repl--ws-caller-trace backtrace-frames) skip))
         (collected nil))
     (dolist (frame frames)
       (let ((evald (nth 0 frame))
             (fn    (nth 1 frame)))
         (when (and evald
                    (symbolp fn)
-                   (not (memq fn '(agent-repl--ws-put-caller-trace
-                                   agent-repl--ws-put
-                                   backtrace-frames)))
+                   (not (memq fn skipped))
                    (< (length collected) 8))
           (push fn collected))))
     (if collected
@@ -424,7 +424,7 @@ REFUSED — see the body."
       (agent-repl--do-log
        nil
        "ws-put: REFUSED :project-dir on persp-mode pseudo-perspective ws=%s val=%S — a built-in perspective owns no workspace directory, and one that did would shadow the real workspace at that path in every dir-keyed lookup and every durable log sink. caller-trace=%s"
-       (list ws val (or (ignore-errors (agent-repl--ws-put-caller-trace))
+       (list ws val (or (ignore-errors (agent-repl--ws-caller-trace '(agent-repl--ws-put)))
                         "<trace-failed>")))
     (agent-repl--ws-put-1 ws key val)))
 
@@ -447,7 +447,7 @@ REFUSED — see the body."
     (when (eq key :project-dir)
       (agent-repl--log-note-workspace-registered ws))
     (when stub-create
-      (let ((trace (or (ignore-errors (agent-repl--ws-put-caller-trace))
+      (let ((trace (or (ignore-errors (agent-repl--ws-caller-trace '(agent-repl--ws-put)))
                        "<trace-failed>")))
         ;; Emitted with a nil workspace ON PURPOSE.  This record's whole
         ;; subject is that WS owns no `:project-dir', which is exactly the

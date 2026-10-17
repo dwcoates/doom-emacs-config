@@ -344,6 +344,53 @@ producer of the leak can be identified from the message alone."
         (should (stringp trace))
         (should (> (length trace) 0))))))
 
+;;;; ---- Tests: --ws-caller-trace ----
+
+(defun agent-repl-test-ws--trace-outer ()
+  "Call the traced inner function, so the trace names this one."
+  (agent-repl-test-ws--trace-inner))
+
+(defun agent-repl-test-ws--trace-inner ()
+  "Ask for a caller trace that skips this function as recording machinery."
+  (agent-repl--ws-caller-trace '(agent-repl-test-ws--trace-inner)))
+
+(defun agent-repl-test-ws--trace-deep (n)
+  "Recurse N more times, then return a caller trace skipping nothing."
+  (if (> n 0)
+      (agent-repl-test-ws--trace-deep (1- n))
+    (agent-repl--ws-caller-trace nil)))
+
+(ert-deftest agent-repl-test-ws-caller-trace-leaves-out-the-skipped-frames ()
+  "The trace starts at the first caller outside SKIP and the helper itself."
+  ;; Act
+  (let ((trace (agent-repl-test-ws--trace-outer)))
+    ;; Assert
+    (should (string-prefix-p "agent-repl-test-ws--trace-outer <- " trace))))
+
+(ert-deftest agent-repl-test-ws-caller-trace-names-at-most-eight-frames ()
+  "A deep stack is cut to its eight innermost named frames."
+  ;; Act
+  (let ((trace (agent-repl-test-ws--trace-deep 12)))
+    ;; Assert
+    (should (equal (split-string trace " <- ")
+                   (make-list 8 "agent-repl-test-ws--trace-deep")))))
+
+(ert-deftest agent-repl-test-ws-put-stub-trace-is-the-shared-caller-trace ()
+  "The stub-create record carries `agent-repl--ws-caller-trace', asked to skip `--ws-put'."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((log-calls nil) (skips nil))
+      (cl-letf (((symbol-function 'agent-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls)))
+                ((symbol-function 'agent-repl--ws-caller-trace)
+                 (lambda (skip) (push skip skips) "shared-trace")))
+        ;; Act
+        (agent-repl--ws-put "stub-ws" :priority "p1"))
+      ;; Assert
+      (should (equal skips '((agent-repl--ws-put))))
+      (should (equal "shared-trace" (car (last (nth 2 (car log-calls)))))))))
+
 ;;;; ---- Tests: ws-forget (hard removal of a tombstone) ----
 
 (ert-deftest agent-repl-test-ws-forget-removes-tombstoned-entry ()
