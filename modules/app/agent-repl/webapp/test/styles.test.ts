@@ -3539,7 +3539,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x14, 0x17, 0x1c]);
+    expect(response).toEqual([0x19, 0x18, 0x16]);
   });
 
   it("is what a response bubble paints", () => {
@@ -4132,7 +4132,7 @@ describe("the tool card's command grey", () => {
 
   it.each([
     ["light", "#4b5563"],
-    ["dark", "#9ca3af"],
+    ["dark", "#a8a29e"],
   ] as const)("defines the %s theme's command grey as %s", (theme, want) => {
     // Arrange
     const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
@@ -4869,7 +4869,7 @@ describe("washOf, a token's transparent wash", () => {
 describe("THEME_BLOCKS, the per-theme token table", () => {
   it.each([
     ["light", "#ffffff"],
-    ["dark", "#111318"],
+    ["dark", "#151413"],
   ] as const)("hands the %s theme its own token block", (theme, bg) => {
     // Arrange
     const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
