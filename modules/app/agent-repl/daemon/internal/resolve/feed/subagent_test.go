@@ -45,6 +45,21 @@ func (h *harness) spawnSubagent(unit string, created *conversationv1.AgentId, su
 	return h.bubbleRow(unit, created)
 }
 
+// spawnNamedSubagent spawns a subagent the spawn gave the addressable NAME.
+func (h *harness) spawnNamedSubagent(unit string, created *conversationv1.AgentId, name string) {
+	h.t.Helper()
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go and look", RequestedName: &name},
+				StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}},
+		}},
+	})
+}
+
 // bubbleRow finds a spawn's bubble row on the root feed.
 func (h *harness) bubbleRow(unit string, created *conversationv1.AgentId) *frontendv1.FeedRow {
 	h.t.Helper()
@@ -1185,7 +1200,7 @@ func TestACommissionNamesTheFeedThatSentIt(t *testing.T) {
 
 	// Assert: the recipient's address line, exactly as an agent prompt draws it.
 	row := h.commissionRow("spawn-1", created)
-	if got := row.GetAgentPrompt().GetAddress().GetText(); got != "from the main agent" {
+	if got := addressLine(row.GetAgentPrompt().GetAddress()); got != "← main the main agent" {
 		t.Fatalf("address = %q, want the sender's feed named", got)
 	}
 }

@@ -526,7 +526,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log: p.Surfaces,
 		// HISTORY IS READ ONLY ON A READER'S REQUEST, from the workspace's
 		// shim, through the fleet built below (forward.go).
-		History:        history,
+		History: history,
+		// A CROSS-SESSION MESSAGE'S OTHER END is read through the same fleet,
+		// and named by the workspace's own display name.
+		PeerDeliveries: history,
+		VendorTasks:    history,
+		WorkspaceName: func(id ids.WorkspaceID) (string, error) {
+			ws, err := p.DB.Workspace(context.Background(), id)
+			return ws.Name, err
+		},
 		Stalls:         stalls,
 		WorkspaceDir:   workspaceDir,
 		Painter:        painter,

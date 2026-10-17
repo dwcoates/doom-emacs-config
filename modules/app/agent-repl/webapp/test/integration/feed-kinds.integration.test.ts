@@ -326,11 +326,12 @@ describe("prompts", () => {
     expect(row.dataset.rowKind).toBe("agentPrompt");
   });
 
-  it("draws the agent prompt's address verbatim", async () => {
+  it("draws the agent prompt's header as the other end's name, then the arrow", async () => {
     // Arrange / Act
     const row = await drawRow(agentPromptRow("please review"));
     // Assert
-    expect(row.textContent).toContain("to reviewer");
+    const header = row.querySelector(".prompt-address");
+    expect([header?.textContent, header?.lastElementChild?.getAttribute("data-direction")]).toEqual(["reviewer", "out"]);
   });
 });
 
@@ -965,11 +966,12 @@ describe("a live detached shell head", () => {
 });
 
 describe("a peer message", () => {
-  it("draws the sender label the daemon composed, verbatim", async () => {
+  it("draws the sender's name the daemon resolved, after the left arrow", async () => {
     // Arrange / Act
     const row = await drawRow(peerMessageRow());
     // Assert
-    expect(row.querySelector(".peer-label")?.textContent).toBe("agent Explore");
+    const header = row.querySelector(".peer-label");
+    expect([header?.textContent, header?.firstElementChild?.getAttribute("data-direction")]).toEqual(["review-bot", "in"]);
   });
 
   it("is not a prompt: it wears the peer bubble, never the user's", async () => {

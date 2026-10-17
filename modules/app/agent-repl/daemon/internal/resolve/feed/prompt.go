@@ -161,14 +161,11 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		senderAddr = feedid.Feed{Root: true}
 	}
 
-	recipientLabel := feedLabel(s, subFeedKey)
-	senderLabel := feedLabel(s, senderFeedKey)
-
 	outgoing := &frontendv1.FeedRow{
 		Id:   r.rowID(s.id, senderAddr, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue(), Sub: "out"}),
 		Turn: turn,
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{Text: "→ " + recipientLabel},
+			Address: sentToAgent(r.agentNamed(s, recipient.GetValue())),
 			Body:    &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(blocks)},
 		}},
 	}
@@ -176,7 +173,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		Id:   r.rowID(s.id, recipientFeed, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue(), Sub: "in"}),
 		Turn: turn,
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{Text: "from " + senderLabel},
+			Address: receivedFromAgent(r.agentOfFeed(s, senderFeedKey)),
 			Body:    &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(blocks)},
 		}},
 	}
@@ -372,15 +369,6 @@ func SaidText(text string) *conversationv1.UserSaid {
 			}},
 		},
 	}
-}
-
-// feedLabel names a feed for an address line: a sub-feed by its bubble's
-// label, the root by the main thread.
-func feedLabel(s *wsState, key string) string {
-	if head, ok := s.subFeeds[key]; ok && head.label != "" {
-		return head.label
-	}
-	return "the main agent"
 }
 
 // AuthorLabel names WHO a prompt row is drawn as being from. The origin is the

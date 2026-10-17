@@ -280,6 +280,32 @@ export function validateReadTranscriptsRequest(_request: shimv1.ReadTranscriptsR
   // Intentionally empty: an empty message has no illegal shape.
 }
 
+/** `shim.v1.ResolvePeerDeliveryRequest` — one delivery id, never empty. */
+export function validateResolvePeerDeliveryRequest(request: shimv1.ResolvePeerDeliveryRequest): void {
+  try {
+    if ((request.deliveryId?.value ?? "") === "") {
+      throw invalidArgument("resolve_peer_delivery.delivery_id is unset or empty; a delivery id is never the empty string");
+    }
+  } catch (err) {
+    refuse("ResolvePeerDelivery", err);
+  }
+}
+
+/** `shim.v1.ResolveVendorTaskRequest` — a session, and one task id, neither empty. */
+export function validateResolveVendorTaskRequest(request: shimv1.ResolveVendorTaskRequest): void {
+  try {
+    if (request.session === undefined) {
+      throw invalidArgument("resolve_vendor_task.session is unset; the store answers within one session's lineage");
+    }
+    validateAgentId(request.session, "resolve_vendor_task.session");
+    if (request.vendorTaskId === "") {
+      throw invalidArgument("resolve_vendor_task.vendor_task_id is empty; a task id is never the empty string");
+    }
+  } catch (err) {
+    refuse("ResolveVendorTask", err);
+  }
+}
+
 /** `shim.v1.ReadHistoryRequest` — whose history, and from where. */
 export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): void {
   try {

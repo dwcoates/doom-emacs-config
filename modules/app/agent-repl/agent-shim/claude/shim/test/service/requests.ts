@@ -153,6 +153,19 @@ export function gatherTitleDigestRequest(): shimv1.GatherTitleDigestRequest {
   return create(shimv1.GatherTitleDigestRequestSchema, {});
 }
 
+export function resolvePeerDeliveryRequest(): shimv1.ResolvePeerDeliveryRequest {
+  return create(shimv1.ResolvePeerDeliveryRequestSchema, {
+    deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: "m-1" }),
+  });
+}
+
+export function resolveVendorTaskRequest(): shimv1.ResolveVendorTaskRequest {
+  return create(shimv1.ResolveVendorTaskRequestSchema, {
+    session: create(conversationv1.AgentIdSchema, { value: "agent-main" }),
+    vendorTaskId: "a47cd5e35c91902a0",
+  });
+}
+
 export function getWorkflowRequest(): shimv1.GetWorkflowRequest {
   return create(shimv1.GetWorkflowRequestSchema, {
     work: create(conversationv1.DetachedWorkIdSchema, { value: "w1" }),

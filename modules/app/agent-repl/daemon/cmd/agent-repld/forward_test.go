@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -78,6 +79,68 @@ func (f fixedHistory) ReadHistory(context.Context, ids.WorkspaceID, *conversatio
 
 func (f fixedHistory) ReadInherited(context.Context, ids.WorkspaceID, *conversationv1.AgentId, *conversationv1.HistoryPointer, int64) (*conversationv1.HistoryPage, error) {
 	return f.page, nil
+}
+
+func (f fixedHistory) ResolvePeerDelivery(context.Context, ids.WorkspaceID, string) (feed.PeerDeliveryEnds, error) {
+	return feed.PeerDeliveryEnds{Sender: "session-a", Recipient: "session-b"}, nil
+}
+
+func (f fixedHistory) ResolveVendorTask(context.Context, ids.WorkspaceID, string, string) (feed.VendorTaskAgent, error) {
+	return feed.VendorTaskAgent{Agent: "toolu_spawn", RequestedName: "vetter"}, nil
+}
+
+func TestHistoryForwarderResolvesAVendorTaskThroughTheBoundFleet(t *testing.T) {
+	// Arrange.
+	var f historyForwarder
+	f.bind(fixedHistory{})
+
+	// Act.
+	got, err := f.ResolveVendorTask(context.Background(), "w1", "agent-main", "a47cd")
+
+	// Assert.
+	if err != nil || got != (feed.VendorTaskAgent{Agent: "toolu_spawn", RequestedName: "vetter"}) {
+		t.Fatalf("ResolveVendorTask = %+v, %v; want the fleet's agent", got, err)
+	}
+}
+
+func TestHistoryForwarderResolvingAVendorTaskBeforeTheFleetIsAnError(t *testing.T) {
+	// Arrange.
+	var f historyForwarder
+
+	// Act.
+	_, err := f.ResolveVendorTask(context.Background(), "w1", "agent-main", "a47cd")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResolveVendorTask before the fleet is bound = nil, want the boot-order error")
+	}
+}
+
+func TestHistoryForwarderResolvesAPeerDeliveryThroughTheBoundFleet(t *testing.T) {
+	// Arrange.
+	var f historyForwarder
+	f.bind(fixedHistory{})
+
+	// Act.
+	got, err := f.ResolvePeerDelivery(context.Background(), "w1", "m-1")
+
+	// Assert.
+	if err != nil || got != (feed.PeerDeliveryEnds{Sender: "session-a", Recipient: "session-b"}) {
+		t.Fatalf("ResolvePeerDelivery = %+v, %v; want the fleet's ends", got, err)
+	}
+}
+
+func TestHistoryForwarderResolvingAPeerDeliveryBeforeTheFleetIsAnError(t *testing.T) {
+	// Arrange.
+	var f historyForwarder
+
+	// Act.
+	_, err := f.ResolvePeerDelivery(context.Background(), "w1", "m-1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResolvePeerDelivery before the fleet is bound = nil, want the boot-order error")
+	}
 }
 
 func TestHistoryForwarderReadsThroughTheBoundFleet(t *testing.T) {

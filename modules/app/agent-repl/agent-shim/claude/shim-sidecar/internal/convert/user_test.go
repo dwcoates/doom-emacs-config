@@ -3,7 +3,11 @@ package convert
 // user_test.go — R15 holds for agent-repl's own prompts (any sdk-* entrypoint, withheld) and
 // is crossed for adopted external prompts (any other entrypoint, emitted).
 
-import "testing"
+import (
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+)
 
 func TestAgentReplsOwnSdkCliPromptIsStillWithheld(t *testing.T) {
 	// Arrange. R15 regression lock: a prompt agent-repl submitted through its
@@ -305,6 +309,79 @@ func TestAPeerMessageWithoutHandbackStatesTheInterSessionKind(t *testing.T) {
 	// Assert.
 	if peerLineOf(entries[0]).GetInterSession() == nil {
 		t.Fatalf("kind = %v, want inter_session", peerLineOf(entries[0]).GetKind())
+	}
+}
+
+// WHO SENT an inter-session message is stated as the vendor states it, each
+// fact UNSET when the vendor states none.
+func TestAnInterSessionMessageStatesItsSender(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		check func(*conversationv1.PeerMessageInterSession) string
+		want  string
+	}{
+		{name: "the sender's session name, trimmed", extra: `,"name":" agent-repl-test-slimming-54 "`,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return i.GetSenderSessionName().GetText() }, want: "agent-repl-test-slimming-54"},
+		{name: "no session name when the vendor states none", extra: ``,
+			check: func(i *conversationv1.PeerMessageInterSession) string {
+				return presence(i.GetSenderSessionName() != nil)
+			}, want: "unset"},
+		{name: "the delivery id", extra: `,"msg_id":"e0aced60"`,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return i.GetDeliveryId().GetValue() }, want: "e0aced60"},
+		{name: "no delivery id when the vendor states none", extra: ``,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return presence(i.GetDeliveryId() != nil) }, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := newTestConverter(t)
+
+			// Act
+			entries := convertLines(t, c, interSessionLine("u1", tt.extra))
+
+			// Assert
+			if got := tt.check(peerLineOf(entries[0]).GetInterSession()); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// presence spells whether an optional field is set, for a table's one column.
+func presence(set bool) string {
+	if set {
+		return "set"
+	}
+	return "unset"
+}
+
+func TestAPeerMessageStatingASenderTaskIsFromAnAgentOfThisSession(t *testing.T) {
+	// Arrange. origin.senderTaskId marks a sender of this same session.
+	c := newTestConverter(t)
+	line := `{"type":"user","uuid":"u1","isSidechain":false,"isMeta":true,"promptSource":"system",` +
+		`"origin":{"kind":"peer","from":"a47cd5e35c91902a0","senderTaskId":"a47cd5e35c91902a0","name":"opus-medium"},"timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":"report"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, line)
+
+	// Assert.
+	if got := peerLineOf(entries[0]).GetInSession().GetSenderTask().GetVendorTaskId(); got != "a47cd5e35c91902a0" {
+		t.Fatalf("in-session sender task = %q, want the vendor's senderTaskId", got)
+	}
+}
+
+func TestAHandbackStatingASenderTaskStaysAHandback(t *testing.T) {
+	// Arrange. A hand-back states its sender's task id too.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "child", "done", "envelope", true))
+
+	// Assert.
+	if peerLineOf(entries[0]).GetSubagentHandback() == nil {
+		t.Fatalf("kind = %v, want subagent_handback", peerLineOf(entries[0]).GetKind())
 	}
 }
 

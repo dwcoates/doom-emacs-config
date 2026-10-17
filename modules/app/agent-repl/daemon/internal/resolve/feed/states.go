@@ -131,7 +131,27 @@ type unitState struct {
 	// address line back from the recipient's own bubble label to the raw
 	// string the caller typed.
 	sendResolved *conversationv1.AgentId
+	// sendReached is WHICH KIND of recipient the send settled on, kept for the
+	// same reason: a replayed start never restates it, and a settled send must
+	// never redraw as unclassified.
+	sendReached sendRecipientKind
+	// sendDeliveryID is the delivery id of a send that reached another Claude
+	// session, the key its header names the recipient workspace by
+	// (peerdelivery.go). Empty for every other send.
+	sendDeliveryID string
 }
+
+// sendRecipientKind is which kind of recipient a send settled on.
+type sendRecipientKind int
+
+const (
+	// sendUnclassified: the send has not said (unsettled, or refused).
+	sendUnclassified sendRecipientKind = iota
+	// sendInSession: an agent of this session.
+	sendInSession
+	// sendPeerSession: another Claude session.
+	sendPeerSession
+)
 
 // unit resolves a unit's accumulation, creating it on first sight.
 func (s *wsState) unit(id string) *unitState {
@@ -420,6 +440,11 @@ type subagentState struct {
 	carrier string
 	// created is the agent the spawn produced — the sub-feed's address.
 	created *conversationv1.AgentId
+	// requestedName is the addressable name the spawn gave the agent
+	// (AgentSubagentPrompt.requested_name), empty when it was spawned unnamed.
+	// An agent-to-agent header names the agent by it, or by its identifier when
+	// there is none (agentaddress.go).
+	requestedName string
 	// bubble is the head as last drawn.
 	bubble *frontendv1.FeedSubagent
 	// firstObservedMs is the daemon-clock instant this bubble was FIRST

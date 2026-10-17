@@ -270,12 +270,6 @@
      because the token is the vocabulary other surfaces are written in. Reads
      clearly against the blue --user fill in this theme; the dark theme lifts
      it the same way --final-response lifts for its own dark fill. */
-  /* THE AGENT-TO-AGENT PROMPT'S BORDER (owner ruling, 2026-09-23): the one
-     amber every prompt one agent addresses to another wears — the
-     agent-addressed prompt row (the lead's or any agent's send, and its
-     delivered copy) and the peer message alike. Its own token rather than
-     --async's, which means background work; the dark theme lifts it. */
-  --agent-prompt-border: #f59e0b;
   /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
      datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
@@ -536,8 +530,6 @@
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
-    /* Brighter amber for the dark theme, as the other state borders lift. */
-    --agent-prompt-border: #fbbf24;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
     /* Brighter token yellow for the dark theme, so the figure reads on the
@@ -1837,6 +1829,14 @@ pre {
 .bubble[data-variant="held"] {
   --bubble-bg: var(--assistant);
 }
+/* AN AGENT-TO-AGENT BUBBLE takes the final response's fill (owner request,
+   2026-10-17): the RESPONSE bubble's own token, `--assistant`, exactly, as the
+   held prompt does. The agent-addressed prompt and the peer message are
+   prompt-role bubbles, so this is the one place their fill leaves the blue. */
+.bubble[data-variant="agent"],
+.bubble[data-variant="peer"] {
+  --bubble-bg: var(--assistant);
+}
 /* THE VERTICAL PADDING LADDER: the gap between a bubble's top and bottom edge
    and its content, as a share of the base. Vertical only: the left and right
    insets and the gaps between rows never read it. Kinds not named here (the
@@ -1994,18 +1994,10 @@ pre {
    The USER's own prompt wears NO border, ever (owner ruling, 2026-09-27,
    retiring the light purple): only an agent-to-agent prompt is bordered. */
 /* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
-   lead or any agent to another, on either end) and the peer message — is the
-   same blue prompt bubble in the one amber.
-   HALF AS THICK (owner ruling, 2026-10-08): 0.5px, a real one-device-pixel
-   line on a Retina display rather than the two it rounded up to at 1px, so
-   it visibly reads thinner. Never reflows the feed beyond that half pixel:
-   the border-color override below (the expanded response's eggshell)
-   recolors this same width and never restate it, so
-   there is no second width anywhere to drift out of step with this one. */
-.bubble[data-role="prompt"][data-variant="agent"],
-.bubble[data-role="prompt"][data-variant="peer"] {
-  border: 0.5px solid var(--agent-prompt-border);
-}
+   lead or any agent to another, on either end, or to another Claude session)
+   and the peer message — wears NO border (owner spec, 2026-10-17): its header
+   alone marks it, the other end's name beside an arrow icon whose side and
+   direction say which way it went (`.peer-arrow`). */
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
    animations whenever `document.visibilityState === "hidden"` — which the
@@ -2041,19 +2033,42 @@ html[data-page-unshown] *::after {
   from { background-position-x: 200%; }
   to { background-position-x: -100%; }
 }
-/* THE PEER MESSAGE'S HEADER STRIP: the sender label, the whole of its
-   collapsed face (its cap is zero lines, src/feed/rows/peer-message.ts). One
-   line, ellipsized, its right padding the room a has-more chevron once took
-   (the chevron is gone, owner ruling 2026-09-23; the padding is kept so the
-   label does not move). */
+/* THE PEER MESSAGE'S HEADER STRIP: the left arrow and the sender's name, the
+   whole of its collapsed face (its cap is zero lines,
+   src/feed/rows/peer-message.ts). One line, the name ellipsized, its right
+   padding the room a has-more chevron once took (the chevron is gone, owner
+   ruling 2026-09-23; the padding is kept so the header does not move). */
 .peer-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
   font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.85;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   padding-right: 1.5em;
+}
+/* An agent-to-agent header's name: one line, ellipsized when the strip is too
+   narrow for it, so the arrow beside it always shows. */
+.peer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* THE ARROW of an agent-to-agent header (src/feed/rows/peer-arrow.ts): the
+   header's own font size (1em) and color (`currentColor`), so it reads as part
+   of the line it sits in, whichever header that is. */
+.peer-arrow {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 /* The bubble's top-right corner: a flex column stacking a final response's
    stats (duration, input tokens) above its timestamp. Smaller and quieter
@@ -5569,6 +5584,14 @@ ar-button.outcome-marker-pill {
 .prompt-author {
   font-size: 0.7rem;
   color: var(--muted);
+}
+/* An agent prompt's header: the other end's name and its arrow, in one line. */
+.prompt-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  min-width: 0;
+  max-width: 100%;
 }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
 /* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble

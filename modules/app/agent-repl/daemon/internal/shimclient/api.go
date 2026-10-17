@@ -182,6 +182,13 @@ type Client interface {
 	DetachForeground(ctx context.Context, req *shimv1.DetachForegroundRequest) (*shimv1.DetachForegroundResponse, error)
 	// ReadHistory pages an agent's history without opening a watch.
 	ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error)
+	// ResolvePeerDelivery answers which sessions hold the two ends of one
+	// cross-session message, read from the host's one store; any running shim
+	// answers for any session.
+	ResolvePeerDelivery(ctx context.Context, req *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error)
+	// ResolveVendorTask answers which agent of a session one vendor task id
+	// names, and the name its spawn gave it, from the store's pairing.
+	ResolveVendorTask(ctx context.Context, req *shimv1.ResolveVendorTaskRequest) (*shimv1.ResolveVendorTaskResponse, error)
 	// ReadTranscripts lists every vendor conversation filed under the shim's
 	// own working directory, read from the transcripts' own lines. It starts
 	// no query and makes no model call.

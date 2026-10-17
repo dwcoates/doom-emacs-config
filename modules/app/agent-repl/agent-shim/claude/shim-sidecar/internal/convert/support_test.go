@@ -160,17 +160,29 @@ func peerLineOf(e *storev1.StoreEntry) *conversationv1.PeerMessage {
 // whose origin.kind is "peer". `from` is the sender; `body`, when non-empty, is
 // the vendor-stated origin.body (else the record text is the body). `handback`
 // marks a subagent hand-back, which is a peer message all the same.
+//
+// THE ORIGIN IS THE OBSERVED SHAPE: another session's message states `from`
+// alone, while a hand-back also states the returning subagent's
+// `senderTaskId`, as every hand-back on the host's transcripts does.
 func peerMessageLine(uuid, from, body, text string, handback bool) string {
-	origin := `"kind":"peer","from":` + quote(from) + `,"senderTaskId":` + quote(from)
+	origin := `"kind":"peer","from":` + quote(from)
 	if body != "" {
 		origin += `,"body":` + quote(body)
 	}
 	if handback {
-		origin += `,"handback":true`
+		origin += `,"senderTaskId":` + quote(from) + `,"handback":true`
 	}
 	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"isMeta":true,"promptSource":"system",` +
 		`"origin":{` + origin + `},"timestamp":"` + ts1 +
 		`","message":{"role":"user","content":[{"type":"text","text":` + quote(text) + `}]}}`
+}
+
+// interSessionLine builds an inter-session peer record carrying extra origin
+// fields (verifiedPeerPid, name, msg_id) as raw JSON members, ", "-prefixed.
+func interSessionLine(uuid, extraOrigin string) string {
+	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"isMeta":true,"promptSource":"system",` +
+		`"origin":{"kind":"peer","from":"uds:/tmp/cc-socks/5398.sock"` + extraOrigin + `},"timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":"envelope"}]}}`
 }
 
 // assistantWith builds an assistant line carrying the given content blocks.

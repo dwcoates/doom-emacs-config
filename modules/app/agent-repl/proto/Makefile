@@ -65,6 +65,9 @@ COMPONENT_DIR ?= src/frontend/v1
 # The tree I7 scans for forbidden imports. Overridable so the codegen-gate
 # self-test can point it at its own fixture root.
 ISOLATION_ROOT ?= ..
+# The tree `go` and `ts` emit into. Overridable so check-generated can
+# regenerate into a scratch tree and never write the committed one.
+GEN ?= gen
 
 .PHONY: all go ts lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate coverage clean
 
@@ -78,18 +81,18 @@ all: go ts
 codegen-gate: conversation-isolation
 
 go: codegen-gate
-	mkdir -p gen/go
-	protoc -I src --go_out=gen/go --go_opt=paths=source_relative \
-	  --connect-go_out=gen/go --connect-go_opt=paths=source_relative $(PROTOS)
+	mkdir -p $(GEN)/go
+	protoc -I src --go_out=$(GEN)/go --go_opt=paths=source_relative \
+	  --connect-go_out=$(GEN)/go --connect-go_opt=paths=source_relative $(PROTOS)
 
 node_modules/.package-lock.json: package.json package-lock.json
 	npm ci
 
 ts: codegen-gate node_modules/.package-lock.json
-	mkdir -p gen/ts
+	mkdir -p $(GEN)/ts
 	protoc -I src \
 	  --plugin=protoc-gen-es=$(PROTOC_GEN_ES) \
-	  --es_out=gen/ts --es_opt=target=ts $(PROTOS)
+	  --es_out=$(GEN)/ts --es_opt=target=ts $(PROTOS)
 
 # Syntax-check every proto without emitting code, then enforce the structural
 # invariants the syntax check cannot see.
@@ -137,16 +140,23 @@ conversation-isolation:
 test-check-conversation-isolation:
 	$(BACKGROUND) ./scripts/test-check-conversation-isolation.sh
 
-# Regenerate and compare with the exact pre-generation bytes. Comparing with
-# HEAD rejects a correct uncommitted schema edit, which makes the pre-commit
-# validation gate impossible to satisfy.
+# Regenerate into a SCRATCH tree and compare it with gen/ as it stands on disk.
+# Comparing with HEAD rejects a correct uncommitted schema edit, which makes the
+# pre-commit validation gate impossible to satisfy.
+#
+# GEN/ IS NEVER WRITTEN. This target runs inside bin/test-all.sh beside units
+# that read gen/ by modification time, and the e2e Emacs layer refuses a webapp
+# dist older than any binding. A regeneration in place rewrote every binding's
+# mtime mid-run with identical bytes, so that layer refused a dist built moments
+# earlier. A binding gen/ holds that no schema produces now differs too.
+# gen/go's go.mod and go.sum are the module's own, written by hand rather than
+# by protoc, so the scratch tree never has them.
 check-generated:
 	test -d gen
-	@before="$$(mktemp -d "$${TMPDIR:-/tmp}/agent-repl-proto-gen.XXXXXX")"; \
-	trap 'rm -rf "$$before"' EXIT; \
-	cp -R gen/. "$$before"/; \
-	$(MAKE) all; \
-	diff -ru "$$before" gen
+	@fresh="$$(mktemp -d "$${TMPDIR:-/tmp}/agent-repl-proto-gen.XXXXXX")"; \
+	trap 'rm -rf "$$fresh"' EXIT; \
+	$(MAKE) all GEN="$$fresh" && \
+	diff -ru --exclude=go.mod --exclude=go.sum gen "$$fresh"
 
 test-check-generated:
 	$(BACKGROUND) ./scripts/test-check-generated.sh

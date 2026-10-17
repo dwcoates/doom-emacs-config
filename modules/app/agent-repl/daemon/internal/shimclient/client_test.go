@@ -355,6 +355,50 @@ func TestGatherTitleDigestReachesTheShim(t *testing.T) {
 	}
 }
 
+// TestResolvePeerDeliveryReachesTheShim asserts the delivery lookup dials the
+// shim like every other unary verb.
+func TestResolvePeerDeliveryReachesTheShim(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.ResolvePeerDelivery(context.Background(), &shimv1.ResolvePeerDeliveryRequest{
+		DeliveryId: &conversationv1.PeerDeliveryId{Value: "m-1"},
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResolvePeerDelivery() error = %v", err)
+	}
+	if got := f.count("ResolvePeerDelivery"); got != 1 {
+		t.Fatalf("ResolvePeerDelivery calls = %d, want 1", got)
+	}
+}
+
+// TestResolveVendorTaskReachesTheShim asserts the task lookup dials the shim
+// like every other unary verb.
+func TestResolveVendorTaskReachesTheShim(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.ResolveVendorTask(context.Background(), &shimv1.ResolveVendorTaskRequest{
+		Session: &conversationv1.AgentId{Value: "agent-main"}, VendorTaskId: "a47cd",
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResolveVendorTask() error = %v", err)
+	}
+	if got := f.count("ResolveVendorTask"); got != 1 {
+		t.Fatalf("ResolveVendorTask calls = %d, want 1", got)
+	}
+}
+
 // TestInvalidRequestNeverReachesTheShim asserts base-function validation
 // refuses before the wire.
 func TestInvalidRequestNeverReachesTheShim(t *testing.T) {

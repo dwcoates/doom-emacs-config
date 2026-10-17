@@ -1817,6 +1817,107 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHICH AGENT of a session one vendor task id names, from the store's locator
+   * pairing, with the name its spawn gave it. An unpaired task id is an answer
+   * (its agent is not on record yet); only a store that could not answer is a
+   * failure, recorded here, at the read that owns it.
+   */
+  async function resolveVendorTaskHere(
+    request: shimv1.ResolveVendorTaskRequest,
+  ): Promise<shimv1.ResolveVendorTaskResponse> {
+    const session = request.session ?? create(conversationv1.AgentIdSchema, {});
+    const answer = await deps.persistence.agentByVendorTask(session, request.vendorTaskId);
+    switch (answer.kind) {
+      case "found": {
+        const requestedName = answer.commission?.requestedName;
+        LOGGER.debug(
+          { task_id: request.vendorTaskId, agent: answer.agent.value, named: requestedName !== undefined },
+          "a vendor task id was resolved to its agent",
+        );
+        return create(shimv1.ResolveVendorTaskResponseSchema, {
+          result: {
+            case: "success",
+            value: create(shimv1.ResolveVendorTaskSuccessSchema, {
+              agent: {
+                case: "found",
+                value: create(shimv1.ResolveVendorTaskAgentSchema, {
+                  agent: answer.agent,
+                  ...(requestedName === undefined || requestedName === "" ? {} : { requestedName }),
+                }),
+              },
+            }),
+          },
+        });
+      }
+      case "not_found":
+        LOGGER.debug({ task_id: request.vendorTaskId }, "no agent of the session is paired with the vendor task id");
+        return create(shimv1.ResolveVendorTaskResponseSchema, {
+          result: {
+            case: "success",
+            value: create(shimv1.ResolveVendorTaskSuccessSchema, {
+              agent: { case: "notRecorded", value: create(shimv1.ResolveVendorTaskNotRecordedSchema, {}) },
+            }),
+          },
+        });
+      case "failed":
+        LOGGER.error(
+          { task_id: request.vendorTaskId, detail: answer.detail },
+          "the store could not say which agent a vendor task id names",
+        );
+        return create(shimv1.ResolveVendorTaskResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(shimv1.ResolveVendorTaskFailureSchema, {
+              detail: answer.detail,
+              kind: { case: "storeUnavailable", value: create(shimv1.ResolveVendorTaskStoreUnavailableSchema, {}) },
+            }),
+          },
+        });
+    }
+  }
+
+  /**
+   * WHICH SESSIONS hold the two ends of one cross-session delivery, from the
+   * host's store. An end no recorded session holds is an answer (an outside
+   * session, or a record not written yet); only a store that could not answer
+   * is a failure, recorded here, at the read that owns it.
+   */
+  async function resolvePeerDeliveryHere(
+    request: shimv1.ResolvePeerDeliveryRequest,
+  ): Promise<shimv1.ResolvePeerDeliveryResponse> {
+    const deliveryId = request.deliveryId?.value ?? "";
+    const answer = await deps.persistence.peerDelivery(deliveryId);
+    if (answer.kind === "failed") {
+      LOGGER.error(
+        { delivery_id: deliveryId, detail: answer.detail },
+        "the store could not say which sessions hold a peer delivery",
+      );
+      return create(shimv1.ResolvePeerDeliveryResponseSchema, {
+        result: {
+          case: "failure",
+          value: create(shimv1.ResolvePeerDeliveryFailureSchema, {
+            detail: answer.detail,
+            kind: { case: "storeUnavailable", value: create(shimv1.ResolvePeerDeliveryStoreUnavailableSchema, {}) },
+          }),
+        },
+      });
+    }
+    LOGGER.debug(
+      { delivery_id: deliveryId, sender: answer.sender?.value ?? "not recorded", recipient: answer.recipient?.value ?? "not recorded" },
+      "a peer delivery was resolved to its ends",
+    );
+    return create(shimv1.ResolvePeerDeliveryResponseSchema, {
+      result: {
+        case: "success",
+        value: create(shimv1.ResolvePeerDeliverySuccessSchema, {
+          sender: deliveryEndOf(answer.sender),
+          recipient: deliveryEndOf(answer.recipient),
+        }),
+      },
+    });
+  }
+
+  /**
    * Every conversation filed under this shim's working directory.
    *
    * IT ANSWERS THE DIRECTORY, NOT THE SESSION, so a shim with no identity yet
@@ -7354,6 +7455,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     detachForeground: afterRestart((request: shimv1.DetachForegroundRequest) => turns.detachForeground(request)),
     readHistory: (request) => turns.readHistory(request),
     readTranscripts: () => Promise.resolve(readTranscriptsHere()),
+    resolvePeerDelivery: (request) => resolvePeerDeliveryHere(request),
+    resolveVendorTask: (request) => resolveVendorTaskHere(request),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     getForkPoint: () => Promise.resolve(getForkPoint()),
     forkSession: afterRestart(forkSession),
@@ -7365,6 +7468,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     },
   };
   return engine;
+}
+
+/** One end of a peer delivery on the wire: its session, or not recorded. */
+function deliveryEndOf(session: conversationv1.AgentId | undefined): shimv1.ResolvePeerDeliveryEnd {
+  return create(shimv1.ResolvePeerDeliveryEndSchema, {
+    end:
+      session === undefined
+        ? { case: "notRecorded", value: create(shimv1.ResolvePeerDeliveryNotRecordedSchema, {}) }
+        : { case: "session", value: session },
+  });
 }
 
 /**

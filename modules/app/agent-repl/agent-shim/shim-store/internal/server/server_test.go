@@ -192,6 +192,13 @@ type fakeStore struct {
 	detachedWorkFor   string
 	detachedWorkAsked bool
 
+	// the peer delivery lookup's answer, and what the last lookup asked for
+	peerSender    string
+	peerRecipient string
+	peerErr       error
+	peerFor       string
+	peerAsked     bool
+
 	settled      []db.SettledRun
 	settledErr   error
 	settledFor   []string
@@ -340,6 +347,14 @@ func (f *fakeStore) DetachedWorkByUnit(_ context.Context, unit string) (*storev1
 	f.detachedWorkAsked = true
 	f.detachedWorkFor = unit
 	return f.detachedWork, f.detachedWork != nil, f.detachedWorkErr
+}
+
+func (f *fakeStore) PeerDelivery(_ context.Context, deliveryID string) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.peerAsked = true
+	f.peerFor = deliveryID
+	return f.peerSender, f.peerRecipient, f.peerErr
 }
 
 func (f *fakeStore) RunSettlements(_ context.Context, runIDs []string) ([]db.SettledRun, error) {
@@ -2350,6 +2365,133 @@ func TestGetRunSettlementsRefusesAnIncompleteRequest(t *testing.T) {
 // ---- GetDetachedWork ----
 
 // detachedWorkOf is a lookup naming one unit.
+func peerDeliveryOf(delivery string) *storev1.GetPeerDeliveryRequest {
+	return &storev1.GetPeerDeliveryRequest{DeliveryId: &conversationv1.PeerDeliveryId{Value: delivery}}
+}
+
+func TestGetPeerDeliveryServesBothEndsTheStoreNames(t *testing.T) {
+	tests := []struct {
+		name string
+		end  func(*storev1.GetPeerDeliverySuccess) *storev1.GetPeerDeliveryEnd
+		want string
+	}{
+		{name: "the sender", end: (*storev1.GetPeerDeliverySuccess).GetSender, want: "session-a"},
+		{name: "the recipient", end: (*storev1.GetPeerDeliverySuccess).GetRecipient, want: "session-b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			store.peerSender, store.peerRecipient = "session-a", "session-b"
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1")))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetPeerDelivery = %v, want nil", err)
+			}
+			if got := tt.end(res.Msg.GetSuccess()).GetSession().GetValue(); got != tt.want {
+				t.Fatalf("session = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetPeerDeliveryAnswersAnEndNoSessionHoldsAsNotRecorded(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.peerSender = "session-a"
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetPeerDelivery = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess().GetRecipient().GetNotRecorded() == nil {
+		t.Fatalf("recipient = %v, want not_recorded", res.Msg.GetSuccess().GetRecipient())
+	}
+}
+
+func TestGetPeerDeliveryAsksTheStoreForTheDeliveryVerbatim(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1"))); err != nil {
+		t.Fatalf("GetPeerDelivery = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.peerFor != "m-1" {
+		t.Fatalf("store read %q, want m-1", store.peerFor)
+	}
+}
+
+func TestGetPeerDeliveryMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.peerErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetPeerDelivery = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestGetPeerDeliveryRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *storev1.GetPeerDeliveryRequest
+	}{
+		{name: "delivery unset", request: &storev1.GetPeerDeliveryRequest{}},
+		{name: "delivery with an empty value", request: peerDeliveryOf("")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(test.request))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetPeerDelivery = %v, want nil", err)
+			}
+			invalid := res.Msg.GetFailure().GetInvalidRequest()
+			if invalid == nil || invalid.GetField() != "delivery_id" {
+				t.Fatalf("result = %v, want invalid_request naming delivery_id", res.Msg.GetResult())
+			}
+			rec, ok := findRecord(t, h.logs, "store.rpc.get-peer-delivery", "warn")
+			if !ok || rec.Context["refusal_site"] != SiteDeliveryEmpty {
+				t.Fatalf("records = %+v, want one warn refusal at site %q", records(t, h.logs), SiteDeliveryEmpty)
+			}
+			store.mu.Lock()
+			asked := store.peerAsked
+			store.mu.Unlock()
+			if asked {
+				t.Fatalf("the store was read for a request the server refuses")
+			}
+		})
+	}
+}
+
 func detachedWorkOf(unit string) *storev1.GetDetachedWorkRequest {
 	return &storev1.GetDetachedWorkRequest{Unit: &conversationv1.AgentActivityId{Value: unit}}
 }

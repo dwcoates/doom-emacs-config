@@ -18,6 +18,8 @@ import "shim/v1/endpoint_kill_turn.proto";
 import "shim/v1/endpoint_roll_back_session.proto";
 import "shim/v1/endpoint_read_history.proto";
 import "shim/v1/endpoint_read_transcripts.proto";
+import "shim/v1/endpoint_resolve_peer_delivery.proto";
+import "shim/v1/endpoint_resolve_vendor_task.proto";
 import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_effort.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
@@ -142,6 +144,16 @@ service Shim {
   // the transcripts themselves. Spends nothing; see
   // endpoint_read_transcripts.proto.
   rpc ReadTranscripts(ReadTranscriptsRequest) returns (ReadTranscriptsResponse);
+
+  // Which sessions are the two ends of one cross-session message, by its
+  // delivery id. Read from the host's one store, so any running shim answers
+  // for any session. See endpoint_resolve_peer_delivery.proto.
+  rpc ResolvePeerDelivery(ResolvePeerDeliveryRequest) returns (ResolvePeerDeliveryResponse);
+
+  // Which agent of a session one vendor task id names, and the name its spawn
+  // gave it, so a message one agent of the session sent another is headed by
+  // its sender. See endpoint_resolve_vendor_task.proto.
+  rpc ResolveVendorTask(ResolveVendorTaskRequest) returns (ResolveVendorTaskResponse);
 
   // ---- Title digest: the material for a synthesized workspace title ----
 

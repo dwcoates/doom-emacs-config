@@ -498,6 +498,27 @@ type Deps struct {
 	// test that is not about loading history wants. Production always wires
 	// it.
 	History HistorySource
+	// PeerDeliveries answers, through a workspace's shim, which sessions hold
+	// the two ends of a cross-session message (peerdelivery.go). nil asks
+	// nothing: an end no row drawn here names stays unresolved, which is what a
+	// test that is not about the store's answer wants. Production always wires
+	// it.
+	PeerDeliveries PeerDeliverySource
+	// VendorTasks answers, through a workspace's shim, which agent of its
+	// session a vendor task id names (vendortask.go). nil asks nothing: a
+	// message from an agent of the session keeps its sender's task id, which
+	// is what a test that is not about the record's answer wants. Production
+	// always wires it.
+	VendorTasks VendorTaskSource
+	// WorkspaceName answers a workspace's display name, the one the sidebar
+	// draws, for the header of a cross-session message whose other end is that
+	// workspace. nil names no workspace, which draws every other end
+	// unresolved. Production always wires it.
+	WorkspaceName func(ids.WorkspaceID) (string, error)
+	// Go runs work the resolver starts OFF its lock (a peer delivery lookup).
+	// Defaults to a new goroutine; a test runs the work when it chooses, so
+	// it never waits on a goroutine it cannot see.
+	Go func(func())
 	// TailRetention is how many published rows a feed retains for a tail's
 	// replay. Defaults to DefaultTailRetention.
 	TailRetention int

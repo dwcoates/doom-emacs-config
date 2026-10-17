@@ -281,6 +281,62 @@ func TestValidateReadHistoryRequest(t *testing.T) {
 	}
 }
 
+// TestValidateResolvePeerDeliveryRequest covers the delivery lookup's illegal
+// shapes.
+func TestValidateResolvePeerDeliveryRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *shimv1.ResolvePeerDeliveryRequest
+	}{
+		{name: "no delivery id", req: &shimv1.ResolvePeerDeliveryRequest{}},
+		{name: "an empty delivery id", req: &shimv1.ResolvePeerDeliveryRequest{DeliveryId: &conversationv1.PeerDeliveryId{}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateResolvePeerDeliveryRequest(tc.req)
+
+			// Assert.
+			assertInvalidField(t, err, "ResolvePeerDeliveryRequest.delivery_id")
+		})
+	}
+}
+
+// TestValidateResolveVendorTaskRequest covers the task lookup's illegal shapes.
+func TestValidateResolveVendorTaskRequest(t *testing.T) {
+	tests := []struct {
+		name  string
+		req   *shimv1.ResolveVendorTaskRequest
+		field string
+	}{
+		{name: "no session", req: &shimv1.ResolveVendorTaskRequest{VendorTaskId: "a47cd"}, field: "ResolveVendorTaskRequest.session"},
+		{name: "no task id", req: &shimv1.ResolveVendorTaskRequest{Session: &conversationv1.AgentId{Value: "agent-main"}}, field: "ResolveVendorTaskRequest.vendor_task_id"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateResolveVendorTaskRequest(tc.req)
+
+			// Assert.
+			assertInvalidField(t, err, tc.field)
+		})
+	}
+}
+
+// TestValidateResolvePeerDeliveryRequestAcceptsADeliveryID pins the legal shape.
+func TestValidateResolvePeerDeliveryRequestAcceptsADeliveryID(t *testing.T) {
+	// Arrange.
+	req := &shimv1.ResolvePeerDeliveryRequest{DeliveryId: &conversationv1.PeerDeliveryId{Value: "m-1"}}
+
+	// Act.
+	err := validateResolvePeerDeliveryRequest(req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("validateResolvePeerDeliveryRequest = %v, want a delivery id accepted", err)
+	}
+}
+
 // TestValidateReadHistoryRequestAcceptsABoundedRead pins the read a fork's
 // inherited past is paged by.
 func TestValidateReadHistoryRequestAcceptsABoundedRead(t *testing.T) {

@@ -26,13 +26,14 @@ import { bookFor } from "./fold-context.js";
 const LOGGER = bindLog({ component: "shim-convert-peer", operation: "shim.convert.peer" });
 
 /** The vendor's message origin, read loosely: an observed shape, not a declared type. */
-interface RawPeerOrigin {
+export interface RawPeerOrigin {
   readonly kind?: string;
   readonly from?: string;
   readonly name?: string;
   readonly senderTaskId?: string;
   readonly body?: string;
   readonly handback?: boolean;
+  readonly msg_id?: string;
 }
 
 /** The sender label and body a peer origin resolves to. */
@@ -62,10 +63,12 @@ export function peerFacts(record: Record<string, unknown>, fallbackBody: string)
 
 /**
  * WHAT KIND of peer message a record is, from the vendor's own marking:
- * `origin.handback === true` is a subagent handing its final report back, and
- * anything else is another session's message. The sidecar reads the same field
- * the same way (`shim-sidecar/internal/convert/user.go`), so both planes state
- * one kind for one record.
+ * `origin.handback === true` is a subagent handing its final report back, a
+ * stated `origin.senderTaskId` is a message an agent of this same session sent
+ * (the vendor stamps it from the sending loop, and it is absent for another
+ * session's), and anything else is another session's message. The sidecar
+ * reads the same fields the same way (`shim-sidecar/internal/convert/user.go`),
+ * so both planes state one kind for one record.
  */
 function peerKindOf(record: Record<string, unknown>): conversationv1.PeerMessage["kind"] {
   const origin = record.origin as RawPeerOrigin | undefined;
@@ -75,7 +78,36 @@ function peerKindOf(record: Record<string, unknown>): conversationv1.PeerMessage
       value: create(conversationv1.PeerMessageSubagentHandbackSchema, {}),
     };
   }
-  return { case: "interSession", value: create(conversationv1.PeerMessageInterSessionSchema, {}) };
+  const task = (origin?.senderTaskId ?? "").trim();
+  if (task !== "") {
+    return {
+      case: "inSession",
+      value: create(conversationv1.PeerMessageInSessionSchema, {
+        senderTask: create(conversationv1.PeerMessageSenderTaskSchema, { vendorTaskId: task }),
+      }),
+    };
+  }
+  return { case: "interSession", value: interSessionOf(origin ?? {}) };
+}
+
+/**
+ * WHAT THE VENDOR SAYS about who sent an inter-session message. Shared with the
+ * sidecar by contract (`shim-sidecar/internal/convert/user.go`
+ * interSessionOf): the same two origin fields, read the same way, so both
+ * planes state one record alike.
+ *
+ * - `name`, the sender's asserted session name: what names a sender outside
+ *   agent-repl.
+ * - `msg_id`, the delivery id the sender's own SendMessage result carries: what
+ *   joins this message to the workspace that sent it.
+ */
+export function interSessionOf(origin: RawPeerOrigin): conversationv1.PeerMessageInterSession {
+  const name = (origin.name ?? "").trim();
+  const deliveryId = origin.msg_id ?? "";
+  return create(conversationv1.PeerMessageInterSessionSchema, {
+    ...(name === "" ? {} : { senderSessionName: create(conversationv1.PeerMessageSenderSessionNameSchema, { text: name }) }),
+    ...(deliveryId === "" ? {} : { deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: deliveryId }) }),
+  });
 }
 
 /** The first text of a user message's content, whether a string or a block list. */

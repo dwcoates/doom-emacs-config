@@ -1,0 +1,76 @@
+// endpoint_resolve_vendor_task.proto — ResolveVendorTask: WHICH AGENT of one
+// session a vendor task id names, and the name its spawn gave it.
+//
+// WHY THE DAEMON ASKS. A message one agent of a session sends another (a
+// subagent to its lead, or to a sibling) names its sender only by the vendor's
+// task id for it (conversation.v1.PeerMessageInSession.sender_task), which is
+// the subagent's LOCATOR rather than its AgentId. The daemon heads the bubble by
+// the sending subagent's requested name, or by its identifier, and so asks which
+// agent the locator names. The pairing is the store's (the sidecar reads both
+// halves from the vendor's own files, store.v1.GetAgentByVendorTask), which the
+// daemon never reads directly: its read path is this service.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Ask which agent of a session one vendor task id names.
+message ResolveVendorTaskRequest {
+  // REQUIRED. The MAIN agent of the session whose lineage the agent is looked
+  // for in: the store answers only within it. UNSET or empty is refused as an
+  // invalid argument, like every malformed shim request.
+  conversation.v1.AgentId session = 1;
+  // REQUIRED. The vendor's task id, verbatim. Empty is refused as an invalid
+  // argument.
+  string vendor_task_id = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message ResolveVendorTaskResponse {
+  oneof result {
+    ResolveVendorTaskSuccess success = 1;
+    ResolveVendorTaskFailure failure = 2;
+  }
+}
+
+// The record was read. Whether it pairs the task id with an agent is the answer,
+// so both answers are success.
+message ResolveVendorTaskSuccess {
+  // THE ARM IS THE ANSWER.
+  oneof agent {
+    // The agent the task id names.
+    ResolveVendorTaskAgent found = 1;
+    // No agent of the session's lineage is paired with the task id yet.
+    ResolveVendorTaskNotRecorded not_recorded = 2;
+  }
+}
+
+// The agent a task id names.
+message ResolveVendorTaskAgent {
+  // The agent, under the cross-plane minting rule: the spawning call's
+  // tool_use_id, as every plane books it.
+  conversation.v1.AgentId agent = 1;
+  // The addressable name its spawn gave it
+  // (conversation.v1.AgentSubagentPrompt.requested_name). UNSET when it was
+  // spawned unnamed, or when the record holds no commission for it.
+  optional string requested_name = 2;
+}
+
+// No agent of the session's lineage is paired with the task id yet.
+message ResolveVendorTaskNotRecorded {}
+
+// Not answered. THE ARM IS WHY.
+message ResolveVendorTaskFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The store could not be reached, or failed to read.
+    ResolveVendorTaskStoreUnavailable store_unavailable = 2;
+  }
+}
+// The store could not answer.
+message ResolveVendorTaskStoreUnavailable {}

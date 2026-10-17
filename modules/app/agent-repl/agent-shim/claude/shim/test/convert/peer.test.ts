@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { SdkMessage } from "../../src/sdk/types.js";
-import { convertPeerMessage, peerFacts, userRecordText } from "../../src/convert/peer.js";
+import { convertPeerMessage, interSessionOf, peerFacts, userRecordText } from "../../src/convert/peer.js";
 import { convertUserRecord } from "../../src/convert/tool-results.js";
 import { createTaskKindRegistry } from "../../src/convert/detached.js";
 import { createCallRegistry } from "../../src/convert/tool-calls.js";
@@ -168,6 +168,34 @@ describe("convertPeerMessage", () => {
     expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("subagentHandback");
   });
 
+  it("marks a record stating origin.senderTaskId as a message from an agent of this session", () => {
+    // Arrange
+    const message = peerRecord({ from: "a47cd5e35c91902a0", senderTaskId: "a47cd5e35c91902a0", name: "opus-medium" });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("inSession");
+  });
+
+  it("states the sending subagent's vendor task id on an in-session message", () => {
+    // Arrange
+    const message = peerRecord({ from: "a47cd5e35c91902a0", senderTaskId: "a47cd5e35c91902a0" });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    const kind = entry?.item.kind === "peer" ? entry.item.peer.kind : undefined;
+    expect(kind?.case === "inSession" ? kind.value.senderTask?.vendorTaskId : "").toBe("a47cd5e35c91902a0");
+  });
+
+  it("keeps a hand-back a hand-back even though it states its sender's task id", () => {
+    // Arrange
+    const message = peerRecord({ from: "a7d07bd69c7b87695", senderTaskId: "a7d07bd69c7b87695", handback: true });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("subagentHandback");
+  });
+
   it("marks a record with no origin.handback as an inter-session message", () => {
     // Arrange
     const message = peerRecord({ from: "Explore" });
@@ -189,6 +217,46 @@ describe("convertPeerMessage", () => {
     const message = peerRecord({ from: "Explore" }, { uuid: "" });
     // Act & Assert
     expect(convertPeerMessage(message, foldContext())).toBeUndefined();
+  });
+});
+
+describe("interSessionOf — what the vendor says about the sender", () => {
+  it("states the sender's asserted session name", () => {
+    // Arrange, Act
+    const inter = interSessionOf({ kind: "peer", name: "agent-repl-test-slimming-54" });
+    // Assert
+    expect(inter.senderSessionName?.text).toBe("agent-repl-test-slimming-54");
+  });
+
+  it("leaves the session name UNSET when the vendor states only whitespace", () => {
+    // Arrange, Act
+    const inter = interSessionOf({ kind: "peer", name: "  " });
+    // Assert
+    expect(inter.senderSessionName).toBeUndefined();
+  });
+
+  it("states the delivery id the sender's SendMessage result shares", () => {
+    // Arrange, Act
+    const inter = interSessionOf({ kind: "peer", msg_id: "e0aced60-711b-490a-a59e-d33d518f1ba5" });
+    // Assert
+    expect(inter.deliveryId?.value).toBe("e0aced60-711b-490a-a59e-d33d518f1ba5");
+  });
+
+  it("leaves the delivery id UNSET when the vendor states none", () => {
+    // Arrange, Act
+    const inter = interSessionOf({ kind: "peer" });
+    // Assert
+    expect(inter.deliveryId).toBeUndefined();
+  });
+
+  it("carries the sender facts onto the converted inter-session message", () => {
+    // Arrange
+    const message = peerRecord({ from: "uds:/tmp/cc-socks/5398.sock", msg_id: "m-1" });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    const kind = entry?.item.kind === "peer" ? entry.item.peer.kind : undefined;
+    expect(kind?.case === "interSession" ? kind.value.deliveryId?.value : "").toBe("m-1");
   });
 });
 

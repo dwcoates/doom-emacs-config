@@ -553,6 +553,14 @@ func (c *fakeClient) ReadTranscripts(context.Context, *shimv1.ReadTranscriptsReq
 	panic("sessionwatcher must not call ReadTranscripts")
 }
 
+func (c *fakeClient) ResolvePeerDelivery(context.Context, *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error) {
+	panic("sessionwatcher must not call ResolvePeerDelivery")
+}
+
+func (c *fakeClient) ResolveVendorTask(context.Context, *shimv1.ResolveVendorTaskRequest) (*shimv1.ResolveVendorTaskResponse, error) {
+	panic("sessionwatcher must not call ResolveVendorTask")
+}
+
 func (c *fakeClient) GatherTitleDigest(context.Context, *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error) {
 	panic("sessionwatcher must not call GatherTitleDigest")
 }

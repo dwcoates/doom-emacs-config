@@ -57,6 +57,11 @@ type resolver struct {
 	hostAsks map[ids.WorkspaceID]*agentreplv1.HostAsk
 	// askChanges announces every workspace whose hostAsks entry moved.
 	askChanges publish.Events[ids.WorkspaceID]
+	// deliveries is every cross-session message a row here was drawn for, by
+	// its delivery id: what is known of its two ends, and the rows waiting to
+	// name them (peerdelivery.go). Across workspaces, because one message's two
+	// ends are two workspaces' rows.
+	deliveries map[string]*peerDelivery
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -214,6 +219,14 @@ type wsState struct {
 	detachedUnits map[string]string
 	// subagents is the bubble accumulation, keyed by the SPAWN unit's id.
 	subagents map[string]*subagentState
+	// peerMessages is every inter-session peer message drawn here, by its id,
+	// so its bubble can be drawn again when the workspace that sent it becomes
+	// known (peerdelivery.go).
+	peerMessages map[string]*conversationv1.PeerMessage
+	// vendorTasks is every sender task id a message from an agent of this
+	// session named, what the record answered for it, and the bubbles waiting
+	// on it (vendortask.go).
+	vendorTasks map[string]*vendorTask
 	// standing holds each permission row's offered standing token, DAEMON-SIDE.
 	standing map[string]*conversationv1.AgentPermissionStanding
 	// permissionRows maps a permission ask id to the row it drew, so a
@@ -595,6 +608,9 @@ func newResolver(deps Deps) (*resolver, error) {
 	if deps.TailRetention <= 0 {
 		deps.TailRetention = DefaultTailRetention
 	}
+	if deps.Go == nil {
+		deps.Go = func(f func()) { go f() }
+	}
 	r := &resolver{
 		deps:       deps,
 		workspaces: map[ids.WorkspaceID]*wsState{},
@@ -602,6 +618,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		loggers:    map[ids.WorkspaceID]dlog.Logger{},
 		held:       map[ids.WorkspaceID]*heldState{},
 		hostAsks:   map[ids.WorkspaceID]*agentreplv1.HostAsk{},
+		deliveries: map[string]*peerDelivery{},
 	}
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.
@@ -700,6 +717,8 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		heldDetachments:      map[string]heldDetachment{},
 		announcedAgents:      map[string]*conversationv1.AgentId{},
 		subagents:            map[string]*subagentState{},
+		peerMessages:         map[string]*conversationv1.PeerMessage{},
+		vendorTasks:          map[string]*vendorTask{},
 		standing:             map[string]*conversationv1.AgentPermissionStanding{},
 		permissionRows:       map[string]*permissionState{},
 		questionAsks:         map[string]*questionState{},

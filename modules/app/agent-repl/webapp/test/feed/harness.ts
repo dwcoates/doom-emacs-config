@@ -86,6 +86,7 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { orderFor } from "../feed-order.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
+import { sentTo } from "./addresses.js";
 
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -471,7 +472,7 @@ export function agentPromptRow(
     row: {
       case: "agentPrompt",
       value: create(FeedAgentPromptSchema, {
-        address: { text: address },
+        address: sentTo(address),
         body: { blocks: [{ block: { case: "text", value: { text } } }] },
         working,
         awaitingUser,

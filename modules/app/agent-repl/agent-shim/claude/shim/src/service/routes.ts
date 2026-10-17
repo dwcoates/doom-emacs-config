@@ -35,6 +35,8 @@ import {
   validateKillTurnRequest,
   validateReadHistoryRequest,
   validateReadTranscriptsRequest,
+  validateResolvePeerDeliveryRequest,
+  validateResolveVendorTaskRequest,
   validateRollBackSessionRequest,
   validateSetSessionEffortRequest,
   validateSetSessionModelRequest,
@@ -330,6 +332,26 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("ReadTranscripts");
         validateReadTranscriptsRequest(request);
         return answering("ReadTranscripts", () => engine.readTranscripts(request));
+      },
+
+      /**
+       * Which session received one cross-session message. A READ of the host's
+       * one store, like ReadHistory, and answerable by any running shim.
+       */
+      async resolvePeerDelivery(request) {
+        entered("ResolvePeerDelivery");
+        validateResolvePeerDeliveryRequest(request);
+        return answering("ResolvePeerDelivery", () => engine.resolvePeerDelivery(request));
+      },
+
+      /**
+       * Which agent of a session one vendor task id names. A READ of the host's
+       * one store, like ResolvePeerDelivery.
+       */
+      async resolveVendorTask(request) {
+        entered("ResolveVendorTask");
+        validateResolveVendorTaskRequest(request);
+        return answering("ResolveVendorTask", () => engine.resolveVendorTask(request));
       },
 
       // ---- Title digest ----

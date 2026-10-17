@@ -114,6 +114,14 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("readTranscripts")(request);
       return create(shimv1.ReadTranscriptsResponseSchema, {});
     },
+    async resolvePeerDelivery(request) {
+      record("resolvePeerDelivery")(request);
+      return create(shimv1.ResolvePeerDeliveryResponseSchema, {});
+    },
+    async resolveVendorTask(request) {
+      record("resolveVendorTask")(request);
+      return create(shimv1.ResolveVendorTaskResponseSchema, {});
+    },
     async gatherTitleDigest(request) {
       record("gatherTitleDigest")(request);
       return create(shimv1.GatherTitleDigestResponseSchema, {});
@@ -158,6 +166,8 @@ describe("shimRoutes unary delegation", () => {
     ["detachForeground", requests.detachForegroundRequest],
     ["readHistory", requests.readHistoryRequest],
     ["gatherTitleDigest", requests.gatherTitleDigestRequest],
+    ["resolvePeerDelivery", requests.resolvePeerDeliveryRequest],
+    ["resolveVendorTask", requests.resolveVendorTaskRequest],
     ["getForkPoint", requests.getForkPointRequest],
     ["forkSession", requests.forkSessionRequest],
   ] as const)("routes %s to its own engine method", async (verb, build) => {
@@ -321,6 +331,35 @@ describe("shimRoutes validation ordering", () => {
 
     // Assert.
     expect(rejection?.code).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a ResolvePeerDelivery naming no delivery id with InvalidArgument", async () => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+
+    // Act.
+    const rejection = await clientFor(engine)
+      .resolvePeerDelivery(create(shimv1.ResolvePeerDeliveryRequestSchema, {}))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect([rejection?.code, calls.length]).toEqual([Code.InvalidArgument, 0]);
+  });
+
+  it.each([
+    ["no session", { vendorTaskId: "a47cd5e35c91902a0" }],
+    ["no task id", { session: { value: "agent-main" } }],
+  ] as const)("refuses a ResolveVendorTask naming %s with InvalidArgument", async (_label, init) => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+
+    // Act.
+    const rejection = await clientFor(engine)
+      .resolveVendorTask(create(shimv1.ResolveVendorTaskRequestSchema, init))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect([rejection?.code, calls.length]).toEqual([Code.InvalidArgument, 0]);
   });
 
   it("never reaches the engine with an illegal request", async () => {

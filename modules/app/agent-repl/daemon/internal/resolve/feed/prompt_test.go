@@ -294,19 +294,19 @@ func TestAnAgentAddressedPromptIsDrawnAtBothEnds(t *testing.T) {
 	var outgoing, delivered string
 	for _, row := range h.rows(rootFeed()) {
 		if prompt := row.GetAgentPrompt(); prompt != nil {
-			outgoing = prompt.GetAddress().GetText()
+			outgoing = addressLine(prompt.GetAddress())
 		}
 	}
 	for _, row := range h.rows(feedid.Feed{Agent: created}) {
 		if prompt := row.GetAgentPrompt(); prompt != nil {
-			delivered = prompt.GetAddress().GetText()
+			delivered = addressLine(prompt.GetAddress())
 		}
 	}
-	if outgoing != "→ map the daemon" {
+	if outgoing != "identified agent-explore →" {
 		t.Fatalf("sender address = %q, want the outgoing form", outgoing)
 	}
 	// …and the delivered prompt on the recipient's, differing ONLY in the line.
-	if delivered != "from the main agent" {
+	if delivered != "← main the main agent" {
 		t.Fatalf("recipient address = %q, want the delivered form", delivered)
 	}
 }

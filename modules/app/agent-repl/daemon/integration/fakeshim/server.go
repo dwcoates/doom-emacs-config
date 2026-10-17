@@ -1325,6 +1325,44 @@ func (s *server) ReadTranscripts(ctx context.Context, req *connect.Request[shimv
 	}), nil
 }
 
+// ResolvePeerDelivery answers BOTH ENDS NOT RECORDED by default: a fake holds no
+// store, and a delivery no session recorded is the one thing that is certainly
+// true of a host nothing has messaged across.
+func (s *server) ResolvePeerDelivery(ctx context.Context, req *connect.Request[shimv1.ResolvePeerDeliveryRequest]) (*connect.Response[shimv1.ResolvePeerDeliveryResponse], error) {
+	if err := s.enter(ctx, RPCResolvePeerDelivery, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.ResolvePeerDeliveryResponse, *shimv1.ResolvePeerDeliveryResponse](s, RPCResolvePeerDelivery); done {
+		return resp, err
+	}
+	notRecorded := func() *shimv1.ResolvePeerDeliveryEnd {
+		return &shimv1.ResolvePeerDeliveryEnd{End: &shimv1.ResolvePeerDeliveryEnd_NotRecorded{NotRecorded: &shimv1.ResolvePeerDeliveryNotRecorded{}}}
+	}
+	return connect.NewResponse(&shimv1.ResolvePeerDeliveryResponse{
+		Result: &shimv1.ResolvePeerDeliveryResponse_Success{Success: &shimv1.ResolvePeerDeliverySuccess{
+			Sender:    notRecorded(),
+			Recipient: notRecorded(),
+		}},
+	}), nil
+}
+
+// ResolveVendorTask answers NOT RECORDED by default: a fake holds no store, and
+// a task id no agent is paired with is the one thing that is certainly true of a
+// host whose record holds no pairings.
+func (s *server) ResolveVendorTask(ctx context.Context, req *connect.Request[shimv1.ResolveVendorTaskRequest]) (*connect.Response[shimv1.ResolveVendorTaskResponse], error) {
+	if err := s.enter(ctx, RPCResolveVendorTask, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.ResolveVendorTaskResponse, *shimv1.ResolveVendorTaskResponse](s, RPCResolveVendorTask); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.ResolveVendorTaskResponse{
+		Result: &shimv1.ResolveVendorTaskResponse_Success{Success: &shimv1.ResolveVendorTaskSuccess{
+			Agent: &shimv1.ResolveVendorTaskSuccess_NotRecorded{NotRecorded: &shimv1.ResolveVendorTaskNotRecorded{}},
+		}},
+	}), nil
+}
+
 // The workflow verbs are kicked this wave: they answer the typed
 // not-implemented refusal and open nothing.
 func (s *server) GetWorkflow(ctx context.Context, req *connect.Request[shimv1.GetWorkflowRequest]) (*connect.Response[shimv1.GetWorkflowResponse], error) {

@@ -222,15 +222,37 @@ func (c *Converter) peerMessage(record, message map[string]any, at Attribution, 
 	}
 	// THE KIND IS THE VENDOR'S OWN MARKING, read exactly as the stream plane
 	// reads it (shim/src/convert/peer.ts peerKindOf): `origin.handback` is a
-	// subagent's hand-back, anything else another session's message.
-	if env.peerHandback {
+	// subagent's hand-back, a stated `origin.senderTaskId` a message from an
+	// agent of this session, anything else another session's message.
+	switch {
+	case env.peerHandback:
 		peer.Kind = &conversationv1.PeerMessage_SubagentHandback{SubagentHandback: &conversationv1.PeerMessageSubagentHandback{}}
-	} else {
-		peer.Kind = &conversationv1.PeerMessage_InterSession{InterSession: &conversationv1.PeerMessageInterSession{}}
+	case env.peerSenderTask != "":
+		peer.Kind = &conversationv1.PeerMessage_InSession{InSession: &conversationv1.PeerMessageInSession{
+			SenderTask: &conversationv1.PeerMessageSenderTask{VendorTaskId: env.peerSenderTask},
+		}}
+	default:
+		peer.Kind = &conversationv1.PeerMessage_InterSession{InterSession: interSessionOf(env)}
 	}
 	c.log.With(at.ctxFor("peer-message")).With(logging.Context{UpsertKey: PeerKey(env.uuid)}).
 		LogVerbose("a peer message (origin.kind=peer, sender=%q, handback=%t) emitted as a page line on the record uuid", env.peerSender, env.peerHandback)
 	return c.landPeerMessage(at, agent, PeerKey(env.uuid), "peer_message", peer)
+}
+
+// interSessionOf states what the vendor says about who sent an inter-session
+// message, read exactly as the stream plane reads it
+// (shim/src/convert/peer.ts interSessionOf): the sender's asserted session name,
+// and the delivery id its own SendMessage result carries. Each is UNSET when the
+// vendor states none, never a stand-in.
+func interSessionOf(env envelope) *conversationv1.PeerMessageInterSession {
+	inter := &conversationv1.PeerMessageInterSession{}
+	if env.peerSessionName != "" {
+		inter.SenderSessionName = &conversationv1.PeerMessageSenderSessionName{Text: env.peerSessionName}
+	}
+	if env.peerDeliveryID != "" {
+		inter.DeliveryId = &conversationv1.PeerDeliveryId{Value: env.peerDeliveryID}
+	}
+	return inter
 }
 
 // userSaid builds the one canonical prompt form from a vendor user message: its

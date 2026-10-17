@@ -810,6 +810,63 @@ func agentByVendorTaskFailure(ref *refusal) *connect.Response[storev1.GetAgentBy
 	})
 }
 
+// ---- GetPeerDelivery ----
+
+// GetPeerDelivery answers which sessions hold the two ends of one
+// cross-session message. AN END NO SESSION HOLDS IS AN ANSWER, not a refusal:
+// the storage layer read the index and recorded the outcome at info, so this
+// layer adds only a verbose trace.
+func (s *Server) GetPeerDelivery(ctx context.Context, req *connect.Request[storev1.GetPeerDeliveryRequest]) (*connect.Response[storev1.GetPeerDeliveryResponse], error) {
+	delivery := req.Msg.GetDeliveryId().GetValue()
+	fields := logging.Fields{}
+	log := s.rpcLogger(storev1connect.ShimStoreGetPeerDeliveryProcedure, req.Header()).With(fields)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-delivery"}, "resolving delivery %s to the sessions at its ends", delivery)
+
+	if ref := validateGetPeerDeliveryRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-peer-delivery", ref, logging.Fields{})
+		return peerDeliveryFailure(ref), nil
+	}
+
+	sender, recipient, err := s.store.PeerDelivery(correlated(ctx, req.Header()), delivery)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-peer-delivery", err, fields)
+		return peerDeliveryFailure(ref), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-delivery"}, "answering delivery %s: sender %q, recipient %q", delivery, sender, recipient)
+	return connect.NewResponse(&storev1.GetPeerDeliveryResponse{
+		Result: &storev1.GetPeerDeliveryResponse_Success{Success: &storev1.GetPeerDeliverySuccess{
+			Sender:    peerDeliveryEnd(sender),
+			Recipient: peerDeliveryEnd(recipient),
+		}},
+	}), nil
+}
+
+// peerDeliveryEnd spells one end on the wire: its session, or not recorded
+// for "".
+func peerDeliveryEnd(session string) *storev1.GetPeerDeliveryEnd {
+	if session == "" {
+		return &storev1.GetPeerDeliveryEnd{End: &storev1.GetPeerDeliveryEnd_NotRecorded{NotRecorded: &storev1.GetPeerDeliveryNotRecorded{}}}
+	}
+	return &storev1.GetPeerDeliveryEnd{End: &storev1.GetPeerDeliveryEnd_Session{Session: &conversationv1.AgentId{Value: session}}}
+}
+
+// peerDeliveryFailure has TWO arms: the request was malformed (no delivery
+// id), or the storage layer failed — which includes an end of a delivery the
+// index holds in two sessions.
+func peerDeliveryFailure(ref *refusal) *connect.Response[storev1.GetPeerDeliveryResponse] {
+	failure := &storev1.GetPeerDeliveryFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetPeerDeliveryFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetPeerDeliveryInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetPeerDeliveryFailure_StorageFailure{StorageFailure: &storev1.GetPeerDeliveryStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetPeerDeliveryResponse{
+		Result: &storev1.GetPeerDeliveryResponse_Failure{Failure: failure},
+	})
+}
+
 // ---- GetDetachedWork ----
 
 // GetDetachedWork answers the kind and end of the detached work that left one

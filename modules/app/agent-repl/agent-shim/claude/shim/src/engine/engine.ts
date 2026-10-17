@@ -139,6 +139,22 @@ export interface Engine {
     request: shimv1.ReadTranscriptsRequest,
   ): Promise<shimv1.ReadTranscriptsResponse>;
 
+  /**
+   * Which session holds the delivered copy of one cross-session message, by
+   * its delivery id: the host's one store, read on the daemon's behalf.
+   */
+  resolvePeerDelivery(
+    request: shimv1.ResolvePeerDeliveryRequest,
+  ): Promise<shimv1.ResolvePeerDeliveryResponse>;
+
+  /**
+   * Which agent of a session one vendor task id names, and the name its spawn
+   * gave it: the store's locator pairing, read on the daemon's behalf.
+   */
+  resolveVendorTask(
+    request: shimv1.ResolveVendorTaskRequest,
+  ): Promise<shimv1.ResolveVendorTaskResponse>;
+
   // ---- Title digest ----
 
   /**
@@ -268,6 +284,14 @@ export class NotImplementedEngine implements Engine {
 
   readTranscripts(): Promise<shimv1.ReadTranscriptsResponse> {
     return Promise.reject(unimplemented("ReadTranscripts"));
+  }
+
+  resolvePeerDelivery(): Promise<shimv1.ResolvePeerDeliveryResponse> {
+    return Promise.reject(unimplemented("ResolvePeerDelivery"));
+  }
+
+  resolveVendorTask(): Promise<shimv1.ResolveVendorTaskResponse> {
+    return Promise.reject(unimplemented("ResolveVendorTask"));
   }
 
   gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {

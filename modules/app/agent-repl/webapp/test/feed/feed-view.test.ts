@@ -80,6 +80,7 @@ import { responseCapLines } from "../../src/feed/cards/response.js";
 import { codeOf } from "../source-text.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { selectable } from "../selectable.js";
+import { sentTo } from "./addresses.js";
 
 /** A scroll box's rect, for fixtures whose box is never measured for a collapse. */
 const boxRect = (): DOMRect => ({ top: 0 }) as DOMRect;
@@ -1459,7 +1460,7 @@ describe("createFeedController: the working prompt's thinking wave", () => {
   it("waves an agent-addressed prompt whose row says working", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true)]),
+      page([agentPromptRow("a1", "Explore", "go", "t1", true)]),
       "replace",
     );
     expect(promptBubble(host, "a1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
@@ -1494,11 +1495,11 @@ describe("createFeedController: the working prompt's thinking wave", () => {
   it("stops an agent prompt's wave when its row is re-pushed not working", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true)]),
+      page([agentPromptRow("a1", "Explore", "go", "t1", true)]),
       "replace",
     );
     controller.upsert(
-      agentPromptRow("a1", "\u2192 Explore", "go", "t1", false),
+      agentPromptRow("a1", "Explore", "go", "t1", false),
     );
     expect(promptBubble(host, "a1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
       false,
@@ -1541,7 +1542,7 @@ describe("createFeedController: the working prompt's thinking wave", () => {
   it("does not wave a working agent prompt whose turn awaits the user", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true, true)]),
+      page([agentPromptRow("a1", "Explore", "go", "t1", true, true)]),
       "replace",
     );
     expect(promptBubble(host, "a1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
@@ -1580,11 +1581,11 @@ describe("createFeedController: the working prompt's thinking wave", () => {
   it("resumes an agent prompt's wave when its row is re-pushed no longer awaiting the user", () => {
     const { controller, host } = fixture();
     controller.applyPage(
-      page([agentPromptRow("a1", "\u2192 Explore", "go", "t1", true, true)]),
+      page([agentPromptRow("a1", "Explore", "go", "t1", true, true)]),
       "replace",
     );
     controller.upsert(
-      agentPromptRow("a1", "\u2192 Explore", "go", "t1", true, false),
+      agentPromptRow("a1", "Explore", "go", "t1", true, false),
     );
     expect(promptBubble(host, "a1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
       PROMPT_WAVE_WORKING,
@@ -2679,7 +2680,7 @@ describe("createFeedController: every row arm reaches its own drawing", () => {
       {
         case: "agentPrompt",
         value: {
-          address: { text: "→ Explore" },
+          address: sentTo("Explore"),
           body: {
             blocks: [{ block: { case: "text", value: { text: "go" } } }],
           },

@@ -31,7 +31,14 @@
     {
       "agentPrompt": {
         "address": {
-          "text": "→ a4000000000000000"
+          "name": {
+            "text": "a4000000000000000"
+          },
+          "sent": {
+            "agent": {
+              "identified": {}
+            }
+          }
         },
         "body": {
           "blocks": [

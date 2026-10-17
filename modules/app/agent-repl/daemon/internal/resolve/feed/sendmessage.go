@@ -60,7 +60,24 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		if err := r.restateSend(s, act, u, state.Success.GetAddressedTo(), state.Success.GetSummary()); err != nil {
 			return nil, err
 		}
-		u.sendResolved = state.Success.GetRecipientAgentId()
+		switch recipient := state.Success.GetRecipient().(type) {
+		case *conversationv1.AgentSendMessageSuccess_PeerSession:
+			// ANOTHER CLAUDE SESSION: the header names it by the delivery id the
+			// recipient's own record carries (peerdelivery.go). A send that
+			// states no id joins nothing and stays unclassified.
+			if id := recipient.PeerSession.GetDeliveryId().GetValue(); id != "" {
+				u.sendReached = sendPeerSession
+				u.sendDeliveryID = id
+				r.noteDeliveryEnd(id, deliverySender, s.id, unitID)
+			}
+		case *conversationv1.AgentSendMessageSuccess_RecipientAgentId:
+			// AN AGENT OF THIS SESSION, named by its identity. A success naming
+			// no identity names no agent, and stays unclassified.
+			if recipient.RecipientAgentId.GetValue() != "" {
+				u.sendReached = sendInSession
+				u.sendResolved = recipient.RecipientAgentId
+			}
+		}
 		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Failure"})
@@ -80,10 +97,8 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: unitID, Sub: "send"}),
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{
-				Text: "→ " + r.sendRecipientLabel(s, u.sendResolved, u.sendAddressedTo),
-			},
-			Body: &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
+			Address: r.sendAddress(s, u),
+			Body:    &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
 		}},
 	}
 	// THE DELIVERY IS THE UNIT'S, NOT THIS FRAME'S. See unitState.sendDelivery
@@ -94,6 +109,48 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	}
 	u.row = row
 	return row, nil
+}
+
+// sendAddress composes a send's header from what its unit has settled on: the
+// recipient's name then a right arrow, whichever kind of agent it reached.
+//
+//   - an agent of this session: by its requested name, or its identifier;
+//   - another Claude session: the recipient workspace by the delivery-id
+//     join, or the address the caller wrote while that is unknown;
+//   - neither said yet (unsettled, or refused): the address the caller wrote.
+func (r *resolver) sendAddress(s *wsState, u *unitState) *frontendv1.FeedAgentPromptAddress {
+	switch u.sendReached {
+	case sendInSession:
+		return sentToAgent(r.agentNamed(s, u.sendResolved.GetValue()))
+	case sendPeerSession:
+		return r.peerSessionAddress(s.id, u.sendDeliveryID, u.sendAddressedTo)
+	default:
+		return sentUnclassified(nameOr(u.sendAddressedTo))
+	}
+}
+
+// redrawSendAddress draws a send's row again under its own FeedId with its
+// header recomposed, because the recipient it names became known
+// (peerdelivery.go). A unit that has drawn no row yet draws its header when it
+// does. Called with r.mu held.
+func (r *resolver) redrawSendAddress(s *wsState, unitID string) {
+	u, ok := s.units[unitID]
+	if !ok || u.row.GetAgentPrompt() == nil {
+		return
+	}
+	id := u.row.GetId().GetValue()
+	stored, ok := r.feed(s, u.at.feed).rows[id]
+	if !ok {
+		return
+	}
+	address := r.sendAddress(s, u)
+	r.restateRow(s, u.at, stored, true, unclonable{
+		operation: "daemon.feed.send_address_unclonable",
+		message:   "a send's row could not be copied to name the session it reached; its header stays as drawn",
+		context:   dlog.Context{"unit": unitID, "row": id},
+	}, func(row *frontendv1.FeedRow) {
+		row.GetAgentPrompt().Address = address
+	})
 }
 
 // restateSend takes a SETTLED send's address and summary from the settle itself.
@@ -119,35 +176,6 @@ func (r *resolver) restateSend(s *wsState, act *conversationv1.AgentActivity, u 
 	u.sendAddressedTo = addressedTo
 	u.sendSummary = summary.GetText()
 	return nil
-}
-
-// sendRecipientLabel names the recipient for the address line, preferring the
-// name a reader can recognize over the identity a machine resolved:
-//
-//  1. the recipient's own bubble label, when the resolved identity is a
-//     subagent this workspace has a feed for — the same label the recipient's
-//     own end of this prompt is addressed by;
-//  2. the addressed string EXACTLY AS THE CALLER WROTE IT, which the contract
-//     says may be an identity or the human-readable name a spawn was given;
-//  3. the resolved identity's value, when that is all there is;
-//  4. the honest admission that nothing named the recipient.
-func (r *resolver) sendRecipientLabel(s *wsState, resolved *conversationv1.AgentId, addressedTo string) string {
-	if id := resolved.GetValue(); id != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id := resolved.GetValue(); id != \"\""})
-		if key, ok := s.agentFeeds[id]; ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "key, ok := s.agentFeeds[id]; ok"})
-			return feedLabel(s, key)
-		}
-	}
-	if addressedTo != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addressedTo != \"\""})
-		return addressedTo
-	}
-	if id := resolved.GetValue(); id != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id := resolved.GetValue(); id != \"\""})
-		return id
-	}
-	return sendNotNamed
 }
 
 // sendBodyBlocks draws the caller's summary, and NOTHING when there was none:

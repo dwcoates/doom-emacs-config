@@ -18,6 +18,14 @@
  * whole basis of the `delivery` arm: present means `resumed_recipient`, absent
  * means `queued_to_live`.
  *
+ * # A send to another Claude session
+ *
+ * A cross-session send settles with no agent of this session to name: its
+ * result carries no pin and no `resumedAgentId`, only the vendor's `msg_id`
+ * for the delivery. That id is what the recipient's record of the message
+ * carries too (convert/peer.ts), so it is stated as the `peer_session`
+ * recipient, and the daemon names the session by joining on it.
+ *
  * # The settle stands alone
  *
  * Both settle arms RESTATE the address and the summary from the call's own
@@ -105,6 +113,13 @@ function recipientOf(structured: Record<string, unknown>): string | undefined {
   return pinned === undefined || pinned === "" ? undefined : pinned;
 }
 
+/** The peer-session recipient: the vendor's delivery id, verbatim. */
+function peerSessionOf(deliveryId: string): conversationv1.AgentSendMessagePeerSession {
+  return create(conversationv1.AgentSendMessagePeerSessionSchema, {
+    deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: deliveryId }),
+  });
+}
+
 /** The `SendMessage` tool: the visible cause of another agent's renewed activity. */
 export const sendMessageConverter: ToolConverter = {
   kind: "send_message",
@@ -139,13 +154,34 @@ export const sendMessageConverter: ToolConverter = {
     }
     const structured = asRecord(outcome.structured);
     const recipient = structured === undefined ? undefined : recipientOf(structured);
+    const deliveryId = structured === undefined ? undefined : str(structured, "msg_id");
+    if (recipient === undefined && deliveryId !== undefined && deliveryId !== "") {
+      LOGGER.logVerbose(
+        { tool_use_id: call.toolUseId, delivery_id: deliveryId },
+        "a send reached another Claude session",
+      );
+      return sendItem({
+        case: "success",
+        value: create(conversationv1.AgentSendMessageSuccessSchema, {
+          recipient: { case: "peerSession", value: peerSessionOf(deliveryId) },
+          // A LISTED PEER IS LIVE, and its messages drain at its next tool
+          // round: the vendor's own account of a cross-session delivery.
+          delivery: {
+            case: "queuedToLive",
+            value: create(conversationv1.AgentSendMessageQueuedToLiveSchema, {}),
+          },
+          settledAt: settledAt(outcome.settledAtMs, call.startedAtMs),
+          addressedTo: addressedToOf(call),
+          summary: summaryOf(call),
+        }),
+      });
+    }
     if (recipient === undefined) {
-      // NO SUCCESS FRAME. `recipient_agent_id` is not optional, and a send whose
-      // recipient cannot be resolved would otherwise claim it reached an agent
-      // nobody named.
+      // NO SUCCESS FRAME. A send that names neither an agent nor a delivery
+      // would otherwise claim it reached a recipient nobody named.
       LOGGER.debug(
         { tool_use_id: call.toolUseId },
-        "a send resolved no recipient identity; no success frame is produced",
+        "a send resolved no recipient identity and no delivery; no success frame is produced",
       );
       return undefined;
     }
@@ -157,7 +193,7 @@ export const sendMessageConverter: ToolConverter = {
     return sendItem({
       case: "success",
       value: create(conversationv1.AgentSendMessageSuccessSchema, {
-        recipientAgentId: subagentId(recipient),
+        recipient: { case: "recipientAgentId", value: subagentId(recipient) },
         delivery: resumed
           ? {
               case: "resumedRecipient",

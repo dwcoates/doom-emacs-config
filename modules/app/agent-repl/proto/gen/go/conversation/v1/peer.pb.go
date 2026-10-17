@@ -59,17 +59,19 @@ type PeerMessage struct {
 	// so the live row and the adopted row for one message supersede each other on
 	// ONE bubble rather than drawing two. Echoed, never parsed.
 	Id string `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	// WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record
-	// (`origin.handback`). A consumer draws the two differently: an inter-session
-	// message is an aside worth reading in place, while a hand-back's report is
-	// the returning subagent's result and belongs with that subagent. UNSET when
-	// the producer did not state the kind; a consumer treats it as an
-	// inter-session message.
+	// WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record:
+	// `origin.handback` marks a hand-back, and `origin.senderTaskId` marks a
+	// message an agent of THIS session sent (it is absent for another session's).
+	// A consumer draws them differently: a message from another agent is an
+	// aside worth reading in place, while a hand-back's report is the returning
+	// subagent's result and belongs with that subagent. UNSET when the producer
+	// did not state the kind; a consumer treats it as an inter-session message.
 	//
 	// Types that are valid to be assigned to Kind:
 	//
 	//	*PeerMessage_InterSession
 	//	*PeerMessage_SubagentHandback
+	//	*PeerMessage_InSession
 	Kind          isPeerMessage_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -158,6 +160,15 @@ func (x *PeerMessage) GetSubagentHandback() *PeerMessageSubagentHandback {
 	return nil
 }
 
+func (x *PeerMessage) GetInSession() *PeerMessageInSession {
+	if x != nil {
+		if x, ok := x.Kind.(*PeerMessage_InSession); ok {
+			return x.InSession
+		}
+	}
+	return nil
+}
+
 type isPeerMessage_Kind interface {
 	isPeerMessage_Kind()
 }
@@ -172,20 +183,144 @@ type PeerMessage_SubagentHandback struct {
 	SubagentHandback *PeerMessageSubagentHandback `protobuf:"bytes,6,opt,name=subagent_handback,json=subagentHandback,proto3,oneof"`
 }
 
+type PeerMessage_InSession struct {
+	// An agent of this same session (a subagent, to its lead or to a sibling)
+	// sent this agent a message.
+	InSession *PeerMessageInSession `protobuf:"bytes,7,opt,name=in_session,json=inSession,proto3,oneof"`
+}
+
 func (*PeerMessage_InterSession) isPeerMessage_Kind() {}
 
 func (*PeerMessage_SubagentHandback) isPeerMessage_Kind() {}
 
+func (*PeerMessage_InSession) isPeerMessage_Kind() {}
+
+// An agent of this same session sent this agent a message.
+//
+// THE SENDER IS STATED AS THE VENDOR STATES IT: by the vendor's task id for the
+// sending subagent (its `origin.senderTaskId`, stamped by the vendor from the
+// sending loop), which is the subagent's LOCATOR (the `<id>` of
+// `agent-<id>.jsonl`), not its AgentId. A consumer names the agent by asking
+// the record which agent of the session the locator names
+// (shim.v1.ResolveVendorTask).
+type PeerMessageInSession struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The sending subagent's vendor task id.
+	SenderTask    *PeerMessageSenderTask `protobuf:"bytes,1,opt,name=sender_task,json=senderTask,proto3" json:"sender_task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerMessageInSession) Reset() {
+	*x = PeerMessageInSession{}
+	mi := &file_conversation_v1_peer_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerMessageInSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerMessageInSession) ProtoMessage() {}
+
+func (x *PeerMessageInSession) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_peer_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerMessageInSession.ProtoReflect.Descriptor instead.
+func (*PeerMessageInSession) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PeerMessageInSession) GetSenderTask() *PeerMessageSenderTask {
+	if x != nil {
+		return x.SenderTask
+	}
+	return nil
+}
+
+// The vendor's task id for the agent that sent a message.
+type PeerMessageSenderTask struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The task id verbatim. Never empty. Opaque: compared and looked up, never
+	// parsed.
+	VendorTaskId  string `protobuf:"bytes,1,opt,name=vendor_task_id,json=vendorTaskId,proto3" json:"vendor_task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerMessageSenderTask) Reset() {
+	*x = PeerMessageSenderTask{}
+	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerMessageSenderTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerMessageSenderTask) ProtoMessage() {}
+
+func (x *PeerMessageSenderTask) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerMessageSenderTask.ProtoReflect.Descriptor instead.
+func (*PeerMessageSenderTask) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PeerMessageSenderTask) GetVendorTaskId() string {
+	if x != nil {
+		return x.VendorTaskId
+	}
+	return ""
+}
+
 // Another Claude session sent this agent a message.
+//
+// WHO SENT IT is joined, not stated: the one value this record shares with the
+// sender's own record of the send is the delivery id, so a consumer holding both
+// conversations names the sending session by joining on it. A sender with no
+// such record (a session outside the consumer's own) is named by the session
+// name it asserted.
 type PeerMessageInterSession struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The sending session's display name, as the sender asserted it (the
+	// vendor's `origin.name`, e.g. "fix-flaky-3a"). It is what names a sender
+	// that is none of the consumer's own sessions. UNSET when the vendor states
+	// none (an older sender, or a wire that is not exactly one envelope).
+	SenderSessionName *PeerMessageSenderSessionName `protobuf:"bytes,1,opt,name=sender_session_name,json=senderSessionName,proto3,oneof" json:"sender_session_name,omitempty"`
+	// The vendor's id for this one delivery (its `origin.msg_id`), the same value
+	// the sender's SendMessage result carries
+	// (AgentSendMessagePeerSession.delivery_id). UNSET when the vendor states
+	// none.
+	DeliveryId    *PeerDeliveryId `protobuf:"bytes,2,opt,name=delivery_id,json=deliveryId,proto3,oneof" json:"delivery_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PeerMessageInterSession) Reset() {
 	*x = PeerMessageInterSession{}
-	mi := &file_conversation_v1_peer_proto_msgTypes[1]
+	mi := &file_conversation_v1_peer_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -197,7 +332,7 @@ func (x *PeerMessageInterSession) String() string {
 func (*PeerMessageInterSession) ProtoMessage() {}
 
 func (x *PeerMessageInterSession) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_peer_proto_msgTypes[1]
+	mi := &file_conversation_v1_peer_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -210,7 +345,67 @@ func (x *PeerMessageInterSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerMessageInterSession.ProtoReflect.Descriptor instead.
 func (*PeerMessageInterSession) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{1}
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PeerMessageInterSession) GetSenderSessionName() *PeerMessageSenderSessionName {
+	if x != nil {
+		return x.SenderSessionName
+	}
+	return nil
+}
+
+func (x *PeerMessageInterSession) GetDeliveryId() *PeerDeliveryId {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return nil
+}
+
+// The sender's asserted display name.
+type PeerMessageSenderSessionName struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name verbatim, as the vendor sanitized it. Never empty.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerMessageSenderSessionName) Reset() {
+	*x = PeerMessageSenderSessionName{}
+	mi := &file_conversation_v1_peer_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerMessageSenderSessionName) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerMessageSenderSessionName) ProtoMessage() {}
+
+func (x *PeerMessageSenderSessionName) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_peer_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerMessageSenderSessionName.ProtoReflect.Descriptor instead.
+func (*PeerMessageSenderSessionName) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *PeerMessageSenderSessionName) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
 }
 
 // A subagent this agent started handed its final report back. The report is
@@ -224,7 +419,7 @@ type PeerMessageSubagentHandback struct {
 
 func (x *PeerMessageSubagentHandback) Reset() {
 	*x = PeerMessageSubagentHandback{}
-	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	mi := &file_conversation_v1_peer_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -236,7 +431,7 @@ func (x *PeerMessageSubagentHandback) String() string {
 func (*PeerMessageSubagentHandback) ProtoMessage() {}
 
 func (x *PeerMessageSubagentHandback) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	mi := &file_conversation_v1_peer_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -249,23 +444,37 @@ func (x *PeerMessageSubagentHandback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerMessageSubagentHandback.ProtoReflect.Descriptor instead.
 func (*PeerMessageSubagentHandback) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{2}
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{5}
 }
 
 var File_conversation_v1_peer_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_peer_proto_rawDesc = "" +
 	"\n" +
-	"\x1aconversation/v1/peer.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\"\xaf\x02\n" +
+	"\x1aconversation/v1/peer.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\"\xf7\x02\n" +
 	"\vPeerMessage\x12.\n" +
 	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12\x16\n" +
 	"\x06sender\x18\x02 \x01(\tR\x06sender\x12\x12\n" +
 	"\x04body\x18\x03 \x01(\tR\x04body\x12\x0e\n" +
 	"\x02id\x18\x04 \x01(\tR\x02id\x12O\n" +
 	"\rinter_session\x18\x05 \x01(\v2(.conversation.v1.PeerMessageInterSessionH\x00R\finterSession\x12[\n" +
-	"\x11subagent_handback\x18\x06 \x01(\v2,.conversation.v1.PeerMessageSubagentHandbackH\x00R\x10subagentHandbackB\x06\n" +
-	"\x04kind\"\x19\n" +
-	"\x17PeerMessageInterSession\"\x1d\n" +
+	"\x11subagent_handback\x18\x06 \x01(\v2,.conversation.v1.PeerMessageSubagentHandbackH\x00R\x10subagentHandback\x12F\n" +
+	"\n" +
+	"in_session\x18\a \x01(\v2%.conversation.v1.PeerMessageInSessionH\x00R\tinSessionB\x06\n" +
+	"\x04kind\"_\n" +
+	"\x14PeerMessageInSession\x12G\n" +
+	"\vsender_task\x18\x01 \x01(\v2&.conversation.v1.PeerMessageSenderTaskR\n" +
+	"senderTask\"=\n" +
+	"\x15PeerMessageSenderTask\x12$\n" +
+	"\x0evendor_task_id\x18\x01 \x01(\tR\fvendorTaskId\"\xec\x01\n" +
+	"\x17PeerMessageInterSession\x12b\n" +
+	"\x13sender_session_name\x18\x01 \x01(\v2-.conversation.v1.PeerMessageSenderSessionNameH\x00R\x11senderSessionName\x88\x01\x01\x12E\n" +
+	"\vdelivery_id\x18\x02 \x01(\v2\x1f.conversation.v1.PeerDeliveryIdH\x01R\n" +
+	"deliveryId\x88\x01\x01B\x16\n" +
+	"\x14_sender_session_nameB\x0e\n" +
+	"\f_delivery_id\"2\n" +
+	"\x1cPeerMessageSenderSessionName\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x1d\n" +
 	"\x1bPeerMessageSubagentHandbackB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
@@ -280,22 +489,30 @@ func file_conversation_v1_peer_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_peer_proto_rawDescData
 }
 
-var file_conversation_v1_peer_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_conversation_v1_peer_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_conversation_v1_peer_proto_goTypes = []any{
-	(*PeerMessage)(nil),                 // 0: conversation.v1.PeerMessage
-	(*PeerMessageInterSession)(nil),     // 1: conversation.v1.PeerMessageInterSession
-	(*PeerMessageSubagentHandback)(nil), // 2: conversation.v1.PeerMessageSubagentHandback
-	(*AgentId)(nil),                     // 3: conversation.v1.AgentId
+	(*PeerMessage)(nil),                  // 0: conversation.v1.PeerMessage
+	(*PeerMessageInSession)(nil),         // 1: conversation.v1.PeerMessageInSession
+	(*PeerMessageSenderTask)(nil),        // 2: conversation.v1.PeerMessageSenderTask
+	(*PeerMessageInterSession)(nil),      // 3: conversation.v1.PeerMessageInterSession
+	(*PeerMessageSenderSessionName)(nil), // 4: conversation.v1.PeerMessageSenderSessionName
+	(*PeerMessageSubagentHandback)(nil),  // 5: conversation.v1.PeerMessageSubagentHandback
+	(*AgentId)(nil),                      // 6: conversation.v1.AgentId
+	(*PeerDeliveryId)(nil),               // 7: conversation.v1.PeerDeliveryId
 }
 var file_conversation_v1_peer_proto_depIdxs = []int32{
-	3, // 0: conversation.v1.PeerMessage.agent:type_name -> conversation.v1.AgentId
-	1, // 1: conversation.v1.PeerMessage.inter_session:type_name -> conversation.v1.PeerMessageInterSession
-	2, // 2: conversation.v1.PeerMessage.subagent_handback:type_name -> conversation.v1.PeerMessageSubagentHandback
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	6, // 0: conversation.v1.PeerMessage.agent:type_name -> conversation.v1.AgentId
+	3, // 1: conversation.v1.PeerMessage.inter_session:type_name -> conversation.v1.PeerMessageInterSession
+	5, // 2: conversation.v1.PeerMessage.subagent_handback:type_name -> conversation.v1.PeerMessageSubagentHandback
+	1, // 3: conversation.v1.PeerMessage.in_session:type_name -> conversation.v1.PeerMessageInSession
+	2, // 4: conversation.v1.PeerMessageInSession.sender_task:type_name -> conversation.v1.PeerMessageSenderTask
+	4, // 5: conversation.v1.PeerMessageInterSession.sender_session_name:type_name -> conversation.v1.PeerMessageSenderSessionName
+	7, // 6: conversation.v1.PeerMessageInterSession.delivery_id:type_name -> conversation.v1.PeerDeliveryId
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_peer_proto_init() }
@@ -307,14 +524,16 @@ func file_conversation_v1_peer_proto_init() {
 	file_conversation_v1_peer_proto_msgTypes[0].OneofWrappers = []any{
 		(*PeerMessage_InterSession)(nil),
 		(*PeerMessage_SubagentHandback)(nil),
+		(*PeerMessage_InSession)(nil),
 	}
+	file_conversation_v1_peer_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_peer_proto_rawDesc), len(file_conversation_v1_peer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

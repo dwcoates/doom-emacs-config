@@ -15432,10 +15432,16 @@ func (x *AgentSendMessageBody) GetText() string {
 // The message reached its recipient.
 type AgentSendMessageSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// WHICH AGENT it reached, resolved. This is the identity the addressed string
-	// above turned out to name, and it is what joins this send to the recipient's
-	// own activity — so a reader can follow a message to the work it caused.
-	RecipientAgentId *AgentId `protobuf:"bytes,1,opt,name=recipient_agent_id,json=recipientAgentId,proto3" json:"recipient_agent_id,omitempty"`
+	// WHO the message reached, resolved. THE ARM IS WHICH KIND OF RECIPIENT: an
+	// agent of this session has an identity this conversation books, while
+	// another Claude session has none here and is joined only through the
+	// delivery the vendor minted for the message.
+	//
+	// Types that are valid to be assigned to Recipient:
+	//
+	//	*AgentSendMessageSuccess_RecipientAgentId
+	//	*AgentSendMessageSuccess_PeerSession
+	Recipient isAgentSendMessageSuccess_Recipient `protobuf_oneof:"recipient"`
 	// How it got there. The two differ in a way a reader cares about: one costs
 	// nothing beyond the message, the other RESTARTED A DORMANT AGENT, which
 	// begins consuming tokens again.
@@ -15492,9 +15498,27 @@ func (*AgentSendMessageSuccess) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{206}
 }
 
+func (x *AgentSendMessageSuccess) GetRecipient() isAgentSendMessageSuccess_Recipient {
+	if x != nil {
+		return x.Recipient
+	}
+	return nil
+}
+
 func (x *AgentSendMessageSuccess) GetRecipientAgentId() *AgentId {
 	if x != nil {
-		return x.RecipientAgentId
+		if x, ok := x.Recipient.(*AgentSendMessageSuccess_RecipientAgentId); ok {
+			return x.RecipientAgentId
+		}
+	}
+	return nil
+}
+
+func (x *AgentSendMessageSuccess) GetPeerSession() *AgentSendMessagePeerSession {
+	if x != nil {
+		if x, ok := x.Recipient.(*AgentSendMessageSuccess_PeerSession); ok {
+			return x.PeerSession
+		}
 	}
 	return nil
 }
@@ -15545,6 +15569,28 @@ func (x *AgentSendMessageSuccess) GetSummary() *AgentSendMessageSummary {
 	return nil
 }
 
+type isAgentSendMessageSuccess_Recipient interface {
+	isAgentSendMessageSuccess_Recipient()
+}
+
+type AgentSendMessageSuccess_RecipientAgentId struct {
+	// WHICH AGENT of this session it reached. This is the identity the
+	// addressed string above turned out to name, and it is what joins this
+	// send to the recipient's own activity, so a reader can follow a message
+	// to the work it caused.
+	RecipientAgentId *AgentId `protobuf:"bytes,1,opt,name=recipient_agent_id,json=recipientAgentId,proto3,oneof"`
+}
+
+type AgentSendMessageSuccess_PeerSession struct {
+	// It reached ANOTHER CLAUDE SESSION, through the vendor's cross-session
+	// messaging. See AgentSendMessagePeerSession.
+	PeerSession *AgentSendMessagePeerSession `protobuf:"bytes,7,opt,name=peer_session,json=peerSession,proto3,oneof"`
+}
+
+func (*AgentSendMessageSuccess_RecipientAgentId) isAgentSendMessageSuccess_Recipient() {}
+
+func (*AgentSendMessageSuccess_PeerSession) isAgentSendMessageSuccess_Recipient() {}
+
 type isAgentSendMessageSuccess_Delivery interface {
 	isAgentSendMessageSuccess_Delivery()
 }
@@ -15566,6 +15612,110 @@ func (*AgentSendMessageSuccess_QueuedToLive) isAgentSendMessageSuccess_Delivery(
 
 func (*AgentSendMessageSuccess_ResumedRecipient) isAgentSendMessageSuccess_Delivery() {}
 
+// The send went to another Claude session.
+//
+// THE RECIPIENT IS NOT NAMED HERE, because the sender's vendor names it only as
+// the address the caller wrote (a peer name such as "fix-flaky-3a", which
+// carries a per-process suffix) and inside prose. What both ends DO share is the
+// delivery id the vendor minted for this one message: the recipient's record
+// of it carries the same id (PeerMessageInterSession.delivery_id), so a
+// consumer holding both conversations names the recipient by joining on it.
+type AgentSendMessagePeerSession struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The vendor's id for this one delivery (its `msg_id`), shared verbatim with
+	// the recipient's record of the message.
+	DeliveryId    *PeerDeliveryId `protobuf:"bytes,1,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentSendMessagePeerSession) Reset() {
+	*x = AgentSendMessagePeerSession{}
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[207]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentSendMessagePeerSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentSendMessagePeerSession) ProtoMessage() {}
+
+func (x *AgentSendMessagePeerSession) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[207]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentSendMessagePeerSession.ProtoReflect.Descriptor instead.
+func (*AgentSendMessagePeerSession) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{207}
+}
+
+func (x *AgentSendMessagePeerSession) GetDeliveryId() *PeerDeliveryId {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return nil
+}
+
+// THE VENDOR'S ID FOR ONE CROSS-SESSION MESSAGE (its `msg_id`): minted by the
+// sending vendor, returned on the sender's SendMessage result, and stamped on
+// the recipient's record of the message. The one value both ends of a
+// cross-session message share, so it is what joins a send to its delivery.
+// Opaque: compared for equality, never parsed.
+type PeerDeliveryId struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The id verbatim. Never empty.
+	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerDeliveryId) Reset() {
+	*x = PeerDeliveryId{}
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[208]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerDeliveryId) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerDeliveryId) ProtoMessage() {}
+
+func (x *PeerDeliveryId) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[208]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerDeliveryId.ProtoReflect.Descriptor instead.
+func (*PeerDeliveryId) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{208}
+}
+
+func (x *PeerDeliveryId) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 // The recipient was already running and the message is queued for it.
 type AgentSendMessageQueuedToLive struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -15575,7 +15725,7 @@ type AgentSendMessageQueuedToLive struct {
 
 func (x *AgentSendMessageQueuedToLive) Reset() {
 	*x = AgentSendMessageQueuedToLive{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[207]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15587,7 +15737,7 @@ func (x *AgentSendMessageQueuedToLive) String() string {
 func (*AgentSendMessageQueuedToLive) ProtoMessage() {}
 
 func (x *AgentSendMessageQueuedToLive) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[207]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15600,7 +15750,7 @@ func (x *AgentSendMessageQueuedToLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSendMessageQueuedToLive.ProtoReflect.Descriptor instead.
 func (*AgentSendMessageQueuedToLive) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{207}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{209}
 }
 
 // The recipient was dormant and was restarted to receive the message.
@@ -15618,7 +15768,7 @@ type AgentSendMessageResumedRecipient struct {
 
 func (x *AgentSendMessageResumedRecipient) Reset() {
 	*x = AgentSendMessageResumedRecipient{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[208]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15630,7 +15780,7 @@ func (x *AgentSendMessageResumedRecipient) String() string {
 func (*AgentSendMessageResumedRecipient) ProtoMessage() {}
 
 func (x *AgentSendMessageResumedRecipient) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[208]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15643,7 +15793,7 @@ func (x *AgentSendMessageResumedRecipient) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSendMessageResumedRecipient.ProtoReflect.Descriptor instead.
 func (*AgentSendMessageResumedRecipient) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{208}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{210}
 }
 
 // The message could not be delivered. Arms are DERIVED from the producer's real
@@ -15667,7 +15817,7 @@ type AgentSendMessageFailure struct {
 
 func (x *AgentSendMessageFailure) Reset() {
 	*x = AgentSendMessageFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[209]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15679,7 +15829,7 @@ func (x *AgentSendMessageFailure) String() string {
 func (*AgentSendMessageFailure) ProtoMessage() {}
 
 func (x *AgentSendMessageFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[209]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15692,7 +15842,7 @@ func (x *AgentSendMessageFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSendMessageFailure.ProtoReflect.Descriptor instead.
 func (*AgentSendMessageFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{209}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{211}
 }
 
 func (x *AgentSendMessageFailure) GetError() *AgentToolFailure {
@@ -15741,7 +15891,7 @@ type AgentSubagentHandback struct {
 
 func (x *AgentSubagentHandback) Reset() {
 	*x = AgentSubagentHandback{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[210]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15753,7 +15903,7 @@ func (x *AgentSubagentHandback) String() string {
 func (*AgentSubagentHandback) ProtoMessage() {}
 
 func (x *AgentSubagentHandback) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[210]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15766,7 +15916,7 @@ func (x *AgentSubagentHandback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSubagentHandback.ProtoReflect.Descriptor instead.
 func (*AgentSubagentHandback) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{210}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *AgentSubagentHandback) GetResult() isAgentSubagentHandback_Result {
@@ -15862,7 +16012,7 @@ type AgentSubagentHandbackStart struct {
 
 func (x *AgentSubagentHandbackStart) Reset() {
 	*x = AgentSubagentHandbackStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[211]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15874,7 +16024,7 @@ func (x *AgentSubagentHandbackStart) String() string {
 func (*AgentSubagentHandbackStart) ProtoMessage() {}
 
 func (x *AgentSubagentHandbackStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[211]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15887,7 +16037,7 @@ func (x *AgentSubagentHandbackStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSubagentHandbackStart.ProtoReflect.Descriptor instead.
 func (*AgentSubagentHandbackStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{211}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *AgentSubagentHandbackStart) GetReport() *AgentSubagentHandbackReport {
@@ -15916,7 +16066,7 @@ type AgentSubagentHandbackReport struct {
 
 func (x *AgentSubagentHandbackReport) Reset() {
 	*x = AgentSubagentHandbackReport{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[212]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15928,7 +16078,7 @@ func (x *AgentSubagentHandbackReport) String() string {
 func (*AgentSubagentHandbackReport) ProtoMessage() {}
 
 func (x *AgentSubagentHandbackReport) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[212]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15941,7 +16091,7 @@ func (x *AgentSubagentHandbackReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSubagentHandbackReport.ProtoReflect.Descriptor instead.
 func (*AgentSubagentHandbackReport) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{212}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *AgentSubagentHandbackReport) GetText() string {
@@ -15968,7 +16118,7 @@ type AgentSubagentHandbackSuccess struct {
 
 func (x *AgentSubagentHandbackSuccess) Reset() {
 	*x = AgentSubagentHandbackSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[213]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[215]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15980,7 +16130,7 @@ func (x *AgentSubagentHandbackSuccess) String() string {
 func (*AgentSubagentHandbackSuccess) ProtoMessage() {}
 
 func (x *AgentSubagentHandbackSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[213]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[215]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15993,7 +16143,7 @@ func (x *AgentSubagentHandbackSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSubagentHandbackSuccess.ProtoReflect.Descriptor instead.
 func (*AgentSubagentHandbackSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{213}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{215}
 }
 
 func (x *AgentSubagentHandbackSuccess) GetReport() *AgentSubagentHandbackReport {
@@ -16025,7 +16175,7 @@ type AgentSubagentHandbackFailure struct {
 
 func (x *AgentSubagentHandbackFailure) Reset() {
 	*x = AgentSubagentHandbackFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[214]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[216]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16037,7 +16187,7 @@ func (x *AgentSubagentHandbackFailure) String() string {
 func (*AgentSubagentHandbackFailure) ProtoMessage() {}
 
 func (x *AgentSubagentHandbackFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[214]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[216]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16050,7 +16200,7 @@ func (x *AgentSubagentHandbackFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSubagentHandbackFailure.ProtoReflect.Descriptor instead.
 func (*AgentSubagentHandbackFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{214}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{216}
 }
 
 func (x *AgentSubagentHandbackFailure) GetError() *AgentToolFailure {
@@ -16086,7 +16236,7 @@ type AgentWebFetch struct {
 
 func (x *AgentWebFetch) Reset() {
 	*x = AgentWebFetch{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[215]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16098,7 +16248,7 @@ func (x *AgentWebFetch) String() string {
 func (*AgentWebFetch) ProtoMessage() {}
 
 func (x *AgentWebFetch) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[215]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16111,7 +16261,7 @@ func (x *AgentWebFetch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebFetch.ProtoReflect.Descriptor instead.
 func (*AgentWebFetch) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{215}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *AgentWebFetch) GetResult() isAgentWebFetch_Result {
@@ -16205,7 +16355,7 @@ type AgentWebFetchStart struct {
 
 func (x *AgentWebFetchStart) Reset() {
 	*x = AgentWebFetchStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[216]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16217,7 +16367,7 @@ func (x *AgentWebFetchStart) String() string {
 func (*AgentWebFetchStart) ProtoMessage() {}
 
 func (x *AgentWebFetchStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[216]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16230,7 +16380,7 @@ func (x *AgentWebFetchStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebFetchStart.ProtoReflect.Descriptor instead.
 func (*AgentWebFetchStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{216}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *AgentWebFetchStart) GetTarget() *AgentWebFetchTarget {
@@ -16259,7 +16409,7 @@ type AgentWebFetchTarget struct {
 
 func (x *AgentWebFetchTarget) Reset() {
 	*x = AgentWebFetchTarget{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[217]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16271,7 +16421,7 @@ func (x *AgentWebFetchTarget) String() string {
 func (*AgentWebFetchTarget) ProtoMessage() {}
 
 func (x *AgentWebFetchTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[217]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16284,7 +16434,7 @@ func (x *AgentWebFetchTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebFetchTarget.ProtoReflect.Descriptor instead.
 func (*AgentWebFetchTarget) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{217}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *AgentWebFetchTarget) GetUrl() string {
@@ -16321,7 +16471,7 @@ type AgentWebFetchSuccess struct {
 
 func (x *AgentWebFetchSuccess) Reset() {
 	*x = AgentWebFetchSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[218]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[220]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16333,7 +16483,7 @@ func (x *AgentWebFetchSuccess) String() string {
 func (*AgentWebFetchSuccess) ProtoMessage() {}
 
 func (x *AgentWebFetchSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[218]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[220]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16346,7 +16496,7 @@ func (x *AgentWebFetchSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebFetchSuccess.ProtoReflect.Descriptor instead.
 func (*AgentWebFetchSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{218}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{220}
 }
 
 func (x *AgentWebFetchSuccess) GetTarget() *AgentWebFetchTarget {
@@ -16404,7 +16554,7 @@ type AgentWebFetchHttpStatus struct {
 
 func (x *AgentWebFetchHttpStatus) Reset() {
 	*x = AgentWebFetchHttpStatus{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[219]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16416,7 +16566,7 @@ func (x *AgentWebFetchHttpStatus) String() string {
 func (*AgentWebFetchHttpStatus) ProtoMessage() {}
 
 func (x *AgentWebFetchHttpStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[219]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16429,7 +16579,7 @@ func (x *AgentWebFetchHttpStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebFetchHttpStatus.ProtoReflect.Descriptor instead.
 func (*AgentWebFetchHttpStatus) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{219}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{221}
 }
 
 func (x *AgentWebFetchHttpStatus) GetCode() uint32 {
@@ -16459,7 +16609,7 @@ type AgentWebFetchFailure struct {
 
 func (x *AgentWebFetchFailure) Reset() {
 	*x = AgentWebFetchFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[220]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16471,7 +16621,7 @@ func (x *AgentWebFetchFailure) String() string {
 func (*AgentWebFetchFailure) ProtoMessage() {}
 
 func (x *AgentWebFetchFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[220]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16484,7 +16634,7 @@ func (x *AgentWebFetchFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebFetchFailure.ProtoReflect.Descriptor instead.
 func (*AgentWebFetchFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{220}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{222}
 }
 
 func (x *AgentWebFetchFailure) GetTarget() *AgentWebFetchTarget {
@@ -16519,7 +16669,7 @@ type AgentWebSearch struct {
 
 func (x *AgentWebSearch) Reset() {
 	*x = AgentWebSearch{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[221]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16531,7 +16681,7 @@ func (x *AgentWebSearch) String() string {
 func (*AgentWebSearch) ProtoMessage() {}
 
 func (x *AgentWebSearch) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[221]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16544,7 +16694,7 @@ func (x *AgentWebSearch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearch.ProtoReflect.Descriptor instead.
 func (*AgentWebSearch) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{221}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *AgentWebSearch) GetResult() isAgentWebSearch_Result {
@@ -16635,7 +16785,7 @@ type AgentWebSearchStart struct {
 
 func (x *AgentWebSearchStart) Reset() {
 	*x = AgentWebSearchStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[222]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16647,7 +16797,7 @@ func (x *AgentWebSearchStart) String() string {
 func (*AgentWebSearchStart) ProtoMessage() {}
 
 func (x *AgentWebSearchStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[222]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16660,7 +16810,7 @@ func (x *AgentWebSearchStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchStart.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{222}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{224}
 }
 
 func (x *AgentWebSearchStart) GetQuery() *AgentWebSearchQuery {
@@ -16688,7 +16838,7 @@ type AgentWebSearchQuery struct {
 
 func (x *AgentWebSearchQuery) Reset() {
 	*x = AgentWebSearchQuery{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[223]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16700,7 +16850,7 @@ func (x *AgentWebSearchQuery) String() string {
 func (*AgentWebSearchQuery) ProtoMessage() {}
 
 func (x *AgentWebSearchQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[223]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16713,7 +16863,7 @@ func (x *AgentWebSearchQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchQuery.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchQuery) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{223}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{225}
 }
 
 func (x *AgentWebSearchQuery) GetTerms() string {
@@ -16744,7 +16894,7 @@ type AgentWebSearchSuccess struct {
 
 func (x *AgentWebSearchSuccess) Reset() {
 	*x = AgentWebSearchSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[224]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16756,7 +16906,7 @@ func (x *AgentWebSearchSuccess) String() string {
 func (*AgentWebSearchSuccess) ProtoMessage() {}
 
 func (x *AgentWebSearchSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[224]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16769,7 +16919,7 @@ func (x *AgentWebSearchSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchSuccess.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{224}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{226}
 }
 
 func (x *AgentWebSearchSuccess) GetQuery() *AgentWebSearchQuery {
@@ -16816,7 +16966,7 @@ type AgentWebSearchResult struct {
 
 func (x *AgentWebSearchResult) Reset() {
 	*x = AgentWebSearchResult{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[225]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16828,7 +16978,7 @@ func (x *AgentWebSearchResult) String() string {
 func (*AgentWebSearchResult) ProtoMessage() {}
 
 func (x *AgentWebSearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[225]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16841,7 +16991,7 @@ func (x *AgentWebSearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchResult.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchResult) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{225}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{227}
 }
 
 func (x *AgentWebSearchResult) GetEntry() isAgentWebSearchResult_Entry {
@@ -16900,7 +17050,7 @@ type AgentWebSearchLink struct {
 
 func (x *AgentWebSearchLink) Reset() {
 	*x = AgentWebSearchLink{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[226]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16912,7 +17062,7 @@ func (x *AgentWebSearchLink) String() string {
 func (*AgentWebSearchLink) ProtoMessage() {}
 
 func (x *AgentWebSearchLink) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[226]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16925,7 +17075,7 @@ func (x *AgentWebSearchLink) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchLink.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchLink) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{226}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{228}
 }
 
 func (x *AgentWebSearchLink) GetTitle() string {
@@ -16953,7 +17103,7 @@ type AgentWebSearchNote struct {
 
 func (x *AgentWebSearchNote) Reset() {
 	*x = AgentWebSearchNote{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[227]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16965,7 +17115,7 @@ func (x *AgentWebSearchNote) String() string {
 func (*AgentWebSearchNote) ProtoMessage() {}
 
 func (x *AgentWebSearchNote) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[227]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16978,7 +17128,7 @@ func (x *AgentWebSearchNote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchNote.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchNote) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{227}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *AgentWebSearchNote) GetText() string {
@@ -17001,7 +17151,7 @@ type AgentWebSearchFailure struct {
 
 func (x *AgentWebSearchFailure) Reset() {
 	*x = AgentWebSearchFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[228]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[230]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17013,7 +17163,7 @@ func (x *AgentWebSearchFailure) String() string {
 func (*AgentWebSearchFailure) ProtoMessage() {}
 
 func (x *AgentWebSearchFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[228]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[230]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17026,7 +17176,7 @@ func (x *AgentWebSearchFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentWebSearchFailure.ProtoReflect.Descriptor instead.
 func (*AgentWebSearchFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{228}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{230}
 }
 
 func (x *AgentWebSearchFailure) GetQuery() *AgentWebSearchQuery {
@@ -17065,7 +17215,7 @@ type AgentMonitor struct {
 
 func (x *AgentMonitor) Reset() {
 	*x = AgentMonitor{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[229]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[231]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17077,7 +17227,7 @@ func (x *AgentMonitor) String() string {
 func (*AgentMonitor) ProtoMessage() {}
 
 func (x *AgentMonitor) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[229]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[231]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17090,7 +17240,7 @@ func (x *AgentMonitor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitor.ProtoReflect.Descriptor instead.
 func (*AgentMonitor) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{229}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{231}
 }
 
 func (x *AgentMonitor) GetResult() isAgentMonitor_Result {
@@ -17182,7 +17332,7 @@ type AgentMonitorStart struct {
 
 func (x *AgentMonitorStart) Reset() {
 	*x = AgentMonitorStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[230]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[232]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17194,7 +17344,7 @@ func (x *AgentMonitorStart) String() string {
 func (*AgentMonitorStart) ProtoMessage() {}
 
 func (x *AgentMonitorStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[230]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[232]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17207,7 +17357,7 @@ func (x *AgentMonitorStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorStart.ProtoReflect.Descriptor instead.
 func (*AgentMonitorStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{230}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{232}
 }
 
 func (x *AgentMonitorStart) GetDescription() string {
@@ -17321,7 +17471,7 @@ type AgentMonitorDeadline struct {
 
 func (x *AgentMonitorDeadline) Reset() {
 	*x = AgentMonitorDeadline{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[231]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[233]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17333,7 +17483,7 @@ func (x *AgentMonitorDeadline) String() string {
 func (*AgentMonitorDeadline) ProtoMessage() {}
 
 func (x *AgentMonitorDeadline) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[231]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[233]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17346,7 +17496,7 @@ func (x *AgentMonitorDeadline) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorDeadline.ProtoReflect.Descriptor instead.
 func (*AgentMonitorDeadline) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{231}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{233}
 }
 
 func (x *AgentMonitorDeadline) GetTimeoutMs() uint64 {
@@ -17365,7 +17515,7 @@ type AgentMonitorPersistent struct {
 
 func (x *AgentMonitorPersistent) Reset() {
 	*x = AgentMonitorPersistent{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[232]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[234]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17377,7 +17527,7 @@ func (x *AgentMonitorPersistent) String() string {
 func (*AgentMonitorPersistent) ProtoMessage() {}
 
 func (x *AgentMonitorPersistent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[232]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[234]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17390,7 +17540,7 @@ func (x *AgentMonitorPersistent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorPersistent.ProtoReflect.Descriptor instead.
 func (*AgentMonitorPersistent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{232}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{234}
 }
 
 // A command source.
@@ -17404,7 +17554,7 @@ type AgentMonitorCommand struct {
 
 func (x *AgentMonitorCommand) Reset() {
 	*x = AgentMonitorCommand{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[233]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17416,7 +17566,7 @@ func (x *AgentMonitorCommand) String() string {
 func (*AgentMonitorCommand) ProtoMessage() {}
 
 func (x *AgentMonitorCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[233]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17429,7 +17579,7 @@ func (x *AgentMonitorCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorCommand.ProtoReflect.Descriptor instead.
 func (*AgentMonitorCommand) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{233}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{235}
 }
 
 func (x *AgentMonitorCommand) GetCommand() string {
@@ -17450,7 +17600,7 @@ type AgentMonitorWebsocket struct {
 
 func (x *AgentMonitorWebsocket) Reset() {
 	*x = AgentMonitorWebsocket{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[234]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17462,7 +17612,7 @@ func (x *AgentMonitorWebsocket) String() string {
 func (*AgentMonitorWebsocket) ProtoMessage() {}
 
 func (x *AgentMonitorWebsocket) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[234]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17475,7 +17625,7 @@ func (x *AgentMonitorWebsocket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorWebsocket.ProtoReflect.Descriptor instead.
 func (*AgentMonitorWebsocket) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{234}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{236}
 }
 
 func (x *AgentMonitorWebsocket) GetUrl() string {
@@ -17500,7 +17650,7 @@ type AgentMonitorEnded struct {
 
 func (x *AgentMonitorEnded) Reset() {
 	*x = AgentMonitorEnded{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[235]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17512,7 +17662,7 @@ func (x *AgentMonitorEnded) String() string {
 func (*AgentMonitorEnded) ProtoMessage() {}
 
 func (x *AgentMonitorEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[235]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17525,7 +17675,7 @@ func (x *AgentMonitorEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorEnded.ProtoReflect.Descriptor instead.
 func (*AgentMonitorEnded) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{235}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{237}
 }
 
 func (x *AgentMonitorEnded) GetCall() *AgentMonitorStart {
@@ -17548,7 +17698,7 @@ type AgentMonitorFailure struct {
 
 func (x *AgentMonitorFailure) Reset() {
 	*x = AgentMonitorFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[236]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[238]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17560,7 +17710,7 @@ func (x *AgentMonitorFailure) String() string {
 func (*AgentMonitorFailure) ProtoMessage() {}
 
 func (x *AgentMonitorFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[236]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[238]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17573,7 +17723,7 @@ func (x *AgentMonitorFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMonitorFailure.ProtoReflect.Descriptor instead.
 func (*AgentMonitorFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{236}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{238}
 }
 
 func (x *AgentMonitorFailure) GetFailure() *AgentToolFailure {
@@ -17607,7 +17757,7 @@ type AgentScheduleWakeup struct {
 
 func (x *AgentScheduleWakeup) Reset() {
 	*x = AgentScheduleWakeup{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[237]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17619,7 +17769,7 @@ func (x *AgentScheduleWakeup) String() string {
 func (*AgentScheduleWakeup) ProtoMessage() {}
 
 func (x *AgentScheduleWakeup) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[237]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17632,7 +17782,7 @@ func (x *AgentScheduleWakeup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeup.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeup) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{237}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{239}
 }
 
 func (x *AgentScheduleWakeup) GetResult() isAgentScheduleWakeup_Result {
@@ -17713,7 +17863,7 @@ type AgentScheduleWakeupStart struct {
 
 func (x *AgentScheduleWakeupStart) Reset() {
 	*x = AgentScheduleWakeupStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[238]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17725,7 +17875,7 @@ func (x *AgentScheduleWakeupStart) String() string {
 func (*AgentScheduleWakeupStart) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[238]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17738,7 +17888,7 @@ func (x *AgentScheduleWakeupStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupStart.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{238}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{240}
 }
 
 func (x *AgentScheduleWakeupStart) GetAct() isAgentScheduleWakeupStart_Act {
@@ -17808,7 +17958,7 @@ type AgentScheduleWakeupSchedule struct {
 
 func (x *AgentScheduleWakeupSchedule) Reset() {
 	*x = AgentScheduleWakeupSchedule{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[239]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[241]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17820,7 +17970,7 @@ func (x *AgentScheduleWakeupSchedule) String() string {
 func (*AgentScheduleWakeupSchedule) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupSchedule) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[239]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[241]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17833,7 +17983,7 @@ func (x *AgentScheduleWakeupSchedule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupSchedule.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupSchedule) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{239}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{241}
 }
 
 func (x *AgentScheduleWakeupSchedule) GetDelaySeconds() uint32 {
@@ -17866,7 +18016,7 @@ type AgentScheduleWakeupStop struct {
 
 func (x *AgentScheduleWakeupStop) Reset() {
 	*x = AgentScheduleWakeupStop{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[240]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[242]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17878,7 +18028,7 @@ func (x *AgentScheduleWakeupStop) String() string {
 func (*AgentScheduleWakeupStop) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupStop) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[240]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[242]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17891,7 +18041,7 @@ func (x *AgentScheduleWakeupStop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupStop.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupStop) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{240}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{242}
 }
 
 // The runtime's answer.
@@ -17910,7 +18060,7 @@ type AgentScheduleWakeupSuccess struct {
 
 func (x *AgentScheduleWakeupSuccess) Reset() {
 	*x = AgentScheduleWakeupSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[241]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[243]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17922,7 +18072,7 @@ func (x *AgentScheduleWakeupSuccess) String() string {
 func (*AgentScheduleWakeupSuccess) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[241]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[243]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17935,7 +18085,7 @@ func (x *AgentScheduleWakeupSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupSuccess.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{241}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{243}
 }
 
 func (x *AgentScheduleWakeupSuccess) GetOutcome() isAgentScheduleWakeupSuccess_Outcome {
@@ -17999,7 +18149,7 @@ type AgentScheduleWakeupScheduled struct {
 
 func (x *AgentScheduleWakeupScheduled) Reset() {
 	*x = AgentScheduleWakeupScheduled{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[242]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[244]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18011,7 +18161,7 @@ func (x *AgentScheduleWakeupScheduled) String() string {
 func (*AgentScheduleWakeupScheduled) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupScheduled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[242]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[244]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18024,7 +18174,7 @@ func (x *AgentScheduleWakeupScheduled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupScheduled.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupScheduled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{242}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{244}
 }
 
 func (x *AgentScheduleWakeupScheduled) GetWakeAtMs() int64 {
@@ -18060,7 +18210,7 @@ type AgentScheduleWakeupStopped struct {
 
 func (x *AgentScheduleWakeupStopped) Reset() {
 	*x = AgentScheduleWakeupStopped{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[243]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[245]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18072,7 +18222,7 @@ func (x *AgentScheduleWakeupStopped) String() string {
 func (*AgentScheduleWakeupStopped) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupStopped) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[243]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[245]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18085,7 +18235,7 @@ func (x *AgentScheduleWakeupStopped) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupStopped.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupStopped) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{243}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{245}
 }
 
 func (x *AgentScheduleWakeupStopped) GetCancelledWakeups() uint32 {
@@ -18106,7 +18256,7 @@ type AgentScheduleWakeupFailure struct {
 
 func (x *AgentScheduleWakeupFailure) Reset() {
 	*x = AgentScheduleWakeupFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[244]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[246]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18118,7 +18268,7 @@ func (x *AgentScheduleWakeupFailure) String() string {
 func (*AgentScheduleWakeupFailure) ProtoMessage() {}
 
 func (x *AgentScheduleWakeupFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[244]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[246]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18131,7 +18281,7 @@ func (x *AgentScheduleWakeupFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentScheduleWakeupFailure.ProtoReflect.Descriptor instead.
 func (*AgentScheduleWakeupFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{244}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{246}
 }
 
 func (x *AgentScheduleWakeupFailure) GetFailure() *AgentToolFailure {
@@ -18159,7 +18309,7 @@ type AgentArtifact struct {
 
 func (x *AgentArtifact) Reset() {
 	*x = AgentArtifact{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[245]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[247]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18171,7 +18321,7 @@ func (x *AgentArtifact) String() string {
 func (*AgentArtifact) ProtoMessage() {}
 
 func (x *AgentArtifact) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[245]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[247]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18184,7 +18334,7 @@ func (x *AgentArtifact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifact.ProtoReflect.Descriptor instead.
 func (*AgentArtifact) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{245}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{247}
 }
 
 func (x *AgentArtifact) GetResult() isAgentArtifact_Result {
@@ -18265,7 +18415,7 @@ type AgentArtifactStart struct {
 
 func (x *AgentArtifactStart) Reset() {
 	*x = AgentArtifactStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[246]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[248]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18277,7 +18427,7 @@ func (x *AgentArtifactStart) String() string {
 func (*AgentArtifactStart) ProtoMessage() {}
 
 func (x *AgentArtifactStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[246]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[248]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18290,7 +18440,7 @@ func (x *AgentArtifactStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactStart.ProtoReflect.Descriptor instead.
 func (*AgentArtifactStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{246}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{248}
 }
 
 func (x *AgentArtifactStart) GetAct() isAgentArtifactStart_Act {
@@ -18370,7 +18520,7 @@ type AgentArtifactPublish struct {
 
 func (x *AgentArtifactPublish) Reset() {
 	*x = AgentArtifactPublish{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[247]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[249]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18382,7 +18532,7 @@ func (x *AgentArtifactPublish) String() string {
 func (*AgentArtifactPublish) ProtoMessage() {}
 
 func (x *AgentArtifactPublish) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[247]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[249]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18395,7 +18545,7 @@ func (x *AgentArtifactPublish) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactPublish.ProtoReflect.Descriptor instead.
 func (*AgentArtifactPublish) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{247}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{249}
 }
 
 func (x *AgentArtifactPublish) GetFilePath() string {
@@ -18460,7 +18610,7 @@ type AgentArtifactList struct {
 
 func (x *AgentArtifactList) Reset() {
 	*x = AgentArtifactList{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[248]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[250]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18472,7 +18622,7 @@ func (x *AgentArtifactList) String() string {
 func (*AgentArtifactList) ProtoMessage() {}
 
 func (x *AgentArtifactList) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[248]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[250]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18485,7 +18635,7 @@ func (x *AgentArtifactList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactList.ProtoReflect.Descriptor instead.
 func (*AgentArtifactList) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{248}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{250}
 }
 
 func (x *AgentArtifactList) GetLimit() uint32 {
@@ -18518,7 +18668,7 @@ type AgentArtifactSuccess struct {
 
 func (x *AgentArtifactSuccess) Reset() {
 	*x = AgentArtifactSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[249]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[251]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18530,7 +18680,7 @@ func (x *AgentArtifactSuccess) String() string {
 func (*AgentArtifactSuccess) ProtoMessage() {}
 
 func (x *AgentArtifactSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[249]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[251]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18543,7 +18693,7 @@ func (x *AgentArtifactSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactSuccess.ProtoReflect.Descriptor instead.
 func (*AgentArtifactSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{249}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{251}
 }
 
 func (x *AgentArtifactSuccess) GetOutcome() isAgentArtifactSuccess_Outcome {
@@ -18612,7 +18762,7 @@ type AgentArtifactPublished struct {
 
 func (x *AgentArtifactPublished) Reset() {
 	*x = AgentArtifactPublished{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[250]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[252]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18624,7 +18774,7 @@ func (x *AgentArtifactPublished) String() string {
 func (*AgentArtifactPublished) ProtoMessage() {}
 
 func (x *AgentArtifactPublished) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[250]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[252]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18637,7 +18787,7 @@ func (x *AgentArtifactPublished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactPublished.ProtoReflect.Descriptor instead.
 func (*AgentArtifactPublished) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{250}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{252}
 }
 
 func (x *AgentArtifactPublished) GetUrl() string {
@@ -18673,7 +18823,7 @@ type AgentArtifactListed struct {
 
 func (x *AgentArtifactListed) Reset() {
 	*x = AgentArtifactListed{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[251]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[253]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18685,7 +18835,7 @@ func (x *AgentArtifactListed) String() string {
 func (*AgentArtifactListed) ProtoMessage() {}
 
 func (x *AgentArtifactListed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[251]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[253]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18698,7 +18848,7 @@ func (x *AgentArtifactListed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactListed.ProtoReflect.Descriptor instead.
 func (*AgentArtifactListed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{251}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{253}
 }
 
 // The call never ran.
@@ -18726,7 +18876,7 @@ type AgentArtifactFailure struct {
 
 func (x *AgentArtifactFailure) Reset() {
 	*x = AgentArtifactFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[252]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[254]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18738,7 +18888,7 @@ func (x *AgentArtifactFailure) String() string {
 func (*AgentArtifactFailure) ProtoMessage() {}
 
 func (x *AgentArtifactFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[252]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[254]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18751,7 +18901,7 @@ func (x *AgentArtifactFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentArtifactFailure.ProtoReflect.Descriptor instead.
 func (*AgentArtifactFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{252}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{254}
 }
 
 func (x *AgentArtifactFailure) GetFailure() *AgentToolFailure {
@@ -18829,7 +18979,7 @@ type AgentMcpToolCall struct {
 
 func (x *AgentMcpToolCall) Reset() {
 	*x = AgentMcpToolCall{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[253]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18841,7 +18991,7 @@ func (x *AgentMcpToolCall) String() string {
 func (*AgentMcpToolCall) ProtoMessage() {}
 
 func (x *AgentMcpToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[253]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18854,7 +19004,7 @@ func (x *AgentMcpToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMcpToolCall.ProtoReflect.Descriptor instead.
 func (*AgentMcpToolCall) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{253}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{255}
 }
 
 func (x *AgentMcpToolCall) GetResult() isAgentMcpToolCall_Result {
@@ -18951,7 +19101,7 @@ type AgentMcpTool struct {
 
 func (x *AgentMcpTool) Reset() {
 	*x = AgentMcpTool{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[254]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18963,7 +19113,7 @@ func (x *AgentMcpTool) String() string {
 func (*AgentMcpTool) ProtoMessage() {}
 
 func (x *AgentMcpTool) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[254]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18976,7 +19126,7 @@ func (x *AgentMcpTool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMcpTool.ProtoReflect.Descriptor instead.
 func (*AgentMcpTool) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{254}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{256}
 }
 
 func (x *AgentMcpTool) GetName() string {
@@ -19006,7 +19156,7 @@ type AgentMcpToolAddress struct {
 
 func (x *AgentMcpToolAddress) Reset() {
 	*x = AgentMcpToolAddress{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[255]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19018,7 +19168,7 @@ func (x *AgentMcpToolAddress) String() string {
 func (*AgentMcpToolAddress) ProtoMessage() {}
 
 func (x *AgentMcpToolAddress) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[255]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19031,7 +19181,7 @@ func (x *AgentMcpToolAddress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMcpToolAddress.ProtoReflect.Descriptor instead.
 func (*AgentMcpToolAddress) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{255}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *AgentMcpToolAddress) GetServer() string {
@@ -19065,7 +19215,7 @@ type AgentMcpToolCallStart struct {
 
 func (x *AgentMcpToolCallStart) Reset() {
 	*x = AgentMcpToolCallStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[256]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19077,7 +19227,7 @@ func (x *AgentMcpToolCallStart) String() string {
 func (*AgentMcpToolCallStart) ProtoMessage() {}
 
 func (x *AgentMcpToolCallStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[256]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19090,7 +19240,7 @@ func (x *AgentMcpToolCallStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMcpToolCallStart.ProtoReflect.Descriptor instead.
 func (*AgentMcpToolCallStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{256}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *AgentMcpToolCallStart) GetTool() *AgentMcpTool {
@@ -19131,7 +19281,7 @@ type AgentMcpToolCallSuccess struct {
 
 func (x *AgentMcpToolCallSuccess) Reset() {
 	*x = AgentMcpToolCallSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[257]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19143,7 +19293,7 @@ func (x *AgentMcpToolCallSuccess) String() string {
 func (*AgentMcpToolCallSuccess) ProtoMessage() {}
 
 func (x *AgentMcpToolCallSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[257]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19156,7 +19306,7 @@ func (x *AgentMcpToolCallSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMcpToolCallSuccess.ProtoReflect.Descriptor instead.
 func (*AgentMcpToolCallSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{257}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *AgentMcpToolCallSuccess) GetTool() *AgentMcpTool {
@@ -19202,7 +19352,7 @@ type AgentMcpToolCallFailure struct {
 
 func (x *AgentMcpToolCallFailure) Reset() {
 	*x = AgentMcpToolCallFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[258]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19214,7 +19364,7 @@ func (x *AgentMcpToolCallFailure) String() string {
 func (*AgentMcpToolCallFailure) ProtoMessage() {}
 
 func (x *AgentMcpToolCallFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[258]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19227,7 +19377,7 @@ func (x *AgentMcpToolCallFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentMcpToolCallFailure.ProtoReflect.Descriptor instead.
 func (*AgentMcpToolCallFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{258}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{260}
 }
 
 func (x *AgentMcpToolCallFailure) GetTool() *AgentMcpTool {
@@ -19267,7 +19417,7 @@ type ToolResultContent struct {
 
 func (x *ToolResultContent) Reset() {
 	*x = ToolResultContent{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[259]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[261]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19279,7 +19429,7 @@ func (x *ToolResultContent) String() string {
 func (*ToolResultContent) ProtoMessage() {}
 
 func (x *ToolResultContent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[259]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[261]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19292,7 +19442,7 @@ func (x *ToolResultContent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResultContent.ProtoReflect.Descriptor instead.
 func (*ToolResultContent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{259}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{261}
 }
 
 func (x *ToolResultContent) GetBlocks() []*ToolResultContentBlock {
@@ -19317,7 +19467,7 @@ type ToolResultContentBlock struct {
 
 func (x *ToolResultContentBlock) Reset() {
 	*x = ToolResultContentBlock{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[260]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[262]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19329,7 +19479,7 @@ func (x *ToolResultContentBlock) String() string {
 func (*ToolResultContentBlock) ProtoMessage() {}
 
 func (x *ToolResultContentBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[260]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[262]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19342,7 +19492,7 @@ func (x *ToolResultContentBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResultContentBlock.ProtoReflect.Descriptor instead.
 func (*ToolResultContentBlock) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{260}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{262}
 }
 
 func (x *ToolResultContentBlock) GetBlock() isToolResultContentBlock_Block {
@@ -19438,7 +19588,7 @@ type AgentUnmodeled struct {
 
 func (x *AgentUnmodeled) Reset() {
 	*x = AgentUnmodeled{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[261]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[263]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19450,7 +19600,7 @@ func (x *AgentUnmodeled) String() string {
 func (*AgentUnmodeled) ProtoMessage() {}
 
 func (x *AgentUnmodeled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[261]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[263]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19463,7 +19613,7 @@ func (x *AgentUnmodeled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentUnmodeled.ProtoReflect.Descriptor instead.
 func (*AgentUnmodeled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{261}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{263}
 }
 
 func (x *AgentUnmodeled) GetResult() isAgentUnmodeled_Result {
@@ -19571,7 +19721,7 @@ type AgentUnmodeledStart struct {
 
 func (x *AgentUnmodeledStart) Reset() {
 	*x = AgentUnmodeledStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[262]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[264]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19583,7 +19733,7 @@ func (x *AgentUnmodeledStart) String() string {
 func (*AgentUnmodeledStart) ProtoMessage() {}
 
 func (x *AgentUnmodeledStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[262]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[264]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19596,7 +19746,7 @@ func (x *AgentUnmodeledStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentUnmodeledStart.ProtoReflect.Descriptor instead.
 func (*AgentUnmodeledStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{262}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{264}
 }
 
 func (x *AgentUnmodeledStart) GetToolName() string {
@@ -19638,7 +19788,7 @@ type AgentUnmodeledSuccess struct {
 
 func (x *AgentUnmodeledSuccess) Reset() {
 	*x = AgentUnmodeledSuccess{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[263]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[265]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19650,7 +19800,7 @@ func (x *AgentUnmodeledSuccess) String() string {
 func (*AgentUnmodeledSuccess) ProtoMessage() {}
 
 func (x *AgentUnmodeledSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[263]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[265]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19663,7 +19813,7 @@ func (x *AgentUnmodeledSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentUnmodeledSuccess.ProtoReflect.Descriptor instead.
 func (*AgentUnmodeledSuccess) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{263}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{265}
 }
 
 func (x *AgentUnmodeledSuccess) GetToolName() string {
@@ -19706,7 +19856,7 @@ type AgentUnmodeledFailure struct {
 
 func (x *AgentUnmodeledFailure) Reset() {
 	*x = AgentUnmodeledFailure{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[264]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[266]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19718,7 +19868,7 @@ func (x *AgentUnmodeledFailure) String() string {
 func (*AgentUnmodeledFailure) ProtoMessage() {}
 
 func (x *AgentUnmodeledFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[264]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[266]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19731,7 +19881,7 @@ func (x *AgentUnmodeledFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentUnmodeledFailure.ProtoReflect.Descriptor instead.
 func (*AgentUnmodeledFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{264}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{266}
 }
 
 func (x *AgentUnmodeledFailure) GetToolName() string {
@@ -19775,7 +19925,7 @@ type AgentHook struct {
 
 func (x *AgentHook) Reset() {
 	*x = AgentHook{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[265]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[267]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19787,7 +19937,7 @@ func (x *AgentHook) String() string {
 func (*AgentHook) ProtoMessage() {}
 
 func (x *AgentHook) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[265]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[267]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19800,7 +19950,7 @@ func (x *AgentHook) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHook.ProtoReflect.Descriptor instead.
 func (*AgentHook) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{265}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{267}
 }
 
 func (x *AgentHook) GetResult() isAgentHook_Result {
@@ -19913,7 +20063,7 @@ type AgentHookStart struct {
 
 func (x *AgentHookStart) Reset() {
 	*x = AgentHookStart{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[266]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[268]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19925,7 +20075,7 @@ func (x *AgentHookStart) String() string {
 func (*AgentHookStart) ProtoMessage() {}
 
 func (x *AgentHookStart) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[266]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[268]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19938,7 +20088,7 @@ func (x *AgentHookStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHookStart.ProtoReflect.Descriptor instead.
 func (*AgentHookStart) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{266}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{268}
 }
 
 func (x *AgentHookStart) GetHookName() string {
@@ -19988,7 +20138,7 @@ type AgentHookSucceeded struct {
 
 func (x *AgentHookSucceeded) Reset() {
 	*x = AgentHookSucceeded{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[267]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[269]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20000,7 +20150,7 @@ func (x *AgentHookSucceeded) String() string {
 func (*AgentHookSucceeded) ProtoMessage() {}
 
 func (x *AgentHookSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[267]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[269]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20013,7 +20163,7 @@ func (x *AgentHookSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHookSucceeded.ProtoReflect.Descriptor instead.
 func (*AgentHookSucceeded) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{267}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{269}
 }
 
 func (x *AgentHookSucceeded) GetCommand() string {
@@ -20057,7 +20207,7 @@ type AgentHookOutput struct {
 
 func (x *AgentHookOutput) Reset() {
 	*x = AgentHookOutput{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[268]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[270]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20069,7 +20219,7 @@ func (x *AgentHookOutput) String() string {
 func (*AgentHookOutput) ProtoMessage() {}
 
 func (x *AgentHookOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[268]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[270]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20082,7 +20232,7 @@ func (x *AgentHookOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHookOutput.ProtoReflect.Descriptor instead.
 func (*AgentHookOutput) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{268}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{270}
 }
 
 func (x *AgentHookOutput) GetStdout() string {
@@ -20113,7 +20263,7 @@ type AgentHookBlockingError struct {
 
 func (x *AgentHookBlockingError) Reset() {
 	*x = AgentHookBlockingError{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[269]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[271]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20125,7 +20275,7 @@ func (x *AgentHookBlockingError) String() string {
 func (*AgentHookBlockingError) ProtoMessage() {}
 
 func (x *AgentHookBlockingError) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[269]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[271]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20138,7 +20288,7 @@ func (x *AgentHookBlockingError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHookBlockingError.ProtoReflect.Descriptor instead.
 func (*AgentHookBlockingError) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{269}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{271}
 }
 
 func (x *AgentHookBlockingError) GetCommand() string {
@@ -20172,7 +20322,7 @@ type AgentHookNonBlockingError struct {
 
 func (x *AgentHookNonBlockingError) Reset() {
 	*x = AgentHookNonBlockingError{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[270]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[272]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20184,7 +20334,7 @@ func (x *AgentHookNonBlockingError) String() string {
 func (*AgentHookNonBlockingError) ProtoMessage() {}
 
 func (x *AgentHookNonBlockingError) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[270]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[272]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20197,7 +20347,7 @@ func (x *AgentHookNonBlockingError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHookNonBlockingError.ProtoReflect.Descriptor instead.
 func (*AgentHookNonBlockingError) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{270}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{272}
 }
 
 func (x *AgentHookNonBlockingError) GetCommand() string {
@@ -20237,7 +20387,7 @@ type AgentHookCancelled struct {
 
 func (x *AgentHookCancelled) Reset() {
 	*x = AgentHookCancelled{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[271]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[273]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20249,7 +20399,7 @@ func (x *AgentHookCancelled) String() string {
 func (*AgentHookCancelled) ProtoMessage() {}
 
 func (x *AgentHookCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[271]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[273]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20262,7 +20412,7 @@ func (x *AgentHookCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHookCancelled.ProtoReflect.Descriptor instead.
 func (*AgentHookCancelled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{271}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{273}
 }
 
 // One injected diagnostics report.
@@ -20276,7 +20426,7 @@ type AgentDiagnosticsReport struct {
 
 func (x *AgentDiagnosticsReport) Reset() {
 	*x = AgentDiagnosticsReport{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[272]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[274]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20288,7 +20438,7 @@ func (x *AgentDiagnosticsReport) String() string {
 func (*AgentDiagnosticsReport) ProtoMessage() {}
 
 func (x *AgentDiagnosticsReport) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[272]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[274]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20301,7 +20451,7 @@ func (x *AgentDiagnosticsReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentDiagnosticsReport.ProtoReflect.Descriptor instead.
 func (*AgentDiagnosticsReport) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{272}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{274}
 }
 
 func (x *AgentDiagnosticsReport) GetFiles() []*AgentDiagnosticsFile {
@@ -20324,7 +20474,7 @@ type AgentDiagnosticsFile struct {
 
 func (x *AgentDiagnosticsFile) Reset() {
 	*x = AgentDiagnosticsFile{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[273]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[275]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20336,7 +20486,7 @@ func (x *AgentDiagnosticsFile) String() string {
 func (*AgentDiagnosticsFile) ProtoMessage() {}
 
 func (x *AgentDiagnosticsFile) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[273]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[275]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20349,7 +20499,7 @@ func (x *AgentDiagnosticsFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentDiagnosticsFile.ProtoReflect.Descriptor instead.
 func (*AgentDiagnosticsFile) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{273}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{275}
 }
 
 func (x *AgentDiagnosticsFile) GetPath() string {
@@ -20388,7 +20538,7 @@ type AgentDiagnostic struct {
 
 func (x *AgentDiagnostic) Reset() {
 	*x = AgentDiagnostic{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[274]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[276]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20400,7 +20550,7 @@ func (x *AgentDiagnostic) String() string {
 func (*AgentDiagnostic) ProtoMessage() {}
 
 func (x *AgentDiagnostic) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[274]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[276]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20413,7 +20563,7 @@ func (x *AgentDiagnostic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentDiagnostic.ProtoReflect.Descriptor instead.
 func (*AgentDiagnostic) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{274}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{276}
 }
 
 func (x *AgentDiagnostic) GetSeverity() AgentDiagnosticSeverity {
@@ -20474,7 +20624,7 @@ type AgentContextInjected struct {
 
 func (x *AgentContextInjected) Reset() {
 	*x = AgentContextInjected{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[275]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[277]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20486,7 +20636,7 @@ func (x *AgentContextInjected) String() string {
 func (*AgentContextInjected) ProtoMessage() {}
 
 func (x *AgentContextInjected) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[275]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[277]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20499,7 +20649,7 @@ func (x *AgentContextInjected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentContextInjected.ProtoReflect.Descriptor instead.
 func (*AgentContextInjected) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{275}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{277}
 }
 
 func (x *AgentContextInjected) GetInjected() isAgentContextInjected_Injected {
@@ -20559,7 +20709,7 @@ type AgentInjectedMemory struct {
 
 func (x *AgentInjectedMemory) Reset() {
 	*x = AgentInjectedMemory{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[276]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[278]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20571,7 +20721,7 @@ func (x *AgentInjectedMemory) String() string {
 func (*AgentInjectedMemory) ProtoMessage() {}
 
 func (x *AgentInjectedMemory) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[276]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[278]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20584,7 +20734,7 @@ func (x *AgentInjectedMemory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentInjectedMemory.ProtoReflect.Descriptor instead.
 func (*AgentInjectedMemory) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{276}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{278}
 }
 
 func (x *AgentInjectedMemory) GetPath() string {
@@ -20612,7 +20762,7 @@ type AgentInjectedSkills struct {
 
 func (x *AgentInjectedSkills) Reset() {
 	*x = AgentInjectedSkills{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[277]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[279]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20624,7 +20774,7 @@ func (x *AgentInjectedSkills) String() string {
 func (*AgentInjectedSkills) ProtoMessage() {}
 
 func (x *AgentInjectedSkills) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[277]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[279]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20637,7 +20787,7 @@ func (x *AgentInjectedSkills) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentInjectedSkills.ProtoReflect.Descriptor instead.
 func (*AgentInjectedSkills) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{277}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{279}
 }
 
 func (x *AgentInjectedSkills) GetSkills() []*AgentInjectedSkill {
@@ -20663,7 +20813,7 @@ type AgentInjectedSkill struct {
 
 func (x *AgentInjectedSkill) Reset() {
 	*x = AgentInjectedSkill{}
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[278]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[280]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20675,7 +20825,7 @@ func (x *AgentInjectedSkill) String() string {
 func (*AgentInjectedSkill) ProtoMessage() {}
 
 func (x *AgentInjectedSkill) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_agent_activity_proto_msgTypes[278]
+	mi := &file_conversation_v1_agent_activity_proto_msgTypes[280]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20688,7 +20838,7 @@ func (x *AgentInjectedSkill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentInjectedSkill.ProtoReflect.Descriptor instead.
 func (*AgentInjectedSkill) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{278}
+	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{280}
 }
 
 func (x *AgentInjectedSkill) GetName() string {
@@ -21622,20 +21772,27 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x17AgentSendMessageSummary\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"*\n" +
 	"\x14AgentSendMessageBody\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xfa\x03\n" +
-	"\x17AgentSendMessageSuccess\x12F\n" +
-	"\x12recipient_agent_id\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x10recipientAgentId\x12U\n" +
-	"\x0equeued_to_live\x18\x02 \x01(\v2-.conversation.v1.AgentSendMessageQueuedToLiveH\x00R\fqueuedToLive\x12`\n" +
-	"\x11resumed_recipient\x18\x03 \x01(\v21.conversation.v1.AgentSendMessageResumedRecipientH\x00R\x10resumedRecipient\x12K\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xdc\x04\n" +
+	"\x17AgentSendMessageSuccess\x12H\n" +
+	"\x12recipient_agent_id\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x00R\x10recipientAgentId\x12Q\n" +
+	"\fpeer_session\x18\a \x01(\v2,.conversation.v1.AgentSendMessagePeerSessionH\x00R\vpeerSession\x12U\n" +
+	"\x0equeued_to_live\x18\x02 \x01(\v2-.conversation.v1.AgentSendMessageQueuedToLiveH\x01R\fqueuedToLive\x12`\n" +
+	"\x11resumed_recipient\x18\x03 \x01(\v21.conversation.v1.AgentSendMessageResumedRecipientH\x01R\x10resumedRecipient\x12K\n" +
 	"\n" +
-	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01\x12!\n" +
+	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x02R\tsettledAt\x88\x01\x01\x12!\n" +
 	"\faddressed_to\x18\x05 \x01(\tR\vaddressedTo\x12G\n" +
-	"\asummary\x18\x06 \x01(\v2(.conversation.v1.AgentSendMessageSummaryH\x02R\asummary\x88\x01\x01B\n" +
+	"\asummary\x18\x06 \x01(\v2(.conversation.v1.AgentSendMessageSummaryH\x03R\asummary\x88\x01\x01B\v\n" +
+	"\trecipientB\n" +
 	"\n" +
 	"\bdeliveryB\r\n" +
 	"\v_settled_atB\n" +
 	"\n" +
-	"\b_summary\"\x1e\n" +
+	"\b_summary\"_\n" +
+	"\x1bAgentSendMessagePeerSession\x12@\n" +
+	"\vdelivery_id\x18\x01 \x01(\v2\x1f.conversation.v1.PeerDeliveryIdR\n" +
+	"deliveryId\"&\n" +
+	"\x0ePeerDeliveryId\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\x1e\n" +
 	"\x1cAgentSendMessageQueuedToLive\"\"\n" +
 	" AgentSendMessageResumedRecipient\"\xd9\x01\n" +
 	"\x17AgentSendMessageFailure\x12<\n" +
@@ -22017,7 +22174,7 @@ func file_conversation_v1_agent_activity_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_agent_activity_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_conversation_v1_agent_activity_proto_msgTypes = make([]protoimpl.MessageInfo, 279)
+var file_conversation_v1_agent_activity_proto_msgTypes = make([]protoimpl.MessageInfo, 281)
 var file_conversation_v1_agent_activity_proto_goTypes = []any{
 	(AgentActivityContract)(0),                 // 0: conversation.v1.AgentActivityContract
 	(AgentBashTailCap)(0),                      // 1: conversation.v1.AgentBashTailCap
@@ -22230,89 +22387,91 @@ var file_conversation_v1_agent_activity_proto_goTypes = []any{
 	(*AgentSendMessageSummary)(nil),            // 208: conversation.v1.AgentSendMessageSummary
 	(*AgentSendMessageBody)(nil),               // 209: conversation.v1.AgentSendMessageBody
 	(*AgentSendMessageSuccess)(nil),            // 210: conversation.v1.AgentSendMessageSuccess
-	(*AgentSendMessageQueuedToLive)(nil),       // 211: conversation.v1.AgentSendMessageQueuedToLive
-	(*AgentSendMessageResumedRecipient)(nil),   // 212: conversation.v1.AgentSendMessageResumedRecipient
-	(*AgentSendMessageFailure)(nil),            // 213: conversation.v1.AgentSendMessageFailure
-	(*AgentSubagentHandback)(nil),              // 214: conversation.v1.AgentSubagentHandback
-	(*AgentSubagentHandbackStart)(nil),         // 215: conversation.v1.AgentSubagentHandbackStart
-	(*AgentSubagentHandbackReport)(nil),        // 216: conversation.v1.AgentSubagentHandbackReport
-	(*AgentSubagentHandbackSuccess)(nil),       // 217: conversation.v1.AgentSubagentHandbackSuccess
-	(*AgentSubagentHandbackFailure)(nil),       // 218: conversation.v1.AgentSubagentHandbackFailure
-	(*AgentWebFetch)(nil),                      // 219: conversation.v1.AgentWebFetch
-	(*AgentWebFetchStart)(nil),                 // 220: conversation.v1.AgentWebFetchStart
-	(*AgentWebFetchTarget)(nil),                // 221: conversation.v1.AgentWebFetchTarget
-	(*AgentWebFetchSuccess)(nil),               // 222: conversation.v1.AgentWebFetchSuccess
-	(*AgentWebFetchHttpStatus)(nil),            // 223: conversation.v1.AgentWebFetchHttpStatus
-	(*AgentWebFetchFailure)(nil),               // 224: conversation.v1.AgentWebFetchFailure
-	(*AgentWebSearch)(nil),                     // 225: conversation.v1.AgentWebSearch
-	(*AgentWebSearchStart)(nil),                // 226: conversation.v1.AgentWebSearchStart
-	(*AgentWebSearchQuery)(nil),                // 227: conversation.v1.AgentWebSearchQuery
-	(*AgentWebSearchSuccess)(nil),              // 228: conversation.v1.AgentWebSearchSuccess
-	(*AgentWebSearchResult)(nil),               // 229: conversation.v1.AgentWebSearchResult
-	(*AgentWebSearchLink)(nil),                 // 230: conversation.v1.AgentWebSearchLink
-	(*AgentWebSearchNote)(nil),                 // 231: conversation.v1.AgentWebSearchNote
-	(*AgentWebSearchFailure)(nil),              // 232: conversation.v1.AgentWebSearchFailure
-	(*AgentMonitor)(nil),                       // 233: conversation.v1.AgentMonitor
-	(*AgentMonitorStart)(nil),                  // 234: conversation.v1.AgentMonitorStart
-	(*AgentMonitorDeadline)(nil),               // 235: conversation.v1.AgentMonitorDeadline
-	(*AgentMonitorPersistent)(nil),             // 236: conversation.v1.AgentMonitorPersistent
-	(*AgentMonitorCommand)(nil),                // 237: conversation.v1.AgentMonitorCommand
-	(*AgentMonitorWebsocket)(nil),              // 238: conversation.v1.AgentMonitorWebsocket
-	(*AgentMonitorEnded)(nil),                  // 239: conversation.v1.AgentMonitorEnded
-	(*AgentMonitorFailure)(nil),                // 240: conversation.v1.AgentMonitorFailure
-	(*AgentScheduleWakeup)(nil),                // 241: conversation.v1.AgentScheduleWakeup
-	(*AgentScheduleWakeupStart)(nil),           // 242: conversation.v1.AgentScheduleWakeupStart
-	(*AgentScheduleWakeupSchedule)(nil),        // 243: conversation.v1.AgentScheduleWakeupSchedule
-	(*AgentScheduleWakeupStop)(nil),            // 244: conversation.v1.AgentScheduleWakeupStop
-	(*AgentScheduleWakeupSuccess)(nil),         // 245: conversation.v1.AgentScheduleWakeupSuccess
-	(*AgentScheduleWakeupScheduled)(nil),       // 246: conversation.v1.AgentScheduleWakeupScheduled
-	(*AgentScheduleWakeupStopped)(nil),         // 247: conversation.v1.AgentScheduleWakeupStopped
-	(*AgentScheduleWakeupFailure)(nil),         // 248: conversation.v1.AgentScheduleWakeupFailure
-	(*AgentArtifact)(nil),                      // 249: conversation.v1.AgentArtifact
-	(*AgentArtifactStart)(nil),                 // 250: conversation.v1.AgentArtifactStart
-	(*AgentArtifactPublish)(nil),               // 251: conversation.v1.AgentArtifactPublish
-	(*AgentArtifactList)(nil),                  // 252: conversation.v1.AgentArtifactList
-	(*AgentArtifactSuccess)(nil),               // 253: conversation.v1.AgentArtifactSuccess
-	(*AgentArtifactPublished)(nil),             // 254: conversation.v1.AgentArtifactPublished
-	(*AgentArtifactListed)(nil),                // 255: conversation.v1.AgentArtifactListed
-	(*AgentArtifactFailure)(nil),               // 256: conversation.v1.AgentArtifactFailure
-	(*AgentMcpToolCall)(nil),                   // 257: conversation.v1.AgentMcpToolCall
-	(*AgentMcpTool)(nil),                       // 258: conversation.v1.AgentMcpTool
-	(*AgentMcpToolAddress)(nil),                // 259: conversation.v1.AgentMcpToolAddress
-	(*AgentMcpToolCallStart)(nil),              // 260: conversation.v1.AgentMcpToolCallStart
-	(*AgentMcpToolCallSuccess)(nil),            // 261: conversation.v1.AgentMcpToolCallSuccess
-	(*AgentMcpToolCallFailure)(nil),            // 262: conversation.v1.AgentMcpToolCallFailure
-	(*ToolResultContent)(nil),                  // 263: conversation.v1.ToolResultContent
-	(*ToolResultContentBlock)(nil),             // 264: conversation.v1.ToolResultContentBlock
-	(*AgentUnmodeled)(nil),                     // 265: conversation.v1.AgentUnmodeled
-	(*AgentUnmodeledStart)(nil),                // 266: conversation.v1.AgentUnmodeledStart
-	(*AgentUnmodeledSuccess)(nil),              // 267: conversation.v1.AgentUnmodeledSuccess
-	(*AgentUnmodeledFailure)(nil),              // 268: conversation.v1.AgentUnmodeledFailure
-	(*AgentHook)(nil),                          // 269: conversation.v1.AgentHook
-	(*AgentHookStart)(nil),                     // 270: conversation.v1.AgentHookStart
-	(*AgentHookSucceeded)(nil),                 // 271: conversation.v1.AgentHookSucceeded
-	(*AgentHookOutput)(nil),                    // 272: conversation.v1.AgentHookOutput
-	(*AgentHookBlockingError)(nil),             // 273: conversation.v1.AgentHookBlockingError
-	(*AgentHookNonBlockingError)(nil),          // 274: conversation.v1.AgentHookNonBlockingError
-	(*AgentHookCancelled)(nil),                 // 275: conversation.v1.AgentHookCancelled
-	(*AgentDiagnosticsReport)(nil),             // 276: conversation.v1.AgentDiagnosticsReport
-	(*AgentDiagnosticsFile)(nil),               // 277: conversation.v1.AgentDiagnosticsFile
-	(*AgentDiagnostic)(nil),                    // 278: conversation.v1.AgentDiagnostic
-	(*AgentContextInjected)(nil),               // 279: conversation.v1.AgentContextInjected
-	(*AgentInjectedMemory)(nil),                // 280: conversation.v1.AgentInjectedMemory
-	(*AgentInjectedSkills)(nil),                // 281: conversation.v1.AgentInjectedSkills
-	(*AgentInjectedSkill)(nil),                 // 282: conversation.v1.AgentInjectedSkill
-	(*TokenUsage)(nil),                         // 283: conversation.v1.TokenUsage
-	(AgentEffortLevel)(0),                      // 284: conversation.v1.AgentEffortLevel
-	(*AgentModel)(nil),                         // 285: conversation.v1.AgentModel
-	(*structpb.Struct)(nil),                    // 286: google.protobuf.Struct
-	(*TextBlock)(nil),                          // 287: conversation.v1.TextBlock
-	(*ImageBlock)(nil),                         // 288: conversation.v1.ImageBlock
-	(*UnsupportedBlock)(nil),                   // 289: conversation.v1.UnsupportedBlock
+	(*AgentSendMessagePeerSession)(nil),        // 211: conversation.v1.AgentSendMessagePeerSession
+	(*PeerDeliveryId)(nil),                     // 212: conversation.v1.PeerDeliveryId
+	(*AgentSendMessageQueuedToLive)(nil),       // 213: conversation.v1.AgentSendMessageQueuedToLive
+	(*AgentSendMessageResumedRecipient)(nil),   // 214: conversation.v1.AgentSendMessageResumedRecipient
+	(*AgentSendMessageFailure)(nil),            // 215: conversation.v1.AgentSendMessageFailure
+	(*AgentSubagentHandback)(nil),              // 216: conversation.v1.AgentSubagentHandback
+	(*AgentSubagentHandbackStart)(nil),         // 217: conversation.v1.AgentSubagentHandbackStart
+	(*AgentSubagentHandbackReport)(nil),        // 218: conversation.v1.AgentSubagentHandbackReport
+	(*AgentSubagentHandbackSuccess)(nil),       // 219: conversation.v1.AgentSubagentHandbackSuccess
+	(*AgentSubagentHandbackFailure)(nil),       // 220: conversation.v1.AgentSubagentHandbackFailure
+	(*AgentWebFetch)(nil),                      // 221: conversation.v1.AgentWebFetch
+	(*AgentWebFetchStart)(nil),                 // 222: conversation.v1.AgentWebFetchStart
+	(*AgentWebFetchTarget)(nil),                // 223: conversation.v1.AgentWebFetchTarget
+	(*AgentWebFetchSuccess)(nil),               // 224: conversation.v1.AgentWebFetchSuccess
+	(*AgentWebFetchHttpStatus)(nil),            // 225: conversation.v1.AgentWebFetchHttpStatus
+	(*AgentWebFetchFailure)(nil),               // 226: conversation.v1.AgentWebFetchFailure
+	(*AgentWebSearch)(nil),                     // 227: conversation.v1.AgentWebSearch
+	(*AgentWebSearchStart)(nil),                // 228: conversation.v1.AgentWebSearchStart
+	(*AgentWebSearchQuery)(nil),                // 229: conversation.v1.AgentWebSearchQuery
+	(*AgentWebSearchSuccess)(nil),              // 230: conversation.v1.AgentWebSearchSuccess
+	(*AgentWebSearchResult)(nil),               // 231: conversation.v1.AgentWebSearchResult
+	(*AgentWebSearchLink)(nil),                 // 232: conversation.v1.AgentWebSearchLink
+	(*AgentWebSearchNote)(nil),                 // 233: conversation.v1.AgentWebSearchNote
+	(*AgentWebSearchFailure)(nil),              // 234: conversation.v1.AgentWebSearchFailure
+	(*AgentMonitor)(nil),                       // 235: conversation.v1.AgentMonitor
+	(*AgentMonitorStart)(nil),                  // 236: conversation.v1.AgentMonitorStart
+	(*AgentMonitorDeadline)(nil),               // 237: conversation.v1.AgentMonitorDeadline
+	(*AgentMonitorPersistent)(nil),             // 238: conversation.v1.AgentMonitorPersistent
+	(*AgentMonitorCommand)(nil),                // 239: conversation.v1.AgentMonitorCommand
+	(*AgentMonitorWebsocket)(nil),              // 240: conversation.v1.AgentMonitorWebsocket
+	(*AgentMonitorEnded)(nil),                  // 241: conversation.v1.AgentMonitorEnded
+	(*AgentMonitorFailure)(nil),                // 242: conversation.v1.AgentMonitorFailure
+	(*AgentScheduleWakeup)(nil),                // 243: conversation.v1.AgentScheduleWakeup
+	(*AgentScheduleWakeupStart)(nil),           // 244: conversation.v1.AgentScheduleWakeupStart
+	(*AgentScheduleWakeupSchedule)(nil),        // 245: conversation.v1.AgentScheduleWakeupSchedule
+	(*AgentScheduleWakeupStop)(nil),            // 246: conversation.v1.AgentScheduleWakeupStop
+	(*AgentScheduleWakeupSuccess)(nil),         // 247: conversation.v1.AgentScheduleWakeupSuccess
+	(*AgentScheduleWakeupScheduled)(nil),       // 248: conversation.v1.AgentScheduleWakeupScheduled
+	(*AgentScheduleWakeupStopped)(nil),         // 249: conversation.v1.AgentScheduleWakeupStopped
+	(*AgentScheduleWakeupFailure)(nil),         // 250: conversation.v1.AgentScheduleWakeupFailure
+	(*AgentArtifact)(nil),                      // 251: conversation.v1.AgentArtifact
+	(*AgentArtifactStart)(nil),                 // 252: conversation.v1.AgentArtifactStart
+	(*AgentArtifactPublish)(nil),               // 253: conversation.v1.AgentArtifactPublish
+	(*AgentArtifactList)(nil),                  // 254: conversation.v1.AgentArtifactList
+	(*AgentArtifactSuccess)(nil),               // 255: conversation.v1.AgentArtifactSuccess
+	(*AgentArtifactPublished)(nil),             // 256: conversation.v1.AgentArtifactPublished
+	(*AgentArtifactListed)(nil),                // 257: conversation.v1.AgentArtifactListed
+	(*AgentArtifactFailure)(nil),               // 258: conversation.v1.AgentArtifactFailure
+	(*AgentMcpToolCall)(nil),                   // 259: conversation.v1.AgentMcpToolCall
+	(*AgentMcpTool)(nil),                       // 260: conversation.v1.AgentMcpTool
+	(*AgentMcpToolAddress)(nil),                // 261: conversation.v1.AgentMcpToolAddress
+	(*AgentMcpToolCallStart)(nil),              // 262: conversation.v1.AgentMcpToolCallStart
+	(*AgentMcpToolCallSuccess)(nil),            // 263: conversation.v1.AgentMcpToolCallSuccess
+	(*AgentMcpToolCallFailure)(nil),            // 264: conversation.v1.AgentMcpToolCallFailure
+	(*ToolResultContent)(nil),                  // 265: conversation.v1.ToolResultContent
+	(*ToolResultContentBlock)(nil),             // 266: conversation.v1.ToolResultContentBlock
+	(*AgentUnmodeled)(nil),                     // 267: conversation.v1.AgentUnmodeled
+	(*AgentUnmodeledStart)(nil),                // 268: conversation.v1.AgentUnmodeledStart
+	(*AgentUnmodeledSuccess)(nil),              // 269: conversation.v1.AgentUnmodeledSuccess
+	(*AgentUnmodeledFailure)(nil),              // 270: conversation.v1.AgentUnmodeledFailure
+	(*AgentHook)(nil),                          // 271: conversation.v1.AgentHook
+	(*AgentHookStart)(nil),                     // 272: conversation.v1.AgentHookStart
+	(*AgentHookSucceeded)(nil),                 // 273: conversation.v1.AgentHookSucceeded
+	(*AgentHookOutput)(nil),                    // 274: conversation.v1.AgentHookOutput
+	(*AgentHookBlockingError)(nil),             // 275: conversation.v1.AgentHookBlockingError
+	(*AgentHookNonBlockingError)(nil),          // 276: conversation.v1.AgentHookNonBlockingError
+	(*AgentHookCancelled)(nil),                 // 277: conversation.v1.AgentHookCancelled
+	(*AgentDiagnosticsReport)(nil),             // 278: conversation.v1.AgentDiagnosticsReport
+	(*AgentDiagnosticsFile)(nil),               // 279: conversation.v1.AgentDiagnosticsFile
+	(*AgentDiagnostic)(nil),                    // 280: conversation.v1.AgentDiagnostic
+	(*AgentContextInjected)(nil),               // 281: conversation.v1.AgentContextInjected
+	(*AgentInjectedMemory)(nil),                // 282: conversation.v1.AgentInjectedMemory
+	(*AgentInjectedSkills)(nil),                // 283: conversation.v1.AgentInjectedSkills
+	(*AgentInjectedSkill)(nil),                 // 284: conversation.v1.AgentInjectedSkill
+	(*TokenUsage)(nil),                         // 285: conversation.v1.TokenUsage
+	(AgentEffortLevel)(0),                      // 286: conversation.v1.AgentEffortLevel
+	(*AgentModel)(nil),                         // 287: conversation.v1.AgentModel
+	(*structpb.Struct)(nil),                    // 288: google.protobuf.Struct
+	(*TextBlock)(nil),                          // 289: conversation.v1.TextBlock
+	(*ImageBlock)(nil),                         // 290: conversation.v1.ImageBlock
+	(*UnsupportedBlock)(nil),                   // 291: conversation.v1.UnsupportedBlock
 }
 var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
-	283, // 0: conversation.v1.AgentActivity.usage:type_name -> conversation.v1.TokenUsage
-	284, // 1: conversation.v1.AgentActivity.effort:type_name -> conversation.v1.AgentEffortLevel
+	285, // 0: conversation.v1.AgentActivity.usage:type_name -> conversation.v1.TokenUsage
+	286, // 1: conversation.v1.AgentActivity.effort:type_name -> conversation.v1.AgentEffortLevel
 	5,   // 2: conversation.v1.AgentActivity.attribution:type_name -> conversation.v1.AgentActivityAttribution
 	0,   // 3: conversation.v1.AgentActivity.contract:type_name -> conversation.v1.AgentActivityContract
 	6,   // 4: conversation.v1.AgentActivity.activity_id:type_name -> conversation.v1.AgentActivityId
@@ -22326,26 +22485,26 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	144, // 12: conversation.v1.AgentActivity.glob:type_name -> conversation.v1.AgentGlob
 	153, // 13: conversation.v1.AgentActivity.bash:type_name -> conversation.v1.AgentBash
 	175, // 14: conversation.v1.AgentActivity.subagent:type_name -> conversation.v1.AgentSubagent
-	265, // 15: conversation.v1.AgentActivity.unmodeled:type_name -> conversation.v1.AgentUnmodeled
+	267, // 15: conversation.v1.AgentActivity.unmodeled:type_name -> conversation.v1.AgentUnmodeled
 	206, // 16: conversation.v1.AgentActivity.send_message:type_name -> conversation.v1.AgentSendMessage
 	71,  // 17: conversation.v1.AgentActivity.task_act:type_name -> conversation.v1.AgentTaskAct
-	269, // 18: conversation.v1.AgentActivity.hook:type_name -> conversation.v1.AgentHook
-	279, // 19: conversation.v1.AgentActivity.context_injected:type_name -> conversation.v1.AgentContextInjected
-	219, // 20: conversation.v1.AgentActivity.web_fetch:type_name -> conversation.v1.AgentWebFetch
-	225, // 21: conversation.v1.AgentActivity.web_search:type_name -> conversation.v1.AgentWebSearch
-	233, // 22: conversation.v1.AgentActivity.monitor:type_name -> conversation.v1.AgentMonitor
-	241, // 23: conversation.v1.AgentActivity.schedule_wakeup:type_name -> conversation.v1.AgentScheduleWakeup
-	249, // 24: conversation.v1.AgentActivity.artifact:type_name -> conversation.v1.AgentArtifact
+	271, // 18: conversation.v1.AgentActivity.hook:type_name -> conversation.v1.AgentHook
+	281, // 19: conversation.v1.AgentActivity.context_injected:type_name -> conversation.v1.AgentContextInjected
+	221, // 20: conversation.v1.AgentActivity.web_fetch:type_name -> conversation.v1.AgentWebFetch
+	227, // 21: conversation.v1.AgentActivity.web_search:type_name -> conversation.v1.AgentWebSearch
+	235, // 22: conversation.v1.AgentActivity.monitor:type_name -> conversation.v1.AgentMonitor
+	243, // 23: conversation.v1.AgentActivity.schedule_wakeup:type_name -> conversation.v1.AgentScheduleWakeup
+	251, // 24: conversation.v1.AgentActivity.artifact:type_name -> conversation.v1.AgentArtifact
 	9,   // 25: conversation.v1.AgentActivity.plan_mode:type_name -> conversation.v1.AgentPlanMode
 	17,  // 26: conversation.v1.AgentActivity.report_findings:type_name -> conversation.v1.AgentReportFindings
 	32,  // 27: conversation.v1.AgentActivity.worktree:type_name -> conversation.v1.AgentWorktree
 	44,  // 28: conversation.v1.AgentActivity.cron:type_name -> conversation.v1.AgentCron
 	55,  // 29: conversation.v1.AgentActivity.push_notification:type_name -> conversation.v1.AgentPushNotification
-	257, // 30: conversation.v1.AgentActivity.mcp_tool_call:type_name -> conversation.v1.AgentMcpToolCall
-	214, // 31: conversation.v1.AgentActivity.subagent_handback:type_name -> conversation.v1.AgentSubagentHandback
+	259, // 30: conversation.v1.AgentActivity.mcp_tool_call:type_name -> conversation.v1.AgentMcpToolCall
+	216, // 31: conversation.v1.AgentActivity.subagent_handback:type_name -> conversation.v1.AgentSubagentHandback
 	27,  // 32: conversation.v1.AgentActivity.chess_board:type_name -> conversation.v1.AgentChessBoard
 	201, // 33: conversation.v1.AgentActivityAttribution.skill:type_name -> conversation.v1.AgentSkillName
-	263, // 34: conversation.v1.AgentToolFailure.content:type_name -> conversation.v1.ToolResultContent
+	265, // 34: conversation.v1.AgentToolFailure.content:type_name -> conversation.v1.ToolResultContent
 	8,   // 35: conversation.v1.AgentToolFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
 	119, // 36: conversation.v1.AgentActivitySettledAt.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	10,  // 37: conversation.v1.AgentPlanMode.start:type_name -> conversation.v1.AgentPlanModeStart
@@ -22364,7 +22523,7 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	26,  // 50: conversation.v1.AgentReportFindings.failure:type_name -> conversation.v1.AgentReportFindingsFailure
 	119, // 51: conversation.v1.AgentReportFindingsStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	20,  // 52: conversation.v1.AgentReportFindingsSuccess.findings:type_name -> conversation.v1.AgentFinding
-	284, // 53: conversation.v1.AgentReportFindingsSuccess.level:type_name -> conversation.v1.AgentEffortLevel
+	286, // 53: conversation.v1.AgentReportFindingsSuccess.level:type_name -> conversation.v1.AgentEffortLevel
 	8,   // 54: conversation.v1.AgentReportFindingsSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
 	21,  // 55: conversation.v1.AgentFinding.confirmed:type_name -> conversation.v1.AgentFindingConfirmed
 	22,  // 56: conversation.v1.AgentFinding.plausible:type_name -> conversation.v1.AgentFindingPlausible
@@ -22487,7 +22646,7 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	69,  // 173: conversation.v1.AgentWrite.progress:type_name -> conversation.v1.AgentToolCallProgress
 	124, // 174: conversation.v1.AgentWrite.success:type_name -> conversation.v1.AgentWriteSuccess
 	127, // 175: conversation.v1.AgentWrite.failure:type_name -> conversation.v1.AgentWriteFailure
-	276, // 176: conversation.v1.AgentWrite.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
+	278, // 176: conversation.v1.AgentWrite.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
 	118, // 177: conversation.v1.AgentWriteStart.path:type_name -> conversation.v1.ReadPath
 	119, // 178: conversation.v1.AgentWriteStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	118, // 179: conversation.v1.AgentWriteSuccess.path:type_name -> conversation.v1.ReadPath
@@ -22501,7 +22660,7 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	69,  // 187: conversation.v1.AgentEdit.progress:type_name -> conversation.v1.AgentToolCallProgress
 	130, // 188: conversation.v1.AgentEdit.success:type_name -> conversation.v1.AgentEditSuccess
 	131, // 189: conversation.v1.AgentEdit.failure:type_name -> conversation.v1.AgentEditFailure
-	276, // 190: conversation.v1.AgentEdit.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
+	278, // 190: conversation.v1.AgentEdit.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
 	118, // 191: conversation.v1.AgentEditStart.path:type_name -> conversation.v1.ReadPath
 	119, // 192: conversation.v1.AgentEditStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	118, // 193: conversation.v1.AgentEditSuccess.path:type_name -> conversation.v1.ReadPath
@@ -22576,7 +22735,7 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	70,  // 262: conversation.v1.AgentSubagentStart.created_agent_id:type_name -> conversation.v1.AgentId
 	177, // 263: conversation.v1.AgentSubagentStart.prompt:type_name -> conversation.v1.AgentSubagentPrompt
 	119, // 264: conversation.v1.AgentSubagentStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	285, // 265: conversation.v1.AgentSubagentPrompt.requested_model:type_name -> conversation.v1.AgentModel
+	287, // 265: conversation.v1.AgentSubagentPrompt.requested_model:type_name -> conversation.v1.AgentModel
 	178, // 266: conversation.v1.AgentSubagentPrompt.none:type_name -> conversation.v1.AgentSubagentIsolationNone
 	179, // 267: conversation.v1.AgentSubagentPrompt.worktree:type_name -> conversation.v1.AgentSubagentIsolationWorktree
 	180, // 268: conversation.v1.AgentSubagentPrompt.remote:type_name -> conversation.v1.AgentSubagentIsolationRemote
@@ -22588,13 +22747,13 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	177, // 274: conversation.v1.AgentSubagentSuccess.prompt:type_name -> conversation.v1.AgentSubagentPrompt
 	187, // 275: conversation.v1.AgentSubagentSuccess.report:type_name -> conversation.v1.AgentSubagentReport
 	188, // 276: conversation.v1.AgentSubagentSuccess.totals:type_name -> conversation.v1.AgentSubagentTotals
-	285, // 277: conversation.v1.AgentSubagentSuccess.models_used:type_name -> conversation.v1.AgentModel
+	287, // 277: conversation.v1.AgentSubagentSuccess.models_used:type_name -> conversation.v1.AgentModel
 	191, // 278: conversation.v1.AgentSubagentSuccess.worktree:type_name -> conversation.v1.AgentSubagentWorktree
 	8,   // 279: conversation.v1.AgentSubagentSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
 	70,  // 280: conversation.v1.AgentSubagentSuccess.created_agent_id:type_name -> conversation.v1.AgentId
 	108, // 281: conversation.v1.AgentSubagentReport.prose:type_name -> conversation.v1.AgentResponseProse
-	286, // 282: conversation.v1.AgentSubagentReport.structured_result:type_name -> google.protobuf.Struct
-	283, // 283: conversation.v1.AgentSubagentTotals.full:type_name -> conversation.v1.TokenUsage
+	288, // 282: conversation.v1.AgentSubagentReport.structured_result:type_name -> google.protobuf.Struct
+	285, // 283: conversation.v1.AgentSubagentTotals.full:type_name -> conversation.v1.TokenUsage
 	189, // 284: conversation.v1.AgentSubagentTotals.total_only:type_name -> conversation.v1.AgentSubagentAsyncUsage
 	190, // 285: conversation.v1.AgentSubagentTotals.tool_stats:type_name -> conversation.v1.AgentSubagentToolStats
 	192, // 286: conversation.v1.AgentSubagentWorktree.created:type_name -> conversation.v1.AgentSubagentWorktreeCreated
@@ -22622,126 +22781,128 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	207, // 308: conversation.v1.AgentSendMessage.start:type_name -> conversation.v1.AgentSendMessageStart
 	69,  // 309: conversation.v1.AgentSendMessage.progress:type_name -> conversation.v1.AgentToolCallProgress
 	210, // 310: conversation.v1.AgentSendMessage.success:type_name -> conversation.v1.AgentSendMessageSuccess
-	213, // 311: conversation.v1.AgentSendMessage.failure:type_name -> conversation.v1.AgentSendMessageFailure
+	215, // 311: conversation.v1.AgentSendMessage.failure:type_name -> conversation.v1.AgentSendMessageFailure
 	208, // 312: conversation.v1.AgentSendMessageStart.summary:type_name -> conversation.v1.AgentSendMessageSummary
 	209, // 313: conversation.v1.AgentSendMessageStart.body:type_name -> conversation.v1.AgentSendMessageBody
 	119, // 314: conversation.v1.AgentSendMessageStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	70,  // 315: conversation.v1.AgentSendMessageSuccess.recipient_agent_id:type_name -> conversation.v1.AgentId
-	211, // 316: conversation.v1.AgentSendMessageSuccess.queued_to_live:type_name -> conversation.v1.AgentSendMessageQueuedToLive
-	212, // 317: conversation.v1.AgentSendMessageSuccess.resumed_recipient:type_name -> conversation.v1.AgentSendMessageResumedRecipient
-	8,   // 318: conversation.v1.AgentSendMessageSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	208, // 319: conversation.v1.AgentSendMessageSuccess.summary:type_name -> conversation.v1.AgentSendMessageSummary
-	7,   // 320: conversation.v1.AgentSendMessageFailure.error:type_name -> conversation.v1.AgentToolFailure
-	208, // 321: conversation.v1.AgentSendMessageFailure.summary:type_name -> conversation.v1.AgentSendMessageSummary
-	215, // 322: conversation.v1.AgentSubagentHandback.start:type_name -> conversation.v1.AgentSubagentHandbackStart
-	69,  // 323: conversation.v1.AgentSubagentHandback.progress:type_name -> conversation.v1.AgentToolCallProgress
-	217, // 324: conversation.v1.AgentSubagentHandback.success:type_name -> conversation.v1.AgentSubagentHandbackSuccess
-	218, // 325: conversation.v1.AgentSubagentHandback.failure:type_name -> conversation.v1.AgentSubagentHandbackFailure
-	216, // 326: conversation.v1.AgentSubagentHandbackStart.report:type_name -> conversation.v1.AgentSubagentHandbackReport
-	119, // 327: conversation.v1.AgentSubagentHandbackStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	216, // 328: conversation.v1.AgentSubagentHandbackSuccess.report:type_name -> conversation.v1.AgentSubagentHandbackReport
-	8,   // 329: conversation.v1.AgentSubagentHandbackSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	7,   // 330: conversation.v1.AgentSubagentHandbackFailure.error:type_name -> conversation.v1.AgentToolFailure
-	216, // 331: conversation.v1.AgentSubagentHandbackFailure.report:type_name -> conversation.v1.AgentSubagentHandbackReport
-	220, // 332: conversation.v1.AgentWebFetch.start:type_name -> conversation.v1.AgentWebFetchStart
-	69,  // 333: conversation.v1.AgentWebFetch.progress:type_name -> conversation.v1.AgentToolCallProgress
-	222, // 334: conversation.v1.AgentWebFetch.success:type_name -> conversation.v1.AgentWebFetchSuccess
-	224, // 335: conversation.v1.AgentWebFetch.failure:type_name -> conversation.v1.AgentWebFetchFailure
-	221, // 336: conversation.v1.AgentWebFetchStart.target:type_name -> conversation.v1.AgentWebFetchTarget
-	221, // 337: conversation.v1.AgentWebFetchSuccess.target:type_name -> conversation.v1.AgentWebFetchTarget
-	223, // 338: conversation.v1.AgentWebFetchSuccess.status:type_name -> conversation.v1.AgentWebFetchHttpStatus
-	221, // 339: conversation.v1.AgentWebFetchFailure.target:type_name -> conversation.v1.AgentWebFetchTarget
-	7,   // 340: conversation.v1.AgentWebFetchFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	226, // 341: conversation.v1.AgentWebSearch.start:type_name -> conversation.v1.AgentWebSearchStart
-	69,  // 342: conversation.v1.AgentWebSearch.progress:type_name -> conversation.v1.AgentToolCallProgress
-	228, // 343: conversation.v1.AgentWebSearch.success:type_name -> conversation.v1.AgentWebSearchSuccess
-	232, // 344: conversation.v1.AgentWebSearch.failure:type_name -> conversation.v1.AgentWebSearchFailure
-	227, // 345: conversation.v1.AgentWebSearchStart.query:type_name -> conversation.v1.AgentWebSearchQuery
-	227, // 346: conversation.v1.AgentWebSearchSuccess.query:type_name -> conversation.v1.AgentWebSearchQuery
-	229, // 347: conversation.v1.AgentWebSearchSuccess.results:type_name -> conversation.v1.AgentWebSearchResult
-	230, // 348: conversation.v1.AgentWebSearchResult.link:type_name -> conversation.v1.AgentWebSearchLink
-	231, // 349: conversation.v1.AgentWebSearchResult.note:type_name -> conversation.v1.AgentWebSearchNote
-	227, // 350: conversation.v1.AgentWebSearchFailure.query:type_name -> conversation.v1.AgentWebSearchQuery
-	7,   // 351: conversation.v1.AgentWebSearchFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	234, // 352: conversation.v1.AgentMonitor.start:type_name -> conversation.v1.AgentMonitorStart
-	239, // 353: conversation.v1.AgentMonitor.ended:type_name -> conversation.v1.AgentMonitorEnded
-	240, // 354: conversation.v1.AgentMonitor.failure:type_name -> conversation.v1.AgentMonitorFailure
-	235, // 355: conversation.v1.AgentMonitorStart.deadline:type_name -> conversation.v1.AgentMonitorDeadline
-	236, // 356: conversation.v1.AgentMonitorStart.persistent:type_name -> conversation.v1.AgentMonitorPersistent
-	237, // 357: conversation.v1.AgentMonitorStart.command:type_name -> conversation.v1.AgentMonitorCommand
-	238, // 358: conversation.v1.AgentMonitorStart.websocket:type_name -> conversation.v1.AgentMonitorWebsocket
-	234, // 359: conversation.v1.AgentMonitorEnded.call:type_name -> conversation.v1.AgentMonitorStart
-	7,   // 360: conversation.v1.AgentMonitorFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	234, // 361: conversation.v1.AgentMonitorFailure.call:type_name -> conversation.v1.AgentMonitorStart
-	242, // 362: conversation.v1.AgentScheduleWakeup.start:type_name -> conversation.v1.AgentScheduleWakeupStart
-	245, // 363: conversation.v1.AgentScheduleWakeup.success:type_name -> conversation.v1.AgentScheduleWakeupSuccess
-	248, // 364: conversation.v1.AgentScheduleWakeup.failure:type_name -> conversation.v1.AgentScheduleWakeupFailure
-	243, // 365: conversation.v1.AgentScheduleWakeupStart.schedule:type_name -> conversation.v1.AgentScheduleWakeupSchedule
-	244, // 366: conversation.v1.AgentScheduleWakeupStart.stop:type_name -> conversation.v1.AgentScheduleWakeupStop
-	246, // 367: conversation.v1.AgentScheduleWakeupSuccess.scheduled:type_name -> conversation.v1.AgentScheduleWakeupScheduled
-	247, // 368: conversation.v1.AgentScheduleWakeupSuccess.stopped:type_name -> conversation.v1.AgentScheduleWakeupStopped
-	7,   // 369: conversation.v1.AgentScheduleWakeupFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	250, // 370: conversation.v1.AgentArtifact.start:type_name -> conversation.v1.AgentArtifactStart
-	253, // 371: conversation.v1.AgentArtifact.success:type_name -> conversation.v1.AgentArtifactSuccess
-	256, // 372: conversation.v1.AgentArtifact.failure:type_name -> conversation.v1.AgentArtifactFailure
-	251, // 373: conversation.v1.AgentArtifactStart.publish:type_name -> conversation.v1.AgentArtifactPublish
-	252, // 374: conversation.v1.AgentArtifactStart.list:type_name -> conversation.v1.AgentArtifactList
-	254, // 375: conversation.v1.AgentArtifactSuccess.published:type_name -> conversation.v1.AgentArtifactPublished
-	255, // 376: conversation.v1.AgentArtifactSuccess.listed:type_name -> conversation.v1.AgentArtifactListed
-	251, // 377: conversation.v1.AgentArtifactPublished.publish:type_name -> conversation.v1.AgentArtifactPublish
-	7,   // 378: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	251, // 379: conversation.v1.AgentArtifactFailure.publish:type_name -> conversation.v1.AgentArtifactPublish
-	252, // 380: conversation.v1.AgentArtifactFailure.list:type_name -> conversation.v1.AgentArtifactList
-	260, // 381: conversation.v1.AgentMcpToolCall.start:type_name -> conversation.v1.AgentMcpToolCallStart
-	69,  // 382: conversation.v1.AgentMcpToolCall.progress:type_name -> conversation.v1.AgentToolCallProgress
-	261, // 383: conversation.v1.AgentMcpToolCall.success:type_name -> conversation.v1.AgentMcpToolCallSuccess
-	262, // 384: conversation.v1.AgentMcpToolCall.failure:type_name -> conversation.v1.AgentMcpToolCallFailure
-	259, // 385: conversation.v1.AgentMcpTool.address:type_name -> conversation.v1.AgentMcpToolAddress
-	258, // 386: conversation.v1.AgentMcpToolCallStart.tool:type_name -> conversation.v1.AgentMcpTool
-	286, // 387: conversation.v1.AgentMcpToolCallStart.arguments:type_name -> google.protobuf.Struct
-	119, // 388: conversation.v1.AgentMcpToolCallStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	258, // 389: conversation.v1.AgentMcpToolCallSuccess.tool:type_name -> conversation.v1.AgentMcpTool
-	286, // 390: conversation.v1.AgentMcpToolCallSuccess.arguments:type_name -> google.protobuf.Struct
-	263, // 391: conversation.v1.AgentMcpToolCallSuccess.content:type_name -> conversation.v1.ToolResultContent
-	8,   // 392: conversation.v1.AgentMcpToolCallSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	258, // 393: conversation.v1.AgentMcpToolCallFailure.tool:type_name -> conversation.v1.AgentMcpTool
-	286, // 394: conversation.v1.AgentMcpToolCallFailure.arguments:type_name -> google.protobuf.Struct
-	7,   // 395: conversation.v1.AgentMcpToolCallFailure.error:type_name -> conversation.v1.AgentToolFailure
-	264, // 396: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
-	287, // 397: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
-	288, // 398: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
-	289, // 399: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
-	266, // 400: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
-	69,  // 401: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
-	267, // 402: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
-	268, // 403: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
-	286, // 404: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
-	119, // 405: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	263, // 406: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
-	8,   // 407: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	263, // 408: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
-	8,   // 409: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	270, // 410: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
-	271, // 411: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
-	273, // 412: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
-	274, // 413: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
-	275, // 414: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
-	2,   // 415: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
-	6,   // 416: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
-	119, // 417: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	272, // 418: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
-	272, // 419: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
-	277, // 420: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
-	278, // 421: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
-	3,   // 422: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
-	280, // 423: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
-	281, // 424: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
-	282, // 425: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
-	426, // [426:426] is the sub-list for method output_type
-	426, // [426:426] is the sub-list for method input_type
-	426, // [426:426] is the sub-list for extension type_name
-	426, // [426:426] is the sub-list for extension extendee
-	0,   // [0:426] is the sub-list for field type_name
+	211, // 316: conversation.v1.AgentSendMessageSuccess.peer_session:type_name -> conversation.v1.AgentSendMessagePeerSession
+	213, // 317: conversation.v1.AgentSendMessageSuccess.queued_to_live:type_name -> conversation.v1.AgentSendMessageQueuedToLive
+	214, // 318: conversation.v1.AgentSendMessageSuccess.resumed_recipient:type_name -> conversation.v1.AgentSendMessageResumedRecipient
+	8,   // 319: conversation.v1.AgentSendMessageSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	208, // 320: conversation.v1.AgentSendMessageSuccess.summary:type_name -> conversation.v1.AgentSendMessageSummary
+	212, // 321: conversation.v1.AgentSendMessagePeerSession.delivery_id:type_name -> conversation.v1.PeerDeliveryId
+	7,   // 322: conversation.v1.AgentSendMessageFailure.error:type_name -> conversation.v1.AgentToolFailure
+	208, // 323: conversation.v1.AgentSendMessageFailure.summary:type_name -> conversation.v1.AgentSendMessageSummary
+	217, // 324: conversation.v1.AgentSubagentHandback.start:type_name -> conversation.v1.AgentSubagentHandbackStart
+	69,  // 325: conversation.v1.AgentSubagentHandback.progress:type_name -> conversation.v1.AgentToolCallProgress
+	219, // 326: conversation.v1.AgentSubagentHandback.success:type_name -> conversation.v1.AgentSubagentHandbackSuccess
+	220, // 327: conversation.v1.AgentSubagentHandback.failure:type_name -> conversation.v1.AgentSubagentHandbackFailure
+	218, // 328: conversation.v1.AgentSubagentHandbackStart.report:type_name -> conversation.v1.AgentSubagentHandbackReport
+	119, // 329: conversation.v1.AgentSubagentHandbackStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	218, // 330: conversation.v1.AgentSubagentHandbackSuccess.report:type_name -> conversation.v1.AgentSubagentHandbackReport
+	8,   // 331: conversation.v1.AgentSubagentHandbackSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	7,   // 332: conversation.v1.AgentSubagentHandbackFailure.error:type_name -> conversation.v1.AgentToolFailure
+	218, // 333: conversation.v1.AgentSubagentHandbackFailure.report:type_name -> conversation.v1.AgentSubagentHandbackReport
+	222, // 334: conversation.v1.AgentWebFetch.start:type_name -> conversation.v1.AgentWebFetchStart
+	69,  // 335: conversation.v1.AgentWebFetch.progress:type_name -> conversation.v1.AgentToolCallProgress
+	224, // 336: conversation.v1.AgentWebFetch.success:type_name -> conversation.v1.AgentWebFetchSuccess
+	226, // 337: conversation.v1.AgentWebFetch.failure:type_name -> conversation.v1.AgentWebFetchFailure
+	223, // 338: conversation.v1.AgentWebFetchStart.target:type_name -> conversation.v1.AgentWebFetchTarget
+	223, // 339: conversation.v1.AgentWebFetchSuccess.target:type_name -> conversation.v1.AgentWebFetchTarget
+	225, // 340: conversation.v1.AgentWebFetchSuccess.status:type_name -> conversation.v1.AgentWebFetchHttpStatus
+	223, // 341: conversation.v1.AgentWebFetchFailure.target:type_name -> conversation.v1.AgentWebFetchTarget
+	7,   // 342: conversation.v1.AgentWebFetchFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	228, // 343: conversation.v1.AgentWebSearch.start:type_name -> conversation.v1.AgentWebSearchStart
+	69,  // 344: conversation.v1.AgentWebSearch.progress:type_name -> conversation.v1.AgentToolCallProgress
+	230, // 345: conversation.v1.AgentWebSearch.success:type_name -> conversation.v1.AgentWebSearchSuccess
+	234, // 346: conversation.v1.AgentWebSearch.failure:type_name -> conversation.v1.AgentWebSearchFailure
+	229, // 347: conversation.v1.AgentWebSearchStart.query:type_name -> conversation.v1.AgentWebSearchQuery
+	229, // 348: conversation.v1.AgentWebSearchSuccess.query:type_name -> conversation.v1.AgentWebSearchQuery
+	231, // 349: conversation.v1.AgentWebSearchSuccess.results:type_name -> conversation.v1.AgentWebSearchResult
+	232, // 350: conversation.v1.AgentWebSearchResult.link:type_name -> conversation.v1.AgentWebSearchLink
+	233, // 351: conversation.v1.AgentWebSearchResult.note:type_name -> conversation.v1.AgentWebSearchNote
+	229, // 352: conversation.v1.AgentWebSearchFailure.query:type_name -> conversation.v1.AgentWebSearchQuery
+	7,   // 353: conversation.v1.AgentWebSearchFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	236, // 354: conversation.v1.AgentMonitor.start:type_name -> conversation.v1.AgentMonitorStart
+	241, // 355: conversation.v1.AgentMonitor.ended:type_name -> conversation.v1.AgentMonitorEnded
+	242, // 356: conversation.v1.AgentMonitor.failure:type_name -> conversation.v1.AgentMonitorFailure
+	237, // 357: conversation.v1.AgentMonitorStart.deadline:type_name -> conversation.v1.AgentMonitorDeadline
+	238, // 358: conversation.v1.AgentMonitorStart.persistent:type_name -> conversation.v1.AgentMonitorPersistent
+	239, // 359: conversation.v1.AgentMonitorStart.command:type_name -> conversation.v1.AgentMonitorCommand
+	240, // 360: conversation.v1.AgentMonitorStart.websocket:type_name -> conversation.v1.AgentMonitorWebsocket
+	236, // 361: conversation.v1.AgentMonitorEnded.call:type_name -> conversation.v1.AgentMonitorStart
+	7,   // 362: conversation.v1.AgentMonitorFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	236, // 363: conversation.v1.AgentMonitorFailure.call:type_name -> conversation.v1.AgentMonitorStart
+	244, // 364: conversation.v1.AgentScheduleWakeup.start:type_name -> conversation.v1.AgentScheduleWakeupStart
+	247, // 365: conversation.v1.AgentScheduleWakeup.success:type_name -> conversation.v1.AgentScheduleWakeupSuccess
+	250, // 366: conversation.v1.AgentScheduleWakeup.failure:type_name -> conversation.v1.AgentScheduleWakeupFailure
+	245, // 367: conversation.v1.AgentScheduleWakeupStart.schedule:type_name -> conversation.v1.AgentScheduleWakeupSchedule
+	246, // 368: conversation.v1.AgentScheduleWakeupStart.stop:type_name -> conversation.v1.AgentScheduleWakeupStop
+	248, // 369: conversation.v1.AgentScheduleWakeupSuccess.scheduled:type_name -> conversation.v1.AgentScheduleWakeupScheduled
+	249, // 370: conversation.v1.AgentScheduleWakeupSuccess.stopped:type_name -> conversation.v1.AgentScheduleWakeupStopped
+	7,   // 371: conversation.v1.AgentScheduleWakeupFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	252, // 372: conversation.v1.AgentArtifact.start:type_name -> conversation.v1.AgentArtifactStart
+	255, // 373: conversation.v1.AgentArtifact.success:type_name -> conversation.v1.AgentArtifactSuccess
+	258, // 374: conversation.v1.AgentArtifact.failure:type_name -> conversation.v1.AgentArtifactFailure
+	253, // 375: conversation.v1.AgentArtifactStart.publish:type_name -> conversation.v1.AgentArtifactPublish
+	254, // 376: conversation.v1.AgentArtifactStart.list:type_name -> conversation.v1.AgentArtifactList
+	256, // 377: conversation.v1.AgentArtifactSuccess.published:type_name -> conversation.v1.AgentArtifactPublished
+	257, // 378: conversation.v1.AgentArtifactSuccess.listed:type_name -> conversation.v1.AgentArtifactListed
+	253, // 379: conversation.v1.AgentArtifactPublished.publish:type_name -> conversation.v1.AgentArtifactPublish
+	7,   // 380: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	253, // 381: conversation.v1.AgentArtifactFailure.publish:type_name -> conversation.v1.AgentArtifactPublish
+	254, // 382: conversation.v1.AgentArtifactFailure.list:type_name -> conversation.v1.AgentArtifactList
+	262, // 383: conversation.v1.AgentMcpToolCall.start:type_name -> conversation.v1.AgentMcpToolCallStart
+	69,  // 384: conversation.v1.AgentMcpToolCall.progress:type_name -> conversation.v1.AgentToolCallProgress
+	263, // 385: conversation.v1.AgentMcpToolCall.success:type_name -> conversation.v1.AgentMcpToolCallSuccess
+	264, // 386: conversation.v1.AgentMcpToolCall.failure:type_name -> conversation.v1.AgentMcpToolCallFailure
+	261, // 387: conversation.v1.AgentMcpTool.address:type_name -> conversation.v1.AgentMcpToolAddress
+	260, // 388: conversation.v1.AgentMcpToolCallStart.tool:type_name -> conversation.v1.AgentMcpTool
+	288, // 389: conversation.v1.AgentMcpToolCallStart.arguments:type_name -> google.protobuf.Struct
+	119, // 390: conversation.v1.AgentMcpToolCallStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	260, // 391: conversation.v1.AgentMcpToolCallSuccess.tool:type_name -> conversation.v1.AgentMcpTool
+	288, // 392: conversation.v1.AgentMcpToolCallSuccess.arguments:type_name -> google.protobuf.Struct
+	265, // 393: conversation.v1.AgentMcpToolCallSuccess.content:type_name -> conversation.v1.ToolResultContent
+	8,   // 394: conversation.v1.AgentMcpToolCallSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	260, // 395: conversation.v1.AgentMcpToolCallFailure.tool:type_name -> conversation.v1.AgentMcpTool
+	288, // 396: conversation.v1.AgentMcpToolCallFailure.arguments:type_name -> google.protobuf.Struct
+	7,   // 397: conversation.v1.AgentMcpToolCallFailure.error:type_name -> conversation.v1.AgentToolFailure
+	266, // 398: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
+	289, // 399: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
+	290, // 400: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
+	291, // 401: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
+	268, // 402: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
+	69,  // 403: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
+	269, // 404: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
+	270, // 405: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
+	288, // 406: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
+	119, // 407: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	265, // 408: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
+	8,   // 409: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	265, // 410: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
+	8,   // 411: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	272, // 412: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
+	273, // 413: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
+	275, // 414: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
+	276, // 415: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
+	277, // 416: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
+	2,   // 417: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
+	6,   // 418: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
+	119, // 419: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	274, // 420: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
+	274, // 421: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
+	279, // 422: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
+	280, // 423: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
+	3,   // 424: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
+	282, // 425: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
+	283, // 426: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
+	284, // 427: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
+	428, // [428:428] is the sub-list for method output_type
+	428, // [428:428] is the sub-list for method input_type
+	428, // [428:428] is the sub-list for extension type_name
+	428, // [428:428] is the sub-list for extension extendee
+	0,   // [0:428] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_activity_proto_init() }
@@ -23096,122 +23257,124 @@ func file_conversation_v1_agent_activity_proto_init() {
 	}
 	file_conversation_v1_agent_activity_proto_msgTypes[203].OneofWrappers = []any{}
 	file_conversation_v1_agent_activity_proto_msgTypes[206].OneofWrappers = []any{
+		(*AgentSendMessageSuccess_RecipientAgentId)(nil),
+		(*AgentSendMessageSuccess_PeerSession)(nil),
 		(*AgentSendMessageSuccess_QueuedToLive)(nil),
 		(*AgentSendMessageSuccess_ResumedRecipient)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[209].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[210].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[211].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[212].OneofWrappers = []any{
 		(*AgentSubagentHandback_Start)(nil),
 		(*AgentSubagentHandback_Progress)(nil),
 		(*AgentSubagentHandback_Success)(nil),
 		(*AgentSubagentHandback_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[213].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[214].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[215].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[215].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[216].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[217].OneofWrappers = []any{
 		(*AgentWebFetch_Start)(nil),
 		(*AgentWebFetch_Progress)(nil),
 		(*AgentWebFetch_Success)(nil),
 		(*AgentWebFetch_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[221].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[223].OneofWrappers = []any{
 		(*AgentWebSearch_Start)(nil),
 		(*AgentWebSearch_Progress)(nil),
 		(*AgentWebSearch_Success)(nil),
 		(*AgentWebSearch_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[225].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[227].OneofWrappers = []any{
 		(*AgentWebSearchResult_Link)(nil),
 		(*AgentWebSearchResult_Note)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[229].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[231].OneofWrappers = []any{
 		(*AgentMonitor_Start)(nil),
 		(*AgentMonitor_Ended)(nil),
 		(*AgentMonitor_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[230].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[232].OneofWrappers = []any{
 		(*AgentMonitorStart_Deadline)(nil),
 		(*AgentMonitorStart_Persistent)(nil),
 		(*AgentMonitorStart_Command)(nil),
 		(*AgentMonitorStart_Websocket)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[237].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[239].OneofWrappers = []any{
 		(*AgentScheduleWakeup_Start)(nil),
 		(*AgentScheduleWakeup_Success)(nil),
 		(*AgentScheduleWakeup_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[238].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[240].OneofWrappers = []any{
 		(*AgentScheduleWakeupStart_Schedule)(nil),
 		(*AgentScheduleWakeupStart_Stop)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[241].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[243].OneofWrappers = []any{
 		(*AgentScheduleWakeupSuccess_Scheduled)(nil),
 		(*AgentScheduleWakeupSuccess_Stopped)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[245].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[247].OneofWrappers = []any{
 		(*AgentArtifact_Start)(nil),
 		(*AgentArtifact_Success)(nil),
 		(*AgentArtifact_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[246].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[248].OneofWrappers = []any{
 		(*AgentArtifactStart_Publish)(nil),
 		(*AgentArtifactStart_List)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[247].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[248].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[249].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[249].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[250].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[251].OneofWrappers = []any{
 		(*AgentArtifactSuccess_Published)(nil),
 		(*AgentArtifactSuccess_Listed)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[250].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[252].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[252].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[254].OneofWrappers = []any{
 		(*AgentArtifactFailure_Publish)(nil),
 		(*AgentArtifactFailure_List)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[253].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[255].OneofWrappers = []any{
 		(*AgentMcpToolCall_Start)(nil),
 		(*AgentMcpToolCall_Progress)(nil),
 		(*AgentMcpToolCall_Success)(nil),
 		(*AgentMcpToolCall_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[254].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[257].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[260].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[256].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[259].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[262].OneofWrappers = []any{
 		(*ToolResultContentBlock_Text)(nil),
 		(*ToolResultContentBlock_Image)(nil),
 		(*ToolResultContentBlock_Unsupported)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[261].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[263].OneofWrappers = []any{
 		(*AgentUnmodeled_Start)(nil),
 		(*AgentUnmodeled_Progress)(nil),
 		(*AgentUnmodeled_Success)(nil),
 		(*AgentUnmodeled_Failure)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[263].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[264].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[265].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[265].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[266].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[267].OneofWrappers = []any{
 		(*AgentHook_Start)(nil),
 		(*AgentHook_Succeeded)(nil),
 		(*AgentHook_BlockingError)(nil),
 		(*AgentHook_NonBlockingError)(nil),
 		(*AgentHook_Cancelled)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[266].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[267].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[270].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[274].OneofWrappers = []any{}
-	file_conversation_v1_agent_activity_proto_msgTypes[275].OneofWrappers = []any{
+	file_conversation_v1_agent_activity_proto_msgTypes[268].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[269].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[272].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[276].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[277].OneofWrappers = []any{
 		(*AgentContextInjected_Memory)(nil),
 		(*AgentContextInjected_Skills)(nil),
 	}
-	file_conversation_v1_agent_activity_proto_msgTypes[278].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[280].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_agent_activity_proto_rawDesc), len(file_conversation_v1_agent_activity_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   279,
+			NumMessages:   281,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

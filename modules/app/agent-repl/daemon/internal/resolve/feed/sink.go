@@ -396,6 +396,10 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 			dlog.Context{"agent": agent.GetValue()})
 	}
 	s.mainAgent = agent.GetValue()
+	// A SESSION THE STORE NAMED AS AN END OF A CROSS-SESSION MESSAGE is now
+	// known to be this workspace, so every row waiting to name it is drawn
+	// again.
+	r.redrawDeliveriesOfSession(s.mainAgent)
 }
 
 // OnDetachedWork draws the bubble of work that left the stream.

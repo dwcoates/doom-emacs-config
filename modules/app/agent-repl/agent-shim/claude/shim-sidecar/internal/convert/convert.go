@@ -433,6 +433,16 @@ type envelope struct {
 	// peerHandback is the vendor's `origin.handback`: set exactly when a peer
 	// message is a subagent handing its final report back.
 	peerHandback bool
+	// peerSessionName is the vendor's `origin.name`, the sender's asserted
+	// session name, trimmed. Empty when the vendor states none.
+	peerSessionName string
+	// peerDeliveryID is the vendor's `origin.msg_id`, the delivery id the
+	// sender's SendMessage result carries too. Empty when the vendor states none.
+	peerDeliveryID string
+	// peerSenderTask is the vendor's `origin.senderTaskId`, trimmed: the task id
+	// of the agent of THIS session that sent a peer message. Empty for another
+	// session's message.
+	peerSenderTask string
 }
 
 func readEnvelope(rec map[string]any) envelope {
@@ -452,6 +462,9 @@ func readEnvelope(rec map[string]any) envelope {
 		peerSender:       sender,
 		peerBody:         str(origin["body"]),
 		peerHandback:     boolean(origin["handback"]),
+		peerSessionName:  strings.TrimSpace(str(origin["name"])),
+		peerDeliveryID:   str(origin["msg_id"]),
+		peerSenderTask:   strings.TrimSpace(str(origin["senderTaskId"])),
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/feedid"
 )
@@ -36,16 +37,76 @@ func TestPeerMessageDrawsAPeerRow(t *testing.T) {
 	}
 }
 
-func TestPeerMessageLabelNamesTheSender(t *testing.T) {
+// interSessionMessage sends one inter-session peer message to the main agent,
+// stating NAME as the sender's session name ("" for none) and DELIVERY as its
+// delivery id ("" for none).
+func (h *harness) interSessionMessage(id, name, delivery, body string) {
+	h.t.Helper()
+	inter := &conversationv1.PeerMessageInterSession{}
+	if name != "" {
+		inter.SenderSessionName = &conversationv1.PeerMessageSenderSessionName{Text: name}
+	}
+	if delivery != "" {
+		inter.DeliveryId = &conversationv1.PeerDeliveryId{Value: delivery}
+	}
+	h.resolver.OnPeerMessage(testWorkspace, &conversationv1.PeerMessage{
+		Agent:  mainAgent(),
+		Sender: "uds:/tmp/cc-socks/5398.sock",
+		Body:   body,
+		Id:     id,
+		Kind:   &conversationv1.PeerMessage_InterSession{InterSession: inter},
+	}, nil, nil)
+}
+
+// fromLine spells a received message's header for an assertion: its arm and
+// its name.
+func fromLine(from *frontendv1.FeedPeerMessageFrom) string {
+	switch from.GetSender().(type) {
+	case *frontendv1.FeedPeerMessageFrom_Workspace:
+		return "← workspace " + from.GetName().GetText()
+	case *frontendv1.FeedPeerMessageFrom_Unresolved:
+		return "← unresolved " + from.GetName().GetText()
+	case *frontendv1.FeedPeerMessageFrom_Unnamed:
+		return "← unnamed " + from.GetName().GetText()
+	case *frontendv1.FeedPeerMessageFrom_Agent:
+		switch agent := from.GetAgent(); {
+		case agent.GetNamed() != nil:
+			return "← agent named " + from.GetName().GetText()
+		case agent.GetIdentified() != nil:
+			return "← agent identified " + from.GetName().GetText()
+		case agent.GetUnresolved() != nil:
+			return "← agent unresolved " + from.GetName().GetText()
+		default:
+			return "← agent with no identity arm"
+		}
+	default:
+		return "no sender arm"
+	}
+}
+
+func TestPeerMessageNamesASenderNoWorkspaceIsKnownForByItsSessionName(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 
 	// Act.
-	h.peerMessage("p1", "Explore", "found it")
+	h.interSessionMessage("p1", "agent-repl-test-slimming-54", "", "found it")
 
 	// Assert.
-	if got := h.only(rootFeed()).GetPeerMessage().GetSender(); got != "agent Explore" {
-		t.Fatalf("label = %q, want \"agent Explore\"", got)
+	if got := fromLine(h.only(rootFeed()).GetPeerMessage().GetFrom()); got != "← unresolved agent-repl-test-slimming-54" {
+		t.Fatalf("header = %q, want the sender's own session name, unresolved", got)
+	}
+}
+
+func TestPeerMessageNeverNamesTheSocketPathTheVendorAddressedItFrom(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.interSessionMessage("p1", "", "", "found it")
+
+	// Assert.
+	if got := h.only(rootFeed()).GetPeerMessage().GetFrom().GetName().GetText(); got == "uds:/tmp/cc-socks/5398.sock" {
+		t.Fatalf("header names the socket path %q", got)
 	}
 }
 
@@ -62,16 +123,16 @@ func TestPeerMessageCarriesTheBodyForExpansion(t *testing.T) {
 	}
 }
 
-func TestPeerMessageWithNoSenderFallsBackToAnotherAgent(t *testing.T) {
+func TestPeerMessageWithNoSenderNameDrawsTheUnnamedStandIn(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 
 	// Act.
-	h.peerMessage("p1", "", "body")
+	h.interSessionMessage("p1", "", "", "body")
 
 	// Assert.
-	if got := h.only(rootFeed()).GetPeerMessage().GetSender(); got != "another agent" {
-		t.Fatalf("label = %q, want the empty-sender fallback \"another agent\"", got)
+	if got := fromLine(h.only(rootFeed()).GetPeerMessage().GetFrom()); got != "← unnamed another session" {
+		t.Fatalf("header = %q, want the unnamed stand-in", got)
 	}
 }
 
@@ -151,8 +212,8 @@ func TestReplayedPeerMessageDrawsThePeerRow(t *testing.T) {
 	h.replay(historyPage(&conversationv1.HistoryFloor{}, peerEntry("p1", "Explore", "found it")))
 
 	// Assert.
-	if h.only(rootFeed()).GetPeerMessage().GetSender() != "agent Explore" {
-		t.Fatal("a replayed peer message must draw the peer bubble with its sender label")
+	if h.only(rootFeed()).GetPeerMessage().GetFrom() == nil {
+		t.Fatal("a replayed peer message must draw the peer bubble with its sender header")
 	}
 }
 

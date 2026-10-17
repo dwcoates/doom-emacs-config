@@ -1,0 +1,71 @@
+// endpoint_resolve_peer_delivery.proto — ResolvePeerDelivery: WHICH SESSIONS
+// are the two ends of one cross-session message, by the vendor's delivery id
+// for it.
+//
+// WHY THE DAEMON ASKS A SHIM. The daemon draws each end's row of a message
+// between two Claude sessions and names the session at the other end. The
+// delivery id is the one value both ends' records share
+// (conversation.v1.PeerDeliveryId), and both records are in the host's one
+// store, which the daemon never reads directly: its read path is this service.
+// Any running shim can answer, because the store is shared by every session on
+// the host; the shim asks the store and relays.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Ask which sessions hold the two ends of one cross-session message.
+message ResolvePeerDeliveryRequest {
+  // REQUIRED. The delivery id, verbatim. UNSET or empty is refused as an
+  // invalid argument, like every malformed shim request.
+  conversation.v1.PeerDeliveryId delivery_id = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ResolvePeerDeliveryResponse {
+  oneof result {
+    ResolvePeerDeliverySuccess success = 1;
+    ResolvePeerDeliveryFailure failure = 2;
+  }
+}
+
+// The record was read. Each end is answered on its own, and an end no recorded
+// session holds is an answer, not a failure.
+message ResolvePeerDeliverySuccess {
+  // The SENDING end: the session whose SendMessage result carries the id.
+  ResolvePeerDeliveryEnd sender = 1;
+  // The RECEIVING end: the session whose conversation holds the delivered
+  // message.
+  ResolvePeerDeliveryEnd recipient = 2;
+}
+
+// One end of the message. THE ARM IS WHETHER IT IS RECORDED.
+message ResolvePeerDeliveryEnd {
+  oneof end {
+    // The MAIN agent of the session holding this end's record. Its value is
+    // that session's original vendor session id.
+    conversation.v1.AgentId session = 1;
+    // No recorded session holds this end: a session outside the host's own,
+    // or a record not written yet.
+    ResolvePeerDeliveryNotRecorded not_recorded = 2;
+  }
+}
+
+// No recorded session holds this end.
+message ResolvePeerDeliveryNotRecorded {}
+
+// Not answered. THE ARM IS WHY.
+message ResolvePeerDeliveryFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The store could not be reached, or failed to read.
+    ResolvePeerDeliveryStoreUnavailable store_unavailable = 2;
+  }
+}
+// The store could not answer.
+message ResolvePeerDeliveryStoreUnavailable {}

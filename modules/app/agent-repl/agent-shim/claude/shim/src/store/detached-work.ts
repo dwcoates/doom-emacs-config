@@ -26,8 +26,8 @@ import { bindLog } from "../log.js";
 import { type conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import { PersistenceError } from "./persistence.js";
-import { readFailure, transportFailure } from "./reader.js";
-import { readWithRetry, type ReadRetryOptions } from "./retry.js";
+import { answeredLookup, lookupRefused, sendLookup } from "./answered-lookup.js";
+import type { ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-detached-work", operation: "shim.store.detached-work" });
 
@@ -86,12 +86,9 @@ export interface DetachedWorkLookupOptions extends ReadRetryOptions {
 
 /** One attempt: the store's answer, or a thrown {@link PersistenceError}. */
 async function lookupOnce(client: StoreClient, unit: conversationv1.AgentActivityId): Promise<DetachedWorkAnswer> {
-  let response: storev1.GetDetachedWorkResponse;
-  try {
-    response = await client.getDetachedWork(create(storev1.GetDetachedWorkRequestSchema, { unit }));
-  } catch (error) {
-    throw transportFailure(error);
-  }
+  const response = await sendLookup(() =>
+    client.getDetachedWork(create(storev1.GetDetachedWorkRequestSchema, { unit })),
+  );
   const result = response.result;
   switch (result.case) {
     case "success": {
@@ -108,14 +105,7 @@ async function lookupOnce(client: StoreClient, unit: conversationv1.AgentActivit
     case "notFound":
       return { kind: "not_found" };
     case "failure":
-      if (result.value.kind.case === "invalidRequest") {
-        // A REQUEST THIS PROCESS BUILT, REFUSED: a shim defect, never retried.
-        throw new PersistenceError(
-          "invalid_request",
-          `the store refused the lookup as malformed (field ${result.value.kind.value.field}): ${result.value.detail}`,
-        );
-      }
-      throw readFailure(result.value);
+      return lookupRefused(result.value);
     default:
       throw new PersistenceError("store_unavailable", "the store answered GetDetachedWork with no result arm set");
   }
@@ -134,19 +124,17 @@ export async function lookupDetachedWork(
   if (unit.value === "") {
     return { kind: "failed", detail: "the lookup names no unit; the store is never asked an incomplete question" };
   }
-  try {
-    const answer = await readWithRetry("GetDetachedWork", () => lookupOnce(options.client, unit), options);
+  const answer = await answeredLookup("GetDetachedWork", () => lookupOnce(options.client, unit), options);
+  if (answer.kind === "failed") {
     LOGGER.debug(
-      { activity_id: unit.value, answer: describeDetachedWorkAnswer(answer) },
-      "the store answered a detached work lookup",
-    );
-    return answer;
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    LOGGER.debug(
-      { activity_id: unit.value, detail },
+      { activity_id: unit.value, detail: answer.detail },
       "the detached work lookup failed; the caller records the outcome",
     );
-    return { kind: "failed", detail };
+    return answer;
   }
+  LOGGER.debug(
+    { activity_id: unit.value, answer: describeDetachedWorkAnswer(answer) },
+    "the store answered a detached work lookup",
+  );
+  return answer;
 }

@@ -45,6 +45,11 @@ function successOf(
   return arm.value as conversationv1.AgentSendMessageSuccess;
 }
 
+/** The agent recipient's id, or undefined when the send reached no agent of this session. */
+function agentRecipientOf(success: conversationv1.AgentSendMessageSuccess): string | undefined {
+  return success.recipient.case === "recipientAgentId" ? success.recipient.value.value : undefined;
+}
+
 describe("sendMessageConverter.start", () => {
   it("carries the address exactly as written, untyped", () => {
     // Arrange, Act.
@@ -121,7 +126,7 @@ describe("sendMessageConverter.settle", () => {
     );
 
     // Assert.
-    expect(success.recipientAgentId?.value).toBe("acd910f5fefb75908");
+    expect(agentRecipientOf(success)).toBe("acd910f5fefb75908");
   });
 
   it("reads the corpus send as a RESUMED recipient, the only structured discriminator", () => {
@@ -142,7 +147,7 @@ describe("sendMessageConverter.settle", () => {
     const success = successOf(sendMessageConverter.settle(call({ to: "vetter" }), outcome(structured)));
 
     // Assert.
-    expect(success.recipientAgentId?.value).toBe("b7c");
+    expect(agentRecipientOf(success)).toBe("b7c");
   });
 
   it("reads a send with no resumedAgentId as QUEUED to a live recipient", () => {
@@ -214,6 +219,81 @@ describe("sendMessageConverter.settle", () => {
 // A SETTLED SEND STANDS ALONE. Its start and its settle upsert one unit, so a
 // store keeping the latest frame replays the settle with no start beside it;
 // the settle therefore restates the address and the summary from the call.
+describe("sendMessageConverter.settle for a send to another Claude session", () => {
+  // The vendor's cross-session result, as observed on the host: no pin, no
+  // resumedAgentId, a delivery id, and the delivery spelled only in prose.
+  const crossSession = {
+    success: true,
+    message: "\u201cReview the fix\u201d \u2192 uds:/tmp/cc-socks/25283.sock; queued there",
+    display: "\u201cReview the fix\u201d \u2192 uds:/tmp/cc-socks/25283.sock",
+    msg_id: "143abeca-81c5-4e2f-bfa8-ed17dbede26f",
+  };
+
+  it("states the peer-session recipient by the vendor's delivery id", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(call({ to: "fix-flaky-3a", message: "go" }), outcome(crossSession)),
+    );
+
+    // Assert.
+    expect(success.recipient.case === "peerSession" ? success.recipient.value.deliveryId?.value : undefined).toBe(
+      "143abeca-81c5-4e2f-bfa8-ed17dbede26f",
+    );
+  });
+
+  it("names no agent recipient for a cross-session send", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(call({ to: "fix-flaky-3a", message: "go" }), outcome(crossSession)),
+    );
+
+    // Assert.
+    expect(agentRecipientOf(success)).toBeUndefined();
+  });
+
+  it("reads a cross-session send as QUEUED to a live recipient", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(call({ to: "fix-flaky-3a", message: "go" }), outcome(crossSession)),
+    );
+
+    // Assert.
+    expect(success.delivery.case).toBe("queuedToLive");
+  });
+
+  it("restates the address the caller wrote on a cross-session success", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(call({ to: "fix-flaky-3a", message: "go" }), outcome(crossSession)),
+    );
+
+    // Assert.
+    expect(success.addressedTo).toBe("fix-flaky-3a");
+  });
+
+  it("prefers the agent recipient when a result names both an agent and a delivery", () => {
+    // Arrange.
+    const structured = { success: true, pin: { id: "b7c" }, msg_id: "m-1" };
+
+    // Act.
+    const success = successOf(sendMessageConverter.settle(call({ to: "vetter" }), outcome(structured)));
+
+    // Assert.
+    expect(agentRecipientOf(success)).toBe("b7c");
+  });
+
+  it("produces NO success frame for an empty delivery id with no agent", () => {
+    // Arrange.
+    const structured = { success: true, msg_id: "" };
+
+    // Act.
+    const item = sendMessageConverter.settle(call({ to: "fix-flaky-3a" }), outcome(structured));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+});
+
 describe("sendMessageConverter.settle restates what the start carried", () => {
   function failureOf(
     item: conversationv1.AgentActivity["item"] | undefined,
