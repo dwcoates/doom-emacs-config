@@ -27,12 +27,15 @@
 (declare-function magit-section-update-highlight "magit-section" (&optional force))
 (declare-function magit-insert-unpushed-to-upstream-or-recent "magit-status")
 (declare-function magit-refresh "magit-mode")
+(declare-function magit-restore-window-configuration "magit-mode" (&optional kill-buffer))
+(declare-function +magit/quit-all "ext:autoload")
 (declare-function magit-status-setup-buffer "magit-status")
 (defvar magit-diff-visit-previous-blob)
 (defvar magit-display-buffer-function)
 (defvar magit-file-section-map)
 (defvar magit-hunk-section-map)
 (defvar magit-no-confirm)
+(defvar magit-previous-window-configuration)
 (defvar magit-section-initial-visibility-alist)
 
 ;; Cross-file forward declarations.  These sources load in the dependency
@@ -53,7 +56,6 @@
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-get "workspace")
-(declare-function agent-repl--ws-put "workspace")
 
 (declare-function magit-commit-at-point "magit-git")
 
@@ -452,19 +454,23 @@ main window so magit replaces the main buffer rather than failing on
 the dedicated side window.
 
 When the current workspace is tracked by agent-repl, the workspace's
-directory is its `:project-dir' and any saved `:fullscreen-config' is
-cleared (the saved pre-panel layout is moot once magit replaces the
-current window).  When the workspace is NOT tracked by agent-repl (e.g.,
-the main \"doom\" workspace, or a workspace whose entry has been
-killed), the workspace's directory is `default-directory' so magit
-still opens, and the `:fullscreen-config' write is skipped to avoid
-creating a stub entry (see `agent-repl--ws-put' STUB-CREATE warning).
+directory is its `:project-dir'.  When the workspace is NOT tracked by
+agent-repl (e.g., the main \"doom\" workspace, or a workspace whose
+entry has been killed), the workspace's directory is
+`default-directory' so magit still opens, and no workspace state is
+written.
 
 When the Claude panels are visible (they always fill the frame —
 fullscreen is the sole display format), closes the input window and
 un-dedicates the webview window before opening magit so that
 `display-buffer-same-window' can replace the webview window cleanly
-instead of splitting it."
+instead of splitting it.
+
+The workspace's `:fullscreen-config' (the layout under the panels) is
+KEPT: `q' on the status buffer (`agent-repl-magit-status-quit') brings
+the panels back, and their later close restores that layout again.
+While magit holds the frame no close path runs, and a mount before `q'
+replaces the configuration (`agent-repl--save-pre-panel-layout')."
   (let* ((ws (agent-repl--ws-current-name))
          (tracked-error nil)
          (tracked-dir (condition-case err
@@ -501,8 +507,7 @@ instead of splitting it."
                   (select-window webview-win))
               (agent-repl--log ws "magit-status-workspace: ws=%s branch=no-frontend-window frontend=%S"
                                 ws webview-buf))))
-        (agent-repl--log ws "magit-status-workspace: ws=%s branch=panels-hidden" ws))
-      (agent-repl--ws-put ws :fullscreen-config nil))
+        (agent-repl--log ws "magit-status-workspace: ws=%s branch=panels-hidden" ws)))
     (agent-repl--magit-status-same-window dir)
     (agent-repl--log ws "magit-status-workspace: ws=%s branch=complete dir=%s tracked=%s"
                       ws dir (if tracked-dir "yes" "no"))))
@@ -533,6 +538,59 @@ than the workspace's own worktree.  See
 handling."
   (interactive)
   (agent-repl--magit-status-workspace-open #'agent-repl--magit-main-worktree-target))
+
+;;;; --- q on magit-status: leave magit, restore the windows it replaced ----
+
+(defun agent-repl--magit-status-quit-branch (saved)
+  "Name what `agent-repl-magit-status-quit' does with SAVED, for its log record.
+SAVED is the status buffer's `magit-previous-window-configuration'.
+`magit-restore-window-configuration' only restores a configuration of
+the selected frame, so one from another frame is named apart."
+  (cond ((null saved) "no-saved-windows")
+        ((eq (window-configuration-frame saved) (selected-frame)) "restore-windows")
+        (t "other-frame")))
+
+(defun agent-repl-magit-status-quit ()
+  "Close magit for this repository and restore the windows magit-status replaced.
+`q' on every magit-status buffer.  Doom's `+magit/quit' (still `q' on
+every other magit buffer) quits the window with
+`magit-mode-quit-window', which in a single-window frame only switches
+it to a previous buffer.  Where the status buffer replaced the agent
+panels, the only buffers that switch may pick are other magit buffers:
+the panels are skipped by `agent-repl--prev-buffer-skip-agent-panel'
+and other workspaces' buffers by the perspective's frame predicate.  So
+`q' alternated between the status and log buffers, and `+magit/quit'
+never saw the last magit window go.
+
+This command leaves magit instead:
+
+1. `magit-restore-window-configuration' buries the status buffer and
+   puts back the configuration magit saved when it displayed it
+   (`magit-save-window-configuration', on
+   `magit-pre-display-buffer-hook').  When the status buffer replaced
+   the panels, that configuration shows the webview alone, and
+   `agent-repl-window--ensure-layout' rebuilds the two-panel layout.
+2. `+magit/quit-all' kills every magit buffer of the repository, run
+   from the status buffer so the repository is the status buffer's.
+
+With no saved configuration (the status buffer was shown without
+`magit-display-buffer', e.g. by `switch-to-buffer'), step 1 only buries
+it, and step 2 still closes magit, so `q' never lands on another magit
+buffer."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name))
+        (status (current-buffer)))
+    (unless (derived-mode-p 'magit-status-mode)
+      (agent-repl--error ws "elisp.magit.status-quit ws=%s buffer=%s mode=%S cause=not-a-magit-status-buffer"
+                         ws (buffer-name status) major-mode)
+      (user-error "agent-repl: %s is not a magit-status buffer" (buffer-name status)))
+    (agent-repl--info ws "elisp.magit.status-quit ws=%s buffer=%s dir=%s branch=%s"
+                      ws (buffer-name status) default-directory
+                      (agent-repl--magit-status-quit-branch
+                       magit-previous-window-configuration))
+    (magit-restore-window-configuration)
+    (with-current-buffer status
+      (+magit/quit-all))))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
 
@@ -587,7 +645,9 @@ transitions `:repl-state' to :inactive)."
 
 (map! :map magit-status-mode-map
       "g c" #'agent-repl-magit-copy-commit-link
-      "g C" #'agent-repl-magit-open-commit-in-github)
+      "g C" #'agent-repl-magit-open-commit-in-github
+      "q"   #'agent-repl-magit-status-quit
+      :nv "q" #'agent-repl-magit-status-quit)
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
