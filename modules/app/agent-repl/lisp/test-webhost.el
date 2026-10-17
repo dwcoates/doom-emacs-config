@@ -233,6 +233,18 @@ so stubbing the accessor would not reach the code under test."
     (should (equal agent-repl--webhost-shown "id-alpha"))
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
+(ert-deftest agent-repl-test-wh-showing-a-page-tells-page-unload ()
+  "Every show is noted to page-unload.el, which judges looks by it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl-page-unload-note-shown)
+                 (lambda (ws) (push ws noted))))
+        ;; Act
+        (agent-repl-webhost-show "alpha")
+        ;; Assert
+        (should (equal noted '("alpha")))))))
+
 (ert-deftest agent-repl-test-wh-showing-the-shown-page-sends-nothing ()
   "Every window change asks; only a change of page reaches the host."
   ;; Arrange
@@ -385,8 +397,22 @@ so stubbing the accessor would not reach the code under test."
 
 ;;;; ---- Replay ----
 
+(defun agent-repl-test-wh--drain-replay ()
+  "Bring back every page the replay queued, as its timer would, one at a time."
+  (while agent-repl--webhost-replay-queue
+    (agent-repl--webhost-replay-next))
+  (agent-repl--webhost-replay-cancel))
+
+(defmacro agent-repl-test-wh--with-order (order current &rest body)
+  "Run BODY with ORDER as the drawn tab order and CURRENT the current workspace."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order) (lambda () ,order))
+             ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
+             ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (id) (substring id 3))))
+     ,@body))
+
 (ert-deftest agent-repl-test-wh-a-load-replays-every-page ()
-  "A loaded host starts empty, so every page is handed to it again."
+  "A loaded host starts empty, so every page is handed to it again, in time."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
@@ -394,8 +420,108 @@ so stubbing the accessor would not reach the code under test."
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl--webhost-on-load 'load-changed)
+    (agent-repl-test-wh--drain-replay)
     ;; Assert
     (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
+
+(ert-deftest agent-repl-test-wh-a-load-brings-back-the-shown-page-at-once ()
+  "The shown page comes back in the load's own turn; the rest wait their turn."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-show "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl--webhost-on-load 'load-changed)
+    ;; Assert
+    (should (equal (list (length (agent-repl-test-wh--sent "ensure")) agent-repl--webhost-replay-queue)
+                   '(1 ("id-beta"))))
+    (should (string-search "id-alpha" (car (agent-repl-test-wh--sent "ensure"))))
+    (agent-repl--webhost-replay-cancel)))
+
+(ert-deftest agent-repl-test-wh-the-replay-comes-back-nearest-first-around-a-ring ()
+  "Pages come back by distance from the current tab, the ends of the bar adjacent."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "a"
+      ;; Act
+      (let ((order (agent-repl--webhost-ring-order '("id-c" "id-d" "id-e" "id-b"))))
+        ;; Assert: b (1 ahead), e (1 behind, the ring's other end), c (2 ahead), d (2 behind).
+        (should (equal order '("id-b" "id-e" "id-c" "id-d")))))))
+
+(ert-deftest agent-repl-test-wh-a-page-with-no-tab-comes-back-last ()
+  "A page whose workspace has no drawn tab is brought back after every tabbed one."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-order '("a" "b") "a"
+      ;; Act
+      (let ((order (agent-repl--webhost-ring-order '("id-z" "id-b"))))
+        ;; Assert
+        (should (equal order '("id-b" "id-z")))))))
+
+(ert-deftest agent-repl-test-wh-a-switch-to-a-queued-page-brings-it-back-at-once ()
+  "Showing a page the replay has not reached ensures it before the show."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl--webhost-on-load 'load-changed)
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl-webhost-show "beta")
+    ;; Assert
+    (should (equal (mapcar (lambda (script) (if (string-search "h.ensure(" script) 'ensure 'show))
+                           (seq-filter (lambda (script) (or (string-search "h.ensure(" script)
+                                                            (string-search "h.show(" script)))
+                                       (reverse (mapcar #'car agent-repl-test-wh--calls))))
+                   '(ensure show)))
+    (should-not (member "id-beta" agent-repl--webhost-replay-queue))
+    (agent-repl--webhost-replay-cancel)))
+
+(ert-deftest agent-repl-test-wh-a-removed-page-leaves-the-replay-queue ()
+  "A page removed while queued is never brought back."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl--webhost-on-load 'load-changed)
+    ;; Act
+    (agent-repl-webhost-remove "alpha")
+    ;; Assert
+    (should-not agent-repl--webhost-replay-queue)
+    (agent-repl--webhost-replay-cancel)))
+
+(ert-deftest agent-repl-test-wh-killing-the-host-cancels-its-replay ()
+  "A host killed mid-replay brings back nothing more."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl--webhost-on-load 'load-changed)
+    (let ((buf (generate-new-buffer " *test-wh-host*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl-webhost-buffer) (lambda () buf))
+                    ((symbol-function 'agent-repl--frontend-kill-webview) #'ignore))
+            ;; Act
+            (agent-repl-webhost-kill)
+            ;; Assert
+            (should (equal (list agent-repl--webhost-replay-queue agent-repl--webhost-replay-timer)
+                           '(nil nil))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-wh-the-replay-records-its-start-and-end ()
+  "A staggered replay is recorded when queued and when complete."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--webhost-on-load 'load-changed)
+        (agent-repl-test-wh--drain-replay))
+      ;; Assert
+      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-staggered queued=1" text)) logged))
+      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-complete" text)) logged)))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-the-shown-page ()
   "A loaded host shows the page Emacs stands on again."
@@ -447,11 +573,13 @@ so stubbing the accessor would not reach the code under test."
   "A loaded host gets every page's input background and gate slot again."
   ;; Arrange
   (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-set-input-background "alpha" "#101010")
     (agent-repl-webhost-set-gate-dock "alpha" 90 "#101010")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl--webhost-on-load 'load-changed)
+    (agent-repl-test-wh--drain-replay)
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))

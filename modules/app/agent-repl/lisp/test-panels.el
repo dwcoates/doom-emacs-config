@@ -3428,6 +3428,42 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
               (should (member "elisp.panels.restore-decision: ws=my-ws decision=re-show reason=default-open-now-missing" infos))))
         (kill-buffer frontend-buf)))))
 
+(ert-deftest agent-repl-test-panels-a-switch-to-an-unloaded-page-remounts-it ()
+  "A restore that finds no view because the page was unloaded remounts it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((remounted nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl-page-unload-remount)
+                 (lambda (ws) (push ws remounted)))
+                ((symbol-function 'agent-repl--info) #'ignore))
+        ;; Act
+        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+        ;; Assert
+        (should (equal remounted '("my-ws")))))))
+
+(ert-deftest agent-repl-test-panels-a-switch-to-a-page-never-made-does-not-remount ()
+  "A missing view that was never unloaded is pre-creation's to make, not a remount."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((remounted nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-page-unload-remount)
+                 (lambda (ws) (push ws remounted)))
+                ((symbol-function 'agent-repl--info) #'ignore))
+        ;; Act
+        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+        ;; Assert
+        (should-not remounted)))))
+
 (ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-already-visible ()
   "The panel-restore decision is recorded at INFO: decision=no-show reason=already-visible."
   ;; Arrange

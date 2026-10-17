@@ -7,6 +7,8 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-page-unloaded-p "page-unload" (ws))
+(declare-function agent-repl-page-unload-remount "page-unload" (ws))
 (declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl--open-progress-placeholder "open-progress" (ws))
 (declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
@@ -692,7 +694,13 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
                                  (plist-get presence :selected)))))))
       (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
-        (agent-repl--frontend-dispatch-show ws)))
+        (agent-repl--frontend-dispatch-show ws))
+      ;; AN UNLOADED PAGE COMES BACK ON THE SWITCH TO IT (page-unload.el):
+      ;; the restore just awaited its view, and the remount's view runs it.
+      (when (and (eq reason 'no-live-view)
+                 (fboundp 'agent-repl-page-unloaded-p)
+                 (agent-repl-page-unloaded-p ws))
+        (agent-repl-page-unload-remount ws)))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.

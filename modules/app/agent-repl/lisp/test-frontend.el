@@ -175,6 +175,23 @@ test is the mount's own binding of the slot to its workspace."
               (should (equal told '("ws1")))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+(ert-deftest agent-repl-test-frontend-a-fresh-slot-is-noted-mounted-once ()
+  "A fresh mount, and only a fresh one, is noted to page-unload.el."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (noted nil))
+      (unwind-protect
+          (agent-repl-test-frontend--with-slot-mount buf
+            (cl-letf (((symbol-function 'agent-repl-page-unload-note-mounted)
+                       (lambda (ws) (push ws noted))))
+              ;; Act
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              ;; Assert
+              (should (equal noted '("ws1")))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 ;;;; ---- The slot ---------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-a-slot-displays-the-host ()
@@ -1556,6 +1573,19 @@ accessor would not reach the code under test."
               ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) t)))
       ;; Act / Assert
       (should (eq (agent-repl--frontend-precreate-refusal "alpha") :hidden)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-an-unloaded-page ()
+  "A page unloaded for want of a look is not remade until the switch to it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) '(:id "ws-1" :dir "/w")))
+              ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) t)))
+      ;; Act / Assert
+      (should (eq (agent-repl--frontend-precreate-refusal "alpha") :unloaded)))))
 
 (ert-deftest agent-repl-test-frontend-precreate-refuses-a-dead-workspace ()
   "A workspace that is gone gets no page."

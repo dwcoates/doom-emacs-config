@@ -1322,6 +1322,7 @@ and logging its own resolution would recurse through the same boundary."
     ("prompt-summary: kickoff skipped reason=no-workspace"
      . "the record reports that no workspace was supplied")
     ("elisp.webview-recovery." . "webview recovery spans workspaces")
+    ("elisp.page-unload." . "a page-unload pass spans workspaces")
     ("load-priority-images:" . "shared image loading is process-wide")
     ("ws-rewrite-source-back-refs:" . "source-reference migration spans workspaces")
     ("ws-put:" . "workspace registry validation can precede sink ownership")
