@@ -81,6 +81,10 @@ interface Measured {
   moves: Box[];
   /** The width "5hr 30m 30s" takes in the duration cell's own font. */
   floor: number;
+  /** Every entry row's stage cell's size, font and color. */
+  stageLooks: string[];
+  /** Every entry row's duration cell's size, font and color. */
+  durationLooks: string[];
 }
 
 /** Draw the table with ROWS and measure it. */
@@ -103,6 +107,11 @@ async function measure(page: Page, rows: readonly Row[]): Promise<Measured> {
     table.querySelector(".merge-queue-line")?.append(probe);
     const floor = probe.getBoundingClientRect().width;
     probe.remove();
+    const looks = (selector: string): string[] =>
+      [...table.querySelectorAll(selector)].map((el) => {
+        const c = getComputedStyle(el);
+        return [c.fontSize, c.fontFamily, c.fontWeight, c.fontStyle, c.fontVariantNumeric, c.letterSpacing, c.color].join(" / ");
+      });
     return {
       duration: boxes(".merge-queue-duration, [data-column='duration']"),
       stage: boxes(".merge-queue-stage, [data-column='stage']"),
@@ -110,6 +119,8 @@ async function measure(page: Page, rows: readonly Row[]): Promise<Measured> {
       names: boxes(".merge-queue-label"),
       moves: boxes(".merge-queue-move"),
       floor,
+      stageLooks: looks(".merge-queue-stage"),
+      durationLooks: looks(".merge-queue-duration"),
     };
   }, html);
 }
@@ -209,6 +220,11 @@ describe("the merge queue tab's columns in WebKit", () => {
     const m = await measure(page, QUEUE);
     const row = m.rows[1];
     expect(m.moves.slice(0, 2).every((b) => b.top >= row.top && b.top + b.height <= row.top + row.height)).toBe(true);
+  });
+
+  it("draws every row's duration in its stage's size, font and color", async () => {
+    const m = await measure(page, QUEUE);
+    expect(m.durationLooks).toEqual(m.stageLooks);
   });
 
   it("keeps a long name to its row's height, ending it rather than wrapping", async () => {

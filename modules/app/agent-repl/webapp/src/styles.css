@@ -7978,7 +7978,14 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   background: none;
   cursor: default;
 }
-.merge-queue-stage { color: var(--muted); }
+/* THE DURATION READS AS THE STAGE DOES (owner request, 2026-10-17): the same
+   size, font and muted grey, so the clock's own blue never sets its figures
+   apart as the row's loudest cell. */
+.merge-queue-stage,
+.merge-queue-line > .merge-queue-duration {
+  color: var(--muted);
+  font: inherit;
+}
 .merge-queue-entry > .merge-queue-refusal,
 .merge-queue-entry > .refusal { grid-column: 1 / -1; }
 .merge-queue-refusal { color: var(--err); font-size: 0.85em; }
