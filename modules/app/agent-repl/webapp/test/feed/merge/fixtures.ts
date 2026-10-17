@@ -140,7 +140,12 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
 export function mergeHead(
   result:
     | { case: "update" }
-    | { case: "success"; endedAtMs: bigint; commit: string }
+    | {
+        case: "success";
+        endedAtMs: bigint;
+        commit: string;
+        landedOn?: { repositoryDir: string; branch: string };
+      }
     | { case: "failed"; endedAtMs: bigint; summary: string }
     | { case: "abandoned"; endedAtMs: bigint; summary: string },
   opts: {
@@ -156,7 +161,7 @@ export function mergeHead(
       : result.case === "success"
         ? {
             case: "success" as const,
-            value: { endedAtMs: result.endedAtMs, commit: result.commit },
+            value: { endedAtMs: result.endedAtMs, commit: result.commit, landedOn: result.landedOn },
           }
         : result.case === "failed"
           ? {

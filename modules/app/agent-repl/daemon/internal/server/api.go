@@ -585,6 +585,22 @@ func (r hostRelay) ReturnFeedToTail(ws ids.WorkspaceID) {
 	r.s.returnFeedToTail(r.s.life, ws)
 }
 
+// OpenCommitLog pushes the open_commit_log arm onto the workspace's host
+// stream.
+func (r hostRelay) OpenCommitLog(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) {
+	r.s.pushOpenCommitLog(ws, target)
+}
+
+// pushOpenCommitLog publishes the open_commit_log arm, the target verbatim.
+func (s *server) pushOpenCommitLog(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) {
+	s.log.Debug("daemon.server.open_commit_log", "relayed a landed commit's click to the host stream",
+		dlog.Context{"workspace": string(ws), "repository_dir": target.GetRepositoryDir(),
+			"branch": target.GetBranch(), "commit": target.GetCommit()})
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_OpenCommitLog{OpenCommitLog: target},
+	})
+}
+
 // pushOpenInEditor publishes the open_in_editor arm.
 func (s *server) pushOpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 	s.log.Debug("daemon.server.open_in_editor", "relayed a link click to the host stream",

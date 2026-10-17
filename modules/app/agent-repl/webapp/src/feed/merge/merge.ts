@@ -25,6 +25,7 @@
  * is the only thing standing between the reader and a merge they cannot see.
  */
 import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
+import { renderMergeCommitLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
@@ -40,6 +41,7 @@ import type {
   FeedMergeHead,
   FeedMergeLabel,
   FeedMergeRuntime,
+  FeedMergeSuccess,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
 const PATH = "FeedMerge";
@@ -62,12 +64,18 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-head";
   el.append(drawFeedMergeHead(head));
+  // THE HEAD'S RIGHT END: the landed commit, then the workspace switch. One
+  // box, pushed right by the stylesheet, so the two never split the line's
+  // free space between them.
+  const end = document.createElement("span");
+  end.className = "merge-head-end";
+  el.append(end);
   // A DETACHED MERGE'S BUBBLE CARRIES ITS SWITCH for its whole life: queued,
   // running and settled alike (workspace-switch.ts). Only the async mode has
   // one; a head with no mode was recorded before heads carried theirs.
   const mode = head.mode?.mode;
   if (mode?.case === "async" && mode.value.workspaceSwitch !== undefined) {
-    el.append(
+    end.append(
       drawMergeWorkspaceSwitch(
         switchFacts(mode.value.workspaceSwitch, `${PATH}.head.mode.async.workspace_switch`),
         rc,
@@ -93,10 +101,9 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
       if (head.version !== undefined) {
         el.append(drawFeedMergeVersion(head.version));
       }
-      const commit = document.createElement("span");
-      commit.className = "merge-commit";
-      commit.textContent = result.value.commit;
-      el.append(commit);
+      // THE COMMIT SHOWS ONLY WHILE THE BUBBLE IS EXPANDED (the stylesheet
+      // hides it on a folded bubble's head), and opens its branch's log.
+      end.prepend(drawFeedMergeCommit(result.value, rc));
       // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES: the clock beside a
       // landed merge is the span the MESSAGE reports, and nothing on this
       // element ticks past it.
@@ -114,6 +121,26 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
     default:
       return unreachableArm(`${PATH}.result`, armName(result));
   }
+}
+
+/**
+ * The landed commit: a link to its branch's log when the head says where it
+ * landed. A head recorded before heads carried `landed_on` draws the commit as
+ * plain text, since there is no log to name.
+ */
+export function drawFeedMergeCommit(success: FeedMergeSuccess, rc: RowContext): HTMLElement {
+  if (success.landedOn !== undefined) {
+    return renderMergeCommitLink(rc.ctx, success.commit, success.landedOn);
+  }
+  return drawMergeCommitText(success.commit);
+}
+
+/** A commit drawn as plain text, in the merge bubble's commit face. */
+export function drawMergeCommitText(commit: string): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "merge-commit";
+  el.textContent = commit;
+  return el;
 }
 
 /** The constant props of the head: the kind glyph and the branch line. */

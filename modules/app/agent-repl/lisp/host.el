@@ -95,6 +95,7 @@
 (declare-function agent-repl-frontend-reload-webview "frontend" (ws))
 (declare-function agent-repl-frontend-reload-webapp "frontend" (ws build))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
+(declare-function agent-repl-magit-log-commit "magit" (ws dir branch commit))
 
 ;;;; ---- State ----
 
@@ -1187,6 +1188,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:transferred (agent-repl-host--transferred ws value))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
+    (:open-commit-log (agent-repl-host--open-commit-log ws value))
     (:ending (agent-repl-host--note-ending ws stream))
     (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S value=%S"
                           ws arm value))))
@@ -1748,6 +1750,17 @@ dired."
         (line (plist-get target :line)))
     (agent-repl--info ws "elisp.host.open-in-editor ws=%s path=%S line=%S" ws path line)
     (agent-repl-popup-open path line)))
+
+(defun agent-repl-host--open-commit-log (ws target)
+  "Open TARGET's branch log with point on its commit, for WS.
+The click on a landed merge's commit; a fact, not a command, exactly as
+`agent-repl-host--open-in-editor' is."
+  (let ((dir (plist-get target :repository-dir))
+        (branch (plist-get target :branch))
+        (commit (plist-get target :commit)))
+    (agent-repl--info ws "elisp.host.open-commit-log ws=%s dir=%S branch=%S commit=%S"
+                      ws dir branch commit)
+    (agent-repl-magit-log-commit ws dir branch commit)))
 
 ;;;; ---- Link lifecycle ----
 

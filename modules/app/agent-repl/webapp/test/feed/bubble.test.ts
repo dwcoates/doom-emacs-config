@@ -78,13 +78,15 @@ function mount(
     overlay?: BubbleOverlay;
     /** Leave the bubble off the page, as the feed does before it places a row. */
     detached?: boolean;
+    /** The feed the row sits in: the root feed unless a sub-feed is named. */
+    feed?: RowContext["feed"];
   } = {},
 ) {
   const heads: number[] = [];
   const bubble = mountBubble({
     ctx: h.ctx,
     row,
-    rc: rowContext(h.ctx, row),
+    rc: rowContext(h.ctx, row, opts.feed === undefined ? {} : { feed: opts.feed }),
     head: (_row, rc) => {
       if (opts.head !== undefined) return opts.head(rc);
       const el = document.createElement("span");
@@ -1782,6 +1784,72 @@ describe("mountBubble: the head's title fold follows the bubble's fold", () => {
 
     // Assert
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+});
+
+describe("mountBubble: the reader's expansion asks the feed to bring a last bubble into view", () => {
+  /** A bubble on a scroll box whose tail records what it is asked. */
+  function withTail(h: Harness = harness(), feed?: RowContext["feed"]) {
+    const box = document.createElement("div");
+    const tail = new TailFollow(box);
+    const asked = vi.spyOn(tail, "lastBubbleExpanded");
+    const { bubble } = mount(subagentRow("b1"), h, { scroll: { box, tail }, feed });
+    return { bubble, asked, head: bubble.element.querySelector<HTMLElement>("[data-expand]")! };
+  }
+
+  it("hands a root bubble the reader opened to the tail", async () => {
+    // Arrange
+    const { bubble, asked, head } = withTail();
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect(asked.mock.calls).toEqual([[bubble.element]]);
+  });
+
+  it("asks nothing for a bubble of a sub-feed", async () => {
+    // Arrange
+    const { asked, head } = withTail(harness(), create(FeedIdSchema, { value: "outer" }));
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing when the open the reader asked for was refused", async () => {
+    // Arrange
+    const { asked, head } = withTail(
+      harness({ openFeed: () => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }) }),
+    );
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing for an expansion that is not the reader's toggle", async () => {
+    // Arrange
+    const { bubble, asked } = withTail();
+    // Act
+    await bubble.expand();
+    await settle();
+    // Assert
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing when the reader folds the bubble", async () => {
+    // Arrange
+    const { asked, head } = withTail();
+    head.click();
+    await settle();
+    asked.mockClear();
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect(asked).not.toHaveBeenCalled();
   });
 });
 

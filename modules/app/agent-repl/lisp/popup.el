@@ -10,7 +10,9 @@
 ;; Two entry points share that one display:
 ;;
 ;;   - `agent-repl-popup-show' shows a BUFFER: the daemon build log, the
-;;     health report, a selected response's markdown.
+;;     health report, a selected response's markdown, and the branch log a
+;;     landed merge's commit opens (magit.el's `agent-repl-magit-log-commit',
+;;     which hands it to magit as `magit-display-buffer-function').
 ;;   - `agent-repl-popup-open' shows a PATH[:line]: dired for a directory,
 ;;     the file otherwise.  Its callers are the plan bubble's edit button,
 ;;     every findings-row location jump, the worktree separation-divider

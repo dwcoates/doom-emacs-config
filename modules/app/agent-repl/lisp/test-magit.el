@@ -617,6 +617,100 @@ the first-restored-workspace splash-screen bug."
       (should (equal (nreverse order)
                      '((require magit t) (status)))))))
 
+;;;; ---- Tests: agent-repl--magit-displaying ----
+
+(ert-deftest agent-repl-test-magit-displaying-requires-magit-before-binding ()
+  "Requires magit (NOERROR) before the display function is bound."
+  (let ((order nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &optional _file noerror)
+                 (push (list 'require feature noerror magit-display-buffer-function) order)
+                 'magit)))
+      (let ((magit-display-buffer-function 'global-default))
+        (agent-repl--magit-displaying
+         'shown (lambda (_) (push (list 'open magit-display-buffer-function) order)))))
+    (should (equal (nreverse order)
+                   '((require magit t global-default) (open shown))))))
+
+(ert-deftest agent-repl-test-magit-displaying-hands-the-require-result-over ()
+  "OPEN-FN receives the `require' result and its value is returned."
+  (cl-letf (((symbol-function 'require) (lambda (&rest _) 'loaded)))
+    (should (equal (agent-repl--magit-displaying 'shown (lambda (result) (list :got result)))
+                   '(:got loaded)))))
+
+(ert-deftest agent-repl-test-magit-displaying-restores-the-global-display-fn ()
+  "The binding ends with OPEN-FN, leaving the global display function alone."
+  (let ((magit-display-buffer-function 'global-default))
+    (cl-letf (((symbol-function 'require) #'ignore))
+      (agent-repl--magit-displaying 'shown #'ignore))
+    (should (eq magit-display-buffer-function 'global-default))))
+
+;;;; ---- Tests: agent-repl-magit-log-commit ----
+
+(defmacro agent-repl-test-magit--with-log (found &rest body)
+  "Run BODY with magit's log entry points recorded; FOUND answers the goto.
+Binds `calls' to the recorded calls, newest first, and `infos' to the
+recorded `agent-repl--info' lines."
+  (declare (indent 1))
+  `(let ((calls nil) (infos nil) (log-buffer (generate-new-buffer " *log*")))
+     (unwind-protect
+         (cl-letf (((symbol-function 'require) (lambda (&rest _) 'magit))
+                   ((symbol-function 'magit-log-arguments) (lambda (&rest _) '(("-n256") ("a.el"))))
+                   ((symbol-function 'magit-log-setup-buffer)
+                    (lambda (&rest args)
+                      (push (list :setup default-directory magit-display-buffer-function args) calls)
+                      log-buffer))
+                   ((symbol-function 'magit-log-goto-commit-section)
+                    (lambda (rev) (push (list :goto rev) calls) ,found))
+                   ((symbol-function 'magit-section-update-highlight)
+                    (lambda (&rest _) (push (list :highlight) calls)))
+                   ((symbol-function 'agent-repl--info)
+                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+           ,@body)
+       (kill-buffer log-buffer))))
+
+(ert-deftest agent-repl-test-magit-log-commit-opens-the-branch-log-in-the-popup ()
+  "The branch's log is set up in DIR with magit's own arguments, shown by the popup."
+  (agent-repl-test-magit--with-log t
+    ;; Act
+    (agent-repl-magit-log-commit "ws-1" "/repo" "master" "abc123")
+    ;; Assert
+    (should (equal (car (last calls))
+                   (list :setup "/repo/" #'agent-repl-popup-show
+                         '(("master") ("-n256") ("a.el")))))))
+
+(ert-deftest agent-repl-test-magit-log-commit-moves-point-to-the-commit ()
+  "Point goes to the commit's section, which is highlighted, and it is logged."
+  (agent-repl-test-magit--with-log t
+    ;; Act
+    (agent-repl-magit-log-commit "ws-1" "/repo" "master" "abc123")
+    ;; Assert
+    (should (equal (seq-take calls 2) '((:highlight) (:goto "abc123"))))
+    (should (seq-some (lambda (line) (string-search "commit=abc123 branch=shown" line)) infos))))
+
+(ert-deftest agent-repl-test-magit-log-commit-says-so-when-the-log-omits-the-commit ()
+  "A commit the log does not show leaves it at the top, logs and tells the user."
+  (agent-repl-test-magit--with-log nil
+    (let ((said nil))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl-magit-log-commit "ws-1" "/repo" "master" "abc123"))
+      ;; Assert
+      (should-not (assq :highlight calls))
+      (should (seq-some (lambda (line) (string-search "branch=not-in-log" line)) infos))
+      (should (equal said "agent-repl: abc123 is not among the commits master's log shows")))))
+
+(defconst agent-repl-test-magit--source
+  (expand-file-name "magit.el" (file-name-directory (or load-file-name buffer-file-name)))
+  "The magit.el source these tests load.")
+
+(ert-deftest agent-repl-test-magit-every-display-binding-goes-through-the-helper ()
+  "No magit.el definition but the helper let-binds the display function itself."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test-magit--source)
+    (should (= (how-many "(let\\*? ((magit-display-buffer-function" (point-min) (point-max)) 1))))
+
 ;;;; ---- Tests: commit decorations keep their tags ----
 
 (ert-deftest agent-repl-test-magit-ref-labels-keep-tags ()

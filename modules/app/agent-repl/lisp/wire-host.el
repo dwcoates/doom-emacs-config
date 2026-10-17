@@ -670,6 +670,18 @@ directory."
            :line (agent-repl-wire--decode-optional-uint32
                   "HostOpenInEditor" 'line object)))))
 
+(defun agent-repl-wire-decode-open-in-editor-commit-log (value)
+  "Decode VALUE as `OpenInEditorCommitLog'.
+The plist is `(:repository-dir :branch :commit)'.  Every field is
+required: the daemon relays a target it validated."
+  (let ((object (agent-repl-wire--object "OpenInEditorCommitLog" value)))
+    (agent-repl-wire--check-keys "OpenInEditorCommitLog" object '(repositoryDir branch commit))
+    (agent-repl-wire--decoded
+     "OpenInEditorCommitLog"
+     (list :repository-dir (agent-repl-wire--decode-string "OpenInEditorCommitLog" 'repositoryDir object)
+           :branch (agent-repl-wire--decode-string "OpenInEditorCommitLog" 'branch object)
+           :commit (agent-repl-wire--decode-string "OpenInEditorCommitLog" 'commit object)))))
+
 ;;;; ---- WatchHostWorkspace ----
 
 (defun agent-repl-wire-encode-watch-host-workspace-request-workspace (value)
@@ -711,6 +723,10 @@ directory."
   "Decode the `open_in_editor' push arm VALUE."
   (agent-repl-wire-decode-host-open-in-editor value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-open-commit-log (value)
+  "Decode the `open_commit_log' push arm VALUE."
+  (agent-repl-wire-decode-open-in-editor-commit-log value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-ending (value)
   "Decode the `ending' push arm VALUE."
   (agent-repl-wire-decode-daemon-stream-ending value))
@@ -726,6 +742,8 @@ directory."
                    agent-repl-wire-decode-watch-host-workspace-response-reload-webapp)
      (openInEditor :open-in-editor
                    agent-repl-wire-decode-watch-host-workspace-response-open-in-editor)
+     (openCommitLog :open-commit-log
+                    agent-repl-wire-decode-watch-host-workspace-response-open-commit-log)
      (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
      (notificationClicked :notification-clicked
                           agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
@@ -736,7 +754,7 @@ directory."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host transferred reloadWebapp openInEditor ending notificationClicked selection))
+     '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

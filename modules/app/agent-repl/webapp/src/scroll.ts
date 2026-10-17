@@ -127,6 +127,7 @@ export const SCROLL_CAUSES = [
   "initialPlacement",
   "replaceRestore",
   "workspaceSelected",
+  "lastBubbleExpanded",
   "prependCompensation",
   "latestVisible",
 ] as const;
@@ -145,6 +146,7 @@ type ParkCause =
   | "initialPlacement"
   | "replaceRestore"
   | "workspaceSelected"
+  | "lastBubbleExpanded"
   | "latestVisible";
 
 /** What asked the latest-visible latch to look: the one re-latch's callers. */
@@ -616,6 +618,36 @@ export class TailFollow {
     this.selectionActive = selected;
     this.heldOffReported = false;
     this.holdUnderClick(row, selected ? "selection-click" : "deselection-click");
+  }
+
+  /**
+   * THE ONE CLICK THAT MOVES THE FEED (owner request, 2026-10-17): the reader
+   * expanded the bubble BUBBLE of a ROOT row. When that row is the feed's
+   * last row, the feed parks at its tail and follows it, so the sub-feed
+   * opening below the reader is brought into view as it draws. Any other
+   * bubble's expansion leaves the view the click held (`readerClicked`).
+   */
+  lastBubbleExpanded(bubble: Element): void {
+    const row = this.rootRowOf(bubble);
+    const last = this.lastDrawnRow();
+    if (row === null || row !== last) {
+      log.debug("an expanded bubble is not the feed's last row; the view holds", {
+        operation: "scroll.bubble-expanded-held",
+        context: { row: row === null ? "none" : rowName(row), last: last === null ? "none" : rowName(last) },
+      });
+      return;
+    }
+    this.supersedeClick();
+    this.park("lastBubbleExpanded");
+  }
+
+  /** The feed's last root row that draws a box, or null with no rows to read. */
+  private lastDrawnRow(): Element | null {
+    if (this.rows === null) return null;
+    const rows = this.rows;
+    let node = rows.host.lastElementChild;
+    while (node !== null && rows.edges(node) === null) node = node.previousElementSibling;
+    return node;
   }
 
   /** THE ONE CLICK HOLD behind `readerClicked` and `selectionClicked`. */

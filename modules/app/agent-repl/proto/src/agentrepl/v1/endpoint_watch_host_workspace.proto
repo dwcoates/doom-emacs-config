@@ -11,6 +11,7 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "agentrepl/v1/daemon_stream_ending.proto";
+import "agentrepl/v1/endpoint_open_in_editor.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
@@ -65,6 +66,10 @@ message WatchHostWorkspaceResponse {
     // first. Emacs never acts on its copy beyond that; a sent prompt and a
     // rollback read the daemon's own selection.
     HostWorkspaceSelection selection = 8;
+    // A HOST-RAISED CLICK on a landed merge's commit, relayed verbatim from
+    // OpenInEditor's `commit_log` target: open the branch's log with point on
+    // the commit. A fact, not a command, exactly as `open_in_editor` is.
+    OpenInEditorCommitLog open_commit_log = 9;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention

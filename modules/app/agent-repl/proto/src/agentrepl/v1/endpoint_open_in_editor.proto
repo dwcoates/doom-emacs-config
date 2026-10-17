@@ -2,7 +2,7 @@
 // section. The webview's shared link component calls this for the
 // affordances that open something in the editor — the plan bubble's edit
 // button, a findings row's location, a worktree divider's path, a merge's
-// test log — and the
+// test log, a landed merge's commit — and the
 // daemon RELAYS the click as the workspace's WatchHostWorkspace push arm
 // `open_in_editor`, which Emacs answers with its ONE shared editor-popup
 // subroutine (a file at a line, or dired for a directory). No daemon→Emacs
@@ -38,7 +38,23 @@ message OpenInEditorRequest {
     // (see OpenInEditorFeedLink) and relays the resolved path exactly as a
     // `workspace_file` click.
     OpenInEditorFeedLink feed_link = 6;
+    // A landed merge's commit, clicked on the merge bubble's head: the
+    // branch's log opens with the commit selected. Relayed verbatim as the
+    // host push arm `open_commit_log`.
+    OpenInEditorCommitLog commit_log = 7;
   }
+}
+
+// A branch's log, opened with one commit selected. Every field is echoed
+// from the merge head that drew it (frontend.v1.FeedMergeSuccess) and
+// required: a blank one is Connect InvalidArgument.
+message OpenInEditorCommitLog {
+  // The checkout on the daemon's host whose log is opened.
+  string repository_dir = 1;
+  // The branch whose log is opened.
+  string branch = 2;
+  // The commit point lands on.
+  string commit = 3;
 }
 // A file or directory inside the workspace's worktree.
 message OpenInEditorWorkspaceFile {

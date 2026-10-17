@@ -23,6 +23,8 @@
  * `renderMergeTestLogLink` is the same verb with the other target: a merge's
  * test log, named by the opaque token the merge bubble served, because the
  * log lives in the daemon's state and has no workspace path to send.
+ * `renderMergeCommitLink` is the same verb again, opening the branch log a
+ * landed merge's commit sits in.
  *
  * NOTHING IS DRAWN ON SUCCESS. The result of either click happens elsewhere —
  * in a browser window, in an editor — so a confirmation on this page would be
@@ -42,7 +44,12 @@ import {
   type OpenInEditorError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { isFileLinkHref } from "./href.js";
-import type { FeedId, FeedMergeTestLog, FeedMergeTestLogToken } from "../../proto/gen/ts/frontend/v1/feed_pb";
+import type {
+  FeedId,
+  FeedMergeLandedOn,
+  FeedMergeTestLog,
+  FeedMergeTestLogToken,
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AppContext } from "./rpc/context.js";
 import {
   clearRefusals,
@@ -125,22 +132,43 @@ export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTM
  * top and a zero would be a sentinel claiming line zero exists.
  */
 export function renderEditorLink(ctx: AppContext, spec: EditorLinkSpec): HTMLElement {
-  const anchor = document.createElement("a");
-  anchor.className = "editor-link";
-  anchor.textContent = spec.text === "" ? spec.path : spec.text;
+  const anchor = editorTargetAnchor(
+    ctx,
+    "editor-link",
+    spec.text === "" ? spec.path : spec.text,
+    workspaceFileTarget(spec),
+  );
   // The stable hook every jump-to-file affordance carries, whichever view
   // drew it: the plan button, a finding's location, a worktree divider's path.
   anchor.setAttribute("data-editor-link", "");
   anchor.setAttribute("data-host-path", spec.path);
   if (spec.line !== undefined) anchor.setAttribute("data-host-line", String(spec.line));
-  // No href: the destination is on the daemon's host, so there is no URL a
-  // browser could meaningfully show or copy. The cursor is the stylesheet's.
+  return anchor;
+}
+
+/**
+ * THE ONE SHAPE every OpenInEditor link takes: an anchor with no href, armed
+ * as a button, whose claimed click is cancelled and becomes the rpc.
+ *
+ * No href: the destination is on the daemon's host, so there is no URL a
+ * browser could meaningfully show or copy, and the click is an rpc, never a
+ * navigation. The cursor is the stylesheet's.
+ */
+export function editorTargetAnchor(
+  ctx: AppContext,
+  className: string,
+  text: string,
+  target: EditorTarget,
+): HTMLAnchorElement {
+  const anchor = document.createElement("a");
+  anchor.className = className;
+  anchor.textContent = text;
   armButtonRole(anchor);
   anchor.addEventListener("click", (event: MouseEvent) => {
     if (!claimsClick(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    void openInEditor(ctx, anchor, workspaceFileTarget(spec));
+    void openInEditor(ctx, anchor, target);
   });
   return anchor;
 }
@@ -160,26 +188,40 @@ export function renderMergeTestLogLink(
 ): HTMLElement {
   const token = requireMessage(u.token, `${path}.token`);
   const label = requireMessage(u.label, `${path}.label`);
-  const anchor = document.createElement("a");
-  anchor.className = "editor-link merge-test-log-link";
-  anchor.textContent = label.text;
-  anchor.setAttribute("data-merge-test-log", "");
-  // No href, for the same reason as the editor link: the log is on the
-  // daemon's host, and the click is an rpc, never a navigation.
-  armButtonRole(anchor);
-  anchor.addEventListener("click", (event: MouseEvent) => {
-    if (!claimsClick(event)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    void openInEditor(ctx, anchor, { case: "mergeTestLog", value: token });
+  const anchor = editorTargetAnchor(ctx, "editor-link merge-test-log-link", label.text, {
+    case: "mergeTestLog",
+    value: token,
   });
+  anchor.setAttribute("data-merge-test-log", "");
   return anchor;
 }
 
-/** What an editor link opens: a workspace file, or a merge's test log. */
+/**
+ * A landed merge's commit, drawn on the merge bubble's head.
+ *
+ * THE CLICK OPENS THE BRANCH'S LOG IN THE EDITOR with point on the commit:
+ * `OpenInEditorRequest.commit_log`, every field echoed from the head the
+ * daemon served. Muted, smaller and underlined rather than the link blue, so
+ * it reads as the head's quiet detail that also opens.
+ */
+export function renderMergeCommitLink(
+  ctx: AppContext,
+  commit: string,
+  landedOn: FeedMergeLandedOn,
+): HTMLElement {
+  const anchor = editorTargetAnchor(ctx, "merge-commit merge-commit-link", commit, {
+    case: "commitLog",
+    value: { repositoryDir: landedOn.repositoryDir, branch: landedOn.branch, commit },
+  });
+  anchor.setAttribute("data-merge-commit", "");
+  return anchor;
+}
+
+/** What an editor link opens: a workspace file, a merge's test log, or a commit in its branch's log. */
 export type EditorTarget =
   | { case: "workspaceFile"; value: { path: string; line?: number } }
   | { case: "mergeTestLog"; value: FeedMergeTestLogToken }
+  | { case: "commitLog"; value: { repositoryDir: string; branch: string; commit: string } }
   | {
       case: "feedLink";
       value: { href: string; sourceRow: FeedId; onUnresolved: { case: "report" | "webFallback"; value: Record<string, never> } };
@@ -209,6 +251,13 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
       return { target: target.case, path: target.value.path, line: target.value.line };
     case "mergeTestLog":
       return { target: target.case, token: target.value.value };
+    case "commitLog":
+      return {
+        target: target.case,
+        repositoryDir: target.value.repositoryDir,
+        branch: target.value.branch,
+        commit: target.value.commit,
+      };
     case "feedLink":
       return { target: target.case, href: target.value.href, sourceRow: target.value.sourceRow.value };
     default: {

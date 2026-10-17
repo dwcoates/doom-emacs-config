@@ -267,6 +267,44 @@ func TestOpenInEditorOpensAWorkspaceFileThroughTheVerb(t *testing.T) {
 	}
 }
 
+func TestOpenInEditorOpensACommitLogThroughTheVerb(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_CommitLog{CommitLog: &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master", Commit: "abc123"}}}))
+
+	// Assert.
+	if err != nil || len(h.Verbs.editorOpens) != 1 || h.Verbs.editorOpens[0] != "commit:/repo@master#abc123" {
+		t.Fatalf("OpenInEditor = %v, opens %v, want the commit log relayed", err, h.Verbs.editorOpens)
+	}
+}
+
+// TestOpenCommitLogRelaysOntoTheHostStream pins the relay face's push: the
+// target travels verbatim as the open_commit_log arm.
+func TestOpenCommitLogRelaysOntoTheHostStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := h.Client.WatchHostWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("open the host stream: %v", err)
+	}
+
+	// Act.
+	h.Server.Relay().OpenCommitLog(testWorkspaceID, &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master", Commit: "abc123"})
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	got := push.GetOpenCommitLog()
+	if got.GetRepositoryDir() != "/repo" || got.GetBranch() != "master" || got.GetCommit() != "abc123" {
+		t.Fatalf("open_commit_log = %v, want /repo master abc123", got)
+	}
+}
+
 func TestOpenInEditorOpensAMergeTestLogByItsToken(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

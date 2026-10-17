@@ -20,7 +20,7 @@
  * that passed its exact inputs. It draws the settled green ✓ and names that
  * run after the suite's name, as the daemon resolved it, so it never reads as
  * a pass of this gate. The run's TALLY, every suite's counts summed, rides
- * at the right end of the run strip (`drawFeedMergeTestsRunTally`).
+ * in the run's own badge (`drawFeedMergeTestsRunTally`).
  *
  * THE RUN'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
  * once the daemon has written it: the shared editor-link verb with the log's
@@ -347,8 +347,8 @@ export function sumFeedMergeTestCounts(suites: readonly FeedMergeTestSuite[]): F
 /**
  * A run's tally: every suite's counts summed (`sumFeedMergeTestCounts`), drawn
  * as a suite's own counts are, so its figures read in the rows' colors. The
- * run panel hands it to the run strip, which draws it at the strip's right
- * end; it is empty while no suite carries counts.
+ * run's badge draws it between its duration and its state glyph; it is empty
+ * while no suite carries counts.
  */
 export function drawFeedMergeTestsRunTally(suites: readonly FeedMergeTestSuite[]): HTMLElement {
   const el = document.createElement("span");

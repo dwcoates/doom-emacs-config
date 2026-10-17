@@ -479,6 +479,9 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     void expand().then((opened) => {
       if (!opened) return;
       tellReaderFold(false);
+      // THE LAST BUBBLE OPENS INTO VIEW: a root bubble the reader expanded at
+      // the feed's end takes the feed to its tail (`lastBubbleExpanded`).
+      if (opts.rc.feed === "root") opts.scroll?.tail.lastBubbleExpanded(el);
     });
   }
 

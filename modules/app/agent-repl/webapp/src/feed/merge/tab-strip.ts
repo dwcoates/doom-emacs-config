@@ -37,11 +37,14 @@ import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../ela
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage } from "../../rpc/strict.js";
 import { stopTicking } from "../ticking.js";
+import { drawFeedMergeTestsRunTally, updateFeedMergeTestsRunTally } from "./tests-tab.js";
 import type {
   FeedMergeTab,
   FeedMergeTabLabel,
   FeedMergeTabLive,
   FeedMergeTabSettled,
+  FeedMergeTestSuite,
+  FeedMergeTabTestsRun,
   FeedRow,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
@@ -199,9 +202,42 @@ export function drawFeedMergeTab(
   el.classList.toggle("is-active", opts.active);
   el.append(drawFeedMergeTabLabel(tab.label));
   el.append(drawTabDuration(tab, opts.ticker));
+  const suites = runSuitesOf(tab);
+  if (suites !== undefined) el.append(drawFeedMergeTestsRunTally(suites));
   el.append(drawTabStateGlyph(tab));
   return el;
 }
+
+/**
+ * A run tab's suites, whose summed counts the run's badge carries between its
+ * duration and its state glyph (owner request, 2026-10-17); undefined for
+ * every other kind of tab.
+ */
+function runSuitesOf(tab: MergeTab): readonly FeedMergeTestSuite[] | undefined {
+  if (tab.kind !== "testsRun") return undefined;
+  const run = tab.value as unknown as FeedMergeTabTestsRun;
+  return requireMessage(run.output, `${PATH}.tests_run.output`).suites;
+}
+
+/** Bring EL's run tally (`runSuitesOf`) to TAB, just before GLYPH. */
+function placeRunTally(el: HTMLElement, tab: MergeTab, glyph: HTMLElement | null): void {
+  const tally = el.querySelector<HTMLElement>(`:scope > .${RUN_TALLY_CLASS}`);
+  const suites = runSuitesOf(tab);
+  if (suites === undefined) {
+    tally?.remove();
+    return;
+  }
+  if (tally !== null) {
+    updateFeedMergeTestsRunTally(tally, suites);
+    return;
+  }
+  const next = drawFeedMergeTestsRunTally(suites);
+  if (glyph === null) el.append(next);
+  else glyph.before(next);
+}
+
+/** The class of a run tab's tally (`drawFeedMergeTestsRunTally`). */
+const RUN_TALLY_CLASS = "merge-run-tally";
 
 /**
  * Bring EL, a tab drawn from PREVIOUS, to TAB IN PLACE.
@@ -239,6 +275,7 @@ export function updateFeedMergeTab(
     }
   }
   const glyph = el.querySelector<HTMLElement>(":scope > .merge-tab-glyph");
+  placeRunTally(el, tab, glyph);
   if (glyph === null) el.append(drawTabStateGlyph(tab));
   else paintTabStateGlyph(glyph, tab);
 }

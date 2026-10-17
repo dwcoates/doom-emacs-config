@@ -841,6 +841,11 @@ func (v *fakeVerbs) OpenFeedLink(_ context.Context, _ ids.WorkspaceID, href stri
 	return v.feedLinkUnresolved, v.feedLinkErr
 }
 
+func (v *fakeVerbs) OpenCommitLogInEditor(_ context.Context, _ ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) error {
+	v.editorOpens = append(v.editorOpens, "commit:"+target.GetRepositoryDir()+"@"+target.GetBranch()+"#"+target.GetCommit())
+	return nil
+}
+
 func (v *fakeVerbs) OpenDaemonFileInEditor(_ context.Context, _ ids.WorkspaceID, path string) error {
 	v.editorOpens = append(v.editorOpens, "daemon:"+path)
 	return nil

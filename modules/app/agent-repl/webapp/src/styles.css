@@ -7632,6 +7632,26 @@ ar-button.outcome-marker-pill {
 .merge-clock,
 .merge-commit { color: var(--muted); font-variant-numeric: tabular-nums; }
 .merge-commit { font-family: var(--mono, monospace); }
+/* The head's right end (merge.ts): the landed commit, then the switch. */
+.merge-head-end {
+  order: 1;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+.merge-head-end:empty { display: none; }
+/* The landed commit on the head: smaller, and a link to its branch's log,
+   underlined in a slightly darker grey than the muted text beside it. */
+.merge-head-end .merge-commit { font-size: 0.8em; }
+.merge-commit-link {
+  color: color-mix(in srgb, var(--muted) 80%, black);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* A folded bubble's head shows no commit: it is the expanded head's detail. */
+.bubble-fold:not([data-expanded="true"]) > .bubble-head .merge-head-end .merge-commit { display: none; }
 /* The version a merge onto agent-repl's master landed as (version.ts): the
    number the merge incremented is green, the rest muted. */
 .merge-version { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -7651,7 +7671,7 @@ ar-button.outcome-marker-pill {
    prominent button at the head line's right end, there for the bubble's whole
    life, and in an agentic tab's content in place of the rows the requester's
    copy never streams. Disabled once the workspace was removed. */
-.merge-workspace-switch-head { order: 1; margin-left: auto; flex: 0 0 auto; }
+.merge-workspace-switch-head { flex: 0 0 auto; }
 .merge-workspace-switch-tab { display: block; padding: 0.3rem 0; }
 .merge-workspace-switch-refusal { color: var(--err); font-size: 0.85em; }
 /* BREATHING, NOT BLINKING: a live thing should read as alive at a glance
@@ -7942,13 +7962,11 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 .merge-suite-counts .is-passed { color: var(--ok); }
 .merge-suite-counts .is-failed { color: var(--err); }
-/* A RUN'S TALLY, every suite's counts summed, at the run strip's right end
-   (owner request, 2026-10-14), in the suites' own figure colors. */
-.merge-strip > .merge-run-tally {
-  margin-left: auto;
-  align-self: center;
-  padding: 0 0.5rem;
-}
+/* A RUN'S TALLY, every suite's counts summed, inside the run's own badge
+   between its duration and its glyph (owner request, 2026-10-17), at the
+   duration's size and in the suites' own figure colors. */
+.merge-tab > .merge-run-tally { font-size: 0.85em; }
+.merge-tab > .merge-run-tally > .merge-suite-counts { margin-left: 0; }
 /* The daemon caps the output; the client scrolls what it was given rather
    than letting a suite grow the bubble without bound. */
 .merge-suite-output {
