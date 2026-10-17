@@ -4,6 +4,7 @@
 // one DOM-facing thing in it: it subscribes a real element's scroll events and
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
+import scrollSource from "../src/scroll.ts?raw";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   SCROLL_CAUSES,
@@ -34,6 +35,7 @@ import {
   type MoveWitnessReport,
   type RevealGeometry,
   type ReaderInput,
+  heldRowName,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
@@ -3938,5 +3940,26 @@ describe("scrollFloor", () => {
     floor.set(1000);
     // Assert
     expect(box.lastElementChild).toBe(blank);
+  });
+});
+
+describe("heldRowName", () => {
+  it.each([
+    ["a row carrying a FeedId", { "data-feed-row": "f1.r7" }, "f1.r7"],
+    ["a row without one", {}, "article"],
+  ])("names %s", (_label, attrs: Record<string, string>, want) => {
+    // Arrange
+    const row = document.createElement("article");
+    for (const [k, v] of Object.entries(attrs)) row.setAttribute(k, v);
+    // Act / Assert
+    expect(heldRowName(row)).toBe(want);
+  });
+
+  it("names a click outside every row none", () => {
+    expect(heldRowName(null)).toBe("none");
+  });
+
+  it("is the one way TailFollow names its held row", () => {
+    expect([scrollSource.includes('this.clickedRow === null ? "none"'), scrollSource.match(/heldRowName\(this\.clickedRow\)/g)?.length]).toEqual([false, 2]);
   });
 });

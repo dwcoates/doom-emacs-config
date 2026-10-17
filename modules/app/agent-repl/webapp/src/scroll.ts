@@ -333,6 +333,11 @@ function rowName(row: Element): string {
   return row.getAttribute("data-feed-row") ?? row.tagName.toLowerCase();
 }
 
+/** The click hold's row in a record: its name (`rowName`), or "none" when the click landed outside every row. */
+export function heldRowName(row: Element | null): string {
+  return row === null ? "none" : rowName(row);
+}
+
 /**
  * THE SINGLE OWNER OF THE FEED'S SCROLL POSITION.
  *
@@ -670,7 +675,7 @@ export class TailFollow {
       context: {
         by,
         at: this.box.scrollTop,
-        row: this.clickedRow === null ? "none" : rowName(this.clickedRow),
+        row: heldRowName(this.clickedRow),
         target: target === null ? "none" : nodeLabel(target),
         floor: this.floorExtent,
       },
@@ -760,7 +765,7 @@ export class TailFollow {
         by,
         at: this.box.scrollTop,
         held_top: this.heldTop,
-        row: this.clickedRow === null ? "none" : rowName(this.clickedRow),
+        row: heldRowName(this.clickedRow),
       },
     });
   }
