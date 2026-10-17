@@ -85,7 +85,7 @@ Reload the changed runtime yourself. Do not ask the user to perform the reload.
 
 For Emacs:
 
-1. Use `/runtime-eval-code`; never use an ad hoc `emacsclient` probe.
+1. Use `/agent-repl-runtime`; never use an ad hoc `emacsclient` probe.
 2. Load the owning agent-repl module or the complete module configuration
    required by the dependency graph.
 3. Capture reload success or failure in the canonical log.
@@ -99,7 +99,7 @@ running runtime through an async merge (agent-repl `AGENTS.md`,
 
 1. Commit the instrumentation and its focused tests on a branch of its own,
    never the branch this workspace has checked out.
-2. Request an `async` merge of that branch through `/merge-queue`, then work
+2. Request an `async` merge of that branch through `/agent-repl-merge-queue`, then work
    the next open question while it runs; never idle on it.
 3. Take the merge's landing report as the cue that the new records are live:
    it arrives only once the running build carries the landing.

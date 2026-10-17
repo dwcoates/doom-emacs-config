@@ -82,7 +82,7 @@ Exit `0` means a JSON report was produced. It does not mean every system is
 ready. Inspect every system's `ready` and `error` fields.
 
 Elisp is deliberately absent. Loading Elisp is runtime state that only the
-live Emacs process can report honestly. Use `/runtime-eval-code` when the
+live Emacs process can report honestly. Use `/agent-repl-runtime` when the
 investigation requires proof of which definition is loaded.
 
 ## Reading the combined baseline

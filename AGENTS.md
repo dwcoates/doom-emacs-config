@@ -144,8 +144,8 @@ The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-
 ## Debugging skills: when to use each
 
 The complete agent-repl investigation workflow lives in
-`<current-repository-root>/modules/app/agent-repl/skills/debug-emacs-agent-repl/SKILL.md`.
-Invoke `/debug-emacs-agent-repl` immediately for
+`<current-repository-root>/modules/app/agent-repl/skills/agent-repl-debug/SKILL.md`.
+Invoke `/agent-repl-debug` immediately for
 any question about current or historical editor, workspace, daemon, shim,
 webapp, sidecar, store, state, deployment, logging, or coverage behavior. The
 skill owns evidence routing, health and readiness checks, identity correlation,
@@ -153,8 +153,8 @@ SQL investigation, log discovery, and telemetry-deficiency review. Do not
 duplicate its paths or procedures here and do not replace them with ad hoc
 `grep`, `cat`, `sqlite3`, or `emacsclient` probes.
 
-Use `/runtime-eval-code` when the debug skill routes the investigation to live
-Emacs state or third-party `*Messages*` output. Use `/profile-agent-repl` for
+Use `/agent-repl-runtime` when the debug skill routes the investigation to live
+Emacs state or third-party `*Messages*` output. Use `/agent-repl-profile` for
 CPU, memory and user-visible latency across every runtime, and
 `/workspace-profile` when the user needs manual Emacs profiler control.
 
@@ -554,7 +554,7 @@ Membership rulings from the deliberation: a `TaskCreate` card's update history i
 
 ## Debugging vexing or non-obvious bugs
 
-Use `/debug-emacs-agent-repl` and follow its evidence plan rather than adding
+Use `/agent-repl-debug` and follow its evidence plan rather than adding
 ad hoc probes or speculating from silence. Its mandatory observability audit
 owns the procedure for identifying and surfacing missing telemetry. The
 contributor instrumentation requirements remain in the earlier "Claude REPL

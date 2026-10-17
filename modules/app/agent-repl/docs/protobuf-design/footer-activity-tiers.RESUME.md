@@ -203,8 +203,8 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    behavior-preserving commits with tests.
 8. LAND THROUGH THE MERGE QUEUE (owner, 2026-09-30, supersedes the
    cherry-pick plan): the daemon's merge-queue handling is fixed, so the
-   finished branch merges via the merge-queue skill (`/merge-queue`,
-   `.claude/skills/merge-queue/SKILL.md`), NOT by cherry-pick. Run the final
+   finished branch merges via the merge-queue skill (`/agent-repl-merge-queue`,
+   `.claude/skills/agent-repl-merge-queue/SKILL.md`), NOT by cherry-pick. Run the final
    consolidation sweep first. On a parked, failed or refused merge, report
    the reason and stop.
 9. Bounce all systems: `bin/build-frontend.sh` + restart agent-repld; build

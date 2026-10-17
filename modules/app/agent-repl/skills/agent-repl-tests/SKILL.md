@@ -1,5 +1,5 @@
 ---
-name: write-tests
+name: agent-repl-tests
 description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or picks how to run tests for a change. Holds the measured test-performance pitfalls and their fixes as a living list.
 ---
 

@@ -3,7 +3,7 @@
 Use this playbook to answer "where is the time going?" — latency, stalls, and
 hitching — across every agent-repl runtime. The normative record shape is
 `../../../logging-contract.md`. The resolver script owns its accepted
-arguments. `/profile-agent-repl` owns live sampling of every runtime. This runbook owns only the
+arguments. `/agent-repl-profile` owns live sampling of every runtime. This runbook owns only the
 operator workflow that chooses and composes them.
 
 ## Choose a strategy before collecting evidence
@@ -15,7 +15,7 @@ live process to explain something that already happened.
 |---|---|---|
 | Stored metrics | The question is when, or in which version, a latency or a process's CPU or memory changed, over hours to 30 days | `/metrics-agent-repl` |
 | Historical latency | The slow event already happened, is intermittent, or spans runtimes | Structured logs, via the resolver's extraction verbs |
-| Fresh sampling | The slowness reproduces on demand in the live runtime | `/profile-agent-repl`, paired with `/runtime-eval-code` for one Emacs operation |
+| Fresh sampling | The slowness reproduces on demand in the live runtime | `/agent-repl-profile`, paired with `/agent-repl-runtime` for one Emacs operation |
 
 Every persisted record already carries `timestamp` and, where the owning
 runtime knows it, `request_id`. Historical latency is therefore available
@@ -26,7 +26,7 @@ no reproduction. Escalate to fresh sampling only when the log-derived answer
 stops inside Emacs and cannot name the function.
 
 For workspace switching, one command does the whole fresh measurement:
-`bin/profile-agent-repl.sh switch-bench` (`/profile-agent-repl`, step 5,
+`bin/agent-repl-profile.sh switch-bench` (`/agent-repl-profile`, step 5,
 LEAD SESSION ONLY and with the owner's agreement, since it drives the live
 editor). It raises every runtime to debug for its run, drives a slow switch
 tour and a fast one (a held key's pace) through Emacs's key loop, turns the
@@ -98,12 +98,12 @@ State the limit honestly whenever a plane cannot be measured directly.
 
 | Plane | Entry point | Current limit |
 |---|---|---|
-| Emacs | `/profile-agent-repl` (CPU and memory profiler); `/runtime-eval-code` to measure one operation | Log-derived gaps still needed for cross-runtime context |
-| Daemon | `/profile-agent-repl` (CPU and heap pprof); log-derived spans and gaps | None for sampling |
-| Store | `/profile-agent-repl` (CPU and heap pprof); log-derived spans and gaps | No per-query timing is emitted |
-| Sidecar | `/profile-agent-repl` (CPU and heap pprof); log-derived spans and gaps | None for sampling |
-| Shim | `/profile-agent-repl` (V8 CPU and sampling heap profiles) | A shim that exits mid-session writes no profile |
-| Webapp | `/profile-agent-repl` (main-thread stalls per visible page, WebKit process CPU and RSS); forwarded records in `webapp.log` | No JS CPU profile without the Web Inspector; hidden pages' timers are suspended |
+| Emacs | `/agent-repl-profile` (CPU and memory profiler); `/agent-repl-runtime` to measure one operation | Log-derived gaps still needed for cross-runtime context |
+| Daemon | `/agent-repl-profile` (CPU and heap pprof); log-derived spans and gaps | None for sampling |
+| Store | `/agent-repl-profile` (CPU and heap pprof); log-derived spans and gaps | No per-query timing is emitted |
+| Sidecar | `/agent-repl-profile` (CPU and heap pprof); log-derived spans and gaps | None for sampling |
+| Shim | `/agent-repl-profile` (V8 CPU and sampling heap profiles) | A shim that exits mid-session writes no profile |
+| Webapp | `/agent-repl-profile` (main-thread stalls per visible page, WebKit process CPU and RSS); forwarded records in `webapp.log` | No JS CPU profile without the Web Inspector; hidden pages' timers are suspended |
 
 The absent store query timing and the webapp's missing JS CPU profile are
 telemetry gaps, not dead ends. When either blocks a diagnosis, report it

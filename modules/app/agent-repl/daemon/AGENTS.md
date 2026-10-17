@@ -272,7 +272,7 @@ environment. Every flag is optional.
    beside it, RUNTIME profiling is armed (`cmd/agent-repld/profiling.go`,
    `agentrepl/logging/profiling`): a session `bin/profile-agent-repl.sh`
    opens starts and stops CPU and heap profiling on SIGWINCH without a
-   restart (`/profile-agent-repl`);
+   restart (`/agent-repl-profile`);
 5. the ONE loopback listener, bound FIRST as the boot-exclusivity claim (an
    exclusive kernel lock on `daemon.lock` beside `daemon.addr`); an UNFLAGGED
    second daemon loses there and exits without touching the incumbent's
@@ -1483,7 +1483,7 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
 ## `agent-repld merge-queue` is how an agent asks for a merge
 
 `cmd/agent-repld/mergequeueverb.go`, the merge-queue skill's one tool
-(`.claude/skills/merge-queue/SKILL.md`). It decides nothing and never runs git.
+(`skills/agent-repl-merge-queue/SKILL.md`). It decides nothing and never runs git.
 
 - The REQUESTER is the calling workspace: the roster row whose worktree holds
   the cwd (the deepest match). It asks through the command-file ingress
@@ -3177,18 +3177,18 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the daemon is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - Debug-log volume: test daemons run at debug, ~680 records per test. The roster re-logged every workspace's unchanged row decisions on every render, in each of its three views (26% of a test daemon's records); 40482a061 logs a row's decisions only when they change and counts what it skipped.
 - Merge "tests" feed rows carry every suite's output inline: avg 1.4MB, max 9.6MB, ~300MB of wsm.db (415MB by 15:45), re-marshalled, rewritten and pushed on every counted test line and never retired; the live daemon's footprint was 551MB (peak 682MB), 547MB of it Go heap (docs/investigations/2026-10-12-first-switch-and-daemon-rss.md). Open item: keep counts and a tail in the row and read the full output from the gate's archive on demand.
 - The idle sweep could hibernate the shim an open was bringing up (it read the previous engagement before the start recorded the new one): only the sweep skips a start in flight (Fleet.StartUnderWay, dcec14621). Fixing it by changing Serving instead blocked held prompts on session-up; keep predicates narrow.
 - The merge pump read a run's lease and chain base from its own goroutine while the run wrote them (a data race the race detector caught 2 in 6 runs); they are read under the run's lock (db277cff6).
-- Tests: fake git hard-linked, not copied (~3GB per daemon suite, da3219969); test logs stay in files: the log pipe (49cfaafc6) was reverted (4e5d4c563) because one collector in the test process became the bottleneck under load, even with non-blocking daemon writes (see /write-tests pitfall 2); test state in memory unless a test restarts on the same root (DurableState); isZombie reads the kernel in process instead of spawning ps (409602c36).
+- Tests: fake git hard-linked, not copied (~3GB per daemon suite, da3219969); test logs stay in files: the log pipe (49cfaafc6) was reverted (4e5d4c563) because one collector in the test process became the bottleneck under load, even with non-blocking daemon writes (see /agent-repl-tests pitfall 2); test state in memory unless a test restarts on the same root (DurableState); isZombie reads the kernel in process instead of spawning ps (409602c36).
 
 ## A merge queue subscription tells the agent, under the hood
 
-`UpdateMergeQueue.subscribe` (the `/merge-queue subscribe` verb) records a
+`UpdateMergeQueue.subscribe` (the `/agent-repl-merge-queue subscribe` verb) records a
 DURABLE subscription (wsm `merge_queue_subscriptions`): a restart or a
 handover keeps it, because a landing's own deploy restarts the daemon. It
 ends on unsubscribe and on the workspace's close, in the close's own

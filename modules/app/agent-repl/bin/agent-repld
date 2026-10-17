@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# agent-repld — the agent API's front door: the serving daemon's CLI.
+#
+# Every agent-repl skill that calls the agent API carries a relative symlink
+# to this file (`skills/<skill>/agent-repld`), and the skill names the INSTALLED
+# link (`~/.claude/skills/<skill>/agent-repld`). The installed skill links into
+# the main checkout, so the call always runs the main checkout's build of the
+# daemon, never a worktree's older one.
+#
+# AGENT_REPL_AGENT_REPLD names another binary (the tests' fake).
+set -uo pipefail
+
+MODULE_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd -P)"
+BIN="${AGENT_REPL_AGENT_REPLD:-$MODULE_DIR/daemon/bin/agent-repld}"
+
+if [ ! -x "$BIN" ]; then
+    echo "agent-repld: $BIN is not built; build it with /agent-repl-runtime build" >&2
+    exit 2
+fi
+exec "$BIN" "$@"

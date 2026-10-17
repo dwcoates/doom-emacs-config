@@ -444,9 +444,11 @@ func TestTheFixingAttemptBriefHandsAFailingTestThatCannotRunAloneToAnInvestigati
 		"IF A FAILING TEST CANNOT BE RUN ON ITS OWN",
 		"do not weaken the test or the code",
 		"without compromising coverage or production UI/UX",
-		"`/create-or-update-workspace`",
-		"send it a `prompt`",
-		"`create` a new NON-one-shot workspace",
+		"`/agent-repl-workspaces`",
+		"`agent-repld workspace list`",
+		"send it a prompt (`agent-repld workspace prompt`)",
+		"create a new NON-one-shot workspace",
+		"`agent-repld workspace create`",
 		"Then carry on with this fix",
 	}
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run.sh — driver for the manage-agent-repl-runtime skill
+# run.sh — driver for the agent-repl-runtime skill
 # Usage:
 #   run.sh --build [--force] [component...]      build what is stale (everything with --force)
 #   run.sh --byte-compile                        byte-compile the elisp as a warning gate

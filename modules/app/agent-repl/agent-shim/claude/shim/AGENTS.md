@@ -1865,8 +1865,8 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the shim is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - A shim starts in ~70ms to its argv refusal; ~17ms of it is compiling the 2.3MB bundle, most of the rest Node's own builtins. The protobuf registry guard took ~43ms off a 108ms start. NODE_COMPILE_CACHE trims ~13%; not adopted alone.
 - shim integration (412 tests) is CPU-bound, each test spawning a real node shim; a test that re-imports the engine's whole module graph needs ~1.2s even idle, so its bound is its own (bf7a42269).

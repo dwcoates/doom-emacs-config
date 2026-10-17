@@ -46,7 +46,7 @@ readonly PROTECTED_REF="refs/heads/master"
 readonly ENFORCE_KEY="agentrepl.mergeQueueEnforce"
 readonly QUEUE_MARKER="AGENT_REPL_MERGE_QUEUE"
 readonly OWNER_OVERRIDE="AGENT_REPL_OWNER_OVERRIDE"
-readonly SKILL=".claude/skills/merge-queue/SKILL.md"
+readonly SKILL="modules/app/agent-repl/skills/agent-repl-merge-queue/SKILL.md"
 readonly RUN_REGISTRY="agent-repl-safe-test-runs"
 readonly RUN_MARKER="AGENT_REPL_SAFE_TEST_RUN"
 
@@ -135,10 +135,10 @@ fi
 
 cat >&2 <<EOF
 [merge-queue] REFUSED: master moves only through the agent-repl merge queue.
-[merge-queue] master did not move. Land the work with the merge-queue skill
+[merge-queue] master did not move. Land the work with /agent-repl-merge-queue
 [merge-queue] ($SKILL), which merges, runs the test gate and fast-forwards master:
-[merge-queue]   - conclude this workspace:      /merge-queue one-shot   (its own branch; it closes once it lands)
-[merge-queue]   - land a branch, keep working:  /merge-queue async <name> <branch> [cleanup] [close <worktree-dir>]
+[merge-queue]   - conclude this workspace:      agent-repld workspace merge here -placement back   (it closes once it lands)
+[merge-queue]   - land a branch, keep working:  agent-repld workspace async-merge -name <name> -branch <branch> ...
 [merge-queue] Committed on master by mistake? Put a branch at the commit
 [merge-queue] (\`git branch <name>\`) and land that branch through the skill.
 [merge-queue] A refused fast-forward leaves its tree checked out; \`git reset --merge\` puts the checkout back.

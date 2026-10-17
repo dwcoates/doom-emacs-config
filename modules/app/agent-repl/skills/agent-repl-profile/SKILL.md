@@ -1,8 +1,8 @@
 ---
-name: profile-agent-repl
-description: Profile a live agent-repl across every runtime at once — CPU and memory of the daemon, store, sidecar, every shim, Emacs and the webapp's pages and WebKit processes — and rank the user-visible latencies (workspace open, switch, first switch to a never-shown workspace, page load, prompt echo) against how perceptible each is; run the startup assessment; and keep the living list of perf-sensitive areas. Use when the user asks why agent-repl is slow, hot, heavy on memory or battery, wants a profile or a perf assessment, cares about how fast something feels, or invokes /profile-agent-repl.
+name: agent-repl-profile
+description: Profile a live agent-repl across every runtime at once — CPU and memory of the daemon, store, sidecar, every shim, Emacs and the webapp's pages and WebKit processes — and rank the user-visible latencies (workspace open, switch, first switch to a never-shown workspace, page load, prompt echo) against how perceptible each is; run the startup assessment; and keep the living list of perf-sensitive areas. Use when the user asks why agent-repl is slow, hot, heavy on memory or battery, wants a profile or a perf assessment, cares about how fast something feels, or invokes /agent-repl-profile.
 argument-hint: "<start [--log-level LEVEL]|stop|status|report [--startup RFC3339] [--level LEVEL]|startup-assessment|switch-bench|list> or a plain-English request"
-lineage_root: user.dodge.skills.profile-agent-repl
+lineage_root: user.dodge.skills.agent-repl-profile
 ---
 
 # Profile agent-repl
@@ -11,7 +11,7 @@ lineage_root: user.dodge.skills.profile-agent-repl
 
 One profiling session covers every runtime, and lands in one directory:
 `~/.cache/agent-repl/profiles/<session>/` (`AGENT_REPL_PROFILE_ROOT`
-overrides the root). `bin/profile-agent-repl.sh` opens and closes sessions and
+overrides the root). `bin/agent-repl-profile.sh` opens and closes sessions and
 reports on them; each runtime profiles itself without a restart.
 
 | Runtime | How it is reached | What it writes |
@@ -43,9 +43,9 @@ which every runtime stops by itself.
 
 | Argument | Behaviour |
 |---|---|
-| `start` | Open a session: `bin/profile-agent-repl.sh start [--interval S] [--log-level debug\|warn\|error]`. |
-| `stop` | Close it; every runtime writes its profiles: `bin/profile-agent-repl.sh stop`. |
-| `status` | The open session, armed runtimes, stale markers: `bin/profile-agent-repl.sh status`. |
+| `start` | Open a session: `bin/agent-repl-profile.sh start [--interval S] [--log-level debug\|warn\|error]`. |
+| `stop` | Close it; every runtime writes its profiles: `bin/agent-repl-profile.sh stop`. |
+| `status` | The open session, armed runtimes, stale markers: `bin/agent-repl-profile.sh status`. |
 | `report [SESSION] [--startup RFC3339] [--level LEVEL]` | Summarize a session (newest by default) into `<session>/summary.md`, from its logs at `--level` up (info by default), kept beside it in `logs.jsonl`. |
 | `startup-assessment` | The startup procedure below. LEAD SESSION ONLY. |
 | `switch-bench` | The switch bench below: a slow switch tour and a fast one, at debug, measured phase by phase in one run. LEAD SESSION ONLY, and only with the owner's agreement to that run. |
@@ -54,18 +54,18 @@ which every runtime stops by itself.
 ## Steps
 
 1. Prepare.
-  - a. Hold merge-queue rollouts for the whole session (`/merge-queue hold-rollouts`, released with `/merge-queue release-rollouts`; being added on a separate branch). A landing would roll out a new build mid-session and replace the processes being profiled.
+  - a. Hold merge-queue rollouts for the whole session (`/agent-repl-merge-queue hold-rollouts`, released with `/agent-repl-merge-queue release-rollouts`; being added on a separate branch). A landing would roll out a new build mid-session and replace the processes being profiled.
   - b. Profile at `info` unless the diagnosis needs the debug records themselves. The latency table reads INFO edges only, so a latency that seems to need debug is a finding: find out why the INFO record is missing and fix the logging. Open the session with `--log-level debug` when the records around the edges are the evidence (the switch bench does), and read its report with `--level debug`.
-  - c. Check `bin/profile-agent-repl.sh status`. Every runtime you expect should be `armed`. A missing one predates profiling or is not running; a `stale` one is a process that died without removing its marker.
+  - c. Check `bin/agent-repl-profile.sh status`. Every runtime you expect should be `armed`. A missing one predates profiling or is not running; a `stale` one is a process that died without removing its marker.
 
 2. Profile.
-  - a. `bin/profile-agent-repl.sh start`. Every line of its output says what each runtime did (`signaled`, `skipped ... and why`, `emacs: started <session> pages=N`).
+  - a. `bin/agent-repl-profile.sh start`. Every line of its output says what each runtime did (`signaled`, `skipped ... and why`, `emacs: started <session> pages=N`).
   - b. Have the user do the interaction being measured, or reproduce it. Keep a session to the interaction; minutes, not hours.
-  - c. `bin/profile-agent-repl.sh stop`, then give the runtimes a second to write their profiles.
+  - c. `bin/agent-repl-profile.sh stop`, then give the runtimes a second to write their profiles.
   - d. NEVER LEAVE A SESSION OPEN. A profile costs CPU on a battery. Every runtime stops by itself after 30 minutes, but that is a backstop for a dead collector, not a way to end a session.
   - e. A shim that exits mid-session writes no profile. Close the session before standing a shim down.
 
-3. Read the results: `bin/profile-agent-repl.sh report`.
+3. Read the results: `bin/agent-repl-profile.sh report`.
   - a. **Processes** ranks every process by CPU-seconds with its average and peak RSS, and sums per runtime. This is the battery view. WebKit processes are every app's (`webkit:*`); close Safari for a clean reading.
   - b. **Hottest frames** per runtime: `go tool pprof -top` for the Go runtimes (`go tool pprof -http=: <file>` to explore), self samples and self bytes for the shim (load `.cpuprofile` into Chrome DevTools for a flame chart), Emacs's reversed call tree, and each page's main-thread stalls.
   - c. **User-visible latency** pairs real INFO log edges per interaction, ranked by how far its p90 is over the budget a user perceives:
@@ -95,15 +95,15 @@ which every runtime stops by itself.
   - a. Hold rollouts (step 1a). Note the instant, then quit and launch the real Emacs.app the user uses, the way they launch it.
   - b. Let every workspace load; do not touch anything.
   - c. Switch through every workspace in turn, once each (each is a first switch), then once more each (repeat switches).
-  - d. `bin/profile-agent-repl.sh report --startup <the launch instant, RFC3339>`: it adds launch to the daemon's first record, each workspace's session up and page painted, launch to every workspace loaded, and every switch with first/repeat marked. A profiling session open across the launch adds the processes and frames.
+  - d. `bin/agent-repl-profile.sh report --startup <the launch instant, RFC3339>`: it adds launch to the daemon's first record, each workspace's session up and page painted, launch to every workspace loaded, and every switch with first/repeat marked. A profiling session open across the launch adds the processes and frames.
   - e. All timings come from real log edges. Never time with the harness, a stopwatch or the tool-call clock.
 
 5. Switch bench (`switch-bench`). LEAD SESSION ONLY: a subagent never drives Emacs. It takes over the owner's live editor while it runs, so it runs only when the owner has agreed to that run.
   - a. Hold rollouts (step 1a). The bench does not hold them itself, since a script releasing a hold could release someone else's; it detects a rollout instead (the daemon or Emacs replaced) and fails the run as INVALID.
-  - b. `bin/profile-agent-repl.sh switch-bench [--slow N:SECONDS] [--fast N:SECONDS]`. Defaults: slow is 8 switches each way 1.5s apart, a pace where each switch settles; fast is 40 each way 0.25s apart, a held key's pace, where switches overlap and pressure shows. The two together must fit the log level window; the bench refuses tours that would outlast it.
+  - b. `bin/agent-repl-profile.sh switch-bench [--slow N:SECONDS] [--fast N:SECONDS]`. Defaults: slow is 8 switches each way 1.5s apart, a pace where each switch settles; fast is 40 each way 0.25s apart, a held key's pace, where switches overlap and pressure shows. The two together must fit the log level window; the bench refuses tours that would outlast it.
   - c. The bench opens a session at debug, drives each tour through Emacs's own key loop (`(agent-repl-profiling-switch-tour N INTERVAL LABEL)`, answered by `(agent-repl-profiling-switch-tour-state)`), cancels a tour past twice its planned length plus a margin, closes the session, and writes the report from the session's debug logs. Exit 0 is a complete, valid run; it prints the summary's and the logs' paths.
   - d. Read the report's **Switch tour slow** and **Switch tour fast** sections. Each gives keys queued, editor switches, switch passes run and superseded (a pass a later key replaced before it ran), pages told shown and first shown frames, then the tour's own phase table (step 3d), its main-thread stalls (`webhost.stall`) and its rail draws (`sidebar.roster-draw`). The fast tour's superseded passes and stalls against the slow tour's show where pressure builds.
-  - e. One tour on its own, outside a bench: `(agent-repl-profiling-switch-tour N INTERVAL LABEL)` through `/runtime-eval-code` in an open session; `(agent-repl-profiling-switch-tour-cancel)` stops it early.
+  - e. One tour on its own, outside a bench: `(agent-repl-profiling-switch-tour N INTERVAL LABEL)` through `/agent-repl-runtime` in an open session; `(agent-repl-profiling-switch-tour-cancel)` stops it early.
   - f. Record the result in the perf-sensitive list (step 6).
 
 6. Keep the perf-sensitive list current.

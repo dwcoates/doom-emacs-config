@@ -171,7 +171,7 @@ func NewRecorderExecutable(t testing.TB, dir, name string) *Recorder {
 // measured against. The recorder spawns nothing on its common path, but it
 // appends each run to its record on the run's RAM disk, where a small write at
 // background I/O priority costs up to 330ms p99 under a full run
-// (skills/write-tests pitfall 6). 750ms is just over twice that, and it is a
+// (skills/agent-repl-tests pitfall 6). 750ms is just over twice that, and it is a
 // fixture: no test asserts the bound itself (merge gate 2026-10-16,
 // TestAFocusGainClaimsTheBannerThePlatformStillHolds, killed at the 160ms
 // platform default with nothing hung).

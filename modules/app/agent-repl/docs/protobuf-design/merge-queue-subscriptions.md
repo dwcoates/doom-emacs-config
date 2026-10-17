@@ -1,6 +1,6 @@
 # Merge queue subscriptions
 
-Any workspace can subscribe, through `/merge-queue`, to a merge queue's state
+Any workspace can subscribe, through `/agent-repl-merge-queue`, to a merge queue's state
 changes — one repository's queue or every repository's — at a level of detail
 it picks (every change; only when the queue advances; only when it depletes).
 Each subscribed change reaches the subscribing workspace's agent as a notice

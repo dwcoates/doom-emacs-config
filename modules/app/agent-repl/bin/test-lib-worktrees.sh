@@ -81,12 +81,10 @@ test_every_function_fails_outside_a_repository() {
 }
 
 # The call sites share the helper: no script but the library reads the
-# worktree list's roots itself. ALLOWED names each script that reads the
+# worktree list's roots itself. ALLOWED would name a script that reads the
 # list's BRANCH lines instead (which worktree holds which branch), a different
-# question the library does not answer, with its reason.
-ALLOWED=(
-  ".claude/skills/merge-queue/run.sh|finds the worktree a branch is checked out in (--remove-branch)"
-)
+# question the library does not answer, with its reason; none does today.
+ALLOWED=()
 
 test_no_script_parses_the_worktree_list_itself() {
   local found f rel allowed entry real=""
@@ -95,7 +93,7 @@ test_no_script_parses_the_worktree_list_itself() {
     rel="${f#"$REPO_DIR"/}"
     case "$rel" in */lib-worktrees.sh|*/fake-git.sh|*/test-*.sh) continue ;; esac
     allowed=0
-    for entry in "${ALLOWED[@]}"; do
+    for entry in ${ALLOWED[@]+"${ALLOWED[@]}"}; do
       [ "${entry%%|*}" = "$rel" ] && allowed=1
     done
     [ "$allowed" -eq 1 ] || real="$real $rel"

@@ -1,5 +1,5 @@
 ---
-name: debug-emacs-agent-repl
+name: agent-repl-debug
 description: Investigate the agent-repl system across Emacs, daemon, shim, webapp, sidecar, store, state, deployment, logging, and test coverage. Use for current or historical workspace failures, wrong colors or stuck states, missing conversation data, service-health questions, source-versus-running readiness, workspace/session/process correlation, structured-log analysis, SSM or store SQL investigation, coverage questions, missing telemetry, iterative critical-path instrumentation, reload, reproduction, and log-analysis loops, and orchestrated bounce-observe-remediate loops that drive the stack to a healthy steady state.
 ---
 
@@ -104,12 +104,12 @@ to another plane, add that plane's runbook and state why. Apply the ambiguity
 gate again when more than one next runbook is plausible. Do not load every
 reference merely because it exists.
 
-Use `/runtime-eval-code` when the needed fact exists only inside the live Emacs
+Use `/agent-repl-runtime` when the needed fact exists only inside the live Emacs
 process or in third-party `*Messages*` output. For latency, stalls, or
 hitching, first read the stored metrics with `/metrics-agent-repl` (which
 version or day a latency or a process's CPU changed), then enter through
 `references/performance-investigation.md`, which decides between log-derived
-history and live sampling and hands off to `/profile-agent-repl` as the
+history and live sampling and hands off to `/agent-repl-profile` as the
 sampling authority. No handoff replaces the evidence already collected here.
 
 ### 5. Audit observability before concluding
@@ -141,7 +141,7 @@ investigation.
 To add one:
 
 1. Write it as `references/<kebab-name>.md` in the repository skill directory,
-   `modules/app/agent-repl/skills/debug-emacs-agent-repl/`. The installed
+   `modules/app/agent-repl/skills/agent-repl-debug/`. The installed
    skill is a symlink to that directory; never edit the installed copy.
 2. Register it in the runbook-selection table above with its investigative
    question, its read-first path, and its common companions. An unregistered

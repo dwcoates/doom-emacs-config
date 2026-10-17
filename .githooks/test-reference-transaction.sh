@@ -158,8 +158,8 @@ test_enforced_refusal_names_each_skill_form() {
   commit_on_master "$repo"
 
   if [ "$RUN_RC" -ne 0 ] &&
-    grep_in "$RUN_OUT" -q "/merge-queue one-shot" &&
-    grep_in "$RUN_OUT" -q "/merge-queue async <name> <branch>" &&
+    grep_in "$RUN_OUT" -q "agent-repld workspace merge here" &&
+    grep_in "$RUN_OUT" -q "agent-repld workspace async-merge" &&
     grep_in "$RUN_OUT" -q "never set AGENT_REPL_OWNER_OVERRIDE"; then
     pass "enforcement on: the refusal names every skill form and forbids the override to agents"
   else

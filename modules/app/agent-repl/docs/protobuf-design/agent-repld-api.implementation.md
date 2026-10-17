@@ -82,9 +82,9 @@ Each item is checked off as it lands, with its commit.
       only when the user explicitly asked for or approved them.
 - [x] D15 `workspace gate` CLI over AnswerColdGate; WorkspaceStatus reports
       `cold_gate` with the gate's FeedId.
-- [ ] S2 `/agent-repl-merge-queue` from `/merge-queue`.
-- [ ] S3 `/agent-repl-runtime` from `/manage-agent-repl-runtime`, absorbing
-      `/runtime-eval-code` as a runbook over `agent-repld editor eval`.
+- [ ] S2 `/agent-repl-merge-queue` from `/agent-repl-merge-queue`.
+- [ ] S3 `/agent-repl-runtime` from `/agent-repl-runtime`, absorbing
+      `/agent-repl-runtime` as a runbook over `agent-repld editor eval`.
 - [ ] S4 `/agent-repl-debug`, `/agent-repl-profile`, `/agent-repl-tests`,
       `/agent-repl-install` renames; `/agent-repl-help` removed.
 - [ ] S5 Tests: every command a skill names exists; every agent command is

@@ -2,7 +2,7 @@
 // workspace's session, as one operation (agentrepl.v1.SetWorkspaceParent).
 //
 // A retarget nobody told the agent about is how work lands in the wrong place:
-// the agent runs `/merge-queue one-shot` believing its merge lands where it did
+// the agent runs `/agent-repl-merge-queue one-shot` believing its merge lands where it did
 // when it was created. So this package is the ONLY caller of the verb that
 // records a retarget, and it never returns success unless the notice is queued
 // in the workspace's session. A notice that cannot be queued undoes the

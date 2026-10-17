@@ -39,4 +39,4 @@ lets the async request name its own merge actions.
     actions configured at the workspace's creation.
   - The command-file ingress (`commandfile.Entry`) and the
     `agent-repld merge-queue` verb gain the two prompts too, so the
-    `/merge-queue` skill can pass them.
+    `/agent-repl-merge-queue` skill can pass them.

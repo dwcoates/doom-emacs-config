@@ -1,9 +1,9 @@
 ---
-name: install-agent-repl
-description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /install-agent-repl. Update this skill whenever the installation process is expanded or changed.
+name: agent-repl-install
+description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Update this skill whenever the installation process is expanded or changed.
 argument-hint: "[check]"
-allowed-tools: Bash(.claude/skills/install-agent-repl/run.sh:*)
-lineage_root: user.dodge.skills.install-agent-repl
+allowed-tools: Bash(.claude/skills/agent-repl-install/run.sh:*)
+lineage_root: user.dodge.skills.agent-repl-install
 ---
 
 ## What This Skill Does
@@ -20,7 +20,7 @@ Brings a machine to the point where every agent-repl requirement is met, and lea
 ## Steps
 
 0. Report the machine's current state.
-  - Call `.claude/skills/install-agent-repl/run.sh --check`.
+  - Call `.claude/skills/agent-repl-install/run.sh --check`.
     - `EXIT CODE 0:` Every required requirement is met. Relay the report. If `check` was passed, STOP; otherwise go to step 5.
     - `EXIT CODE 1:` Some required requirement is unmet. Relay the report. If `check` was passed, STOP; otherwise continue to step 1.
     - `EXIT CODE 2:` The requirements could not be read. Go to step 4 with the printed error as the failure.
@@ -34,7 +34,7 @@ Brings a machine to the point where every agent-repl requirement is met, and lea
   - CRITICAL: NEVER run step 2 without this approval, because it installs packages, loads launchd services, and writes links under the home directory.
 
 2. Install.
-  - Call `.claude/skills/install-agent-repl/run.sh --install`.
+  - Call `.claude/skills/agent-repl-install/run.sh --install`.
     - `EXIT CODE 0:` Every required requirement is met. Go to step 5.
     - `EXIT CODE 1:` Some required requirement is still unmet. Continue to step 3.
     - `EXIT CODE 2:` The requirements could not be read. Go to step 4 with the printed error as the failure.
@@ -52,13 +52,13 @@ Brings a machine to the point where every agent-repl requirement is met, and lea
     - a. Make the fix hold for every machine and every person, and NEVER encode this user's paths, accounts, names or choices.
     - b. A per-person value becomes an environment-variable entry with its row in the user guide's Setup table.
     - c. Add or update the test that pins the fix.
-  - Call `.claude/skills/install-agent-repl/run.sh --verify`.
+  - Call `.claude/skills/agent-repl-install/run.sh --verify`.
     - `EXIT CODE 0:` The suites pass. Commit the fix, then return to step 0.
     - `EXIT CODE 1:` A suite failed. Fix the failure, then restart step 4's verification.
   - Ambiguity only the user can resolve goes in the response's dedicated setup branch, and is NEVER guessed.
 
 5. Refresh Doom and confirm.
-  - Call `.claude/skills/install-agent-repl/run.sh --finish`.
+  - Call `.claude/skills/agent-repl-install/run.sh --finish`.
     - `EXIT CODE 0:` Doom is refreshed and the doctor found nothing. Report the machine ready.
     - `EXIT CODE 1:` The doctor reported findings. Relay them, then return to step 0.
     - `EXIT CODE 2:` Doom could not be refreshed. IMMEDIATELY terminate and surface the raw error.

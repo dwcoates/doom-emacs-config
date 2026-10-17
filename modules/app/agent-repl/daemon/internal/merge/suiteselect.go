@@ -188,11 +188,10 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: ".githooks/pre-push", Suites: []string{"release-tag-hook-harness", "push-release-harness", backgroundHarness}},
 	{Kind: matchExact, Path: ".githooks/test-pre-push.sh", Suites: []string{"release-tag-hook-harness", backgroundHarness, testrunSuite}},
 	{Kind: matchSubtree, Path: ".githooks/", Suites: []string{backgroundHarness, testrunSuite}},
-	// The .claude scripts: the merge-queue skill, the safe test runner and the
-	// installer each have their harness; the background harness scans the
-	// top-level scripts, the worktrees library's harness greps every one, and
-	// testrun's roster-coverage test walks .claude for test scripts.
-	{Kind: matchSubtree, Path: ".claude/skills/merge-queue/", Suites: []string{"merge-queue-skill-harness", worktreesLibHarness, testrunSuite}},
+	// The .claude scripts: the safe test runner and the installer each have
+	// their harness; the background harness scans the top-level scripts, the
+	// worktrees library's harness greps every one, and testrun's
+	// roster-coverage test walks .claude for test scripts.
 	{Kind: matchExact, Path: ".claude/safe-test-run.sh", Suites: []string{"safe-test-run-harness", backgroundHarness, worktreesLibHarness}},
 	{Kind: matchExact, Path: ".claude/test-safe-test-run.sh", Suites: []string{"safe-test-run-harness", backgroundHarness, worktreesLibHarness, testrunSuite}},
 	{Kind: matchExact, Path: ".claude/install.sh", Suites: []string{"install-harness", backgroundHarness, worktreesLibHarness}},

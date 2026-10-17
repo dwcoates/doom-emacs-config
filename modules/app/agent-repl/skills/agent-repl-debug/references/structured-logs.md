@@ -50,7 +50,7 @@ The resolver's default global Emacs sink is the durable
 which carries every `:agent-repl-central` record: creation, fork, kill,
 teardown and daemon administration. If
 `agent-repl-log-file-name` is customized, resolve its live value through
-`/runtime-eval-code` and pass that exact path through
+`/agent-repl-runtime` and pass that exact path through
 `AGENT_REPL_EMACS_GLOBAL_LOG`.
 
 Filter strict JSONL:
@@ -147,15 +147,15 @@ leftover `AGENT_REPL_LOG_LEVEL` without a live UNTIL starts every runtime at
 `info` and says so at info.
 
 To raise EVERY RUNNING runtime at once, with no restart, open a profiling
-session at that level: `bin/profile-agent-repl.sh start --log-level debug`
-(`/profile-agent-repl`). The daemon, store, sidecar and every shim open the
+session at that level: `bin/agent-repl-profile.sh start --log-level debug`
+(`/agent-repl-profile`). The daemon, store, sidecar and every shim open the
 window live; Emacs opens its own and tells the webhost and every page. The
 stop closes every window, and each ends by itself at five minutes either way.
-Read the session's records with `bin/profile-agent-repl.sh report --level
+Read the session's records with `bin/agent-repl-profile.sh report --level
 debug`, which keeps them in `<session>/logs.jsonl`.
 
 The per-workspace buffer threshold has no dedicated command; set
-`agent-repl-log-buffer-level` directly (`setq`, or via `/runtime-eval-code`)
+`agent-repl-log-buffer-level` directly (`setq`, or via `/agent-repl-runtime`)
 when a workspace buffer needs to show ordinary or verbose activity.
 
 ### Debugging workflow
@@ -187,7 +187,7 @@ Emacs-owned workspace data. Use it for buffer, process, timer, prompt, and
 lifecycle fields. Do not use it to derive rendered workspace color. The SSM
 database owns resolved state.
 
-Use `/runtime-eval-code` when:
+Use `/agent-repl-runtime` when:
 
 - The needed value exists only in live Emacs memory.
 - A third-party package wrote only to `*Messages*`.

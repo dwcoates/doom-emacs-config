@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run.sh — driver for the install-agent-repl skill.
+# run.sh — driver for the agent-repl-install skill.
 #
 # Usage:
 #   run.sh --check     report every requirement's status; changes nothing

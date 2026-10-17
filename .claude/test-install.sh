@@ -43,9 +43,9 @@ pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
 
 # Local skills install.sh expects to find under modules/app/agent-repl/skills/.
-# debug-emacs-agent-repl is deliberately absent: it is PROJECT-scoped
-# (checked-in <repo>/.claude/skills symlink), not a user-level installed skill.
-LOCAL_SKILL_NAMES=( profile-agent-repl write-tests runtime-eval-code emit-workspace-commands.sh )
+# agent-repl-debug is deliberately absent: it is PROJECT-scoped (checked-in
+# <repo>/.claude/skills symlink), not a user-level installed skill.
+LOCAL_SKILL_NAMES=( agent-repl-profile agent-repl-tests agent-repl-runtime agent-repl-merge-queue agent-repl-workspaces )
 
 # Build a synthetic repo containing a fresh copy of install.sh and the
 # requirements runner it delegates to, the pre-commit hook, and a requirements
@@ -276,12 +276,12 @@ test_local_skills_link_to_main_worktree() {
     bash "$repo/linked-wt/.claude/install.sh" install >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
-  local actual; actual="$(readlink "$home/.claude/skills/profile-agent-repl" 2>/dev/null || echo MISSING)"
+  local actual; actual="$(readlink "$home/.claude/skills/agent-repl-profile" 2>/dev/null || echo MISSING)"
   # install.sh links to the PHYSICAL main-worktree path (matching git's
   # canonical `worktree list` output), so canonicalize the tmpdir-based
   # expectation too (mktemp yields /var/... which symlinks to /private/var/...
   # on macOS).
-  local expected; expected="$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/profile-agent-repl"
+  local expected; expected="$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/agent-repl-profile"
   if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$expected" ]; then
     pass "local skills link to main worktree when run from a linked worktree"
   else

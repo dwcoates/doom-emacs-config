@@ -70,7 +70,7 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the shared logging libraries is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - Every record costs a marshal and a write; per-render or per-event repeats at debug dominate test volume (see the daemon's lesson on log-on-change). Prefer logging a decision when it changes over lowering its level.

@@ -266,8 +266,8 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about Emacs (the lisp) is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - Every workspace switch spends 80-180ms of elisp before the webview swap starts; ~118ms of it in the slowest case is covered by no record (first-switch investigation). Add records, then cut it.
 - Tests: an ERT integration file that takes 3.4s alone took 28s inside a loaded full run; bound waits by what is observed under realistic concurrency. The itest fixture's process-global host selection slot is scoped per scenario (efff6f77c).
