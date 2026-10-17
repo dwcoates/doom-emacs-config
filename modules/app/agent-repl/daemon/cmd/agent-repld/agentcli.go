@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 
 	"agent-repld/internal/envc"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/stateroot"
 )
@@ -31,7 +33,7 @@ import (
 // THE AGENT API'S COMMANDS: four nouns over the serving daemon's rpcs.
 //
 //	agent-repld workspace    create | async-merge | prompt | set | merge | open | close | kill
-//	                         compact | status | subscribe | unsubscribe | gate
+//	                         compact | status | list | subscribe | unsubscribe | gate
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
 //	agent-repld editor       eval
@@ -137,6 +139,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"kill":        {usage: "kill WS", run: workspaceKill},
 		"compact":     {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":      {usage: "status WS", run: workspaceStatus},
+		"list":        {usage: "list", run: workspaceList},
 		"subscribe":   {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
 		"unsubscribe": {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"gate":        {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
@@ -843,6 +846,77 @@ func workspaceStatus(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.GetWorkspaceStatus(c.ctx, connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref}))
 	return answer(c, resp, err)
+}
+
+// listedWorkspace is one workspace as `workspace list` prints it.
+type listedWorkspace struct {
+	Name    string `json:"name"`
+	ID      string `json:"id"`
+	Dir     string `json:"dir"`
+	Status  string `json:"status"`
+	Section string `json:"section"`
+	Calling bool   `json:"calling,omitempty"`
+}
+
+// workspaceList prints every workspace the roster carries, one JSON object a
+// line: its name, id, directory, the roster status it draws, and the section
+// it is drawn in (open, hidden, or merged). `status WS` reads one in full.
+func workspaceList(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	roster, ok := c.readRoster()
+	if !ok {
+		return exitFailure
+	}
+	callingID := ""
+	if cwd, err := c.deps.getwd(); err == nil {
+		if row := callingRow(roster, canonicalDir(cwd)); row != nil {
+			callingID = row.GetWorkspace().GetWorkspace().GetId()
+		}
+	}
+	section := func(rows []*frontendv1.RosterRow, name string) []listedWorkspace {
+		var out []listedWorkspace
+		for _, row := range rows {
+			ref := row.GetWorkspace().GetWorkspace()
+			out = append(out, listedWorkspace{Name: row.GetName().GetText(), ID: ref.GetId(), Dir: ref.GetDir(),
+				Status: rowStatus(row), Section: name, Calling: ref.GetId() == callingID})
+		}
+		return out
+	}
+	var open []*frontendv1.RosterRow
+	for _, row := range rosterwalk.OpenRows(roster) {
+		open = append(open, row.GetRow())
+	}
+	listed := section(open, "open")
+	listed = append(listed, section(rosterwalk.HiddenRows(roster), "hidden")...)
+	listed = append(listed, section(rosterwalk.MergedRows(roster), "merged")...)
+	encoder := json.NewEncoder(c.out)
+	for _, ws := range listed {
+		if err := encoder.Encode(ws); err != nil {
+			c.failed("print the list: %v", err)
+			return exitFailure
+		}
+	}
+	return exitSuccess
+}
+
+// rowStatus names a row's status arm by its proto field name, "unset" when it
+// states none.
+func rowStatus(row *frontendv1.RosterRow) string {
+	arm, ok := protoarm.Name(row.ProtoReflect(), "status")
+	if !ok {
+		return "unset"
+	}
+	return string(arm)
 }
 
 // noticeEvents are the -events spellings.

@@ -503,3 +503,20 @@ func TestAsyncMergeSendsItsMakerTargetAndPlacement(t *testing.T) {
 		t.Fatalf("async merge = %v, want the subagent's branch into its maker at the front", async)
 	}
 }
+
+func TestListPrintsEveryWorkspaceOneALine(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "list")
+
+	// Assert
+	lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
+	if code != exitSuccess || len(lines) != 4 {
+		t.Fatalf("exit %d, lines %q; want four workspaces", code, lines)
+	}
+	if !strings.Contains(lines[0], `"name":"caller"`) || !strings.Contains(lines[0], `"calling":true`) || strings.Contains(lines[1], `"calling"`) {
+		t.Fatalf("lines = %q, want the caller first and marked", lines)
+	}
+}
