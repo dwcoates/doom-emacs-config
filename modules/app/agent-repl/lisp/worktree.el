@@ -14,7 +14,7 @@
 ;; deliberately blessed as editor-local:
 ;;
 ;;   THE EVAL HELPERS -- `agent-repl--eval-code-string' and its formatter,
-;;   reached over `emacsclient' by the /runtime-eval-code skill.  Debugging
+;;   reached over `emacsclient' by the /agent-repl-runtime skill.  Debugging
 ;;   the editor depends on being able to evaluate inside it, and no rpc
 ;;   replaces that.
 ;;
@@ -261,114 +261,6 @@ Tombstoned entries are skipped so a killed workspace's preserved
                        "elisp.worktree.ws-name-for-dir dir=%s canonical=%s live-count=%d result=%s"
                        dir canon (length live-names) (or result "nil"))
       result)))
-
-;;;; ---- The eval helpers --------------------------------------------------
-;;
-;; REACHED OVER `emacsclient' by the /runtime-eval-code skill, which is the
-;; only way to inspect or mutate live editor state without rewriting source.
-;; It survives the overhaul deliberately: debugging depends on it, and no
-;; rpc replaces it.  There is no longer a JSON inbox command that sends the
-;; result back into a session -- the caller reads the returned plist.
-
-(defcustom agent-repl-eval-output-max-chars 8000
-  "Maximum characters of eval output a formatted result carries.
-Anything longer is truncated with a `[truncated to N chars]' marker
-appended, so a reader knows the output was clipped rather than silently
-short.  Set to 0 to disable truncation entirely (not recommended -- a
-runaway loop can otherwise dump megabytes)."
-  :type 'integer
-  :group 'agent-repl)
-
-(defun agent-repl--eval-snippet (label code-string)
-  "Return CODE-STRING under a `;; LABEL:' header line."
-  (concat ";; " label ":\n" code-string "\n"))
-
-(defun agent-repl--eval-truncate (text)
-  "Truncate TEXT to `agent-repl-eval-output-max-chars'.
-Returns TEXT unmodified when the cap is 0 or TEXT fits within it."
-  (cond
-   ((or (null text) (not (stringp text))) (or text ""))
-   ((<= agent-repl-eval-output-max-chars 0) text)
-   ((<= (length text) agent-repl-eval-output-max-chars) text)
-   (t (concat (substring text 0 agent-repl-eval-output-max-chars)
-              (format "\n;; [truncated to %d chars]"
-                      agent-repl-eval-output-max-chars)))))
-
-(defun agent-repl--eval-format-prompt (code-string note printed value-string error-string)
-  "Format an eval result for a reader.
-CODE-STRING is the raw source, NOTE an optional one-line label, PRINTED
-the captured `standard-output', VALUE-STRING the printed return value (or
-nil when an error fired) and ERROR-STRING the trapped error (or nil).
-
-The format is deliberately enumerated and labeled so a reader can
-pattern-match on `;; code:', `;; printed:', `;; result:' and `;; error:'
-without ambiguity."
-  (let* ((header (if error-string "Elisp eval ERROR" "Elisp eval result"))
-         (note-suffix (if (and note (stringp note) (not (string-empty-p note)))
-                          (format " (note: %s)" note)
-                        ""))
-         (sections (list (agent-repl--eval-snippet "code" code-string))))
-    (when (and printed (not (string-empty-p printed)))
-      (push (agent-repl--eval-snippet "printed" printed) sections))
-    (if error-string
-        (push (agent-repl--eval-snippet "error" error-string) sections)
-      (push (agent-repl--eval-snippet "result" (or value-string "nil")) sections))
-    (concat header note-suffix ":\n\n"
-            "```elisp\n"
-            (agent-repl--eval-truncate
-             (mapconcat #'identity (nreverse sections) "\n"))
-            "\n```")))
-
-(defun agent-repl--eval-code-string (code-string)
-  "Read every top-level form from CODE-STRING and evaluate them in order.
-Returns the plist (:printed STRING :value-string STRING-OR-NIL :error
-STRING-OR-NIL).
-
-Captures `princ' / `print' output through a buffer-bound
-`standard-output', so a `(princ ...)' side effect lands in `:printed'
-rather than vanishing.  `message' writes to `*Messages*' directly and is
-NOT captured -- callers that need to round-trip messages use `princ'.
-
-The value is that of the LAST form.  A trapped error short-circuits the
-remaining forms and populates `:error'; partial side effects from earlier
-forms are still reported through `:printed', because pretending they did
-not happen would be the more misleading answer."
-  (let ((printed-buf (generate-new-buffer " *agent-repl-eval-output*"))
-        (value-string nil)
-        (error-string nil)
-        (printed ""))
-    (unwind-protect
-        (progn
-          (let ((standard-output printed-buf))
-            (condition-case err
-                (let ((pos 0)
-                      (last-value nil)
-                      (len (length code-string)))
-                  (while (< pos len)
-                    (let ((parsed (read-from-string code-string pos)))
-                      (setq last-value (eval (car parsed) t))
-                      (setq pos (cdr parsed))
-                      ;; Skip whitespace between forms so the next read
-                      ;; starts at the next form (or at EOF).
-                      (while (and (< pos len)
-                                  (memq (aref code-string pos) '(?\s ?\t ?\n ?\r)))
-                        (setq pos (1+ pos)))))
-                  (setq value-string (prin1-to-string last-value)))
-              (end-of-file
-               ;; Only fatal when nothing was successfully read -- a
-               ;; whitespace-only code string yields nil with no error.
-               (when (null value-string)
-                 (setq value-string "nil")))
-              (error
-               (setq error-string (error-message-string err)))))
-          (setq printed (with-current-buffer printed-buf (buffer-string))))
-      (kill-buffer printed-buf))
-    (agent-repl--log '(:agent-repl-central "runtime evaluation is process-wide")
-                     "elisp.worktree.eval printed-len=%d errored=%s"
-                     (length printed) (and error-string t))
-    (list :printed printed
-          :value-string value-string
-          :error error-string)))
 
 (provide 'worktree)
 
