@@ -2,8 +2,8 @@
 
 Owner-led planning, started 2026-10-17. This file is the living record of what
 has been decided, what is proposed, and what is set aside. It is updated as the
-planning goes. It lives in agent-repl for now. Where the project finally lives,
-and what agent-repl is renamed to, are both still open (see Open questions).
+planning goes, for the whole of the planning process. The project lives
+inside agent-repl.
 
 ## Ground rules
 
@@ -11,6 +11,7 @@ and what agent-repl is renamed to, are both still open (see Open questions).
 - Settled terms go in a glossary in the project's `AGENTS.md`.
 - Code, protos and docs use only glossary terms as identifiers, with no synonyms.
 - Renaming a term changes the glossary and every place that uses it in the same commit.
+- This plan is updated continually as decisions are made, throughout the project.
 
 ## Vision
 
@@ -22,6 +23,11 @@ knowledge. Its new parts:
 - asking about a highlighted passage of anything on screen (an agent's
   response, a chat answer, later a book), with the question and answer landing
   in the graph as a child of the text that was highlighted.
+
+agent-repl is heading toward being a general tool rather than only an agent
+manager. That is context for this project, not part of it: renaming agent-repl
+and moving it out of the doom config into its own repository both come at a
+later date.
 
 Prior art: `~/workspace/notertame` (a question-and-answer card app with
 `Datum.parentId` follow-ups, chosen by hand, and a swipeable card stack).
@@ -46,7 +52,21 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 - Remote clients, such as the future mobile app, reach the workstation's
   daemon only through a proxy service over HTTP. The mobile app is not built
   now. Proposed: the workstation dials out to the proxy, the proxy only passes
-  messages through, and remote devices pair with the workstation.
+  messages through, remote devices pair with the workstation, and content is
+  encrypted end to end so the proxy cannot read it.
+- The code may be regrouped by client, but only as directory renames and the
+  reference updates they need. No code is reorganized. An illustration of the
+  layout (names not settled):
+
+  ```text
+  proto/
+  services/  daemon, shim, store, sidecar, proxy
+  clients/   emacs, webapp, desktop, mobile
+  ```
+
+- The contract must work over HTTP, so local and remote clients share it.
+- A remote client has nothing to show while the workstation is offline,
+  unless caching is added later.
 
 ### Data model
 
@@ -74,7 +94,11 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   selection (`frontend.v1.FeedSelectionResponse`, see
   `proto/src/agentrepl/v1/endpoint_submit_prompt.proto`). A text highlight
   becomes a second kind of selection beside it.
-- Highlights in agent feeds land in the knowledge graph too.
+- Every view uses one shared highlight component, so building highlights for
+  answers also builds them for books. A book is a source text in the graph,
+  and the reader is the view that shows one.
+- The webapp has its own input box, used whenever the host provides no input
+  client.
 
 ### Chat UX
 
@@ -89,6 +113,9 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   comes back, branches are picked again from the sighting counts. The pick is
   determined only by those counts, so children not looked at keep their
   branch.
+- A visit lasts while its parent stays on the path on screen. Scrolling the
+  parent out of view does not end it, and swiping deeper down the path does
+  not end the visits of the parents above.
 
 ## Proposed, not yet settled
 
@@ -96,8 +123,30 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   instead of Agent SDK sessions. A linear SDK transcript does not match a
   chain of earlier nodes, and a node with several parents has no single
   session to resume.
+- Highlights in agent feeds land in the knowledge graph too (inferred from the
+  owner's answer on surrounding text, not yet confirmed).
 - How sightings are counted: a bubble fully on screen, recorded by the daemon.
-- A visit lasts while its parent stays on the path on screen.
+- Requirements:
+  - what it does: persistent chat stored as the graph, asking about a highlight
+    in any view, similarity search over the graph, reading and annotating
+    books later, and a simpler way to work with agent-repl's agents from
+    desktop and mobile;
+  - how it behaves: the workstation is the only place state is stored, one
+    contract serves every client, and tests never reach a real vendor.
+- The graph gets its own service in the engine, the only owner of the graph
+  database, the way the store owns the record database. The store cannot be
+  reused: its only callers are the shim and the sidecar, and the daemon never
+  calls `store.v1`. The service calls the Messages API itself, and the daemon
+  stays the one endpoint every client talks to, passing graph calls on.
+- Stack:
+  - protobuf over Connect, as agent-repl already uses; Connect runs over HTTP,
+    so the proxy can carry it unchanged;
+  - SQLite through `modernc.org/sqlite`; that driver cannot load vector
+    extensions, so similarity search runs in Go over embeddings held in
+    memory, which is fast enough for one person's graph;
+  - the webapp stays plain TypeScript and Vite;
+  - Tauri for the desktop shell, because on macOS it uses the same WebKit
+    engine xwidget runs today.
 
 ## Known complications
 
@@ -129,7 +178,6 @@ Nothing here is settled yet.
 
 | Concept | Candidates |
 |---|---|
-| The renamed project | open |
 | The question-and-answer unit | open (notertame used `datum`) |
 | A source text, such as a book | open |
 | A frozen version of a node's content | `revision` |
@@ -141,10 +189,14 @@ Nothing here is settled yet.
 
 ## Open questions
 
-- Should agent-repl move out of the doom config into its own repository, and what is it renamed to?
 - How much of agent-repl's elisp is domain logic that a second input client would have to rewrite? (audit)
 - Should the proxy be built here, or should an existing tunnel be used?
 - Should the mobile app host the webapp in a web view rather than be built natively?
 - Is the least-seen pick for exploring the graph, or for remembering what's in it (spaced repetition)?
 - What does swiping on an answer bubble cycle through: the pair's siblings, or that answer's revisions?
 - Should questions about a highlight sit on the passage, in the sibling stack, or both?
+- With Emacs as the host, is the webapp's input box hidden or available alongside it?
+- In the chat, does a new prompt always attach to the end of the path on screen?
+- Is a separate overview of the graph wanted, or is the chat the only way to see it?
+- Which embedding provider?
+- Tauri or Electron for the desktop shell?
