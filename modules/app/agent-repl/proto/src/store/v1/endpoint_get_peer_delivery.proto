@@ -1,0 +1,93 @@
+// endpoint_get_peer_delivery.proto — GetPeerDelivery: WHICH SESSIONS are the two
+// ends of one cross-session message, by the vendor's delivery id for it.
+//
+// WHY ANYONE ASKS. A cross-session message names neither end as one of the
+// host's sessions: the sender's record names the recipient only as the address
+// the caller wrote, and the recipient's record names the sender only by the
+// name it asserted. The one value both records share is the delivery id the
+// sending vendor minted (conversation.v1.PeerDeliveryId): the sender's
+// SendMessage result carries it (AgentSendMessagePeerSession.delivery_id), and
+// so does the recipient's record of the message
+// (PeerMessageInterSession.delivery_id). The daemon draws each end's row and
+// names the session at the other end by this join.
+//
+// WHY THE STORE CAN ANSWER. Every session on the host writes into this one
+// store, so both records are here whichever sessions hold them, each indexed by
+// its delivery id at write time.
+//
+// DELIBERATELY NOT SCOPED TO THE CALLER'S LINEAGE, unlike GetLiveWork and
+// GetAgentByVendorTask: the question is which OTHER session holds a record, so
+// a lineage scope would refuse every answer the endpoint exists to give. The
+// answer is agent ids, never either record's content.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask which sessions hold the two ends of one cross-session message.
+message GetPeerDeliveryRequest {
+  // REQUIRED. The delivery id, verbatim. UNSET or empty is refused with
+  // `invalid_request`.
+  conversation.v1.PeerDeliveryId delivery_id = 1;
+}
+
+// Both ends, or why they could not be read. THE ARM IS THE ANSWER.
+message GetPeerDeliveryResponse {
+  oneof result {
+    GetPeerDeliverySuccess success = 1;
+    GetPeerDeliveryFailure failure = 2;
+  }
+}
+
+// The index was read. Each end is answered on its own, because either record
+// may be missing while the other is not: a session outside the host's own
+// writes no record here, and the recipient's copy lands only when it is drawn
+// into the recipient's conversation.
+message GetPeerDeliverySuccess {
+  // The SENDING end: the session whose SendMessage result carries the id.
+  GetPeerDeliveryEnd sender = 1;
+  // The RECEIVING end: the session whose conversation holds the delivered
+  // message.
+  GetPeerDeliveryEnd recipient = 2;
+}
+
+// One end of the message. THE ARM IS WHETHER IT IS RECORDED.
+message GetPeerDeliveryEnd {
+  oneof end {
+    // The MAIN agent of the session holding this end's record: the root of the
+    // lineage of the book it is filed in. A main agent's id is its session's
+    // original vendor session id, which is how the caller names the session.
+    conversation.v1.AgentId session = 1;
+    // No recorded session holds this end: it is a session outside the host's
+    // own, or its record has not been written yet.
+    GetPeerDeliveryNotRecorded not_recorded = 2;
+  }
+}
+
+// No recorded session holds this end of the message.
+message GetPeerDeliveryNotRecorded {}
+
+// The index could not be read. THE ARM IS WHY.
+message GetPeerDeliveryFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // `delivery_id` unset or empty.
+    GetPeerDeliveryInvalidRequest invalid_request = 2;
+    // The database failed, or the record breaks the index's invariant (one end
+    // of one delivery filed under two sessions); `detail` says which.
+    GetPeerDeliveryStorageFailure storage_failure = 3;
+  }
+}
+// The request was malformed.
+message GetPeerDeliveryInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+// The database failed, or the index broke its invariant; `detail` says which.
+message GetPeerDeliveryStorageFailure {}

@@ -203,9 +203,9 @@ type ShimClient interface {
 	// the transcripts themselves. Spends nothing; see
 	// endpoint_read_transcripts.proto.
 	ReadTranscripts(context.Context, *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error)
-	// Which session received one cross-session message, by its delivery id.
-	// Read from the host's one store, so any running shim answers for any
-	// session. See endpoint_resolve_peer_delivery.proto.
+	// Which sessions are the two ends of one cross-session message, by its
+	// delivery id. Read from the host's one store, so any running shim answers
+	// for any session. See endpoint_resolve_peer_delivery.proto.
 	ResolvePeerDelivery(context.Context, *connect.Request[v1.ResolvePeerDeliveryRequest]) (*connect.Response[v1.ResolvePeerDeliveryResponse], error)
 	// The prompts (and, after a /compact, the compaction summary) the daemon
 	// summarizes into a workspace title of its own when the vendor has written
@@ -628,9 +628,9 @@ type ShimHandler interface {
 	// the transcripts themselves. Spends nothing; see
 	// endpoint_read_transcripts.proto.
 	ReadTranscripts(context.Context, *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error)
-	// Which session received one cross-session message, by its delivery id.
-	// Read from the host's one store, so any running shim answers for any
-	// session. See endpoint_resolve_peer_delivery.proto.
+	// Which sessions are the two ends of one cross-session message, by its
+	// delivery id. Read from the host's one store, so any running shim answers
+	// for any session. See endpoint_resolve_peer_delivery.proto.
 	ResolvePeerDelivery(context.Context, *connect.Request[v1.ResolvePeerDeliveryRequest]) (*connect.Response[v1.ResolvePeerDeliveryResponse], error)
 	// The prompts (and, after a /compact, the compaction summary) the daemon
 	// summarizes into a workspace title of its own when the vendor has written

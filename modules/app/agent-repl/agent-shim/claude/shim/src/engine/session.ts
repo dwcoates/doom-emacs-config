@@ -149,7 +149,6 @@ import {
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
 import { commandCatalogOf, commandCatalogUpdate } from "../convert/command-catalog.js";
-import { exitEndsLevel, vendorProcessEnded, vendorProcessRunning, vendorProcessUpdate } from "../convert/vendor-process.js";
 import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable, ShellRunStarts, type LiveWorkEntry } from "./detached.js";
 import {
@@ -243,12 +242,6 @@ export interface QuerySpec {
    * the mocked vendor has no child to end.
    */
   readonly onChildExit?: (exit: VendorEnd) => void;
-  /**
-   * The vendor child's pid, once its spawn returned one: what the session
-   * states as its vendor process (SessionVendorProcess). Optional: the mocked
-   * vendor has no child.
-   */
-  readonly onChildSpawn?: (pid: number) => void;
 }
 
 /**
@@ -256,8 +249,6 @@ export interface QuerySpec {
  * for a child that never ran — the errno its spawn failed with.
  */
 export interface VendorEnd {
-  /** The pid of the child that ended; absent for one that never spawned. */
-  readonly pid?: number;
   readonly code: number | null;
   readonly signal: string | null;
   readonly spawnErrno?: string;
@@ -1024,13 +1015,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * that there was never a child to end.
    */
   let vendorExit: VendorEnd | undefined;
-  /**
-   * THE VENDOR PROCESS LEVEL standing now (SessionVendorProcess), held so an
-   * exit can be told to be the current child's. The pushes replay it to every
-   * new session watch. Absent until a first child spawned, which is forever
-   * for the mocked vendor.
-   */
-  let vendorProcess: conversationv1.SessionVendorProcess | undefined;
   let loop: Promise<void> | undefined;
   /**
    * WHERE THE LIVE QUERY'S MESSAGE LOOP IS PARKED: waiting on the vendor for
@@ -1833,61 +1817,53 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHICH SESSIONS hold the two ends of one cross-session delivery, from the
+   * host's store. An end no recorded session holds is an answer (an outside
+   * session, or a record not written yet); only a store that could not answer
+   * is a failure, recorded here, at the read that owns it.
+   */
+  async function resolvePeerDeliveryHere(
+    request: shimv1.ResolvePeerDeliveryRequest,
+  ): Promise<shimv1.ResolvePeerDeliveryResponse> {
+    const deliveryId = request.deliveryId?.value ?? "";
+    const answer = await deps.persistence.peerDelivery(deliveryId);
+    if (answer.kind === "failed") {
+      LOGGER.error(
+        { delivery_id: deliveryId, detail: answer.detail },
+        "the store could not say which sessions hold a peer delivery",
+      );
+      return create(shimv1.ResolvePeerDeliveryResponseSchema, {
+        result: {
+          case: "failure",
+          value: create(shimv1.ResolvePeerDeliveryFailureSchema, {
+            detail: answer.detail,
+            kind: { case: "storeUnavailable", value: create(shimv1.ResolvePeerDeliveryStoreUnavailableSchema, {}) },
+          }),
+        },
+      });
+    }
+    LOGGER.debug(
+      { delivery_id: deliveryId, sender: answer.sender?.value ?? "not recorded", recipient: answer.recipient?.value ?? "not recorded" },
+      "a peer delivery was resolved to its ends",
+    );
+    return create(shimv1.ResolvePeerDeliveryResponseSchema, {
+      result: {
+        case: "success",
+        value: create(shimv1.ResolvePeerDeliverySuccessSchema, {
+          sender: deliveryEndOf(answer.sender),
+          recipient: deliveryEndOf(answer.recipient),
+        }),
+      },
+    });
+  }
+
+  /**
    * Every conversation filed under this shim's working directory.
    *
    * IT ANSWERS THE DIRECTORY, NOT THE SESSION, so a shim with no identity yet
    * still answers: the list is a fact about the working directory, and a
    * session that has not named itself simply flags nothing as bound.
    */
-  /**
-   * WHICH SESSION holds one cross-session delivery, from the host's store. The
-   * not-found answer is an answer (an outside session, or a copy not written
-   * yet); only a store that could not answer is a failure, recorded here, at
-   * the read that owns it.
-   */
-  async function resolvePeerDeliveryHere(
-    request: shimv1.ResolvePeerDeliveryRequest,
-  ): Promise<shimv1.ResolvePeerDeliveryResponse> {
-    const deliveryId = request.deliveryId?.value ?? "";
-    const answer = await deps.persistence.peerRecipient(deliveryId);
-    switch (answer.kind) {
-      case "found":
-        LOGGER.debug({ delivery_id: deliveryId, session: answer.session.value }, "a peer delivery resolved to a session");
-        return create(shimv1.ResolvePeerDeliveryResponseSchema, {
-          result: {
-            case: "success",
-            value: create(shimv1.ResolvePeerDeliverySuccessSchema, {
-              recipient: { case: "session", value: answer.session },
-            }),
-          },
-        });
-      case "not_found":
-        LOGGER.debug({ delivery_id: deliveryId }, "no recorded session holds the peer delivery");
-        return create(shimv1.ResolvePeerDeliveryResponseSchema, {
-          result: {
-            case: "success",
-            value: create(shimv1.ResolvePeerDeliverySuccessSchema, {
-              recipient: { case: "notRecorded", value: create(shimv1.ResolvePeerDeliveryNotRecordedSchema, {}) },
-            }),
-          },
-        });
-      case "failed":
-        LOGGER.error(
-          { delivery_id: deliveryId, detail: answer.detail },
-          "the store could not say which session holds a peer delivery",
-        );
-        return create(shimv1.ResolvePeerDeliveryResponseSchema, {
-          result: {
-            case: "failure",
-            value: create(shimv1.ResolvePeerDeliveryFailureSchema, {
-              detail: answer.detail,
-              kind: { case: "storeUnavailable", value: create(shimv1.ResolvePeerDeliveryStoreUnavailableSchema, {}) },
-            }),
-          },
-        });
-    }
-  }
-
   function readTranscriptsHere(): shimv1.ReadTranscriptsResponse {
     const read = readTranscripts(
       deps.env.configDir,
@@ -2797,22 +2773,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     LOGGER.debug({ characters: chunk.length }, "the vendor child wrote to stderr");
   }
 
-  /** State the spawned child as the session's running vendor process. */
-  function noteVendorSpawn(pid: number): void {
-    vendorProcess = vendorProcessRunning(pid, deps.nowMs());
-    LOGGER.debug({ vendor_pid: pid }, "the vendor child spawned; its pid is stated as the session's vendor process");
-    pushes.push(vendorProcessUpdate(vendorProcess));
-  }
-
   /** Remember how the vendor child ended, for the death record. */
   function noteVendorExit(exit: VendorEnd): void {
     vendorExit = exit;
-    // ONLY THE CURRENT CHILD'S EXIT ENDS THE LEVEL: a replaced child's late
-    // exit would otherwise erase the child that replaced it.
-    if (exitEndsLevel(vendorProcess, exit.pid)) {
-      vendorProcess = vendorProcessEnded();
-      pushes.push(vendorProcessUpdate(vendorProcess));
-    }
     LOGGER.debug(
       {
         vendor_exit_code: exit.code ?? -1,
@@ -4701,7 +4664,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       prompt: queue,
       onStderr: noteVendorStderr,
       onChildExit: noteVendorExit,
-      onChildSpawn: noteVendorSpawn,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
       ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
       ...(resumeDropsTurn === undefined ? {} : { resumeDropsTurn }),
@@ -7445,6 +7407,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     },
   };
   return engine;
+}
+
+/** One end of a peer delivery on the wire: its session, or not recorded. */
+function deliveryEndOf(session: conversationv1.AgentId | undefined): shimv1.ResolvePeerDeliveryEnd {
+  return create(shimv1.ResolvePeerDeliveryEndSchema, {
+    end:
+      session === undefined
+        ? { case: "notRecorded", value: create(shimv1.ResolvePeerDeliveryNotRecordedSchema, {}) }
+        : { case: "session", value: session },
+  });
 }
 
 /**

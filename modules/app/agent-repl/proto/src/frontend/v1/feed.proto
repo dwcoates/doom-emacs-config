@@ -440,18 +440,20 @@ message FeedPeerMessageFrom {
   // a socket path, and never the vendor's per-process session suffix for a
   // sender that is one of agent-repl's own workspaces.
   FeedPeerMessageFromName name = 1;
-  // WHAT THE NAME NAMES. THE ARM IS THE SENDER'S KIND.
+  // WHAT THE NAME NAMES. THE ARM IS HOW FAR THE SENDER IS RESOLVED.
   oneof sender {
     // The sender is one of agent-repl's own workspaces, and `name` is its
     // workspace name, the one the sidebar draws.
     FeedPeerMessageFromWorkspace workspace = 2;
-    // The sender is NOT one of agent-repl's workspaces (a session started
-    // outside agent-repl, or one whose vendor process is gone, so its pid no
-    // longer names a workspace), and `name` is the session name the sender
-    // gave itself.
-    FeedPeerMessageFromOutsideSession outside_session = 3;
-    // The sender is none of agent-repl's workspaces and stated no session
-    // name, so `name` is the daemon's generic stand-in for another session.
+    // No agent-repl workspace is known to have sent the message: the sender is
+    // a session outside agent-repl, or its own record of the send has not
+    // landed yet. `name` is the session name the sender gave itself. The
+    // daemon redraws the row in place, as `workspace`, when the sender's
+    // record lands in a workspace.
+    FeedPeerMessageFromUnresolved unresolved = 3;
+    // No agent-repl workspace is known to have sent the message, and the
+    // sender stated no session name, so `name` is the daemon's generic
+    // stand-in for another session.
     FeedPeerMessageFromUnnamed unnamed = 4;
   }
 }
@@ -462,9 +464,11 @@ message FeedPeerMessageFromName {
 }
 // The sender is one of agent-repl's workspaces.
 message FeedPeerMessageFromWorkspace {}
-// The sender is a session outside agent-repl, named by its own session name.
-message FeedPeerMessageFromOutsideSession {}
-// The sender is a session outside agent-repl that stated no name.
+// No agent-repl workspace is known to have sent the message; the sender is
+// named by its own session name.
+message FeedPeerMessageFromUnresolved {}
+// No agent-repl workspace is known to have sent the message, and it stated no
+// name.
 message FeedPeerMessageFromUnnamed {}
 
 // The marker a subagent's hand-back leaves in the conversation: a small

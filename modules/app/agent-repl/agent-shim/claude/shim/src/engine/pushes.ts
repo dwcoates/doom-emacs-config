@@ -171,13 +171,7 @@ export class SessionPushes {
   // without being awaited, so it usually lands before the daemon's watch
   // exists, and a consumer that attached later would otherwise offer no
   // completions until the catalog next changed.
-  //
-  // `vendorProcess` is a LEVEL whose producer obligation is restatement on
-  // every open (session.proto): the first child spawns inside StartSession,
-  // before the daemon's watch exists, and a daemon that never learned the pid
-  // could not name this session as the sender of its cross-session messages.
   private static readonly REPLAYED = [
-    "vendorProcess",
     "contextUsage",
     "modelChanged",
     "permissionModeChanged",

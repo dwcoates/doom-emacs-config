@@ -7857,21 +7857,47 @@ describe("ResolvePeerDelivery", () => {
     create(shimv1.ResolvePeerDeliveryRequestSchema, {
       deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: "m-1" }),
     });
+  const session = (value: string): conversationv1.AgentId => create(conversationv1.AgentIdSchema, { value });
 
-  it("answers the session the store names", async () => {
+  /** The session an answered end names, or "not recorded". */
+  function endName(end: shimv1.ResolvePeerDeliveryEnd | undefined): string {
+    return end?.end.case === "session" ? end.end.value.value : end?.end.case === "notRecorded" ? "not recorded" : "unset";
+  }
+
+  it("answers the sending session the store names", async () => {
     // Arrange.
     const h = harness();
-    h.persistence.peerRecipients.set("m-1", {
-      kind: "found",
-      session: create(conversationv1.AgentIdSchema, { value: "vendor-session-b" }),
-    });
+    h.persistence.peerDeliveries.set("m-1", { kind: "read", sender: session("session-a"), recipient: session("session-b") });
 
     // Act.
     const response = await h.engine.resolvePeerDelivery(request());
 
     // Assert.
-    const success = response.result.case === "success" ? response.result.value : undefined;
-    expect(success?.recipient.case === "session" ? success.recipient.value.value : "").toBe("vendor-session-b");
+    expect(endName(response.result.case === "success" ? response.result.value.sender : undefined)).toBe("session-a");
+  });
+
+  it("answers the receiving session the store names", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.peerDeliveries.set("m-1", { kind: "read", sender: session("session-a"), recipient: session("session-b") });
+
+    // Act.
+    const response = await h.engine.resolvePeerDelivery(request());
+
+    // Assert.
+    expect(endName(response.result.case === "success" ? response.result.value.recipient : undefined)).toBe("session-b");
+  });
+
+  it("answers an end no recorded session holds as not recorded, a success", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.peerDeliveries.set("m-1", { kind: "read", sender: session("session-a"), recipient: undefined });
+
+    // Act.
+    const response = await h.engine.resolvePeerDelivery(request());
+
+    // Assert.
+    expect(endName(response.result.case === "success" ? response.result.value.recipient : undefined)).toBe("not recorded");
   });
 
   it("asks the store for the delivery id verbatim", async () => {
@@ -7882,24 +7908,13 @@ describe("ResolvePeerDelivery", () => {
     await h.engine.resolvePeerDelivery(request());
 
     // Assert.
-    expect(h.persistence.peerRecipientLookups).toEqual(["m-1"]);
-  });
-
-  it("answers not_recorded, a success, when no recorded session holds the delivery", async () => {
-    // Arrange.
-    const h = harness();
-
-    // Act.
-    const response = await h.engine.resolvePeerDelivery(request());
-
-    // Assert.
-    expect(response.result.case === "success" ? response.result.value.recipient.case : "").toBe("notRecorded");
+    expect(h.persistence.peerDeliveryLookups).toEqual(["m-1"]);
   });
 
   it("answers store_unavailable when the store could not answer", async () => {
     // Arrange.
     const h = harness();
-    h.persistence.peerRecipients.set("m-1", { kind: "failed", detail: "database is locked" });
+    h.persistence.peerDeliveries.set("m-1", { kind: "failed", detail: "database is locked" });
 
     // Act.
     const response = await h.engine.resolvePeerDelivery(request());
@@ -7912,106 +7927,18 @@ describe("ResolvePeerDelivery", () => {
   it("records a store that could not answer at ERROR, naming the delivery", async () => {
     // Arrange.
     const h = harness();
-    h.persistence.peerRecipients.set("m-1", { kind: "failed", detail: "database is locked" });
+    h.persistence.peerDeliveries.set("m-1", { kind: "failed", detail: "database is locked" });
     const from = logSinkMark();
 
     // Act.
     await h.engine.resolvePeerDelivery(request());
 
     // Assert.
-    const message = "the store could not say which session holds a peer delivery";
+    const message = "the store could not say which sessions hold a peer delivery";
     expect({ level: logLevelFor(from, message), context: logContextFor(from, message) }).toMatchObject({
       level: "error",
       context: { delivery_id: "m-1", detail: "database is locked" },
     });
-  });
-});
-
-describe("the vendor process level", () => {
-  /** The pid each pushed level names, or "ended" for the ended arm. */
-  function levelOf(update: conversationv1.SessionUpdate["update"]): number | "ended" | undefined {
-    if (update.case !== "vendorProcess") return undefined;
-    return update.value.state.case === "running" ? update.value.state.value.pid : "ended";
-  }
-
-  it("states the spawned child's pid as the running vendor process", async () => {
-    // Arrange.
-    const h = harness();
-
-    // Act.
-    const levels = await pushedUpdates(h, levelOf, async () => {
-      void h.engine.startSession(freshRequest());
-      (await untilQuery(h, 0)).spec.onChildSpawn?.(29021);
-    });
-
-    // Assert.
-    expect(levels).toEqual([29021]);
-  });
-
-  it("stamps the running level with the instant the shim saw the spawn", async () => {
-    // Arrange.
-    const h = harness({ nowMs: 7_000 });
-
-    // Act.
-    const instants = await pushedUpdates(
-      h,
-      (update) =>
-        update.case === "vendorProcess" && update.value.state.case === "running"
-          ? update.value.state.value.startedAtMs
-          : undefined,
-      async () => {
-        void h.engine.startSession(freshRequest());
-        (await untilQuery(h, 0)).spec.onChildSpawn?.(29021);
-      },
-    );
-
-    // Assert.
-    expect(instants).toEqual([7_000n]);
-  });
-
-  it("ends the level on the running child's own exit", async () => {
-    // Arrange.
-    const h = harness();
-
-    // Act.
-    const levels = await pushedUpdates(h, levelOf, async () => {
-      void h.engine.startSession(freshRequest());
-      const first = await untilQuery(h, 0);
-      first.spec.onChildSpawn?.(29021);
-      first.spec.onChildExit?.({ code: 0, signal: null, pid: 29021 });
-    });
-
-    // Assert.
-    expect(levels).toEqual([29021, "ended"]);
-  });
-
-  it("keeps the level standing on a replaced child's late exit", async () => {
-    // Arrange.
-    const h = harness();
-
-    // Act.
-    const levels = await pushedUpdates(h, levelOf, async () => {
-      void h.engine.startSession(freshRequest());
-      const first = await untilQuery(h, 0);
-      first.spec.onChildSpawn?.(29021);
-      first.spec.onChildExit?.({ code: null, signal: "SIGTERM", pid: 28000 });
-    });
-
-    // Assert.
-    expect(levels).toEqual([29021]);
-  });
-
-  it("replays the standing level to a watch opened after the spawn", async () => {
-    // Arrange.
-    const h = harness();
-    void h.engine.startSession(freshRequest());
-    (await untilQuery(h, 0)).spec.onChildSpawn?.(29021);
-
-    // Act.
-    const levels = await pushedUpdates(h, levelOf, () => Promise.resolve());
-
-    // Assert.
-    expect(levels).toEqual([29021]);
   });
 });
 

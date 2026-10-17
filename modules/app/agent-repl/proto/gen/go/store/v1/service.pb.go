@@ -33,7 +33,7 @@ var File_store_v1_service_proto protoreflect.FileDescriptor
 
 const file_store_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x16store/v1/service.proto\x12\bstore.v1\x1a0store/v1/endpoint_get_agent_by_vendor_task.proto\x1a)store/v1/endpoint_get_detached_work.proto\x1a%store/v1/endpoint_get_live_work.proto\x1a*store/v1/endpoint_get_peer_recipient.proto\x1a+store/v1/endpoint_get_run_settlements.proto\x1a,store/v1/endpoint_get_shell_run_claims.proto\x1a+store/v1/endpoint_get_sidecar_cursors.proto\x1a$store/v1/endpoint_get_workflow.proto\x1a+store/v1/endpoint_list_residue_shapes.proto\x1a*store/v1/endpoint_open_agent_session.proto\x1a'store/v1/endpoint_read_agent_page.proto\x1a+store/v1/endpoint_watch_agent_session.proto\x1a&store/v1/endpoint_watch_bash_run.proto\x1a#store/v1/endpoint_write_batch.proto2\xdc\t\n" +
+	"\x16store/v1/service.proto\x12\bstore.v1\x1a0store/v1/endpoint_get_agent_by_vendor_task.proto\x1a)store/v1/endpoint_get_detached_work.proto\x1a%store/v1/endpoint_get_live_work.proto\x1a)store/v1/endpoint_get_peer_delivery.proto\x1a+store/v1/endpoint_get_run_settlements.proto\x1a,store/v1/endpoint_get_shell_run_claims.proto\x1a+store/v1/endpoint_get_sidecar_cursors.proto\x1a$store/v1/endpoint_get_workflow.proto\x1a+store/v1/endpoint_list_residue_shapes.proto\x1a*store/v1/endpoint_open_agent_session.proto\x1a'store/v1/endpoint_read_agent_page.proto\x1a+store/v1/endpoint_watch_agent_session.proto\x1a&store/v1/endpoint_watch_bash_run.proto\x1a#store/v1/endpoint_write_batch.proto2\xd9\t\n" +
 	"\tShimStore\x12Y\n" +
 	"\x10OpenAgentSession\x12!.store.v1.OpenAgentSessionRequest\x1a\".store.v1.OpenAgentSessionResponse\x12^\n" +
 	"\x11WatchAgentSession\x12\".store.v1.WatchAgentSessionRequest\x1a#.store.v1.WatchAgentSessionResponse0\x01\x12P\n" +
@@ -46,8 +46,8 @@ const file_store_v1_service_proto_rawDesc = "" +
 	"\x14GetAgentByVendorTask\x12%.store.v1.GetAgentByVendorTaskRequest\x1a&.store.v1.GetAgentByVendorTaskResponse\x12\\\n" +
 	"\x11GetShellRunClaims\x12\".store.v1.GetShellRunClaimsRequest\x1a#.store.v1.GetShellRunClaimsResponse\x12\\\n" +
 	"\x11GetRunSettlements\x12\".store.v1.GetRunSettlementsRequest\x1a#.store.v1.GetRunSettlementsResponse\x12V\n" +
-	"\x0fGetDetachedWork\x12 .store.v1.GetDetachedWorkRequest\x1a!.store.v1.GetDetachedWorkResponse\x12Y\n" +
-	"\x10GetPeerRecipient\x12!.store.v1.GetPeerRecipientRequest\x1a\".store.v1.GetPeerRecipientResponse\x12G\n" +
+	"\x0fGetDetachedWork\x12 .store.v1.GetDetachedWorkRequest\x1a!.store.v1.GetDetachedWorkResponse\x12V\n" +
+	"\x0fGetPeerDelivery\x12 .store.v1.GetPeerDeliveryRequest\x1a!.store.v1.GetPeerDeliveryResponse\x12G\n" +
 	"\n" +
 	"WriteBatch\x12\x1b.store.v1.WriteBatchRequest\x1a\x1c.store.v1.WriteBatchResponseB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
@@ -64,7 +64,7 @@ var file_store_v1_service_proto_goTypes = []any{
 	(*GetShellRunClaimsRequest)(nil),     // 9: store.v1.GetShellRunClaimsRequest
 	(*GetRunSettlementsRequest)(nil),     // 10: store.v1.GetRunSettlementsRequest
 	(*GetDetachedWorkRequest)(nil),       // 11: store.v1.GetDetachedWorkRequest
-	(*GetPeerRecipientRequest)(nil),      // 12: store.v1.GetPeerRecipientRequest
+	(*GetPeerDeliveryRequest)(nil),       // 12: store.v1.GetPeerDeliveryRequest
 	(*WriteBatchRequest)(nil),            // 13: store.v1.WriteBatchRequest
 	(*OpenAgentSessionResponse)(nil),     // 14: store.v1.OpenAgentSessionResponse
 	(*WatchAgentSessionResponse)(nil),    // 15: store.v1.WatchAgentSessionResponse
@@ -78,7 +78,7 @@ var file_store_v1_service_proto_goTypes = []any{
 	(*GetShellRunClaimsResponse)(nil),    // 23: store.v1.GetShellRunClaimsResponse
 	(*GetRunSettlementsResponse)(nil),    // 24: store.v1.GetRunSettlementsResponse
 	(*GetDetachedWorkResponse)(nil),      // 25: store.v1.GetDetachedWorkResponse
-	(*GetPeerRecipientResponse)(nil),     // 26: store.v1.GetPeerRecipientResponse
+	(*GetPeerDeliveryResponse)(nil),      // 26: store.v1.GetPeerDeliveryResponse
 	(*WriteBatchResponse)(nil),           // 27: store.v1.WriteBatchResponse
 }
 var file_store_v1_service_proto_depIdxs = []int32{
@@ -94,7 +94,7 @@ var file_store_v1_service_proto_depIdxs = []int32{
 	9,  // 9: store.v1.ShimStore.GetShellRunClaims:input_type -> store.v1.GetShellRunClaimsRequest
 	10, // 10: store.v1.ShimStore.GetRunSettlements:input_type -> store.v1.GetRunSettlementsRequest
 	11, // 11: store.v1.ShimStore.GetDetachedWork:input_type -> store.v1.GetDetachedWorkRequest
-	12, // 12: store.v1.ShimStore.GetPeerRecipient:input_type -> store.v1.GetPeerRecipientRequest
+	12, // 12: store.v1.ShimStore.GetPeerDelivery:input_type -> store.v1.GetPeerDeliveryRequest
 	13, // 13: store.v1.ShimStore.WriteBatch:input_type -> store.v1.WriteBatchRequest
 	14, // 14: store.v1.ShimStore.OpenAgentSession:output_type -> store.v1.OpenAgentSessionResponse
 	15, // 15: store.v1.ShimStore.WatchAgentSession:output_type -> store.v1.WatchAgentSessionResponse
@@ -108,7 +108,7 @@ var file_store_v1_service_proto_depIdxs = []int32{
 	23, // 23: store.v1.ShimStore.GetShellRunClaims:output_type -> store.v1.GetShellRunClaimsResponse
 	24, // 24: store.v1.ShimStore.GetRunSettlements:output_type -> store.v1.GetRunSettlementsResponse
 	25, // 25: store.v1.ShimStore.GetDetachedWork:output_type -> store.v1.GetDetachedWorkResponse
-	26, // 26: store.v1.ShimStore.GetPeerRecipient:output_type -> store.v1.GetPeerRecipientResponse
+	26, // 26: store.v1.ShimStore.GetPeerDelivery:output_type -> store.v1.GetPeerDeliveryResponse
 	27, // 27: store.v1.ShimStore.WriteBatch:output_type -> store.v1.WriteBatchResponse
 	14, // [14:28] is the sub-list for method output_type
 	0,  // [0:14] is the sub-list for method input_type
@@ -125,7 +125,7 @@ func file_store_v1_service_proto_init() {
 	file_store_v1_endpoint_get_agent_by_vendor_task_proto_init()
 	file_store_v1_endpoint_get_detached_work_proto_init()
 	file_store_v1_endpoint_get_live_work_proto_init()
-	file_store_v1_endpoint_get_peer_recipient_proto_init()
+	file_store_v1_endpoint_get_peer_delivery_proto_init()
 	file_store_v1_endpoint_get_run_settlements_proto_init()
 	file_store_v1_endpoint_get_shell_run_claims_proto_init()
 	file_store_v1_endpoint_get_sidecar_cursors_proto_init()

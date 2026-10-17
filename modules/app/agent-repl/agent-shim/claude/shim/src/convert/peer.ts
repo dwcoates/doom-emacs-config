@@ -33,7 +33,6 @@ export interface RawPeerOrigin {
   readonly senderTaskId?: string;
   readonly body?: string;
   readonly handback?: boolean;
-  readonly verifiedPeerPid?: number;
   readonly msg_id?: string;
 }
 
@@ -69,7 +68,7 @@ export function peerFacts(record: Record<string, unknown>, fallbackBody: string)
  * the same way (`shim-sidecar/internal/convert/user.go`), so both planes state
  * one kind for one record.
  */
-function peerKindOf(record: Record<string, unknown>, nowMs: () => number): conversationv1.PeerMessage["kind"] {
+function peerKindOf(record: Record<string, unknown>): conversationv1.PeerMessage["kind"] {
   const origin = record.origin as RawPeerOrigin | undefined;
   if (origin?.handback === true) {
     return {
@@ -77,49 +76,27 @@ function peerKindOf(record: Record<string, unknown>, nowMs: () => number): conve
       value: create(conversationv1.PeerMessageSubagentHandbackSchema, {}),
     };
   }
-  return { case: "interSession", value: interSessionOf(origin ?? {}, record, nowMs) };
+  return { case: "interSession", value: interSessionOf(origin ?? {}) };
 }
 
 /**
- * WHO SENT an inter-session message, as the vendor states it. Shared with the
+ * WHAT THE VENDOR SAYS about who sent an inter-session message. Shared with the
  * sidecar by contract (`shim-sidecar/internal/convert/user.go`
- * interSessionOf): the same three origin fields, read the same way, so both
- * planes state one sender for one record.
+ * interSessionOf): the same two origin fields, read the same way, so both
+ * planes state one record alike.
  *
- * - `verifiedPeerPid`, the kernel-verified pid of the connecting process, which
- *   the vendor says to key sender identity on. Its instant is the record's own
- *   `timestamp` when stated (the vendor's), else the receipt instant.
- * - `name`, the sender's asserted session name.
- * - `msg_id`, the delivery id the sender's own SendMessage result carries.
+ * - `name`, the sender's asserted session name: what names a sender outside
+ *   agent-repl.
+ * - `msg_id`, the delivery id the sender's own SendMessage result carries: what
+ *   joins this message to the workspace that sent it.
  */
-export function interSessionOf(
-  origin: RawPeerOrigin,
-  record: Record<string, unknown>,
-  nowMs: () => number,
-): conversationv1.PeerMessageInterSession {
-  const pid = origin.verifiedPeerPid;
+export function interSessionOf(origin: RawPeerOrigin): conversationv1.PeerMessageInterSession {
   const name = (origin.name ?? "").trim();
   const deliveryId = origin.msg_id ?? "";
   return create(conversationv1.PeerMessageInterSessionSchema, {
-    ...(typeof pid === "number" && Number.isInteger(pid) && pid > 0
-      ? {
-          senderProcess: create(conversationv1.PeerMessageSenderProcessSchema, {
-            verifiedPid: pid,
-            receivedAtMs: BigInt(recordInstantMs(record) ?? nowMs()),
-          }),
-        }
-      : {}),
     ...(name === "" ? {} : { senderSessionName: create(conversationv1.PeerMessageSenderSessionNameSchema, { text: name }) }),
     ...(deliveryId === "" ? {} : { deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: deliveryId }) }),
   });
-}
-
-/** The record's own `timestamp` (ISO), in Unix ms, or undefined when it states none it parses. */
-function recordInstantMs(record: Record<string, unknown>): number | undefined {
-  const raw = record.timestamp;
-  if (typeof raw !== "string" || raw === "") return undefined;
-  const ms = Date.parse(raw);
-  return Number.isNaN(ms) ? undefined : ms;
 }
 
 /** The first text of a user message's content, whether a string or a block list. */
@@ -171,7 +148,7 @@ export function convertPeerMessage(
     sender: facts.sender,
     body: facts.body,
     id: uuid,
-    kind: peerKindOf(record, context.nowMs),
+    kind: peerKindOf(record),
   });
   LOGGER.logVerbose(
     { uuid, sender: facts.sender, agent: book.value, kind: peer.kind.case },

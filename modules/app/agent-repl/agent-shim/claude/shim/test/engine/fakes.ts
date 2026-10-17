@@ -35,7 +35,7 @@ import type {
 } from "../../src/store/persistence.js";
 import { PersistenceError, REPAINT } from "../../src/store/persistence.js";
 import type { DetachedWorkAnswer } from "../../src/store/detached-work.js";
-import type { PeerRecipientAnswer } from "../../src/store/peer-recipient.js";
+import type { PeerDeliveryAnswer } from "../../src/store/peer-delivery.js";
 import type { VendorTaskAnswer } from "../../src/store/locator.js";
 import type { TaskAgentKnowledge, TaskAwaitingKind } from "../../src/convert/detached.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
@@ -588,15 +588,15 @@ export class RecordingPersistence implements Persistence {
     return Promise.resolve(this.detachedWorks.get(unit.value) ?? { kind: "not_found" });
   }
   /**
-   * The store's answer per delivery id; an unlisted id answers `not_found`,
-   * which is what a store holding no such delivery says.
+   * The store's answer per delivery id; an unlisted id answers both ends not
+   * recorded, which is what a store holding no such delivery says.
    */
-  readonly peerRecipients = new Map<string, PeerRecipientAnswer>();
-  /** Every peer recipient lookup, by delivery id, in order. */
-  readonly peerRecipientLookups: string[] = [];
-  peerRecipient(deliveryId: string): Promise<PeerRecipientAnswer> {
-    this.peerRecipientLookups.push(deliveryId);
-    return Promise.resolve(this.peerRecipients.get(deliveryId) ?? { kind: "not_found" });
+  readonly peerDeliveries = new Map<string, PeerDeliveryAnswer>();
+  /** Every peer delivery lookup, by delivery id, in order. */
+  readonly peerDeliveryLookups: string[] = [];
+  peerDelivery(deliveryId: string): Promise<PeerDeliveryAnswer> {
+    this.peerDeliveryLookups.push(deliveryId);
+    return Promise.resolve(this.peerDeliveries.get(deliveryId) ?? { kind: "read", sender: undefined, recipient: undefined });
   }
   /**
    * The durable writes and shell-run opens, in the order they were made — so a

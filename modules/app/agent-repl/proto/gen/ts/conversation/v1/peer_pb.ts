@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/peer.proto.
  */
 export const file_conversation_v1_peer: GenFile = /*@__PURE__*/
-  fileDesc("Chpjb252ZXJzYXRpb24vdjEvcGVlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIvYBCgtQZWVyTWVzc2FnZRInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEg4KBnNlbmRlchgCIAEoCRIMCgRib2R5GAMgASgJEgoKAmlkGAQgASgJEkEKDWludGVyX3Nlc3Npb24YBSABKAsyKC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VJbnRlclNlc3Npb25IABJJChFzdWJhZ2VudF9oYW5kYmFjaxgGIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVN1YmFnZW50SGFuZGJhY2tIAEIGCgRraW5kIqgCChdQZWVyTWVzc2FnZUludGVyU2Vzc2lvbhJGCg5zZW5kZXJfcHJvY2VzcxgBIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVNlbmRlclByb2Nlc3NIAIgBARJPChNzZW5kZXJfc2Vzc2lvbl9uYW1lGAIgASgLMi0uY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlU2VuZGVyU2Vzc2lvbk5hbWVIAYgBARI5CgtkZWxpdmVyeV9pZBgDIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5QZWVyRGVsaXZlcnlJZEgCiAEBQhEKD19zZW5kZXJfcHJvY2Vzc0IWChRfc2VuZGVyX3Nlc3Npb25fbmFtZUIOCgxfZGVsaXZlcnlfaWQiSAoYUGVlck1lc3NhZ2VTZW5kZXJQcm9jZXNzEhQKDHZlcmlmaWVkX3BpZBgBIAEoDRIWCg5yZWNlaXZlZF9hdF9tcxgCIAEoAyIsChxQZWVyTWVzc2FnZVNlbmRlclNlc3Npb25OYW1lEgwKBHRleHQYASABKAkiHQobUGVlck1lc3NhZ2VTdWJhZ2VudEhhbmRiYWNrQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
+  fileDesc("Chpjb252ZXJzYXRpb24vdjEvcGVlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIvYBCgtQZWVyTWVzc2FnZRInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEg4KBnNlbmRlchgCIAEoCRIMCgRib2R5GAMgASgJEgoKAmlkGAQgASgJEkEKDWludGVyX3Nlc3Npb24YBSABKAsyKC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VJbnRlclNlc3Npb25IABJJChFzdWJhZ2VudF9oYW5kYmFjaxgGIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVN1YmFnZW50SGFuZGJhY2tIAEIGCgRraW5kIs0BChdQZWVyTWVzc2FnZUludGVyU2Vzc2lvbhJPChNzZW5kZXJfc2Vzc2lvbl9uYW1lGAEgASgLMi0uY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlU2VuZGVyU2Vzc2lvbk5hbWVIAIgBARI5CgtkZWxpdmVyeV9pZBgCIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5QZWVyRGVsaXZlcnlJZEgBiAEBQhYKFF9zZW5kZXJfc2Vzc2lvbl9uYW1lQg4KDF9kZWxpdmVyeV9pZCIsChxQZWVyTWVzc2FnZVNlbmRlclNlc3Npb25OYW1lEgwKBHRleHQYASABKAkiHQobUGVlck1lc3NhZ2VTdWJhZ2VudEhhbmRiYWNrQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
 
 /**
  * A message another Claude session (a peer, or a returning subagent) sent into
@@ -114,30 +114,22 @@ export const PeerMessageSchema: GenMessage<PeerMessage> = /*@__PURE__*/
 /**
  * Another Claude session sent this agent a message.
  *
- * WHO SENT IT is stated as the vendor states it, never resolved: which of the
- * host's sessions a pid belongs to is the consumer's fact (it holds every
- * session's SessionVendorProcess level), not this conversation's.
+ * WHO SENT IT is joined, not stated: the one value this record shares with the
+ * sender's own record of the send is the delivery id, so a consumer holding both
+ * conversations names the sending session by joining on it. A sender with no
+ * such record (a session outside the consumer's own) is named by the session
+ * name it asserted.
  *
  * @generated from message conversation.v1.PeerMessageInterSession
  */
 export type PeerMessageInterSession = Message<"conversation.v1.PeerMessageInterSession"> & {
-  /**
-   * THE PROCESS THAT SENT IT, verified by the kernel. The vendor's own
-   * contract is to key sender identity on this and never on the sender-written
-   * `from` address. UNSET when the vendor could not verify a pid (a non-socket
-   * ingress), never a wrong value. For relayed traffic the pid is the relay's.
-   *
-   * @generated from field: optional conversation.v1.PeerMessageSenderProcess sender_process = 1;
-   */
-  senderProcess?: PeerMessageSenderProcess | undefined;
-
   /**
    * The sending session's display name, as the sender asserted it (the
    * vendor's `origin.name`, e.g. "fix-flaky-3a"). It is what names a sender
    * that is none of the consumer's own sessions. UNSET when the vendor states
    * none (an older sender, or a wire that is not exactly one envelope).
    *
-   * @generated from field: optional conversation.v1.PeerMessageSenderSessionName sender_session_name = 2;
+   * @generated from field: optional conversation.v1.PeerMessageSenderSessionName sender_session_name = 1;
    */
   senderSessionName?: PeerMessageSenderSessionName | undefined;
 
@@ -147,7 +139,7 @@ export type PeerMessageInterSession = Message<"conversation.v1.PeerMessageInterS
    * (AgentSendMessagePeerSession.delivery_id). UNSET when the vendor states
    * none.
    *
-   * @generated from field: optional conversation.v1.PeerDeliveryId delivery_id = 3;
+   * @generated from field: optional conversation.v1.PeerDeliveryId delivery_id = 2;
    */
   deliveryId?: PeerDeliveryId | undefined;
 };
@@ -158,39 +150,6 @@ export type PeerMessageInterSession = Message<"conversation.v1.PeerMessageInterS
  */
 export const PeerMessageInterSessionSchema: GenMessage<PeerMessageInterSession> = /*@__PURE__*/
   messageDesc(file_conversation_v1_peer, 1);
-
-/**
- * The kernel-verified process a peer message came from.
- *
- * @generated from message conversation.v1.PeerMessageSenderProcess
- */
-export type PeerMessageSenderProcess = Message<"conversation.v1.PeerMessageSenderProcess"> & {
-  /**
-   * The pid of the process that connected to this session's messaging socket
-   * (the vendor's `origin.verifiedPeerPid`). Never zero.
-   *
-   * @generated from field: uint32 verified_pid = 1;
-   */
-  verifiedPid: number;
-
-  /**
-   * When the message arrived, in Unix milliseconds on the host clock: the
-   * record's own timestamp on the transcript, or the shim's receipt instant
-   * on the live stream. A pid is recycled, so it names a process only for an
-   * event at or after that process started (SessionVendorProcessRunning
-   * .started_at_ms); this is the instant a consumer checks against.
-   *
-   * @generated from field: int64 received_at_ms = 2;
-   */
-  receivedAtMs: bigint;
-};
-
-/**
- * Describes the message conversation.v1.PeerMessageSenderProcess.
- * Use `create(PeerMessageSenderProcessSchema)` to create a new message.
- */
-export const PeerMessageSenderProcessSchema: GenMessage<PeerMessageSenderProcess> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_peer, 2);
 
 /**
  * The sender's asserted display name.
@@ -211,7 +170,7 @@ export type PeerMessageSenderSessionName = Message<"conversation.v1.PeerMessageS
  * Use `create(PeerMessageSenderSessionNameSchema)` to create a new message.
  */
 export const PeerMessageSenderSessionNameSchema: GenMessage<PeerMessageSenderSessionName> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_peer, 3);
+  messageDesc(file_conversation_v1_peer, 2);
 
 /**
  * A subagent this agent started handed its final report back. The report is
@@ -228,5 +187,5 @@ export type PeerMessageSubagentHandback = Message<"conversation.v1.PeerMessageSu
  * Use `create(PeerMessageSubagentHandbackSchema)` to create a new message.
  */
 export const PeerMessageSubagentHandbackSchema: GenMessage<PeerMessageSubagentHandback> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_peer, 4);
+  messageDesc(file_conversation_v1_peer, 3);
 

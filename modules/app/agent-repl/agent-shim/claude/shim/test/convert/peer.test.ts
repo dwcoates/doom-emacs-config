@@ -192,82 +192,38 @@ describe("convertPeerMessage", () => {
   });
 });
 
-describe("interSessionOf — who sent an inter-session message", () => {
-  const nowMs = (): number => 9_000;
-
-  it("states the vendor's verified pid as the sender process", () => {
-    // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", verifiedPeerPid: 5398 }, {}, nowMs);
-    // Assert
-    expect(inter.senderProcess?.verifiedPid).toBe(5398);
-  });
-
-  it("stamps the sender process with the record's own timestamp when it states one", () => {
-    // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", verifiedPeerPid: 5398 }, { timestamp: "2026-10-15T03:08:16.836Z" }, nowMs);
-    // Assert
-    expect(inter.senderProcess?.receivedAtMs).toBe(BigInt(Date.parse("2026-10-15T03:08:16.836Z")));
-  });
-
-  it("stamps the sender process with the receipt instant when the record states no timestamp", () => {
-    // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", verifiedPeerPid: 5398 }, {}, nowMs);
-    // Assert
-    expect(inter.senderProcess?.receivedAtMs).toBe(9_000n);
-  });
-
-  it("stamps the receipt instant when the record's timestamp does not parse", () => {
-    // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", verifiedPeerPid: 5398 }, { timestamp: "not a time" }, nowMs);
-    // Assert
-    expect(inter.senderProcess?.receivedAtMs).toBe(9_000n);
-  });
-
-  it("leaves the sender process UNSET when the vendor verified no pid", () => {
-    // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", from: "uds:/tmp/cc-socks/5398.sock" }, {}, nowMs);
-    // Assert
-    expect(inter.senderProcess).toBeUndefined();
-  });
-
-  it("leaves the sender process UNSET for a pid that is not a positive integer", () => {
-    // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", verifiedPeerPid: 0 }, {}, nowMs);
-    // Assert
-    expect(inter.senderProcess).toBeUndefined();
-  });
-
+describe("interSessionOf — what the vendor says about the sender", () => {
   it("states the sender's asserted session name", () => {
     // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", name: "agent-repl-test-slimming-54" }, {}, nowMs);
+    const inter = interSessionOf({ kind: "peer", name: "agent-repl-test-slimming-54" });
     // Assert
     expect(inter.senderSessionName?.text).toBe("agent-repl-test-slimming-54");
   });
 
   it("leaves the session name UNSET when the vendor states only whitespace", () => {
     // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", name: "  " }, {}, nowMs);
+    const inter = interSessionOf({ kind: "peer", name: "  " });
     // Assert
     expect(inter.senderSessionName).toBeUndefined();
   });
 
   it("states the delivery id the sender's SendMessage result shares", () => {
     // Arrange, Act
-    const inter = interSessionOf({ kind: "peer", msg_id: "e0aced60-711b-490a-a59e-d33d518f1ba5" }, {}, nowMs);
+    const inter = interSessionOf({ kind: "peer", msg_id: "e0aced60-711b-490a-a59e-d33d518f1ba5" });
     // Assert
     expect(inter.deliveryId?.value).toBe("e0aced60-711b-490a-a59e-d33d518f1ba5");
   });
 
   it("leaves the delivery id UNSET when the vendor states none", () => {
     // Arrange, Act
-    const inter = interSessionOf({ kind: "peer" }, {}, nowMs);
+    const inter = interSessionOf({ kind: "peer" });
     // Assert
     expect(inter.deliveryId).toBeUndefined();
   });
 
   it("carries the sender facts onto the converted inter-session message", () => {
     // Arrange
-    const message = peerRecord({ from: "uds:/tmp/cc-socks/5398.sock", verifiedPeerPid: 5398, msg_id: "m-1" });
+    const message = peerRecord({ from: "uds:/tmp/cc-socks/5398.sock", msg_id: "m-1" });
     // Act
     const entry = convertPeerMessage(message, foldContext());
     // Assert

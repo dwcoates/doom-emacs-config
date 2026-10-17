@@ -1668,12 +1668,12 @@ type FeedPeerMessageFrom struct {
 	// a socket path, and never the vendor's per-process session suffix for a
 	// sender that is one of agent-repl's own workspaces.
 	Name *FeedPeerMessageFromName `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// WHAT THE NAME NAMES. THE ARM IS THE SENDER'S KIND.
+	// WHAT THE NAME NAMES. THE ARM IS HOW FAR THE SENDER IS RESOLVED.
 	//
 	// Types that are valid to be assigned to Sender:
 	//
 	//	*FeedPeerMessageFrom_Workspace
-	//	*FeedPeerMessageFrom_OutsideSession
+	//	*FeedPeerMessageFrom_Unresolved
 	//	*FeedPeerMessageFrom_Unnamed
 	Sender        isFeedPeerMessageFrom_Sender `protobuf_oneof:"sender"`
 	unknownFields protoimpl.UnknownFields
@@ -1733,10 +1733,10 @@ func (x *FeedPeerMessageFrom) GetWorkspace() *FeedPeerMessageFromWorkspace {
 	return nil
 }
 
-func (x *FeedPeerMessageFrom) GetOutsideSession() *FeedPeerMessageFromOutsideSession {
+func (x *FeedPeerMessageFrom) GetUnresolved() *FeedPeerMessageFromUnresolved {
 	if x != nil {
-		if x, ok := x.Sender.(*FeedPeerMessageFrom_OutsideSession); ok {
-			return x.OutsideSession
+		if x, ok := x.Sender.(*FeedPeerMessageFrom_Unresolved); ok {
+			return x.Unresolved
 		}
 	}
 	return nil
@@ -1761,23 +1761,25 @@ type FeedPeerMessageFrom_Workspace struct {
 	Workspace *FeedPeerMessageFromWorkspace `protobuf:"bytes,2,opt,name=workspace,proto3,oneof"`
 }
 
-type FeedPeerMessageFrom_OutsideSession struct {
-	// The sender is NOT one of agent-repl's workspaces (a session started
-	// outside agent-repl, or one whose vendor process is gone, so its pid no
-	// longer names a workspace), and `name` is the session name the sender
-	// gave itself.
-	OutsideSession *FeedPeerMessageFromOutsideSession `protobuf:"bytes,3,opt,name=outside_session,json=outsideSession,proto3,oneof"`
+type FeedPeerMessageFrom_Unresolved struct {
+	// No agent-repl workspace is known to have sent the message: the sender is
+	// a session outside agent-repl, or its own record of the send has not
+	// landed yet. `name` is the session name the sender gave itself. The
+	// daemon redraws the row in place, as `workspace`, when the sender's
+	// record lands in a workspace.
+	Unresolved *FeedPeerMessageFromUnresolved `protobuf:"bytes,3,opt,name=unresolved,proto3,oneof"`
 }
 
 type FeedPeerMessageFrom_Unnamed struct {
-	// The sender is none of agent-repl's workspaces and stated no session
-	// name, so `name` is the daemon's generic stand-in for another session.
+	// No agent-repl workspace is known to have sent the message, and the
+	// sender stated no session name, so `name` is the daemon's generic
+	// stand-in for another session.
 	Unnamed *FeedPeerMessageFromUnnamed `protobuf:"bytes,4,opt,name=unnamed,proto3,oneof"`
 }
 
 func (*FeedPeerMessageFrom_Workspace) isFeedPeerMessageFrom_Sender() {}
 
-func (*FeedPeerMessageFrom_OutsideSession) isFeedPeerMessageFrom_Sender() {}
+func (*FeedPeerMessageFrom_Unresolved) isFeedPeerMessageFrom_Sender() {}
 
 func (*FeedPeerMessageFrom_Unnamed) isFeedPeerMessageFrom_Sender() {}
 
@@ -1864,27 +1866,28 @@ func (*FeedPeerMessageFromWorkspace) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{21}
 }
 
-// The sender is a session outside agent-repl, named by its own session name.
-type FeedPeerMessageFromOutsideSession struct {
+// No agent-repl workspace is known to have sent the message; the sender is
+// named by its own session name.
+type FeedPeerMessageFromUnresolved struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FeedPeerMessageFromOutsideSession) Reset() {
-	*x = FeedPeerMessageFromOutsideSession{}
+func (x *FeedPeerMessageFromUnresolved) Reset() {
+	*x = FeedPeerMessageFromUnresolved{}
 	mi := &file_frontend_v1_feed_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FeedPeerMessageFromOutsideSession) String() string {
+func (x *FeedPeerMessageFromUnresolved) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FeedPeerMessageFromOutsideSession) ProtoMessage() {}
+func (*FeedPeerMessageFromUnresolved) ProtoMessage() {}
 
-func (x *FeedPeerMessageFromOutsideSession) ProtoReflect() protoreflect.Message {
+func (x *FeedPeerMessageFromUnresolved) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_feed_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1896,12 +1899,13 @@ func (x *FeedPeerMessageFromOutsideSession) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FeedPeerMessageFromOutsideSession.ProtoReflect.Descriptor instead.
-func (*FeedPeerMessageFromOutsideSession) Descriptor() ([]byte, []int) {
+// Deprecated: Use FeedPeerMessageFromUnresolved.ProtoReflect.Descriptor instead.
+func (*FeedPeerMessageFromUnresolved) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{22}
 }
 
-// The sender is a session outside agent-repl that stated no name.
+// No agent-repl workspace is known to have sent the message, and it stated no
+// name.
 type FeedPeerMessageFromUnnamed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -24248,17 +24252,19 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x12FeedRowOrderPinned\"i\n" +
 	"\x0fFeedPeerMessage\x124\n" +
 	"\x04from\x18\x03 \x01(\v2 .frontend.v1.FeedPeerMessageFromR\x04from\x12\x12\n" +
-	"\x04body\x18\x02 \x01(\tR\x04bodyJ\x04\b\x01\x10\x02R\x06sender\"\xc4\x02\n" +
+	"\x04body\x18\x02 \x01(\tR\x04bodyJ\x04\b\x01\x10\x02R\x06sender\"\xb7\x02\n" +
 	"\x13FeedPeerMessageFrom\x128\n" +
 	"\x04name\x18\x01 \x01(\v2$.frontend.v1.FeedPeerMessageFromNameR\x04name\x12I\n" +
-	"\tworkspace\x18\x02 \x01(\v2).frontend.v1.FeedPeerMessageFromWorkspaceH\x00R\tworkspace\x12Y\n" +
-	"\x0foutside_session\x18\x03 \x01(\v2..frontend.v1.FeedPeerMessageFromOutsideSessionH\x00R\x0eoutsideSession\x12C\n" +
+	"\tworkspace\x18\x02 \x01(\v2).frontend.v1.FeedPeerMessageFromWorkspaceH\x00R\tworkspace\x12L\n" +
+	"\n" +
+	"unresolved\x18\x03 \x01(\v2*.frontend.v1.FeedPeerMessageFromUnresolvedH\x00R\n" +
+	"unresolved\x12C\n" +
 	"\aunnamed\x18\x04 \x01(\v2'.frontend.v1.FeedPeerMessageFromUnnamedH\x00R\aunnamedB\b\n" +
 	"\x06sender\"-\n" +
 	"\x17FeedPeerMessageFromName\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x1e\n" +
-	"\x1cFeedPeerMessageFromWorkspace\"#\n" +
-	"!FeedPeerMessageFromOutsideSession\"\x1c\n" +
+	"\x1cFeedPeerMessageFromWorkspace\"\x1f\n" +
+	"\x1dFeedPeerMessageFromUnresolved\"\x1c\n" +
 	"\x1aFeedPeerMessageFromUnnamed\"^\n" +
 	"\x19FeedSubagentHandbackBadge\x12A\n" +
 	"\x05label\x18\x01 \x01(\v2+.frontend.v1.FeedSubagentHandbackBadgeLabelR\x05label\"4\n" +
@@ -25463,7 +25469,7 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedPeerMessageFrom)(nil),                         // 19: frontend.v1.FeedPeerMessageFrom
 	(*FeedPeerMessageFromName)(nil),                     // 20: frontend.v1.FeedPeerMessageFromName
 	(*FeedPeerMessageFromWorkspace)(nil),                // 21: frontend.v1.FeedPeerMessageFromWorkspace
-	(*FeedPeerMessageFromOutsideSession)(nil),           // 22: frontend.v1.FeedPeerMessageFromOutsideSession
+	(*FeedPeerMessageFromUnresolved)(nil),               // 22: frontend.v1.FeedPeerMessageFromUnresolved
 	(*FeedPeerMessageFromUnnamed)(nil),                  // 23: frontend.v1.FeedPeerMessageFromUnnamed
 	(*FeedSubagentHandbackBadge)(nil),                   // 24: frontend.v1.FeedSubagentHandbackBadge
 	(*FeedSubagentHandbackBadgeLabel)(nil),              // 25: frontend.v1.FeedSubagentHandbackBadgeLabel
@@ -25881,7 +25887,7 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	19,  // 40: frontend.v1.FeedPeerMessage.from:type_name -> frontend.v1.FeedPeerMessageFrom
 	20,  // 41: frontend.v1.FeedPeerMessageFrom.name:type_name -> frontend.v1.FeedPeerMessageFromName
 	21,  // 42: frontend.v1.FeedPeerMessageFrom.workspace:type_name -> frontend.v1.FeedPeerMessageFromWorkspace
-	22,  // 43: frontend.v1.FeedPeerMessageFrom.outside_session:type_name -> frontend.v1.FeedPeerMessageFromOutsideSession
+	22,  // 43: frontend.v1.FeedPeerMessageFrom.unresolved:type_name -> frontend.v1.FeedPeerMessageFromUnresolved
 	23,  // 44: frontend.v1.FeedPeerMessageFrom.unnamed:type_name -> frontend.v1.FeedPeerMessageFromUnnamed
 	25,  // 45: frontend.v1.FeedSubagentHandbackBadge.label:type_name -> frontend.v1.FeedSubagentHandbackBadgeLabel
 	27,  // 46: frontend.v1.FeedMergeHandbackBadge.label:type_name -> frontend.v1.FeedMergeHandbackBadgeLabel
@@ -26362,7 +26368,7 @@ func file_frontend_v1_feed_proto_init() {
 	file_frontend_v1_feed_proto_msgTypes[16].OneofWrappers = []any{}
 	file_frontend_v1_feed_proto_msgTypes[19].OneofWrappers = []any{
 		(*FeedPeerMessageFrom_Workspace)(nil),
-		(*FeedPeerMessageFrom_OutsideSession)(nil),
+		(*FeedPeerMessageFrom_Unresolved)(nil),
 		(*FeedPeerMessageFrom_Unnamed)(nil),
 	}
 	file_frontend_v1_feed_proto_msgTypes[28].OneofWrappers = []any{

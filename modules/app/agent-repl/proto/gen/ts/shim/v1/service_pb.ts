@@ -335,9 +335,9 @@ export const Shim: GenService<{
     output: typeof ReadTranscriptsResponseSchema;
   },
   /**
-   * Which session received one cross-session message, by its delivery id.
-   * Read from the host's one store, so any running shim answers for any
-   * session. See endpoint_resolve_peer_delivery.proto.
+   * Which sessions are the two ends of one cross-session message, by its
+   * delivery id. Read from the host's one store, so any running shim answers
+   * for any session. See endpoint_resolve_peer_delivery.proto.
    *
    * @generated from rpc shim.v1.Shim.ResolvePeerDelivery
    */
