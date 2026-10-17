@@ -44,6 +44,11 @@ Each item is checked off as it lands, with its commit.
       token correlation with a measured deadline.
 - [ ] D12 `cmd/agent-repld`: nouns `workspace`, `merge-queue`, `editor`,
       `runtime`; `merge-queue` verb ported onto RPCs; requester from cwd.
+- [ ] D16 One-shot standing (owner, 2026-10-17): an rpc that marks or
+      unmarks a workspace a one-shot after its creation, refused for a child
+      its owner lands; WorkspaceStatus reports it; the workspace skill tells
+      every agent to mark itself a one-shot when it commits to one-shotting
+      the rest of its work.
 - [ ] D13 Retire `internal/commandfile` and the output-dir ingress.
 - [ ] D14 Integration harness and e2e callers ported.
 
