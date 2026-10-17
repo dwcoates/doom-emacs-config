@@ -5,6 +5,11 @@ import {
   SELECTION_BLINK_DELAY_PROPERTY,
   SELECTION_BLINK_DURATION_PROPERTY,
   SELECTION_BLINK_MS,
+  SELECTION_ANIMATIONS,
+  SELECTION_NUMBER_FADE_CLASS,
+  SELECTION_NUMBER_FADE_DELAY_PROPERTY,
+  SELECTION_NUMBER_FADE_DURATION_PROPERTY,
+  SELECTION_NUMBER_FADE_MS,
   createSelectionBlink,
   type SelectionBlink,
 } from "../../src/sidebar/selection-blink.js";
@@ -23,6 +28,8 @@ function drawnRow(root: HTMLElement, id: string): HTMLElement {
 
 const blinking = (row: HTMLElement): boolean => row.classList.contains(SELECTION_BLINK_CLASS);
 const delayOf = (row: HTMLElement): string => row.style.getPropertyValue(SELECTION_BLINK_DELAY_PROPERTY);
+const fading = (row: HTMLElement): boolean => row.classList.contains(SELECTION_NUMBER_FADE_CLASS);
+const fadeDelayOf = (row: HTMLElement): string => row.style.getPropertyValue(SELECTION_NUMBER_FADE_DELAY_PROPERTY);
 
 describe("the selection blink", () => {
   let root: HTMLElement;
@@ -132,6 +139,95 @@ describe("the selection blink", () => {
     expect([blinking(drawn), delayOf(drawn)]).toEqual([false, ""]);
   });
 
+  it("fades the selected row's number from its start alongside the blink", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-1");
+
+    // Act
+    blink.start("ws-1");
+
+    // Assert
+    expect([fading(row), fadeDelayOf(row)]).toEqual([true, "0ms"]);
+  });
+
+  it("runs the number fade for 1600 ms", () => {
+    // Arrange, Act, Assert
+    expect(SELECTION_NUMBER_FADE_MS).toBe(1600);
+  });
+
+  it("hands a fading row the fade's length", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-1");
+
+    // Act
+    blink.start("ws-1");
+
+    // Assert
+    expect(row.style.getPropertyValue(SELECTION_NUMBER_FADE_DURATION_PROPERTY)).toBe(`${SELECTION_NUMBER_FADE_MS}ms`);
+  });
+
+  it("joins a row redrawn after the blink but mid-fade to the fade alone", () => {
+    // Arrange
+    blink.start("ws-1");
+    const elapsed = SELECTION_BLINK_MS + 100;
+    clock += elapsed;
+    const redrawn = document.createElement("div");
+
+    // Act
+    blink.apply("ws-1", redrawn);
+
+    // Assert
+    expect([blinking(redrawn), delayOf(redrawn), fading(redrawn), fadeDelayOf(redrawn)]).toEqual([
+      false,
+      "",
+      true,
+      `-${elapsed}ms`,
+    ]);
+  });
+
+  it("draws a row's number still once its fade has run its length", () => {
+    // Arrange
+    blink.start("ws-1");
+    clock += SELECTION_NUMBER_FADE_MS;
+    const redrawn = document.createElement("div");
+
+    // Act
+    blink.apply("ws-1", redrawn);
+
+    // Assert
+    expect([blinking(redrawn), fading(redrawn)]).toEqual([false, false]);
+  });
+
+  it("restarts both animations of a row reselected mid-fade", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-1");
+    blink.start("ws-1");
+    clock += SELECTION_BLINK_MS + 100;
+    blink.apply("ws-1", row);
+
+    // Act
+    blink.start("ws-1");
+
+    // Assert
+    expect([blinking(row), delayOf(row), fading(row), fadeDelayOf(row)]).toEqual([true, "0ms", true, "0ms"]);
+  });
+
+  it("runs every selection animation under its own class and properties", () => {
+    // Arrange / Act
+    const shapes = SELECTION_ANIMATIONS.map((a) => [a.className, a.durationProperty, a.delayProperty, a.ms]);
+
+    // Assert
+    expect(shapes).toEqual([
+      [SELECTION_BLINK_CLASS, SELECTION_BLINK_DURATION_PROPERTY, SELECTION_BLINK_DELAY_PROPERTY, SELECTION_BLINK_MS],
+      [
+        SELECTION_NUMBER_FADE_CLASS,
+        SELECTION_NUMBER_FADE_DURATION_PROPERTY,
+        SELECTION_NUMBER_FADE_DELAY_PROPERTY,
+        SELECTION_NUMBER_FADE_MS,
+      ],
+    ]);
+  });
+
   it("states the workspace and how many copies blink, in the canonical log", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
@@ -184,6 +280,47 @@ describe("the selection blink's styling", () => {
       false,
       false,
     ]);
+  });
+
+  it("animates the fading row's number on the fade's length and delay, once", () => {
+    // Arrange / Act
+    const declarations = declarationsOf(`#ws-sidebar .ws.${SELECTION_NUMBER_FADE_CLASS} > .row .sb-num`);
+
+    // Assert
+    expect(declarations).toContainEqual(
+      expect.stringMatching(
+        /animation:\s*ws-selection-number-fade var\(--selection-number-fade-duration\) ease-in-out var\(--selection-number-fade-delay\) 1;/,
+      ),
+    );
+  });
+
+  it("holds the number white from a quick rise until a second later", () => {
+    // Arrange / Act
+    const stops = rulesOf(keyframesOf("ws-selection-number-fade"));
+
+    // Assert
+    const [whiteFromMs = NaN, whiteUntilMs = NaN] = (stops[0]?.selectors ?? []).map(
+      (stop) => (parseFloat(stop) / 100) * SELECTION_NUMBER_FADE_MS,
+    );
+    expect([stops.length, whiteFromMs, whiteUntilMs - whiteFromMs, stops[0]?.declarations.trim()]).toEqual([
+      1,
+      160,
+      1000,
+      "color: white;",
+    ]);
+  });
+
+  it("stops the number fade under reduced motion", () => {
+    // Arrange
+    const reduced = stylesheet
+      .split("@media (prefers-reduced-motion: reduce)")
+      .slice(1)
+      .some((block: string) =>
+        /#ws-sidebar \.ws\.selection-number-fade > \.row \.sb-num \{\s*animation: none;/.test(block),
+      );
+
+    // Assert
+    expect(reduced).toBe(true);
   });
 
   it("stops the blink under reduced motion", () => {

@@ -1162,6 +1162,18 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 @keyframes ws-selection-blink {
   50% { background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
 }
+/* THE SELECTED ROW'S TAB NUMBER FADES INTO WHITE (owner request, 2026-10-17):
+   a quick rise from its own grey to white, held for a second, then a fall
+   back to the grey. The class and the fade's length are set by
+   src/sidebar/selection-blink.ts beside the row's wash, and seeked the same
+   way, so a redraw mid-fade continues it. The stops are fractions of
+   SELECTION_NUMBER_FADE_MS (1600 ms): white from 160 ms to 1160 ms. */
+#ws-sidebar .ws.selection-number-fade > .row .sb-num {
+  animation: ws-selection-number-fade var(--selection-number-fade-duration) ease-in-out var(--selection-number-fade-delay) 1;
+}
+@keyframes ws-selection-number-fade {
+  10%, 72.5% { color: white; }
+}
 
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)
    workspace, and a hidden one (owner request, 2026-10-13: a Hidden row reads
@@ -3659,6 +3671,10 @@ html[data-page-unshown] *::after {
   }
   /* A selected row does not blink: the brighter bar already says which. */
   #ws-sidebar .ws.selection-blink > .row {
+    animation: none;
+  }
+  /* Nor does its tab number fade. */
+  #ws-sidebar .ws.selection-number-fade > .row .sb-num {
     animation: none;
   }
   .thinking-spinner {
