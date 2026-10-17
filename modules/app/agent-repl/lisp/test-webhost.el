@@ -430,10 +430,18 @@ so stubbing the accessor would not reach the code under test."
     ;; Assert
     (should (equal (agent-repl-test-wh--sent "ensure")
                    (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/")
-                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" t))))))
+                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" "after"))))))
 
-(ert-deftest agent-repl-test-wh-the-in-turn-pages-are-handed-over-nearest-first ()
-  "The pages handed over in turn go nearest the current tab first."
+(defun agent-repl-test-wh--ensured-lanes ()
+  "Each ensure sent, as (WORKSPACE . LANE), LANE nil for a plain ensure."
+  (mapcar (lambda (script)
+            (string-match "\"id-\\([a-z0-9]+\\)\",\"[^\"]*\"\\(?:,\"\\([a-z]+\\)\"\\)?)" script)
+            (cons (match-string 1 script) (match-string 2 script)))
+          (agent-repl-test-wh--sent "ensure")))
+
+(ert-deftest agent-repl-test-wh-the-in-turn-pages-are-handed-over-in-two-lanes ()
+  "The pages after the current tab go in one lane, those before it in the other.
+The current tab's page, not shown here, is the nearest of all."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (dolist (ws '("a" "b" "c" "d" "e")) (agent-repl-webhost-ensure-page ws))
@@ -442,29 +450,57 @@ so stubbing the accessor would not reach the code under test."
       ;; Act
       (agent-repl--webhost-on-load 'load-changed))
     ;; Assert
-    (should (equal (mapcar (lambda (script) (and (string-match "\"id-\\([a-e]\\)\"" script) (match-string 1 script)))
-                           (agent-repl-test-wh--sent "ensure"))
-                   '("c" "d" "b" "e" "a")))))
+    (should (equal (agent-repl-test-wh--ensured-lanes)
+                   '(("c" . "after") ("d" . "after") ("e" . "after") ("b" . "before") ("a" . "before"))))))
 
-(ert-deftest agent-repl-test-wh-the-replay-comes-back-nearest-first-around-a-ring ()
-  "Pages come back by distance from the current tab, the ends of the bar adjacent."
+(ert-deftest agent-repl-test-wh-the-lanes-halve-the-ring ()
+  "The lanes wrap around the ring, and the lane after takes the odd one out."
+  ;; Arrange
+  (let ((tabs (mapcar #'number-to-string (number-sequence 1 11))))
+    (dolist (case `((,tabs "10" ("11" "1" "2" "3" "4") ("9" "8" "7" "6" "5"))
+                    (,tabs "1" ("2" "3" "4" "5" "6") ("11" "10" "9" "8" "7"))
+                    (,(butlast tabs) "10" ("1" "2" "3" "4" "5") ("9" "8" "7" "6"))
+                    (("1" "2") "1" ("2") ())
+                    (("1") "1" () ())))
+      (agent-repl-test-wh--with-host
+        (agent-repl-test-wh--with-order (nth 0 case) (nth 1 case)
+          ;; Act
+          (let* ((ids (lambda (names) (mapcar (lambda (ws) (concat "id-" ws)) names)))
+                 (lanes (agent-repl--webhost-replay-lanes
+                         (funcall ids (remove (nth 1 case) (nth 0 case))))))
+            ;; Assert
+            (should (equal lanes (cons (funcall ids (nth 2 case))
+                                       (funcall ids (nth 3 case)))))))))))
+
+(ert-deftest agent-repl-test-wh-a-lane-skips-a-tab-with-no-page ()
+  "A tab whose page the host does not hold keeps its place in its lane, empty."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "a"
       ;; Act
-      (let ((order (agent-repl--webhost-ring-order '("id-c" "id-d" "id-e" "id-b"))))
-        ;; Assert: b (1 ahead), e (1 behind, the ring's other end), c (2 ahead), d (2 behind).
-        (should (equal order '("id-b" "id-e" "id-c" "id-d")))))))
+      (let ((lanes (agent-repl--webhost-replay-lanes '("id-c" "id-e"))))
+        ;; Assert
+        (should (equal lanes '(("id-c") . ("id-e"))))))))
 
-(ert-deftest agent-repl-test-wh-a-page-with-no-tab-comes-back-last ()
-  "A page whose workspace has no drawn tab is brought back after every tabbed one."
+(ert-deftest agent-repl-test-wh-a-page-with-no-tab-goes-to-the-shorter-lane ()
+  "A page whose workspace has no drawn tab goes after the tabbed ones, in the shorter lane."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-test-wh--with-order '("a" "b") "a"
       ;; Act
-      (let ((order (agent-repl--webhost-ring-order '("id-z" "id-b"))))
+      (let ((lanes (agent-repl--webhost-replay-lanes '("id-y" "id-b" "id-z"))))
         ;; Assert
-        (should (equal order '("id-b" "id-z")))))))
+        (should (equal lanes '(("id-b" "id-z") . ("id-y"))))))))
+
+(ert-deftest agent-repl-test-wh-with-no-current-tab-every-page-alternates-lanes ()
+  "With no current tab every page goes to the shorter lane, in the order given."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-order '("a" "b" "c") nil
+      ;; Act
+      (let ((lanes (agent-repl--webhost-replay-lanes '("id-a" "id-b" "id-c"))))
+        ;; Assert
+        (should (equal lanes '(("id-a" "id-c") . ("id-b"))))))))
 
 (ert-deftest agent-repl-test-wh-the-replay-records-the-pages-handed-over-in-turn ()
   "A load records how many pages it handed over in turn."
@@ -477,7 +513,7 @@ so stubbing the accessor would not reach the code under test."
         ;; Act
         (agent-repl--webhost-on-load 'load-changed))
       ;; Assert
-      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-in-turn pages=1" text)) logged)))))
+      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-in-turn after=1 before=0" text)) logged)))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-the-shown-page ()
   "A loaded host shows the page Emacs stands on again."

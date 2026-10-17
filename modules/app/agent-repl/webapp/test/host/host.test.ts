@@ -58,9 +58,9 @@ function fromPage(id: string, data: unknown): void {
   window.dispatchEvent(new MessageEvent("message", { data, source: frame(id).contentWindow }));
 }
 
-/** Ensure ID's page in turn on H, answering the parsed answer. */
-function inTurn(h: Host, id: string): Record<string, unknown> {
-  return parsed(h.ensure(id, `http://ws-${id}.localhost:1/`, true));
+/** Ensure ID's page in turn in LANE on H, answering the parsed answer. */
+function inTurn(h: Host, id: string, lane = "right"): Record<string, unknown> {
+  return parsed(h.ensure(id, `http://ws-${id}.localhost:1/`, lane));
 }
 
 /** Whether ID's page has started loading. */
@@ -180,6 +180,42 @@ describe("ensure in turn", () => {
     expect(loading("b")).toBe(true);
   });
 
+  it("loads the first page of each lane at once, side by side", () => {
+    // Act
+    inTurn(host, "r1", "right");
+    inTurn(host, "l1", "left");
+
+    // Assert
+    expect([loading("r1"), loading("l1")]).toEqual([true, true]);
+  });
+
+  it("holds a lane's later page behind its own lane only", () => {
+    // Arrange
+    inTurn(host, "r1", "right");
+    inTurn(host, "r2", "right");
+    inTurn(host, "l1", "left");
+    inTurn(host, "l2", "left");
+
+    // Act
+    fromPage("l1", { channel: HOST_CHANNEL, kind: "drawn", what: "page" });
+
+    // Assert
+    expect([loading("r2"), loading("l2")]).toEqual([false, true]);
+  });
+
+  it("loads a page waiting in either lane the moment it is shown", () => {
+    // Arrange
+    inTurn(host, "r1", "right");
+    inTurn(host, "l1", "left");
+    inTurn(host, "l2", "left");
+
+    // Act
+    const answer = parsed(host.show("l2"));
+
+    // Assert
+    expect([answer.jumped, loading("l2")]).toEqual([true, true]);
+  });
+
   it("loads a page ensured plainly at once, whatever is loading in turn", () => {
     // Arrange
     inTurn(host, "a");
@@ -189,6 +225,24 @@ describe("ensure in turn", () => {
 
     // Assert
     expect(loading("z")).toBe(true);
+  });
+
+  it("stops every lane's bound on dispose", () => {
+    // Arrange
+    vi.useFakeTimers();
+    try {
+      const timed = createHost({ doc: document, win: window, level: LevelWindow.fixed("info") });
+      inTurn(timed, "p", "right");
+      inTurn(timed, "q", "left");
+
+      // Act
+      timed.dispose();
+
+      // Assert
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts the next page, recorded at warn, when one never says it drew", () => {
@@ -205,7 +259,10 @@ describe("ensure in turn", () => {
 
         // Assert
         const notes = parsed(timed.ids()).notes as { level: string; text: string }[];
-        expect([loading("q"), notes.some((n) => n.level === "warn" && n.text.includes("page p"))]).toEqual([true, true]);
+        expect([loading("q"), notes.some((n) => n.level === "warn" && n.text.includes("page p loading in turn in lane right"))]).toEqual([
+          true,
+          true,
+        ]);
       } finally {
         timed.dispose();
       }

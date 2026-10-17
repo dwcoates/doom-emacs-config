@@ -88,10 +88,11 @@ interface Frame {
 export interface Host {
   /**
    * Hold workspace ID's page at URL: create it, re-point it, or leave it.
-   * IN TURN, a page created now loads only once every page loading before it
-   * has drawn (see `createHost`'s pacing), or at once if it is shown first.
+   * Given a LANE, a page created now loads only once every page loading
+   * before it in that lane has drawn (see `createHost`'s pacing), or at once
+   * if it is shown first. Without one it loads at once.
    */
-  ensure(id: string, url: string, inTurn?: boolean): string;
+  ensure(id: string, url: string, lane?: string): string;
   /** Show workspace ID's page and hide every other. */
   show(id: string): string;
   /** Tell LISTENER the id of every page shown from now on; answers the stop. */
@@ -130,10 +131,19 @@ export interface Host {
 
 /**
  * How long a page loading in turn may take to say it has drawn before the
- * next one starts anyway: a page that never says so is recorded at warn, and
- * the pages after it are not held behind it.
+ * next one in its lane starts anyway: a page that never says so is recorded
+ * at warn, and the pages after it are not held behind it.
  */
 export const IN_TURN_BOUND_MS = 10_000;
+
+/** One lane of pages loaded in turn: its queue, oldest first, and the page in flight. */
+interface Lane {
+  readonly name: string;
+  readonly waiting: string[];
+  loading: string | null;
+  /** The bound on `loading` (`IN_TURN_BOUND_MS`). */
+  bound: number | null;
+}
 
 /** The class every workspace iframe wears; the stylesheet stacks them. */
 const FRAME_CLASS = "workspace-frame";
@@ -168,19 +178,18 @@ export function createHost(env: HostEnv): Host {
   /** The log level window every page is told, while one stands. */
   let logLevel: { level: WindowLevel; untilMs: number } | null = null;
   /**
-   * PAGES LOADED IN TURN load one after another, each once the one before has
-   * drawn (owner ruling, 2026-10-17). Every page booting at once after a host
-   * load stalled the web process for up to 1.8s; a fixed gap between them is
-   * too slow on an idle machine and lets them pile up on a hot one. Pacing on
-   * the page's own `drawn` is as fast as the machine allows and never
-   * overlaps. `waiting` is the queue, oldest first; `loadingInTurn` is the one
-   * in flight, and `inTurnBound` its bound (`IN_TURN_BOUND_MS`).
+   * PAGES LOADED IN TURN load one after another in their LANE, each once the
+   * one before it has drawn (owner rulings, 2026-10-17). Every page booting at
+   * once after a host load stalled the web process for up to 1.8s; a fixed gap
+   * between them is too slow on an idle machine and lets them pile up on a hot
+   * one. Pacing on the page's own `drawn` is as fast as the machine allows.
+   * The lanes run side by side, so as many pages load at once as there are
+   * lanes: Emacs hands the pages after the current workspace to one and those
+   * before it to another, each nearest first.
    */
-  const waiting: string[] = [];
+  const lanes = new Map<string, Lane>();
   /** Who is told every page shown (`onShown`): the webhost's sidebar. */
   const shownListeners = new Set<(id: string) => void>();
-  let loadingInTurn: string | null = null;
-  let inTurnBound: number | null = null;
 
   const note = (level: HostNote["level"], text: string): void => {
     notes.push({ level, text });
@@ -247,38 +256,62 @@ export function createHost(env: HostEnv): Host {
     frame.iframe.src = frame.url;
   };
 
-  /** Start the next page waiting its turn, when none is loading in turn. */
-  const advance = (): void => {
-    if (loadingInTurn !== null) return;
-    const next = waiting.shift();
+  /** The lane named NAME, made empty the first time it is named. */
+  const laneNamed = (name: string): Lane => {
+    const known = lanes.get(name);
+    if (known !== undefined) return known;
+    const lane: Lane = { name, waiting: [], loading: null, bound: null };
+    lanes.set(name, lane);
+    return lane;
+  };
+
+  /** Start LANE's next waiting page, when none of LANE's is loading. */
+  const advance = (lane: Lane): void => {
+    if (lane.loading !== null) return;
+    const next = lane.waiting.shift();
     if (next === undefined) return;
     const frame = frames.get(next);
     if (frame === undefined) {
-      advance();
+      advance(lane);
       return;
     }
-    loadingInTurn = next;
+    lane.loading = next;
     load(frame);
-    inTurnBound = win.setTimeout(() => {
-      note("warn", `page ${next} loading in turn did not say it had drawn within ${IN_TURN_BOUND_MS}ms; the next page starts`);
+    lane.bound = win.setTimeout(() => {
+      note(
+        "warn",
+        `page ${next} loading in turn in lane ${lane.name} did not say it had drawn within ${IN_TURN_BOUND_MS}ms; the next page starts`,
+      );
       finishTurn(next);
     }, IN_TURN_BOUND_MS);
   };
 
-  /** ID's turn is over (it drew, or it is gone): start the next. */
+  /** ID's turn is over (it drew, or it is gone): its lane starts the next. */
   const finishTurn = (id: string): void => {
-    if (loadingInTurn !== id) return;
-    if (inTurnBound !== null) win.clearTimeout(inTurnBound);
-    inTurnBound = null;
-    loadingInTurn = null;
-    advance();
+    for (const lane of lanes.values()) {
+      if (lane.loading !== id) continue;
+      if (lane.bound !== null) win.clearTimeout(lane.bound);
+      lane.bound = null;
+      lane.loading = null;
+      advance(lane);
+    }
+  };
+
+  /** Take ID out of the lane it waits in; whether it was waiting. */
+  const unqueue = (id: string): boolean => {
+    for (const lane of lanes.values()) {
+      const at = lane.waiting.indexOf(id);
+      if (at >= 0) {
+        lane.waiting.splice(at, 1);
+        return true;
+      }
+    }
+    return false;
   };
 
   /** Load ID now if it is still waiting its turn (it is being shown). */
   const loadNow = (frame: Frame): boolean => {
-    const at = waiting.indexOf(frame.id);
-    if (at < 0) return false;
-    waiting.splice(at, 1);
+    if (!unqueue(frame.id)) return false;
     load(frame);
     return true;
   };
@@ -367,7 +400,7 @@ export function createHost(env: HostEnv): Host {
     frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
   };
 
-  const create = (id: string, url: string, inTurn = false): Frame => {
+  const create = (id: string, url: string, lane: string | undefined): Frame => {
     const iframe = doc.createElement("iframe");
     iframe.className = FRAME_CLASS;
     iframe.setAttribute(FRAME_WORKSPACE_ATTRIBUTE, id);
@@ -390,9 +423,10 @@ export function createHost(env: HostEnv): Host {
     frameParent.append(iframe);
     // Laid out first, so a frame created hidden is fixed at the size it fills.
     applyShown(frame, id === shownId);
-    if (inTurn) {
-      waiting.push(id);
-      advance();
+    if (lane !== undefined) {
+      const queue = laneNamed(lane);
+      queue.waiting.push(id);
+      advance(queue);
     } else {
       load(frame);
     }
@@ -405,11 +439,12 @@ export function createHost(env: HostEnv): Host {
   };
 
   return {
-    ensure(id, url, inTurn = false) {
+    ensure(id, url, lane) {
       const frame = frames.get(id);
       if (frame === undefined) {
-        create(id, url, inTurn);
-        return answer("ensure", id, inTurn && waiting.includes(id) ? "queued" : "created");
+        create(id, url, lane);
+        const queued = lane !== undefined && laneNamed(lane).waiting.includes(id);
+        return answer("ensure", id, queued ? "queued" : "created");
       }
       if (frame.url === url) return answer("ensure", id, "unchanged");
       frame.url = url;
@@ -447,8 +482,7 @@ export function createHost(env: HostEnv): Host {
       return withFrame("remove", id, (frame) => {
         frames.delete(id);
         frame.iframe.remove();
-        const at = waiting.indexOf(id);
-        if (at >= 0) waiting.splice(at, 1);
+        unqueue(id);
         finishTurn(id);
         if (shownId === id) {
           shownId = null;
@@ -550,10 +584,10 @@ export function createHost(env: HostEnv): Host {
       for (const frame of frames.values()) frame.iframe.remove();
       frames.clear();
       shownId = null;
-      waiting.length = 0;
-      if (inTurnBound !== null) win.clearTimeout(inTurnBound);
-      inTurnBound = null;
-      loadingInTurn = null;
+      for (const lane of lanes.values()) {
+        if (lane.bound !== null) win.clearTimeout(lane.bound);
+      }
+      lanes.clear();
     },
   };
 }

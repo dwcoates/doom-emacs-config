@@ -374,31 +374,48 @@ reloads while the window lasts.  Non-nil when the call was sent."
 
 ;;;; ---- Replay and reload -----------------------------------------------------
 
-(defun agent-repl--webhost-ring-order (ids)
-  "IDS, nearest the current workspace first, around the drawn tab order.
-The order is a RING: the first and last tabs are next to each other.  At
-equal distance the tab after the current one comes before the tab before
-it.  A page whose workspace has no drawn tab comes last, in the order
-given."
+(defun agent-repl--webhost-replay-lanes (ids)
+  "IDS split into two lanes around the current workspace: `(AFTER . BEFORE)'.
+The drawn tab order is a RING: the first and last tabs are next to each
+other.  The tabs other than the current one are halved around it: AFTER
+takes the nearer half going forward from the current tab, BEFORE the rest
+going backward, each nearest first, and AFTER takes the odd one out.  So
+with eleven tabs and the tenth current, AFTER is 11, 1, 2, 3, 4 and BEFORE
+is 9, 8, 7, 6, 5.  A page whose workspace has no drawn tab, or every page
+when no tab is current, goes to whichever lane is shorter then, in the
+order given."
   (let* ((order (and (fboundp 'agent-repl-roster-drawn-tab-order)
                      (agent-repl-roster-drawn-tab-order)))
          (n (length order))
          (current (and (fboundp 'agent-repl--ws-current-name) (agent-repl--ws-current-name)))
          (here (and current (cl-position current order :test #'equal)))
-         (rank (lambda (id)
-                 (let* ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id)))
-                        (at (and ws (cl-position ws order :test #'equal))))
-                   (cond ((or (null at) (null here)) (* 4 (max n 1)))
-                         (t (let* ((ahead (mod (- at here) n))
-                                   (behind (mod (- here at) n)))
-                              (if (<= ahead behind) (* 2 ahead) (1+ (* 2 behind))))))))))
-    (cl-stable-sort (copy-sequence ids) #'< :key rank)))
+         (after-span (/ n 2))
+         after before untabbed)
+    (dolist (id ids)
+      (let* ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id)))
+             (at (and ws (cl-position ws order :test #'equal))))
+        (if (or (null at) (null here))
+            (push id untabbed)
+          (let ((ahead (mod (- at here) n)))
+            (if (<= ahead after-span)
+                (push (cons ahead id) after)
+              (push (cons (mod (- here at) n) id) before))))))
+    (let* ((nearest-first (lambda (ranked)
+                            (mapcar #'cdr (cl-stable-sort (nreverse ranked) #'< :key #'car))))
+           (after (funcall nearest-first after))
+           (before (funcall nearest-first before)))
+      (dolist (id (nreverse untabbed))
+        (if (<= (length after) (length before))
+            (setq after (append after (list id)))
+          (setq before (append before (list id)))))
+      (cons after before))))
 
-(defun agent-repl--webhost-replay-page (id in-turn)
-  "Hand the host page ID and its state; IN-TURN loads it once those before have drawn."
+(defun agent-repl--webhost-replay-page (id lane)
+  "Hand the host page ID and its state.
+Given a LANE, the host loads it once the pages before it in LANE have drawn."
   (when-let ((url (gethash id agent-repl--webhost-pages)))
-    (if in-turn
-        (agent-repl--webhost-call "ensure" id url t)
+    (if lane
+        (agent-repl--webhost-call "ensure" id url lane)
       (agent-repl--webhost-call "ensure" id url))
     (when-let ((background (gethash id agent-repl--webhost-input-backgrounds)))
       (agent-repl--webhost-call "setInputBackground" id background))
@@ -407,22 +424,27 @@ given."
 
 (defun agent-repl--webhost-replay ()
   "Hand the host everything it should hold, after a load: the host starts empty.
-THE PAGES COME BACK ONE AFTER ANOTHER (owner ruling, 2026-10-17).  Every
-page booting at once is what stalled the web process for up to 1.8s after a
-reconnect.  The shown page loads now; every other page is handed over IN
-TURN, nearest the current workspace first (`agent-repl--webhost-ring-order'),
-and the host loads each once the one before has drawn (host.ts), so the pages
-a switch is likeliest to reach are fresh first, as fast as the machine allows
-and never piled up.  A switch to a page still waiting loads it at once."
+THE PAGES COME BACK IN TWO LANES, ONE PAGE AT A TIME IN EACH (owner
+rulings, 2026-10-17).  Every page booting at once is what stalled the web
+process for up to 1.8s after a reconnect.  The shown page loads now; every
+other page is handed over IN TURN, in the lane after the current workspace
+or the lane before it, nearest first (`agent-repl--webhost-replay-lanes').
+The host loads each lane's next page once its last has drawn (host.ts), so
+the pages a switch is likeliest to reach either way are fresh first, two at
+a time and never piled up.  A switch to a page still waiting loads it at
+once."
   (let (ids)
     (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown
       (agent-repl--webhost-replay-page agent-repl--webhost-shown nil)
       (agent-repl--webhost-call "show" agent-repl--webhost-shown))
-    (let ((rest (agent-repl--webhost-ring-order (delete agent-repl--webhost-shown (nreverse ids)))))
-      (dolist (id rest)
-        (agent-repl--webhost-replay-page id t))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn pages=%d" (length rest))))
+    (let ((lanes (agent-repl--webhost-replay-lanes (delete agent-repl--webhost-shown (nreverse ids)))))
+      (dolist (id (car lanes))
+        (agent-repl--webhost-replay-page id "after"))
+      (dolist (id (cdr lanes))
+        (agent-repl--webhost-replay-page id "before"))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d"
+                        (length (car lanes)) (length (cdr lanes)))))
   (when (and agent-repl--webhost-log-level
              (> (cdr agent-repl--webhost-log-level) (* 1000 (float-time))))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
