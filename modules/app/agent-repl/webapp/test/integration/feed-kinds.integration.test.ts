@@ -62,6 +62,7 @@ import {
   MERGE_TAB_PENDING_KINDS,
   MERGE_TAB_TURN_KINDS,
   MERGE_TAB_WAITING_KINDS,
+  MERGE_LANDED_ON,
   MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
   PLAN_STATES,
@@ -291,7 +292,7 @@ describe("arm coverage", () => {
   });
 
   it("covers every OpenInEditor target", () => {
-    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog", "feedLink"]);
+    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog", "feedLink", "commitLog"]);
   });
 
   it("covers every feed command panel arm", () => {
@@ -2034,6 +2035,22 @@ describe("a merge bubble's fold", () => {
     await push(mergeRow("update"));
     // Assert
     expect(expanded()).toBe("true");
+  });
+
+  it("opens the landed commit's branch log at the commit, leaving the fold as it was", async () => {
+    // Arrange
+    await drawLanded();
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-merge-commit]');
+    // Assert
+    const [request] = harness.fake.calls<OpenInEditorRequest>("openInEditor");
+    expect([
+      request.target.case === "commitLog"
+        ? [request.target.value.repositoryDir, request.target.value.branch, request.target.value.commit]
+        : request.target.case,
+      expanded(),
+    ]).toEqual([[MERGE_LANDED_ON.repositoryDir, MERGE_LANDED_ON.branch, "abc1234"], "true"]);
   });
 
   it("opens on the reader's toggle", async () => {

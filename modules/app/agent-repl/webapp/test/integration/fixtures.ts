@@ -1521,6 +1521,9 @@ export const mergeQueueOfferRow = (overrides?: Partial<RowInit>): FeedRow => {
 };
 
 export const MERGE_RESULTS = ["update", "success", "failed", "abandoned"] as const;
+
+/** Where the landed merge's commit landed (FeedMergeSuccess.landed_on). */
+export const MERGE_LANDED_ON = { repositoryDir: "/home/u/repo", branch: "master" } as const;
 export type MergeResult = (typeof MERGE_RESULTS)[number];
 
 export const mergeUnit = (result: MergeResult): ActivityUnit => ({
@@ -1538,7 +1541,14 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
       result === "update"
         ? { case: "update", value: {} }
         : result === "success"
-          ? { case: "success", value: { endedAtMs: 9_000n, commit: "abc1234" } }
+          ? {
+              case: "success",
+              value: {
+                endedAtMs: 9_000n,
+                commit: "abc1234",
+                landedOn: { repositoryDir: MERGE_LANDED_ON.repositoryDir, branch: MERGE_LANDED_ON.branch },
+              },
+            }
           : {
               case: "error",
               value: {
