@@ -61,12 +61,12 @@ Each item is checked off as it lands, with its commit.
 
 ## Editor (Emacs lisp, `lisp/`)
 
-- [ ] E1 Port CreateWorkspace / CloseWorkspace / MergeWorkspace callers
+- [x] E1 (90394009c2) Port CreateWorkspace / CloseWorkspace / MergeWorkspace callers
       (`verbs.el`, `wire-verbs.el`) to topology + context + requester, behavior
       unchanged; fake daemon (`lisp/testsupport/fakedaemon`) follows.
-- [ ] E2 Answer the `evaluate` host push with AnswerEditorEvaluation.
-- [ ] E3 Remove `SPC o h` and the help workspace.
-- [ ] E4 Stop writing command files (core.el output dir).
+- [x] E2 (e372e4ef38) Answer the `evaluate` host push with AnswerEditorEvaluation.
+- [x] E3 (dafcac3c6a) Remove `SPC o h` and the help workspace.
+- [x] E4 (12e42e0363) Stop writing command files (core.el output dir).
 
 ## Webapp (`webapp/`)
 
