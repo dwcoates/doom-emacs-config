@@ -178,6 +178,17 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     it. A blocker that appears before then abandons the close into the
     footer's close-blocked state. Kill never waits.
 
+15. COLD GATES (owner, 2026-10-17). The agent API passes a workspace's
+    compaction (cold) gate through the existing AnswerColdGate: pay and
+    resume, clear, compact, or compact and resume, with every compaction
+    option (model, scope). `WorkspaceStatusActivity` gains `cold_gate`
+    carrying the gate's `frontend.v1.FeedId`, the token AnswerColdGate needs,
+    so an agent can answer a gate it did not draw. Clearing at a gate is a gate
+    answer, distinct from the `/clear` prompt the API refuses. SKILL RULE: the
+    workspace skill states that a kill or a gate answer is performed only when
+    the user explicitly asked for it or explicitly approved it. The daemon
+    cannot observe that approval, so it is a skill rule, not a daemon refusal.
+
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing

@@ -12,6 +12,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -87,6 +88,11 @@ message WorkspaceStatusActivity {
     WorkspaceStatusActivityNeedsInput needs_input = 4;
     // The workspace's own merge is in its queue or running.
     WorkspaceStatusActivityMerging merging = 5;
+    // The session is parked at its COLD GATE: resuming its large, uncached
+    // conversation would cost more than the gate allows, so nothing runs until
+    // the gate is answered (AnswerColdGate: pay and resume, clear, compact, or
+    // compact and resume).
+    WorkspaceStatusActivityColdGate cold_gate = 6;
   }
 }
 // Being brought up. No fields.
@@ -109,6 +115,12 @@ message WorkspaceStatusActivityNeedsInput {
 message WorkspaceStatusActivityNeedsInputQuestion {}
 // A permission is open. No fields.
 message WorkspaceStatusActivityNeedsInputPermission {}
+// Parked at the cold gate.
+message WorkspaceStatusActivityColdGate {
+  // The gate, as AnswerColdGate names it (AnswerColdGateRequest.gate),
+  // echoed back unchanged.
+  frontend.v1.FeedId gate = 1;
+}
 // The workspace's own merge is queued or running. No fields: the queue's
 // status (GetMergeQueueStatus) says where it stands.
 message WorkspaceStatusActivityMerging {}
