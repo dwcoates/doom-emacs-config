@@ -8,6 +8,6 @@ This workspace was reopened to REVERT the merge it landed. The user asked for th
 1. Find what that merge brought in: the first commit in the parent branch's first-parent history that contains `{{landed_commit}}` (`git log --first-parent --ancestry-path --reverse --format='%H %s' {{landed_commit}}..HEAD | head -1`). When that commit is a merge, it is the merge to revert. When the merge was a fast-forward, the commits to revert are the ones `{{landed_commit}}` brought in.
 2. Revert it on this workspace's branch with `git revert` (`-m 1` for a merge commit), resolving any conflict with work that landed after it. Never rewrite history.
 3. Run the tests that cover what the revert touches, and fix whatever the revert breaks.
-4. Commit, then land the revert with `/merge-queue one-shot`, the way this workspace lands any finished work.
+4. Commit, then land the revert with `agent-repld workspace merge here` (the `/agent-repl-merge-queue` skill), the way this workspace lands any finished work.
 
 If something only the user can decide stands in the way, such as later work that depends on what is being reverted, stop and say so instead of landing.
