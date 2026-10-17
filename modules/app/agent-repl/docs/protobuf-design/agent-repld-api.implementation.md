@@ -70,7 +70,7 @@ Each item is checked off as it lands, with its commit.
 
 ## Webapp (`webapp/`)
 
-- [ ] W1 Port `sidebar/create.ts`, `sidebar/roster.ts`, `feed/bubble-more.ts`.
+- [x] W1 (e511f6830d) Port `sidebar/create.ts`, `sidebar/roster.ts`, `feed/bubble-more.ts`.
 
 ## Skills, manifests, docs
 
