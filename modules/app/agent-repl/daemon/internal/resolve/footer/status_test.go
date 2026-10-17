@@ -406,6 +406,48 @@ func TestBackgroundStandsWhileDetachedWorkRunsWithNoTurn(t *testing.T) {
 	}
 }
 
+func TestAwaitingCorrespondenceStandsTheBackgroundArm(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(h *harness)
+		wantStatus string
+		wantNamed  string
+	}{
+		{name: "awaiting with nothing running", arrange: func(h *harness) { h.r.SetAwaiting(testWS, "planner") },
+			wantStatus: "background", wantNamed: "planner"},
+		{name: "awaiting beside detached work", arrange: func(h *harness) {
+			h.r.OnDetachedWork(testWS, mainAgent, createdShell("work-1", "npm test"))
+			h.r.SetAwaiting(testWS, "planner")
+		}, wantStatus: "background", wantNamed: "planner"},
+		{name: "a turn outranks awaiting", arrange: func(h *harness) {
+			h.r.SetAwaiting(testWS, "planner")
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+		}, wantStatus: "working"},
+		{name: "awaiting lifted", arrange: func(h *harness) {
+			h.r.SetAwaiting(testWS, "planner")
+			h.r.SetAwaiting(testWS, "")
+		}, wantStatus: "idle"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got := h.status(t); got != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
+			}
+			if got := h.view(t).GetStrip().GetStatus().GetBackground().GetAwaiting().GetAwaitedName(); got != tt.wantNamed {
+				t.Errorf("awaited = %q, want %q", got, tt.wantNamed)
+			}
+		})
+	}
+}
+
 func TestATurnOutranksBackground(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

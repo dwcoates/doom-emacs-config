@@ -400,6 +400,10 @@ type wsState struct {
 	// workspace sees belongs to the revival's own spawn, and a spawn that then
 	// FAILS must read `dead` like any other.
 	parked bool
+	// awaiting is the name of the workspace this one awaits correspondence
+	// from (SetAwaiting), empty while it awaits none: it stands the
+	// background arm while no turn runs, as live detached work does.
+	awaiting string
 	// hostStream and webStream are the OTHER TWO HOPS of connectivity truth
 	// (daemon.md invariant 11): the workspace is connected only while its
 	// shim.v1 WatchSession, its WatchHostWorkspace and its WatchWebWorkspace

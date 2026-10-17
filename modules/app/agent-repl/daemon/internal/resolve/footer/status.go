@@ -717,7 +717,8 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }
 
-// background resolves detached work running while the main thread is free.
+// background resolves detached work running, or correspondence awaited from
+// another workspace, while the main thread is free.
 //
 // IT ANSWERS FROM THE WATCHER'S LIVE-WORK SET, never from a count of the
 // footer's own rows: the watcher reaps each detached item at its terminal and
@@ -725,12 +726,14 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 // roster (see livework.go). An EMPTY set is never a background arm, whatever
 // rows the footer still holds.
 func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
-	if !s.detachedLive() {
+	if !s.detachedLive() && s.awaiting == "" {
 		return nil
 	}
-	return &frontendv1.FooterStatus{
-		Status: &frontendv1.FooterStatus_Background{
-			Background: &frontendv1.FooterStatusBackground{Activity: r.backgroundActivity(s)}}}
+	background := &frontendv1.FooterStatusBackground{Activity: r.backgroundActivity(s)}
+	if s.awaiting != "" {
+		background.Awaiting = &frontendv1.FooterStatusBackgroundAwaiting{AwaitedName: s.awaiting}
+	}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Background{Background: background}}
 }
 
 // degraded resolves the degraded rung: the session serves, but the daemon's
