@@ -20,7 +20,8 @@ prover), after the gap additions merged as 3841cbba64:
 | `TestEveryStandingStreamEndsWithItsEndFrameWhenTheDaemonExits` | 8 | 4 (covering set) | per-stream endings unit-pinned |
 | `TestRegistryReadsAcrossTheSuccessorsPromotionAreServed` | 6 workspaces | 2 | the reproductions are one layer down |
 
-The webapp `main.test.ts` gate rows (`removals-webapp.txt`) stay until
+The webapp `main.test.ts` gate rows (`removals-webapp.txt`) are cut on branch
+`xprod-webapp-gate`, held until
 webapp coverage is measured across every tier.
 
 ## What was audited, and how
