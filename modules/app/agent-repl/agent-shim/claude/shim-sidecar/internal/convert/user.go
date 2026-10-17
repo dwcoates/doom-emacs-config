@@ -222,10 +222,16 @@ func (c *Converter) peerMessage(record, message map[string]any, at Attribution, 
 	}
 	// THE KIND IS THE VENDOR'S OWN MARKING, read exactly as the stream plane
 	// reads it (shim/src/convert/peer.ts peerKindOf): `origin.handback` is a
-	// subagent's hand-back, anything else another session's message.
-	if env.peerHandback {
+	// subagent's hand-back, a stated `origin.senderTaskId` a message from an
+	// agent of this session, anything else another session's message.
+	switch {
+	case env.peerHandback:
 		peer.Kind = &conversationv1.PeerMessage_SubagentHandback{SubagentHandback: &conversationv1.PeerMessageSubagentHandback{}}
-	} else {
+	case env.peerSenderTask != "":
+		peer.Kind = &conversationv1.PeerMessage_InSession{InSession: &conversationv1.PeerMessageInSession{
+			SenderTask: &conversationv1.PeerMessageSenderTask{VendorTaskId: env.peerSenderTask},
+		}}
+	default:
 		peer.Kind = &conversationv1.PeerMessage_InterSession{InterSession: interSessionOf(env)}
 	}
 	c.log.With(at.ctxFor("peer-message")).With(logging.Context{UpsertKey: PeerKey(env.uuid)}).

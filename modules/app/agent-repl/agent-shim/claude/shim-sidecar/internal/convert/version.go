@@ -37,7 +37,8 @@ import (
 //     its index among the record's entries. The re-read is what gives every
 //     row stored without a place its recorded one.
 //   - 3: an inter-session peer message states the sender's session name and
-//     the delivery id, and a cross-session SendMessage settles on the
+//     the delivery id, a message from an agent of this session states its
+//     sender's task id, and a cross-session SendMessage settles on the
 //     peer_session recipient, carrying the same id, rather than on an agent
 //     minted from the addressed name. The re-read is what lets both ends of a
 //     stored message be joined to the workspaces that hold them.

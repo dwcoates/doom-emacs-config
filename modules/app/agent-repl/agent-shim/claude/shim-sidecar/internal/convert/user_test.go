@@ -356,6 +356,35 @@ func presence(set bool) string {
 	return "unset"
 }
 
+func TestAPeerMessageStatingASenderTaskIsFromAnAgentOfThisSession(t *testing.T) {
+	// Arrange. origin.senderTaskId marks a sender of this same session.
+	c := newTestConverter(t)
+	line := `{"type":"user","uuid":"u1","isSidechain":false,"isMeta":true,"promptSource":"system",` +
+		`"origin":{"kind":"peer","from":"a47cd5e35c91902a0","senderTaskId":"a47cd5e35c91902a0","name":"opus-medium"},"timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":"report"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, line)
+
+	// Assert.
+	if got := peerLineOf(entries[0]).GetInSession().GetSenderTask().GetVendorTaskId(); got != "a47cd5e35c91902a0" {
+		t.Fatalf("in-session sender task = %q, want the vendor's senderTaskId", got)
+	}
+}
+
+func TestAHandbackStatingASenderTaskStaysAHandback(t *testing.T) {
+	// Arrange. A hand-back states its sender's task id too.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "child", "done", "envelope", true))
+
+	// Assert.
+	if peerLineOf(entries[0]).GetSubagentHandback() == nil {
+		t.Fatalf("kind = %v, want subagent_handback", peerLineOf(entries[0]).GetKind())
+	}
+}
+
 func TestPeerMessageIdentityIsDerivedFromTheRecordUUID(t *testing.T) {
 	// Arrange. The stream and file planes both key the same vendor record
 	// peer:<uuid> and spell the uuid into PeerMessage.id, so their rows collapse.
