@@ -116,11 +116,20 @@ func fromAgent(name string, agent *frontendv1.FeedPeerMessageFromAgent) *fronten
 }
 
 // askVendorTask starts the one lookup of task ID for S, through S's own shim
-// and within S's lineage, unless one is under way. A workspace whose main agent
-// is not named yet cannot be asked within its lineage, and asks once it is
-// (OnMainAgent draws its waiting bubbles again). Called with r.mu held.
+// and within S's lineage, unless one is under way. Called with r.mu held.
+//
+// S'S MAIN AGENT IS NAMED BY CONSTRUCTION: a peer bubble is placed only on a
+// feed of a named main agent or of a subagent whose spawn was placed on one
+// (r.place), so a lookup with no lineage to ask within is a placement defect,
+// recorded at ERROR and asked nothing.
 func (r *resolver) askVendorTask(s *wsState, id string, t *vendorTask) {
-	if t.asked || r.deps.VendorTasks == nil || s.mainAgent == "" {
+	if t.asked || r.deps.VendorTasks == nil {
+		return
+	}
+	if s.mainAgent == "" {
+		r.logger(s.id).Error("daemon.feed.vendor_task_no_lineage",
+			"a message from an agent of this session was drawn in a workspace whose main agent is not named; its sender cannot be asked for",
+			dlog.Context{"task_id": id})
 		return
 	}
 	t.asked = true
@@ -179,17 +188,6 @@ func (r *resolver) redrawVendorTask(s *wsState, t *vendorTask) {
 	for id := range t.peers {
 		if peer, ok := s.peerMessages[id]; ok {
 			r.drawPeerMessage(s, peer)
-		}
-	}
-}
-
-// redrawUnaskedVendorTasks draws again the bubbles of every task in S that was
-// never asked, now that S's main agent is named and the record can be asked
-// within its lineage. Called with r.mu held.
-func (r *resolver) redrawUnaskedVendorTasks(s *wsState) {
-	for _, t := range s.vendorTasks {
-		if !t.known && !t.asked {
-			r.redrawVendorTask(s, t)
 		}
 	}
 }

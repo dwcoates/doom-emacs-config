@@ -200,25 +200,19 @@ func TestAMessageNamingNoSenderTaskIsRecordedAtErrorAndDrawnUnnamed(t *testing.T
 	}
 }
 
-func TestAMessageDrawnBeforeTheMainAgentIsNamedIsLookedUpOnceItIs(t *testing.T) {
-	// Arrange: a workspace whose main agent the session watcher has not named.
+func TestALookupWithNoMainAgentToScopeItIsRecordedAtErrorAndAsksNothing(t *testing.T) {
+	// Arrange: a workspace whose main agent no watcher named.
 	h := newHarness(t)
-	h.resolver.OnPeerMessage(otherWorkspace, &conversationv1.PeerMessage{
-		Agent: otherMainAgent(),
-		Body:  "report",
-		Id:    "p1",
-		Kind: &conversationv1.PeerMessage_InSession{InSession: &conversationv1.PeerMessageInSession{
-			SenderTask: &conversationv1.PeerMessageSenderTask{VendorTaskId: "a47cd"},
-		}},
-	}, nil, nil)
-	h.runSpawned()
+	h.resolver.mu.Lock()
+	s := h.resolver.state(otherWorkspace)
 
 	// Act.
-	h.resolver.OnMainAgent(otherWorkspace, otherMainAgent())
+	h.resolver.askVendorTask(s, "a47cd", s.vendorTaskOf("a47cd"))
+	h.resolver.mu.Unlock()
 	h.runSpawned()
 
 	// Assert.
-	if got := h.taskSource.lookups; len(got) != 1 || got[0] != string(otherWorkspace)+"/agent-other/a47cd" {
-		t.Fatalf("lookups = %v, want one, once the main agent was named", got)
+	if len(h.taskSource.lookups) != 0 || !h.hasRecordWith("error", "daemon.feed.vendor_task_no_lineage", "task_id", "a47cd") {
+		t.Fatalf("lookups = %v, records = %+v; want none asked and the defect at ERROR", h.taskSource.lookups, h.records())
 	}
 }
