@@ -49,6 +49,13 @@ Each item is checked off as it lands, with its commit.
       its owner lands; WorkspaceStatus reports it; the workspace skill tells
       every agent to mark itself a one-shot when it commits to one-shotting
       the rest of its work.
+- [ ] D17 Awaiting correspondence (owner, 2026-10-17): SetWorkspaceCorrespondence
+      marks a workspace awaiting another and clears it; the mark is durable,
+      ends with the workspace's close or the awaited workspace's forget, and
+      stands the footer's background arm (yellow) while no turn runs;
+      WorkspaceStatus reports it; the workspace skill tells every agent to
+      mark itself when it ends a turn to wait on another workspace and to
+      clear it when the answer arrives.
 - [ ] D13 Retire `internal/commandfile` and the output-dir ingress.
 - [ ] D14 Integration harness and e2e callers ported.
 

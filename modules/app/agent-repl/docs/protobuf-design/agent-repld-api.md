@@ -189,6 +189,21 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     the user explicitly asked for it or explicitly approved it. The daemon
     cannot observe that approval, so it is a skill rule, not a daemon refusal.
 
+16. ONE-SHOT STANDING (owner, 2026-10-17). `SetWorkspaceOneShot` marks a
+    workspace a one-shot after its creation, or unmarks it; marking answers
+    the repository's completion directive, so a workspace that became a
+    one-shot is told what one created as one is told. Refused for a child its
+    owner lands. The workspace skill tells every agent to mark itself when it
+    commits to finishing the rest of its work unattended.
+
+17. AWAITING CORRESPONDENCE (owner, 2026-10-17). `SetWorkspaceCorrespondence`
+    marks a workspace awaiting another workspace, or clears the mark. While it
+    stands and no turn runs, the footer stands the background arm with
+    `awaiting` set, so every surface draws the workspace in the background
+    status (yellow). The agent clears it when the answer arrives; the daemon
+    clears it only at the workspace's close or the awaited workspace's forget,
+    since it cannot judge whether a reply is the one awaited.
+
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing
