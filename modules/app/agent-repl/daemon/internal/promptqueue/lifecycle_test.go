@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
@@ -811,5 +812,39 @@ func TestRestoreHoldsRecordsAnOrphanNobodyOwesAtWarn(t *testing.T) {
 	// Assert
 	if level := orphanRecordLevel(t, h); level != "warn" {
 		t.Fatalf("orphan-close level = %q, want warn for a turn nobody owes", level)
+	}
+}
+
+func TestOnTurnEndedRaisesNoBannerForATurnADaemonNoticeCaused(t *testing.T) {
+	cases := []struct {
+		origin conversationv1.PromptOrigin
+		banner bool
+	}{
+		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE},
+		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE},
+		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT},
+		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE, banner: true},
+		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, banner: true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.origin.String(), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			runningFrom(t, h, "notice-turn", tt.origin)
+			h.watcher.idle()
+
+			// Act
+			h.q.OnTurnEnded(theWorkspace, "notice-turn", wsm.CloseCompleted)
+
+			// Assert
+			if got := len(h.banners.raised()) > 0; got != tt.banner {
+				t.Fatalf("banner raised = %v, want %v", got, tt.banner)
+			}
+			_, recorded := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opTurnEnded,
+				Message: "a turn a daemon notice or an agent's compaction caused ended; no desktop banner"})
+			if recorded == tt.banner {
+				t.Errorf("withheld-banner record = %v, want %v: %+v", recorded, !tt.banner, h.log.Records())
+			}
+		})
 	}
 }
