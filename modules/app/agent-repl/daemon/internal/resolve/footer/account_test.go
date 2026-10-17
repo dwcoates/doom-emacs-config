@@ -660,7 +660,7 @@ func TestTheActivityCellIsNeverEmptyUnderAnyStatus(t *testing.T) {
 			h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
 		}, "loading"},
 		{"waiting", func(_ *testing.T, h *harness) {
-			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}})
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "cold"}})
 		}, "waiting"},
 		{"permission", func(_ *testing.T, h *harness) {
 			h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "Claude wants to run make"))

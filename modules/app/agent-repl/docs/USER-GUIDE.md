@@ -507,6 +507,10 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
     - "pay and resume" and "compact first" keep them, with the badge "held for you", until you press Send now or Cancel.
     - "compact and resume" compacts, then sends them once the session is back.
       - The gate shows this button only while prompts are held at it.
+- **A compaction you chose at the gate says what it cost in the footer.**
+  - Once the summary is written, the footer's activity line ends with the summarizing model and the tokens it spent, e.g. "· claude-sonnet-5 spent 104.3k tokens".
+  - The line stays on the "compacted and resumed" outcome after the session is back.
+  - The token figure is colored with the same scale as the gate's own token figure, so the two read alike.
   - Send now is refused while the gate stands, and Cancel still drops the prompt.
 - **A held prompt reads "classifying" only while the classifier is actually deciding it.**
   - A prompt that nothing is classifying and nothing holds reads "queued", and it is delivered in order.

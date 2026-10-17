@@ -843,11 +843,27 @@ func substatusName(status *frontendv1.FooterStatus) string {
 
 // coldGateCostLine is the cold gate's cost line on the wire: the whole line
 // and the parts it is exactly made of, the figure carrying its window fill.
-func coldGateCostLine(c ColdGateCost) *frontendv1.FooterStatusActivityColdGateCost {
+func coldGateCostLine(c FiguredLine) *frontendv1.FooterStatusActivityColdGateCost {
 	return &frontendv1.FooterStatusActivityColdGateCost{
 		Text:   c.Text(),
 		Lead:   c.Lead,
-		Figure: &frontendv1.FooterColdGateFigure{Text: c.Figure, WindowFill: c.WindowFill},
+		Figure: c.wireFigure(),
 		Tail:   c.Tail,
 	}
+}
+
+// wire is the line in its parts on the wire, nil for a line with none. Every
+// line drawn around one cold-gate figure that is not the gate's own cost line
+// takes its parts from here.
+func (c *FiguredLine) wire() *frontendv1.FooterColdGateFiguredLine {
+	if c == nil {
+		return nil
+	}
+	return &frontendv1.FooterColdGateFiguredLine{Lead: c.Lead, Figure: c.wireFigure(), Tail: c.Tail}
+}
+
+// wireFigure is the line's figure on the wire, carrying the window fill that
+// is its color. Every wire shape around a cold-gate figure takes it from here.
+func (c FiguredLine) wireFigure() *frontendv1.FooterColdGateFigure {
+	return &frontendv1.FooterColdGateFigure{Text: c.Figure, WindowFill: c.WindowFill}
 }

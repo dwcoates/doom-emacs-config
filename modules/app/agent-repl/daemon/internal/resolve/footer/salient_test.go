@@ -398,7 +398,7 @@ func TestAColdGatesConcludedCompactionIsAnnounced(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compacted and resumed (101.6k → 12.4k)",
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
 		Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400, "")})
 	h.r.SetColdGateAnswer(testWS, nil)
 
@@ -414,7 +414,7 @@ func TestAColdGatesFailedCompactionRaisesNoSalientLine(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction failed",
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
 		Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED, 0, 0, "the summary was empty")})
 	h.r.SetColdGateAnswer(testWS, nil)
 
@@ -430,7 +430,7 @@ func TestAColdGatesRunningPhaseAnnouncesNothing(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "summarizing",
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
 		Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0, "")})
 
 	// Assert

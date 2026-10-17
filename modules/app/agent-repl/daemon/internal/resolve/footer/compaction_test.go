@@ -35,7 +35,7 @@ func TestCompactionLineNamesTheSizeWhileSummarizing(t *testing.T) {
 	p := progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0, "")
 
 	// Act.
-	line := CompactionLine(p)
+	line := compactionSentence(p)
 
 	// Assert.
 	if line != "summarizing the conversation (101.6k)…" {
@@ -48,7 +48,7 @@ func TestCompactionLineOmitsAnUnknownSizeWhileSummarizing(t *testing.T) {
 	p := progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 0, 0, "")
 
 	// Act.
-	line := CompactionLine(p)
+	line := compactionSentence(p)
 
 	// Assert.
 	if line != "summarizing the conversation…" {
@@ -61,7 +61,7 @@ func TestCompactionLineStatesBothFiguresOnCompletion(t *testing.T) {
 	p := progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400, "")
 
 	// Act.
-	line := CompactionLine(p)
+	line := compactionSentence(p)
 
 	// Assert.
 	if line != "compacted and resumed (101.6k → 12.4k)" {
@@ -74,7 +74,7 @@ func TestCompactionLineCarriesTheFailuresOwnWords(t *testing.T) {
 	p := progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED, 0, 0, "the summarizing session ended as error_max_turns")
 
 	// Act.
-	line := CompactionLine(p)
+	line := compactionSentence(p)
 
 	// Assert.
 	if line != "compaction failed — the summarizing session ended as error_max_turns" {
@@ -174,10 +174,10 @@ func TestAnAnsweredColdGateThinksRatherThanWaits(t *testing.T) {
 	// lands, and the answer must outrank it.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Request: "compaction requested"})
 
 	// Assert.
 	status := h.view(t).GetStrip().GetStatus()
@@ -190,10 +190,10 @@ func TestAnAnsweredColdGateDrawsTheDaemonsOwnLine(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Request: "compaction requested"})
 
 	// Assert.
 	got := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction().GetText()
@@ -206,10 +206,10 @@ func TestACompactAndResumeGateAnswerTakesTheCompactingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompactAndResume, Text: "compaction requested"})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompactAndResume, Request: "compaction requested"})
 
 	// Assert.
 	if got := h.view(t).GetStrip().GetStatus().GetWorking().GetCompacting(); got == nil {
@@ -231,10 +231,10 @@ func TestAClearedGateAnswerTakesTheClearingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceClear, Text: "clearing the context"})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceClear, Request: "clearing the context"})
 
 	// Assert.
 	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
@@ -247,10 +247,10 @@ func TestAPaidGateAnswerTakesTheSubmittingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoicePay, Text: "resuming and paying"})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoicePay, Request: "resuming and paying"})
 
 	// Assert.
 	thinking := h.view(t).GetStrip().GetStatus().GetWorking()
@@ -263,8 +263,8 @@ func TestClearingTheAnswerGivesTheStandingGateBackTheStrip(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Request: "compaction requested"})
 
 	// Act. The re-open failed, so the gate is still the question.
 	h.r.SetColdGateAnswer(testWS, nil)
@@ -280,7 +280,7 @@ func TestClearingTheAnswerRetiresItsProgressLine(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Request: "compaction requested"})
 
 	// Act.
 	h.r.SetColdGateAnswer(testWS, nil)
@@ -297,9 +297,9 @@ func TestClearingTheAnswerRetiresItsProgressLine(t *testing.T) {
 // outlivedTurn is the operation of the invariant-violation record.
 const outlivedTurn = "daemon.footer.compaction_line_outlived_turn"
 
-// compactionText is the compaction line the published view draws, empty when
+// drawnCompaction is the compaction line the published view draws, empty when
 // none stands.
-func compactionText(t *testing.T, h *harness) string {
+func drawnCompaction(t *testing.T, h *harness) string {
 	t.Helper()
 	return h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction().GetText()
 }
@@ -341,7 +341,7 @@ func TestTheTurnsTerminalEndsACompactionLineItsCutNeverEnded(t *testing.T) {
 
 	// Assert: the next turn draws no compaction line.
 	h.r.SetTurn(testWS, &TurnStarted{At: h.clock.Now(), Act: ActPrompt})
-	if got := compactionText(t, h); got != "" {
+	if got := drawnCompaction(t, h); got != "" {
 		t.Fatalf("activity = %q, want no compaction line on the next turn", got)
 	}
 }
@@ -388,7 +388,7 @@ func TestTheCutEndsTheCompactionLineWithNoViolation(t *testing.T) {
 	endTurn(h, "turn-1")
 
 	// Assert
-	if got := compactionText(t, h); got != "" {
+	if got := drawnCompaction(t, h); got != "" {
 		t.Fatalf("activity = %q, want the line gone with the cut", got)
 	}
 	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
@@ -408,7 +408,7 @@ func TestACompactTurnsTerminalEndsItsLine(t *testing.T) {
 
 	// Assert
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
-	if got := compactionText(t, h); got != "" {
+	if got := drawnCompaction(t, h); got != "" {
 		t.Fatalf("activity = %q, want the compact turn's line ended with it", got)
 	}
 }
@@ -423,7 +423,7 @@ func TestATurnOpeningWithACompactionLineStandingIsNoViolation(t *testing.T) {
 	h.r.OnTurnOpened(testWS, "turn-1")
 
 	// Assert
-	if got := compactionText(t, h); got != vendorCompactionLine {
+	if got := drawnCompaction(t, h); got != vendorCompactionLine {
 		t.Fatalf("activity = %q, want the turn's own compaction line", got)
 	}
 	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
@@ -595,14 +595,14 @@ func TestTheColdGateAnswersLine(t *testing.T) {
 			// Arrange: the gate's verb relayed its concluded phase.
 			h := newHarness(t)
 			connected(h)
-			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
-			h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compacted and resumed"})
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
+			h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Request: "compacted and resumed"})
 
 			// Act
 			tt.act(h)
 
 			// Assert
-			if got := compactionText(t, h); got != tt.want {
+			if got := drawnCompaction(t, h); got != tt.want {
 				t.Fatalf("activity = %q, want %q", got, tt.want)
 			}
 			if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
@@ -634,7 +634,7 @@ func TestAConcludedPhaseEndsTheSalientLineAtOnce(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(progress(tt.phase, 101_600, 12_400, "")))
 
 			// Assert
-			if got := compactionText(t, h); got != "" {
+			if got := drawnCompaction(t, h); got != "" {
 				t.Fatalf("salient compaction = %q, want none once the compaction concluded", got)
 			}
 		})
@@ -697,8 +697,8 @@ func TestAConclusionUnderAColdGateAnswerStillRaisesItsTransient(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
-	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "resuming the session from the summary…"})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Request: "resuming the session from the summary…"})
 	h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
 		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400, "")))
 
@@ -785,7 +785,7 @@ func TestCompactingNamedByItsOwnConcludedCut(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, tt.start)
 
 			// Assert
-			if got := compactionText(t, h); got != tt.wantLine {
+			if got := drawnCompaction(t, h); got != tt.wantLine {
 				t.Fatalf("activity = %q, want %q", got, tt.wantLine)
 			}
 			if got := len(recordsOf(h.log.Records(), "daemon.footer.compacting_after_its_cut")); got != tt.wantStale {
@@ -889,7 +889,7 @@ func TestARestatedCutNamesItsCompaction(t *testing.T) {
 			tt.act(h)
 
 			// Assert
-			if got := compactionText(t, h); got != tt.wantLine {
+			if got := drawnCompaction(t, h); got != tt.wantLine {
 				t.Fatalf("activity = %q, want %q", got, tt.wantLine)
 			}
 			if got := len(recordsOf(h.log.Records(), "daemon.footer.compacting_after_its_cut")); got != tt.wantStale {
@@ -916,5 +916,270 @@ func TestARestatedCutLeavesNoViolationAtTheTerminal(t *testing.T) {
 	// Assert
 	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
 		t.Fatalf("records = %+v, want no violation: the restated cut ended the compaction", errs)
+	}
+}
+
+// ---- what the gate's compaction spent --------------------------------------
+
+// spentWindow is the window the spend tests' gate measured its figure against.
+const spentWindow = 1_000_000
+
+// spent is a phase stating what its summarizer spent.
+func spent(phase conversationv1.SessionCompactionPhase, model string, tokens uint64) *conversationv1.SessionCompactionProgress {
+	p := progress(phase, 101_600, 12_400, "")
+	p.Spend = &conversationv1.SessionCompactionSpend{
+		Model: &conversationv1.AgentModel{Name: model}, Tokens: tokens,
+	}
+	return p
+}
+
+// gateStanding stands a cold gate measured against spentWindow.
+func gateStanding(h *harness) {
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}, Window: spentWindow})
+}
+
+// partsOf flattens a wire line's parts for comparison.
+func partsOf(p *frontendv1.FooterColdGateFiguredLine) []any {
+	return []any{p.GetLead(), p.GetFigure().GetText(), p.GetFigure().GetWindowFill(), p.GetTail()}
+}
+
+func TestCompactionSpendLine(t *testing.T) {
+	tests := []struct {
+		name   string
+		tokens uint64
+		window int64
+		want   FiguredLine
+	}{
+		{
+			name: "a spend in thousands is scaled as the line's other figures are", tokens: 104_300, window: 1_000_000,
+			want: FiguredLine{Lead: "compacted · claude-sonnet-5 spent ", Figure: "104.3k", Tail: " tokens", WindowFill: 0.1043},
+		},
+		{
+			name: "a spend under a thousand is drawn whole", tokens: 950, window: 1_000_000,
+			want: FiguredLine{Lead: "compacted · claude-sonnet-5 spent ", Figure: "950", Tail: " tokens", WindowFill: 0.00095},
+		},
+		{
+			name: "a spend beyond the window fills it and no further", tokens: 300_000, window: 200_000,
+			want: FiguredLine{Lead: "compacted · claude-sonnet-5 spent ", Figure: "300k", Tail: " tokens", WindowFill: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			spend := &conversationv1.SessionCompactionSpend{Model: &conversationv1.AgentModel{Name: "claude-sonnet-5"}, Tokens: tt.tokens}
+
+			// Act
+			got := compactionSpendLine("compacted", spend, tt.window)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("compactionSpendLine = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestARunningPhaseWithItsSpendNamesTheSummarizerAndItsTokens(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	gateStanding(h)
+
+	// Act
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
+		Progress: spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, "claude-sonnet-5", 104_300)})
+
+	// Assert
+	if got := drawnCompaction(t, h); got != "the summary is written; the context is cut · claude-sonnet-5 spent 104.3k tokens" {
+		t.Fatalf("activity = %q, want the summarizer and its spend named", got)
+	}
+}
+
+func TestARunningPhaseWithItsSpendCarriesTheSpendAsTheGatesFigure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	gateStanding(h)
+
+	// Act
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
+		Progress: spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_RESUMING, "claude-sonnet-5", 104_300)})
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction()
+	got := partsOf(line.GetParts())
+	want := []any{"resuming the session from the summary… · claude-sonnet-5 spent ", "104.3k", 0.1043, " tokens"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parts = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestARunningPhaseWithItsSpendIsExactlyItsParts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	gateStanding(h)
+
+	// Act
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
+		Progress: spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, "claude-sonnet-5", 104_300)})
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction()
+	parts := line.GetParts()
+	if whole := parts.GetLead() + parts.GetFigure().GetText() + parts.GetTail(); whole != line.GetText() {
+		t.Fatalf("text = %q, want lead+figure+tail %q", line.GetText(), whole)
+	}
+}
+
+func TestARunningPhaseWithoutASpendCarriesNoParts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	gateStanding(h)
+
+	// Act
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
+		Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 101_600, 0, "")})
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction()
+	if line.GetParts() != nil || line.GetText() != "summarizing the conversation (101.6k)…" {
+		t.Fatalf("line = %+v, want the plain sentence and no parts", line)
+	}
+}
+
+func TestTheConcludedCompactionNamesTheSummarizersSpendInParts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	gateStanding(h)
+
+	// Act
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
+		Progress: spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, "claude-sonnet-5", 104_300)})
+	// The re-open landed: the gate retires before the answer does, as the
+	// verb that settles it orders the two.
+	h.r.SetColdGate(testWS, ColdGate{Standing: false})
+	h.r.SetColdGateAnswer(testWS, nil)
+
+	// Assert
+	concluded := transientOf(t, h).GetCompactionConcluded()
+	got := append([]any{concluded.GetText()}, partsOf(concluded.GetParts())...)
+	want := []any{
+		"compacted and resumed (101.6k → 12.4k) · claude-sonnet-5 spent 104.3k tokens",
+		"compacted and resumed (101.6k → 12.4k) · claude-sonnet-5 spent ", "104.3k", 0.1043, " tokens",
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("compaction_concluded = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestAPhaseOnTheSessionStreamNamesItsSpendAsTheAnswersDoes(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	gateStanding(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+
+	// Act
+	h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
+		spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_RESUMING, "claude-haiku-4-5", 2_000)))
+	// The standing gate outranks the working line; with it lifted, the line
+	// the phase stood is the one drawn.
+	h.r.SetColdGate(testWS, ColdGate{Standing: false})
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetWorking().GetActivity().GetSalient().GetCompaction()
+	got := append([]any{line.GetText()}, partsOf(line.GetParts())...)
+	want := []any{
+		"resuming the session from the summary… · claude-haiku-4-5 spent 2k tokens",
+		"resuming the session from the summary… · claude-haiku-4-5 spent ", "2k", 0.002, " tokens",
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("line = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestASpendWithNoGateStandingIsRecordedAndFailsHard(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a spend with no gate standing did not fail hard")
+		}
+		errs := recordsOf(h.log.Records(), "daemon.footer.compaction_spend_without_gate")
+		if len(errs) != 1 || errs[0].Level != dlog.LevelError ||
+			errs[0].Context["summarizer_model"] != "claude-sonnet-5" || errs[0].Context["gate_standing"] != false {
+			t.Fatalf("records = %+v, want one ERROR naming the summarizer and the absent gate", errs)
+		}
+	}()
+
+	// Act
+	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact,
+		Progress: spent(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZED, "claude-sonnet-5", 104_300)})
+}
+
+func TestAColdGateAnswerSettingNeitherLineIsRecordedAndFailsHard(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *ColdGateAnswer
+	}{
+		{name: "neither", answer: &ColdGateAnswer{Choice: ChoiceCompact}},
+		{name: "both", answer: &ColdGateAnswer{Choice: ChoiceCompact, Request: "compaction requested",
+			Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING, 0, 0, "")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("a malformed answer did not fail hard")
+				}
+				errs := recordsOf(h.log.Records(), "daemon.footer.cold_gate_answer_malformed")
+				if len(errs) != 1 || errs[0].Level != dlog.LevelError || errs[0].Context["choice"] != ChoiceCompact {
+					t.Fatalf("records = %+v, want one ERROR naming the answer", errs)
+				}
+			}()
+
+			// Act
+			h.r.SetColdGateAnswer(testWS, tt.answer)
+		})
+	}
+}
+
+func TestLineOfNamesWhatTheAnswerSays(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *ColdGateAnswer
+		want   string
+	}{
+		{name: "no answer", answer: nil, want: ""},
+		{name: "a request", answer: &ColdGateAnswer{Request: "compaction requested"}, want: "compaction requested"},
+		{name: "a relayed phase", answer: &ColdGateAnswer{
+			Progress: progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 0, 0, "")},
+			want: "SESSION_COMPACTION_PHASE_STARTED"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := lineOf(tt.answer)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("lineOf = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

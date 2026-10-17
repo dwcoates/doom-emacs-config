@@ -1695,3 +1695,76 @@ describe("the cold gate's cost line", () => {
     expect(() => salientCell("coldGateCost", broken, "waiting")).toThrow(MalformedView);
   });
 });
+
+describe("the compaction line's summarizer spend", () => {
+  const sentence = "compacted and resumed (101.6k → 12.4k) · claude-sonnet-5 spent 104.3k tokens";
+  const parts = {
+    lead: "compacted and resumed (101.6k → 12.4k) · claude-sonnet-5 spent ",
+    figure: { text: "104.3k", windowFill: 0.41 },
+    tail: " tokens",
+  };
+
+  /** The color PERCENT paints on the cold-gate gradient, as the DOM normalizes it. */
+  function painted(percent: number): string {
+    const probe = document.createElement("span");
+    probe.style.color = coldGatePercentColor(percent);
+    return probe.style.color;
+  }
+
+  it("colors a running line's spend on the cold-gate gradient", () => {
+    // Act
+    const cell = salientCell("compaction", { text: sentence, parts }, "working");
+    // Assert
+    expect(cell.querySelector<HTMLElement>(".footer-activity-compaction .footer-cold-gate-figure")?.style.color).toBe(
+      painted(41),
+    );
+  });
+
+  it("draws a running line with no spend verbatim, with no figure", () => {
+    // Act
+    const cell = salientCell("compaction", { text: "summarizing the conversation (101.6k)…" }, "working");
+    // Assert
+    expect([
+      cell.querySelector(".footer-activity-compaction")?.textContent,
+      cell.querySelector(".footer-cold-gate-figure"),
+    ]).toEqual(["summarizing the conversation (101.6k)…", null]);
+  });
+
+  it("refuses a running line whose parts do not make its text", () => {
+    // Act / Assert
+    expect(() => salientCell("compaction", { text: sentence, parts: { ...parts, tail: " toks" } }, "working")).toThrow(
+      MalformedView,
+    );
+  });
+
+  it("colors a concluded compaction's spend on the cold-gate gradient", () => {
+    // Act
+    const cell = transientCell("compactionConcluded", { text: sentence, parts });
+    // Assert
+    expect(cell.querySelector<HTMLElement>(".footer-activity-compaction .footer-cold-gate-figure")?.style.color).toBe(
+      painted(41),
+    );
+  });
+
+  it("reads a concluded compaction with its spend exactly as its text", () => {
+    // Act
+    const cell = transientCell("compactionConcluded", { text: sentence, parts });
+    // Assert
+    expect(cell.querySelector(".footer-activity-compaction")?.textContent).toBe(sentence);
+  });
+
+  it("draws the spend's figure exactly as the cold gate's cost line draws its own", () => {
+    // Arrange: one drawer serves every cold-gate figure, so a spend and a
+    // gate cost of the same fill wear one figure shape and one color.
+    const cost = { text: "cold at 409,051 tokens", lead: "cold at ", figure: { text: "409,051", windowFill: 0.41 }, tail: " tokens" };
+
+    // Act
+    const spend = salientCell("compaction", { text: sentence, parts }, "working").querySelector<HTMLElement>(
+      ".footer-cold-gate-figure",
+    );
+    const gate = salientCell("coldGateCost", cost, "waiting").querySelector<HTMLElement>(".footer-cold-gate-figure");
+
+    // Assert
+    expect([spend?.tagName, spend?.style.color]).toEqual([gate?.tagName, gate?.style.color]);
+  });
+});

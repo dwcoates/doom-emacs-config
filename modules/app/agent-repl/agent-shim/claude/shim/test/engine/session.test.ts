@@ -50,7 +50,7 @@ import { VENDOR_ERROR_RETRY_INTERVAL_MS } from "../../src/engine/vendor-error-re
 import { isVendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, emitSummary, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
 import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 
 interface Harness {
@@ -9977,7 +9977,7 @@ describe("the cold gate's COMPACT remediation", () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
       onQueryCreated: (query, _spec, index) => {
-        if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+        if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
       },
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
@@ -10298,7 +10298,7 @@ describe("the cold gate's COMPACT remediation", () => {
       onQueryCreated: (query, _spec, index) => {
         if (index !== 0) return;
         timeline?.push("summarizing-query");
-        query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+        emitSummary(query, "77777777-7777-4777-8777-777777777777");
       },
     });
 
@@ -10348,6 +10348,173 @@ describe("the cold gate's COMPACT remediation", () => {
       (frame) => frame.phase === conversationv1.SessionCompactionPhase.SUMMARIZED,
     );
     expect(summarized?.tokensAfter).toBe(BigInt(2));
+  });
+
+  /** The phase frame named WHICH, as the engine pushed it. */
+  const frameOf = (
+    frames: conversationv1.SessionCompactionProgress[],
+    which: conversationv1.SessionCompactionPhase,
+  ): conversationv1.SessionCompactionProgress | undefined => frames.find((frame) => frame.phase === which);
+
+  /** A harness whose summarizer runs on MODEL and spends USAGE. */
+  const spending = (model: string, usage: Parameters<typeof resultMessage>[1]): Harness =>
+    harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777", { model, usage });
+      },
+    });
+
+  const SPEND_USAGE = { input_tokens: 3, cache_creation_input_tokens: 40_000, cache_read_input_tokens: 60_000, output_tokens: 1_200 };
+
+  it("states no spend on the SUMMARIZING frame, before the summarizer has answered", async () => {
+    // Arrange
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    const watched = watchPhases(h, []);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    expect(frameOf(watched.frames, conversationv1.SessionCompactionPhase.SUMMARIZING)?.spend).toBeUndefined();
+  });
+
+  it("names the model the summarizing query's init stated on the SUMMARIZED frame", async () => {
+    // Arrange
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    const watched = watchPhases(h, []);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    expect(frameOf(watched.frames, conversationv1.SessionCompactionPhase.SUMMARIZED)?.spend?.model?.name).toBe(
+      "claude-sonnet-5",
+    );
+  });
+
+  it("states every token the summarizer spent on the SUMMARIZED frame, cache reads and writes included", async () => {
+    // Arrange
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    const watched = watchPhases(h, []);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    expect(frameOf(watched.frames, conversationv1.SessionCompactionPhase.SUMMARIZED)?.spend?.tokens).toBe(
+      BigInt(3 + 40_000 + 60_000 + 1_200),
+    );
+  });
+
+  it("restates the summarizer's spend on the RESUMING and STARTED frames", async () => {
+    // Arrange
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    const watched = watchPhases(h, []);
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const restated = [conversationv1.SessionCompactionPhase.RESUMING, conversationv1.SessionCompactionPhase.STARTED].map(
+      (which) => {
+        const spend = frameOf(watched.frames, which)?.spend;
+        return [spend?.model?.name, spend?.tokens];
+      },
+    );
+    expect(restated).toEqual([
+      ["claude-sonnet-5", BigInt(101_203)],
+      ["claude-sonnet-5", BigInt(101_203)],
+    ]);
+  });
+
+  it("logs the summarizer's model and spend on the SUMMARIZED phase's line", async () => {
+    // Arrange
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    watchPhases(h, []);
+    const before = logSinkMark();
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const context = logContextFor(
+      before,
+      "the cold gate's summary came back and the compaction boundary was appended to the transcript",
+    );
+    expect([context?.["summarizer_model"], context?.["summarizer_tokens"]]).toEqual(["claude-sonnet-5", 101_203]);
+  });
+
+  it("logs every phase with one field set, wherever the phase is said from", async () => {
+    // Arrange: SUMMARIZED is said from the compaction, STARTED from
+    // StartSession; one narrator says both.
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    watchPhases(h, []);
+    const before = logSinkMark();
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const fields = (said: string): string[] =>
+      Object.keys(logContextFor(before, said) ?? {})
+        .filter((key) => key !== "vendor_session_id")
+        .sort();
+    const started = fields("the session resumed from the cold gate's compaction is up");
+    expect([started.includes("summarizer_tokens"), started]).toEqual([
+      true,
+      fields("the cold gate's summary came back and the compaction boundary was appended to the transcript"),
+    ]);
+  });
+
+  it("fails the compaction when the summarizer answers without the init that names its model", async () => {
+    // Arrange: the vendor opens every query with its init, so a summary with
+    // none before it cannot say which model wrote it.
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+      },
+    });
+    const watched = watchPhases(h, []);
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    // Assert
+    expect({
+      result: response.result.case,
+      error: frameOf(watched.frames, conversationv1.SessionCompactionPhase.FAILED)?.error,
+      summarized: frameOf(watched.frames, conversationv1.SessionCompactionPhase.SUMMARIZED),
+    }).toEqual({
+      result: "failure",
+      error: "the summarizing session answered without stating its model",
+      summarized: undefined,
+    });
+  });
+
+  it("states no spend on the FAILED frame", async () => {
+    // Arrange
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 0) return;
+        query.emit(initMessage({ model: "claude-sonnet-5" }));
+        query.emit({
+          ...(resultMessage("88888888-8888-4888-8888-888888888888") as unknown as Record<string, unknown>),
+          subtype: "error_max_turns",
+        } as never);
+      },
+    });
+    const watched = watchPhases(h, []);
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    // Assert
+    expect(frameOf(watched.frames, conversationv1.SessionCompactionPhase.FAILED)?.spend).toBeUndefined();
   });
 
   it("pushes FAILED carrying the failure's own wording", async () => {
@@ -11030,7 +11197,7 @@ describe("compaction when no model is in effect", () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
       onQueryCreated: (query, _spec, index) => {
-        if (index === 0) query.emit(resultMessage("cccccccc-cccc-4ccc-8ccc-cccccccccccc"));
+        if (index === 0) emitSummary(query, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
       },
     });
     // A transcript whose records never named a model: nothing to recover, so
@@ -12282,7 +12449,7 @@ describe("the cold gate's compact remediation, in detail", () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
       onQueryCreated: (query, _spec, index) => {
-        if (index === 0) query.emit(resultMessage("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"));
+        if (index === 0) emitSummary(query, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
       },
     });
     const pending = compactWith(
@@ -12308,6 +12475,7 @@ describe("the cold gate's compact remediation, in detail", () => {
       nowMs: 1_000_000 + 10 * 60 * 1000,
       onQueryCreated: (query, _spec, index) => {
         if (index !== 0) return;
+        query.emit(initMessage());
         query.emit(assistantMessage("00000000-0000-4000-8000-000000000110"));
         query.emit(resultMessage("ffffffff-ffff-4fff-8fff-ffffffffffff"));
       },
@@ -15177,7 +15345,7 @@ describe("RollBackSession", () => {
       const h = harness({
         nowMs: 1_000_000 + 10 * 60 * 1000,
         onQueryCreated: (query, _spec, index) => {
-          if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+          if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
         },
       });
       writeTranscript(h.configDir, h.cwd, "resume-1", [

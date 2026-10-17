@@ -573,8 +573,14 @@ message FooterStatusWorkingSalient {
 // phase the producer last stated ("summarizing the conversation…"). Drawn
 // verbatim; a client words nothing.
 message FooterStatusActivityCompaction {
-  // The composed line, drawn verbatim.
+  // The composed line, drawn verbatim when `parts` is absent.
   string text = 1;
+  // THE LINE IN PARTS, so the summarizer's token spend takes the cold gate's
+  // gradient. SET from the `summarized` phase on, when the line names what
+  // the summary cost ("… · claude-sonnet-5 spent 104.3k tokens"); absent
+  // before it. A client draws the parts instead of `text`, which they make
+  // exactly.
+  optional FooterColdGateFiguredLine parts = 2;
 }
 // The prompt is being delivered.
 message FooterSubStatusWorkingSubmitting {}
@@ -768,6 +774,17 @@ message FooterStatusActivityColdGateCost {
   FooterColdGateFigure figure = 3;
   // The words after it (" context tokens").
   string tail = 4;
+}
+// A composed line around ONE cold-gate token figure, in the parts a client
+// draws it in: the line's text is exactly `lead` + `figure.text` + `tail`, and
+// a client refuses parts that do not make it.
+message FooterColdGateFiguredLine {
+  // The words before the figure.
+  string lead = 1;
+  // The token figure, formatted and colored.
+  FooterColdGateFigure figure = 2;
+  // The words after it.
+  string tail = 3;
 }
 // The cold gate's token figure on the footer line.
 message FooterColdGateFigure {
@@ -1951,8 +1968,13 @@ message FooterActivityTransient {
 // A compaction concluded.
 message FooterActivityTransientCompactionConcluded {
   // The daemon's composed outcome line ("compacted and resumed (101.6k →
-  // 12.4k)"), drawn verbatim.
+  // 12.4k) · claude-sonnet-5 spent 104.3k tokens"), drawn verbatim when
+  // `parts` is absent.
   string text = 1;
+  // THE LINE IN PARTS, so the summarizer's token spend takes the cold gate's
+  // gradient. SET whenever the concluded phase states what the summary cost;
+  // a client draws the parts instead of `text`, which they make exactly.
+  optional FooterColdGateFiguredLine parts = 2;
 }
 
 // A background subagent's wait for the API opened or ended.

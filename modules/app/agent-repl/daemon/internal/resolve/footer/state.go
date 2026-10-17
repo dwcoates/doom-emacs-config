@@ -19,6 +19,10 @@ import (
 type standing struct {
 	// text is the composed line, drawn verbatim.
 	text string
+	// parts is the line in the parts a client draws it in, when it names a
+	// figure that takes the cold gate's gradient; nil otherwise. Its Text()
+	// is exactly `text`.
+	parts *FiguredLine
 	// at is when the line began standing.
 	at time.Time
 	// compaction is the identity of the compaction a vendor compaction's

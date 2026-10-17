@@ -302,7 +302,10 @@ export function hookResponse(
 }
 
 /** A turn terminal. */
-export function resultMessage(uuid = "22222222-2222-4222-8222-222222222222"): SdkMessage {
+export function resultMessage(
+  uuid = "22222222-2222-4222-8222-222222222222",
+  usage: Partial<Record<"input_tokens" | "output_tokens" | "cache_read_input_tokens" | "cache_creation_input_tokens", number>> = {},
+): SdkMessage {
   return {
     type: "result",
     subtype: "success",
@@ -313,12 +316,27 @@ export function resultMessage(uuid = "22222222-2222-4222-8222-222222222222"): Sd
     result: "done",
     stop_reason: null,
     total_cost_usd: 0,
-    usage: { input_tokens: 1, output_tokens: 2 },
+    // THE VENDOR'S RESULT USAGE STATES ALL FOUR COUNTERS (its
+    // `NonNullableUsage`), the cache pair included.
+    usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...usage },
     modelUsage: {},
     permission_denials: [],
     uuid,
     session_id: "session-1",
   } as unknown as SdkMessage;
+}
+
+/**
+ * A summarizing query's whole answer, in the vendor's order: its `init`,
+ * naming the model it runs on, then the `result` carrying the summary.
+ */
+export function emitSummary(
+  query: ScriptedQuery,
+  uuid: string,
+  options: { model?: string; usage?: Parameters<typeof resultMessage>[1] } = {},
+): void {
+  query.emit(initMessage(options.model === undefined ? {} : { model: options.model }));
+  query.emit(resultMessage(uuid, options.usage));
 }
 
 /**

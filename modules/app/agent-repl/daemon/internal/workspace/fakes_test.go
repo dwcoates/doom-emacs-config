@@ -1569,14 +1569,19 @@ func (f *fakeFooter) SetColdGateAnswer(_ ids.WorkspaceID, answer *footer.ColdGat
 	f.coldEvents = append(f.coldEvents, "answer")
 }
 
-// coldAnswerLines is every non-clearing line the footer was handed, in order.
+// coldAnswerLines is what every non-clearing answer the footer was handed
+// says, in order: its request line, or the name of the phase it relays.
 func (f *fakeFooter) coldAnswerLines() []string {
 	out := []string{}
 	for _, answer := range f.coldAnswers {
-		if answer == nil {
+		switch {
+		case answer == nil:
 			continue
+		case answer.Progress != nil:
+			out = append(out, answer.Progress.GetPhase().String())
+		default:
+			out = append(out, answer.Request)
 		}
-		out = append(out, answer.Text)
 	}
 	return out
 }

@@ -1243,6 +1243,27 @@ func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
 	}
 }
 
+func TestStartHandsTheFooterTheWindowTheGatesFigureWasMeasuredAgainst(t *testing.T) {
+	// Arrange: the gate's compaction measures its summarizer's spend against
+	// the window the gate's own figure was, so the footer is handed it.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+	f.topbarWindow = 200_000
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	gate := f.footer.coldGates[ws.ID]
+	if gate.Window != 200_000 || gate.Cost.WindowFill != topbar.WindowFill(120_000, 200_000) {
+		t.Fatalf("gate = %+v, want the window 200,000 its figure's fill was measured against", gate)
+	}
+}
+
 func TestStartStatesTheColdGateToTheTopbar(t *testing.T) {
 	// Arrange: a cold refusal starts NO session, so the topbar's session facts
 	// never arrive and its own gate state is the only thing that keeps the

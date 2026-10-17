@@ -2546,7 +2546,8 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	// compact too.
 	compact, menu := coldCompactMenu(cold)
 
-	cost := coldGateCost(cold, f.deps.Topbar.ContextWindow(ws))
+	window := f.deps.Topbar.ContextWindow(ws)
+	cost := coldGateCost(cold, window)
 	detail := cost.Text()
 
 	standing := &frontendv1.FeedColdGateStanding{
@@ -2571,7 +2572,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	}
 
 	f.publishColdGateRow(ws)
-	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Cost: cost})
+	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Cost: cost, Window: window})
 	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),
@@ -2657,9 +2658,9 @@ var englishPrinter = message.NewPrinter(language.English)
 // chip measures against (topbar.Resolver.ContextWindow: the vendor's stated
 // window, else the assumed 1,000,000), so the gate and the chip agree on how
 // full one count is. The gate's fill and the feed figure's are this one value.
-func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.ColdGateCost {
+func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.FiguredLine {
 	tokens := cold.GetContextTokens()
-	return footer.ColdGateCost{
+	return footer.FiguredLine{
 		Lead:       "the conversation is cold at ",
 		Figure:     englishPrinter.Sprintf("%d", tokens),
 		Tail:       " context tokens",

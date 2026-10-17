@@ -856,7 +856,7 @@ func TestAnswerColdGatePublishesOneLinePerRelayedPhase(t *testing.T) {
 	}
 }
 
-func TestAnswerColdGatePublishesTheCompletionLine(t *testing.T) {
+func TestAnswerColdGateHandsTheCompletionPhaseAlone(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -870,11 +870,16 @@ func TestAnswerColdGatePublishesTheCompletionLine(t *testing.T) {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
 
-	// Assert.
-	lines := f.footer.coldAnswerLines()
-	last := lines[len(lines)-1]
-	if last != "compacted and resumed (101.6k → 12.4k)" {
-		t.Fatalf("completion line = %q, want the compacted-and-resumed figures", last)
+	// Assert. The footer words the phase itself, so the verb hands it the
+	// phase alone and no line of its own beside it.
+	var last *footer.ColdGateAnswer
+	for _, answer := range f.footer.coldAnswers {
+		if answer != nil {
+			last = answer
+		}
+	}
+	if last == nil || last.Request != "" || last.Progress.GetPhase() != conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED {
+		t.Fatalf("last answer = %+v, want the started phase with no request line", last)
 	}
 }
 

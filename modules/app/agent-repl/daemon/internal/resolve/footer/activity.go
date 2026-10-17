@@ -81,7 +81,7 @@ func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingAc
 	case s.compaction != nil:
 		line = salient(s.compaction.at)
 		line.Kind = &frontendv1.FooterStatusWorkingSalient_Compaction{
-			Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text}}
+			Compaction: &frontendv1.FooterStatusActivityCompaction{Text: s.compaction.text, Parts: s.compaction.parts.wire()}}
 	case ok:
 		line = fillShared(&frontendv1.FooterStatusWorkingSalient{}, shared)
 	default:
