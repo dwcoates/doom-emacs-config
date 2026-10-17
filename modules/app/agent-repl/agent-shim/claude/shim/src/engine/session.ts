@@ -1817,6 +1817,66 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * WHICH AGENT of a session one vendor task id names, from the store's locator
+   * pairing, with the name its spawn gave it. An unpaired task id is an answer
+   * (its agent is not on record yet); only a store that could not answer is a
+   * failure, recorded here, at the read that owns it.
+   */
+  async function resolveVendorTaskHere(
+    request: shimv1.ResolveVendorTaskRequest,
+  ): Promise<shimv1.ResolveVendorTaskResponse> {
+    const session = request.session ?? create(conversationv1.AgentIdSchema, {});
+    const answer = await deps.persistence.agentByVendorTask(session, request.vendorTaskId);
+    switch (answer.kind) {
+      case "found": {
+        const requestedName = answer.commission?.requestedName;
+        LOGGER.debug(
+          { task_id: request.vendorTaskId, agent: answer.agent.value, named: requestedName !== undefined },
+          "a vendor task id was resolved to its agent",
+        );
+        return create(shimv1.ResolveVendorTaskResponseSchema, {
+          result: {
+            case: "success",
+            value: create(shimv1.ResolveVendorTaskSuccessSchema, {
+              agent: {
+                case: "found",
+                value: create(shimv1.ResolveVendorTaskAgentSchema, {
+                  agent: answer.agent,
+                  ...(requestedName === undefined || requestedName === "" ? {} : { requestedName }),
+                }),
+              },
+            }),
+          },
+        });
+      }
+      case "not_found":
+        LOGGER.debug({ task_id: request.vendorTaskId }, "no agent of the session is paired with the vendor task id");
+        return create(shimv1.ResolveVendorTaskResponseSchema, {
+          result: {
+            case: "success",
+            value: create(shimv1.ResolveVendorTaskSuccessSchema, {
+              agent: { case: "notRecorded", value: create(shimv1.ResolveVendorTaskNotRecordedSchema, {}) },
+            }),
+          },
+        });
+      case "failed":
+        LOGGER.error(
+          { task_id: request.vendorTaskId, detail: answer.detail },
+          "the store could not say which agent a vendor task id names",
+        );
+        return create(shimv1.ResolveVendorTaskResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(shimv1.ResolveVendorTaskFailureSchema, {
+              detail: answer.detail,
+              kind: { case: "storeUnavailable", value: create(shimv1.ResolveVendorTaskStoreUnavailableSchema, {}) },
+            }),
+          },
+        });
+    }
+  }
+
+  /**
    * WHICH SESSIONS hold the two ends of one cross-session delivery, from the
    * host's store. An end no recorded session holds is an answer (an outside
    * session, or a record not written yet); only a store that could not answer
@@ -7396,6 +7456,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     readHistory: (request) => turns.readHistory(request),
     readTranscripts: () => Promise.resolve(readTranscriptsHere()),
     resolvePeerDelivery: (request) => resolvePeerDeliveryHere(request),
+    resolveVendorTask: (request) => resolveVendorTaskHere(request),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     getForkPoint: () => Promise.resolve(getForkPoint()),
     forkSession: afterRestart(forkSession),

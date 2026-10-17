@@ -63,10 +63,12 @@ export function peerFacts(record: Record<string, unknown>, fallbackBody: string)
 
 /**
  * WHAT KIND of peer message a record is, from the vendor's own marking:
- * `origin.handback === true` is a subagent handing its final report back, and
- * anything else is another session's message. The sidecar reads the same field
- * the same way (`shim-sidecar/internal/convert/user.go`), so both planes state
- * one kind for one record.
+ * `origin.handback === true` is a subagent handing its final report back, a
+ * stated `origin.senderTaskId` is a message an agent of this same session sent
+ * (the vendor stamps it from the sending loop, and it is absent for another
+ * session's), and anything else is another session's message. The sidecar
+ * reads the same fields the same way (`shim-sidecar/internal/convert/user.go`),
+ * so both planes state one kind for one record.
  */
 function peerKindOf(record: Record<string, unknown>): conversationv1.PeerMessage["kind"] {
   const origin = record.origin as RawPeerOrigin | undefined;
@@ -74,6 +76,15 @@ function peerKindOf(record: Record<string, unknown>): conversationv1.PeerMessage
     return {
       case: "subagentHandback",
       value: create(conversationv1.PeerMessageSubagentHandbackSchema, {}),
+    };
+  }
+  const task = (origin?.senderTaskId ?? "").trim();
+  if (task !== "") {
+    return {
+      case: "inSession",
+      value: create(conversationv1.PeerMessageInSessionSchema, {
+        senderTask: create(conversationv1.PeerMessageSenderTaskSchema, { vendorTaskId: task }),
+      }),
     };
   }
   return { case: "interSession", value: interSessionOf(origin ?? {}) };

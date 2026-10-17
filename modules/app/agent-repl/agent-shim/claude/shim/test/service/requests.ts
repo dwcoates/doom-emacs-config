@@ -159,6 +159,13 @@ export function resolvePeerDeliveryRequest(): shimv1.ResolvePeerDeliveryRequest 
   });
 }
 
+export function resolveVendorTaskRequest(): shimv1.ResolveVendorTaskRequest {
+  return create(shimv1.ResolveVendorTaskRequestSchema, {
+    session: create(conversationv1.AgentIdSchema, { value: "agent-main" }),
+    vendorTaskId: "a47cd5e35c91902a0",
+  });
+}
+
 export function getWorkflowRequest(): shimv1.GetWorkflowRequest {
   return create(shimv1.GetWorkflowRequestSchema, {
     work: create(conversationv1.DetachedWorkIdSchema, { value: "w1" }),

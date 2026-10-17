@@ -168,6 +168,34 @@ describe("convertPeerMessage", () => {
     expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("subagentHandback");
   });
 
+  it("marks a record stating origin.senderTaskId as a message from an agent of this session", () => {
+    // Arrange
+    const message = peerRecord({ from: "a47cd5e35c91902a0", senderTaskId: "a47cd5e35c91902a0", name: "opus-medium" });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("inSession");
+  });
+
+  it("states the sending subagent's vendor task id on an in-session message", () => {
+    // Arrange
+    const message = peerRecord({ from: "a47cd5e35c91902a0", senderTaskId: "a47cd5e35c91902a0" });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    const kind = entry?.item.kind === "peer" ? entry.item.peer.kind : undefined;
+    expect(kind?.case === "inSession" ? kind.value.senderTask?.vendorTaskId : "").toBe("a47cd5e35c91902a0");
+  });
+
+  it("keeps a hand-back a hand-back even though it states its sender's task id", () => {
+    // Arrange
+    const message = peerRecord({ from: "a7d07bd69c7b87695", senderTaskId: "a7d07bd69c7b87695", handback: true });
+    // Act
+    const entry = convertPeerMessage(message, foldContext());
+    // Assert
+    expect(entry?.item.kind === "peer" ? entry.item.peer.kind.case : "").toBe("subagentHandback");
+  });
+
   it("marks a record with no origin.handback as an inter-session message", () => {
     // Arrange
     const message = peerRecord({ from: "Explore" });

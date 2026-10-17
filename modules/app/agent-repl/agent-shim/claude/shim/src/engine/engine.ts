@@ -147,6 +147,14 @@ export interface Engine {
     request: shimv1.ResolvePeerDeliveryRequest,
   ): Promise<shimv1.ResolvePeerDeliveryResponse>;
 
+  /**
+   * Which agent of a session one vendor task id names, and the name its spawn
+   * gave it: the store's locator pairing, read on the daemon's behalf.
+   */
+  resolveVendorTask(
+    request: shimv1.ResolveVendorTaskRequest,
+  ): Promise<shimv1.ResolveVendorTaskResponse>;
+
   // ---- Title digest ----
 
   /**
@@ -280,6 +288,10 @@ export class NotImplementedEngine implements Engine {
 
   resolvePeerDelivery(): Promise<shimv1.ResolvePeerDeliveryResponse> {
     return Promise.reject(unimplemented("ResolvePeerDelivery"));
+  }
+
+  resolveVendorTask(): Promise<shimv1.ResolveVendorTaskResponse> {
+    return Promise.reject(unimplemented("ResolveVendorTask"));
   }
 
   gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {

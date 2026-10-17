@@ -7852,6 +7852,114 @@ async function pushedUpdates<T>(
   return seen;
 }
 
+describe("ResolveVendorTask", () => {
+  const request = (): shimv1.ResolveVendorTaskRequest =>
+    create(shimv1.ResolveVendorTaskRequestSchema, {
+      session: create(conversationv1.AgentIdSchema, { value: "agent-main" }),
+      vendorTaskId: "a47cd5e35c91902a0",
+    });
+  const agent = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+
+  it("answers the agent the store pairs with the task id", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.vendorTasks.set("a47cd5e35c91902a0", { kind: "found", agent, commission: undefined });
+
+    // Act.
+    const response = await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect(success?.agent.case === "found" ? success.agent.value.agent?.value : "").toBe("toolu_spawn");
+  });
+
+  it("answers the name the agent's spawn gave it", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.vendorTasks.set("a47cd5e35c91902a0", {
+      kind: "found",
+      agent,
+      commission: create(conversationv1.AgentSubagentPromptSchema, { text: "go", requestedName: "vetter" }),
+    });
+
+    // Act.
+    const response = await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect(success?.agent.case === "found" ? success.agent.value.requestedName : "").toBe("vetter");
+  });
+
+  it("leaves the name UNSET for an agent spawned unnamed", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.vendorTasks.set("a47cd5e35c91902a0", {
+      kind: "found",
+      agent,
+      commission: create(conversationv1.AgentSubagentPromptSchema, { text: "go" }),
+    });
+
+    // Act.
+    const response = await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect(success?.agent.case === "found" ? success.agent.value.requestedName : "unexpected").toBeUndefined();
+  });
+
+  it("asks the store within the session the request names", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    expect(h.persistence.vendorTaskLookups).toEqual(["agent-main/a47cd5e35c91902a0"]);
+  });
+
+  it("answers not_recorded, a success, for a task id no agent is paired with", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    const response = await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.agent.case : "").toBe("notRecorded");
+  });
+
+  it("answers store_unavailable when the store could not answer", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.vendorTasks.set("a47cd5e35c91902a0", { kind: "failed", detail: "database is locked" });
+
+    // Act.
+    const response = await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect([failure?.kind.case, failure?.detail]).toEqual(["storeUnavailable", "database is locked"]);
+  });
+
+  it("records a store that could not answer at ERROR, naming the task id", async () => {
+    // Arrange.
+    const h = harness();
+    h.persistence.vendorTasks.set("a47cd5e35c91902a0", { kind: "failed", detail: "database is locked" });
+    const from = logSinkMark();
+
+    // Act.
+    await h.engine.resolveVendorTask(request());
+
+    // Assert.
+    const message = "the store could not say which agent a vendor task id names";
+    expect({ level: logLevelFor(from, message), context: logContextFor(from, message) }).toMatchObject({
+      level: "error",
+      context: { task_id: "a47cd5e35c91902a0", detail: "database is locked" },
+    });
+  });
+});
+
 describe("ResolvePeerDelivery", () => {
   const request = (): shimv1.ResolvePeerDeliveryRequest =>
     create(shimv1.ResolvePeerDeliveryRequestSchema, {

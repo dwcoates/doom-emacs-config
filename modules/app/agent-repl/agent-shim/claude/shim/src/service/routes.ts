@@ -36,6 +36,7 @@ import {
   validateReadHistoryRequest,
   validateReadTranscriptsRequest,
   validateResolvePeerDeliveryRequest,
+  validateResolveVendorTaskRequest,
   validateRollBackSessionRequest,
   validateSetSessionEffortRequest,
   validateSetSessionModelRequest,
@@ -341,6 +342,16 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("ResolvePeerDelivery");
         validateResolvePeerDeliveryRequest(request);
         return answering("ResolvePeerDelivery", () => engine.resolvePeerDelivery(request));
+      },
+
+      /**
+       * Which agent of a session one vendor task id names. A READ of the host's
+       * one store, like ResolvePeerDelivery.
+       */
+      async resolveVendorTask(request) {
+        entered("ResolveVendorTask");
+        validateResolveVendorTaskRequest(request);
+        return answering("ResolveVendorTask", () => engine.resolveVendorTask(request));
       },
 
       // ---- Title digest ----
