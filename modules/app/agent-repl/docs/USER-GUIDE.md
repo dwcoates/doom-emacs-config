@@ -241,6 +241,9 @@ While the agent waits on a question or a permission card, type the choice's numb
   - This covers text already in the input window, a number the card has no choice for, `0`, and no card waiting.
 - **Typed text is still an answer.**
   - A sent sentence answers the shown question in your own words, or denies the permission with that sentence as the reason.
+- **Every answer shows on the card at once.**
+  - On a card of several questions, the card moves on to the next unanswered question.
+  - Each answered question stays listed above it, with its header and its answer, typed words in italics.
 
 ## Replying to a response
 

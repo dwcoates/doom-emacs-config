@@ -6836,6 +6836,8 @@ ar-button.outcome-marker-pill {
   gap: 0.4rem;
   padding: 0.2rem 0;
 }
+/* A batch's answers given so far, between its tabs and its shown question. */
+.q-given { margin-bottom: 0.3rem; }
 .q-chosen { font-weight: 600; }
 .q-other-given { color: var(--muted); font-style: italic; }
 
