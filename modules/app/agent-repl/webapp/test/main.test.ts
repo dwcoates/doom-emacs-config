@@ -628,41 +628,18 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.gateSet).toHaveBeenCalledWith("open", undefined);
   });
 
-  // A STOPPED MERGE NO LONGER HOLDS THE SESSION (owner ruling, 2026-09-28): a
-  // failed or landed merge is over, so neither may close the composer the way
-  // a merge in flight does.
-  test.each([["mergeFailed"], ["merged"]])(
-    "keeps the gate open when the footer reports the stopped merge's %s arm",
-    async (arm) => {
-      await bootMain();
-
-      page.onFooterStatus?.(arm);
-
-      expect(page.gateSet).toHaveBeenCalledWith("open", undefined);
-    },
-  );
-
   // THE COMPOSER INVARIANT (owner rulings, 2026-09-28, 2026-10-01 and
-  // 2026-10-02): the gate is closed exactly when the footer's color is blue
-  // (an agent-repl or network fault, a close); purple, a merge in flight, and
-  // turquoise, a vendor fault, hold their prompts and leave it open. One row per arm
-  // the rulings place on either side of the line.
-  test.each([
-    ["agentReplFault", "closed"],
-    ["networkFault", "closed"],
-    ["closing", "closed"],
-    ["vendorFault", "open"],
-    ["merging", "open"],
-    ["turnFailed", "open"],
-    ["degraded", "open"],
-    ["idle", "open"],
-    ["working", "open"],
-  ])("sets the gate %s -> %s by the footer's color", async (arm, want) => {
+  // 2026-10-02): the gate is closed exactly when the footer's color is blue.
+  // Which arm reads which color, and so opens or closes the gate, is
+  // composerClosedFor's, pinned arm by arm in vocab.test.ts. The boot's part is
+  // handing each status to it and the gate its answer, so it runs one closing
+  // arm here and one opening arm above (merging).
+  test("closes the gate, naming the arm, when the footer's color is blue", async () => {
     await bootMain();
 
-    page.onFooterStatus?.(arm);
+    page.onFooterStatus?.("agentReplFault");
 
-    expect(page.gateSet).toHaveBeenCalledWith(want, want === "closed" ? arm : undefined);
+    expect(page.gateSet).toHaveBeenCalledWith("closed", "agentReplFault");
   });
 
   test("draws a dev-mode command panel beside the composer that asked for it", async () => {
