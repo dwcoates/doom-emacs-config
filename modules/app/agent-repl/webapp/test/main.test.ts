@@ -28,6 +28,7 @@
  */
 import { createControl } from "../src/control.js";
 import { STREAM_COST_WINDOW_MS } from "../src/stream-cost.js";
+import { CENSUS_EVERY_MS } from "../src/page-census.js";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -367,6 +368,9 @@ async function teardownPage(): Promise<void> {
     // boundary production uses so no retry or iterator survives into the next
     // fresh module graph.
     page.bootedContext?.quiesce();
+    // The boot's page-lifetime timers and wrapped globals, from the BOOT'S OWN
+    // module graph (src/page-teardown.ts), before the reset below drops it.
+    (await import("../src/page-teardown.js")).tearDownPage();
     consoleError.mockRestore();
     vi.unstubAllGlobals();
     vi.resetModules();
@@ -447,6 +451,28 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
 
       // Assert
       expect(cleared).toHaveBeenCalledWith(timer);
+    } finally {
+      armed.mockRestore();
+      cleared.mockRestore();
+    }
+  });
+
+  test("takes its census timer and busy probe down when the page is torn down", async () => {
+    // Arrange: the timers spied, then as they stood before the boot wrapped them.
+    const armed = vi.spyOn(globalThis, "setTimeout");
+    const cleared = vi.spyOn(globalThis, "clearTimeout");
+    const before = window.setTimeout;
+    try {
+      await bootMain();
+      const censusCall = armed.mock.calls.findIndex(([, ms]) => ms === CENSUS_EVERY_MS);
+      expect(censusCall).toBeGreaterThanOrEqual(0);
+      const timer: unknown = armed.mock.results[censusCall]?.value;
+
+      // Act
+      (await import("../src/page-teardown.js")).tearDownPage();
+
+      // Assert
+      expect([cleared.mock.calls.some(([t]) => t === timer), window.setTimeout === before]).toEqual([true, true]);
     } finally {
       armed.mockRestore();
       cleared.mockRestore();

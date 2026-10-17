@@ -56,6 +56,7 @@ import { installPagePresenceLog } from "./page-presence.js";
 import { installPageCensus } from "./page-census.js";
 import { installBusyProbe } from "./busy-probe.js";
 import { pageAfter } from "./every.js";
+import { stopAtPageTeardown } from "./page-teardown.js";
 import { connectToHost } from "./host/embed.js";
 import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
 import { mintConnectionId } from "./connection-id.js";
@@ -111,6 +112,7 @@ export async function boot(): Promise<void> {
     // FIRST, so every callback the page registers is tallied (busy-probe.ts,
     // a diagnosis of the web process's idle time). It logs nothing itself.
     const busy = installBusyProbe(window);
+    stopAtPageTeardown(() => busy.stop());
 
     const address = pageAddress(window.location.search);
     const workspace = workspaceRef(address.workspaceId, address.workspaceDir);
@@ -150,7 +152,7 @@ export async function boot(): Promise<void> {
     installPagePresenceLog();
     // THE PAGE STATES ITS OWN SIZE (page-census.ts): the webhost holding it
     // cannot read a cross-origin page's document.
-    installPageCensus(document, pageAfter, busy);
+    stopAtPageTeardown(installPageCensus(document, pageAfter, busy));
 
     // THE TOPBAR IS MOUNTED HERE, BEFORE ANY STREAM, because its warning chip
     // is the ONE place this page shows an error -- including the ones that

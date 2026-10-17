@@ -183,7 +183,10 @@ describe("the webapp's boot against a real page", () => {
     vi.resetModules();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // The boot's page-lifetime timers and wrapped globals (src/page-teardown.ts),
+    // from the module graph the boot ran in: no reset has happened since.
+    (await import("../src/page-teardown.js")).tearDownPage();
     globalThis.queueMicrotask = realQueueMicrotask;
     globalThis.fetch = realFetch;
     consoleError.mockRestore();

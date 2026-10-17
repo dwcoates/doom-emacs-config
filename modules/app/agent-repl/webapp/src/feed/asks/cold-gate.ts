@@ -42,6 +42,12 @@
  * about the gate: the gate keeps standing for whenever the workspace is shown
  * again.
  *
+ * KILLING THE WORKSPACE IS NOT A REMEDIATION EITHER (owner request,
+ * 2026-10-17). The grey "kill workspace" button beside hide sends
+ * `KillWorkspace` — the same forced session death the sidebar's Kill sends,
+ * which leaves the worktree and branch standing — and answers nothing about the
+ * gate.
+ *
  * EVERY COMPACT VALUE IS ECHOED FROM THE MENU. The summarizer is the served
  * `AgentModel` handed back whole; the scope is one of the served enum values.
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
@@ -59,6 +65,7 @@ import {
   AnswerColdGateResponseSchema,
   type AnswerColdGateReopenFailed,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
+import { KillWorkspaceResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
@@ -85,7 +92,7 @@ import {
   whileInFlight,
 } from "../cards/controls.js";
 import { callFailure, refusalOf, type Cause, type SentenceTable } from "../../rpc/refuse.js";
-import { buildSetWorkspaceHiddenRequest } from "../../sidebar/verbs.js";
+import { buildKillWorkspaceRequest, buildSetWorkspaceHiddenRequest } from "../../sidebar/verbs.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
@@ -123,6 +130,10 @@ export const COLD_GATE_COPY = {
   hide: {
     label: "hide workspace",
     hint: "move this workspace to the sidebar's hidden section; the gate stands until it is shown again",
+  },
+  kill: {
+    label: "kill workspace",
+    hint: "end this workspace's session; the worktree and branch survive",
   },
   /** {held} is the served count of prompts held at the gate, worded by heldPromptsPhrase. */
   compactAndResume: {
@@ -429,13 +440,19 @@ function drawActions(
   // the red border; clear takes the place and the border pay had.
   // HIDE WORKSPACE ENDS THE ROW, in grey (owner request, 2026-10-13): it is
   // not a remediation, so it sits past pay, the last of them.
+  // KILL WORKSPACE SITS BETWEEN PAY AND HIDE, in the same grey (owner request,
+  // 2026-10-17): it is not a remediation either.
+  const kill = gateButton("cold-gate-kill", ["data-cold-gate-kill", ""], COLD_GATE_COPY.kill, buttons);
   const hide = gateButton("cold-gate-hide", ["data-cold-gate-hide", ""], COLD_GATE_COPY.hide, buttons);
-  row.append(clear, pay, hide);
+  row.append(clear, pay, kill, hide);
   pay.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
   clear.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "clear" });
+  });
+  kill.addEventListener("click", () => {
+    void killWorkspace(rc, actions, buttons);
   });
   hide.addEventListener("click", () => {
     void hideWorkspace(rc, actions, buttons);
@@ -665,30 +682,73 @@ async function answer(
  * again when the workspace is shown. The landing elsewhere is the daemon's, as
  * for every hide.
  */
-async function hideWorkspace(
-  rc: RowContext,
-  actions: HTMLElement,
-  buttons: readonly Control[],
-): Promise<void> {
-  log.info("hiding the workspace from a cold gate", {
-    operation: "feed.asks.cold-gate.hide",
-    context: { workspace: rc.ctx.workspace.id },
-  });
-  await callFromGate(rc, actions, buttons, {
+function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly Control[]): Promise<void> {
+  return workspaceVerbFromGate(rc, actions, buttons, {
+    verb: "hide",
+    message: "hiding the workspace from a cold gate",
     rpc: "SetWorkspaceHidden",
     call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
     schema: SetWorkspaceHiddenResponseSchema,
-    // SetWorkspaceHidden answers only the cross-cutting four.
-    own: {},
-    malformedOperation: "feed.asks.cold-gate.hide.malformed-refusal",
   });
 }
 
-/** A response whose result is the `success` or `error` arm every gate call answers. */
+/**
+ * Kill the workspace's session, and nothing else: the gate is not answered,
+ * and the worktree and branch survive, as for every kill.
+ */
+function killWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly Control[]): Promise<void> {
+  return workspaceVerbFromGate(rc, actions, buttons, {
+    verb: "kill",
+    message: "killing the workspace from a cold gate",
+    rpc: "KillWorkspace",
+    // NO op_id: the synchronous form, which answers `success` or `error` and
+    // never `accepted`.
+    call: (client) => client.killWorkspace(buildKillWorkspaceRequest(rc.ctx.workspace)),
+    schema: KillWorkspaceResponseSchema,
+  });
+}
+
+/**
+ * ONE WORKSPACE VERB FROM THE GATE'S ROW, which is not a remediation: logged
+ * under `feed.asks.cold-gate.<verb>` with the workspace it acts on, and refused
+ * with only the cross-cutting four, which is all a workspace verb answers.
+ */
+export async function workspaceVerbFromGate<Res extends GateResponse>(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly Control[],
+  spec: {
+    verb: "hide" | "kill";
+    message: string;
+    rpc: string;
+    call: (client: AgentReplClient) => Promise<Res>;
+    schema: DescMessage;
+  },
+): Promise<void> {
+  log.info(spec.message, {
+    operation: `feed.asks.cold-gate.${spec.verb}`,
+    context: { workspace: rc.ctx.workspace.id },
+  });
+  await callFromGate(rc, actions, buttons, {
+    rpc: spec.rpc,
+    call: spec.call,
+    schema: spec.schema,
+    own: {},
+    malformedOperation: `feed.asks.cold-gate.${spec.verb}.malformed-refusal`,
+  });
+}
+
+/**
+ * A response whose result is the `success` or `error` arm every gate call
+ * answers. `accepted` is KillWorkspace's asynchronous form, answered only to a
+ * request carrying an op_id, which no gate call sends: it is typed here so the
+ * kill response fits, and is refused as an unreachable arm if it ever arrives.
+ */
 type GateResponse = Message & {
   result:
     | { case: "success"; value: unknown }
     | { case: "error"; value: { cause: Cause } }
+    | { case: "accepted"; value: unknown }
     | { case: undefined; value?: undefined };
 };
 
