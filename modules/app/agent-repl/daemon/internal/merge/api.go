@@ -110,6 +110,11 @@ type Orchestrator interface {
 	Pause(ctx context.Context, scope *RepositoryScope) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
+	// Status answers each registered repository's queue as it stands, its
+	// started merges' steps filled in: the one repository a scope names (an
+	// unknown one refused as unknown_repository), or every registered one for
+	// a nil scope.
+	Status(ctx context.Context, scope *RepositoryScope) ([]QueueStatus, error)
 	// HoldRollouts holds the queue's rollouts, daemon-wide and durably:
 	// merges keep running and landing, but a landing in the daemon's own
 	// checkout no longer tells the deploy, so a hand-deployed build is kept.
