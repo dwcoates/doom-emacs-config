@@ -55,6 +55,8 @@
 (declare-function agent-repl-frontend-webview-url "frontend" (ws))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
+(declare-function agent-repl-roster-drawn-tab-order "roster" ())
+(declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 
@@ -87,6 +89,17 @@ workspace's own.")
   "The log level window the host and every page record at, or nil: a cons
 \(LEVEL . UNTIL-MS), LEVEL a symbol and UNTIL-MS the window's end in epoch
 milliseconds.  Replayed to a host that loads before the window ends.")
+
+(defcustom agent-repl-webhost-replay-stagger 0.75
+  "Seconds between the pages a host load brings back, after the shown one."
+  :type 'number
+  :group 'agent-repl)
+
+(defvar agent-repl--webhost-replay-queue nil
+  "The page ids a host load has yet to bring back, nearest first.")
+
+(defvar agent-repl--webhost-replay-timer nil
+  "The timer that brings back the next queued page, while one is queued.")
 
 (defvar agent-repl--webhost-reload-timer nil
   "The pending host reload of a rollout burst, or nil.")
@@ -186,6 +199,7 @@ the host buffer is never displayed itself; workspace slots display it."
       (agent-repl--frontend-kill-webview buf))
     (setq agent-repl--webhost-buffer nil
           agent-repl--webhost-url nil)
+    (agent-repl--webhost-replay-cancel)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.killed")))
 
 ;;;; ---- Calls -----------------------------------------------------------------
@@ -291,6 +305,11 @@ be built (`agent-repl-frontend-webview-url')."
   (let ((id (agent-repl--webhost-id ws)))
     (when (fboundp 'agent-repl-page-unload-note-shown)
       (agent-repl-page-unload-note-shown ws))
+    ;; A PAGE A HOST LOAD HAS NOT BROUGHT BACK YET comes back now, before
+    ;; it is shown.
+    (when (and id (member id agent-repl--webhost-replay-queue))
+      (agent-repl--info ws "elisp.webhost.replay-jumped ws=%s id=%s" ws id)
+      (agent-repl--webhost-replay-page id))
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
       (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
@@ -302,6 +321,7 @@ be built (`agent-repl-frontend-webview-url')."
     (remhash id agent-repl--webhost-pages)
     (remhash id agent-repl--webhost-input-backgrounds)
     (remhash id agent-repl--webhost-gate-docks)
+    (setq agent-repl--webhost-replay-queue (delete id agent-repl--webhost-replay-queue))
     (when (equal id agent-repl--webhost-shown)
       (setq agent-repl--webhost-shown nil))
     (agent-repl--info ws "elisp.webhost.page-removed ws=%s id=%s" ws id)
@@ -367,18 +387,75 @@ reloads while the window lasts.  Non-nil when the call was sent."
 
 ;;;; ---- Replay and reload -----------------------------------------------------
 
+(defun agent-repl--webhost-ring-order (ids)
+  "IDS, nearest the current workspace first, around the drawn tab order.
+The order is a RING: the first and last tabs are next to each other.  At
+equal distance the tab after the current one comes before the tab before
+it.  A page whose workspace has no drawn tab comes last, in the order
+given."
+  (let* ((order (and (fboundp 'agent-repl-roster-drawn-tab-order)
+                     (agent-repl-roster-drawn-tab-order)))
+         (n (length order))
+         (current (and (fboundp 'agent-repl--ws-current-name) (agent-repl--ws-current-name)))
+         (here (and current (cl-position current order :test #'equal)))
+         (rank (lambda (id)
+                 (let* ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id)))
+                        (at (and ws (cl-position ws order :test #'equal))))
+                   (cond ((or (null at) (null here)) (* 4 (max n 1)))
+                         (t (let* ((ahead (mod (- at here) n))
+                                   (behind (mod (- here at) n)))
+                              (if (<= ahead behind) (* 2 ahead) (1+ (* 2 behind))))))))))
+    (cl-stable-sort (copy-sequence ids) #'< :key rank)))
+
+(defun agent-repl--webhost-replay-page (id)
+  "Bring back page ID with its state, and drop it from the replay queue."
+  (setq agent-repl--webhost-replay-queue (delete id agent-repl--webhost-replay-queue))
+  (when-let ((url (gethash id agent-repl--webhost-pages)))
+    (agent-repl--webhost-call "ensure" id url)
+    (when-let ((background (gethash id agent-repl--webhost-input-backgrounds)))
+      (agent-repl--webhost-call "setInputBackground" id background))
+    (when-let ((dock (gethash id agent-repl--webhost-gate-docks)))
+      (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))))
+
+(defun agent-repl--webhost-replay-next ()
+  "Bring back the next queued page, and queue the one after it."
+  (setq agent-repl--webhost-replay-timer nil)
+  (when agent-repl--webhost-replay-queue
+    (agent-repl--webhost-replay-page (car agent-repl--webhost-replay-queue))
+    (if agent-repl--webhost-replay-queue
+        (setq agent-repl--webhost-replay-timer
+              (run-at-time agent-repl-webhost-replay-stagger nil #'agent-repl--webhost-replay-next))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-complete"))))
+
+(defun agent-repl--webhost-replay-cancel ()
+  "Drop the replay queue and its timer."
+  (when (timerp agent-repl--webhost-replay-timer)
+    (cancel-timer agent-repl--webhost-replay-timer))
+  (setq agent-repl--webhost-replay-timer nil
+        agent-repl--webhost-replay-queue nil))
+
 (defun agent-repl--webhost-replay ()
-  "Hand the host everything it should hold: every page, the shown one, and
-each page's state.  Run on every load of the host, which starts empty."
-  (maphash (lambda (id url) (agent-repl--webhost-call "ensure" id url))
-           agent-repl--webhost-pages)
-  (maphash (lambda (id background) (agent-repl--webhost-call "setInputBackground" id background))
-           agent-repl--webhost-input-backgrounds)
-  (maphash (lambda (id dock)
-             (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))
-           agent-repl--webhost-gate-docks)
+  "Hand the host everything it should hold, after a load: the host starts empty.
+THE PAGES COME BACK STAGGERED (owner ruling, 2026-10-17).  Every page
+booting at once is what stalled the web process for up to 1.8s after a
+reconnect: the shown page comes back now, and every other page one at a time,
+`agent-repl-webhost-replay-stagger' seconds apart, nearest the current
+workspace first (`agent-repl--webhost-ring-order'), so the pages a switch is
+likeliest to reach are fresh first.  A switch to a page still queued brings
+it back at once (`agent-repl-webhost-show')."
+  (agent-repl--webhost-replay-cancel)
+  (let (ids)
+    (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
+    (setq agent-repl--webhost-replay-queue
+          (agent-repl--webhost-ring-order (delete agent-repl--webhost-shown (nreverse ids)))))
   (when agent-repl--webhost-shown
+    (agent-repl--webhost-replay-page agent-repl--webhost-shown)
     (agent-repl--webhost-call "show" agent-repl--webhost-shown))
+  (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-staggered queued=%d stagger-s=%s"
+                    (length agent-repl--webhost-replay-queue) agent-repl-webhost-replay-stagger)
+  (when agent-repl--webhost-replay-queue
+    (setq agent-repl--webhost-replay-timer
+          (run-at-time agent-repl-webhost-replay-stagger nil #'agent-repl--webhost-replay-next)))
   (when (and agent-repl--webhost-log-level
              (> (cdr agent-repl--webhost-log-level) (* 1000 (float-time))))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
