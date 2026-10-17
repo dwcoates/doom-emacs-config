@@ -1793,6 +1793,46 @@ latest one."
         (should (cl-every (lambda (e) (equal (cdr e) "captured-ws"))
                           received-ws))))))
 
+;;;; ---- Tests: on-workspace-switch flashes the switched-to tab ----
+
+(defmacro agent-repl-test-panels--with-switch-pass (log-name flashed &rest body)
+  "Run BODY with the switch pass's side effects stubbed.
+LOG-NAME answers `agent-repl--ws-log-name'; every workspace the pass
+flashes is pushed onto FLASHED."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) ,log-name))
+             ((symbol-function 'agent-repl--ensure-own-panels-on-persp-switch) #'ignore)
+             ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+             ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
+             ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+             ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
+             ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
+             ((symbol-function 'agent-repl-status-flash-switched-tab)
+              (lambda (ws) (push ws ,flashed))))
+     ,@body))
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-flashes-the-switched-to-tab ()
+  "The switch pass flashes the tab of the workspace switched TO."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((flashed nil))
+      (agent-repl-test-panels--with-switch-pass "to-ws" flashed
+        ;; Act
+        (agent-repl--on-workspace-switch "to-ws"))
+      ;; Assert
+      (should (equal flashed '("to-ws"))))))
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-flashes-no-placeholder ()
+  "A persp placeholder has no tab-bar entry, so nothing is flashed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((flashed nil))
+      (agent-repl-test-panels--with-switch-pass nil flashed
+        ;; Act
+        (agent-repl--on-workspace-switch "main"))
+      ;; Assert
+      (should-not flashed))))
+
 ;;;; ---- Tests: after-persp-activated eager-open suppression ----
 
 (ert-deftest agent-repl-test-panels-after-persp-activated-schedules-switch ()

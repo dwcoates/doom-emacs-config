@@ -14,6 +14,7 @@
 (declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
 (declare-function agent-repl--agent-panel-buffer-p "core")
 (declare-function agent-repl--align-buffer-to-ws-dir "status")
+(declare-function agent-repl-status-flash-switched-tab "status" (ws))
 (declare-function agent-repl--buffer-name "core")
 (declare-function agent-repl--call-in-background-workspace "workspace")
 (declare-function agent-repl--buffer-owner "core")
@@ -765,6 +766,10 @@ not be routed at all.
        ;; its other half: readiness is the daemon's, and a workspace's state
        ;; arrives on the roster rather than being latched together here out of
        ;; two local observations.
+       ;; The workspace switched TO flashes its tab-bar entry.  A placeholder
+       ;; perspective has no tab-bar entry to flash.
+       (when log-ws
+         (agent-repl-status-flash-switched-tab ws))
        (when ws
          ;; Screened through `--ws-log-name' like every other record on this
          ;; path: persp-mode hands it its own placeholders too, and those own
