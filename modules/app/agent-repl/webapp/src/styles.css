@@ -969,6 +969,23 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar { --ws-mark-width: 9px; --ws-mark-size: 9px; }
 #ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: var(--ws-mark-size); border-radius: 50%; }
 
+/* THE EMACS TAB NUMBER (owner request, 2026-10-17): an open row leads with
+   the numeral its tab carries on the Emacs tab bar (src/sidebar/tab-numbers.ts),
+   in white, a step smaller than the name. The box is a fixed width, so a
+   one- or two-digit number and an unnumbered row all start their mark and
+   name at one edge; the row's left padding gives a little of that width back,
+   so the rows indent only slightly. */
+#ws-sidebar { --tab-number-w: 0.85rem; }
+#ws-sidebar .sb-num {
+  flex: 0 0 auto;
+  width: var(--tab-number-w);
+  margin-right: -0.2rem;
+  text-align: right;
+  color: white;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
 /* THE BANDS UNDER THE REPOSITORY SECTIONS -- Hidden Workspaces, then Recently
    Merged -- hold no repository's section, so each is set off from the list above by
    ONE shared light rule. Both bands' headers are drawn purple: Recently

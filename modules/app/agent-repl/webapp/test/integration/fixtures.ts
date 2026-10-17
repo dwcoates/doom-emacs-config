@@ -65,6 +65,8 @@ import {
   type WorkspaceRoster,
   RosterRepoSectionSchema,
   type RosterRowWhenSchema,
+  type RosterTabBarSchema,
+  RosterTabSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   FeedHeldSchema,
@@ -2556,11 +2558,35 @@ export function roster(init?: {
       ],
       fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
     },
+    tabBar: { tabs: rosterTabs(init?.repositorySections ?? [{ rows }], init?.hidden ?? []) },
     current:
       init?.currentUnset === true
         ? undefined
         : { workspace: workspaceRef(init?.current ?? WORKSPACE_ID) },
   });
+}
+
+/**
+ * The tab bar the daemon would send for these sections: one tab per open row
+ * and open descendant, in section order, withheld for a collapsed section,
+ * then each hidden workspace's tab, withheld as hidden.
+ */
+function rosterTabs(
+  sections: { rows: RosterRow[]; collapsed?: boolean }[],
+  hidden: RosterRow[],
+): MessageInitShape<typeof RosterTabBarSchema>["tabs"] {
+  const tabs: NonNullable<MessageInitShape<typeof RosterTabBarSchema>["tabs"]> = [];
+  const walk = (rows: RosterRow[], visibility: "drawn" | "withheldCollapsed" | "withheldHidden"): void => {
+    for (const row of rows) {
+      if (row.closed?.closed !== true) {
+        tabs.push(create(RosterTabSchema, { workspace: row.workspace?.workspace, visibility: { case: visibility, value: {} } }));
+      }
+      walk(row.children, visibility);
+    }
+  };
+  for (const section of sections) walk(section.rows, section.collapsed === true ? "withheldCollapsed" : "drawn");
+  walk(hidden, "withheldHidden");
+  return tabs;
 }
 
 export const emptyRoster = (): WorkspaceRoster => roster();
