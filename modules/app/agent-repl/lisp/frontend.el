@@ -127,6 +127,8 @@
 ;; The one web view holding every workspace's page (webhost.el).
 (declare-function agent-repl-webhost-ensure "webhost" (conn))
 (declare-function agent-repl-webhost-xwidget "webhost" ())
+(declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
+(declare-function agent-repl-page-unloaded-p "page-unload" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
 (declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
@@ -835,6 +837,8 @@ webview window resolves against the worktree the REPL is attached to."
                     (agent-repl--info ws "elisp.frontend.slot-mounted ws=%s buffer=%s" ws name)
                     buf)))))
     (agent-repl-webhost-ensure-page ws)
+    (when (and fresh (fboundp 'agent-repl-page-unload-note-mounted))
+      (agent-repl-page-unload-note-mounted ws))
     (when fresh
       ;; The page's gate wears the input window's color; the host keeps it
       ;; and hands it to the page on every load of the page.
@@ -1126,6 +1130,8 @@ Refusals, all preconditions rather than failures:
                          workspace, and a guessed URL is not an option;
   - `:hidden'            the user hid it, or its repository section is
                          collapsed: it runs nothing (open-tabs.el);
+  - `:unloaded'          its page was unloaded because nobody looked at
+                         it (page-unload.el); the switch to it remounts it;
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview
@@ -1135,6 +1141,7 @@ Refusals, all preconditions rather than failures:
    ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
    ((null (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))) :no-ref)
    ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws)) :hidden)
+   ((and (fboundp 'agent-repl-page-unloaded-p) (agent-repl-page-unloaded-p ws)) :unloaded)
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 

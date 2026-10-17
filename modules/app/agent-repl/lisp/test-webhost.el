@@ -233,6 +233,18 @@ so stubbing the accessor would not reach the code under test."
     (should (equal agent-repl--webhost-shown "id-alpha"))
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
+(ert-deftest agent-repl-test-wh-showing-a-page-tells-page-unload ()
+  "Every show is noted to page-unload.el, which judges looks by it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl-page-unload-note-shown)
+                 (lambda (ws) (push ws noted))))
+        ;; Act
+        (agent-repl-webhost-show "alpha")
+        ;; Assert
+        (should (equal noted '("alpha")))))))
+
 (ert-deftest agent-repl-test-wh-showing-the-shown-page-sends-nothing ()
   "Every window change asks; only a change of page reaches the host."
   ;; Arrange

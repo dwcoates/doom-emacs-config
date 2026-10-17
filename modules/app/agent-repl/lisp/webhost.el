@@ -54,6 +54,7 @@
 (declare-function agent-repl--frontend-kill-webview "frontend" (buf))
 (declare-function agent-repl-frontend-webview-url "frontend" (ws))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
+(declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 
@@ -288,6 +289,8 @@ be built (`agent-repl-frontend-webview-url')."
 (defun agent-repl-webhost-show (ws)
   "Show WS's page in the host.  Nothing is sent when it is already the one shown."
   (let ((id (agent-repl--webhost-id ws)))
+    (when (fboundp 'agent-repl-page-unload-note-shown)
+      (agent-repl-page-unload-note-shown ws))
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
       (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
