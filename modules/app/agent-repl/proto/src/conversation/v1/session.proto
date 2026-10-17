@@ -493,6 +493,21 @@ message SessionCompactionProgress {
   uint64 tokens_after = 3;
   // Why a `failed` phase failed, verbatim. Empty on every other phase.
   string error = 4;
+  // WHAT THE SUMMARY COST, and on which model. SET on every phase at or
+  // after `summarized`, because only the summarizing query's own result
+  // states it; ABSENT before it and on `failed`.
+  optional SessionCompactionSpend spend = 5;
+}
+
+// What the summarizing query spent writing a compaction's summary, as that
+// query itself stated it.
+message SessionCompactionSpend {
+  // The model that wrote the summary, as the summarizing query's opening
+  // stated it: the summarizer the compaction was asked to run on.
+  AgentModel model = 1;
+  // Every token the summarizing query spent: its input (uncached, cache
+  // writes and cache reads alike) plus its output, from its result's usage.
+  uint64 tokens = 2;
 }
 
 // The vendor's summary of the conversation, verbatim.
