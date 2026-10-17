@@ -707,7 +707,7 @@ func TestTheStateRootLayoutIsCreated(t *testing.T) {
 	_ = runIn(t, root)
 
 	// Assert.
-	for _, dir := range []string{"logs", "sock", "intent", "output"} {
+	for _, dir := range []string{"logs", "sock", "intent"} {
 		if _, err := os.Stat(filepath.Join(root, dir)); err != nil {
 			t.Fatalf("the layout's %s directory was not created: %v", dir, err)
 		}

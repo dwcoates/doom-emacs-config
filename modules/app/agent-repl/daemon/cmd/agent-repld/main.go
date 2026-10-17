@@ -23,7 +23,6 @@ import (
 	"syscall"
 	"time"
 
-	"agent-repld/internal/commandfile"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/envc"
@@ -184,12 +183,11 @@ func main() {
 		stop()
 		os.Exit(code)
 	}
-	if len(os.Args) > 1 && os.Args[1] == mergeQueueVerb {
-		// THE VERB STARTS NOTHING: it drops a command file for the serving
-		// daemon and reads the outcome off its roster.
+	if len(os.Args) > 1 && cliNouns[os.Args[1]] != nil {
+		// THE AGENT API'S NOUNS START NOTHING: each command sends the serving
+		// daemon its rpcs and prints the answers.
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		code := runMergeQueueVerb(ctx, os.Args[2:], dialMergeQueueDaemon,
-			mergeQueueEnv{getwd: os.Getwd, poll: commandfile.DefaultInterval}, os.Stdout, os.Stderr)
+		code := runNoun(ctx, os.Args[1], os.Args[2:], productionCLIDeps(), os.Stdout, os.Stderr)
 		stop()
 		os.Exit(code)
 	}
