@@ -28,7 +28,6 @@ import { callUnary } from "../../rpc/unary.js";
 import {
   OpenWorkspaceRequestSchema,
   OpenWorkspaceResponseSchema,
-  type OpenWorkspaceError,
   type OpenWorkspaceResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
@@ -137,7 +136,7 @@ export async function openAndJumpToWorkspace(
       const cause = requireCase(result.value.cause, "OpenWorkspaceError.cause");
       const sentence =
         crossCuttingSentence("OpenWorkspace", cause) ??
-        openWorkspaceRefusal(cause as NonNullable<OpenWorkspaceError["cause"]> & { case: string });
+        openWorkspaceRefusal(cause);
       refuse(host, site, "OpenWorkspace", workspace, cause.case, sentence);
       return;
     }
