@@ -2320,15 +2320,68 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-oneshot-reads prompts
         (cl-letf (((symbol-function 'agent-repl-verbs--create-oneshot)
-                   (lambda (command pick-model about-current)
-                     (push (list command pick-model about-current) calls))))
+                   (lambda (command pick-model about-current repository-fn)
+                     (push (list command pick-model about-current repository-fn) calls))))
           ;; Act.
           (agent-repl-create-oneshot nil)
           (agent-repl-create-oneshot-for-current-workspace t)
           ;; Assert.
           (should (equal (reverse calls)
-                         '((agent-repl-create-oneshot nil nil)
-                           (agent-repl-create-oneshot-for-current-workspace t t)))))))))
+                         '((agent-repl-create-oneshot nil nil agent-repl-verbs--oneshot-repository)
+                           (agent-repl-create-oneshot-for-current-workspace t t agent-repl-verbs--oneshot-repository)))))))))
+
+(ert-deftest agent-repl-verbs-oneshot-repository-is-the-current-workspaces ()
+  "The ordinary one-shots take the repository the current workspace sits in."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section))))
+      ;; Act / Assert.
+      (should (equal (agent-repl-verbs--oneshot-repository) (agent-repl-test-verbs--repo-ref))))))
+
+;;;; ---- Create: the roster lookup of a fixed repository ----
+
+(ert-deftest agent-repl-verbs-roster-repository-at-answers-the-matching-section ()
+  "The section whose canonical directory is MAIN answers its `RepositoryRef'."
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections))))
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+      ;; Act / Assert.
+      (should (equal (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/doom")
+                     (agent-repl-test-verbs--repo-ref
+                      "agent-repl-repo" "/tmp/agent-repl-test/doom"))))))
+
+(ert-deftest agent-repl-verbs-roster-repository-at-canonicalizes-the-section-directory ()
+  "A section directory with a trailing slash still matches its canonical MAIN."
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster
+          nil nil
+          (list (list :key (list :repository (agent-repl-test-verbs--repo-ref "slash" "/tmp/agent-repl-test/x/"))
+                      :header (list :label (list :text "x"))
+                      :rows (list :rows nil))))))
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+      ;; Act / Assert.
+      (should (equal (plist-get (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/x") :id)
+                     "slash")))))
+
+(ert-deftest agent-repl-verbs-roster-repository-at-answers-nil-for-no-section ()
+  "A directory no section carries answers nil, leaving the refusal to the caller."
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--help-sections))))
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
+      ;; Act / Assert.
+      (should-not (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/nowhere")))))
+
+(ert-deftest agent-repl-verbs-help-repository-uses-the-shared-roster-lookup ()
+  "The help repository is found by `agent-repl-verbs--roster-repository-at'."
+  ;; Arrange.
+  (let (asked)
+    (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
+      (cl-letf (((symbol-function 'agent-repl-verbs--roster-repository-at)
+                 (lambda (main) (push main asked) (list :id main))))
+        ;; Act.
+        (agent-repl-verbs--help-repository)
+        ;; Assert.
+        (should (equal asked '("/tmp/agent-repl-test/doom")))))))
 
 ;;;; ---- Create: the shared one-shot composition ----
 
@@ -2343,7 +2396,8 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                 ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
         ;; Act.
-        (agent-repl-verbs--create-oneshot 'some-oneshot-command nil nil)
+        (agent-repl-verbs--create-oneshot 'some-oneshot-command nil nil
+                                          #'agent-repl-verbs--oneshot-repository)
         ;; Assert.
         (should (member "elisp.verbs.create-invoked command=some-oneshot-command" logs))
         (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :arm)
