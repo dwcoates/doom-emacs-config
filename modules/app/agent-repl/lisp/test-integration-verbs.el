@@ -512,10 +512,10 @@ model as the webapp."
                                                 daemon "SelectWorkspace")))
                      (plist-get ref :id))))))
 
-;;;; ---- MoveWorkspace ----
+;;;; ---- SwapWorkspaces ----
 
-(ert-deftest agent-repl-itest-verbs-move-sends-both-refs ()
-  "A move sends the workspace's ref and the target's over the wire."
+(ert-deftest agent-repl-itest-verbs-swap-sends-both-refs ()
+  "A swap sends the workspace's ref and the target's over the wire."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -525,10 +525,10 @@ model as the webapp."
                    (lambda (ws) (if (equal ws "itest-other") other (funcall host-ref ws))))
                   ((symbol-function 'agent-repl--ws-require-known) (lambda (&rest _) nil)))
           ;; Act.
-          (agent-repl-verb-move agent-repl-itest-verbs--ws "itest-other")
-          (agent-repl-itest--await-call daemon "MoveWorkspace"))
+          (agent-repl-verb-swap agent-repl-itest-verbs--ws "itest-other")
+          (agent-repl-itest--await-call daemon "SwapWorkspaces"))
         ;; Assert.
-        (let ((body (agent-repl-itest-verbs--body daemon "MoveWorkspace")))
+        (let ((body (agent-repl-itest-verbs--body daemon "SwapWorkspaces")))
           (should (equal (agent-repl-itest--body-field body 'workspace 'id) (plist-get ref :id)))
           (should (equal (agent-repl-itest--body-field body 'target 'id) "ws-itest-other")))))))
 

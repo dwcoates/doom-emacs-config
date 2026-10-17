@@ -959,18 +959,17 @@ func (s *server) SetWorkspaceParent(
 	return connect.NewResponse(resp), nil
 }
 
-// MoveWorkspace moves one workspace onto another's place in the registry
-// order. Both refs resolve as any workspace ref does, and a refusal of either
+// SwapWorkspaces exchanges two workspaces' places in the registry order. Both refs resolve as any workspace ref does, and a refusal of either
 // names the ref it refused; the new order arrives on the roster stream.
-func (s *server) MoveWorkspace(
+func (s *server) SwapWorkspaces(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.MoveWorkspaceRequest],
-) (*connect.Response[agentreplv1.MoveWorkspaceResponse], error) {
-	const rpc = "MoveWorkspace"
-	if err := validateMoveWorkspaceRequest(req.Msg); err != nil {
+	req *connect.Request[agentreplv1.SwapWorkspacesRequest],
+) (*connect.Response[agentreplv1.SwapWorkspacesResponse], error) {
+	const rpc = "SwapWorkspaces"
+	if err := validateSwapWorkspacesRequest(req.Msg); err != nil {
 		return nil, err
 	}
-	resp := &agentreplv1.MoveWorkspaceResponse{}
+	resp := &agentreplv1.SwapWorkspacesResponse{}
 	var subjects []resolved
 	for _, ref := range []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetTarget()} {
 		subject, refused, done := s.resolveNaming(ctx, rpc, resp, ref, nil)
@@ -979,11 +978,11 @@ func (s *server) MoveWorkspace(
 		}
 		subjects = append(subjects, subject)
 	}
-	if err := s.deps.Verbs.Move(ctx, subjects[0].Record.ID, subjects[1].Record.ID); err != nil {
+	if err := s.deps.Verbs.Swap(ctx, subjects[0].Record.ID, subjects[1].Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subjects[0].Log, rpc, resp, err, nil))
 	}
-	resp.Result = &agentreplv1.MoveWorkspaceResponse_Success{
-		Success: &agentreplv1.MoveWorkspaceSuccess{},
+	resp.Result = &agentreplv1.SwapWorkspacesResponse_Success{
+		Success: &agentreplv1.SwapWorkspacesSuccess{},
 	}
 	return connect.NewResponse(resp), nil
 }

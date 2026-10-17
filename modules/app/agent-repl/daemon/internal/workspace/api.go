@@ -362,8 +362,9 @@ type Verbs interface {
 	SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error)
 	// RestoreParent undoes change unless a later retarget superseded it.
 	RestoreParent(ctx context.Context, change wsm.ParentChange) error
-	// Move moves workspace ws onto target's place in the registry order.
-	Move(ctx context.Context, ws, target ids.WorkspaceID) error
+	// Swap exchanges the places of workspaces ws and target in the registry
+	// order, every other workspace keeping its own.
+	Swap(ctx context.Context, ws, target ids.WorkspaceID) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.

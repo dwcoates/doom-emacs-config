@@ -372,12 +372,12 @@ func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Prio
 	return nil
 }
 
-// Move moves workspace ws onto target's place in the registry order, the
-// workspaces between shifting one step toward the place ws left (wsm's
-// MovePlace). The sidebar and the tab bar are both views of the registry, so
-// one move shows on both; any two workspaces can move.
-func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
-	const rpc = "MoveWorkspace"
+// Swap exchanges the places of workspaces ws and target in the registry order,
+// every other workspace keeping its own (wsm's SwapPlaces). The sidebar and the
+// tab bar are both views of the registry, so one swap shows on both; any two
+// workspaces can swap.
+func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
+	const rpc = "SwapWorkspaces"
 	_, log, err := v.owned(ctx, rpc, ws)
 	if err != nil {
 		return err
@@ -386,11 +386,11 @@ func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
 		return err
 	}
 	log = log.With(dlog.Context{"target": string(target)})
-	if err := v.deps.DB.MovePlace(ctx, ws, target); err != nil {
-		log.Error(opMove, "could not move the workspace", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("move %q onto %q: %w", ws, target, err)
+	if err := v.deps.DB.SwapPlaces(ctx, ws, target); err != nil {
+		log.Error(opSwap, "could not swap the workspaces' places", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("swap %q with %q: %w", ws, target, err)
 	}
-	log.Info(opMove, "moved the workspace onto the target's place", nil)
-	v.republishRegistry(ctx, log, opMove)
+	log.Info(opSwap, "swapped the workspace's place with the target's", nil)
+	v.republishRegistry(ctx, log, opSwap)
 	return nil
 }

@@ -55,9 +55,9 @@ type fakeDB struct {
 	owedMu sync.Mutex
 	owed   map[ids.WorkspaceID][]ids.TurnID
 
-	// moves is every MovePlace call, in order; moveErr fails it.
-	moves   [][2]ids.WorkspaceID
-	moveErr error
+	// swaps is every SwapPlaces call, in order; swapErr fails it.
+	swaps   [][2]ids.WorkspaceID
+	swapErr error
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -455,11 +455,11 @@ func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
 	return d.current, nil
 }
 
-func (d *fakeDB) MovePlace(_ context.Context, ws, target ids.WorkspaceID) error {
-	if d.moveErr != nil {
-		return d.moveErr
+func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error {
+	if d.swapErr != nil {
+		return d.swapErr
 	}
-	d.moves = append(d.moves, [2]ids.WorkspaceID{ws, target})
+	d.swaps = append(d.swaps, [2]ids.WorkspaceID{ws, target})
 	return nil
 }
 

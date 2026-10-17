@@ -1178,30 +1178,30 @@ func TestTheHiddenFlagHasOneWrite(t *testing.T) {
 	}
 }
 
-func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
+func TestSwapSwapsTheWorkspacesAndRepublishes(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Move(context.Background(), "w1", "w2"); err != nil {
-		t.Fatalf("Move: %v", err)
+	if err := f.verbs.Swap(context.Background(), "w1", "w2"); err != nil {
+		t.Fatalf("Swap: %v", err)
 	}
 
 	// Assert.
-	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.moves, want) {
-		t.Fatalf("moves = %v, want %v", f.db.moves, want)
+	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.swaps, want) {
+		t.Fatalf("swaps = %v, want %v", f.db.swaps, want)
 	}
 	if len(f.sidebar.registries) != 1 {
 		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
 	}
-	if !hasRecord(f, dlog.LevelInfo, opMove) {
-		t.Fatal("the move was not recorded at info")
+	if !hasRecord(f, dlog.LevelInfo, opSwap) {
+		t.Fatal("the swap was not recorded at info")
 	}
 }
 
-func TestMoveRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+func TestSwapRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -1209,33 +1209,33 @@ func TestMoveRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	f.owner.standing = StandingTransferringAway
 
 	// Act.
-	err := f.verbs.Move(context.Background(), "w1", "w2")
+	err := f.verbs.Swap(context.Background(), "w1", "w2")
 
 	// Assert.
 	asRefusal(t, err, ArmTransferringAway)
-	if len(f.db.moves) != 0 {
-		t.Fatalf("a refused move wrote %v", f.db.moves)
+	if len(f.db.swaps) != 0 {
+		t.Fatalf("a refused swap wrote %v", f.db.swaps)
 	}
 }
 
-func TestMoveSurfacesAStoreFailure(t *testing.T) {
+func TestSwapSurfacesAStoreFailure(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
-	f.db.moveErr = errors.New("disk on fire")
+	f.db.swapErr = errors.New("disk on fire")
 
 	// Act.
-	err := f.verbs.Move(context.Background(), "w1", "w2")
+	err := f.verbs.Swap(context.Background(), "w1", "w2")
 
 	// Assert.
-	if err == nil || !errors.Is(err, f.db.moveErr) {
+	if err == nil || !errors.Is(err, f.db.swapErr) {
 		t.Fatalf("error = %v, want the store's failure", err)
 	}
 	if len(f.sidebar.registries) != 0 {
-		t.Fatalf("a failed move republished %d times", len(f.sidebar.registries))
+		t.Fatalf("a failed swap republished %d times", len(f.sidebar.registries))
 	}
-	if !loggedAtError(f, opMove) {
+	if !loggedAtError(f, opSwap) {
 		t.Fatal("the store failure was not logged at error")
 	}
 }

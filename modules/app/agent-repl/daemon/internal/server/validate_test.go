@@ -357,9 +357,9 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "workspace",
 		},
 		{
-			name: "move with no workspace",
+			name: "swap with no workspace",
 			check: func() *connect.Error {
-				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{
+				return validateSwapWorkspacesRequest(&agentreplv1.SwapWorkspacesRequest{
 					Target: &workspacev1.WorkspaceRef{Id: "ws-2"},
 				})
 			},
@@ -395,16 +395,16 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "child_of.parent",
 		},
 		{
-			name: "move with no target",
+			name: "swap with no target",
 			check: func() *connect.Error {
-				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref()})
+				return validateSwapWorkspacesRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref()})
 			},
 			field: "target",
 		},
 		{
-			name: "move of a workspace onto itself",
+			name: "swap of a workspace with itself",
 			check: func() *connect.Error {
-				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{
+				return validateSwapWorkspacesRequest(&agentreplv1.SwapWorkspacesRequest{
 					Workspace: ref(), Target: ref(),
 				})
 			},
@@ -614,9 +614,9 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			},
 		},
 		{
-			name: "move of one workspace onto another",
+			name: "swap of one workspace with another",
 			check: func() *connect.Error {
-				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{
+				return validateSwapWorkspacesRequest(&agentreplv1.SwapWorkspacesRequest{
 					Workspace: ref(), Target: &workspacev1.WorkspaceRef{Id: "ws-2"},
 				})
 			},

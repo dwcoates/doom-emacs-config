@@ -248,33 +248,35 @@ func TestSettingAPriorityOnAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	}
 }
 
-func TestMovePlace(t *testing.T) {
+func TestSwapPlaces(t *testing.T) {
 	cases := []struct {
-		name        string
-		mover, onto string
-		want        []string
+		name       string
+		ws, target string
+		want       []string
 	}{
-		{name: "moving right lands on the target's place and shifts the passed ones left",
-			mover: "a", onto: "c", want: []string{"b", "c", "a", "d"}},
-		{name: "moving left lands on the target's place and shifts the passed ones right",
-			mover: "d", onto: "b", want: []string{"a", "d", "b", "c"}},
-		{name: "moving onto a neighbour exchanges the two",
-			mover: "b", onto: "c", want: []string{"a", "c", "b", "d"}},
+		{name: "swapping rightward exchanges the two and leaves the ones between in place",
+			ws: "a", target: "c", want: []string{"c", "b", "a", "d"}},
+		{name: "swapping leftward exchanges the two and leaves the ones between in place",
+			ws: "d", target: "b", want: []string{"a", "d", "c", "b"}},
+		{name: "swapping neighbours exchanges the two",
+			ws: "b", target: "c", want: []string{"a", "c", "b", "d"}},
+		{name: "swapping the ends leaves the middle alone",
+			ws: "a", target: "d", want: []string{"d", "b", "c", "a"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: places a, b, c, d in order (each lands after the last
-			// by being moved there).
+			// Arrange: places a, b, c, d in order, sorted into it by swaps.
 			s, _ := testStore(t)
 			repoDir := placeRepo(t)
 			ids := map[string]WorkspaceID{}
 			for _, name := range []string{"a", "b", "c", "d"} {
 				ids[name] = registerIn(t, s, repoDir, name, nil).ID
 			}
-			for _, name := range []string{"b", "c", "d"} {
-				order := orderedNames(t, s)
-				if err := s.MovePlace(context.Background(), ids[name], ids[order[len(order)-1]]); err != nil && order[len(order)-1] != name {
-					t.Fatalf("arrange MovePlace: %v", err)
+			for i, name := range []string{"a", "b", "c", "d"} {
+				if at := orderedNames(t, s)[i]; at != name {
+					if err := s.SwapPlaces(context.Background(), ids[name], ids[at]); err != nil {
+						t.Fatalf("arrange SwapPlaces: %v", err)
+					}
 				}
 			}
 			if got := orderedNames(t, s); !slices.Equal(got, []string{"a", "b", "c", "d"}) {
@@ -282,8 +284,8 @@ func TestMovePlace(t *testing.T) {
 			}
 
 			// Act.
-			if err := s.MovePlace(context.Background(), ids[tc.mover], ids[tc.onto]); err != nil {
-				t.Fatalf("MovePlace: %v", err)
+			if err := s.SwapPlaces(context.Background(), ids[tc.ws], ids[tc.target]); err != nil {
+				t.Fatalf("SwapPlaces: %v", err)
 			}
 
 			// Assert.
@@ -294,7 +296,7 @@ func TestMovePlace(t *testing.T) {
 	}
 }
 
-func TestMovePlaceRefusesAnUnknownWorkspaceWritingNothing(t *testing.T) {
+func TestSwapPlacesRefusesAnUnknownWorkspaceWritingNothing(t *testing.T) {
 	// Arrange.
 	s, log := testStore(t)
 	repoDir := placeRepo(t)
@@ -303,33 +305,33 @@ func TestMovePlaceRefusesAnUnknownWorkspaceWritingNothing(t *testing.T) {
 	before := placesByName(t, s)
 
 	// Act.
-	err := s.MovePlace(context.Background(), a.ID, "ws-missing")
+	err := s.SwapPlaces(context.Background(), a.ID, "ws-missing")
 
 	// Assert.
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("MovePlace error = %v, want ErrNotFound", err)
+		t.Fatalf("SwapPlaces error = %v, want ErrNotFound", err)
 	}
 	if after := placesByName(t, s); !maps.Equal(after, before) {
-		t.Fatalf("places moved from %v to %v on a refused move", before, after)
+		t.Fatalf("places moved from %v to %v on a refused swap", before, after)
 	}
-	if !loggedOperation(log, "daemon.wsm.move_place", "debug") {
-		t.Fatalf("the refused move was not recorded at debug: %v", log.Records())
+	if !loggedOperation(log, "daemon.wsm.swap_places", "debug") {
+		t.Fatalf("the refused swap was not recorded at debug: %v", log.Records())
 	}
 }
 
-func TestMovePlaceRefusesAWorkspaceOntoItself(t *testing.T) {
+func TestSwapPlacesRefusesAWorkspaceWithItself(t *testing.T) {
 	// Arrange.
 	s, log := testStore(t)
 	a := registerIn(t, s, placeRepo(t), "a", nil)
 
 	// Act.
-	err := s.MovePlace(context.Background(), a.ID, a.ID)
+	err := s.SwapPlaces(context.Background(), a.ID, a.ID)
 
 	// Assert.
 	if err == nil {
-		t.Fatal("MovePlace of a workspace onto itself succeeded")
+		t.Fatal("SwapPlaces of a workspace with itself succeeded")
 	}
-	if !loggedOperation(log, "daemon.wsm.move_place", "error") {
+	if !loggedOperation(log, "daemon.wsm.swap_places", "error") {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
 }

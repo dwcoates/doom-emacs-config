@@ -1653,10 +1653,10 @@ func TestEveryRepositoryRPCFailsAnUnreadableRegistryAsInternal(t *testing.T) {
 	}
 }
 
-// ---- MoveWorkspace ---------------------------------------------------------
+// ---- SwapWorkspaces --------------------------------------------------------
 
-// moveHarness is a harness whose registry holds a second workspace, ws-2.
-func moveHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
+// swapHarness is a harness whose registry holds a second workspace, ws-2.
+func swapHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	h := newHarness(t)
 	other := wsm.Workspace{ID: "ws-2", Dir: "/tmp/agent-repl-test-workspace-2"}
@@ -1664,60 +1664,60 @@ func moveHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
 	return h, &workspacev1.WorkspaceRef{Id: string(other.ID), Dir: other.Dir}
 }
 
-func TestMoveWorkspaceHandsBothResolvedIdsToTheVerb(t *testing.T) {
+func TestSwapWorkspacesHandsBothResolvedIdsToTheVerb(t *testing.T) {
 	// Arrange.
-	h, target := moveHarness(t)
+	h, target := swapHarness(t)
 
 	// Act.
-	resp, err := h.Client.MoveWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: target}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("MoveWorkspace: %v", err)
+		t.Fatalf("SwapWorkspaces: %v", err)
 	}
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
 	}
-	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.moves, want) {
-		t.Fatalf("moves = %v, want %v", h.Verbs.moves, want)
+	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.swaps, want) {
+		t.Fatalf("swaps = %v, want %v", h.Verbs.swaps, want)
 	}
 }
 
-func TestMoveWorkspaceNamesTheUnknownRef(t *testing.T) {
+func TestSwapWorkspacesNamesTheUnknownRef(t *testing.T) {
 	// Arrange.
-	h, _ := moveHarness(t)
+	h, _ := swapHarness(t)
 	missing := &workspacev1.WorkspaceRef{Id: "ws-nope"}
 
 	// Act.
-	resp, err := h.Client.MoveWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: missing}))
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: missing}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("MoveWorkspace: %v", err)
+		t.Fatalf("SwapWorkspaces: %v", err)
 	}
 	got := resp.Msg.GetError().GetUnknownWorkspace()
 	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
 		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.moves) != 0 {
-		t.Fatalf("moves = %v, want none for an unknown workspace", h.Verbs.moves)
+	if len(h.Verbs.swaps) != 0 {
+		t.Fatalf("swaps = %v, want none for an unknown workspace", h.Verbs.swaps)
 	}
 }
 
-func TestMoveWorkspaceNamesTheMismatchedRef(t *testing.T) {
+func TestSwapWorkspacesNamesTheMismatchedRef(t *testing.T) {
 	// Arrange.
-	h, target := moveHarness(t)
+	h, target := swapHarness(t)
 	stale := &workspacev1.WorkspaceRef{Id: target.GetId(), Dir: "/somewhere/else"}
 
 	// Act.
-	resp, err := h.Client.MoveWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: stale}))
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: stale}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("MoveWorkspace: %v", err)
+		t.Fatalf("SwapWorkspaces: %v", err)
 	}
 	got := resp.Msg.GetError().GetWorkspaceRefMismatch()
 	if got == nil || got.GetWorkspace().GetId() != target.GetId() || got.GetRegistryDir() != target.GetDir() {
@@ -1725,18 +1725,18 @@ func TestMoveWorkspaceNamesTheMismatchedRef(t *testing.T) {
 	}
 }
 
-func TestMoveWorkspaceFailsAVerbError(t *testing.T) {
+func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	// Arrange.
-	h, target := moveHarness(t)
-	h.Verbs.moveErr = errors.New("disk I/O error")
+	h, target := swapHarness(t)
+	h.Verbs.swapErr = errors.New("disk I/O error")
 
 	// Act.
-	_, err := h.Client.MoveWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+	_, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: target}))
 
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInternal {
-		t.Fatalf("MoveWorkspace = %v, want an internal failure", err)
+		t.Fatalf("SwapWorkspaces = %v, want an internal failure", err)
 	}
 }
 

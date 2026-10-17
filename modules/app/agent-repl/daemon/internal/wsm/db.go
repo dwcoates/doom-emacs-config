@@ -95,10 +95,10 @@ type DB interface {
 	// still stands as the retarget left it; stale reports a retarget that
 	// has since been superseded, which is left alone.
 	RestoreParent(ctx context.Context, change ParentChange) (stale bool, err error)
-	// MovePlace moves workspace ws onto target's place in the registry order,
-	// the workspaces between shifting one step toward the place ws left; an
-	// unknown id is ErrNotFound and nothing is written.
-	MovePlace(ctx context.Context, ws, target WorkspaceID) error
+	// SwapPlaces exchanges the places of workspaces ws and target in the
+	// registry order, every other workspace keeping its own; an unknown id is
+	// ErrNotFound and nothing is written.
+	SwapPlaces(ctx context.Context, ws, target WorkspaceID) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

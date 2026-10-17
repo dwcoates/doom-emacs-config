@@ -1,0 +1,75 @@
+// endpoint_swap_workspaces.proto — SwapWorkspaces: exchange two workspaces'
+// places in the registry order. SIDEBAR section. The sidebar and the editor's
+// tab bar are both views of the registry order, so one swap shows on both; the
+// new order arrives on the roster stream.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Exchange two workspaces' places in the registry order: `workspace` takes
+// `target`'s place and `target` takes `workspace`'s, and every other workspace
+// keeps its own. Any two workspaces may swap, whatever their repositories or
+// parents. The sidebar and the tab bar both redraw from the registry, so the
+// swap shows on both.
+message SwapWorkspacesRequest {
+  // One of the two workspaces, as the roster served it; the editor sends the
+  // current workspace here. Must differ from `target` by id (InvalidArgument
+  // otherwise).
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The other workspace, as the roster served it; the editor sends the
+  // workspace on the tab the user named.
+  workspace.v1.WorkspaceRef target = 2;
+}
+
+// The set arm is the outcome.
+message SwapWorkspacesResponse {
+  // Exactly one arm is set: the swap was made, or it was refused with nothing
+  // written.
+  oneof result {
+    SwapWorkspacesSuccess success = 1;
+    SwapWorkspacesError error = 2;
+  }
+}
+
+// The two places were exchanged; the roster push carries the new order.
+message SwapWorkspacesSuccess {}
+
+// Why the swap was not made. No place changes on any arm.
+message SwapWorkspacesError {
+  // The one reason the daemon could not serve the swap.
+  oneof cause {
+    // A ref's id is not in the daemon's registry.
+    SwapWorkspacesUnknownWorkspace unknown_workspace = 1;
+    // A ref's dir disagrees with the registry's dir for its id.
+    SwapWorkspacesWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released a workspace to a successor; dial `address`.
+    SwapWorkspacesTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting a workspace yet.
+    SwapWorkspacesNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// Names the ref the registry does not hold.
+message SwapWorkspacesUnknownWorkspace {
+  // The request's ref whose id the registry does not hold, echoed as sent.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the mismatched ref and the dir the registry holds for its id.
+message SwapWorkspacesWorkspaceRefMismatch {
+  // The request's ref whose dir disagrees with the registry, echoed as sent.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The dir the registry holds for that ref's id.
+  string registry_dir = 2;
+}
+// The successor daemon now owns the workspace; the caller re-dials it.
+message SwapWorkspacesTransferringAway {
+  // The successor's `127.0.0.1:<port>`.
+  string address = 1;
+}
+// Adoption of a named workspace is still in progress; the caller retries once
+// the roster shows it adopted.
+message SwapWorkspacesNotYetAdopted {}

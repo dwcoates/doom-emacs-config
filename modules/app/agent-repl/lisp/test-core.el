@@ -314,15 +314,15 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("commands.el" agent-repl-switch-to-workspace
      "[agent-repl] No workspace tab %d -- the bar draws %d"
      "explains why the requested interactive switch did nothing")
-    ("commands.el" agent-repl-workspace-place
-     "[agent-repl] The current workspace has no tab to move"
-     "explains why the requested interactive move did nothing")
-    ("commands.el" agent-repl-workspace-place
+    ("commands.el" agent-repl-workspace-swap
+     "[agent-repl] The current workspace has no tab to swap"
+     "explains why the requested interactive swap did nothing")
+    ("commands.el" agent-repl-workspace-swap
      "[agent-repl] No workspace tab %d -- the bar draws %d"
-     "explains why the requested interactive move did nothing")
-    ("commands.el" agent-repl-workspace-place
+     "explains why the requested interactive swap did nothing")
+    ("commands.el" agent-repl-workspace-swap
      "[agent-repl] %s is already tab %d"
-     "explains why the requested interactive move did nothing")
+     "explains why the requested interactive swap did nothing")
     ("core.el" agent-repl--migrate-legacy-state
      "[agent-repl] migrated state %s -> %s"
      "announces an on-disk state migration")
@@ -516,8 +516,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's hide or show of a workspace")
     ("verbs.el" agent-repl-send-hidden-keepalives "agent-repl: %s"
      "reports how the user's keep-alive to the hidden workspaces went")
-    ("verbs.el" agent-repl-verb-move "agent-repl: moved %s to %s's place"
-     "confirms the user's move command")
+    ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"
+     "confirms the user's swap command")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")

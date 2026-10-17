@@ -1464,21 +1464,58 @@ func awaitCursorAdvance(t testing.TB, w *World, projectDir string, baseline map[
 // stated at a site that was not the bound in force.
 func awaitCursorAdvanceWithin(t testing.TB, w *World, projectDir string, baseline map[string]int64, bound time.Duration) {
 	t.Helper()
+	awaitCursors(t, w, bound, "the sidecar to durably advance a cursor under "+projectDir, func(cursors []*storev1.CursorState) bool {
+		for path, offset := range cursorOffsetsUnder(cursors, projectDir) {
+			if offset > baseline[path] {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// awaitFileIngested polls GetSidecarCursors until the cursor of the file at
+// path stands at the file's current size: the store's own durable statement
+// that the sidecar has committed every line the file holds. A turn's end
+// orders nothing about a file the turn wrote beside its main transcript (a
+// nested subagent's own transcript), so a read of that file's facts waits on
+// that file's cursor, never on awaitCursorAdvance's any-cursor edge.
+func awaitFileIngested(t testing.TB, w *World, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("e2e: stat %s: %v", path, err)
+	}
+	awaitCursors(t, w, DefaultTimeout, fmt.Sprintf("the sidecar to durably ingest %s through byte %d", path, info.Size()), func(cursors []*storev1.CursorState) bool {
+		return cursorIngested(cursors, path, info.Size())
+	})
+}
+
+// cursorIngested reports whether a cursor of the file at path has read to
+// size or past it.
+func cursorIngested(cursors []*storev1.CursorState, path string, size int64) bool {
+	for _, c := range cursors {
+		if c.GetPath() == path && c.GetOffset() >= size {
+			return true
+		}
+	}
+	return false
+}
+
+// awaitCursors polls the store's durable sidecar cursors until done holds of
+// them, failing the test naming what it waited for once bound passes. Every
+// cursor wait in this suite is this loop with its own predicate.
+func awaitCursors(t testing.TB, w *World, bound time.Duration, what string, done func([]*storev1.CursorState) bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), bound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
-	for {
-		now := cursorOffsetsUnder(w.Store.Cursors(t, ctx), projectDir)
-		for path, offset := range now {
-			if offset > baseline[path] {
-				return
-			}
-		}
+	for !done(w.Store.Cursors(t, ctx)) {
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			t.Fatalf("e2e: waiting for the sidecar to durably advance a cursor under %s: %v", projectDir, ctx.Err())
+			t.Fatalf("e2e: waiting for %s: %v", what, ctx.Err())
 		}
 	}
 }

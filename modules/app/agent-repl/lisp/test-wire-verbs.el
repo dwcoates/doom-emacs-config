@@ -616,87 +616,87 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
                    (agent-repl-test-wire-verbs--parse "{\"stillHidden\":{}}"))
                   :type 'agent-repl-wire-error)))
 
-;;;; ---- MoveWorkspace ---------------------------------------------
+;;;; ---- SwapWorkspaces ---------------------------------------------
 
-(ert-deftest agent-repl-test-wire-verbs-move-request ()
-  "A move request carries both refs through the WorkspaceRef codec."
+(ert-deftest agent-repl-test-wire-verbs-swap-request ()
+  "A swap request carries both refs through the WorkspaceRef codec."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-encode-move-workspace-request
+    (should (equal (agent-repl-wire-encode-swap-workspaces-request
                     (list :workspace agent-repl-test-wire-verbs--ref
                           :target '(:id "ws-2" :dir "/w/two")))
                    '((workspace . ((id . "ws-1") (dir . "/w/one")))
                      (target . ((id . "ws-2") (dir . "/w/two"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-move-without-target ()
-  "A move with no target is incomplete and errors before send."
+(ert-deftest agent-repl-test-wire-verbs-swap-without-target ()
+  "A swap with no target is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-encode-move-workspace-request
+    (should-error (agent-repl-wire-encode-swap-workspaces-request
                    (list :workspace agent-repl-test-wire-verbs--ref))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-move-without-workspace ()
-  "A move with no workspace is incomplete and errors before send."
+(ert-deftest agent-repl-test-wire-verbs-swap-without-workspace ()
+  "A swap with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-encode-move-workspace-request
+    (should-error (agent-repl-wire-encode-swap-workspaces-request
                    '(:other (:id "ws-2" :dir "/w/two")))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-move-response-success ()
-  "A made move decodes to the empty success arm."
+(ert-deftest agent-repl-test-wire-verbs-swap-response-success ()
+  "A made swap decodes to the empty success arm."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-move-workspace-response
+    (should (equal (agent-repl-wire-decode-swap-workspaces-response
                     (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
                    '(:arm :success :value nil)))))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-unknown-workspace-arm ()
-  "MoveWorkspaceError's `unknown_workspace' arm decodes with the ref it
+(ert-deftest agent-repl-test-wire-verbs-swap-error-unknown-workspace-arm ()
+  "SwapWorkspacesError's `unknown_workspace' arm decodes with the ref it
 names."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-move-workspace-error
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
                     (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :unknown-workspace :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-workspace-ref-mismatch-arm ()
-  "MoveWorkspaceError's `workspace_ref_mismatch' arm decodes with the ref
+(ert-deftest agent-repl-test-wire-verbs-swap-error-workspace-ref-mismatch-arm ()
+  "SwapWorkspacesError's `workspace_ref_mismatch' arm decodes with the ref
 and the registry dir."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-move-workspace-error
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
                     (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/stale\"},\"registryDir\":\"/w/two\"}}"))
                    '(:cause (:arm :workspace-ref-mismatch
                              :value (:workspace (:id "ws-2" :dir "/w/stale") :registry-dir "/w/two")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-transferring-away-arm ()
-  "MoveWorkspaceError's `transferring_away' arm decodes with its address."
+(ert-deftest agent-repl-test-wire-verbs-swap-error-transferring-away-arm ()
+  "SwapWorkspacesError's `transferring_away' arm decodes with its address."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-move-workspace-error
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
                     (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
                    '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-not-yet-adopted-arm ()
-  "MoveWorkspaceError's `not_yet_adopted' arm decodes empty."
+(ert-deftest agent-repl-test-wire-verbs-swap-error-not-yet-adopted-arm ()
+  "SwapWorkspacesError's `not_yet_adopted' arm decodes empty."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-move-workspace-error
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
                    '(:cause (:arm :not-yet-adopted :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-unset-cause-is-a-breach ()
-  "MoveWorkspaceError with no arm set is a breach."
+(ert-deftest agent-repl-test-wire-verbs-swap-error-unset-cause-is-a-breach ()
+  "SwapWorkspacesError with no arm set is a breach."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-decode-move-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+    (should-error (agent-repl-wire-decode-swap-workspaces-error (agent-repl-test-wire-verbs--parse "{}"))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-unknown-arm-is-a-breach ()
-  "An arm MoveWorkspaceError does not declare is refused."
+(ert-deftest agent-repl-test-wire-verbs-swap-error-unknown-arm-is-a-breach ()
+  "An arm SwapWorkspacesError does not declare is refused."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-decode-move-workspace-error
+    (should-error (agent-repl-wire-decode-swap-workspaces-error
                    (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-move-error-arms-pinned ()
-  "MoveWorkspaceError's arm set is exactly what the frozen schema
+(ert-deftest agent-repl-test-wire-verbs-swap-error-arms-pinned ()
+  "SwapWorkspacesError's arm set is exactly what the frozen schema
 declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_move_workspace.pb.go" "MoveWorkspaceError")
+                        "agentrepl/v1/endpoint_swap_workspaces.pb.go" "SwapWorkspacesError")
                        #'string<)
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
                        #'string<))))
