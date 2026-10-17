@@ -974,13 +974,16 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    in the muted grey, two steps smaller than the name (owner request,
    2026-10-17: grey and slightly smaller than the first white cut). The box is a fixed width, so a
    one- or two-digit number and an unnumbered row all start their mark and
-   name at one edge; the row's left padding gives a little of that width back,
-   so the rows indent only slightly. */
+   name at one edge. The box's left margin hands back part of the row's left
+   padding, so the rows indent only slightly, and its right margin sets the
+   number a little further from the mark than the mark sits from the name
+   (owner request, 2026-10-17). */
 #ws-sidebar { --tab-number-w: 0.85rem; }
 #ws-sidebar .sb-num {
   flex: 0 0 auto;
   width: var(--tab-number-w);
-  margin-right: -0.2rem;
+  margin-left: -0.4rem;
+  margin-right: 0.1rem;
   text-align: right;
   color: var(--muted);
   font-size: 0.66rem;
