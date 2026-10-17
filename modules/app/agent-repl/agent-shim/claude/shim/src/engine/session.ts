@@ -6469,6 +6469,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         pushes.withdraw("cacheLapse");
         cadence.run();
         break;
+      case "lastRound":
+        // THE HELD PROJECTION NO LONGER STANDS while the round's beat is
+        // owed; the cadence states the new one when the round is spent.
+        pushes.withdraw("cacheLapse");
+        cadence.lastRound();
+        break;
       default:
         throw new Error(`SetKeepalive reached the engine with no cadence arm (${String(request.cadence.case)}); validation admits none`);
     }
