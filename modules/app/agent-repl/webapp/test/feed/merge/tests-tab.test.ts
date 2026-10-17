@@ -574,9 +574,20 @@ describe("drawFeedMergeTestsRunTally", () => {
 });
 
 describe("the stylesheet's run tally", () => {
-  it("draws the tally at the run strip's right end", () => {
-    const rules = rulesOf(STYLESHEET).filter((rule) => rule.selectors.includes(".merge-strip > .merge-run-tally"));
-    expect(rules.map((rule) => rule.declarations).join(";")).toContain("margin-left: auto");
+  const declarationsOf = (selector: string) =>
+    rulesOf(STYLESHEET)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => rule.declarations)
+      .join(";");
+
+  it("draws the tally in the run's badge at the duration's font size", () => {
+    expect([declarationsOf(".merge-tab > .merge-run-tally"), declarationsOf(".merge-tab-duration")].map((d) =>
+      d.match(/font-size: [^;]+/)?.[0],
+    )).toEqual(["font-size: 0.85em", "font-size: 0.85em"]);
+  });
+
+  it("no longer pushes the tally to the run strip's right end", () => {
+    expect(declarationsOf(".merge-strip > .merge-run-tally")).toBe("");
   });
 });
 

@@ -136,6 +136,7 @@ These clicks jump to an entry in the feed:
   - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.
   - A commit whose replay conflicted shows the conflicted files, and below them the agent's conflict resolution as it streams.
   - The tests tab has a tab for each full run of the suites (`run 1`, `run 2`, ...).
+    - Each run's tab shows its passed/failed/total test counts, summed over its suites, between its clock and its state glyph.
   - Only one merge of a repository runs its tests at a time; the merges ready to test take turns, first come first served.
     - A run waiting its turn shows a hollow `○`, keeps its clock ticking, and reads "waiting for the test turn: <workspace>'s tests run first".
     - While one merge's agent fixes a failed run, the other merge's tests run, and the fixed one runs again once they end.

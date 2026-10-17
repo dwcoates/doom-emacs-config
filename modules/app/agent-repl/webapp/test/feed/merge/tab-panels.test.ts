@@ -164,23 +164,7 @@ describe("mergeTabPanel", () => {
     expect(host.querySelector('.merge-strip.is-nested [data-merge-tab="testsRun"]')).not.toBeNull();
   });
 
-  it("hands a run's tally, every suite's counts summed, to its strip", () => {
-    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
-    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
-    expect([panel.accessory?.className, panel.accessory?.textContent]).toEqual(["merge-run-tally", "3/1/7"]);
-  });
-
-  it("moves a run's tally on a push of new counts", () => {
-    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
-    const view = new FakeSubfeed([run]);
-    const panel = mergeTabPanel(tabOf(run), view, rc());
-    const next = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(2) } } });
-    view.push([next]);
-    panel.update(tabOf(next));
-    expect(panel.accessory?.textContent).toBe("4/1/7");
-  });
-
-  it("draws the shown run's tally at the right end of the tests tab's run strip", () => {
+  it("draws each run's tally inside its own badge in the tests tab's run strip", () => {
     const rows = [
       tabRow("t-tests", { kind: "tests", state: "live" }),
       tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } }),
@@ -188,7 +172,11 @@ describe("mergeTabPanel", () => {
     const panel = mergeTabPanel(childTabsOf(rows, undefined)[0], new FakeSubfeed(rows), rc());
     const host = document.createElement("div");
     host.append(...panel.nodes);
-    expect(host.querySelector(".merge-strip.is-nested")?.lastElementChild?.classList.contains("merge-run-tally")).toBe(true);
+    const strip = host.querySelector(".merge-strip.is-nested");
+    expect([
+      strip?.querySelector('[data-merge-tab="testsRun"] > .merge-run-tally')?.textContent,
+      strip?.querySelector(":scope > .merge-run-tally"),
+    ]).toEqual(["3/1/7", null]);
   });
 
   it("draws a run as its views, with no strip of its own", () => {

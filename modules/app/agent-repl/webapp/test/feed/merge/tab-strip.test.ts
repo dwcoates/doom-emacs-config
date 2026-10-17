@@ -181,7 +181,7 @@ describe("drawFeedMergeTabLabel: rounds beyond the first", () => {
   });
 });
 
-describe("drawFeedMergeTab: the badge says label, round and state — no counts (R5)", () => {
+describe("drawFeedMergeTab: the badge says label, round and state — no counts but a run's tally", () => {
   it("marks the kind as the hook the suite targets", () => {
     const row = tabRow("t1", { kind: "updatingMain", state: "live" });
     const tab = readMergeTab(row, row.row.value as never);
@@ -212,6 +212,52 @@ describe("drawFeedMergeTab: the badge says label, round and state — no counts 
   it("marks the active tab so the strip shows where the reader is", () => {
     const [tab] = childTabsOf([tabRow("t1", { kind: "queue", state: "live" })], undefined);
     expect(drawFeedMergeTab(tab, { active: true, ticker: TICKER }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("a run tab's tally", () => {
+  const SUITES = (passed: number) => [
+    { name: "unit", state: { case: "failed", value: {} }, counts: { passed, failed: 1, total: 7 } },
+  ];
+  const run = (passed: number) => {
+    const [tab] = childTabsOf(
+      [tabRow("t-run", { kind: "testsRun", state: "live", payload: { output: { suites: SUITES(passed) } } })],
+      undefined,
+    );
+    return tab;
+  };
+
+  it("sits between the run's duration and its state glyph", () => {
+    const el = drawFeedMergeTab(run(3), { active: false, ticker: TICKER });
+    expect([...el.children].map((c) => c.className.split(" ")[0])).toEqual([
+      "merge-tab-label",
+      "merge-tab-duration",
+      "merge-run-tally",
+      "merge-tab-glyph",
+    ]);
+  });
+
+  it("sums the run's suite counts", () => {
+    expect(drawFeedMergeTab(run(3), { active: false, ticker: TICKER }).querySelector(".merge-run-tally")?.textContent).toBe(
+      "3/1/7",
+    );
+  });
+
+  it("moves in place on a push of new counts, keeping its place before the glyph", () => {
+    const first = run(3);
+    const el = drawFeedMergeTab(first, { active: false, ticker: TICKER });
+    const tally = el.querySelector(".merge-run-tally");
+    updateFeedMergeTab(el, run(5), first, { active: false, ticker: TICKER });
+    expect([el.querySelector(".merge-run-tally") === tally, tally?.textContent, tally?.nextElementSibling?.className.split(" ")[0]]).toEqual([
+      true,
+      "5/1/7",
+      "merge-tab-glyph",
+    ]);
+  });
+
+  it("is drawn on no other kind of tab", () => {
+    const [tab] = childTabsOf([tabRow("t1", { kind: "tests", state: "live" })], undefined);
+    expect(drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-run-tally")).toBeNull();
   });
 });
 

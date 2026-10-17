@@ -7962,13 +7962,11 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 .merge-suite-counts .is-passed { color: var(--ok); }
 .merge-suite-counts .is-failed { color: var(--err); }
-/* A RUN'S TALLY, every suite's counts summed, at the run strip's right end
-   (owner request, 2026-10-14), in the suites' own figure colors. */
-.merge-strip > .merge-run-tally {
-  margin-left: auto;
-  align-self: center;
-  padding: 0 0.5rem;
-}
+/* A RUN'S TALLY, every suite's counts summed, inside the run's own badge
+   between its duration and its glyph (owner request, 2026-10-17), at the
+   duration's size and in the suites' own figure colors. */
+.merge-tab > .merge-run-tally { font-size: 0.85em; }
+.merge-tab > .merge-run-tally > .merge-suite-counts { margin-left: 0; }
 /* The daemon caps the output; the client scrolls what it was given rather
    than letting a suite grow the bubble without bound. */
 .merge-suite-output {
