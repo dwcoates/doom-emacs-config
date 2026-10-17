@@ -88,6 +88,10 @@ These clicks jump to an entry in the feed:
   - A merge bubble is the exception: a jump that opened it leaves it open.
   - Scrolling back to it then shows it closed.
   - Each jump's entry is watched on its own. A second jump never closes the first one's entry early.
+- **Opening the bubble at the very end of the feed scrolls the feed to its bottom.**
+  - The feed then keeps the bubble's opening content in view as it draws, until you scroll.
+  - This applies to every bubble that is the last entry of the feed, and to no other.
+  - Opening any other entry leaves the feed where it is.
 - **An entry you opened yourself stays open when you scroll away from it.**
   - A jump to an entry that was already open leaves it as it is.
   - Clicking an entry the jump opened, to close or reopen it, makes it yours: the jump no longer closes it.
