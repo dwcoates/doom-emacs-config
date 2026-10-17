@@ -325,6 +325,24 @@ func pendingKinds(s *Service) []Kind {
 	return kinds
 }
 
+func TestACreationIsReportedWithItsOwnerNotice(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	ws := derived(idp(owner), nil, nil, true)
+
+	// Act
+	f.s.ReportCreated(ws, "the parser fix")
+
+	// Assert
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var got []Event
+	f.s.loop.Run(ctx, func(_ context.Context, e Event) { got = append(got, e) })
+	if len(got) != 1 || got[0].Kind != Created || got[0].Workspace.ID != child || got[0].OwnerNotice != "the parser fix" {
+		t.Fatalf("reported = %+v, want the creation with its notice", got)
+	}
+}
+
 func TestTheEdgesReportOnlyTheDerivedEvents(t *testing.T) {
 	landedAt := time.Unix(1, 0)
 	tests := []struct {

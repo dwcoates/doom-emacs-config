@@ -572,27 +572,15 @@ type Banners interface {
 	Raise(ws ids.WorkspaceID, kind, text string)
 }
 
-// Deps are the verbs' collaborators.
-// DerivedKind is what happened to a workspace derived from others: created,
-// landed, or closed without landing.
-type DerivedKind int
-
-const (
-	// DerivedCreated: the workspace was created.
-	DerivedCreated DerivedKind = iota
-	// DerivedLanded: its branch landed.
-	DerivedLanded
-	// DerivedClosedWithoutLanding: it closed and never landed.
-	DerivedClosedWithoutLanding
-)
-
-// DerivedReporter tells the workspaces a workspace was derived from -- its
-// owner and its context source -- what happened to it
-// (internal/workspacenotice). It never blocks.
+// DerivedReporter tells the workspaces a new workspace was derived from -- its
+// owner and its context source -- that it was created
+// (internal/workspacenotice); its landing and its close reach them as
+// lifecycle edges (internal/wsedges). It never blocks.
 type DerivedReporter interface {
-	ReportDerived(kind DerivedKind, ws wsm.Workspace, ownerNotice string)
+	ReportCreated(ws wsm.Workspace, ownerNotice string)
 }
 
+// Deps are the verbs' collaborators.
 type Deps struct {
 	// Instance is THIS DAEMON's identity. Registration claims serving
 	// ownership of every workspace under it, which is what a handover hands

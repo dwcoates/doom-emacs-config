@@ -130,6 +130,12 @@ func New(deps Deps) *Service {
 // Report appends EVENT for the loop and never blocks.
 func (s *Service) Report(event Event) { s.loop.Report(event) }
 
+// ReportCreated implements workspace.DerivedReporter: WS was just created,
+// with OWNERNOTICE for an owner that lands it.
+func (s *Service) ReportCreated(ws wsm.Workspace, ownerNotice string) {
+	s.Report(Event{Kind: Created, Workspace: ws, OwnerNotice: ownerNotice})
+}
+
 // TurnStarted implements wsedges.Observer: a turn is no derived event.
 func (s *Service) TurnStarted(ids.WorkspaceID) {}
 

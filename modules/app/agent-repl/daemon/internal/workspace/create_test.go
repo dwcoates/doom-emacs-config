@@ -1341,7 +1341,7 @@ func TestCreateDerivations(t *testing.T) {
 			if tc.wantNote != "" && !strings.Contains(first, tc.wantNote) {
 				t.Errorf("first message = %q, want the note %q", first, tc.wantNote)
 			}
-			want := []derivedEvent{{kind: DerivedCreated, workspace: created.ID, ownerNotice: tc.notice}}
+			want := []derivedEvent{{workspace: created.ID, ownerNotice: tc.notice}}
 			if !reflect.DeepEqual(f.derived.events, want) {
 				t.Errorf("derived events = %+v, want %+v", f.derived.events, want)
 			}

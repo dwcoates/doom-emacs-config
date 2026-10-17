@@ -2616,18 +2616,17 @@ type fixture struct {
 	briefErr error
 }
 
-// derivedEvent is one reported derived-workspace event.
+// derivedEvent is one reported creation of a derived workspace.
 type derivedEvent struct {
-	kind        DerivedKind
 	workspace   ids.WorkspaceID
 	ownerNotice string
 }
 
-// fakeDerived records every derived-workspace event.
+// fakeDerived records every reported creation.
 type fakeDerived struct{ events []derivedEvent }
 
-func (d *fakeDerived) ReportDerived(kind DerivedKind, ws wsm.Workspace, ownerNotice string) {
-	d.events = append(d.events, derivedEvent{kind: kind, workspace: ws.ID, ownerNotice: ownerNotice})
+func (d *fakeDerived) ReportCreated(ws wsm.Workspace, ownerNotice string) {
+	d.events = append(d.events, derivedEvent{workspace: ws.ID, ownerNotice: ownerNotice})
 }
 
 // newFixture arranges a verb surface with a live session, an owned workspace

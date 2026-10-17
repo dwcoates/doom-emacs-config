@@ -417,7 +417,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"branch": branch, "dir": record.Dir, "one_shot": spec.OneShot,
 	})
 	v.republishRegistry(ctx, log, opCreate)
-	v.deps.Derived.ReportDerived(DerivedCreated, record, spec.OwnerNotice)
+	v.deps.Derived.ReportCreated(record, spec.OwnerNotice)
 	return record, nil
 }
 
