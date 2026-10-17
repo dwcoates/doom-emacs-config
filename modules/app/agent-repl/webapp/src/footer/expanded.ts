@@ -64,6 +64,9 @@ import type {
   FooterTaskRowSubject,
   FooterTokensLineAlarm,
   FooterTokensLineVerdict,
+  FooterWakeupRow,
+  FooterWakeupRowReason,
+  FooterWakeupRowWakeAt,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
@@ -829,8 +832,50 @@ export function drawFooterExpandedCrons(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement[] {
-  if (u.rows.length === 0) return [emptyRow("nothing scheduled")];
-  return u.rows.map((row, index) => drawFooterCronRow(row, deps, `${path}.rows[${index}]`));
+  const rows = u.rows.map((row, index) => drawFooterCronRow(row, deps, `${path}.rows[${index}]`));
+  if (u.wakeup !== undefined) rows.unshift(drawFooterWakeupRow(u.wakeup, deps, `${path}.wakeup`));
+  if (rows.length === 0) return [emptyRow("nothing scheduled")];
+  return rows;
+}
+
+/** The pending wakeup: ◷ · wakeup · reason · countdown. NOT a jump target. */
+export function drawFooterWakeupRow(
+  u: FooterWakeupRow,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  const row = plainRow("crons");
+  row.setAttribute("data-wakeup", "");
+  row.appendChild(glyph("crons", "◷"));
+  const label = document.createElement("span");
+  label.className = "footer-row-label";
+  label.textContent = "wakeup";
+  row.appendChild(label);
+  if (u.reason !== undefined) row.appendChild(drawFooterWakeupRowReason(u.reason));
+  if (u.wakeAt !== undefined) {
+    const figures = document.createElement("span");
+    figures.className = "footer-row-figures";
+    figures.appendChild(drawFooterWakeupRowWakeAt(u.wakeAt, deps, `${path}.wake_at`));
+    row.appendChild(figures);
+  }
+  return row;
+}
+
+/** The agent's reason for the wakeup, verbatim. */
+export function drawFooterWakeupRowReason(u: FooterWakeupRowReason): HTMLElement {
+  const reason = document.createElement("span");
+  reason.className = "footer-row-description";
+  reason.textContent = u.text;
+  return reason;
+}
+
+/** The countdown to the wakeup, ticking from the daemon's instant. */
+export function drawFooterWakeupRowWakeAt(
+  u: FooterWakeupRowWakeAt,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  return countdownClock(u.wakeAtMs, deps, `${path}.wake_at_ms`);
 }
 
 /** One job: ◷ · schedule · prompt · countdown · markers. */

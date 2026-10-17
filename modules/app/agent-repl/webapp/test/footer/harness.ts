@@ -24,6 +24,7 @@ import { FeedIdSchema, type FeedId } from "../../../proto/gen/ts/frontend/v1/fee
 import {
   FooterAgentRowSchema,
   FooterCronRowSchema,
+  FooterWakeupRowSchema,
   FooterExpandedSchema,
   FooterExpandedTokensSchema,
   FooterLiveWorkChipsSchema,
@@ -260,6 +261,7 @@ export interface ExpandedInit {
   shells?: readonly MessageInitShape<typeof FooterShellRowSchema>[];
   monitors?: readonly MessageInitShape<typeof FooterMonitorRowSchema>[];
   crons?: readonly MessageInitShape<typeof FooterCronRowSchema>[];
+  wakeup?: MessageInitShape<typeof FooterWakeupRowSchema>;
 }
 
 /**
@@ -282,7 +284,7 @@ export function expanded(init: ExpandedInit = {}): FooterExpanded {
     tasks: { rows: [...(init.tasks ?? [])] },
     shells: { rows: [...(init.shells ?? [])] },
     monitors: { rows: [...(init.monitors ?? [])] },
-    crons: { rows: [...(init.crons ?? [])] },
+    crons: { rows: [...(init.crons ?? [])], wakeup: init.wakeup },
   });
 }
 
