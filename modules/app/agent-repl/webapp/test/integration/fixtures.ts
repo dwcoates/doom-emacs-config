@@ -100,6 +100,7 @@ import {
 import { orderFor } from "../feed-order.js";
 import { ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { enduringLine } from "../footer/enduring-line.js";
+import { sentTo } from "../feed/addresses.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -223,7 +224,7 @@ export const agentPromptRow = (text = "please review", overrides?: Partial<RowIn
     {
       case: "agentPrompt",
       value: {
-        address: { text: "to reviewer" },
+        address: sentTo("reviewer"),
         body: { blocks: [{ block: { case: "text", value: { text } } }] },
       },
     },
@@ -678,7 +679,7 @@ export const peerMessageRow = (
   overrides?: Partial<RowInit>,
 ): FeedRow =>
   feedRow(
-    { case: "peerMessage", value: { sender: "agent Explore", body: "the sweep found nothing" } },
+    { case: "peerMessage", value: { from: { name: { text: "review-bot" }, sender: { case: "workspace", value: {} } }, body: "the sweep found nothing" } },
     overrides,
   );
 

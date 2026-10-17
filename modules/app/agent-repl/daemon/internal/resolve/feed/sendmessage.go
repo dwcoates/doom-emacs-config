@@ -71,8 +71,12 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 				r.noteDeliveryEnd(id, deliverySender, s.id, unitID)
 			}
 		case *conversationv1.AgentSendMessageSuccess_RecipientAgentId:
-			u.sendReached = sendInSession
-			u.sendResolved = recipient.RecipientAgentId
+			// AN AGENT OF THIS SESSION, named by its identity. A success naming
+			// no identity names no agent, and stays unclassified.
+			if recipient.RecipientAgentId.GetValue() != "" {
+				u.sendReached = sendInSession
+				u.sendResolved = recipient.RecipientAgentId
+			}
 		}
 		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
@@ -107,26 +111,21 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	return row, nil
 }
 
-// sendAddress composes a send's header from what its unit has settled on.
-// THE ARM IS WHICH KIND OF RECIPIENT, and it decides the bubble's border:
+// sendAddress composes a send's header from what its unit has settled on: the
+// recipient's name then a right arrow, whichever kind of agent it reached.
 //
-//   - an agent of this session: the "→ name" line, bordered;
+//   - an agent of this session: by its requested name, or its identifier;
 //   - another Claude session: the recipient workspace by the delivery-id
 //     join, or the address the caller wrote while that is unknown;
-//   - neither said yet (unsettled, or refused): the address the caller wrote,
-//     drawn as a cross-session send is.
+//   - neither said yet (unsettled, or refused): the address the caller wrote.
 func (r *resolver) sendAddress(s *wsState, u *unitState) *frontendv1.FeedAgentPromptAddress {
 	switch u.sendReached {
 	case sendInSession:
-		return inSessionAddress("→ " + r.sendRecipientLabel(s, u.sendResolved, u.sendAddressedTo))
+		return sentToAgent(r.agentNamed(s, u.sendResolved.GetValue()))
 	case sendPeerSession:
 		return r.peerSessionAddress(s.id, u.sendDeliveryID, u.sendAddressedTo)
 	default:
-		return &frontendv1.FeedAgentPromptAddress{Address: &frontendv1.FeedAgentPromptAddress_Unclassified{
-			Unclassified: &frontendv1.FeedAgentPromptAddressUnclassified{
-				Name: &frontendv1.FeedAgentPromptAddressUnclassifiedName{Text: r.sendRecipientLabel(s, nil, u.sendAddressedTo)},
-			},
-		}}
+		return sentUnclassified(nameOr(u.sendAddressedTo))
 	}
 }
 
@@ -154,14 +153,6 @@ func (r *resolver) redrawSendAddress(s *wsState, unitID string) {
 	})
 }
 
-// inSessionAddress is the header of a prompt between two agents of this
-// session: one composed line, drawn verbatim.
-func inSessionAddress(text string) *frontendv1.FeedAgentPromptAddress {
-	return &frontendv1.FeedAgentPromptAddress{Address: &frontendv1.FeedAgentPromptAddress_InSession{
-		InSession: &frontendv1.FeedAgentPromptAddressInSession{Text: text},
-	}}
-}
-
 // restateSend takes a SETTLED send's address and summary from the settle itself.
 //
 // THE SETTLE STANDS ALONE. A send's start and its settle upsert one unit, so a
@@ -185,35 +176,6 @@ func (r *resolver) restateSend(s *wsState, act *conversationv1.AgentActivity, u 
 	u.sendAddressedTo = addressedTo
 	u.sendSummary = summary.GetText()
 	return nil
-}
-
-// sendRecipientLabel names the recipient for the address line, preferring the
-// name a reader can recognize over the identity a machine resolved:
-//
-//  1. the recipient's own bubble label, when the resolved identity is a
-//     subagent this workspace has a feed for — the same label the recipient's
-//     own end of this prompt is addressed by;
-//  2. the addressed string EXACTLY AS THE CALLER WROTE IT, which the contract
-//     says may be an identity or the human-readable name a spawn was given;
-//  3. the resolved identity's value, when that is all there is;
-//  4. the honest admission that nothing named the recipient.
-func (r *resolver) sendRecipientLabel(s *wsState, resolved *conversationv1.AgentId, addressedTo string) string {
-	if id := resolved.GetValue(); id != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id := resolved.GetValue(); id != \"\""})
-		if key, ok := s.agentFeeds[id]; ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "key, ok := s.agentFeeds[id]; ok"})
-			return feedLabel(s, key)
-		}
-	}
-	if addressedTo != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "addressedTo != \"\""})
-		return addressedTo
-	}
-	if id := resolved.GetValue(); id != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id := resolved.GetValue(); id != \"\""})
-		return id
-	}
-	return sendNotNamed
 }
 
 // sendBodyBlocks draws the caller's summary, and NOTHING when there was none:

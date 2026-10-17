@@ -440,6 +440,11 @@ type subagentState struct {
 	carrier string
 	// created is the agent the spawn produced — the sub-feed's address.
 	created *conversationv1.AgentId
+	// requestedName is the addressable name the spawn gave the agent
+	// (AgentSubagentPrompt.requested_name), empty when it was spawned unnamed.
+	// An agent-to-agent header names the agent by it, or by its identifier when
+	// there is none (agentaddress.go).
+	requestedName string
 	// bubble is the head as last drawn.
 	bubble *frontendv1.FeedSubagent
 	// firstObservedMs is the daemon-clock instant this bubble was FIRST

@@ -34,6 +34,7 @@ import {
 import { drawFeedAgentPrompt } from "../src/feed/rows/agent-prompt.js";
 import { drawFeedUserPrompt } from "../src/feed/rows/user-prompt.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
+import { sentTo } from "./feed/addresses.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -558,7 +559,7 @@ describe("promptWaves: a prompt waves while its turn works and does not await th
         awaitingUser,
       });
       const agent = create(FeedAgentPromptSchema, {
-        address: { text: "→ Explore" },
+        address: sentTo("Explore"),
         body: { blocks: [] },
         working,
         awaitingUser,

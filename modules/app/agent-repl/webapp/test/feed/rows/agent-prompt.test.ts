@@ -2,12 +2,15 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  FeedAgentPromptAddressSchema,
   FeedAgentPromptQueuedToLiveSchema,
   FeedAgentPromptRefusedSchema,
   FeedAgentPromptResumedRecipientSchema,
   FeedAgentPromptSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
+import { receivedFrom, sentTo, sentToWorkspace } from "../addresses.js";
+import { PEER_ARROW_CLASS } from "../../../src/feed/rows/peer-arrow.js";
 import { drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import {
@@ -22,9 +25,9 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 
-function agentPrompt(address = "→ Explore", blocks: unknown[] = [], working = false, awaitingUser = false) {
+function agentPrompt(address = sentTo("vetter"), blocks: unknown[] = [], working = false, awaitingUser = false) {
   return create(FeedAgentPromptSchema, {
-    address: { text: address },
+    address,
     body: { blocks: blocks as never },
     working,
     awaitingUser,
@@ -36,25 +39,25 @@ describe("drawFeedAgentPrompt", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).classList.contains("user")).toBe(true);
   });
 
-  it("marks itself for the ORANGE border the schema names for it", () => {
+  it("wears the agent prompt's hook", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).classList.contains("prompt-agent")).toBe(true);
   });
 
   it("waves when its row says the turn is working, like the user kind", () => {
     expect(
-      drawFeedAgentPrompt(agentPrompt("→ Explore", [], true)).getAttribute(PROMPT_WAVE_ATTRIBUTE),
+      drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], true)).getAttribute(PROMPT_WAVE_ATTRIBUTE),
     ).toBe(PROMPT_WAVE_WORKING);
   });
 
   it("does not wave when its row says the turn is not working", () => {
     expect(
-      drawFeedAgentPrompt(agentPrompt("→ Explore", [], false)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+      drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], false)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
     ).toBe(false);
   });
 
   it("does not wave while its row says the working turn awaits the user", () => {
     expect(
-      drawFeedAgentPrompt(agentPrompt("→ Explore", [], true, true)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+      drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], true, true)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
     ).toBe(false);
   });
 
@@ -64,14 +67,14 @@ describe("drawFeedAgentPrompt", () => {
     );
   });
 
-  it("draws the composed address line verbatim, whichever end this feed is", () => {
-    const el = drawFeedAgentPrompt(agentPrompt("from Plan"));
-    expect(el.querySelector(".prompt-address")?.textContent).toBe("from Plan");
+  it("draws the other end's name verbatim", () => {
+    const el = drawFeedAgentPrompt(agentPrompt(receivedFrom("the main agent")));
+    expect(el.querySelector(".prompt-address")?.textContent).toBe("the main agent");
   });
 
   it("draws the shared block vocabulary in the capped body", () => {
     const el = drawFeedAgentPrompt(
-      agentPrompt("→ Explore", [{ block: { case: "text", value: { text: "go" } } }]),
+      agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { text: "go" } } }]),
     );
     expect(el.querySelector(".bubble-body")?.children).toHaveLength(1);
   });
@@ -85,14 +88,14 @@ describe("drawFeedAgentPrompt", () => {
     ],
   ] as const)("draws no delivery line for a %s send, the strip being the address alone", (arm, value) => {
     // Arrange
-    const msg = agentPrompt("→ Explore");
+    const msg = agentPrompt(sentTo("vetter"));
     msg.delivery = { case: arm, value: value() } as never;
     // Act
     const el = drawFeedAgentPrompt(msg);
     // Assert
     expect(
       [...el.querySelectorAll(`.${BUBBLE_STRIP_CLASS}`)].map((c) => c.textContent),
-    ).toEqual(["→ Explore"]);
+    ).toEqual(["vetter"]);
   });
 
   it("refuses a prompt with no address, rather than drawing an unaddressed one", () => {
@@ -101,7 +104,7 @@ describe("drawFeedAgentPrompt", () => {
   });
 
   it("refuses a prompt with no body", () => {
-    const msg = create(FeedAgentPromptSchema, { address: { text: "→ x" } });
+    const msg = create(FeedAgentPromptSchema, { address: sentTo("x") });
     expect(() => drawFeedAgentPrompt(msg)).toThrow(MalformedView);
   });
 });
@@ -123,7 +126,7 @@ describe("drawFeedAgentPrompt: its spec", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("prompt");
   });
 
-  it("is the agent variant, whose border is its own", () => {
+  it("is the agent variant", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("agent");
   });
 
@@ -153,7 +156,7 @@ describe("drawFeedAgentPrompt: the header strip", () => {
     // Arrange / Act
     const el = drawFeedAgentPrompt(
       create(FeedAgentPromptSchema, {
-        address: { text: "→ Explore" },
+        address: sentTo("vetter"),
         body: { blocks: [] },
         delivery: { case: "queuedToLive", value: create(FeedAgentPromptQueuedToLiveSchema, {}) },
       }),
@@ -163,5 +166,50 @@ describe("drawFeedAgentPrompt: the header strip", () => {
       "prompt-author",
       "bubble-scroll",
     ]);
+  });
+});
+
+describe("drawFeedAgentPrompt: the arrow says which way it went", () => {
+  /** The header's children, as "name" and "arrow-<direction>". */
+  function headerParts(el: HTMLElement): string[] {
+    const header = el.querySelector(".prompt-address");
+    return [...(header?.children ?? [])].map((child) =>
+      child.classList.contains(PEER_ARROW_CLASS) ? `arrow-${child.getAttribute("data-direction")}` : child.textContent ?? "",
+    );
+  }
+
+  it("draws a prompt to a subagent as its name, then a right arrow", () => {
+    expect(headerParts(drawFeedAgentPrompt(agentPrompt(sentTo("vetter"))))).toEqual(["vetter", "arrow-out"]);
+  });
+
+  it("draws a prompt from the lead as a left arrow, then its name", () => {
+    expect(headerParts(drawFeedAgentPrompt(agentPrompt(receivedFrom("the main agent"))))).toEqual([
+      "arrow-in",
+      "the main agent",
+    ]);
+  });
+
+  it("draws a send to another workspace as its name, then a right arrow", () => {
+    expect(headerParts(drawFeedAgentPrompt(agentPrompt(sentToWorkspace("review-bot"))))).toEqual([
+      "review-bot",
+      "arrow-out",
+    ]);
+  });
+
+  it("draws no arrow as text: the arrow is the icon alone", () => {
+    expect(drawFeedAgentPrompt(agentPrompt(sentTo("vetter"))).querySelector(".prompt-address")?.textContent).not.toMatch(
+      /[→←]/,
+    );
+  });
+
+  it("refuses a header that names no direction", () => {
+    const msg = agentPrompt(create(FeedAgentPromptAddressSchema, { name: { text: "vetter" } }));
+    expect(() => drawFeedAgentPrompt(msg)).toThrow(MalformedView);
+  });
+
+  it("refuses a header that names no one", () => {
+    const address = sentTo("vetter");
+    address.name = undefined;
+    expect(() => drawFeedAgentPrompt(agentPrompt(address))).toThrow(MalformedView);
   });
 });

@@ -312,15 +312,13 @@ const unnamedPeerSender = "another session"
 // the caller wrote.
 func (r *resolver) peerSessionAddress(ws ids.WorkspaceID, deliveryID, addressedTo string) *frontendv1.FeedAgentPromptAddress {
 	if name, ok := r.deliveryWorkspaceName(deliveryID, deliveryRecipient, ws); ok {
-		return &frontendv1.FeedAgentPromptAddress{Address: &frontendv1.FeedAgentPromptAddress_PeerSession{PeerSession: &frontendv1.FeedAgentPromptAddressPeerSession{
-			Name:      &frontendv1.FeedAgentPromptAddressPeerSessionName{Text: name},
+		return sentToPeerSession(name, &frontendv1.FeedAgentPromptAddressPeerSession{
 			Recipient: &frontendv1.FeedAgentPromptAddressPeerSession_Workspace{Workspace: &frontendv1.FeedAgentPromptAddressPeerSessionWorkspace{}},
-		}}}
+		})
 	}
-	return &frontendv1.FeedAgentPromptAddress{Address: &frontendv1.FeedAgentPromptAddress_PeerSession{PeerSession: &frontendv1.FeedAgentPromptAddressPeerSession{
-		Name:      &frontendv1.FeedAgentPromptAddressPeerSessionName{Text: nameOr(addressedTo)},
+	return sentToPeerSession(nameOr(addressedTo), &frontendv1.FeedAgentPromptAddressPeerSession{
 		Recipient: &frontendv1.FeedAgentPromptAddressPeerSession_Unresolved{Unresolved: &frontendv1.FeedAgentPromptAddressPeerSessionUnresolved{}},
-	}}}
+	})
 }
 
 // nameOr is the address the caller wrote, or the honest admission that it wrote

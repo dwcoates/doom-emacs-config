@@ -359,7 +359,7 @@ func TestTwoWorkspacesDrawingOneEndKeepTheFirstAndRecordTheConflict(t *testing.T
 	}
 }
 
-func TestASendToAnAgentOfThisSessionDrawsTheInSessionLine(t *testing.T) {
+func TestASendToAnAgentThisWorkspaceKnowsNothingOfNamesItsIdentifier(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 
@@ -370,8 +370,8 @@ func TestASendToAnAgentOfThisSessionDrawsTheInSessionLine(t *testing.T) {
 	})
 
 	// Assert.
-	if got := addressLine(h.sendRow().GetAddress()); got != "→ vetter" {
-		t.Fatalf("address = %q, want the in-session line", got)
+	if got := addressLine(h.sendRow().GetAddress()); got != "identified agent-unknown →" {
+		t.Fatalf("address = %q, want the agent named by its identifier", got)
 	}
 }
 

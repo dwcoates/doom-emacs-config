@@ -2562,13 +2562,16 @@ message FeedQuoteBlock {
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,
-// drawn as a prompt bubble with an ORANGE BORDER. ONE component, both ends:
-// on the sender's feed it is the outgoing send, on the recipient's the
-// delivered prompt; only the address line differs, and the daemon composes
-// it for whichever feed it resolves.
+// drawn as a prompt bubble with NO border: its header alone marks it as
+// agent-to-agent. ONE component, both ends of a prompt between two agents of
+// one session: on the sender's feed it is the outgoing send, on the
+// recipient's the delivered prompt; only the header differs, and the daemon
+// composes it for whichever feed it resolves. A send to another Claude session
+// is this component on the sender's feed only; its delivered copy is a
+// FeedPeerMessage.
 message FeedAgentPrompt {
-  // The header: whom the prompt went to or came from. See
-  // FeedAgentPromptAddress, whose arm also decides the bubble's border.
+  // The header: the agent at the other end, and which way the prompt went.
+  // See FeedAgentPromptAddress.
   FeedAgentPromptAddress address = 1;
   // The prompt's content, in composed order — the feed's shared drawn
   // block vocabulary. Long bodies fold/cap as client presentation, like
@@ -2627,73 +2630,98 @@ message FeedAgentPromptRefusalReason {
   // The producer's own words, drawn verbatim.
   string text = 1;
 }
-// The address element: whom the prompt went to, or came from. THE ARM IS
-// WHICH KIND OF AGENT is on the other end, and it decides the bubble's chrome:
-// a prompt between two agents of this session wears the agent-prompt border,
-// while a send to another Claude session wears none, its header alone marking
-// it.
+// The header: the agent at the OTHER END of the prompt, and which way the
+// prompt went. Every agent-to-agent bubble is headed the same way, with NO
+// border: a prompt that went OUT reads the other end's name then a RIGHT arrow
+// icon, and one that came IN reads a LEFT arrow icon then the name. The arrow's
+// side and direction alone say which way it went; the client draws `name`
+// verbatim, in the header's one font size and color, on the side the
+// direction arm names.
 message FeedAgentPromptAddress {
-  // Tag 1 (one composed line for every kind) is RETIRED: the line is the
-  // `in_session` arm's.
+  // Tag 1 (one composed line, arrow and all) is RETIRED: the arrow is the
+  // client's icon, placed by `direction`.
   reserved 1;
   reserved "text";
-  oneof address {
-    // The other end is an agent of THIS session: a lead and its subagent.
-    // Drawn as a text line, bordered.
-    FeedAgentPromptAddressInSession in_session = 2;
-    // The other end is ANOTHER CLAUDE SESSION: this row is the sender's end of
-    // a cross-session send. Drawn as the recipient's name then a right arrow
-    // icon, borderless. The recipient's end is a FeedPeerMessage, never this.
-    FeedAgentPromptAddressPeerSession peer_session = 3;
-    // The send has not said which kind of agent it reached: it has not
-    // settled, or it was refused, and the address the caller wrote names
-    // either kind. Drawn exactly as `peer_session`, the common case. A send
-    // that settles to an agent of this session redraws as `in_session`.
-    FeedAgentPromptAddressUnclassified unclassified = 4;
+  // The other end's name, resolved by the daemon. Only a name: never a socket
+  // path, and never an arrow.
+  FeedAgentPromptAddressName name = 2;
+  // WHICH WAY THE PROMPT WENT. THE ARM IS THE DIRECTION, and with it which
+  // kinds of other end are possible.
+  oneof direction {
+    // It went OUT from the agent whose feed draws it: the sender's end.
+    FeedAgentPromptAddressSent sent = 3;
+    // It came IN to the agent whose feed draws it: an agent of this session
+    // prompted it. A message IN from another Claude session is a
+    // FeedPeerMessage, never this.
+    FeedAgentPromptAddressReceived received = 4;
   }
 }
-// A prompt between two agents of this session.
-message FeedAgentPromptAddressInSession {
-  // The composed line ("→ Explore" on the sender's feed, "from Plan" on the
-  // recipient's), drawn verbatim.
+// The other end's name element.
+message FeedAgentPromptAddressName {
+  // Drawn verbatim beside the arrow. Never empty.
   string text = 1;
 }
-// The sender's end of a send to another Claude session.
+// The prompt went out. Drawn as the name, then a right arrow.
+message FeedAgentPromptAddressSent {
+  // WHO RECEIVED IT. THE ARM IS WHICH KIND OF AGENT.
+  oneof recipient {
+    // An agent of this session.
+    FeedAgentPromptAddressAgent agent = 1;
+    // Another Claude session. See FeedAgentPromptAddressPeerSession.
+    FeedAgentPromptAddressPeerSession peer_session = 2;
+    // The send has not said which kind of agent it reached: it has not
+    // settled, or it was refused, and `name` is the address the caller wrote,
+    // which names either kind. It redraws as `agent` or `peer_session` once it
+    // settles.
+    FeedAgentPromptAddressUnclassified unclassified = 3;
+  }
+}
+// The prompt came in from an agent of this session. Drawn as a left arrow,
+// then the name.
+message FeedAgentPromptAddressReceived {
+  // The agent that sent it.
+  FeedAgentPromptAddressAgent agent = 1;
+}
+// An agent of this session at the other end: WHAT `name` IS.
+message FeedAgentPromptAddressAgent {
+  // THE ARM IS WHAT THE NAME IS, so a reader of the schema knows a subagent
+  // with no name is drawn by its identifier rather than by anything else.
+  oneof identity {
+    // The session's main agent; `name` is the daemon's word for it.
+    FeedAgentPromptAddressAgentMain main_agent = 1;
+    // A subagent spawned with a name (its requested, addressable name);
+    // `name` is that name.
+    FeedAgentPromptAddressAgentNamed named = 2;
+    // A subagent spawned with no name; `name` is its identifier.
+    FeedAgentPromptAddressAgentIdentified identified = 3;
+  }
+}
+// The session's main agent.
+message FeedAgentPromptAddressAgentMain {}
+// A subagent named by its requested name.
+message FeedAgentPromptAddressAgentNamed {}
+// A subagent with no name, named by its identifier.
+message FeedAgentPromptAddressAgentIdentified {}
+// The send reached another Claude session.
 message FeedAgentPromptAddressPeerSession {
-  // The name drawn before the right arrow, resolved by the daemon. Only a
-  // name, never a socket path.
-  FeedAgentPromptAddressPeerSessionName name = 1;
-  // WHAT THE NAME NAMES. THE ARM IS HOW FAR THE RECIPIENT IS RESOLVED.
+  // WHAT `name` IS. THE ARM IS HOW FAR THE RECIPIENT IS RESOLVED.
   oneof recipient {
     // The message reached one of agent-repl's own workspaces, and `name` is
     // its workspace name, the one the sidebar draws.
-    FeedAgentPromptAddressPeerSessionWorkspace workspace = 2;
+    FeedAgentPromptAddressPeerSessionWorkspace workspace = 1;
     // No agent-repl workspace is known to hold the message: the recipient is
     // a session outside agent-repl, or its copy has not landed yet. `name` is
     // the address the caller wrote. The daemon redraws the row in place, as
     // `workspace`, when the recipient's copy lands in a workspace.
-    FeedAgentPromptAddressPeerSessionUnresolved unresolved = 3;
+    FeedAgentPromptAddressPeerSessionUnresolved unresolved = 2;
   }
-}
-// The recipient's name element.
-message FeedAgentPromptAddressPeerSessionName {
-  // Drawn verbatim. Never empty.
-  string text = 1;
 }
 // The recipient is one of agent-repl's workspaces.
 message FeedAgentPromptAddressPeerSessionWorkspace {}
 // No agent-repl workspace is known to hold the message.
 message FeedAgentPromptAddressPeerSessionUnresolved {}
 // A send that has not said which kind of agent it reached.
-message FeedAgentPromptAddressUnclassified {
-  // The address the caller wrote, drawn before the right arrow.
-  FeedAgentPromptAddressUnclassifiedName name = 1;
-}
-// The unclassified send's name element.
-message FeedAgentPromptAddressUnclassifiedName {
-  // Drawn verbatim. Never empty.
-  string text = 1;
-}
+message FeedAgentPromptAddressUnclassified {}
 // The body element.
 message FeedAgentPromptBody {
   // The blocks, in order.

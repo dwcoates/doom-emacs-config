@@ -238,6 +238,12 @@ func subagentArmDraws(spawn *conversationv1.AgentSubagent) bool {
 // folded exactly as a live one would have been.
 func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentState, spawn *conversationv1.AgentSubagent) error {
 	bubble := state.bubble
+	// THE AGENT'S NAME, from whichever frame restates the commission. Never
+	// overwritten with nothing: a frame that restates none leaves the name the
+	// earlier one gave.
+	if name := commissionOf(spawn).GetRequestedName(); name != "" {
+		state.requestedName = name
+	}
 	switch frame := spawn.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Start"})
@@ -516,7 +522,7 @@ func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state
 			Kind: feedid.KindPrompt, ID: unitID, Sub: "commission",
 		}),
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: inSessionAddress("from " + feedLabel(s, r.feedKey(s.id, at.feed))),
+			Address: receivedFromAgent(r.agentOfFeed(s, r.feedKey(s.id, at.feed))),
 			Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{
 				Block: &frontendv1.FeedAgentPromptBlock_Text{
 					Text: &frontendv1.FeedTextBlock{Text: prompt.GetText()},

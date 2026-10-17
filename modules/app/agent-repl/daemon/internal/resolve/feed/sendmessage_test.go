@@ -47,21 +47,43 @@ func sendActivity(t *testing.T, unit string, result any) *conversationv1.AgentAc
 	}
 }
 
-// addressLine spells a header for an assertion: an in-session line verbatim,
-// and the other arms by their arm and name.
+// addressLine spells a header for an assertion: what the other end is, its
+// name, and the arrow on the side the direction puts it.
 func addressLine(address *frontendv1.FeedAgentPromptAddress) string {
-	switch arm := address.GetAddress().(type) {
-	case *frontendv1.FeedAgentPromptAddress_InSession:
-		return arm.InSession.GetText()
-	case *frontendv1.FeedAgentPromptAddress_PeerSession:
-		if arm.PeerSession.GetWorkspace() != nil {
-			return "workspace " + arm.PeerSession.GetName().GetText() + " →"
+	name := address.GetName().GetText()
+	switch direction := address.GetDirection().(type) {
+	case *frontendv1.FeedAgentPromptAddress_Sent:
+		switch recipient := direction.Sent.GetRecipient().(type) {
+		case *frontendv1.FeedAgentPromptAddressSent_Agent:
+			return agentIdentity(recipient.Agent) + " " + name + " →"
+		case *frontendv1.FeedAgentPromptAddressSent_PeerSession:
+			if recipient.PeerSession.GetWorkspace() != nil {
+				return "workspace " + name + " →"
+			}
+			return "unresolved " + name + " →"
+		case *frontendv1.FeedAgentPromptAddressSent_Unclassified:
+			return "unclassified " + name + " →"
+		default:
+			return "sent with no recipient arm"
 		}
-		return "unresolved " + arm.PeerSession.GetName().GetText() + " →"
-	case *frontendv1.FeedAgentPromptAddress_Unclassified:
-		return "unclassified " + arm.Unclassified.GetName().GetText() + " →"
+	case *frontendv1.FeedAgentPromptAddress_Received:
+		return "← " + agentIdentity(direction.Received.GetAgent()) + " " + name
 	default:
-		return "no address arm"
+		return "no direction arm"
+	}
+}
+
+// agentIdentity spells what an agent header's name is.
+func agentIdentity(agent *frontendv1.FeedAgentPromptAddressAgent) string {
+	switch agent.GetIdentity().(type) {
+	case *frontendv1.FeedAgentPromptAddressAgent_MainAgent:
+		return "main"
+	case *frontendv1.FeedAgentPromptAddressAgent_Named:
+		return "named"
+	case *frontendv1.FeedAgentPromptAddressAgent_Identified:
+		return "identified"
+	default:
+		return "no identity arm"
 	}
 }
 
@@ -128,7 +150,7 @@ func TestASendWithNoSummaryDrawsNoBodyRatherThanTheMessage(t *testing.T) {
 	}
 }
 
-func TestASendAddressesAResolvedRecipientByItsBubbleLabel(t *testing.T) {
+func TestASendNamesAnUnnamedSubagentRecipientByItsIdentifier(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	recipient := &conversationv1.AgentId{Value: "agent-sub"}
@@ -145,8 +167,8 @@ func TestASendAddressesAResolvedRecipientByItsBubbleLabel(t *testing.T) {
 
 	// Assert.
 	got := addressLine(h.sendRowAt(rootFeed(), "unit-1").GetAddress())
-	if got != "→ longhand counter" {
-		t.Fatalf("address = %q, want the recipient's bubble label", got)
+	if got != "identified agent-sub →" {
+		t.Fatalf("address = %q, want the unnamed subagent's identifier, never its description", got)
 	}
 }
 
@@ -230,7 +252,7 @@ func TestASendWithNoAddressedStringFallsBackToTheResolvedIdentity(t *testing.T) 
 	})
 
 	// Assert.
-	if got := addressLine(h.sendRow().GetAddress()); got != "→ agent-unknown" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "identified agent-unknown →" {
 		t.Fatalf("address = %q, want the resolved identity", got)
 	}
 }
@@ -518,7 +540,7 @@ func TestAReplayedStartKeepsTheRecipientTheSuccessResolved(t *testing.T) {
 	h.sendMessage("unit-1", startTo("", "vet the diff"))
 
 	// Assert.
-	if got := addressLine(h.sendRow().GetAddress()); got != "→ agent-unknown" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "identified agent-unknown →" {
 		t.Fatalf("address after the replayed start = %q, want the resolved identity, not the unnamed fallback", got)
 	}
 }
@@ -553,7 +575,7 @@ func replayedSends(to, summary string) []struct {
 				AddressedTo: to,
 				Summary:     restated,
 			},
-			wantAddress: "→ " + to,
+			wantAddress: "identified agent-unknown →",
 		},
 		{
 			name:        "a refused send",

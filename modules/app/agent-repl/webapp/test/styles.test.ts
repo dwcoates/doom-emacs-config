@@ -1707,12 +1707,12 @@ describe("the prompt borders", () => {
     ["an agent-addressed prompt in flight", "agent", true, ["user", "prompt-agent"]],
     ["an agent-addressed prompt at rest", "agent", false, ["user", "prompt-agent"]],
     ["a peer message", "peer", false, ["peer"]],
-  ] as const)("borders %s in the one agent amber", (_label, variant, working, hooks) => {
+  ] as const)("gives %s no border: its header alone marks it", (_label, variant, working, hooks) => {
     // Arrange / Act
     const borders = bordersOn(prompt(variant, working), hooks);
 
-    // Assert — half as thick as before (owner ruling, 2026-10-08).
-    expect(borders).toEqual(["border: 0.5px solid var(--agent-prompt-border)"]);
+    // Assert — every agent-to-agent bubble is borderless (owner spec, 2026-10-17).
+    expect(borders).toEqual([]);
   });
 
   it.each([
@@ -1736,15 +1736,30 @@ describe("the prompt borders", () => {
     expect(waving.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it.each([
-    ["--agent-prompt-border", "light"],
-    ["--agent-prompt-border", "dark"],
-  ] as const)("defines %s in the %s theme", (token, theme) => {
+  it("defines no agent-to-agent border token any more", () => {
     // Arrange / Act
-    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+    const sheet = stylesheet;
 
     // Assert
-    expect(block).toMatch(new RegExp(`${token}:\\s*#[0-9a-fA-F]{3,6}`));
+    expect(sheet).not.toMatch(/--agent-prompt-border/);
+  });
+});
+
+describe("the agent-to-agent header's arrow", () => {
+  it("takes the header's own font size", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".peer-arrow") ?? "";
+
+    // Assert
+    expect([rule.match(/width:\s*1em/) !== null, rule.match(/height:\s*1em/) !== null]).toEqual([true, true]);
+  });
+
+  it("takes the header's own color", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".peer-arrow") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/stroke:\s*currentColor/);
   });
 });
 
