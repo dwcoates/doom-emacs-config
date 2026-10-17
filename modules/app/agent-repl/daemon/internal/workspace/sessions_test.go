@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -2888,6 +2890,67 @@ func TestTakeColdGateSpendsOnlyTheGateItNames(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStandingColdGateFollowsTheGatesLife(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(f *fleetFixture, ws ids.WorkspaceID)
+		want bool
+	}{
+		{"no gate raised is not standing", func(*fleetFixture, ids.WorkspaceID) {}, false},
+		{"a raised gate stands with its cold facts", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+		}, true},
+		{"a taken gate is not standing", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, false},
+		{"a gate stood again after a failed re-open stands", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.TakeColdGate(ws, "vendor-1")
+			f.fleet.ReraiseColdGate(ws, "vendor-1")
+		}, true},
+		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			_ = f.fleet.Stop(context.Background(), ws, true)
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-standing")
+
+			// Act.
+			tt.act(f, ws.ID)
+
+			// Assert.
+			cold, standing := f.fleet.StandingColdGate(ws.ID)
+			if standing != tt.want {
+				t.Fatalf("StandingColdGate standing = %t, want %t", standing, tt.want)
+			}
+			if standing && !proto.Equal(cold, coldResponse().GetFailure().GetCold()) {
+				t.Fatalf("StandingColdGate cold = %v, want the facts the gate was raised from", cold)
+			}
+		})
+	}
+}
+
+func TestStandingColdGatePanicsOnAGateWithNoColdFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-torn")
+	f.fleet.coldGates[ws.ID] = coldGate{served: ServedColdGate{VendorSessionID: "vendor-1"}}
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a standing gate with no cold facts did not panic")
+		}
+	}()
+
+	// Act.
+	f.fleet.StandingColdGate(ws.ID)
 }
 
 // ---- the gate the host view carries ----

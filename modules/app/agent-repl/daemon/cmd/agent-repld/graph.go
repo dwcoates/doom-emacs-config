@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/account"
 	"agent-repld/internal/agentreplsession"
 	"agent-repld/internal/boot"
@@ -652,6 +654,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
 		DB:              p.DB,
 		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
+		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
 		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),
 		Clock:           clock.System{},
@@ -697,7 +700,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// OFF THE BRING-UP'S GOROUTINE: the merge being ejected may itself be
 		// what is bringing the session up (its repair's ensureSession), and
 		// the eviction waits for that run to stop.
+		// A HIDDEN OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
+		// lapse (cachelapse.Keeper.ColdGateRaised).
 		ColdGateRaised: func(ws ids.WorkspaceID) {
+			cacheKeeper.ColdGateRaised(ws)
 			if eject := ejectCold; eject != nil {
 				go eject(ws)
 			}

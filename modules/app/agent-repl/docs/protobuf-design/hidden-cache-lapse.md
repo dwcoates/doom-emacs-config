@@ -119,3 +119,28 @@ like normal".
 - Every close and reopen reaches the keeper through the one state client every
   close path writes through (`cachelapse.ObserveClosures`), so no close path
   can skip the round.
+
+## A workspace parked at its cold gate is already cold
+
+Owner request, 2026-10-17: "if a workspace enters the HIDDEN section already
+compacted, it shouldn't countdown to compaction gate ... if already compacted,
+that is trivially 0".
+
+- A session parked at its cold gate holds no cadence, so no shim ever states a
+  projection for it.
+  - Before this, a hidden parked workspace counted UP from the hide, and its
+    row drew `severed` once the hide dropped its participants (seen on
+    `metrics-o11y` and `agent-repl-test-governor`, 2026-10-17 20:11).
+- The keeper now records the STANDING GATE'S OWN LAPSE on a hidden or closed
+  row (`cachelapse.gateLapse`, from `workspace.Fleet.StandingColdGate`).
+  - It is when the conversation went cold: a cache lifetime after the last
+    request, or the last request itself for a model switch.
+  - It is gated at the gate's context, so the row keeps `cold_gate` and the
+    column reads "cold cache" at once.
+  - It is taken on every reconcile (a hide, a close, a selection moving off)
+    and on the gate being raised (`Keeper.ColdGateRaised`), so a gate raised
+    while hidden is caught too.
+- The lapse is due at once, so the parked session is stood down as any lapsed
+  one is, and showing the workspace again raises the gate afresh.
+- A gate an answer has taken is not standing: its remediation is bringing the
+  session back warm, and the shim projects from the fresh anchor.
