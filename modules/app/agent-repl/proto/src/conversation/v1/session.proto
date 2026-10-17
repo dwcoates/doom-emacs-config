@@ -309,8 +309,60 @@ message SessionUpdate {
     // fork point after answering; this states, once, how that restart
     // settled. See SessionRollbackSettled.
     SessionRollbackSettled rollback_settled = 37;
+    // THE VENDOR PROCESS the session runs on, as a STANDING level. See
+    // SessionVendorProcess, which carries the arm's whole contract.
+    SessionVendorProcess vendor_process = 38;
   }
 }
+
+// THE OS PROCESS THE SESSION'S VENDOR RUNS AS, stated as a STANDING level:
+// every push replaces the last, and the latest push is the truth.
+//
+// WHY A CONSUMER NEEDS IT. Another Claude session that messages this one is
+// identified, on the recipient's record, by the kernel-verified pid of the
+// process that connected (PeerMessageSenderProcess.verified_pid). That pid is
+// a VENDOR process's pid, never the shim's, so a consumer that wants to name
+// the sending session as one of its own sessions maps the pid back through
+// this level.
+//
+// PRODUCER OBLIGATIONS. The shim pushes `running` once the vendor child it
+// spawned has a pid, and `ended` the moment that child exits, before anything
+// a next child states. It restates the standing level once on every
+// WatchSession open, so a consumer that attaches late learns it from its own
+// stream. A shim with no vendor process (the fake mode) never pushes it, and
+// with the shim's own process gone the stream ends, which ends the level too.
+//
+// PIDS ARE RECYCLED. A pid names this session only while `running` stands,
+// and only for an event that happened at or after `started_at_ms`: an event
+// older than the process cannot have come from it, whatever pid it carries.
+message SessionVendorProcess {
+  // Whether the session has a running vendor process right now. THE ARM IS THE
+  // STATE: a pid exists only while one runs, so an ended process carries none.
+  oneof state {
+    // A vendor process is running for the session.
+    SessionVendorProcessRunning running = 1;
+    // The session's vendor process exited and no next one runs yet.
+    SessionVendorProcessEnded ended = 2;
+  }
+}
+
+// The running vendor process.
+message SessionVendorProcessRunning {
+  // The OS pid of the vendor process, as the shim's spawn returned it. It is
+  // the pid the vendor names its cross-session messaging socket after
+  // (`/tmp/cc-socks/<pid>.sock`), and the pid a peer's record carries as its
+  // verified sender. Never zero.
+  uint32 pid = 1;
+  // When the shim observed the process to exist (its spawn had returned a
+  // pid), in Unix milliseconds on the host clock. It is never earlier than the
+  // process's true start, so an event stamped before it was not this
+  // process's.
+  int64 started_at_ms = 2;
+}
+
+// The vendor process exited. Empty: the arm is the whole fact, and from here
+// no pid names this session until the next `running`.
+message SessionVendorProcessEnded {}
 
 // HOW A ROLLBACK'S RESTART SETTLED. shim.v1.RollBackSession answers once the
 // open turn is stopped and the cut is made, and restarts the vendor at the

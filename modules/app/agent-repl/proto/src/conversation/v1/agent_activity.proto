@@ -2853,10 +2853,20 @@ message AgentSendMessageBody {
 
 // The message reached its recipient.
 message AgentSendMessageSuccess {
-  // WHICH AGENT it reached, resolved. This is the identity the addressed string
-  // above turned out to name, and it is what joins this send to the recipient's
-  // own activity — so a reader can follow a message to the work it caused.
-  AgentId recipient_agent_id = 1;
+  // WHO the message reached, resolved. THE ARM IS WHICH KIND OF RECIPIENT: an
+  // agent of this session has an identity this conversation books, while
+  // another Claude session has none here and is joined only through the
+  // delivery the vendor minted for the message.
+  oneof recipient {
+    // WHICH AGENT of this session it reached. This is the identity the
+    // addressed string above turned out to name, and it is what joins this
+    // send to the recipient's own activity, so a reader can follow a message
+    // to the work it caused.
+    AgentId recipient_agent_id = 1;
+    // It reached ANOTHER CLAUDE SESSION, through the vendor's cross-session
+    // messaging. See AgentSendMessagePeerSession.
+    AgentSendMessagePeerSession peer_session = 7;
+  }
 
   // How it got there. The two differ in a way a reader cares about: one costs
   // nothing beyond the message, the other RESTARTED A DORMANT AGENT, which
@@ -2886,6 +2896,30 @@ message AgentSendMessageSuccess {
   // start's was: the caller supplied none, and a surface draws the recipient
   // alone — never the body.
   optional AgentSendMessageSummary summary = 6;
+}
+
+// The send went to another Claude session.
+//
+// THE RECIPIENT IS NOT NAMED HERE, because the sender's vendor names it only as
+// the address the caller wrote (a peer name such as "fix-flaky-3a", which
+// carries a per-process suffix) and inside prose. What both ends DO share is the
+// delivery id the vendor minted for this one message: the recipient's record
+// of it carries the same id (PeerMessageInterSession.delivery_id), so a
+// consumer holding both conversations names the recipient by joining on it.
+message AgentSendMessagePeerSession {
+  // The vendor's id for this one delivery (its `msg_id`), shared verbatim with
+  // the recipient's record of the message.
+  PeerDeliveryId delivery_id = 1;
+}
+
+// THE VENDOR'S ID FOR ONE CROSS-SESSION MESSAGE (its `msg_id`): minted by the
+// sending vendor, returned on the sender's SendMessage result, and stamped on
+// the recipient's record of the message. The one value both ends of a
+// cross-session message share, so it is what joins a send to its delivery.
+// Opaque: compared for equality, never parsed.
+message PeerDeliveryId {
+  // The id verbatim. Never empty.
+  string value = 1;
 }
 
 // The recipient was already running and the message is queued for it.

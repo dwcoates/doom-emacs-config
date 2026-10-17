@@ -1,0 +1,79 @@
+// endpoint_get_peer_recipient.proto — GetPeerRecipient: WHICH SESSION received
+// one cross-session message, by the vendor's delivery id for it.
+//
+// WHY ANYONE ASKS. A send to another Claude session names its recipient only
+// as the address the caller wrote, and the one value both ends share is the
+// delivery id the sending vendor minted (conversation.v1.PeerDeliveryId): the
+// sender's SendMessage result carries it, and so does the recipient's record of
+// the message. The daemon draws the sender's row and wants to name the session
+// the message reached; on a live delivery it sees the recipient's record land,
+// but a send replayed from history needs the record's owner from the record.
+//
+// WHY THE STORE CAN ANSWER. Every session on the host writes into this one
+// store, so the recipient's record is here whichever session holds it, keyed by
+// its delivery id at write time (PeerMessageInterSession.delivery_id).
+//
+// DELIBERATELY NOT SCOPED TO THE CALLER'S LINEAGE, unlike GetLiveWork and
+// GetAgentByVendorTask: the question is which OTHER session holds a record, so
+// a lineage scope would refuse every answer the endpoint exists to give. The
+// answer is one agent id, never the record's content.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask which session holds the delivered copy of one cross-session message.
+message GetPeerRecipientRequest {
+  // REQUIRED. The delivery id, verbatim (AgentSendMessagePeerSession
+  // .delivery_id). UNSET or empty is refused with `invalid_request`.
+  conversation.v1.PeerDeliveryId delivery_id = 1;
+}
+
+// The session, the statement that no session holds the message, or why neither
+// could be said. THE ARM IS THE ANSWER.
+message GetPeerRecipientResponse {
+  oneof result {
+    GetPeerRecipientSuccess success = 1;
+    GetPeerRecipientNotFound not_found = 2;
+    GetPeerRecipientFailure failure = 3;
+  }
+}
+
+// A session holds the delivered message.
+message GetPeerRecipientSuccess {
+  // The MAIN agent of the session whose conversation holds the message: the
+  // root of the lineage of the book the record was filed in. A main agent's id
+  // is its session's original vendor session id, which is how the caller names
+  // the session.
+  conversation.v1.AgentId session = 1;
+}
+
+// No session's record holds a message with this delivery id. An ANSWER, not a
+// failure: the recipient is not one of the host's recorded sessions (an outside
+// session), or its record has not been written yet.
+message GetPeerRecipientNotFound {}
+
+// The answer could not be read. THE ARM IS WHY.
+message GetPeerRecipientFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // `delivery_id` unset or empty.
+    GetPeerRecipientInvalidRequest invalid_request = 2;
+    // The database failed, or the record breaks the index's invariant (one
+    // delivery id filed under two sessions); `detail` says which.
+    GetPeerRecipientStorageFailure storage_failure = 3;
+  }
+}
+// The request was malformed.
+message GetPeerRecipientInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+// The database failed, or the index broke its invariant; `detail` says which.
+message GetPeerRecipientStorageFailure {}

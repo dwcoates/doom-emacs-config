@@ -58,7 +58,46 @@ message PeerMessage {
 }
 
 // Another Claude session sent this agent a message.
-message PeerMessageInterSession {}
+//
+// WHO SENT IT is stated as the vendor states it, never resolved: which of the
+// host's sessions a pid belongs to is the consumer's fact (it holds every
+// session's SessionVendorProcess level), not this conversation's.
+message PeerMessageInterSession {
+  // THE PROCESS THAT SENT IT, verified by the kernel. The vendor's own
+  // contract is to key sender identity on this and never on the sender-written
+  // `from` address. UNSET when the vendor could not verify a pid (a non-socket
+  // ingress), never a wrong value. For relayed traffic the pid is the relay's.
+  optional PeerMessageSenderProcess sender_process = 1;
+  // The sending session's display name, as the sender asserted it (the
+  // vendor's `origin.name`, e.g. "fix-flaky-3a"). It is what names a sender
+  // that is none of the consumer's own sessions. UNSET when the vendor states
+  // none (an older sender, or a wire that is not exactly one envelope).
+  optional PeerMessageSenderSessionName sender_session_name = 2;
+  // The vendor's id for this one delivery (its `origin.msg_id`), the same value
+  // the sender's SendMessage result carries
+  // (AgentSendMessagePeerSession.delivery_id). UNSET when the vendor states
+  // none.
+  optional PeerDeliveryId delivery_id = 3;
+}
+
+// The kernel-verified process a peer message came from.
+message PeerMessageSenderProcess {
+  // The pid of the process that connected to this session's messaging socket
+  // (the vendor's `origin.verifiedPeerPid`). Never zero.
+  uint32 verified_pid = 1;
+  // When the message arrived, in Unix milliseconds on the host clock: the
+  // record's own timestamp on the transcript, or the shim's receipt instant
+  // on the live stream. A pid is recycled, so it names a process only for an
+  // event at or after that process started (SessionVendorProcessRunning
+  // .started_at_ms); this is the instant a consumer checks against.
+  int64 received_at_ms = 2;
+}
+
+// The sender's asserted display name.
+message PeerMessageSenderSessionName {
+  // The name verbatim, as the vendor sanitized it. Never empty.
+  string text = 1;
+}
 
 // A subagent this agent started handed its final report back. The report is
 // this record's `body`; the same text is the subagent's own

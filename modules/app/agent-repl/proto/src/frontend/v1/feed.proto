@@ -413,19 +413,59 @@ message FeedRowOrderPinned {}
 // A message another Claude session sent into this conversation: an
 // inter-session peer message. The client
 // draws it as a distinct, abbreviated, expandable bubble — right-aligned like a
-// prompt but purple, not blue — whose COLLAPSED form is just the sender label
+// prompt but purple, not blue, and with NO border: its header alone marks it as
+// a message from another agent — whose COLLAPSED form is just the sender header
 // and a chevron (no body), and whose EXPANDED form reveals the body via the
 // shared 50vh bubble-scroll model. Never the turn's concluded answer, never
 // green.
 message FeedPeerMessage {
-  // The display label naming the sender, drawn verbatim in the collapsed
-  // bubble (e.g. "agent Explore"). Daemon-composed from the record's sender
-  // id/name; the client draws what it is handed.
-  string sender = 1;
+  // Tag 1 (a bare `sender` label) is RETIRED: the header is the `from` element.
+  reserved 1;
+  reserved "sender";
+  // The header: a LEFT-POINTING arrow icon, then the sending session's name.
+  // The arrow's side and direction alone say the message came IN; nothing
+  // else in the header says so.
+  FeedPeerMessageFrom from = 3;
   // The message body as markdown, drawn only when the bubble is EXPANDED.
   // Rendered with the same markdown machinery a response bubble uses.
   string body = 2;
 }
+
+// The received bubble's header: who sent the message. The client draws the
+// left arrow icon, then `name`, in the header's one font size and color,
+// whichever arm is set; the arm states what the name IS, so nothing about the
+// sender is left to the client to work out.
+message FeedPeerMessageFrom {
+  // The name drawn after the arrow, resolved by the daemon. Only a name: never
+  // a socket path, and never the vendor's per-process session suffix for a
+  // sender that is one of agent-repl's own workspaces.
+  FeedPeerMessageFromName name = 1;
+  // WHAT THE NAME NAMES. THE ARM IS THE SENDER'S KIND.
+  oneof sender {
+    // The sender is one of agent-repl's own workspaces, and `name` is its
+    // workspace name, the one the sidebar draws.
+    FeedPeerMessageFromWorkspace workspace = 2;
+    // The sender is NOT one of agent-repl's workspaces (a session started
+    // outside agent-repl, or one whose vendor process is gone, so its pid no
+    // longer names a workspace), and `name` is the session name the sender
+    // gave itself.
+    FeedPeerMessageFromOutsideSession outside_session = 3;
+    // The sender is none of agent-repl's workspaces and stated no session
+    // name, so `name` is the daemon's generic stand-in for another session.
+    FeedPeerMessageFromUnnamed unnamed = 4;
+  }
+}
+// The sender's name element.
+message FeedPeerMessageFromName {
+  // Drawn verbatim. Never empty.
+  string text = 1;
+}
+// The sender is one of agent-repl's workspaces.
+message FeedPeerMessageFromWorkspace {}
+// The sender is a session outside agent-repl, named by its own session name.
+message FeedPeerMessageFromOutsideSession {}
+// The sender is a session outside agent-repl that stated no name.
+message FeedPeerMessageFromUnnamed {}
 
 // The marker a subagent's hand-back leaves in the conversation: a small
 // inline badge, drawn in the flow of the feed where the hand-back arrived. It
@@ -2523,8 +2563,8 @@ message FeedQuoteBlock {
 // delivered prompt; only the address line differs, and the daemon composes
 // it for whichever feed it resolves.
 message FeedAgentPrompt {
-  // The address line — "→ Explore" on the sender's feed, "from Plan" on
-  // the recipient's. Daemon-composed, drawn verbatim.
+  // The header: whom the prompt went to or came from. See
+  // FeedAgentPromptAddress, whose arm also decides the bubble's border.
   FeedAgentPromptAddress address = 1;
   // The prompt's content, in composed order — the feed's shared drawn
   // block vocabulary. Long bodies fold/cap as client presentation, like
@@ -2583,9 +2623,71 @@ message FeedAgentPromptRefusalReason {
   // The producer's own words, drawn verbatim.
   string text = 1;
 }
-// The address element.
+// The address element: whom the prompt went to, or came from. THE ARM IS
+// WHICH KIND OF AGENT is on the other end, and it decides the bubble's chrome:
+// a prompt between two agents of this session wears the agent-prompt border,
+// while a send to another Claude session wears none, its header alone marking
+// it.
 message FeedAgentPromptAddress {
-  // The composed line, drawn verbatim.
+  // Tag 1 (one composed line for every kind) is RETIRED: the line is the
+  // `in_session` arm's.
+  reserved 1;
+  reserved "text";
+  oneof address {
+    // The other end is an agent of THIS session: a lead and its subagent.
+    // Drawn as a text line, bordered.
+    FeedAgentPromptAddressInSession in_session = 2;
+    // The other end is ANOTHER CLAUDE SESSION: this row is the sender's end of
+    // a cross-session send. Drawn as the recipient's name then a right arrow
+    // icon, borderless. The recipient's end is a FeedPeerMessage, never this.
+    FeedAgentPromptAddressPeerSession peer_session = 3;
+    // The send has not said which kind of agent it reached: it has not
+    // settled, or it was refused, and the address the caller wrote names
+    // either kind. Drawn exactly as `peer_session`, the common case. A send
+    // that settles to an agent of this session redraws as `in_session`.
+    FeedAgentPromptAddressUnclassified unclassified = 4;
+  }
+}
+// A prompt between two agents of this session.
+message FeedAgentPromptAddressInSession {
+  // The composed line ("→ Explore" on the sender's feed, "from Plan" on the
+  // recipient's), drawn verbatim.
+  string text = 1;
+}
+// The sender's end of a send to another Claude session.
+message FeedAgentPromptAddressPeerSession {
+  // The name drawn before the right arrow, resolved by the daemon. Only a
+  // name, never a socket path.
+  FeedAgentPromptAddressPeerSessionName name = 1;
+  // WHAT THE NAME NAMES. THE ARM IS HOW FAR THE RECIPIENT IS RESOLVED.
+  oneof recipient {
+    // The message reached one of agent-repl's own workspaces, and `name` is
+    // its workspace name, the one the sidebar draws.
+    FeedAgentPromptAddressPeerSessionWorkspace workspace = 2;
+    // No agent-repl workspace is known to hold the message: the recipient is
+    // a session outside agent-repl, or its copy has not landed yet. `name` is
+    // the address the caller wrote. The daemon redraws the row in place, as
+    // `workspace`, when the recipient's copy lands in a workspace.
+    FeedAgentPromptAddressPeerSessionUnresolved unresolved = 3;
+  }
+}
+// The recipient's name element.
+message FeedAgentPromptAddressPeerSessionName {
+  // Drawn verbatim. Never empty.
+  string text = 1;
+}
+// The recipient is one of agent-repl's workspaces.
+message FeedAgentPromptAddressPeerSessionWorkspace {}
+// No agent-repl workspace is known to hold the message.
+message FeedAgentPromptAddressPeerSessionUnresolved {}
+// A send that has not said which kind of agent it reached.
+message FeedAgentPromptAddressUnclassified {
+  // The address the caller wrote, drawn before the right arrow.
+  FeedAgentPromptAddressUnclassifiedName name = 1;
+}
+// The unclassified send's name element.
+message FeedAgentPromptAddressUnclassifiedName {
+  // Drawn verbatim. Never empty.
   string text = 1;
 }
 // The body element.

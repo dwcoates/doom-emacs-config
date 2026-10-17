@@ -74,6 +74,9 @@ const (
 	// ShimStoreGetDetachedWorkProcedure is the fully-qualified name of the ShimStore's GetDetachedWork
 	// RPC.
 	ShimStoreGetDetachedWorkProcedure = "/store.v1.ShimStore/GetDetachedWork"
+	// ShimStoreGetPeerRecipientProcedure is the fully-qualified name of the ShimStore's
+	// GetPeerRecipient RPC.
+	ShimStoreGetPeerRecipientProcedure = "/store.v1.ShimStore/GetPeerRecipient"
 	// ShimStoreWriteBatchProcedure is the fully-qualified name of the ShimStore's WriteBatch RPC.
 	ShimStoreWriteBatchProcedure = "/store.v1.ShimStore/WriteBatch"
 )
@@ -93,6 +96,7 @@ var (
 	shimStoreGetShellRunClaimsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
 	shimStoreGetRunSettlementsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetRunSettlements")
 	shimStoreGetDetachedWorkMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("GetDetachedWork")
+	shimStoreGetPeerRecipientMethodDescriptor     = shimStoreServiceDescriptor.Methods().ByName("GetPeerRecipient")
 	shimStoreWriteBatchMethodDescriptor           = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
 )
 
@@ -146,6 +150,11 @@ type ShimStoreClient interface {
 	// never states one): a re-report of an ended run is recognized as such, and
 	// a live run is typed by the record rather than refused.
 	GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error)
+	// WHICH SESSION received one cross-session message, by the vendor's delivery
+	// id for it. The shim asks on the daemon's behalf (shim.v1
+	// ResolvePeerDelivery) so the sender's row can name the session it reached.
+	// Unscoped by design: the answer is always another session.
+	GetPeerRecipient(context.Context, *connect.Request[v1.GetPeerRecipientRequest]) (*connect.Response[v1.GetPeerRecipientResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -232,6 +241,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetDetachedWorkMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getPeerRecipient: connect.NewClient[v1.GetPeerRecipientRequest, v1.GetPeerRecipientResponse](
+			httpClient,
+			baseURL+ShimStoreGetPeerRecipientProcedure,
+			connect.WithSchema(shimStoreGetPeerRecipientMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		writeBatch: connect.NewClient[v1.WriteBatchRequest, v1.WriteBatchResponse](
 			httpClient,
 			baseURL+ShimStoreWriteBatchProcedure,
@@ -255,6 +270,7 @@ type shimStoreClient struct {
 	getShellRunClaims    *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
 	getRunSettlements    *connect.Client[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse]
 	getDetachedWork      *connect.Client[v1.GetDetachedWorkRequest, v1.GetDetachedWorkResponse]
+	getPeerRecipient     *connect.Client[v1.GetPeerRecipientRequest, v1.GetPeerRecipientResponse]
 	writeBatch           *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
 }
 
@@ -318,6 +334,11 @@ func (c *shimStoreClient) GetDetachedWork(ctx context.Context, req *connect.Requ
 	return c.getDetachedWork.CallUnary(ctx, req)
 }
 
+// GetPeerRecipient calls store.v1.ShimStore.GetPeerRecipient.
+func (c *shimStoreClient) GetPeerRecipient(ctx context.Context, req *connect.Request[v1.GetPeerRecipientRequest]) (*connect.Response[v1.GetPeerRecipientResponse], error) {
+	return c.getPeerRecipient.CallUnary(ctx, req)
+}
+
 // WriteBatch calls store.v1.ShimStore.WriteBatch.
 func (c *shimStoreClient) WriteBatch(ctx context.Context, req *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {
 	return c.writeBatch.CallUnary(ctx, req)
@@ -373,6 +394,11 @@ type ShimStoreHandler interface {
 	// never states one): a re-report of an ended run is recognized as such, and
 	// a live run is typed by the record rather than refused.
 	GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error)
+	// WHICH SESSION received one cross-session message, by the vendor's delivery
+	// id for it. The shim asks on the daemon's behalf (shim.v1
+	// ResolvePeerDelivery) so the sender's row can name the session it reached.
+	// Unscoped by design: the answer is always another session.
+	GetPeerRecipient(context.Context, *connect.Request[v1.GetPeerRecipientRequest]) (*connect.Response[v1.GetPeerRecipientResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
 }
@@ -455,6 +481,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetDetachedWorkMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreGetPeerRecipientHandler := connect.NewUnaryHandler(
+		ShimStoreGetPeerRecipientProcedure,
+		svc.GetPeerRecipient,
+		connect.WithSchema(shimStoreGetPeerRecipientMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreWriteBatchHandler := connect.NewUnaryHandler(
 		ShimStoreWriteBatchProcedure,
 		svc.WriteBatch,
@@ -487,6 +519,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetRunSettlementsHandler.ServeHTTP(w, r)
 		case ShimStoreGetDetachedWorkProcedure:
 			shimStoreGetDetachedWorkHandler.ServeHTTP(w, r)
+		case ShimStoreGetPeerRecipientProcedure:
+			shimStoreGetPeerRecipientHandler.ServeHTTP(w, r)
 		case ShimStoreWriteBatchProcedure:
 			shimStoreWriteBatchHandler.ServeHTTP(w, r)
 		default:
@@ -544,6 +578,10 @@ func (UnimplementedShimStoreHandler) GetRunSettlements(context.Context, *connect
 
 func (UnimplementedShimStoreHandler) GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetDetachedWork is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) GetPeerRecipient(context.Context, *connect.Request[v1.GetPeerRecipientRequest]) (*connect.Response[v1.GetPeerRecipientResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetPeerRecipient is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error) {

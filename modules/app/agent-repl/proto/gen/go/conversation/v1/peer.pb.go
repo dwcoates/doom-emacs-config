@@ -177,8 +177,27 @@ func (*PeerMessage_InterSession) isPeerMessage_Kind() {}
 func (*PeerMessage_SubagentHandback) isPeerMessage_Kind() {}
 
 // Another Claude session sent this agent a message.
+//
+// WHO SENT IT is stated as the vendor states it, never resolved: which of the
+// host's sessions a pid belongs to is the consumer's fact (it holds every
+// session's SessionVendorProcess level), not this conversation's.
 type PeerMessageInterSession struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE PROCESS THAT SENT IT, verified by the kernel. The vendor's own
+	// contract is to key sender identity on this and never on the sender-written
+	// `from` address. UNSET when the vendor could not verify a pid (a non-socket
+	// ingress), never a wrong value. For relayed traffic the pid is the relay's.
+	SenderProcess *PeerMessageSenderProcess `protobuf:"bytes,1,opt,name=sender_process,json=senderProcess,proto3,oneof" json:"sender_process,omitempty"`
+	// The sending session's display name, as the sender asserted it (the
+	// vendor's `origin.name`, e.g. "fix-flaky-3a"). It is what names a sender
+	// that is none of the consumer's own sessions. UNSET when the vendor states
+	// none (an older sender, or a wire that is not exactly one envelope).
+	SenderSessionName *PeerMessageSenderSessionName `protobuf:"bytes,2,opt,name=sender_session_name,json=senderSessionName,proto3,oneof" json:"sender_session_name,omitempty"`
+	// The vendor's id for this one delivery (its `origin.msg_id`), the same value
+	// the sender's SendMessage result carries
+	// (AgentSendMessagePeerSession.delivery_id). UNSET when the vendor states
+	// none.
+	DeliveryId    *PeerDeliveryId `protobuf:"bytes,3,opt,name=delivery_id,json=deliveryId,proto3,oneof" json:"delivery_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -213,6 +232,133 @@ func (*PeerMessageInterSession) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{1}
 }
 
+func (x *PeerMessageInterSession) GetSenderProcess() *PeerMessageSenderProcess {
+	if x != nil {
+		return x.SenderProcess
+	}
+	return nil
+}
+
+func (x *PeerMessageInterSession) GetSenderSessionName() *PeerMessageSenderSessionName {
+	if x != nil {
+		return x.SenderSessionName
+	}
+	return nil
+}
+
+func (x *PeerMessageInterSession) GetDeliveryId() *PeerDeliveryId {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return nil
+}
+
+// The kernel-verified process a peer message came from.
+type PeerMessageSenderProcess struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The pid of the process that connected to this session's messaging socket
+	// (the vendor's `origin.verifiedPeerPid`). Never zero.
+	VerifiedPid uint32 `protobuf:"varint,1,opt,name=verified_pid,json=verifiedPid,proto3" json:"verified_pid,omitempty"`
+	// When the message arrived, in Unix milliseconds on the host clock: the
+	// record's own timestamp on the transcript, or the shim's receipt instant
+	// on the live stream. A pid is recycled, so it names a process only for an
+	// event at or after that process started (SessionVendorProcessRunning
+	// .started_at_ms); this is the instant a consumer checks against.
+	ReceivedAtMs  int64 `protobuf:"varint,2,opt,name=received_at_ms,json=receivedAtMs,proto3" json:"received_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerMessageSenderProcess) Reset() {
+	*x = PeerMessageSenderProcess{}
+	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerMessageSenderProcess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerMessageSenderProcess) ProtoMessage() {}
+
+func (x *PeerMessageSenderProcess) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerMessageSenderProcess.ProtoReflect.Descriptor instead.
+func (*PeerMessageSenderProcess) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PeerMessageSenderProcess) GetVerifiedPid() uint32 {
+	if x != nil {
+		return x.VerifiedPid
+	}
+	return 0
+}
+
+func (x *PeerMessageSenderProcess) GetReceivedAtMs() int64 {
+	if x != nil {
+		return x.ReceivedAtMs
+	}
+	return 0
+}
+
+// The sender's asserted display name.
+type PeerMessageSenderSessionName struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name verbatim, as the vendor sanitized it. Never empty.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerMessageSenderSessionName) Reset() {
+	*x = PeerMessageSenderSessionName{}
+	mi := &file_conversation_v1_peer_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerMessageSenderSessionName) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerMessageSenderSessionName) ProtoMessage() {}
+
+func (x *PeerMessageSenderSessionName) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_peer_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerMessageSenderSessionName.ProtoReflect.Descriptor instead.
+func (*PeerMessageSenderSessionName) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PeerMessageSenderSessionName) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 // A subagent this agent started handed its final report back. The report is
 // this record's `body`; the same text is the subagent's own
 // AgentSubagentHandback on its stream.
@@ -224,7 +370,7 @@ type PeerMessageSubagentHandback struct {
 
 func (x *PeerMessageSubagentHandback) Reset() {
 	*x = PeerMessageSubagentHandback{}
-	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	mi := &file_conversation_v1_peer_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -236,7 +382,7 @@ func (x *PeerMessageSubagentHandback) String() string {
 func (*PeerMessageSubagentHandback) ProtoMessage() {}
 
 func (x *PeerMessageSubagentHandback) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_peer_proto_msgTypes[2]
+	mi := &file_conversation_v1_peer_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -249,7 +395,7 @@ func (x *PeerMessageSubagentHandback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerMessageSubagentHandback.ProtoReflect.Descriptor instead.
 func (*PeerMessageSubagentHandback) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{2}
+	return file_conversation_v1_peer_proto_rawDescGZIP(), []int{4}
 }
 
 var File_conversation_v1_peer_proto protoreflect.FileDescriptor
@@ -264,8 +410,20 @@ const file_conversation_v1_peer_proto_rawDesc = "" +
 	"\x02id\x18\x04 \x01(\tR\x02id\x12O\n" +
 	"\rinter_session\x18\x05 \x01(\v2(.conversation.v1.PeerMessageInterSessionH\x00R\finterSession\x12[\n" +
 	"\x11subagent_handback\x18\x06 \x01(\v2,.conversation.v1.PeerMessageSubagentHandbackH\x00R\x10subagentHandbackB\x06\n" +
-	"\x04kind\"\x19\n" +
-	"\x17PeerMessageInterSession\"\x1d\n" +
+	"\x04kind\"\xd6\x02\n" +
+	"\x17PeerMessageInterSession\x12U\n" +
+	"\x0esender_process\x18\x01 \x01(\v2).conversation.v1.PeerMessageSenderProcessH\x00R\rsenderProcess\x88\x01\x01\x12b\n" +
+	"\x13sender_session_name\x18\x02 \x01(\v2-.conversation.v1.PeerMessageSenderSessionNameH\x01R\x11senderSessionName\x88\x01\x01\x12E\n" +
+	"\vdelivery_id\x18\x03 \x01(\v2\x1f.conversation.v1.PeerDeliveryIdH\x02R\n" +
+	"deliveryId\x88\x01\x01B\x11\n" +
+	"\x0f_sender_processB\x16\n" +
+	"\x14_sender_session_nameB\x0e\n" +
+	"\f_delivery_id\"c\n" +
+	"\x18PeerMessageSenderProcess\x12!\n" +
+	"\fverified_pid\x18\x01 \x01(\rR\vverifiedPid\x12$\n" +
+	"\x0ereceived_at_ms\x18\x02 \x01(\x03R\freceivedAtMs\"2\n" +
+	"\x1cPeerMessageSenderSessionName\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x1d\n" +
 	"\x1bPeerMessageSubagentHandbackB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
@@ -280,22 +438,28 @@ func file_conversation_v1_peer_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_peer_proto_rawDescData
 }
 
-var file_conversation_v1_peer_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_conversation_v1_peer_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_conversation_v1_peer_proto_goTypes = []any{
-	(*PeerMessage)(nil),                 // 0: conversation.v1.PeerMessage
-	(*PeerMessageInterSession)(nil),     // 1: conversation.v1.PeerMessageInterSession
-	(*PeerMessageSubagentHandback)(nil), // 2: conversation.v1.PeerMessageSubagentHandback
-	(*AgentId)(nil),                     // 3: conversation.v1.AgentId
+	(*PeerMessage)(nil),                  // 0: conversation.v1.PeerMessage
+	(*PeerMessageInterSession)(nil),      // 1: conversation.v1.PeerMessageInterSession
+	(*PeerMessageSenderProcess)(nil),     // 2: conversation.v1.PeerMessageSenderProcess
+	(*PeerMessageSenderSessionName)(nil), // 3: conversation.v1.PeerMessageSenderSessionName
+	(*PeerMessageSubagentHandback)(nil),  // 4: conversation.v1.PeerMessageSubagentHandback
+	(*AgentId)(nil),                      // 5: conversation.v1.AgentId
+	(*PeerDeliveryId)(nil),               // 6: conversation.v1.PeerDeliveryId
 }
 var file_conversation_v1_peer_proto_depIdxs = []int32{
-	3, // 0: conversation.v1.PeerMessage.agent:type_name -> conversation.v1.AgentId
+	5, // 0: conversation.v1.PeerMessage.agent:type_name -> conversation.v1.AgentId
 	1, // 1: conversation.v1.PeerMessage.inter_session:type_name -> conversation.v1.PeerMessageInterSession
-	2, // 2: conversation.v1.PeerMessage.subagent_handback:type_name -> conversation.v1.PeerMessageSubagentHandback
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 2: conversation.v1.PeerMessage.subagent_handback:type_name -> conversation.v1.PeerMessageSubagentHandback
+	2, // 3: conversation.v1.PeerMessageInterSession.sender_process:type_name -> conversation.v1.PeerMessageSenderProcess
+	3, // 4: conversation.v1.PeerMessageInterSession.sender_session_name:type_name -> conversation.v1.PeerMessageSenderSessionName
+	6, // 5: conversation.v1.PeerMessageInterSession.delivery_id:type_name -> conversation.v1.PeerDeliveryId
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_peer_proto_init() }
@@ -308,13 +472,14 @@ func file_conversation_v1_peer_proto_init() {
 		(*PeerMessage_InterSession)(nil),
 		(*PeerMessage_SubagentHandback)(nil),
 	}
+	file_conversation_v1_peer_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_peer_proto_rawDesc), len(file_conversation_v1_peer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

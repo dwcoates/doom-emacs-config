@@ -1,0 +1,66 @@
+// endpoint_resolve_peer_delivery.proto — ResolvePeerDelivery: WHICH SESSION
+// received one cross-session message, by the vendor's delivery id for it.
+//
+// WHY THE DAEMON ASKS A SHIM. The daemon draws the sender's row of a send to
+// another Claude session and names the session the message reached. The
+// delivery id is the one value both ends of the message share
+// (conversation.v1.PeerDeliveryId), and the record that holds the delivered
+// copy is in the host's one store, which the daemon never reads directly: its
+// read path is this service. Any running shim can answer, because the store is
+// shared by every session on the host; the shim asks the store and relays.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Ask which session holds the delivered copy of one cross-session message.
+message ResolvePeerDeliveryRequest {
+  // REQUIRED. The delivery id, verbatim (AgentSendMessagePeerSession
+  // .delivery_id).
+  conversation.v1.PeerDeliveryId delivery_id = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ResolvePeerDeliveryResponse {
+  oneof result {
+    ResolvePeerDeliverySuccess success = 1;
+    ResolvePeerDeliveryFailure failure = 2;
+  }
+}
+
+// The record was read. Whether a session holds the message is the answer, so
+// both answers are success.
+message ResolvePeerDeliverySuccess {
+  // THE ARM IS THE ANSWER.
+  oneof recipient {
+    // The MAIN agent of the session whose conversation holds the message. Its
+    // value is that session's original vendor session id.
+    conversation.v1.AgentId session = 1;
+    // No recorded session holds it: the recipient is an outside session, or
+    // its record has not been written yet.
+    ResolvePeerDeliveryNotRecorded not_recorded = 2;
+  }
+}
+
+// No recorded session holds the message.
+message ResolvePeerDeliveryNotRecorded {}
+
+// Not answered. THE ARM IS WHY.
+message ResolvePeerDeliveryFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The delivery id was unset or empty.
+    ResolvePeerDeliveryInvalidRequest invalid_request = 2;
+    // The store could not be reached, or failed to read.
+    ResolvePeerDeliveryStoreUnavailable store_unavailable = 3;
+  }
+}
+// The request named no delivery id.
+message ResolvePeerDeliveryInvalidRequest {}
+// The store could not answer.
+message ResolvePeerDeliveryStoreUnavailable {}

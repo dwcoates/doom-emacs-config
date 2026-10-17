@@ -15,6 +15,7 @@ package store.v1;
 import "store/v1/endpoint_get_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_detached_work.proto";
 import "store/v1/endpoint_get_live_work.proto";
+import "store/v1/endpoint_get_peer_recipient.proto";
 import "store/v1/endpoint_get_run_settlements.proto";
 import "store/v1/endpoint_get_shell_run_claims.proto";
 import "store/v1/endpoint_get_sidecar_cursors.proto";
@@ -92,6 +93,12 @@ service ShimStore {
   // never states one): a re-report of an ended run is recognized as such, and
   // a live run is typed by the record rather than refused.
   rpc GetDetachedWork(GetDetachedWorkRequest) returns (GetDetachedWorkResponse);
+
+  // WHICH SESSION received one cross-session message, by the vendor's delivery
+  // id for it. The shim asks on the daemon's behalf (shim.v1
+  // ResolvePeerDelivery) so the sender's row can name the session it reached.
+  // Unscoped by design: the answer is always another session.
+  rpc GetPeerRecipient(GetPeerRecipientRequest) returns (GetPeerRecipientResponse);
 
   // ---- Writes: how a producer hands records to the store ----
 
