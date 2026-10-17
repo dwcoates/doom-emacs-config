@@ -83,7 +83,7 @@ describe("a click in the feed holds its view, in WebKit", () => {
   it("owes the docked gate's stillness to the floor undoing the box's clamp", () => {
     // A still pass with no restore would mean the dock's height never reached
     // the feed's box: a vacuous pass.
-    expect(dockedRecords).toContain("debug scroll.click-floor-restored");
+    expect(dockedRecords).toContain("info scroll.click-floor-restored");
   });
 
   it("writes no error through any answer", () => {

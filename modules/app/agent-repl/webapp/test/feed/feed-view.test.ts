@@ -2055,7 +2055,7 @@ describe("createFeedController: a landed thinking row", () => {
       scroll: { box, tail },
     });
     controller.applyPage(page([thinkingRow("t1", false)]), "replace");
-    tail.onInput();
+    tail.onInput("wheel");
     box.scrollTop = 500;
     tail.onScroll();
     return { controller, box, host };

@@ -33,6 +33,7 @@ import {
   MoveWitness,
   type MoveWitnessReport,
   type RevealGeometry,
+  type ReaderInput,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
@@ -346,7 +347,7 @@ function armed(box: ReanchorBox): {
 } {
   let onScroll = (): void => {};
   let onResize = (): void => {};
-  let onInput = (): void => {};
+  let onInput = (_kind: ReaderInput): void => {};
   const tail = new TailFollow(box);
   tail.observe(
     (cb) => {
@@ -363,9 +364,9 @@ function armed(box: ReanchorBox): {
     tail,
     scroll: () => onScroll(),
     resize: () => onResize(),
-    input: () => onInput(),
+    input: () => onInput("wheel"),
     gesture: () => {
-      onInput();
+      onInput("wheel");
       onScroll();
     },
   };
@@ -1032,7 +1033,7 @@ describe("TailFollow's latest-visible latch", () => {
     const entry: Entry = { offset: 900, height: 100 };
     let onScroll = (): void => {};
     let onResize = (): void => {};
-    let onInput = (): void => {};
+    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box, () => ({
       boxTop: 0,
       boxHeight: box.clientHeight,
@@ -1056,9 +1057,9 @@ describe("TailFollow's latest-visible latch", () => {
       entry,
       scroll: () => onScroll(),
       resize: () => onResize(),
-      input: () => onInput(),
+      input: () => onInput("wheel"),
       gesture: () => {
-        onInput();
+        onInput("wheel");
         onScroll();
       },
       // A new row drawn under the last one becomes the latest entry.
@@ -1459,7 +1460,7 @@ describe("TailFollow's latest-visible latch", () => {
       l.tail.readerClicked(clicked());
       // Assert
       const record = await forwardedRecord(capture, "scroll.click-held");
-      expect([record.level.case, record.context]).toMatchObject(["debug", { by: "click", at: 650, row: "none" }]);
+      expect([record.level.case, record.context]).toMatchObject(["info", { by: "click", at: 650, row: "none" }]);
     });
   });
 
@@ -2856,7 +2857,7 @@ function anchoredFeed(
   };
   let onScroll = (): void => {};
   let onResize = (): void => {};
-  let onInput = (): void => {};
+  let onInput = (_kind: ReaderInput): void => {};
   const tail = new TailFollow(box, () => null, rows);
   tail.observe(
     (cb) => (onScroll = cb),
@@ -2871,7 +2872,7 @@ function anchoredFeed(
     tail,
     scroll: () => onScroll(),
     resize: () => onResize(),
-    input: () => onInput(),
+    input: () => onInput("wheel"),
     /** Insert a row of HEIGHT at the top, as a prepend does. */
     prepend: (height: number) => {
       host.prepend(row(-1));
@@ -3468,7 +3469,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     };
     let onScroll = (): void => {};
     let onResize = (): void => {};
-    let onInput = (): void => {};
+    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box, () => null, null, floor);
     tail.observe(
       (cb) => (onScroll = cb),
@@ -3486,7 +3487,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
       extents,
       layout,
       scroll: () => onScroll(),
-      input: () => onInput(),
+      input: () => onInput("wheel"),
       /** The content below the view shrinks by PX, the box lays out, then tells its owner. */
       shrink: (px: number) => {
         state.content -= px;
@@ -3586,7 +3587,102 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     f.grow(210);
     // Assert
     const record = await forwardedRecord(capture, "scroll.click-floor-restored");
-    expect([record.level.case, record.context]).toMatchObject(["debug", { from: 490, to: 700, floor: 1210 }]);
+    expect([record.level.case, record.context]).toMatchObject(["info", { from: 490, to: 700, floor: 1210 }]);
+  });
+
+  it("records the reader input that ends a standing hold", async () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("info");
+    // Act
+    f.input();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-hold-ended");
+    expect([record.level.case, record.context]).toMatchObject(["info", { by: "wheel", at: 700, held_top: 700, row: "none" }]);
+  });
+
+  it("records the named cause that supersedes a standing hold", async () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("info");
+    // Act
+    f.tail.workspaceSelected();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-hold-ended");
+    expect(record.context).toMatchObject({ by: "workspaceSelected", held_top: 700 });
+  });
+
+  it("records no hold ending when no hold stands", async () => {
+    // Arrange
+    const f = floored(700);
+    const capture = captureLogRecords("debug");
+    // Act
+    f.input();
+    f.tail.workspaceSelected();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.click-hold-ended")).toEqual([]);
+  });
+
+  it("records a move under the hold that it takes as the new held position", async () => {
+    // Arrange -- content enough below that the box is nowhere near its end.
+    const f = floored(300, 2000);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("info");
+    // Act
+    f.box.scrollTop = 200;
+    f.scroll();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-hold-moved");
+    expect([record.level.case, record.context]).toMatchObject(["info", { from: 300, to: 200, end: 1700, scroll_height: 2000 }]);
+  });
+
+  it("records no move under the hold when the view stands still", async () => {
+    // Arrange
+    const f = floored(300, 2000);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("debug");
+    // Act
+    f.scroll();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.click-hold-moved")).toEqual([]);
+  });
+
+  it("records the floor it sets with the box's geometry", async () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("info");
+    // Act
+    f.shrink(200);
+    // Assert -- the click armed the floor; the shrink is what laid its blank.
+    capture.logger.flush();
+    await Promise.resolve();
+    const record = capture.sent.filter((r) => r.operation === "scroll.floor-set").at(-1);
+    expect([record?.level.case, record?.context]).toMatchObject([
+      "info",
+      // `at` is where the box's own clamp left it, before the floor restores it.
+      { extent: 1000, blank: 200, held: true, at: 500, scroll_height: 1000, client_height: 300 },
+    ]);
+  });
+
+  it("records the clicked element and the floor standing when the hold is taken", async () => {
+    // Arrange
+    const f = floored(700);
+    const target = document.createElement("span");
+    target.className = "merge-tab is-active";
+    const capture = captureLogRecords("info");
+    // Act
+    f.tail.readerClicked(target);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    // The floor the click armed: the held view's bottom.
+    expect(record.context).toMatchObject({ target: "span.merge-tab.is-active", floor: 1000 });
   });
 
   it("recedes the floor as the reader scrolls back up once the hold ends", () => {
@@ -3665,14 +3761,14 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     // Arrange -- the pointerdown that began the click is an input on the box.
     const box: ReanchorBox = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
     let onScroll = (): void => {};
-    let onInput = (): void => {};
+    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box);
     tail.observe(
       (cb) => (onScroll = cb),
       () => {},
       (cb) => (onInput = cb),
     );
-    onInput();
+    onInput("wheel");
     tail.readerClicked(document.createElement("div"));
     const capture = captureLogRecords();
     // Act -- the box moves with nothing behind it but the click.
