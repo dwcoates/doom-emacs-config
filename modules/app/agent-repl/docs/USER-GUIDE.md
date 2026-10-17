@@ -499,6 +499,11 @@ The top bar's effort selector sits between the model selector and the permission
   - Its conversation is kept.
   - A workspace whose conversation is large enough to need the cold-cache choice when it resumes has its name struck through.
   - Showing it again asks that choice, as any cold resume does.
+- **A hidden workspace you are looking at runs like a shown one.**
+  - Selecting it from a picker keeps its session up and its cache warm while you are on it.
+  - Moving off it leaves its cache to run out again.
+- **Answering a hidden workspace's cold-cache choice shows it again.**
+  - It moves out of Hidden Workspaces the moment you click, whichever choice you made.
 
 ## When Claude does not start
 

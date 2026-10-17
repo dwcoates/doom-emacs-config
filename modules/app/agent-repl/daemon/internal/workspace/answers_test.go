@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/topbar"
@@ -1218,5 +1220,104 @@ func TestARefusedColdGateStandsAgainInOneHome(t *testing.T) {
 	// Assert
 	if sites != 2 {
 		t.Fatalf("ReraiseColdGate is called at %d sites, want reraiseRefusedColdGate and coldGateSettled", sites)
+	}
+}
+
+// hideWorkspace moves a fixture workspace into the hidden section.
+func hideWorkspace(f *fixture, ws ids.WorkspaceID) {
+	record := f.db.workspaces[ws]
+	record.Hidden = true
+	f.db.workspaces[ws] = record
+}
+
+func TestAnswerColdGateShowsAHiddenWorkspaceBeforeTheReopen(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer func() *agentreplv1.AnswerColdGateRequest
+	}{
+		{name: "pay", answer: payAnswer},
+		{name: "clear", answer: clearAnswer},
+		{name: "compact", answer: compactAnswer},
+		{name: "compact and resume", answer: compactAndResumeAnswer},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			hideWorkspace(f, "w1")
+			standingGate(f)
+			hiddenAtSettle := true
+			f.queue.onGateFate = func() { hiddenAtSettle = f.db.workspaces["w1"].Hidden }
+
+			// Act.
+			err := f.verbs.AnswerColdGate(context.Background(), "w1", tt.answer())
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("AnswerColdGate: %v", err)
+			}
+			if hiddenAtSettle {
+				t.Fatal("the workspace was still hidden when the held prompts were settled, before the re-open")
+			}
+			if len(f.fleet.resumes) != 1 {
+				t.Fatalf("resumes = %d, want the chosen re-open", len(f.fleet.resumes))
+			}
+			if !slices.Equal(f.visibilityEdges, []ids.WorkspaceID{"w1"}) {
+				t.Fatalf("visibility edges = %v, want the shown workspace", f.visibilityEdges)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+				Level: "info", Operation: opColdGate, Message: "the answered gate's workspace was hidden; it is shown again"}); !ok {
+				t.Fatalf("records = %+v, want the show recorded", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestAnswerColdGateOfAShownWorkspaceWritesNoVisibility(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+
+	// Act.
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", payAnswer()); err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+
+	// Assert.
+	if len(f.visibilityEdges) != 0 || len(f.sidebar.registries) != 0 {
+		t.Fatalf("edges %v, republications %d; want none for a workspace already shown", f.visibilityEdges, len(f.sidebar.registries))
+	}
+}
+
+func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	hideWorkspace(f, "w1")
+	standingGate(f)
+	f.db.setHiddenErr = errors.New("disk I/O error")
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", payAnswer())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("an answer whose workspace could not be shown was answered as success")
+	}
+	if len(f.fleet.resumes) != 0 || len(f.queue.gateFates) != 0 || len(f.feed.retired) != 0 {
+		t.Fatalf("resumes %d, fates %v, retired %v; want nothing settled or re-opened", len(f.fleet.resumes), f.queue.gateFates, f.feed.retired)
+	}
+	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
+		t.Fatalf("reraised = %v, want vendor-1's gate stood again", f.cards.reraised)
+	}
+	if !loggedAtError(f, opSetHidden) {
+		t.Fatal("the failed show was not recorded at error")
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: "info", Operation: opColdGate, Message: "the workspace could not be shown; the answer is refused"})
+	if !ok || r.Context["cause"] != `set hidden on "w1": disk I/O error` || r.Context["gate_stands_again"] != true {
+		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
 	}
 }

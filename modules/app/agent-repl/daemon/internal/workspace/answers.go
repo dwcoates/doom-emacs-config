@@ -199,8 +199,14 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 // queue has settled them, so the session-up release it raises cannot send a
 // prompt the answer kept or discarded. A queue that cannot settle them
 // refuses the answer, and the gate stands again.
+//
+// AN ANSWERED GATE SHOWS ITS WORKSPACE (owner ruling, 2026-10-17). A hidden
+// workspace's answer moves it out of the hidden section before the re-open
+// starts, so the session the answer brings up is one the daemon runs and
+// keeps warm, never one the cache keeper stands down on arrival. A show that
+// cannot be recorded refuses the answer, and the gate stands again.
 func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
-	_, log, err := v.owned(ctx, "AnswerColdGate", ws)
+	record, log, err := v.owned(ctx, "AnswerColdGate", ws)
 	if err != nil {
 		return err
 	}
@@ -222,6 +228,14 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	if !v.deps.Cards.TakeColdGate(ws, served.VendorSessionID) {
 		return refuse(log, "AnswerColdGate", ArmNoColdGate,
 			fmt.Sprintf("the cold gate on workspace %q was already answered", ws), false)
+	}
+	if record.InHiddenSection() {
+		if err := v.recordHidden(ctx, log, ws, false); err != nil {
+			// recordHidden recorded the failure at ERROR as its owner.
+			v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the workspace could not be shown", err)
+			return fmt.Errorf("show the workspace whose cold gate was answered, %q: %w", ws, err)
+		}
+		log.Info(opColdGate, "the answered gate's workspace was hidden; it is shown again", dlog.Context{"choice": choice})
 	}
 	if err := v.deps.Queue.ColdGateAnswered(ctx, ws, coldGateFate(answer)); err != nil {
 		// The queue recorded the failure at ERROR as its owner; what is the

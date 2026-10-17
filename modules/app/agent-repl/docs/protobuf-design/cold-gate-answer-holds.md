@@ -82,3 +82,20 @@ under `wsm.HoldColdGate`, whatever the choice.
 - A kept prompt stands outside the queue line. Prompts submitted later are not
   classified against it, folded into it, or held behind it
   (`promptqueue.queue.itemAhead`, `submitBehindHeld`).
+
+### 4. An answered gate shows its workspace (owner ruling, 2026-10-17)
+
+- **In the owner's terms**: a hidden workspace "should be unhidden immediately
+  after any gate pass, and the selected option should be immediately executed
+  and obeyed."
+- Every answer (pay, clear, compact, compact and resume) on a workspace in
+  the hidden section moves it out (`workspace.verbs.recordHidden`), after the
+  gate is spent and before the held prompts are settled and the re-open
+  starts. So the session the answer brings up is one the daemon runs and
+  keeps warm (`wsm.Workspace.Runs`, `wsm.Workspace.KeepaliveHeld`).
+- **Why**: a hidden workspace's paid re-open was stood down by the cache
+  keeper the moment it came up (its cache had lapsed long before), so the
+  gate stood again on the next selection, answer after answer.
+- A show that cannot be recorded refuses the answer, and the gate stands
+  again, unspent (`workspace.verbs.reraiseRefusedColdGate`).
+
