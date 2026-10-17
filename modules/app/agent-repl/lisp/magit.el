@@ -21,6 +21,10 @@
 (declare-function magit-diff-visit-file-other-window "magit-diff")
 (declare-function magit-diff-visit-worktree-file "magit-diff")
 (declare-function magit-insert-heading "magit-section")
+(declare-function magit-log-arguments "magit-log" (&optional mode))
+(declare-function magit-log-goto-commit-section "magit-log" (rev))
+(declare-function magit-log-setup-buffer "magit-log" (revs args files &optional locked focus))
+(declare-function magit-section-update-highlight "magit-section" (&optional force))
 (declare-function magit-insert-unpushed-to-upstream-or-recent "magit-status")
 (declare-function magit-refresh "magit-mode")
 (declare-function magit-status-setup-buffer "magit-status")
@@ -37,6 +41,7 @@
 (declare-function agent-repl--close-buffer-window "panels")
 (declare-function agent-repl--error "core")
 (declare-function agent-repl--gh-string-quiet "core")
+(declare-function agent-repl--info "core")
 (declare-function agent-repl--git-string "core")
 (declare-function agent-repl--git-string-quiet "core")
 (declare-function agent-repl--hide-panels "panels")
@@ -44,6 +49,7 @@
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--main-worktree-for-dir "workspace")
 (declare-function agent-repl--panels-visible-p "panels")
+(declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-get "workspace")
@@ -396,6 +402,35 @@ wants anyway."
        (magit-status-setup-buffer (file-name-as-directory (expand-file-name dir)))
        (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
                          ws dir (selected-window))))))
+
+(defun agent-repl-magit-log-commit (ws dir branch commit)
+  "Open BRANCH's log in the repository at DIR with point on COMMIT, for WS.
+The click on a landed merge's commit in the merge bubble's head
+\(`agentrepl.v1' WatchHostWorkspace's `open_commit_log' arm).  The log
+opens in the ONE shared agent-repl popup (`agent-repl-popup-show'), where
+`q' closes it, with the log arguments magit would use itself.
+
+A COMMIT THE LOG DOES NOT SHOW is an old landing beyond the log's commit
+limit: the log stays open at its top and the echo area says so.  Returns
+the log buffer."
+  (agent-repl--magit-displaying
+   #'agent-repl-popup-show
+   (lambda (_require-result)
+     (let* ((default-directory (file-name-as-directory (expand-file-name dir)))
+            (arguments (magit-log-arguments))
+            (buffer (magit-log-setup-buffer (list branch) (car arguments) (cadr arguments))))
+       (with-current-buffer buffer
+         (if (magit-log-goto-commit-section commit)
+             (progn
+               (magit-section-update-highlight)
+               (when-let ((window (get-buffer-window buffer)))
+                 (set-window-point window (point)))
+               (agent-repl--info ws "elisp.magit.log-commit ws=%s dir=%s branch=%s commit=%s branch=shown"
+                                 ws dir branch commit))
+           (agent-repl--info ws "elisp.magit.log-commit ws=%s dir=%s branch=%s commit=%s branch=not-in-log"
+                             ws dir branch commit)
+           (message "agent-repl: %s is not among the commits %s's log shows" commit branch)))
+       buffer))))
 
 (defun agent-repl--magit-status-workspace-open (target-fn)
   "Open magit-status for the workspace in the SELECTED window, at TARGET-FN's dir.

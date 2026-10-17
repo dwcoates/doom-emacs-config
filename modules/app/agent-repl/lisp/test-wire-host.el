@@ -246,6 +246,8 @@
                       (list "{\"transferred\":{}}" :transferred)
                       (list "{\"reloadWebapp\":{}}" :reload-webapp)
                       (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)
+                      (list "{\"openCommitLog\":{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\"}}"
+                            :open-commit-log)
                       (list "{\"selection\":{\"none\":{}}}" :selection)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
@@ -318,6 +320,22 @@
                   #'agent-repl-wire-decode-host-open-in-editor
                   "{\"path\":\"/w/a.el\",\"column\":3}")
                  '("HostOpenInEditor" column "unknown field"))))
+
+;;;; ---- OpenInEditorCommitLog ----
+
+(ert-deftest agent-repl-test-wire-host-open-commit-log-carries-every-field ()
+  "A relayed commit click decodes its repository dir, branch and commit."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-open-in-editor-commit-log
+                  "{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\"}")
+                 '(:repository-dir "/r" :branch "master" :commit "abc"))))
+
+(ert-deftest agent-repl-test-wire-host-open-commit-log-refuses-an-unknown-field ()
+  "An unknown key on the relayed commit click is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-open-in-editor-commit-log
+                  "{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\",\"line\":3}")
+                 '("OpenInEditorCommitLog" line "unknown field"))))
 
 ;;;; ---- The selection push ----
 
@@ -1248,7 +1266,7 @@ opens are OpenTabs streams."
                         "WatchHostWorkspaceResponse")
                        #'string<)
                  (sort (list "host" "transferred" "reloadWebapp"
-                             "openInEditor" "ending" "notificationClicked" "selection")
+                             "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

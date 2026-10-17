@@ -2284,6 +2284,22 @@ would adopt onto a connection the link has let go of."
     (should (equal (car agent-repl-test-host--effects)
                    (list :popup "/tmp/findings" nil)))))
 
+(ert-deftest agent-repl-test-host-open-commit-log-opens-the-branch-log ()
+  "The commit click opens its branch's log at the commit, and is logged."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((opened nil))
+      (cl-letf (((symbol-function 'agent-repl-magit-log-commit)
+                 (lambda (&rest args) (setq opened args))))
+        ;; Act
+        (agent-repl-test-host--push
+         "ws-1" (list :arm :open-commit-log
+                      :value (list :repository-dir "/repo" :branch "master" :commit "abc123")))
+        ;; Assert
+        (should (equal opened '("ws-1" "/repo" "master" "abc123")))
+        (should (agent-repl-test-host--logged-p :info "elisp.host.open-commit-log"))))))
+
 (ert-deftest agent-repl-test-host-unknown-push-arm-is-an-error ()
   "An arm nobody knows is a contract breach, never a silent drop."
   (agent-repl-test-host--with-harness
