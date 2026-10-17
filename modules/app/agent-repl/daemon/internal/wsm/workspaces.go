@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, owner_lands, context_from, requested_by, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -83,8 +83,10 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		closedBy      sql.NullString
 		statusChanged sql.NullInt64
 		subsection    sql.NullString
+		contextFrom   sql.NullString
+		requestedBy   sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -126,6 +128,19 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	if parent.Valid {
 		id := WorkspaceID(parent.String)
 		ws.Parent = &id
+	}
+	// AN OWNER-LANDED WORKSPACE HAS AN OWNER: owner_lands names who lands it,
+	// so a row that sets it with no parent is corrupt.
+	if ws.OwnerLands && ws.Parent == nil {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "owner_lands", Err: errors.New("a workspace its owner lands records its owner")}
+	}
+	if contextFrom.Valid {
+		id := WorkspaceID(contextFrom.String)
+		ws.ContextFrom = &id
+	}
+	if requestedBy.Valid {
+		id := WorkspaceID(requestedBy.String)
+		ws.RequestedBy = &id
 	}
 	if priority.Valid {
 		p := Priority(priority.Int64)
@@ -248,6 +263,12 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			Priority:     facts.Priority,
 			CreatedAt:    time.Now().UTC(),
 			MergeOf:      facts.MergeOf,
+			OwnerLands:   facts.OwnerLands,
+			ContextFrom:  facts.ContextFrom,
+			RequestedBy:  facts.RequestedBy,
+		}
+		if out.OwnerLands && out.Parent == nil {
+			return fmt.Errorf("wsm: register %s: a workspace its owner lands names its owner", normalized)
 		}
 		var mergeOf, request, forkHead, closeOnLanding, cleanupDir any
 		compactAfter, cleanupWorktree := false, false
@@ -266,9 +287,9 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			return err
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place)
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, owner_lands, context_from, requested_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, out.OwnerLands, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy))
 		if err != nil {
 			return err
 		}

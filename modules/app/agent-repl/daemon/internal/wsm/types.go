@@ -58,6 +58,16 @@ type Workspace struct {
 	// registered by Emacs (never created through the daemon) carries none, and
 	// the roster falls back to the branch lineage for it.
 	Parent *WorkspaceID
+	// OwnerLands marks a child whose context was not forked from its owner
+	// (Parent): only the owner, or the user, lands it. Recorded at creation;
+	// never set without Parent.
+	OwnerLands bool
+	// ContextFrom is the workspace whose conversation was forked into this
+	// one at its creation, nil for a fresh context or a registered workspace.
+	ContextFrom *WorkspaceID
+	// RequestedBy is the workspace whose agent asked for this one's creation,
+	// nil when the user asked or the workspace was registered.
+	RequestedBy *WorkspaceID
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
 	// Closure is when the workspace was closed and by whom (MarkClosed); nil
@@ -285,6 +295,11 @@ type RegisterFacts struct {
 	// MergeOf marks a MERGE WORKSPACE at its creation, nil for every other
 	// workspace. Only the creation path supplies it.
 	MergeOf *MergeOrigin
+	// OwnerLands, ContextFrom and RequestedBy are Workspace's derivation
+	// facts, supplied only by the creation path.
+	OwnerLands  bool
+	ContextFrom *WorkspaceID
+	RequestedBy *WorkspaceID
 	// Priority is the priority a minted workspace is created with, nil for
 	// none. It is recorded in the insert itself because it decides the place
 	// the workspace lands on. An announcement of an already-registered
