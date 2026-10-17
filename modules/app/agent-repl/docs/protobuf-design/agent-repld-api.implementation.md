@@ -18,45 +18,45 @@ Each item is checked off as it lands, with its commit.
 - [x] D2 (ab49cac61c) `internal/wsm`: persist `owner_lands`, `context_from` and `requester`
       on the workspace row (migration), read by MergeWorkspace refusals,
       WorkspaceStatus and the derived-workspace notices.
-- [ ] D3 Notices: owner notice (PROMPT_ORIGIN_OWNER_NOTICE) on create;
+- [x] D3 Notices: owner notice (PROMPT_ORIGIN_OWNER_NOTICE) on create;
       derived-workspace notices (PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE) to
       the branch-source and context-source workspaces on create, land, and
       close-without-landing, combined when one workspace is both, never to
       the requester.
-- [ ] D4 `internal/merge`: async merge as a create form. DetachedRun gains
+- [x] D4 `internal/merge`: async merge as a create form. DetachedRun gains
       the maker, the target (primary or maker) and front placement; the
       maker's context is forked; HAND-OFF (fork + pick) MOVES TO ADMISSION so
       the merge workspace forks when the merge starts; merge arms renamed to
       `async_merge_*`; a branch owned by a registered workspace is refused;
       the subagent maker is resolved from `<session>/subagents/agent-<id>.jsonl`.
-- [ ] D5 MergeWorkspace: requester rules (`owner_lands`,
+- [x] D5 MergeWorkspace: requester rules (`owner_lands`,
       `requester_may_not_land`), required placement.
-- [ ] D6 CloseWorkspace: requester; a self-close is accepted as
+- [x] D6 CloseWorkspace: requester; a self-close is accepted as
       `closes_when_turn_ends` and performed at the turn-end edge.
-- [ ] D7 CompactWorkspace rpc; SubmitPrompt refuses a slash command of origin
+- [x] D7 CompactWorkspace rpc; SubmitPrompt refuses a slash command of origin
       AGENT_SENT.
-- [ ] D8 Status: GetWorkspaceStatus, GetMergeQueueStatus.
-- [ ] D9 Subscriptions: SubscribeWorkspace/UnsubscribeWorkspace (durable,
+- [x] D8 Status: GetWorkspaceStatus, GetMergeQueueStatus.
+- [x] D9 Subscriptions: SubscribeWorkspace/UnsubscribeWorkspace (durable,
       notices as PROMPT_ORIGIN_WORKSPACE_NOTICE); SubscribeMergeQueue/
       UnsubscribeMergeQueue moved off UpdateMergeQueue, answering a snapshot.
-- [ ] D10 UpdateRollouts; release deploys when the checkout is ahead.
-- [ ] D11 EvaluateInEditor / AnswerEditorEvaluation / host push `evaluate`,
+- [x] D10 UpdateRollouts; release deploys when the checkout is ahead.
+- [x] D11 EvaluateInEditor / AnswerEditorEvaluation / host push `evaluate`,
       token correlation with a measured deadline.
-- [ ] D12 `cmd/agent-repld`: nouns `workspace`, `merge-queue`, `editor`,
+- [x] D12 `cmd/agent-repld`: nouns `workspace`, `merge-queue`, `editor`,
       `runtime`; `merge-queue` verb ported onto RPCs; requester from cwd.
-- [ ] D16 One-shot standing (owner, 2026-10-17): an rpc that marks or
+- [x] D16 One-shot standing (owner, 2026-10-17): an rpc that marks or
       unmarks a workspace a one-shot after its creation, refused for a child
       its owner lands; WorkspaceStatus reports it; the workspace skill tells
       every agent to mark itself a one-shot when it commits to one-shotting
       the rest of its work.
-- [ ] D17 Awaiting correspondence (owner, 2026-10-17): SetWorkspaceCorrespondence
+- [x] D17 Awaiting correspondence (owner, 2026-10-17): SetWorkspaceCorrespondence
       marks a workspace awaiting another and clears it; the mark is durable,
       ends with the workspace's close or the awaited workspace's forget, and
       stands the footer's background arm (yellow) while no turn runs;
       WorkspaceStatus reports it; the workspace skill tells every agent to
       mark itself when it ends a turn to wait on another workspace and to
       clear it when the answer arrives.
-- [ ] D13 Retire `internal/commandfile` and the output-dir ingress.
+- [x] D13 Retire `internal/commandfile` and the output-dir ingress.
 - [ ] D14 Integration harness and e2e callers ported.
 
 ## Editor (Emacs lisp, `lisp/`)
@@ -80,7 +80,7 @@ Each item is checked off as it lands, with its commit.
       It states that `workspace kill` and every cold-gate answer (`workspace
       gate pay|clear|compact|compact-and-resume`, with model and scope) run
       only when the user explicitly asked for or approved them.
-- [ ] D15 `workspace gate` CLI over AnswerColdGate; WorkspaceStatus reports
+- [x] D15 `workspace gate` CLI over AnswerColdGate; WorkspaceStatus reports
       `cold_gate` with the gate's FeedId.
 - [ ] S2 `/agent-repl-merge-queue` from `/merge-queue`.
 - [ ] S3 `/agent-repl-runtime` from `/manage-agent-repl-runtime`, absorbing
