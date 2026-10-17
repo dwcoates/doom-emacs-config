@@ -144,3 +144,56 @@ func TestOneShotMetaSentinelsAreTheCrossSystemLiterals(t *testing.T) {
 		t.Fatalf("prompts.Wrap = %q, want %q", got, want)
 	}
 }
+
+func TestTheCompletionDirectiveIsTheLeadAndTheRepositorysDirective(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	oneShotBriefs(f)
+	v := f.verbs.(*verbs)
+
+	// Act
+	got, err := v.completionDirective(testPolicy)
+
+	// Assert
+	if err != nil || got != completionDirectiveLead+"DIRECTIVE" {
+		t.Fatalf("completionDirective = %q, %v; want the lead and the directive", got, err)
+	}
+}
+
+func TestTheCompletionDirectiveRefusesAMissingDirective(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	oneShotBriefs(f)
+	delete(f.briefs, BriefOneShotCompletionDirective)
+	v := f.verbs.(*verbs)
+
+	// Act
+	_, err := v.completionDirective(testPolicy)
+
+	// Assert
+	if err == nil {
+		t.Fatal("completionDirective(no directive) = nil error, want a refusal")
+	}
+}
+
+// TestTheDecorationCarriesTheSharedDirective pins that a one-shot's first
+// message carries exactly what completionDirective composes, so a workspace
+// marked a one-shot later is told what one created as one was.
+func TestTheDecorationCarriesTheSharedDirective(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	oneShotBriefs(f)
+	v := f.verbs.(*verbs)
+	directive, err := v.completionDirective(testPolicy)
+	if err != nil {
+		t.Fatalf("completionDirective: %v", err)
+	}
+
+	// Act
+	decorated, err := v.decorateOneShot("task", testPolicy)
+
+	// Assert
+	if err != nil || !strings.HasSuffix(decorated, prompts.Wrap("\n"+directive)) {
+		t.Fatalf("decorated = %q, %v; want it to end with the shared directive", decorated, err)
+	}
+}

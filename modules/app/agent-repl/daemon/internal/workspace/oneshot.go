@@ -57,10 +57,22 @@ func (v *verbs) decorateOneShot(raw string, policy prompts.Source) (string, erro
 		return "", fmt.Errorf("splice the %s brief: %w", BriefAutonomousPreamble, err)
 	}
 
-	// THE DIRECTIVE IS PLAIN ENGLISH AND SPLICES NOTHING. It declares no
-	// placeholders, so the nil value map is what refuses one that declares any:
-	// the daemon has nothing to fill a placeholder in a repository's own
-	// completion statement from.
+	directive, err := v.completionDirective(policy)
+	if err != nil {
+		return "", err
+	}
+	return prompts.Wrap(preambleText) + raw + prompts.Wrap("\n"+directive), nil
+}
+
+// completionDirective is the repository's completion directive behind its
+// framing sentence: what a one-shot is told to do when its work is done,
+// whether it was created one or marked one since (SetOneShot).
+//
+// THE DIRECTIVE IS PLAIN ENGLISH AND SPLICES NOTHING. It declares no
+// placeholders, so the nil value map is what refuses one that declares any:
+// the daemon has nothing to fill a placeholder in a repository's own
+// completion statement from.
+func (v *verbs) completionDirective(policy prompts.Source) (string, error) {
 	directive, err := v.load(policy.Dir, BriefOneShotCompletionDirective)
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefOneShotCompletionDirective, err)
@@ -69,7 +81,7 @@ func (v *verbs) decorateOneShot(raw string, policy prompts.Source) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("splice the %s brief: %w", BriefOneShotCompletionDirective, err)
 	}
-	return prompts.Wrap(preambleText) + raw + prompts.Wrap("\n"+completionDirectiveLead+directiveText), nil
+	return completionDirectiveLead + directiveText, nil
 }
 
 // opOneShotPolicySource is the operation every one-shot create records its
