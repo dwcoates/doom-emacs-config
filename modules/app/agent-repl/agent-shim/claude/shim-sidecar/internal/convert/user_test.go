@@ -4,7 +4,6 @@ package convert
 // is crossed for adopted external prompts (any other entrypoint, emitted).
 
 import (
-	"strconv"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -322,18 +321,6 @@ func TestAnInterSessionMessageStatesItsSender(t *testing.T) {
 		check func(*conversationv1.PeerMessageInterSession) string
 		want  string
 	}{
-		{name: "the verified pid", extra: `,"verifiedPeerPid":5398`,
-			check: func(i *conversationv1.PeerMessageInterSession) string {
-				return strconv.FormatUint(uint64(i.GetSenderProcess().GetVerifiedPid()), 10)
-			}, want: "5398"},
-		{name: "the pid's instant is the record's timestamp", extra: `,"verifiedPeerPid":5398`,
-			check: func(i *conversationv1.PeerMessageInterSession) string {
-				return strconv.FormatInt(i.GetSenderProcess().GetReceivedAtMs(), 10)
-			}, want: strconv.FormatInt(parseInstant(ts1), 10)},
-		{name: "no sender process when the vendor verified no pid", extra: ``,
-			check: func(i *conversationv1.PeerMessageInterSession) string { return presence(i.GetSenderProcess() != nil) }, want: "unset"},
-		{name: "no sender process for a pid that is not a whole positive number", extra: `,"verifiedPeerPid":-3`,
-			check: func(i *conversationv1.PeerMessageInterSession) string { return presence(i.GetSenderProcess() != nil) }, want: "unset"},
 		{name: "the sender's session name, trimmed", extra: `,"name":" agent-repl-test-slimming-54 "`,
 			check: func(i *conversationv1.PeerMessageInterSession) string { return i.GetSenderSessionName().GetText() }, want: "agent-repl-test-slimming-54"},
 		{name: "no session name when the vendor states none", extra: ``,

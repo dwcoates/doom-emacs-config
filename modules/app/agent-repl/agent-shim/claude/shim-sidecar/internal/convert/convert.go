@@ -433,10 +433,6 @@ type envelope struct {
 	// peerHandback is the vendor's `origin.handback`: set exactly when a peer
 	// message is a subagent handing its final report back.
 	peerHandback bool
-	// peerVerifiedPid is the vendor's `origin.verifiedPeerPid`, the
-	// kernel-verified pid of the process that sent a peer message. Zero when
-	// the vendor verified none.
-	peerVerifiedPid uint32
 	// peerSessionName is the vendor's `origin.name`, the sender's asserted
 	// session name, trimmed. Empty when the vendor states none.
 	peerSessionName string
@@ -462,7 +458,6 @@ func readEnvelope(rec map[string]any) envelope {
 		peerSender:       sender,
 		peerBody:         str(origin["body"]),
 		peerHandback:     boolean(origin["handback"]),
-		peerVerifiedPid:  verifiedPid(origin["verifiedPeerPid"]),
 		peerSessionName:  strings.TrimSpace(str(origin["name"])),
 		peerDeliveryID:   str(origin["msg_id"]),
 	}
@@ -492,18 +487,7 @@ func (c *Converter) frameAgent(at Attribution, env envelope) string {
 // small readers over decoded JSON
 // ---------------------------------------------------------------------------
 
-func str(v any) string { s, _ := v.(string); return s }
-
-// verifiedPid reads the vendor's verified peer pid: a positive whole number
-// that fits a pid, or zero for anything else (absent, fractional, negative),
-// which is the vendor saying it verified none.
-func verifiedPid(v any) uint32 {
-	f, ok := v.(float64)
-	if !ok || f <= 0 || f != float64(uint32(f)) {
-		return 0
-	}
-	return uint32(f)
-}
+func str(v any) string   { s, _ := v.(string); return s }
 func boolean(v any) bool { b, _ := v.(bool); return b }
 
 func obj(v any) map[string]any {

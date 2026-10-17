@@ -36,11 +36,11 @@ import (
 //     place (place.go): the timestamp of the record that opened its unit and
 //     its index among the record's entries. The re-read is what gives every
 //     row stored without a place its recorded one.
-//   - 3: an inter-session peer message states who sent it (the verified pid
-//     and its instant, the sender's session name, the delivery id), and a
-//     cross-session SendMessage settles on the peer_session recipient rather
-//     than an agent minted from the addressed name. The re-read is what lets a
-//     stored message name the workspace that sent it.
+//   - 3: an inter-session peer message states the sender's session name and
+//     the delivery id, and a cross-session SendMessage settles on the
+//     peer_session recipient, carrying the same id, rather than on an agent
+//     minted from the addressed name. The re-read is what lets both ends of a
+//     stored message be joined to the workspaces that hold them.
 const ConversionVersion uint32 = 3
 
 // RetiredKeys answers the upsert keys a record could own that the entries it

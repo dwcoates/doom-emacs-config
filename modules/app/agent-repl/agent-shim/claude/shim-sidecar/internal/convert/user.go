@@ -233,19 +233,13 @@ func (c *Converter) peerMessage(record, message map[string]any, at Attribution, 
 	return c.landPeerMessage(at, agent, PeerKey(env.uuid), "peer_message", peer)
 }
 
-// interSessionOf states WHO SENT an inter-session message, as the vendor states
-// it, read exactly as the stream plane reads it (shim/src/convert/peer.ts
-// interSessionOf): the verified pid with the record's own instant, the sender's
-// asserted session name, and the delivery id. Each is UNSET when the vendor
-// states none, never a stand-in.
+// interSessionOf states what the vendor says about who sent an inter-session
+// message, read exactly as the stream plane reads it
+// (shim/src/convert/peer.ts interSessionOf): the sender's asserted session name,
+// and the delivery id its own SendMessage result carries. Each is UNSET when the
+// vendor states none, never a stand-in.
 func interSessionOf(env envelope) *conversationv1.PeerMessageInterSession {
 	inter := &conversationv1.PeerMessageInterSession{}
-	if env.peerVerifiedPid != 0 {
-		inter.SenderProcess = &conversationv1.PeerMessageSenderProcess{
-			VerifiedPid:  env.peerVerifiedPid,
-			ReceivedAtMs: env.timestampMs,
-		}
-	}
 	if env.peerSessionName != "" {
 		inter.SenderSessionName = &conversationv1.PeerMessageSenderSessionName{Text: env.peerSessionName}
 	}
