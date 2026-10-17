@@ -399,8 +399,13 @@
      each size to its own content) is what lands their bottom rules flush at the
      same y: the topbar is otherwise the taller of the two, since its select
      pickers outsize the sidebar's plain title, and the two dividers drift apart.
-     Comfortably clears the 0.85rem select at any renderer's control metrics. */
-  --topbar-h: 2.75rem;
+     Comfortably clears the 0.85rem select at any renderer's control metrics.
+     It is the strip's BAND (where the flanks and the summary sit) plus the
+     NAME LINE below it (owner ruling, 2026-10-17: "the topbar should be
+     slightly taller, with the extra space being downward"). */
+  --topbar-band-h: 2.75rem;
+  --topbar-name-h: 0.75rem;
+  --topbar-h: calc(var(--topbar-band-h) + var(--topbar-name-h));
   /* THE STRIP'S FRAME MEASURE (owner ruling 1, 2026-09-13, narrowed
      2026-09-14). The padding at the strip's own left and right edges and the
      gap between the row's three TRACKS are the SAME distance, so they are the
@@ -7211,7 +7216,10 @@ ar-button.outcome-marker-pill {
   grid-template-columns: auto minmax(0, 1fr) auto;
   width: 100%;
   min-width: 0;
-  align-items: center;
+  /* THE EXTRA HEIGHT IS DOWNWARD. Every cell hangs from the top, and the
+     flanks keep the band's height, so they sit exactly where they sat before
+     the strip grew; only the heading reaches into the name line below. */
+  align-items: start;
   /* ONE TOKEN, BOTH FRAME DISTANCES (owner ruling 1). The gap between the
      three TRACKS and the inset at the strip's edges are the same measure by
      definition, so a change to one is a change to both and they cannot drift
@@ -7235,6 +7243,7 @@ ar-button.outcome-marker-pill {
 .topbar-left {
   display: flex;
   align-items: center;
+  height: var(--topbar-band-h);
   gap: var(--topbar-chip-gap);
   justify-self: start;
   min-width: 0;
@@ -7242,6 +7251,7 @@ ar-button.outcome-marker-pill {
 .topbar-right {
   display: flex;
   align-items: center;
+  height: var(--topbar-band-h);
   gap: var(--topbar-right-chip-gap);
   justify-self: end;
   min-width: 0;
@@ -7257,22 +7267,64 @@ ar-button.outcome-marker-pill {
 .topbar-right > :not(:has(ar-button)) {
   padding-inline: var(--topbar-right-chip-inset);
 }
-/* THE MIDDLE TRACK: THE SPACE BETWEEN THE FLANKS, AND THE TEXT CENTERED IN IT.
-   The track is whatever the two `auto` flanks left over, so `text-align:
-   center` puts the same clear space on the left and the right of the visible
-   text — the owner's rule of 2026-09-14. The rest of this rule is what happens
-   when the text does not fit that space: ellipsis rather than wrapping,
-   because the strip is one line high by definition and the whole title is in
+/* THE MIDDLE TRACK: THE SPACE BETWEEN THE FLANKS, AND THE HEADING CENTERED IN
+   IT. The track is whatever the two `auto` flanks left over, and the heading
+   is centered in it (`justify-self: center`), so the same clear space sits on
+   the left and the right of the visible text — the owner's rule of
+   2026-09-14. A non-stretched grid item sizes to fit its content, so the
+   heading box HUGS ITS LINES, and each line is centered in that box
+   (`justify-items: center`), which centers the name under the SUMMARY'S TEXT
+   rather than under the strip or the track (owner ruling, 2026-10-17). Two
+   fixed rows: the band the flanks share, and the name line below it.
+   `min-width: 0` and `max-width: 100%` are what let the heading shrink below
+   its content instead of pushing a flank off the strip. */
+.topbar-heading {
+  display: grid;
+  grid-template-rows: var(--topbar-band-h) var(--topbar-name-h);
+  justify-items: center;
+  justify-self: center;
+  min-width: 0;
+  max-width: 100%;
+}
+/* What happens when a line does not fit: ellipsis rather than wrapping,
+   because each line is one line high by definition and the whole text is in
    the tooltip, and the clipping is symmetric because the box it clips in is
-   itself the space between the groups. `min-width: 0` is what lets the track
-   shrink below the title's content instead of pushing a flank off the strip. */
-.topbar-title {
+   itself centered between the groups. */
+.topbar-title,
+.topbar-workspace-name {
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
+}
+/* THE SUMMARY: purple and italic, on the band (owner ruling, 2026-10-17). */
+.topbar-title {
+  grid-row: 1;
+  align-self: center;
+  font-style: italic;
   color: var(--tool-title);
+}
+/* THE WORKSPACE NAME: the foreground color, bold, and a step larger than the
+   summary and every cell of the band (owner ruling, 2026-10-17: "row 1.5,
+   just for the workspace name"). Under a summary it hangs from the name line's
+   top, lifted a touch toward the summary so the two read as one heading. */
+.topbar-workspace-name {
+  grid-row: 2;
+  align-self: start;
+  margin-top: -0.5rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg);
+}
+/* WITH NO SUMMARY THE NAME TAKES THE SUMMARY'S PLACE, centered on the band,
+   and the name line below stays empty. */
+.topbar-heading:not(:has(.topbar-title)) .topbar-workspace-name {
+  grid-row: 1;
+  align-self: center;
+  margin-top: 0;
 }
 
 /* The account chip, ported from #account: quiet text that only shows its

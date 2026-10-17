@@ -134,6 +134,16 @@ describe("the title and session line", () => {
     expect(harness.text(".topbar-title")).toBe("port the webapp");
   });
 
+  it("draws the served workspace name on its own line in the heading", async () => {
+    // Arrange / Act
+    await withTopbar({ title: "port the webapp", workspaceName: "overhaul" });
+    // Assert
+    expect([...(harness.$(".topbar-heading")?.children ?? [])].map((el) => el.textContent)).toEqual([
+      "port the webapp",
+      "overhaul",
+    ]);
+  });
+
   it("reveals the session line below the strip", async () => {
     // Arrange
     await withTopbar({ sessionLine: "session 3 of the overhaul" });
@@ -1435,13 +1445,14 @@ describe("the strip's spacing", () => {
     }
   });
 
-  it("draws the title between the two flank groups", async () => {
+  it("draws the heading between the two flank groups", async () => {
     // Arrange / Act
     const row = await mountedRow();
-    // Assert: the middle track holds the title and nothing else does.
+    // Assert: the middle track holds the heading (the summary over the
+    // workspace's name) and nothing else does.
     expect([...row.children].map((el) => el.className.split(" ")[0])).toEqual([
       "topbar-left",
-      "topbar-title",
+      "topbar-heading",
       "topbar-right",
     ]);
   });

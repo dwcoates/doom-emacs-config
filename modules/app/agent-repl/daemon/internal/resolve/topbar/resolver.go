@@ -227,7 +227,8 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 		return nil, nil
 	}
 	return &frontendv1.TopbarView{
-		Title:                &frontendv1.TopbarTitle{Text: r.title(s)},
+		Title:                title(s),
+		WorkspaceName:        &frontendv1.TopbarWorkspaceName{Text: s.naming.Name},
 		SessionLine:          &frontendv1.TopbarSessionLine{Text: r.sessionLine(s)},
 		ModelSelector:        r.modelSelector(s),
 		EffortSelector:       effortSelector(s),
@@ -240,39 +241,25 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	}, nil
 }
 
-// title composes the title line: the workspace's name, plus the branch when the
-// branch is worth showing. A branch is worth showing when it says something the
-// title does not already say, so two comparisons drop it: a workspace sitting on
-// its repository's DEFAULT branch is named by its name alone, and so is one
-// whose branch reads exactly like THE NAME ALREADY SHOWN — every worktree
-// workspace whose branch is minted from its name would otherwise print that
-// name twice and fill the strip's title cap with the repetition. The comparison
-// is against the name as shown, after the session-title and naming fallbacks,
-// because what is doubled is what the reader sees.
-func (r *resolver) title(s *wsState) string {
-	// THE TITLE IS THE WORKSPACE SUMMARY the daemon distills from every
-	// prompt the user sent (owner ruling, 2026-10-14). It answers "what is
-	// this workspace's task" far better than a directory's name, so it takes
-	// the name's place. The BRANCH is unaffected — it is a different fact, and
-	// the rule about when it is worth showing is unchanged.
-	name := s.synthesizedTitle
-	if name == "" {
-		// THE VENDOR'S OWN ai-title stands in until the first distillation
-		// lands (owner ruling, 2026-09-13, demoted 2026-10-14): it still beats
-		// the bare workspace name below.
-		name = s.sessionTitle
+// title is the title line: the workspace's generated summary, or nil while
+// none exists.
+//
+// THE TITLE IS THE SUMMARY AND NOTHING ELSE (owner ruling, 2026-10-17). The
+// daemon's own distillation of every prompt the user sent comes first; the
+// vendor's own ai-title stands in only until the first distillation lands
+// (owner rulings, 2026-09-13 and 2026-10-14). The workspace's name and its
+// branch are never composed into it, as a suffix or as a stand-in: the name is
+// its own element (TopbarWorkspaceName), drawn beneath the summary, and a
+// workspace with no summary yet draws no title line at all.
+func title(s *wsState) *frontendv1.TopbarTitle {
+	switch {
+	case s.synthesizedTitle != "":
+		return &frontendv1.TopbarTitle{Text: s.synthesizedTitle}
+	case s.sessionTitle != "":
+		return &frontendv1.TopbarTitle{Text: s.sessionTitle}
+	default:
+		return nil
 	}
-	if name == "" {
-		name = s.naming.Title
-	}
-	if name == "" {
-		name = s.naming.Slug
-	}
-	branch := s.naming.Branch
-	if branch == "" || branch == s.naming.DefaultBranch || branch == name {
-		return name
-	}
-	return joinNonEmpty(" · ", name, branch)
 }
 
 // sessionLine composes the identity line: which vendor session, which account
@@ -535,10 +522,10 @@ func (r *resolver) McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView {
 
 // ---- daemon-fact setters --------------------------------------------------
 
-// SetNaming installs the WSM-derived title and session line.
+// SetNaming installs the WSM-derived workspace name and session line.
 func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 	r.mutate(ws, "daemon.topbar.set_naming", "the topbar took the workspace naming",
-		dlog.Context{"branch": naming.Branch, "default_branch": naming.DefaultBranch},
+		dlog.Context{"name": naming.Name, "config_dir": naming.ConfigDir},
 		func(s *wsState) {
 			s.naming = naming
 			s.namingSet = true
@@ -547,9 +534,9 @@ func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 
 // SetSynthesizedTitle installs the daemon's OWN one-line summary of the
 // conversation. It is the first precedence in the title, ahead of the vendor's
-// ai-title and the workspace name. An empty text retracts it (the title falls
-// back to the vendor's ai-title, else the name), which is how the synthesizer
-// drops a stale title after a /clear.
+// ai-title. An empty text retracts it (the title falls back to the vendor's
+// ai-title, else no title line), which is how the synthesizer drops a stale
+// title after a /clear.
 func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
 	r.mutate(ws, "daemon.topbar.set_synthesized_title", "the topbar took a synthesized title",
 		dlog.Context{"present": title != ""},

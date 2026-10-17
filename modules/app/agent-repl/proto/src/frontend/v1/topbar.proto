@@ -1,13 +1,17 @@
 // topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
 // connectivity dot and, right beside it, the account label it qualifies —
-// one cell. Center: the title, centered on ITS OWN content against the whole
-// strip, with all free width split evenly either side of it — the flank
-// groups never spread and never push it. Right, tight, in order: model
-// selector, context chip, persistent-wifi chip, warning chip at the far edge.
-// The strip stands off the window's edges exactly as far as its cells stand
-// off each other.
+// one cell. Center: the heading — the workspace's generated summary, and on a
+// line beneath it the workspace's name — centered in the space between the
+// flank groups, which never spread and never push it. Right, tight, in order:
+// model selector, context chip, persistent-wifi chip, warning chip at the far
+// edge. The strip stands off the window's edges exactly as far as its cells
+// stand off each other. The flanks and the summary share the strip's top
+// band; the name line is a band below it, and is centered under the summary
+// text rather than under the strip. A workspace with no summary draws its
+// name in the summary's place on the top band.
 //
-//   │● work@…com         ABC/fix-flaky-reconnect    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
+//   │● work@…com    Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
+//   │                    fix-flaky-reconnect                                      │
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
 // options, the context chip's usage breakdown, the warning dropdown and
@@ -55,8 +59,11 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // One workspace's topbar, resolved completely by the daemon. The client
 // renders each element verbatim and derives nothing.
 message TopbarView {
-  // The title line.
-  TopbarTitle title = 1;
+  // The title line: the workspace's generated summary, drawn in the heading's
+  // top line. OPTIONAL BY PRESENCE: UNSET while no summary exists for the
+  // workspace, and the client then draws the workspace's name in the
+  // summary's place. The title's TEXT is never anything but a summary.
+  optional TopbarTitle title = 1;
   // The session identity line (hover/expanded state).
   TopbarSessionLine session_line = 2;
   // The model selector: current selection and the selectable list. OPTIONAL
@@ -110,6 +117,11 @@ message TopbarView {
   // for the same reason and with the same no-session drawing as the model
   // selector.
   optional TopbarEffortSelector effort_selector = 14;
+  // The workspace's name, drawn on the heading's second line, beneath the
+  // title and centered under the title's text, or in the title's place when
+  // the title is unset. ALWAYS SET: every workspace has a name, summarized or
+  // not.
+  TopbarWorkspaceName workspace_name = 15;
 }
 
 // THE PERSISTENT-WIFI CHIP: one wifi glyph stating two facts about the
@@ -253,10 +265,24 @@ message TopbarAccountOption {
   bool current = 4;
 }
 
-// The title line the topbar shows.
+// The title line the topbar shows: the workspace's generated summary, one
+// imperative sentence stating the workspace's task. It is a summary ONLY —
+// the daemon's own distillation of the user's prompts, or the vendor's own
+// conversation title until the first distillation lands — and never carries
+// the workspace's name or its branch, as a suffix or as a stand-in; the name
+// is TopbarWorkspaceName's, drawn on its own line.
 message TopbarTitle {
-  // Pre-composed (workspace name, or name + branch when the daemon resolves a
-  // branch worth showing); the client never concatenates identity fragments.
+  // The summary sentence, verbatim. Never empty when the title is set.
+  string text = 1;
+}
+
+// The workspace's name as the registry holds it: drawn on the heading's
+// second line, centered under the title's text, or in the title's place when
+// there is no title. Its own element because it is drawn in its own place and
+// styled its own way (bold, and larger than the summary), apart from the
+// summary above it.
+message TopbarWorkspaceName {
+  // The workspace's registry name, verbatim.
   string text = 1;
 }
 

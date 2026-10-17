@@ -332,7 +332,7 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 	if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
 		return nil, fmt.Errorf("open %q: bind the restored workspace's views: %w", record.ID, err)
 	}
-	if err := v.publishNaming(ctx, log, record, repository.DefaultBranch); err != nil {
+	if err := v.publishNaming(ctx, log, record); err != nil {
 		log.Error(opOpen, "could not publish the restored workspace's naming", dlog.Context{
 			"dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
 		})

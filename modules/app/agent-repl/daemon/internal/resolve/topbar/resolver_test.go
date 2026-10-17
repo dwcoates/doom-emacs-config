@@ -75,7 +75,7 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 func (h *harness) ready(t *testing.T) {
 	t.Helper()
 	h.r.SetNaming(testWS, Naming{
-		Title: "fix-flaky-reconnect", Branch: "main", DefaultBranch: "main",
+		Name:      "fix-flaky-reconnect",
 		ConfigDir: "/Users/dev/.claude",
 	})
 	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
@@ -226,7 +226,7 @@ func TestTheLastRequiredFactPublishesTheWholeView(t *testing.T) {
 	// Assert
 	view := h.view(t)
 	switch {
-	case view.GetTitle() == nil, view.GetSessionLine() == nil, view.GetModelSelector() == nil,
+	case view.GetWorkspaceName() == nil, view.GetSessionLine() == nil, view.GetModelSelector() == nil,
 		view.GetConnectivity() == nil, view.GetWarnings() == nil, view.GetContext() == nil,
 		view.GetAccount() == nil, view.GetPermissionModePicker() == nil:
 		t.Fatalf("view = %+v, want every element resolved", view)
@@ -238,7 +238,7 @@ func TestAnIncompleteWorkspaceRecordsWhatItAwaits(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 
 	// Assert
 	records := h.log.Records()
@@ -260,97 +260,6 @@ func TestAnIdenticalRepublishIsDeduplicated(t *testing.T) {
 	// Assert
 	if h.view(t) != first {
 		t.Fatalf("an identical view was republished; the topic deduplicates by proto.Equal")
-	}
-}
-
-func TestTheTitleIsTheNameAloneOnTheDefaultBranch(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-
-	// Act
-	h.r.SetNaming(testWS, Naming{
-		Title: "fix-flaky-reconnect", Branch: "main", DefaultBranch: "main", ConfigDir: "/root",
-	})
-
-	// Assert
-	if got := h.view(t).GetTitle().GetText(); got != "fix-flaky-reconnect" {
-		t.Fatalf("title = %q, want the name alone: the default branch says nothing", got)
-	}
-}
-
-func TestTheTitleShowsABranchThatDiffersFromTheDefault(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-
-	// Act
-	h.r.SetNaming(testWS, Naming{
-		Title: "ABC", Branch: "fix-flaky-reconnect", DefaultBranch: "main", ConfigDir: "/root",
-	})
-
-	// Assert
-	if got := h.view(t).GetTitle().GetText(); got != "ABC · fix-flaky-reconnect" {
-		t.Fatalf("title = %q, want the name and the branch", got)
-	}
-}
-
-func TestTheTitleDropsABranchThatSaysNothing(t *testing.T) {
-	tests := []struct {
-		name         string
-		naming       Naming
-		sessionTitle string
-		want         string
-	}{
-		{
-			name:   "the default branch says nothing",
-			naming: Naming{Title: "fix-flaky-reconnect", Branch: "main", DefaultBranch: "main", ConfigDir: "/root"},
-			want:   "fix-flaky-reconnect",
-		},
-		{
-			name:   "a branch equal to the name shown says nothing",
-			naming: Naming{Title: "ABC/chess960-review-failures-enm", Branch: "ABC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
-			want:   "ABC/chess960-review-failures-enm",
-		},
-		{
-			name:         "a branch equal to the slug still differs from the vendor title shown",
-			naming:       Naming{Slug: "ABC/chess960-review-failures-enm", Branch: "ABC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
-			sessionTitle: "Add SPC j keybinding support",
-			want:         "Add SPC j keybinding support · ABC/chess960-review-failures-enm",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			h.ready(t)
-
-			// Act
-			h.r.SetNaming(testWS, tt.naming)
-			if tt.sessionTitle != "" {
-				h.r.OnSessionUpdate(testWS, sessionTitle(tt.sessionTitle))
-			}
-
-			// Assert
-			if got := h.view(t).GetTitle().GetText(); got != tt.want {
-				t.Fatalf("title = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTheTitleFallsBackToTheSlug(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-
-	// Act
-	h.r.SetNaming(testWS, Naming{Slug: "ws-slug", DefaultBranch: "main", ConfigDir: "/root"})
-
-	// Assert
-	if got := h.view(t).GetTitle().GetText(); got != "ws-slug" {
-		t.Fatalf("title = %q, want the slug when no display title was set", got)
 	}
 }
 
@@ -859,7 +768,7 @@ func TestTheTopbarPublishesOnTheWorkspaceFactsAloneWithNoSession(t *testing.T) {
 	// Arrange: the two workspace facts and NOT ONE session fact — exactly what
 	// a hibernated or cold-gated workspace has after a daemon boot.
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "fix-flaky-reconnect", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", ConfigDir: "/root"})
 
 	// Act
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
@@ -874,7 +783,7 @@ func TestTheTopbarPublishesOnTheWorkspaceFactsAloneWithNoSession(t *testing.T) {
 func TestTheSessionLessStripDrawsEveryCellItAlwaysDraws(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "fix-flaky-reconnect", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
@@ -886,7 +795,7 @@ func TestTheSessionLessStripDrawsEveryCellItAlwaysDraws(t *testing.T) {
 		element string
 		present bool
 	}{
-		{"title", view.GetTitle() != nil},
+		{"workspace_name", view.GetWorkspaceName() != nil},
 		{"session_line", view.GetSessionLine() != nil},
 		{"connectivity", view.GetConnectivity() != nil},
 		{"account", view.GetAccount() != nil},
@@ -941,7 +850,7 @@ func TestTheParkedStripsChipStatesTheContextTheSessionHeld(t *testing.T) {
 func TestAChipWithNoContextEverStatesZero(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 
 	// Act
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
@@ -955,7 +864,7 @@ func TestAChipWithNoContextEverStatesZero(t *testing.T) {
 func TestTheColdGatedChipStatesWhatAColdReadWouldReread(t *testing.T) {
 	// Arrange: the gate's own count is what the shim read for THIS resume.
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "explanation-engine", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
@@ -1112,7 +1021,7 @@ func TestTheStripGetsItsControlsBackWhenTheColdGateIsAnswered(t *testing.T) {
 	// Arrange: the gate stood before any session fact, which is the real
 	// order — the shim refuses the start, and only the answer opens a session.
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "explanation-engine", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
 
@@ -1132,7 +1041,7 @@ func TestTheStripGetsItsControlsBackWhenTheColdGateIsAnswered(t *testing.T) {
 func TestTheSessionLessStripIsRecordedAtInfo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "explanation-engine", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "explanation-engine", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
@@ -1175,7 +1084,7 @@ func TestTheIncompleteTopbarIsRecordedAtInfoWithItsGatesNamed(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 
 	// Assert: a blank topbar has to be diagnosable at the default level.
 	records := h.log.Records()
@@ -1203,34 +1112,62 @@ func TestTheTitleIsTheVendorsSummaryWhenItHasStatedOne(t *testing.T) {
 	}
 }
 
-func TestTheTitleIsTheWorkspaceNameUntilTheVendorStatesASummary(t *testing.T) {
+func TestThereIsNoTitleUntilASummaryExists(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
 	h.ready(t)
 
-	// Assert
-	if got, want := h.view(t).GetTitle().GetText(), "fix-flaky-reconnect"; got != want {
-		t.Fatalf("title = %q, want %q", got, want)
+	// Assert: nothing stands in for a summary, the workspace's name least of all.
+	if got := h.view(t).GetTitle(); got != nil {
+		t.Fatalf("title = %v, want none before a summary exists", got)
 	}
 }
 
-func TestTheVendorsSummaryKeepsTheBranchBesideIt(t *testing.T) {
-	// Arrange: a branch worth showing is a DIFFERENT fact from the name the
-	// summary replaces, so the rule about it is unchanged.
+func TestTheWorkspaceNameIsItsOwnElement(t *testing.T) {
+	tests := []struct {
+		name      string
+		summarize func(h *harness)
+	}{
+		{name: "with no summary", summarize: func(*harness) {}},
+		{name: "beside the vendor's summary", summarize: func(h *harness) {
+			h.r.OnSessionUpdate(testWS, sessionTitle("Add SPC j keybinding support"))
+		}},
+		{name: "beside the daemon's synthesis", summarize: func(h *harness) {
+			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.summarize(h)
+
+			// Assert
+			if got, want := h.view(t).GetWorkspaceName().GetText(), "fix-flaky-reconnect"; got != want {
+				t.Fatalf("workspace name = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestTheTitleNeverCarriesTheNameOrTheBranch(t *testing.T) {
+	// Arrange: a workspace whose branch is minted from its name, the shape that
+	// used to print "<summary> · <name>".
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetNaming(testWS, Naming{
-		Title: "fix-flaky-reconnect", Branch: "ABC/fix", DefaultBranch: "main", ConfigDir: "/root",
-	})
+	h.r.SetNaming(testWS, Naming{Name: "ABC/fix", ConfigDir: "/root"})
 
 	// Act
 	h.r.OnSessionUpdate(testWS, sessionTitle("Add SPC j keybinding support"))
 
 	// Assert
-	if got, want := h.view(t).GetTitle().GetText(), "Add SPC j keybinding support · ABC/fix"; got != want {
-		t.Fatalf("title = %q, want %q", got, want)
+	if got, want := h.view(t).GetTitle().GetText(), "Add SPC j keybinding support"; got != want {
+		t.Fatalf("title = %q, want the summary alone %q", got, want)
 	}
 }
 
@@ -1309,7 +1246,7 @@ func TestAnEmptySynthesizedTitleFallsBackToTheVendorsSummary(t *testing.T) {
 	}
 }
 
-func TestAnEmptySynthesizedTitleFallsBackToTheWorkspaceName(t *testing.T) {
+func TestARetractedSynthesisWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
@@ -1319,8 +1256,8 @@ func TestAnEmptySynthesizedTitleFallsBackToTheWorkspaceName(t *testing.T) {
 	h.r.SetSynthesizedTitle(testWS, "")
 
 	// Assert
-	if got, want := h.view(t).GetTitle().GetText(), "fix-flaky-reconnect"; got != want {
-		t.Fatalf("title = %q, want %q", got, want)
+	if got := h.view(t).GetTitle(); got != nil {
+		t.Fatalf("title = %v, want none: the workspace name never stands in", got)
 	}
 }
 

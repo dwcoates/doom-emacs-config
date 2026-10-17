@@ -154,6 +154,7 @@ var layout3Undo = map[int][]string{
 	53: {`DROP TABLE merge_racing_disabled`},
 	54: {`ALTER TABLE workspaces DROP COLUMN status_changed_at`},
 	55: {`DROP TABLE merge_queue_subscriptions`},
+	56: {`DROP TABLE workspace_summaries`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

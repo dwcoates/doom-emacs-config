@@ -6,14 +6,18 @@ import {
   TopbarConnectivitySchema,
   TopbarSessionLineSchema,
   TopbarTitleSchema,
+  TopbarWorkspaceNameSchema,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
-  bindTitleSessionReveal,
+  bindHeadingSessionReveal,
+  drawHeadingLine,
   drawTopbarAccount,
   drawTopbarConnectivity,
+  drawTopbarHeading,
   drawTopbarSessionLine,
   drawTopbarTitle,
+  drawTopbarWorkspaceName,
 } from "../../src/topbar/strip.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { openPanel, topbarContext } from "./fixtures.js";
@@ -55,13 +59,13 @@ describe("drawTopbarAccount", () => {
   });
 });
 
-describe("bindTitleSessionReveal", () => {
-  it("opens the same session line the chip does, the title being the session's own door", () => {
+describe("bindHeadingSessionReveal", () => {
+  it("opens the same session line the chip does, the heading being the session's own door", () => {
     // ARRANGE
     const { host, tc } = topbarContext();
     const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
-    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    bindHeadingSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
     // ACT
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // ASSERT
@@ -72,7 +76,7 @@ describe("bindTitleSessionReveal", () => {
     const { host, tc } = topbarContext();
     const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
-    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    bindHeadingSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
     expect(title.getAttribute("data-reveal-anchor")).toBe("session");
   });
 
@@ -81,7 +85,7 @@ describe("bindTitleSessionReveal", () => {
     const { host, tc } = topbarContext();
     const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
-    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    bindHeadingSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // ACT
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -95,10 +99,10 @@ describe("bindTitleSessionReveal", () => {
     const { host, tc } = topbarContext();
     const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
-    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session one" }), tc);
+    bindHeadingSessionReveal(title, create(TopbarSessionLineSchema, { text: "session one" }), tc);
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // ACT
-    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session two" }), tc);
+    bindHeadingSessionReveal(title, create(TopbarSessionLineSchema, { text: "session two" }), tc);
     tc.reveals.refresh();
     // ASSERT
     expect(openPanel(host)?.textContent).toBe("session two");
@@ -108,7 +112,7 @@ describe("bindTitleSessionReveal", () => {
     const { host, tc } = topbarContext();
     const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
-    bindTitleSessionReveal(title, undefined, tc);
+    bindHeadingSessionReveal(title, undefined, tc);
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(openPanel(host)).toBeNull();
   });
@@ -117,7 +121,7 @@ describe("bindTitleSessionReveal", () => {
     const { host, tc } = topbarContext();
     const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
-    bindTitleSessionReveal(title, undefined, tc);
+    bindHeadingSessionReveal(title, undefined, tc);
     expect(title.getAttribute("data-reveal-anchor")).toBeNull();
   });
 });
@@ -179,8 +183,64 @@ describe("drawTopbarConnectivity", () => {
   });
 });
 
+const workspaceName = (text: string) => create(TopbarWorkspaceNameSchema, { text });
+
+describe("drawHeadingLine", () => {
+  it("draws the text verbatim under the given class", () => {
+    const line = drawHeadingLine("topbar-x", "some text");
+    expect([line.className, line.textContent]).toEqual(["topbar-x", "some text"]);
+  });
+
+  it("keeps the whole text in the tooltip", () => {
+    expect(drawHeadingLine("topbar-x", "some text").title).toBe("some text");
+  });
+
+  // Both heading lines are the one shape: a hand-rolled line that dropped the
+  // tooltip or the class would fail here.
+  it.each([
+    ["title", () => drawTopbarTitle(create(TopbarTitleSchema, { text: "t" })), "topbar-title"],
+    ["workspace name", () => drawTopbarWorkspaceName(workspaceName("t")), "topbar-workspace-name"],
+  ])("draws the %s as a heading line", (_, draw, className) => {
+    expect(draw().outerHTML).toBe(drawHeadingLine(className, "t").outerHTML);
+  });
+});
+
+describe("drawTopbarHeading", () => {
+  it("draws the summary above the workspace's name", () => {
+    // ACT
+    const heading = drawTopbarHeading(
+      create(TopbarTitleSchema, { text: "Fix the reconnect backoff" }),
+      workspaceName("fix-reconnect"),
+    );
+    // ASSERT
+    expect([...heading.children].map((el) => [el.className, el.textContent])).toEqual([
+      ["topbar-title", "Fix the reconnect backoff"],
+      ["topbar-workspace-name", "fix-reconnect"],
+    ]);
+  });
+
+  it("draws the name alone, and nothing in the summary's place, when there is no summary", () => {
+    // ACT
+    const heading = drawTopbarHeading(undefined, workspaceName("fix-reconnect"));
+    // ASSERT
+    expect([...heading.children].map((el) => el.className)).toEqual(["topbar-workspace-name"]);
+  });
+});
+
+describe("drawTopbarWorkspaceName", () => {
+  it("draws the name verbatim", () => {
+    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).textContent).toBe(
+      "fix-reconnect",
+    );
+  });
+
+  it("keeps the whole name in the tooltip, since the strip ellipsis-clips it", () => {
+    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).title).toBe("fix-reconnect");
+  });
+});
+
 describe("drawTopbarTitle", () => {
-  it("draws the pre-composed title verbatim", () => {
+  it("draws the summary verbatim", () => {
     expect(drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" })).textContent).toBe(
       "ABC/fix",
     );

@@ -15,8 +15,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 let browser: Browser;
 
+// THE BROWSER'S COLD START IS THE HOOK'S WORK, under the hook's bound: the
+// first page a freshly launched WebKit opens pays for its web process, which
+// alone outruns the 850ms a test may take, so the hook opens and closes one
+// and every test's boot is a warm one.
 beforeAll(async () => {
   browser = await webkit.launch();
+  await (await browser.newPage()).close();
 });
 
 afterAll(async () => {
@@ -108,27 +113,37 @@ describe("bootPage", () => {
 });
 
 describe("pageAssets", () => {
-  it("bundles the page module beside it and reads the real stylesheet", async () => {
-    // Arrange + Act
-    const { script, css } = await pageAssets("page-log.ts", "pageLog");
+  // THE BUNDLE IS THE HOOK'S WORK, under the hook's bound: a cold bundle
+  // (the first after a source change) outruns the 850ms a test may take, so
+  // the test only reads what the hook produced.
+  let assets: { script: string; css: string };
+  beforeAll(async () => {
+    assets = await pageAssets("page-log.ts", "pageLog");
+  });
+
+  it("bundles the page module beside it and reads the real stylesheet", () => {
     // Assert
-    expect([script.includes("installPageLogger"), css.includes("#feed-scroll")]).toEqual([true, true]);
+    expect([assets.script.includes("installPageLogger"), assets.css.includes("#feed-scroll")]).toEqual([true, true]);
   });
 });
 
 describe("the one boot", () => {
-  it("is the only place a WebKit suite boots its page by hand", async () => {
-    // Arrange
-    // This suite names the boot's own failure, so it is not one of them.
-    const suites = (await readdir(here)).filter(
+  // READING EVERY SUITE IS THE HOOK'S WORK, under the hook's bound, for the
+  // same reason as the bundle above; the test reads what the hook found.
+  // This suite names the boot's own failure, so it is not one of them.
+  let suites: string[];
+  const own: string[] = [];
+  beforeAll(async () => {
+    suites = (await readdir(here)).filter(
       (name) => name.endsWith(".webkit.test.ts") && name !== "boot-page.webkit.test.ts",
     );
-    // Act
-    const own: string[] = [];
     for (const name of suites) {
       const src = await readFile(path.join(here, name), "utf8");
       if (src.includes("the page failed to boot")) own.push(name);
     }
+  });
+
+  it("is the only place a WebKit suite boots its page by hand", () => {
     // Assert
     expect([suites.length > 5, own]).toEqual([true, []]);
   });

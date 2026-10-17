@@ -185,7 +185,7 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	// keeps the topic current. Bind first: Prime writes to the workspace's own
 	// log sink, which bindResolvers just resolved.
 	v.deps.Footer.Prime(record.ID)
-	if err := v.publishNaming(ctx, log, record, facts.DefaultBranch); err != nil {
+	if err := v.publishNaming(ctx, log, record); err != nil {
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}
 	// THIS DAEMON SERVES IT from here. The claim is what a handover hands
@@ -330,9 +330,11 @@ func (v *verbs) bindResolvers(log dlog.Logger, id wsm.WorkspaceID, dir string) e
 // publishNaming installs the topbar's naming and account lines: both are
 // DAEMON facts (the registry's name and branch, the repo-under-root account
 // rule) and no vendor frame carries either, so nothing else can state them.
+// It then restores the workspace's persisted summary, which outranks the name
+// in the title.
 // Until they are installed the topbar is not complete and publishes NO view at
 // all, so this is part of registration rather than of a session's bring-up.
-func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace, defaultBranch string) error {
+func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
 	configDir, err := v.accountRoot(ctx, record)
 	if err != nil {
 		return err
@@ -342,15 +344,15 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 	}
 	v.publishEffortSettings(log, record, configDir)
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
-		Slug:          record.Name,
-		Title:         record.Name,
-		Branch:        record.Branch,
-		DefaultBranch: defaultBranch,
-		ConfigDir:     configDir,
+		Name:      record.Name,
+		ConfigDir: configDir,
 	})
 	log.Debug(opRegister, "installed the topbar's naming and account lines", dlog.Context{
-		"workspace": string(record.ID), "config_dir": configDir, "default_branch": defaultBranch,
+		"workspace": string(record.ID), "config_dir": configDir,
 	})
+	if err := v.deps.Summaries.Restore(ctx, record.ID); err != nil {
+		return fmt.Errorf("restore the summary of %q: %w", record.ID, err)
+	}
 	return nil
 }
 
@@ -495,10 +497,6 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 	// has just restarted did not run Register for the rows it inherited, and
 	// an unbound resolver cannot serve their views.
 	global := v.deps.Log.Global()
-	defaults := make(map[wsm.RepoID]string, len(repositories))
-	for _, repo := range repositories {
-		defaults[repo.ID] = repo.DefaultBranch
-	}
 	for i := range workspaces {
 		ws := &workspaces[i]
 		// A WORKSPACE WHOSE WORKTREE IS GONE binds nothing: a merged or nuked
@@ -538,7 +536,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		if err := v.bindResolvers(global, ws.ID, ws.Dir); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
-		if err := v.publishNaming(ctx, global, *ws, defaults[ws.Repo]); err != nil {
+		if err := v.publishNaming(ctx, global, *ws); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}

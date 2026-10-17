@@ -681,7 +681,7 @@ func readyOther(t *testing.T, h *harness) {
 	if err := h.r.SetWorkspaceDir(otherWS, t.TempDir()); err != nil {
 		t.Fatalf("SetWorkspaceDir: %v", err)
 	}
-	h.r.SetNaming(otherWS, Naming{Title: "other", Branch: "main", DefaultBranch: "main", ConfigDir: "/Users/dev/.claude"})
+	h.r.SetNaming(otherWS, Naming{Name: "other", ConfigDir: "/Users/dev/.claude"})
 	h.r.SetAccount(otherWS, testAccount("dev@example.com"))
 }
 

@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/runecap"
+	"agent-repld/internal/wsm"
 )
 
 // opSynth is the operation the synthesizer's records carry.
@@ -25,7 +26,8 @@ const opSynth = "daemon.titlesynth"
 //
 // It is a sessionwatcher sink implemented structurally: OnSessionStarted,
 // OnPrompt and OnTurnEnded are the synthesis triggers, and OnContextReset
-// resets the digest hash. The heavy work — a shim call and a
+// resets the digest hash. Restore installs a workspace's persisted summary at
+// registration. The heavy work — a shim call and a
 // model call — runs on a goroutine so a trigger never blocks the watcher's
 // stream, and a per-workspace inflight/dirty guard collapses a burst of
 // triggers into at most one extra run.
@@ -41,6 +43,10 @@ type Synthesizer struct {
 
 // wsState is one workspace's synthesis bookkeeping.
 type wsState struct {
+	// loaded reports that the persisted summary has been read into this state
+	// (and installed, if one stood). Every path that reads or writes the
+	// cadence loads first, so a stored digest can never overwrite a newer one.
+	loaded bool
 	// lastHash is the digest hash of the last synthesis. A trigger whose
 	// digest hashes to this makes no model call.
 	lastHash string
@@ -61,8 +67,8 @@ type wsState struct {
 // New builds a synthesizer. It panics on a missing collaborator, because a
 // half-wired synthesizer is a boot defect, not a runtime condition.
 func New(deps Deps) *Synthesizer {
-	if deps.Digester == nil || deps.Headless == nil || deps.ConfigDirs == nil || deps.Titles == nil || deps.Log == nil {
-		panic("titlesynth: New requires Digester, Headless, ConfigDirs, Titles and Log")
+	if deps.Digester == nil || deps.Headless == nil || deps.ConfigDirs == nil || deps.Titles == nil || deps.Store == nil || deps.Log == nil {
+		panic("titlesynth: New requires Digester, Headless, ConfigDirs, Titles, Store and Log")
 	}
 	if deps.GatherTimeout == 0 {
 		deps.GatherTimeout = DefaultGatherTimeout
@@ -89,14 +95,80 @@ func (s *Synthesizer) OnTurnEnded(ws ids.WorkspaceID) { s.dispatch(ws) }
 
 // OnContextReset resets the digest hash so the next trigger re-synthesizes. A
 // /clear moves the boundary, so the last synthesis no longer describes the
-// conversation.
+// conversation. The reset is persisted too, so a restart before the next
+// distillation still finds it due.
 func (s *Synthesizer) OnContextReset(ws ids.WorkspaceID) {
+	ctx := context.Background()
+	if err := s.ensureLoaded(ctx, ws); err != nil {
+		return
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	st := s.stateFor(ws)
 	st.lastHash = ""
 	st.haveHash = false
 	st.lastPrompts = 0
+	s.mu.Unlock()
+	if err := s.deps.Store.ResetWorkspaceSummaryDigest(ctx, ws); err != nil {
+		s.deps.Log.Error(opSynth, "the summary's cleared digest could not be persisted; a restart before the next distillation keeps the old cadence", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+	}
+}
+
+// Restore installs the workspace's persisted summary into the topbar and seeds
+// its cadence from the digest it was distilled from. The daemon calls it when
+// it registers the workspace, before any session trigger can arrive, so a
+// restart draws the summary at once, however long the session stays down. A
+// second call, or one after a trigger already loaded the workspace, does
+// nothing.
+func (s *Synthesizer) Restore(ctx context.Context, ws ids.WorkspaceID) error {
+	return s.ensureLoaded(ctx, ws)
+}
+
+// ensureLoaded reads the workspace's persisted summary into its state once.
+//
+// THE LOAD IS DECIDED UNDER THE LOCK, after the read: whichever caller marks
+// the state loaded is the one that seeds it and installs the stored title, and
+// it installs while holding the lock, so every later install (which loads
+// first) lands after it. A stored summary therefore never overwrites a newer
+// one, whichever of Restore and a trigger reaches the workspace first.
+func (s *Synthesizer) ensureLoaded(ctx context.Context, ws ids.WorkspaceID) error {
+	s.mu.Lock()
+	loaded := s.stateFor(ws).loaded
+	s.mu.Unlock()
+	if loaded {
+		return nil
+	}
+
+	sum, found, err := s.deps.Store.WorkspaceSummaryOf(ctx, ws)
+	if err != nil {
+		s.deps.Log.Error(opSynth, "the persisted workspace summary could not be read", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.stateFor(ws)
+	if st.loaded {
+		return nil
+	}
+	st.loaded = true
+	if !found {
+		return nil
+	}
+	if d := sum.Digest; d != nil {
+		st.lastHash = d.Hash
+		st.haveHash = true
+		st.lastPrompts = d.Prompts
+		st.lastBoundary = d.Boundary
+	}
+	s.deps.Titles.SetSynthesizedTitle(ws, sum.Title)
+	s.deps.Log.Debug(opSynth, "restored the persisted workspace summary", dlog.Context{
+		"workspace": string(ws), "digest_reset": sum.Digest == nil,
+	})
+	return nil
 }
 
 // Wait blocks until every dispatched run has finished. It exists for a clean
@@ -158,6 +230,9 @@ func (s *Synthesizer) run(ws ids.WorkspaceID) {
 // the result. Every failure is best-effort and leaves the previous title
 // standing.
 func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
+	if err := s.ensureLoaded(ctx, ws); err != nil {
+		return
+	}
 	digest, ok := s.gather(ctx, ws)
 	if !ok {
 		return
@@ -176,7 +251,7 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 	// summary described a conversation that is gone.
 	if len(said) == 0 {
 		if digest.GetBoundary() == shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR {
-			s.retract(ws)
+			s.retract(ctx, ws)
 		}
 		return
 	}
@@ -205,8 +280,16 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 		return
 	}
 
-	s.deps.Titles.SetSynthesizedTitle(ws, title)
+	if err := s.deps.Store.PutWorkspaceSummary(ctx, ws, wsm.WorkspaceSummary{
+		Title:  title,
+		Digest: &wsm.SummaryDigest{Hash: hash, Prompts: len(prompts), Boundary: digest.GetBoundary()},
+	}); err != nil {
+		s.deps.Log.Error(opSynth, "the synthesized workspace title could not be persisted; it stands only until the daemon restarts", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+	}
 	s.mu.Lock()
+	s.deps.Titles.SetSynthesizedTitle(ws, title)
 	st = s.stateFor(ws)
 	st.lastHash = hash
 	st.haveHash = true
@@ -322,9 +405,14 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, said []
 }
 
 // retract drops a stale synthesized title and forgets its hash.
-func (s *Synthesizer) retract(ws ids.WorkspaceID) {
-	s.deps.Titles.SetSynthesizedTitle(ws, "")
+func (s *Synthesizer) retract(ctx context.Context, ws ids.WorkspaceID) {
+	if err := s.deps.Store.DropWorkspaceSummary(ctx, ws); err != nil {
+		s.deps.Log.Error(opSynth, "the retracted workspace summary could not be deleted; a restart restores it", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+	}
 	s.mu.Lock()
+	s.deps.Titles.SetSynthesizedTitle(ws, "")
 	st := s.stateFor(ws)
 	st.lastHash = ""
 	st.haveHash = false

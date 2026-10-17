@@ -907,18 +907,19 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 // Topbar
 // ---------------------------------------------------------------------------
 
-func TestTopbarTitleIsComposedFromTheWorkspacesNaming(t *testing.T) {
+func TestTopbarWorkspaceNameIsTheWorkspacesNameAndTheTitleIsAbsentUntilASummary(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
 
-	// Assert
-	got := awaitTopbar(t, f, topbar, "the composed title", func(v *frontendv1.TopbarView) bool {
-		return v.GetTitle().GetText() != ""
+	// Assert: the name rides its own element, and with no summary yet nothing
+	// stands in for the title.
+	got := awaitTopbar(t, f, topbar, "the workspace name", func(v *frontendv1.TopbarView) bool {
+		return v.GetWorkspaceName().GetText() != ""
 	})
-	if got.GetTitle().GetText() == "" {
-		t.Fatalf("topbar title = %q, want a composed, non-empty name", got.GetTitle().GetText())
+	if got.GetTitle() != nil {
+		t.Fatalf("topbar title = %v, want absent before any summary", got.GetTitle())
 	}
 }
 

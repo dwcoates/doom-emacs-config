@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -804,6 +805,56 @@ func TestRegisterBindsTheFooterToTheAccountRoot(t *testing.T) {
 	// Assert.
 	if got := f.footer.accounts[record.ID]; !slices.Equal(got, []string{"/config-work"}) {
 		t.Fatalf("footer account roots for %q = %v, want the root the session spends from", record.ID, got)
+	}
+}
+
+func TestRegisterRestoresTheWorkspaceSummary(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if !slices.Equal(f.summaries.restored, []ids.WorkspaceID{record.ID}) {
+		t.Fatalf("restored summaries = %v, want %q's", f.summaries.restored, record.ID)
+	}
+}
+
+func TestRegisterSurfacesAFailedSummaryRestore(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.summaries.err = errors.New("database is locked")
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "restore the summary") || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("Register = %v, want the restore's failure", err)
+	}
+}
+
+func TestPublishRegistryRestoresEveryInheritedWorkspacesSummary(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	f.summaries.restored = nil
+
+	// Act.
+	if err := f.verbs.PublishRegistry(context.Background()); err != nil {
+		t.Fatalf("PublishRegistry: %v", err)
+	}
+
+	// Assert.
+	if !slices.Equal(f.summaries.restored, []ids.WorkspaceID{record.ID}) {
+		t.Fatalf("restored summaries = %v, want %q's", f.summaries.restored, record.ID)
 	}
 }
 

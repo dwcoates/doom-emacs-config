@@ -2379,6 +2379,8 @@ type fixture struct {
 	// visibilityEdges is every workspace whose hide or show the cache keeper
 	// was told of.
 	visibilityEdges []ids.WorkspaceID
+	// summaries is the summary restorer registration asks.
+	summaries *fakeSummaries
 	// topbarParked is every park state the topbar seam was handed, in order.
 	topbarParked []bool
 	// topbarColdGates is every cold-gate state the topbar seam was handed, in
@@ -2413,27 +2415,28 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
-		home:     t.TempDir(),
-		db:       newFakeDB(),
-		git:      &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
-		account:  &fakeAccounts{configDir: "/config"},
-		queue:    newFakeQueue(),
-		merge:    newFakeMerge(),
-		rollout:  &fakeRollout{done: make(chan struct{}, 8)},
-		feed:     &fakeFeed{},
-		footer:   newFakeFooter(),
-		sidebar:  &fakeSidebar{},
-		health:   &fakeHealth{},
-		host:     &fakeHost{},
-		banners:  &fakeBanners{},
-		browser:  &fakeBrowser{},
-		fleet:    newFakeSessions(),
-		shim:     &fakeShim{},
-		owner:    &fakeOwnership{standing: StandingOwned},
-		cards:    newFakeCards(),
-		log:      newFakeSurfaces(),
-		headless: &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
-		briefs:   map[string]prompts.Prompt{},
+		home:      t.TempDir(),
+		db:        newFakeDB(),
+		git:       &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
+		account:   &fakeAccounts{configDir: "/config"},
+		queue:     newFakeQueue(),
+		merge:     newFakeMerge(),
+		rollout:   &fakeRollout{done: make(chan struct{}, 8)},
+		feed:      &fakeFeed{},
+		footer:    newFakeFooter(),
+		sidebar:   &fakeSidebar{},
+		health:    &fakeHealth{},
+		host:      &fakeHost{},
+		banners:   &fakeBanners{},
+		browser:   &fakeBrowser{},
+		fleet:     newFakeSessions(),
+		shim:      &fakeShim{},
+		owner:     &fakeOwnership{standing: StandingOwned},
+		cards:     newFakeCards(),
+		summaries: &fakeSummaries{},
+		log:       newFakeSurfaces(),
+		headless:  &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
+		briefs:    map[string]prompts.Prompt{},
 	}
 	f.queue.db = f.db
 	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
@@ -2476,7 +2479,8 @@ func newFixture(t *testing.T) *fixture {
 		CacheLapses: visibilityFunc(func(ws ids.WorkspaceID) {
 			f.visibilityEdges = append(f.visibilityEdges, ws)
 		}),
-		Cards: f.cards,
+		Cards:     f.cards,
+		Summaries: f.summaries,
 		ReadEffortSettings: func(configDir string) (claudesettings.Effort, error) {
 			f.effortReads = append(f.effortReads, configDir)
 			return f.effortSettings, f.effortErr
@@ -2865,6 +2869,18 @@ type standDownsFunc func(ws ids.WorkspaceID)
 func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
 
 // visibilityFunc adapts a function to CacheLapses.
+// fakeSummaries records every workspace whose summary was restored, and
+// answers err.
+type fakeSummaries struct {
+	restored []ids.WorkspaceID
+	err      error
+}
+
+func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
+	s.restored = append(s.restored, ws)
+	return s.err
+}
+
 type visibilityFunc func(ws ids.WorkspaceID)
 
 func (f visibilityFunc) VisibilityChanged(ws ids.WorkspaceID) { f(ws) }

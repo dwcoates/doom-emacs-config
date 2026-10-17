@@ -141,7 +141,7 @@ type wsState struct {
 	// arrived unbound and the invariant violation was stated at ERROR.
 	unboundReported bool
 
-	// naming is the WSM-derived title and session line.
+	// naming is the WSM-derived workspace name and session line.
 	naming Naming
 	// namingSet reports whether the naming has been installed.
 	namingSet bool
