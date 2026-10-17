@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/workspacenotice"
+	"agent-repld/internal/workspacesubs"
 )
 
 // TestEveryNotifierDeliversThroughTheSharedLoop pins that each notifier of an
@@ -16,6 +17,7 @@ func TestEveryNotifierDeliversThroughTheSharedLoop(t *testing.T) {
 	notifiers := map[string]reflect.Type{
 		"mergenotice.Service":     reflect.TypeOf(mergenotice.Service{}),
 		"workspacenotice.Service": reflect.TypeOf(workspacenotice.Service{}),
+		"workspacesubs.Service":   reflect.TypeOf(workspacesubs.Service{}),
 	}
 	for name, typ := range notifiers {
 		t.Run(name, func(t *testing.T) {
