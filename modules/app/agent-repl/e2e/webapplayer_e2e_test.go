@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -142,6 +143,21 @@ const WebappLayerSilence = 20 * time.Second
 // wlDriveArea's participant hold is written under.
 const WebappLayerHandoverTimeout = 60 * time.Second
 
+// wlBootBudget mirrors BOOT_BUDGET_MS in `webapp/test/webapp-layer/drive.ts`:
+// the child's own budget for its page's mount once vitest has collected it.
+const wlBootBudget = 5 * time.Second
+
+// WebappLayerColdMountTimeout bounds a COLD vitest child's boot up to its
+// page's mount: npm, node, vite's cold transform and collect of the module
+// graph, then the page's own boot. The first three are exactly the warm
+// driver's warm-up, so it is wlWarmupBound plus the page's wlBootBudget.
+//
+// WebappLayerTimeout DOES NOT BOUND IT: that constant is sized for an area run
+// whose cold transform the warm driver already paid. A full gate run
+// (2026-10-17) warmed its driver in 41s, and the restart-handover child, cold
+// in the same run, had not yet collected its file when the 45s bound fired.
+const WebappLayerColdMountTimeout = wlWarmupBound + wlBootBudget
+
 // TestWebappLayerParticipantHoldOutlivesTheWaitBound pins the bound the host
 // participant hold runs on.
 //
@@ -177,6 +193,16 @@ func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
 			bound: WebappLayerHandoverTimeout,
 			floor: harness.HandoverChainTimeout,
 		},
+		{
+			name:  "a cold child's mount bound outlives the warm driver's warm-up bound",
+			bound: WebappLayerColdMountTimeout,
+			floor: wlWarmupBound,
+		},
+		{
+			name:  "a cold child's mount bound outlives a functional area's bound",
+			bound: WebappLayerColdMountTimeout,
+			floor: WebappLayerTimeout,
+		},
 	}
 
 	for _, tc := range tests {
@@ -189,6 +215,33 @@ func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
 				t.Errorf("the participant hold's bound = %s, want more than %s", got, tc.floor)
 			}
 		})
+	}
+}
+
+// TestWlBootBudgetMirrorsTheChildsBootBudget pins wlBootBudget to
+// BOOT_BUDGET_MS in drive.ts, so the cold mount bound cannot drift below the
+// budget the child itself boots its page under.
+func TestWlBootBudgetMirrorsTheChildsBootBudget(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	src, err := os.ReadFile(filepath.Join("..", "webapp", "test", "webapp-layer", "drive.ts"))
+	if err != nil {
+		t.Fatalf("reading drive.ts: %v", err)
+	}
+	m := regexp.MustCompile(`export const BOOT_BUDGET_MS = ([0-9_]+);`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("drive.ts declares no `export const BOOT_BUDGET_MS = <n>;`")
+	}
+
+	// Act.
+	ms, err := strconv.Atoi(strings.ReplaceAll(string(m[1]), "_", ""))
+	if err != nil {
+		t.Fatalf("BOOT_BUDGET_MS %q: %v", m[1], err)
+	}
+
+	// Assert.
+	if got := time.Duration(ms) * time.Millisecond; got != wlBootBudget {
+		t.Errorf("drive.ts BOOT_BUDGET_MS = %s, wlBootBudget = %s, want them equal", got, wlBootBudget)
 	}
 }
 
@@ -604,9 +657,9 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 	// npm, node, vite's transform and collect, then the page's mount. Bounded
 	// by one daemon wait (HandoverChainTimeout, 15s) it failed under a full
 	// suite run while the child was still booting -- its siblings' walls that
-	// run reached 17s -- so it takes the bound measured for a child's wall.
+	// run reached 17s -- so it takes the bound of a cold child's boot.
 	w.Daemon.AwaitLogRecordWithin(harness.ClientLogPath(ws),
-		"the page's own mounted marker, logged through ClientLog", WebappLayerTimeout,
+		"the page's own mounted marker, logged through ClientLog", WebappLayerColdMountTimeout,
 		func(r harness.LogRecord) bool { return r.Operation == wlPageMountedOperation })
 
 	// Act: a real landed commit on the daemon's own checkout fires the real
