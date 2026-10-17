@@ -360,18 +360,8 @@ caller owns logging it, because only the caller knows what was lost."
          (delete-file tmp))
        (signal (car err) (cdr err))))))
 
-(defconst agent-repl--output-dir
-  (file-name-as-directory (agent-repl--global-state-file "output"))
-  "The daemon's workspace-command inbox at `~/.claude-emacs/output/'.
-Every workspace-creation flavor — an Emacs chord, the generation skill, an
-out-of-band agent — reaches the daemon by dropping a
-`workspace_commands_<uuid>.json' file here.  Emacs writes into this
-directory and never reads from it: the daemon is the sole watcher,
-claimant, and deleter.")
-
 (defconst agent-repl--legacy-state-migrations
   '(("~/.claude/emacs"                  . "")
-    ("~/.claude/output"                 . "output")
     ("~/.claude/workspace-notifications" . "workspace-notifications"))
   "Alist (LEGACY-ABS . NEW-RELATIVE) of state dirs to migrate once.
 LEGACY-ABS is the old location under the Claude CLI config dir;
