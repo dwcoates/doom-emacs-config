@@ -1064,3 +1064,23 @@ func TestEveryRunIsBuiltByBuildRun(t *testing.T) {
 		})
 	}
 }
+
+// TestAMergeBringsUpASessionThatIsRecordedButNotLive pins that a recorded
+// session does not stand in for a live one: a merge workspace records its
+// session at its create and brings it up only when its merge first needs a
+// turn, so the bring-up is asked whatever the record says.
+func TestAMergeBringsUpASessionThatIsRecordedButNotLive(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.sessions[theWorkspace] = wsm.Session{Workspace: theWorkspace}
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.ensureSession(context.Background(), theWorkspace)
+
+	// Assert
+	if err != nil || len(h.startedSessions) != 1 || h.startedSessions[0] != theWorkspace {
+		t.Fatalf("ensureSession = %v, starts %v; want the recorded session brought up", err, h.startedSessions)
+	}
+}

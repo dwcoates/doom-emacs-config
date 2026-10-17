@@ -572,8 +572,9 @@ type Deps struct {
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter
-	// StartSession starts a session for a workspace that has none, under the
-	// lease, because a configured prompt needs one (revival-is-implicit).
+	// StartSession brings a workspace's session up when none is live, under
+	// the lease, because a merge prompt needs one (revival-is-implicit). It
+	// answers at once for a live session.
 	StartSession StartSessionFunc
 	// StopSession ends and reaps a merged workspace's session before its
 	// worktree is removed. The process must lose its working directory only
