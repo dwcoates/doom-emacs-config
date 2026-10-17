@@ -72,8 +72,6 @@ func TestLayoutPaths(t *testing.T) {
 		{name: "shim socket", got: l.ShimSocket("abcdef0123456789"), want: "/state/sock/abcdef0123456789.sock"},
 		{name: "intent dir", got: l.IntentDir(), want: "/state/intent"},
 		{name: "intent manifest", got: l.IntentManifest(), want: "/state/intent/manifest.json"},
-		{name: "output dir", got: l.OutputDir(), want: "/state/output"},
-		{name: "command file glob", got: l.CommandFileGlob(), want: "/state/output/workspace_commands_*.json"},
 		{name: "held prompt dir", got: l.HeldPromptDir(), want: "/state/held-prompts"},
 	}
 	for _, tc := range tests {
@@ -124,7 +122,7 @@ func TestDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Root() error = %v", err)
 	}
-	want := []string{"/state", "/state/logs", "/state/sock", "/state/intent", "/state/output"}
+	want := []string{"/state", "/state/logs", "/state/sock", "/state/intent"}
 
 	// Act.
 	got := l.Dirs()

@@ -23,7 +23,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/chessboard"
-	"agent-repld/internal/commandfile"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -88,9 +87,6 @@ type Deps struct {
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
-	// Commands is the command-file ingress, wired here so the two ingresses
-	// share one dependency graph.
-	Commands commandfile.Ingress
 
 	// Ownership answers a workspace's SERVING STANDING, which is what every
 	// per-workspace rpc refuses on before it delegates.

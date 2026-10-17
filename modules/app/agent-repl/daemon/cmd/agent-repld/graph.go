@@ -26,7 +26,6 @@ import (
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/commandcatalog"
-	"agent-repld/internal/commandfile"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -97,8 +96,7 @@ import (
 //  4. the prompt queue, which delivers through the fleet;
 //  5. the rollout and drain controllers, whose server halves are forwarders;
 //  6. the merge orchestrator, the workspace verbs, the health reporter, the
-//     login manager, the prompt handler, the command-file ingress and the
-//     held-prompt ingress;
+//     login manager, the prompt handler, and the held-prompt ingress;
 //  7. the boot sequence's dependencies and the server's, returned together
 //     with the late bindings and the background loops.
 //
@@ -1258,36 +1256,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	detachedRef.bind(detached)
 	// THE RETARGET pairs the verb that records a new merge target with the
-	// notice queued through the same handler every prompt takes, so the rpc
-	// and the command file share one operation.
+	// notice queued through the same handler every prompt takes, as one
+	// operation.
 	retargeter := retarget.New(retarget.Deps{
 		Verbs:   verbs,
 		Prompts: handler,
 		Briefs:  merge.BriefsFrom(paths.PromptsDir),
 		Log:     p.Surfaces,
 	})
-	ingress, err := commandfile.New(commandfile.Deps{
-		Dir: p.Layout.OutputDir(),
-		// The ingress joins the pattern onto its own directory, so it takes
-		// the NAME pattern: the layout's CommandFileGlob is the whole path,
-		// and joining that onto the directory again yields a pattern that
-		// matches nothing at all.
-		Glob:     filepath.Base(p.Layout.CommandFileGlob()),
-		Verbs:    verbs,
-		DB:       p.DB,
-		Merge:    mergeOrchestrator,
-		Prompts:  handler,
-		Retarget: retargeter,
-		Home:     paths.Home,
-		// ONLY THE DAEMON THAT SERVES TAKES INTAKE (internal/intakegate): not
-		// a successor still joining, not an incumbent handing over.
-		Serves: rolloutController.ServesIntake,
-		Log:    p.Surfaces,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("agent-repld: build the command-file ingress: %w", err)
-	}
-
 	// THE HELD-PROMPT INGRESS is where a client leaves a prompt it could not
 	// hand to a live daemon. It submits through the same handler the rpc
 	// does, under the prompt's own idempotency key, so a prompt this daemon
@@ -1386,7 +1362,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			gateGovernor.Run(ctx)
 			return nil
 		}},
-		{Name: "command_file_ingress", Run: ingress.Run},
 		{Name: "held_prompt_ingress", Run: held.Run},
 		{Name: "shim_log_roll", Run: func(ctx context.Context) error {
 			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
@@ -1436,7 +1411,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Deploy:            deployer,
 			Health:            healthReporter,
 			Login:             loginManager,
-			Commands:          ingress,
 			Ownership:         ownership,
 			SuccessorAddress:  rolloutController.SuccessorAddress,
 			Feed:              feedResolver,
