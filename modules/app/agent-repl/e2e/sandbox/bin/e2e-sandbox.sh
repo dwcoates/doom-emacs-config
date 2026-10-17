@@ -841,6 +841,9 @@ STAGE_ENTRIES=(
   agent-shim
   proto
   testrun
+  # The TLDR-tree grammars: tldr's generated parser and its Go binding
+  # (tldr/src), which the daemon links through cgo.
+  tree-sitter-tldr
   # Elisp sources and suites; also carries lisp/testsupport/fakedaemon.
   lisp
   # The three files Doom's module loader resolves by exact path.
