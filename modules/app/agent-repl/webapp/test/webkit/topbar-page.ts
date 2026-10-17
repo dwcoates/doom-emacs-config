@@ -63,6 +63,18 @@ export interface StripMeasure {
   title: BoxMeasure | null;
   /** The workspace name's box. */
   name: BoxMeasure;
+  /** The summary's computed type, null when the strip drew none. */
+  titleType: TypeMeasure | null;
+  /** The workspace name's computed type. */
+  nameType: TypeMeasure;
+}
+
+/** One element's computed type. */
+export interface TypeMeasure {
+  fontSize: number;
+  fontWeight: string;
+  fontStyle: string;
+  color: string;
 }
 
 declare global {
@@ -141,6 +153,18 @@ function box(element: Element | null): BoxMeasure | null {
   return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
 }
 
+/** One element's computed type, or null when it is absent. */
+function type(element: Element | null): TypeMeasure | null {
+  if (element === null) return null;
+  const st = getComputedStyle(element);
+  return {
+    fontSize: Number.parseFloat(st.fontSize),
+    fontWeight: st.fontWeight,
+    fontStyle: st.fontStyle,
+    color: st.color,
+  };
+}
+
 /** One element's box, which the strip always draws. */
 function requiredBox(header: Element, selector: string): BoxMeasure {
   const measured = box(header.querySelector(selector));
@@ -175,6 +199,8 @@ window.topbarPage = {
       right: requiredBox(header, ".topbar-right"),
       title: box(header.querySelector(".topbar-title")),
       name: requiredBox(header, ".topbar-workspace-name"),
+      titleType: type(header.querySelector(".topbar-title")),
+      nameType: type(header.querySelector(".topbar-workspace-name"))!,
     };
   },
   drawWifi(offset) {

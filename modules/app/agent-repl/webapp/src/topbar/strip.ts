@@ -139,10 +139,10 @@ export function drawTopbarConnectivity(u: TopbarConnectivity): HTMLElement {
 
 /**
  * The heading: the summary on the strip's band, and the workspace's name on the
- * line beneath it. The heading box hugs its two lines and both are centered in
- * it, so the name's midpoint is the summary's midpoint rather than the strip's.
- * With no summary (the daemon left the title absent) the band stays empty and
- * the name keeps its own line: nothing stands in for the summary.
+ * line beneath it. The heading box hugs its lines and each is centered in it,
+ * so the name's midpoint is the summary's midpoint rather than the strip's.
+ * With no summary (the daemon left the title absent) only the name is drawn,
+ * and the stylesheet sets it in the summary's place on the band.
  */
 export function drawTopbarHeading(
   title: TopbarTitle | undefined,

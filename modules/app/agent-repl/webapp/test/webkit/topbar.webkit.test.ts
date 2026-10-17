@@ -191,13 +191,40 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     ]);
   });
 
-  it("keeps the name on its own line when there is no summary", async () => {
+  // WITH NO SUMMARY THE NAME TAKES THE SUMMARY'S PLACE on the band.
+  it("draws the name in the summary's place when there is no summary", async () => {
     // ARRANGE
     const summarized = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, true));
     // ACT
     const bare = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, false));
     // ASSERT
-    expect([bare.title, bare.name.top]).toEqual([null, summarized.name.top]);
+    const middle = (b: { top: number; bottom: number }): number => (b.top + b.bottom) / 2;
+    expect(bare.title).toBeNull();
+    expect(Math.abs(middle(bare.name) - middle(summarized.title!))).toBeLessThanOrEqual(0.5);
+  });
+
+  it("italicizes the summary", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    expect(m.titleType?.fontStyle).toBe("italic");
+  });
+
+  it("draws the name bold in the foreground color", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    const fg = await rig.page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--fg)";
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    expect([m.nameType.fontWeight, m.nameType.color]).toEqual(["700", fg]);
+  });
+
+  it("draws the name larger than the summary and every cell of the band", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    const band = [m.titleType!.fontSize, Number.parseFloat(m.accountFontSize), ...m.cells.map((c) => Number.parseFloat(c.fontSize))];
+    expect(m.nameType.fontSize).toBeGreaterThan(Math.max(...band));
   });
 
   it("writes no error while drawing", async () => {

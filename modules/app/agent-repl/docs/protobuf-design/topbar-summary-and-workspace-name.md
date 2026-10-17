@@ -56,3 +56,27 @@ and that the workspace's name gets a line of its own beneath it.
   - The vendor ai-title still stands in until the first distillation: it is a
     generated summary, not a name, so it is inside the ruling's "just the
     generated summary".
+
+### The name stands in the summary's place when there is no summary, bold and larger
+
+- WHAT: with `frontend.v1.TopbarView.title` unset, the client draws
+  `frontend.v1.TopbarView.workspace_name` in the summary's place on the top
+  band instead of on the name line. The summary is italic (still purple). The
+  name is bold, in the foreground color, and a step larger than the summary
+  and every cell of the band. The comments on both fields say so; no field or
+  tag changed.
+- WHY, in the owner's terms: "it can show just the workspace name in place of
+  the purple summary. the workspace name can always be white and bold text. the
+  summary should be additionally italicized. the name should be slightly larger
+  text than the summary (or anything else on the main first row of the top
+  bar), and i consider this workspace name row like row 1.5 and just for the
+  workspace name."
+- CONSEQUENCES:
+  - This narrows the earlier "nothing stands in for a summary": the title's
+    TEXT is still never anything but a summary, but the NAME element now takes
+    the title's SLOT when the title is absent. The placement is the client's
+    stylesheet keyed on the title's absence, so the daemon states nothing new.
+  - "White" is the theme's foreground color: white in the dark theme, and the
+    light theme's dark foreground there, because literal white would vanish on
+    the light background.
+  - The name line grows to fit the larger text (`--topbar-name-h` 0.95rem).

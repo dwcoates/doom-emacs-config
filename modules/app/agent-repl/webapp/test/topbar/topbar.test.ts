@@ -778,14 +778,24 @@ describe("the strip's geometry", () => {
     expect(placed.text.start).toBe(placed.title.start);
   });
 
-  it("ellipsis-clips the title rather than letting it wrap or spill", () => {
-    expect([
-      declaration(".topbar-title", "min-width"),
-      declaration(".topbar-title", "overflow"),
-      declaration(".topbar-title", "text-overflow"),
-      declaration(".topbar-title", "white-space"),
-    ]).toEqual(["0", "hidden", "ellipsis", "nowrap"]);
-  });
+  it.each(["topbar-title", "topbar-workspace-name"])(
+    "ellipsis-clips the %s rather than letting it wrap or spill",
+    (className) => {
+      // Arrange
+      const remove = installStylesheet();
+      const line = document.createElement("div");
+      line.className = className;
+      document.body.append(line);
+      // Act
+      const values = ["min-width", "overflow", "text-overflow", "white-space"].map((property) =>
+        cascadedValue(line, property),
+      );
+      // Assert
+      expect(values).toEqual(["0px", "hidden", "ellipsis", "nowrap"]);
+      line.remove();
+      remove();
+    },
+  );
 
   it("hangs each flank group on its own edge of the strip", () => {
     expect([

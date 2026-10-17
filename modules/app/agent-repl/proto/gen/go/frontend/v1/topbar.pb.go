@@ -1,13 +1,14 @@
 // topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
 // connectivity dot and, right beside it, the account label it qualifies —
 // one cell. Center: the heading — the workspace's generated summary, and on a
-// second, smaller line beneath it the workspace's name — centered in the space
-// between the flank groups, which never spread and never push it. Right,
-// tight, in order: model selector, context chip, persistent-wifi chip, warning
-// chip at the far edge. The strip stands off the window's edges exactly as far
-// as its cells stand off each other. The flanks and the summary share the
-// strip's top band; the name line is a band below it, and is centered under
-// the summary text rather than under the strip.
+// line beneath it the workspace's name — centered in the space between the
+// flank groups, which never spread and never push it. Right, tight, in order:
+// model selector, context chip, persistent-wifi chip, warning chip at the far
+// edge. The strip stands off the window's edges exactly as far as its cells
+// stand off each other. The flanks and the summary share the strip's top
+// band; the name line is a band below it, and is centered under the summary
+// text rather than under the strip. A workspace with no summary draws its
+// name in the summary's place on the top band.
 //
 //   │● work@…com    Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
 //   │                    fix-flaky-reconnect                                      │
@@ -77,9 +78,8 @@ type TopbarView struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The title line: the workspace's generated summary, drawn in the heading's
 	// top line. OPTIONAL BY PRESENCE: UNSET while no summary exists for the
-	// workspace, and the client then draws no title line at all — the name
-	// line below still identifies the workspace, and nothing else ever stands
-	// in for a summary.
+	// workspace, and the client then draws the workspace's name in the
+	// summary's place. The title's TEXT is never anything but a summary.
 	Title *TopbarTitle `protobuf:"bytes,1,opt,name=title,proto3,oneof" json:"title,omitempty"`
 	// The session identity line (hover/expanded state).
 	SessionLine *TopbarSessionLine `protobuf:"bytes,2,opt,name=session_line,json=sessionLine,proto3" json:"session_line,omitempty"`
@@ -118,8 +118,9 @@ type TopbarView struct {
 	// selector.
 	EffortSelector *TopbarEffortSelector `protobuf:"bytes,14,opt,name=effort_selector,json=effortSelector,proto3,oneof" json:"effort_selector,omitempty"`
 	// The workspace's name, drawn on the heading's second line, beneath the
-	// title and centered under the title's text. ALWAYS SET: every workspace
-	// has a name, summarized or not.
+	// title and centered under the title's text, or in the title's place when
+	// the title is unset. ALWAYS SET: every workspace has a name, summarized or
+	// not.
 	WorkspaceName *TopbarWorkspaceName `protobuf:"bytes,15,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1127,9 +1128,10 @@ func (x *TopbarTitle) GetText() string {
 	return ""
 }
 
-// The heading's second line: the workspace's name as the registry holds it,
-// smaller than the title and centered under the title's text. Its own element
-// because it is drawn in its own place and styled its own way, apart from the
+// The workspace's name as the registry holds it: drawn on the heading's
+// second line, centered under the title's text, or in the title's place when
+// there is no title. Its own element because it is drawn in its own place and
+// styled its own way (bold, and larger than the summary), apart from the
 // summary above it.
 type TopbarWorkspaceName struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
