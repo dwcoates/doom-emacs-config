@@ -24,7 +24,7 @@ import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 
 /** How long one selection blink runs, in milliseconds. */
-export const SELECTION_BLINK_MS = 1800;
+export const SELECTION_BLINK_MS = 900;
 
 /** The class a blinking row's box carries. */
 export const SELECTION_BLINK_CLASS = "selection-blink";

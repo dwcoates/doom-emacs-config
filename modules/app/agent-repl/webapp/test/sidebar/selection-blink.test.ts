@@ -159,6 +159,34 @@ describe("the selection blink's styling", () => {
     );
   });
 
+  /** The full body of the `@keyframes ws-selection-blink` block. */
+  const blinkKeyframes = (): string => {
+    const body = /@keyframes ws-selection-blink \{([\s\S]*?)\n\}/.exec(stylesheet)?.[1];
+    if (body === undefined) throw new Error("the stylesheet has no ws-selection-blink keyframes");
+    return body;
+  };
+
+  it("swells once: the blink's keyframes carry a single stop", () => {
+    // Arrange / Act
+    const stops = rulesOf(blinkKeyframes()).map((rule) => rule.selectors);
+
+    // Assert
+    expect(stops).toEqual([["50%"]]);
+  });
+
+  it("rises from and settles back to the row's own background, so a current row ends on its tint", () => {
+    // Arrange / Act
+    const stops = rulesOf(blinkKeyframes()).flatMap((rule) => rule.selectors);
+
+    // Assert
+    expect([stops.includes("0%"), stops.includes("100%"), stops.includes("from"), stops.includes("to")]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
   it("stops the blink under reduced motion", () => {
     // Arrange
     const reduced = stylesheet
