@@ -194,6 +194,11 @@ type ColdGate struct {
 	Standing bool
 	// Cost is the gate's composed cost line, in the parts it is drawn in.
 	Cost FiguredLine
+	// Window is the context window the gate's figure was measured against
+	// (Cost.WindowFill). The gate's compaction measures what its summarizer
+	// spent against the SAME window, so the spend of re-reading a count
+	// wears the color the gate gave that count. Positive while Standing.
+	Window int64
 }
 
 // FiguredLine is a composed line around ONE cold-gate token figure, in the
@@ -235,21 +240,24 @@ func (c FiguredLine) Text() string {
 type ColdGateAnswer struct {
 	// Choice is the remediation being spent: "pay", "clear" or "compact".
 	Choice string
-	// Text is the daemon's COMPOSED progress line for where the answer has got
-	// to. Never empty: an answer with nothing to say about itself is the state
-	// this type exists to end.
+	// EXACTLY ONE OF Request AND Progress IS SET: the answer has something to
+	// say about itself at every instant, and the line it says is worded in
+	// one place.
 	//
-	// WHEN it began standing is the RESOLVER's stamp, taken from the resolver's
-	// own clock like every other `at` on this strip, so a caller cannot hand
-	// the footer an instant from a different clock than the one the view is
-	// rendered against.
-	Text string
-	// Progress is the compaction phase the shim relayed that Text words, nil
-	// for the answer's own request line and for a remediation that is not a
-	// compaction. A CONCLUDED phase is the compaction's outcome: success is
-	// announced as `compaction_concluded`, and failure raises no footer line
-	// (the feed's outcome marker is its whole account), exactly as the
-	// vendor's own compaction's outcome does.
+	// WHEN the line began standing is the RESOLVER's stamp, taken from the
+	// resolver's own clock like every other `at` on this strip, so a caller
+	// cannot hand the footer an instant from a different clock than the one
+	// the view is rendered against.
+	//
+	// Request is the answer's own request line (CompactionRequestLine),
+	// standing from the click until the shim relays a phase.
+	Request string
+	// Progress is the compaction phase the shim last relayed. The RESOLVER
+	// words it, exactly as it words the same phase arriving on the session
+	// stream, so the two cannot read differently. A CONCLUDED phase is the
+	// compaction's outcome: success is announced as `compaction_concluded`,
+	// and failure raises no footer line (the feed's outcome marker is its
+	// whole account), exactly as the vendor's own compaction's outcome does.
 	Progress *conversationv1.SessionCompactionProgress
 }
 

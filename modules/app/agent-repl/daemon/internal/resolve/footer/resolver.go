@@ -858,7 +858,7 @@ func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer)
 				r.endCompaction(ws, s, "daemon.footer.set_cold_gate_answer")
 				return
 			}
-			r.standCompaction(ws, s, answer.Text, "daemon.footer.set_cold_gate_answer")
+			r.standCompaction(ws, s, r.coldAnswerLine(ws, s, answer), "daemon.footer.set_cold_gate_answer")
 			// THE ANSWER'S COMPACTION CONCLUDING IS AN OUTCOME like the
 			// vendor's own: announced beneath the answer's line that its verb
 			// ends.
@@ -877,12 +877,41 @@ func choiceOf(answer *ColdGateAnswer) string {
 	return answer.Choice
 }
 
-// lineOf is the answer's composed line for the record, empty when none stands.
+// lineOf is what the answer says for the record: its request line, or the
+// phase it relays; empty when none stands.
 func lineOf(answer *ColdGateAnswer) string {
-	if answer == nil {
+	switch {
+	case answer == nil:
 		return ""
+	case answer.Progress != nil:
+		return answer.Progress.GetPhase().String()
+	default:
+		return answer.Request
 	}
-	return answer.Text
+}
+
+// coldAnswerLine is the line an answer in flight stands: its request line
+// until a phase is relayed, then that phase as the resolver words every
+// phase. An answer setting both, or neither, breaks ColdGateAnswer's
+// contract; it is recorded at ERROR and the resolver fails hard rather than
+// pick one.
+func (r *resolver) coldAnswerLine(ws ids.WorkspaceID, s *wsState, answer *ColdGateAnswer) compactionText {
+	if (answer.Request == "") == (answer.Progress == nil) {
+		r.logOf(ws, s).Error("daemon.footer.cold_gate_answer_malformed",
+			"a cold gate's answer set both or neither of its request line and its relayed phase",
+			dlog.Context{
+				"choice":              answer.Choice,
+				"request":             answer.Request,
+				"has_progress":        answer.Progress != nil,
+				"invariant_violation": "a cold gate's answer states exactly one of Request and Progress",
+				"remediation":         "fix the SetColdGateAnswer caller to set exactly one",
+			})
+		panic(fmt.Sprintf("footer: cold gate answer on %q sets both or neither of Request and Progress", ws))
+	}
+	if answer.Progress != nil {
+		return r.compactionLine(ws, s, answer.Progress)
+	}
+	return plainCompaction(answer.Request)
 }
 
 // SetInterrupting fires waiting·interrupting the moment an interrupt registers.
@@ -1061,7 +1090,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			// fact this arm carries — no phase, no figure — so the line says
 			// exactly that and nothing it does not know (owner ruling,
 			// 2026-09-14: both compactions read the same).
-			r.standCompaction(ws, s, vendorCompactionLine, "daemon.footer.on_session_update.compacting")
+			r.standCompaction(ws, s, plainCompaction(vendorCompactionLine), "daemon.footer.on_session_update.compacting")
 			if s.compaction.compaction == "" {
 				s.compaction.compaction = id
 			}
@@ -1082,7 +1111,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 				return
 			}
 			s.compacting = true
-			r.standCompaction(ws, s, CompactionLine(progress), "daemon.footer.on_session_update.compaction_progress")
+			r.standCompaction(ws, s, r.compactionLine(ws, s, progress), "daemon.footer.on_session_update.compaction_progress")
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {

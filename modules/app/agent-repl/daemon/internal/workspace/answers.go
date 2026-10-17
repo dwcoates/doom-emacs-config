@@ -248,13 +248,11 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	v.deps.Sessions.ResumeColdDetached(ws, ColdResume{
 		VendorSessionID: served.VendorSessionID,
 		Remediation:     remediation,
-		// EVERY PHASE THE SHIM RELAYS BECOMES THIS ACT'S LINE. The daemon
-		// composes the sentence (footer.CompactionLine) so the vendor's own
-		// auto-compaction and this one read identically.
+		// EVERY PHASE THE SHIM RELAYS BECOMES THIS ACT'S LINE. The footer
+		// words the phase itself, the summarizer's spend included, exactly as
+		// it words the same phase arriving on the session stream.
 		OnPhase: func(progress *conversationv1.SessionCompactionProgress) {
-			v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{
-				Choice: choice, Text: footer.CompactionLine(progress), Progress: progress,
-			})
+			v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{Choice: choice, Progress: progress})
 		},
 	}, func(runCtx context.Context, err error) {
 		v.coldGateSettled(runCtx, log, ws, served.VendorSessionID, choice, err)
@@ -304,7 +302,7 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 
 // spendingColdGate publishes one line of the act a gate's answer is spending.
 func (v *verbs) spendingColdGate(ws ids.WorkspaceID, choice, line string) {
-	v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{Choice: choice, Text: line})
+	v.deps.Footer.SetColdGateAnswer(ws, &footer.ColdGateAnswer{Choice: choice, Request: line})
 }
 
 // coldRemediation translates the answered gate into the shim's remediation,

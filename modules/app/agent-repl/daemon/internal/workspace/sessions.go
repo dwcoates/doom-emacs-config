@@ -2546,7 +2546,8 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	// compact too.
 	compact, menu := coldCompactMenu(cold)
 
-	cost := coldGateCost(cold, f.deps.Topbar.ContextWindow(ws))
+	window := f.deps.Topbar.ContextWindow(ws)
+	cost := coldGateCost(cold, window)
 	detail := cost.Text()
 
 	standing := &frontendv1.FeedColdGateStanding{
@@ -2571,7 +2572,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	}
 
 	f.publishColdGateRow(ws)
-	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Cost: cost})
+	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: true, Cost: cost, Window: window})
 	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{
 		Standing:      true,
 		ContextTokens: int64(cold.GetContextTokens()),

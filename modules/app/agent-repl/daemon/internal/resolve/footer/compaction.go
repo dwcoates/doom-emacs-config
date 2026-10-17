@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/topbar"
 )
 
 // The compaction's progress lines, composed HERE and nowhere else.
@@ -29,10 +30,69 @@ import (
 // and no figure, and this line says nothing it does not know.
 const vendorCompactionLine = "compacting the context…"
 
-// CompactionLine composes one phase's line. It is exported because the verb
-// that spends a cold gate's answer relays the same phases onto the same cell
-// and must not word them a second way.
-func CompactionLine(p *conversationv1.SessionCompactionProgress) string {
+// compactionText is one compaction line as the footer draws it: the sentence,
+// and its parts when it names a figure that takes the cold gate's gradient.
+type compactionText struct {
+	text  string
+	parts *FiguredLine
+}
+
+// plainCompaction is a compaction line that names no colored figure.
+func plainCompaction(text string) compactionText {
+	return compactionText{text: text}
+}
+
+// compactionLine words one relayed phase, for both of the routes a phase
+// reaches the footer by: the session stream and the cold gate's answer. A
+// phase that states what its summary cost names the summarizer and its spend,
+// the spend measured against the window the standing gate's own figure was
+// (ColdGate.Window), so it takes the gate's gradient.
+//
+// A SPEND WITH NO GATE STANDING IS AN INVARIANT VIOLATION. Only the cold
+// gate's remediation runs a summarizer, and the gate is lifted only after its
+// re-open lands, so every spend arrives while the gate's window is known. A
+// spend measured against no window would be a color invented here; it is
+// recorded at ERROR and the resolver fails hard instead.
+func (r *resolver) compactionLine(ws ids.WorkspaceID, s *wsState, p *conversationv1.SessionCompactionProgress) compactionText {
+	sentence := compactionSentence(p)
+	spend := p.GetSpend()
+	if spend == nil {
+		return plainCompaction(sentence)
+	}
+	if !s.coldGate.Standing || s.coldGate.Window <= 0 {
+		r.logOf(ws, s).Error("daemon.footer.compaction_spend_without_gate",
+			"a compaction stated its summarizer's spend with no cold gate standing to measure it against",
+			dlog.Context{
+				"phase":               p.GetPhase().String(),
+				"summarizer_model":    spend.GetModel().GetName(),
+				"summarizer_tokens":   spend.GetTokens(),
+				"gate_standing":       s.coldGate.Standing,
+				"gate_window":         s.coldGate.Window,
+				"invariant_violation": "a summarizer's spend arrives only while its cold gate stands",
+				"remediation":         "find what lifted the gate, or zeroed its window, before the compaction concluded",
+			})
+		panic(fmt.Sprintf("footer: compaction spend on %q with no cold gate window (standing=%t, window=%d)",
+			ws, s.coldGate.Standing, s.coldGate.Window))
+	}
+	parts := compactionSpendLine(sentence, spend, s.coldGate.Window)
+	return compactionText{text: parts.Text(), parts: &parts}
+}
+
+// compactionSpendLine is a phase's sentence followed by what its summary
+// cost: "compacted and resumed (101.6k → 12.4k) · claude-sonnet-5 spent
+// 104.3k tokens", the spend as the colored figure.
+func compactionSpendLine(sentence string, spend *conversationv1.SessionCompactionSpend, window int64) FiguredLine {
+	tokens := spend.GetTokens()
+	return FiguredLine{
+		Lead:       sentence + " · " + spend.GetModel().GetName() + " spent ",
+		Figure:     tokenFigure(tokens),
+		Tail:       " tokens",
+		WindowFill: topbar.WindowFill(int64(tokens), window),
+	}
+}
+
+// compactionSentence composes one phase's sentence, before any spend.
+func compactionSentence(p *conversationv1.SessionCompactionProgress) string {
 	switch p.GetPhase() {
 	case conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_SUMMARIZING:
 		if before := p.GetTokensBefore(); before > 0 {
@@ -122,13 +182,13 @@ func CompactionRequestLine(choice, detail string) string {
 // `compacting` signal about every thirty seconds while it compacts, and the
 // strip's age — and a violation record's — is the age of the ACT, not of the
 // latest re-send.
-func (r *resolver) standCompaction(ws ids.WorkspaceID, s *wsState, text, cause string) {
-	if s.compaction != nil && s.compaction.text == text {
+func (r *resolver) standCompaction(ws ids.WorkspaceID, s *wsState, line compactionText, cause string) {
+	if s.compaction != nil && s.compaction.text == line.text {
 		return
 	}
-	s.compaction = &standing{text: text, at: r.opts.clock.Now()}
+	s.compaction = &standing{text: line.text, parts: line.parts, at: r.opts.clock.Now()}
 	r.logOf(ws, s).Debug("daemon.footer.compaction_line_stood", "the footer stood a compaction line",
-		dlog.Context{"text": text, "cause": cause})
+		dlog.Context{"text": line.text, "cause": cause})
 }
 
 // endCompaction ends the standing compaction line, if any, and records which
@@ -154,16 +214,17 @@ func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState, progress *
 	if s.coldAnswer == nil {
 		r.endCompaction(ws, s, cause)
 	}
-	line := CompactionLine(progress)
 	if progress.GetPhase() == conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED {
 		r.logOf(ws, s).Debug("daemon.footer.compaction_failed_no_line",
 			"a compaction failed; the footer raises no line, the feed's outcome marker carries it",
-			dlog.Context{"text": line, "cause": cause})
+			dlog.Context{"text": compactionSentence(progress), "cause": cause})
 		return
 	}
+	line := r.compactionLine(ws, s, progress)
 	r.raiseTransient(ws, s, "", &frontendv1.FooterActivityTransient{
 		Kind: &frontendv1.FooterActivityTransient_CompactionConcluded{
-			CompactionConcluded: &frontendv1.FooterActivityTransientCompactionConcluded{Text: line}},
+			CompactionConcluded: &frontendv1.FooterActivityTransientCompactionConcluded{
+				Text: line.text, Parts: line.parts.wire()}},
 	})
 }
 
