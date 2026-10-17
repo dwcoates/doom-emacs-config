@@ -51,7 +51,7 @@ import {
   startOfTomorrow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
-import { SELECTION_BLINK_CLASS, createSelectionBlink } from "../../src/sidebar/selection-blink.js";
+import { SELECTION_BLINK_CLASS, SELECTION_BLINK_MS, createSelectionBlink } from "../../src/sidebar/selection-blink.js";
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 
@@ -1167,7 +1167,8 @@ describe("the selection blink", () => {
     const before = drawRosterRow(row({ id: "ws-1" }), sc, "R");
     document.body.appendChild(before);
     await click(before.querySelector("[data-select]") as Element);
-    clock += 500;
+    const elapsed = SELECTION_BLINK_MS / 2;
+    clock += elapsed;
 
     // Act
     const after = drawRosterRow(row({ id: "ws-1", current: true }), sc, "R");
@@ -1175,7 +1176,7 @@ describe("the selection blink", () => {
     // Assert
     expect([after.classList.contains(SELECTION_BLINK_CLASS), after.style.getPropertyValue("--selection-blink-delay")]).toEqual([
       true,
-      "-500ms",
+      `-${elapsed}ms`,
     ]);
   });
 });

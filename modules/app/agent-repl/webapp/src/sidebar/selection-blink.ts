@@ -1,6 +1,6 @@
 /**
- * selection-blink — a row the user selects from the rail blinks, softly and
- * slowly, once per click (owner request, 2026-10-17).
+ * selection-blink — a row the user selects from the rail blinks, softly,
+ * once per click (owner request, 2026-10-17).
  *
  * EVERY CLICK BLINKS, even on the row already selected: the blink answers the
  * click, not the roster, so it is started where the rail's one select verb
@@ -23,8 +23,8 @@
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 
-/** How long one selection blink runs, in milliseconds. */
-export const SELECTION_BLINK_MS = 900;
+/** How long one selection blink runs, in milliseconds (owner request, 2026-10-17: twice as fast as the first 900). */
+export const SELECTION_BLINK_MS = 450;
 
 /** The class a blinking row's box carries. */
 export const SELECTION_BLINK_CLASS = "selection-blink";

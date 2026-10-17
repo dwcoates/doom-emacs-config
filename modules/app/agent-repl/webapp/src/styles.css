@@ -1146,8 +1146,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
-/* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): one soft,
-   slow swell of an accent wash over the row line (owner request, 2026-10-17:
+/* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): one soft
+   swell of an accent wash over the row line (owner request, 2026-10-17:
    once, not twice), on every click, the current workspace's included. The
    swell rises from and settles back to the row's own background, so it ends
    on the current row's tint rather than snapping to it. The class and the blink's length are set by

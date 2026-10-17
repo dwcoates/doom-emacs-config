@@ -54,6 +54,11 @@ describe("the selection blink", () => {
     ]);
   });
 
+  it("runs one blink for 450 ms", () => {
+    // Arrange, Act, Assert
+    expect(SELECTION_BLINK_MS).toBe(450);
+  });
+
   it("hands a blinking row the blink's length", () => {
     // Arrange
     const row = drawnRow(root, "ws-1");
@@ -92,14 +97,15 @@ describe("the selection blink", () => {
   it("joins a row redrawn mid-blink at the elapsed time", () => {
     // Arrange
     blink.start("ws-1");
-    clock += 600;
+    const elapsed = SELECTION_BLINK_MS / 2;
+    clock += elapsed;
     const redrawn = document.createElement("div");
 
     // Act
     blink.apply("ws-1", redrawn);
 
     // Assert
-    expect([blinking(redrawn), delayOf(redrawn)]).toEqual([true, "-600ms"]);
+    expect([blinking(redrawn), delayOf(redrawn)]).toEqual([true, `-${elapsed}ms`]);
   });
 
   it("draws a row still once its blink has run its length", () => {
