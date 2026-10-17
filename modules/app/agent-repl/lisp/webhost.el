@@ -155,12 +155,7 @@ the new one, which queues it until the host starts (main.ts).  So the
 replay at commit is the earliest that lands, and the only one needed.
 
 The stage rides only the event itself, as `xwidget-webkit-callback'
-reads it, so it is read here off `last-input-event' rather than passed.
-THE ONE ARGUMENT IS THE CONTRACT with every live host: the callback
-`agent-repl--webhost-watch-load' installed on an xwidget is a closure that
-calls this function by name, and it outlives a hot reload.  A second
-argument made every host created before the reload signal
-\"Wrong number of arguments\" on each load (2026-10-17)."
+reads it, so it is read here off `last-input-event' rather than passed."
   (when (eq event-type 'load-changed)
     (let ((status (nth 3 last-input-event)))
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
@@ -168,17 +163,43 @@ argument made every host created before the reload signal
       (when (equal status "load-committed")
         (agent-repl--webhost-replay)))))
 
+(defun agent-repl--webhost-callback (xwidget event-type)
+  "The host XWIDGET's `callback': its prior handler, then the load handler.
+INSTALLED BY NAME, never as a closure.  The xwidget keeps its callback for
+the session, so a closure installed on it is code a hot reload cannot
+reach: a closure calling `agent-repl--webhost-on-load' with one argument
+broke when that function took two, and one calling it with two broke when
+it went back to one, every load signalling \"Wrong number of arguments\"
+and replaying nothing (2026-10-17).  By name, the host runs whatever this
+module's current definitions are, and the prior handler rides the xwidget's
+`agent-repl-prior-callback' property."
+  (let ((prior (xwidget-get xwidget 'agent-repl-prior-callback)))
+    (when (functionp prior) (funcall prior xwidget event-type)))
+  (agent-repl--webhost-on-load event-type))
+
 (defun agent-repl--webhost-watch-load (xw)
   "Make XW replay the desired state on every load, keeping its own handler.
 The xwidget event handler calls the widget's `callback' property, so the
 existing one is WRAPPED rather than replaced: the webkit machinery still gets
-every event it needs.  The wrapper hands `agent-repl--webhost-on-load' the
-one argument it has always taken (see that function)."
-  (let ((prior (xwidget-get xw 'callback)))
-    (xwidget-put xw 'callback
-                 (lambda (xwidget event-type)
-                   (when (functionp prior) (funcall prior xwidget event-type))
-                   (agent-repl--webhost-on-load event-type)))))
+every event it needs.  The wrapper is `agent-repl--webhost-callback', by
+name (see that function)."
+  (xwidget-put xw 'agent-repl-prior-callback (xwidget-get xw 'callback))
+  (xwidget-put xw 'callback 'agent-repl--webhost-callback))
+
+(defun agent-repl--webhost-rewatch ()
+  "Put the live host's callback back on `agent-repl--webhost-callback'.
+Run each time this file loads, so a hot reload heals a host that an
+earlier build wrapped in a closure (see `agent-repl--webhost-callback').  That
+closure held the creator's handler, `xwidget-webkit-callback' (the host is
+created with no handler of its own, `agent-repl-webhost-ensure'), so that
+handler is the prior one again."
+  (when-let ((xw (agent-repl-webhost-xwidget)))
+    (let ((installed (xwidget-get xw 'callback)))
+      (unless (eq installed 'agent-repl--webhost-callback)
+        (xwidget-put xw 'agent-repl-prior-callback 'xwidget-webkit-callback)
+        (xwidget-put xw 'callback 'agent-repl--webhost-callback)
+        (agent-repl--info agent-repl--webhost-central "elisp.webhost.rewatched replaced=%s"
+                          (if (symbolp installed) installed (type-of installed)))))))
 
 (defun agent-repl-webhost-ensure (conn)
   "Return the host's live xwidget, creating the host on CONN's daemon if needed.
@@ -501,6 +522,8 @@ the host was last reloaded onto is already met."
     (agent-repl-webhost-reload conn)
     (setq agent-repl--webhost-build build)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build=%s" build)))
+
+(agent-repl--webhost-rewatch)
 
 (provide 'webhost)
 
