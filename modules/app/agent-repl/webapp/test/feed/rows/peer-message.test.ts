@@ -75,6 +75,8 @@ describe("drawFeedPeerMessage: its spec", () => {
   it.each([
     ["an unresolved sender", { case: "unresolved" as const, value: {} }],
     ["an unnamed sender", { case: "unnamed" as const, value: {} }],
+    ["a named subagent", { case: "agent" as const, value: { identity: { case: "named" as const, value: {} } } }],
+    ["an unnamed subagent", { case: "agent" as const, value: { identity: { case: "identified" as const, value: {} } } }],
   ])("draws %s's name the same way", (_label, sender) => {
     const el = drawFeedPeerMessage(
       create(FeedPeerMessageSchema, { from: { name: { text: "desktop-session-9f" }, sender }, body: "hi" }),
