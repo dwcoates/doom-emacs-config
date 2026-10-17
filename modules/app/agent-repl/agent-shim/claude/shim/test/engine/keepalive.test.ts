@@ -1330,13 +1330,10 @@ describe("the cadence's last round, when the workspace is closed", () => {
     scheduler.fireTimeout();
 
     // Assert
-    expect(logRecordsSince(before)).toContainEqual(
-      expect.objectContaining({
-        level: "info",
-        message: "the last keep-alive round is spent; keep-alives are held and the cache is left to lapse",
-        context: expect.objectContaining({ why: "the last round's beat came due" }),
-      }),
+    const record = logRecordsSince(before).find(
+      (entry) => entry.message === "the last keep-alive round is spent; keep-alives are held and the cache is left to lapse",
     );
+    expect([record?.level, record?.context.why]).toEqual(["info", "the last round's beat came due"]);
   });
 });
 
