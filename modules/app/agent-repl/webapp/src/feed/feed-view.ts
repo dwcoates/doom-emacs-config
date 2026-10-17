@@ -23,7 +23,8 @@
  *    and (for a bubble) the open sub-feed inside it survive.
  *  - THE WALK. `has_more` shows the load-more control, `at_start` hides it, and
  *    a prepend is anchored so the reader is not moved by content arriving above
- *    them.
+ *    them. The control loads its page when it scrolls into view, and shows a
+ *    spinner while a walk is in flight (walk-control.ts).
  *
  * WHAT IT DOES NOT OWN. It draws no card itself beyond the four row kinds the
  * feed core is responsible for; every other arm goes to an injected renderer,
@@ -35,7 +36,12 @@
  * card was unreadable would lose the reader everything, including the evidence.
  */
 import { drawFeedEarlierSteps } from "./rows/earlier-steps.js";
-import { createControl } from "../control.js";
+import {
+  FEED_LOAD_MORE_LABEL,
+  createWalkTrigger,
+  drawWalkControl,
+  setWalkLoading,
+} from "./walk-control.js";
 import { log } from "../log.js";
 import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import type { SelectionVisibility } from "./selection-visibility.js";
@@ -273,11 +279,7 @@ const SELECTION_ARM_MESSAGE = {
   bubble: "FeedSelectionBubble",
 } as const;
 
-/**
- * What the walk control at the top of a feed reads: it loads the page before
- * the oldest one held (owner request, 2026-10-08; it read "older").
- */
-export const FEED_LOAD_MORE_LABEL = "load previous page";
+export { FEED_LOAD_MORE_LABEL };
 
 /** Build a controller for ONE feed and draw its shell into the host. */
 export function createFeedController(
@@ -318,10 +320,7 @@ export function createFeedController(
     opts.feed === "root" ? "root" : opts.feed.value,
   );
 
-  const loadMore = createControl();
-  loadMore.className = "feed-load-more";
-  loadMore.setAttribute("data-load-more", "");
-  loadMore.textContent = FEED_LOAD_MORE_LABEL;
+  const loadMore = drawWalkControl();
 
   const errorSlot = document.createElement("div");
   errorSlot.className = "feed-page-error-slot";
@@ -375,6 +374,9 @@ export function createFeedController(
   loadMore.addEventListener("click", () => {
     void guardMalformed(opts.ctx, "feed.load-older", serializeWalk(loadOlder));
   });
+  // THE CONTROL LOADS ITS PAGE ON SIGHT (walk-control.ts): scrolling it into
+  // view clicks it, and a landed page rearms the watch.
+  const walkTrigger = createWalkTrigger(loadMore, feedName());
 
   const bodyHandle = opts.body(bodyMount, subfeed, opts.bodyContext);
 
@@ -703,7 +705,7 @@ export function createFeedController(
     truncateAtSeparation(row, id);
     if (separationBoundsFeed(row) && !separationEndsHistory(row)) {
       reanchoring += 1;
-      loadMore.disabled = true;
+      setWalkLoading(loadMore, true);
       void guardMalformed(
         opts.ctx,
         "feed.walk-reanchor",
@@ -1710,10 +1712,12 @@ export function createFeedController(
       context: { feed: feedName(), oldest_held: oldest?.key ?? "none" },
     });
     clearRefusals();
-    loadMore.disabled = true;
+    setWalkLoading(loadMore, true);
     const page = await askFeedPage(oldest === undefined ? { case: "first" } : { case: "olderThan", oldestHeld: oldest });
     releaseLoadMore();
-    if (page !== null) applyPage(page, "prepend");
+    if (page === null) return;
+    applyPage(page, "prepend");
+    walkTrigger.rearm();
   }
 
   /**
@@ -1757,7 +1761,7 @@ export function createFeedController(
    * still holds it.
    */
   function releaseLoadMore(): void {
-    loadMore.disabled = throughRunning > 0 || reanchoring > 0;
+    setWalkLoading(loadMore, throughRunning > 0 || reanchoring > 0);
   }
 
   /**
@@ -1793,6 +1797,7 @@ export function createFeedController(
           operation: "feed.walk-reanchored",
           context: { feed: feedName(), row: divider, edge: walkEdge ?? "none" },
         });
+        walkTrigger.rearm();
         return;
       case "error":
         drawPageError(page.value);
@@ -1837,13 +1842,16 @@ export function createFeedController(
     });
     clearRefusals();
     throughRunning += 1;
-    loadMore.disabled = true;
+    setWalkLoading(loadMore, true);
+    let outcome: LoadThroughOutcome;
     try {
-      return await consumeLoadThrough(target);
+      outcome = await consumeLoadThrough(target);
     } finally {
       throughRunning -= 1;
       releaseLoadMore();
     }
+    if (outcome === "reached") walkTrigger.rearm();
+    return outcome;
   }
 
   async function consumeLoadThrough(
@@ -2024,6 +2032,7 @@ export function createFeedController(
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    walkTrigger.dispose();
     bodyHandle.dispose();
     clearRows();
     listeners.clear();

@@ -4815,6 +4815,53 @@ describe("the load-more control's outline", () => {
 });
 
 /**
+ * THE LOAD-MORE CONTROL WHILE ITS PAGE LOADS (feed/walk-control.ts): the pill
+ * gives way to a spinner in the control's own muted token, spun by the
+ * thinking spinner's keyframes.
+ */
+describe("the load-more control's loading face", () => {
+  /** Every rule naming SELECTOR, joined: the base rule follows the reduced-motion block. */
+  const everyDeclarationOf = (selector: string): string =>
+    rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => rule.declarations)
+      .join(";");
+
+  it("drops the pill's outline while loading", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more[data-loading]") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*border-color:\s*transparent/);
+  });
+
+  it("draws the spinner in the control's muted token", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*border-top-color:\s*var\(--muted\)/);
+  });
+
+  it("spins the spinner", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*animation:\s*thinking-spin\b/);
+  });
+
+  it("slows the spinner under reduced motion", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+
+    // Assert
+    expect(reduced).toMatch(/\.feed-load-more-spinner\s*\{\s*animation-duration:\s*1\.4s;/);
+  });
+});
+
+/**
  * THE CLASSIC DIFF (owner request, 2026-10-08): an added line on a green
  * background and a removed one on a red, each a block of its own, in theme
  * tokens both themes define.

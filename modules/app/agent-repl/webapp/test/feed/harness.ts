@@ -192,7 +192,8 @@ export interface FeedScript {
   openFeed?: (req: OpenFeedRequest) => OpenFeedResponse | Promise<OpenFeedResponse>;
   /** The tail each opened token yields. Keyed by token value. */
   channels?: Map<string, Channel<WatchFeedResponse>>;
-  getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse;
+  /** Answers GetFeedPage. A promise holds the page in flight until the test resolves it. */
+  getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse | Promise<GetFeedPageResponse>;
   interrupt?: (req: InterruptRequest) => InterruptResponse;
   /**
    * The frames LoadFeedThrough streams, as an async generator the test owns.

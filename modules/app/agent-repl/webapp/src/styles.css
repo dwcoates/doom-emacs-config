@@ -3681,6 +3681,10 @@ html[data-page-unshown] *::after {
   .tool-spinner {
     animation-duration: 1.4s, 0.2s;
   }
+  /* The walk control's spinner slows as the tool arc's rotation does. */
+  .feed-load-more-spinner {
+    animation-duration: 1.4s;
+  }
   /* The dots are a hint the arc already carries, not the progress signal
      itself, so under reduced motion they rest at a static ellipsis rather
      than cycling — the same treatment the bubble breath and compaction sweep
@@ -5354,6 +5358,23 @@ bubble-body.bubble-body { display: block; }
   cursor: pointer;
 }
 .feed-load-more[aria-disabled="true"] { cursor: progress; opacity: 0.6; }
+/* A WALK IN FLIGHT: the pill gives way to a spinner in the control's own muted
+   color (feed/walk-control.ts), spun by the thinking spinner's keyframes. */
+.feed-load-more[data-loading] {
+  border-color: transparent;
+  background: transparent;
+  opacity: 1;
+  line-height: 0;
+}
+.feed-load-more-spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid color-mix(in srgb, var(--muted) 25%, transparent);
+  border-top-color: var(--muted);
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
 /* A TURN'S EARLIER STEPS ON AN OLDER PAGE: the load control's look, under the
    prompt it belongs to (feed/rows/earlier-steps.ts). */
 .feed-earlier-steps {
