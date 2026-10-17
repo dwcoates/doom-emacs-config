@@ -1649,15 +1649,30 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     which: conversationv1.SessionCompactionPhase,
     said: string,
   ): void {
-    const figures = coldCompactionFigures;
-    pushes.push(compactionProgressUpdate(which, figures ?? {}));
+    narrateCompactionPhase(which, coldCompactionFigures ?? {}, said);
+  }
+
+  /**
+   * One compaction phase, said to the fan-out and to the log at once, with the
+   * same fields wherever it is said from. CONTEXT is what only the caller
+   * knows (the vendor session the compaction runs on).
+   */
+  function narrateCompactionPhase(
+    which: conversationv1.SessionCompactionPhase,
+    figures: Partial<CompactionFigures> & { error?: string },
+    said: string,
+    context: Record<string, string> = {},
+  ): void {
+    pushes.push(compactionProgressUpdate(which, figures));
     LOGGER.info(
       {
+        ...context,
         phase: conversationv1.SessionCompactionPhase[which],
-        tokens_before: figures?.tokensBefore ?? 0,
-        tokens_after: figures?.tokensAfter ?? 0,
-        summarizer_model: figures?.spend.model ?? "",
-        summarizer_tokens: figures?.spend.tokens ?? 0,
+        tokens_before: figures.tokensBefore ?? 0,
+        tokens_after: figures.tokensAfter ?? 0,
+        summarizer_model: figures.spend?.model ?? "",
+        summarizer_tokens: figures.spend?.tokens ?? 0,
+        ...(figures.error === undefined ? {} : { cause: figures.error }),
       },
       said,
     );
@@ -5323,21 +5338,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       which: conversationv1.SessionCompactionPhase,
       figures: Partial<CompactionFigures> & { error?: string },
       said: string,
-    ): void => {
-      pushes.push(compactionProgressUpdate(which, figures));
-      LOGGER.info(
-        {
-          vendor_session_id: vendorSessionId,
-          phase: conversationv1.SessionCompactionPhase[which],
-          tokens_before: figures.tokensBefore ?? 0,
-          tokens_after: figures.tokensAfter ?? 0,
-          summarizer_model: figures.spend?.model ?? "",
-          summarizer_tokens: figures.spend?.tokens ?? 0,
-          ...(figures.error === undefined ? {} : { cause: figures.error }),
-        },
-        said,
-      );
-    };
+    ): void => narrateCompactionPhase(which, figures, said, { vendor_session_id: vendorSessionId });
     /**
      * A compaction that did not complete, said once to both surfaces, with
      * whether asking again can help — the start it gates carries that label.

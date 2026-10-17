@@ -10445,6 +10445,28 @@ describe("the cold gate's COMPACT remediation", () => {
     expect([context?.["summarizer_model"], context?.["summarizer_tokens"]]).toEqual(["claude-sonnet-5", 101_203]);
   });
 
+  it("logs every phase with one field set, wherever the phase is said from", async () => {
+    // Arrange: SUMMARIZED is said from the compaction, STARTED from
+    // StartSession; one narrator says both.
+    const h = spending("claude-sonnet-5", SPEND_USAGE);
+    watchPhases(h, []);
+    const before = logSinkMark();
+
+    // Act
+    await compactedResume(h);
+
+    // Assert
+    const fields = (said: string): string[] =>
+      Object.keys(logContextFor(before, said) ?? {})
+        .filter((key) => key !== "vendor_session_id")
+        .sort();
+    const started = fields("the session resumed from the cold gate's compaction is up");
+    expect([started.includes("summarizer_tokens"), started]).toEqual([
+      true,
+      fields("the cold gate's summary came back and the compaction boundary was appended to the transcript"),
+    ]);
+  });
+
   it("fails the compaction when the summarizer answers without the init that names its model", async () => {
     // Arrange: the vendor opens every query with its init, so a summary with
     // none before it cannot say which model wrote it.
