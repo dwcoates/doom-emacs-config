@@ -3307,14 +3307,17 @@ describe("the one bubble rule set", () => {
     );
     // Assert — the base rule paints the role's token; the roles choose it, and
     // so do the owner-named fills: the held variant's (2026-09-23), the
-    // page-colored thinking and interim fill (2026-10-08) and the selected
-    // bubble's grey (2026-10-11).
+    // page-colored thinking and interim fill (2026-10-08), the selected
+    // bubble's grey (2026-10-11) and the agent-to-agent bubbles' final-response
+    // fill (2026-10-17).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
         ".bubble.entry-selected",
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
+        '.bubble[data-variant="agent"]',
+        '.bubble[data-variant="peer"]',
         '.bubble[data-variant="held"]',
         '.bubble[data-variant="thinking"]',
         ".bubble.interim-response",
