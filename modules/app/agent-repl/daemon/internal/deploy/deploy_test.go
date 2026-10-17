@@ -593,6 +593,23 @@ func TestTheWebappReloadGoesOnlyToWebviewsOnAnOlderBuild(t *testing.T) {
 	}
 }
 
+func TestTheWebappReloadNamesTheBuildItBrings(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.clients.webviews["ws-a"] = []string{"Web1"}
+	h.clients.webviews["ws-b"] = []string{"Web1"}
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if want := []string{"Web2", "Web2"}; !slices.Equal(h.clients.webappBuilds, want) {
+		t.Fatalf("builds = %v, want %v", h.clients.webappBuilds, want)
+	}
+}
+
 func TestADeployIsRefused(t *testing.T) {
 	tests := []struct {
 		name    string

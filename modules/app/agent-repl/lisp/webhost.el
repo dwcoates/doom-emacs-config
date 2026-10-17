@@ -93,6 +93,11 @@ milliseconds.  Replayed to a host that loads before the window ends.")
 (defvar agent-repl--webhost-reload-timer nil
   "The pending host reload of a rollout burst, or nil.")
 
+(defvar agent-repl--webhost-build nil
+  "The webapp build a deploy last reloaded the host onto, or nil.
+Nil too after any other reload, whose build nobody named
+\(`agent-repl-webhost-reload-onto').")
+
 (defvar agent-repl--webhost-url nil
   "The URL the host was last loaded at, which names the daemon it talks to.
 The host draws the sidebar over its own connection to that daemon, so when
@@ -369,31 +374,48 @@ reloads while the window lasts.  Non-nil when the call was sent."
 
 ;;;; ---- Replay and reload -----------------------------------------------------
 
-(defun agent-repl--webhost-ring-order (ids)
-  "IDS, nearest the current workspace first, around the drawn tab order.
-The order is a RING: the first and last tabs are next to each other.  At
-equal distance the tab after the current one comes before the tab before
-it.  A page whose workspace has no drawn tab comes last, in the order
-given."
+(defun agent-repl--webhost-replay-lanes (ids)
+  "IDS split into two lanes around the current workspace: `(AFTER . BEFORE)'.
+The drawn tab order is a RING: the first and last tabs are next to each
+other.  The tabs other than the current one are halved around it: AFTER
+takes the nearer half going forward from the current tab, BEFORE the rest
+going backward, each nearest first, and AFTER takes the odd one out.  So
+with eleven tabs and the tenth current, AFTER is 11, 1, 2, 3, 4 and BEFORE
+is 9, 8, 7, 6, 5.  A page whose workspace has no drawn tab, or every page
+when no tab is current, goes to whichever lane is shorter then, in the
+order given."
   (let* ((order (and (fboundp 'agent-repl-roster-drawn-tab-order)
                      (agent-repl-roster-drawn-tab-order)))
          (n (length order))
          (current (and (fboundp 'agent-repl--ws-current-name) (agent-repl--ws-current-name)))
          (here (and current (cl-position current order :test #'equal)))
-         (rank (lambda (id)
-                 (let* ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id)))
-                        (at (and ws (cl-position ws order :test #'equal))))
-                   (cond ((or (null at) (null here)) (* 4 (max n 1)))
-                         (t (let* ((ahead (mod (- at here) n))
-                                   (behind (mod (- here at) n)))
-                              (if (<= ahead behind) (* 2 ahead) (1+ (* 2 behind))))))))))
-    (cl-stable-sort (copy-sequence ids) #'< :key rank)))
+         (after-span (/ n 2))
+         after before untabbed)
+    (dolist (id ids)
+      (let* ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id)))
+             (at (and ws (cl-position ws order :test #'equal))))
+        (if (or (null at) (null here))
+            (push id untabbed)
+          (let ((ahead (mod (- at here) n)))
+            (if (<= ahead after-span)
+                (push (cons ahead id) after)
+              (push (cons (mod (- here at) n) id) before))))))
+    (let* ((nearest-first (lambda (ranked)
+                            (mapcar #'cdr (cl-stable-sort (nreverse ranked) #'< :key #'car))))
+           (after (funcall nearest-first after))
+           (before (funcall nearest-first before)))
+      (dolist (id (nreverse untabbed))
+        (if (<= (length after) (length before))
+            (setq after (append after (list id)))
+          (setq before (append before (list id)))))
+      (cons after before))))
 
-(defun agent-repl--webhost-replay-page (id in-turn)
-  "Hand the host page ID and its state; IN-TURN loads it once those before have drawn."
+(defun agent-repl--webhost-replay-page (id lane)
+  "Hand the host page ID and its state.
+Given a LANE, the host loads it once the pages before it in LANE have drawn."
   (when-let ((url (gethash id agent-repl--webhost-pages)))
-    (if in-turn
-        (agent-repl--webhost-call "ensure" id url t)
+    (if lane
+        (agent-repl--webhost-call "ensure" id url lane)
       (agent-repl--webhost-call "ensure" id url))
     (when-let ((background (gethash id agent-repl--webhost-input-backgrounds)))
       (agent-repl--webhost-call "setInputBackground" id background))
@@ -402,22 +424,27 @@ given."
 
 (defun agent-repl--webhost-replay ()
   "Hand the host everything it should hold, after a load: the host starts empty.
-THE PAGES COME BACK ONE AFTER ANOTHER (owner ruling, 2026-10-17).  Every
-page booting at once is what stalled the web process for up to 1.8s after a
-reconnect.  The shown page loads now; every other page is handed over IN
-TURN, nearest the current workspace first (`agent-repl--webhost-ring-order'),
-and the host loads each once the one before has drawn (host.ts), so the pages
-a switch is likeliest to reach are fresh first, as fast as the machine allows
-and never piled up.  A switch to a page still waiting loads it at once."
+THE PAGES COME BACK IN TWO LANES, ONE PAGE AT A TIME IN EACH (owner
+rulings, 2026-10-17).  Every page booting at once is what stalled the web
+process for up to 1.8s after a reconnect.  The shown page loads now; every
+other page is handed over IN TURN, in the lane after the current workspace
+or the lane before it, nearest first (`agent-repl--webhost-replay-lanes').
+The host loads each lane's next page once its last has drawn (host.ts), so
+the pages a switch is likeliest to reach either way are fresh first, two at
+a time and never piled up.  A switch to a page still waiting loads it at
+once."
   (let (ids)
     (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown
       (agent-repl--webhost-replay-page agent-repl--webhost-shown nil)
       (agent-repl--webhost-call "show" agent-repl--webhost-shown))
-    (let ((rest (agent-repl--webhost-ring-order (delete agent-repl--webhost-shown (nreverse ids)))))
-      (dolist (id rest)
-        (agent-repl--webhost-replay-page id t))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn pages=%d" (length rest))))
+    (let ((lanes (agent-repl--webhost-replay-lanes (delete agent-repl--webhost-shown (nreverse ids)))))
+      (dolist (id (car lanes))
+        (agent-repl--webhost-replay-page id "after"))
+      (dolist (id (cdr lanes))
+        (agent-repl--webhost-replay-page id "before"))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d"
+                        (length (car lanes)) (length (cdr lanes)))))
   (when (and agent-repl--webhost-log-level
              (> (cdr agent-repl--webhost-log-level) (* 1000 (float-time))))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
@@ -435,13 +462,28 @@ and never piled up.  A switch to a page still waiting loads it at once."
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
 
 (defun agent-repl-webhost-reload (conn)
-  "Reload the host, and so every page, on CONN's daemon, once per burst.
-A rollout tells every workspace to reload in one burst of pushes; the host
-reloads once for all of them, on the next turn of the command loop, which
-also brings the host page's own code up to the new build."
+  "Reload the host, and so every page, on CONN's daemon, once per turn.
+Every page re-pointed in one turn of the command loop reloads the host
+once, on the next turn.  The build the host comes onto is nobody's to
+name, so the build a deploy brought is forgotten."
+  (setq agent-repl--webhost-build nil)
   (unless agent-repl--webhost-reload-timer
     (setq agent-repl--webhost-reload-timer
           (run-at-time 0 nil #'agent-repl--webhost-reload-now conn))))
+
+(defun agent-repl-webhost-reload-onto (conn build)
+  "Reload the host onto the webapp BUILD a deploy brings, on CONN's daemon.
+THE HOST RELOADS ONCE PER BUILD.  A deploy tells every workspace with a
+stale page, each on its own stream, so the pushes arrive over several
+turns of the command loop (eight in 100ms, 2026-10-17), and each reload
+replays every page.  The host's reload fetches the build the daemon
+serves, which is BUILD from the first push on, so a push naming the build
+the host was last reloaded onto is already met."
+  (if (equal build agent-repl--webhost-build)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-met build=%s" build)
+    (agent-repl-webhost-reload conn)
+    (setq agent-repl--webhost-build build)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build=%s" build)))
 
 (provide 'webhost)
 

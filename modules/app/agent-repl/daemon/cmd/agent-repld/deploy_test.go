@@ -201,7 +201,7 @@ func (f *fakeClients) WebviewBuilds() map[ids.WorkspaceID][]string {
 	return map[ids.WorkspaceID][]string{"w1": {"old"}}
 }
 
-func (f *fakeClients) PushReloadWebapp(ws ids.WorkspaceID) {
+func (f *fakeClients) PushReloadWebappBuild(ws ids.WorkspaceID, _ string) {
 	f.pushedWebapp = append(f.pushedWebapp, ws)
 }
 
@@ -211,7 +211,7 @@ func TestAnUnboundClientsForwarderAnswersNoClient(t *testing.T) {
 
 	// Act
 	emacs, webviews, reached := f.EmacsBuilds(), f.WebviewBuilds(), f.PushReloadElisp([]string{"s1"}, "/r", "b")
-	f.PushReloadWebapp("w1")
+	f.PushReloadWebappBuild("w1", "b")
 
 	// Assert
 	if len(emacs) != 0 || len(webviews) != 0 || reached != 0 {
@@ -228,7 +228,7 @@ func TestABoundClientsForwarderHandsEverythingOn(t *testing.T) {
 	// Act
 	emacs, webviews := f.EmacsBuilds(), f.WebviewBuilds()
 	reached := f.PushReloadElisp([]string{"s1"}, "/r", "b")
-	f.PushReloadWebapp("w1")
+	f.PushReloadWebappBuild("w1", "b")
 
 	// Assert
 	if len(emacs) != 1 || len(webviews["w1"]) != 1 || reached != 1 {

@@ -1392,7 +1392,9 @@ How the daemon puts each component into service:
      kind it was asked");
    - a stale Emacs is pushed `reload_elisp` (the whole module set in
      `config.el` load order, then the heartbeat and timer re-arm check), and a
-     stale webview `reload_webapp`.
+     stale webview `reload_webapp` naming the fresh build. Every page lives in
+     Emacs's one host web view, so Emacs reloads the host once per build
+     however many workspaces are told (`agent-repl-webhost-reload-onto`).
 
 EVERY PHASE IS ON THE FOOTER (owner request, 2026-09-27). The deploy states
 each phase through ONE entry point (`internal/deployprogress.Sink`, the footer

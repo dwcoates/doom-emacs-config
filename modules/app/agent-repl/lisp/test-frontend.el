@@ -1495,17 +1495,34 @@ accessor would not reach the code under test."
         ;; Assert
         (should (null reloaded))))))
 
-(ert-deftest agent-repl-test-frontend-reload-webapp-reloads-the-host ()
-  "A rollout's push reloads the one host, bringing every page onto the new build."
+(ert-deftest agent-repl-test-frontend-reload-webapp-reloads-the-host-onto-the-build ()
+  "A deploy's push reloads the one host onto the build it names."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((reloaded nil))
       (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
-                ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (setq reloaded conn))))
+                ((symbol-function 'agent-repl-webhost-reload-onto)
+                 (lambda (conn build) (setq reloaded (list conn build))))
+                ((symbol-function 'agent-repl-frontend-reload-webview)
+                 (lambda (ws) (error "Reloaded the page of %s" ws))))
         ;; Act
-        (agent-repl-frontend-reload-webapp "alpha")
+        (agent-repl-frontend-reload-webapp "alpha" "Web2")
         ;; Assert
-        (should (eq reloaded 'conn))))))
+        (should (equal reloaded '(conn "Web2")))))))
+
+(ert-deftest agent-repl-test-frontend-reload-webapp-without-a-build-reloads-the-page ()
+  "A push naming no build (a restart's) reloads that workspace's page alone."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((reloaded nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-reload-onto)
+                 (lambda (&rest _) (error "Reloaded the host")))
+                ((symbol-function 'agent-repl-frontend-reload-webview)
+                 (lambda (ws) (setq reloaded ws))))
+        ;; Act
+        (agent-repl-frontend-reload-webapp "alpha" nil)
+        ;; Assert
+        (should (equal reloaded "alpha"))))))
 
 (ert-deftest agent-repl-test-frontend-reload-does-not-remount-the-buffer ()
   "The webview is bound to its buffer for life: the widget is navigated."

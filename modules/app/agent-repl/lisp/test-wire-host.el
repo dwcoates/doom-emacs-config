@@ -273,6 +273,28 @@
                   "{\"restartWebview\":{}}")
                  '("WatchHostWorkspaceResponse" restartWebview "unknown field"))))
 
+;;;; ---- HostWorkspaceReloadWebapp ----
+
+(ert-deftest agent-repl-test-wire-host-reload-webapp-carries-the-build ()
+  "A deploy's reload decodes the build it brings."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-reload-webapp
+                  "{\"webappBuild\":\"Web2\"}")
+                 '(:webapp-build "Web2"))))
+
+(ert-deftest agent-repl-test-wire-host-reload-webapp-absent-build-is-nil ()
+  "UNSET build means a reload of the workspace's page alone: nil."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-reload-webapp "{}")
+                 '(:webapp-build nil))))
+
+(ert-deftest agent-repl-test-wire-host-reload-webapp-refuses-an-unknown-field ()
+  "An unknown key on the reload is refused."
+  (should (equal (car (agent-repl-test-wire-host--breach
+                       #'agent-repl-wire-decode-host-workspace-reload-webapp
+                       "{\"address\":\"x\"}"))
+                 "HostWorkspaceReloadWebapp")))
+
 ;;;; ---- HostOpenInEditor ----
 
 (ert-deftest agent-repl-test-wire-host-open-in-editor-carries-the-line ()

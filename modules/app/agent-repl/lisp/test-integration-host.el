@@ -56,8 +56,8 @@ replay is run here, exactly where the load would run it."
   "The page URL a host call SCRIPT asks the host to hold, or nil.
 Every page lives in the one host web view (webhost.el), so pointing a page
 at a URL is the host's `ensure' call, and that call is the observable,
-whether the page loads at once or in turn (a third argument, `true')."
-  (when (string-match "h\\.ensure(\"[^\"]*\",\"\\([^\"]*\\)\"\\(?:,true\\)?)" script)
+whether the page loads at once or in turn (a third argument, its lane)."
+  (when (string-match "h\\.ensure(\"[^\"]*\",\"\\([^\"]*\\)\"\\(?:,\"[a-z]+\"\\)?)" script)
     (match-string 1 script)))
 (declare-function agent-repl-popup-open "popup")
 (declare-function agent-repl-link-successor "daemon-link")
@@ -641,21 +641,21 @@ the click is a SelectWorkspace, and the frame follows the roster."
 ;;;; ---- Scenario 7: reload_webapp ----
 
 (ert-deftest agent-repl-itest-host-reload-webapp-reloads-that-workspace ()
-  "`reload_webapp' reloads THIS workspace's webview against the SAME daemon.
-It is empty by design: no address, because the daemon is not changing.
-It is a PUSH, never a terminal frame."
+  "`reload_webapp' reloads against the SAME daemon, naming the build it brings.
+No address rides it, because the daemon is not changing.  It is a PUSH,
+never a terminal frame."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
       (let ((reloaded nil))
         (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp)
-                   (lambda (ws) (push ws reloaded))))
+                   (lambda (ws build) (push (list ws build) reloaded))))
           ;; Act.
-          (agent-repl-itest--push daemon "host" '((reloadWebapp . ()))
+          (agent-repl-itest--push daemon "host" '((reloadWebapp . ((webappBuild . "Web2"))))
                                   (plist-get ref :id))
           ;; Assert.
           (agent-repl-itest--wait-until (lambda () reloaded) nil "the webview reload")
-          (should (equal reloaded (list agent-repl-itest-host--ws))))))))
+          (should (equal reloaded (list (list agent-repl-itest-host--ws "Web2")))))))))
 
 (ert-deftest agent-repl-itest-host-reload-webapp-leaves-the-stream-standing ()
   "A `reload_webapp' push does not end the stream.
@@ -664,7 +664,7 @@ stream stands until the CLIENT cancels."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp) (lambda (_ws _build) nil)))
         ;; Act.
         (agent-repl-itest--push daemon "host" '((reloadWebapp . ()))
                                 (plist-get ref :id))
@@ -1549,7 +1549,7 @@ the contract, so the assertion needs a second one to leave alone."
     (agent-repl-itest-host--with-two-subscriptions daemon ref-a ref-b
       (let ((reloaded nil))
         (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp)
-                   (lambda (ws) (push ws reloaded))))
+                   (lambda (ws _build) (push ws reloaded))))
           ;; Act: A only.  B's own stream is pushed a state afterwards and
           ;; waited for, so a broadcast reload would have been recorded by
           ;; the time the assertion runs.

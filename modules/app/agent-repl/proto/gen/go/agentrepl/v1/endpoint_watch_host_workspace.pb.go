@@ -214,12 +214,12 @@ type WatchHostWorkspaceResponse_Transferred struct {
 }
 
 type WatchHostWorkspaceResponse_ReloadWebapp struct {
-	// WEBAPP-ONLY ROLLOUT: rebuilt webapp assets are deployed and Emacs
-	// must reload this workspace's xwidget against the SAME daemon. Empty
-	// by design: no address rides it (the daemon is not changing), and a
-	// combined daemon+webapp rollout never sends it — the handover's fresh
-	// attach pulls the new assets as a side effect. The reloaded webview's
-	// default first-page load is the whole of the recovery.
+	// RELOAD AGAINST THE SAME DAEMON: Emacs reloads this workspace's page.
+	// No address rides it (the daemon is not changing), and a combined
+	// daemon+webapp rollout never sends it — the handover's fresh attach
+	// pulls the new assets as a side effect. The reloaded page's default
+	// first-page load is the whole of the recovery. A webapp deploy names
+	// the build it brings (`webapp_build`); a restart reloads one page.
 	ReloadWebapp *HostWorkspaceReloadWebapp `protobuf:"bytes,4,opt,name=reload_webapp,json=reloadWebapp,proto3,oneof"`
 }
 
@@ -363,7 +363,15 @@ func (*HostWorkspaceTransferred) Descriptor() ([]byte, []int) {
 }
 
 type HostWorkspaceReloadWebapp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE WEBAPP BUILD A DEPLOY BRINGS, which every page and the host page
+	// itself must come onto. A deploy pushes it to every workspace with a
+	// stale page in one burst, and every page lives in Emacs's one host web
+	// view, so the host reloads ONCE per build: a push naming the build the
+	// host was last reloaded onto is already met. UNSET = a reload of this
+	// workspace's page alone, on the build it runs (a restart's, after its
+	// shim was replaced).
+	WebappBuild   *string `protobuf:"bytes,1,opt,name=webapp_build,json=webappBuild,proto3,oneof" json:"webapp_build,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -396,6 +404,13 @@ func (x *HostWorkspaceReloadWebapp) ProtoReflect() protoreflect.Message {
 // Deprecated: Use HostWorkspaceReloadWebapp.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceReloadWebapp) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *HostWorkspaceReloadWebapp) GetWebappBuild() string {
+	if x != nil && x.WebappBuild != nil {
+		return *x.WebappBuild
+	}
+	return ""
 }
 
 // The user clicked this workspace's desktop banner. Empty: the stream it
@@ -2925,8 +2940,10 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x17\n" +
 	"\x04line\x18\x02 \x01(\rH\x00R\x04line\x88\x01\x01B\a\n" +
 	"\x05_line\"\x1a\n" +
-	"\x18HostWorkspaceTransferred\"\x1b\n" +
-	"\x19HostWorkspaceReloadWebapp\"\"\n" +
+	"\x18HostWorkspaceTransferred\"T\n" +
+	"\x19HostWorkspaceReloadWebapp\x12&\n" +
+	"\fwebapp_build\x18\x01 \x01(\tH\x00R\vwebappBuild\x88\x01\x01B\x0f\n" +
+	"\r_webapp_build\"\"\n" +
 	" HostWorkspaceNotificationClicked\"\x87\x03\n" +
 	"\rHostWorkspace\x123\n" +
 	"\x04none\x18\x01 \x01(\v2\x1d.agentrepl.v1.HostSessionNoneH\x00R\x04none\x12?\n" +
@@ -3231,6 +3248,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*WatchHostWorkspaceResponse_Selection)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[2].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[4].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[6].OneofWrappers = []any{
 		(*HostWorkspace_None)(nil),
 		(*HostWorkspace_Existing)(nil),
