@@ -259,6 +259,26 @@ func (f *verbsForwarder) interruptTurn(ctx context.Context, ws ids.WorkspaceID) 
 	return out.Turn, nil
 }
 
+// status is a workspace subscription's status read (workspacesubs.Deps.Status),
+// read out of the verbs, which are built after the notifier.
+func (f *verbsForwarder) status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error) {
+	verbs, err := f.bound("a followed workspace's status was read")
+	if err != nil {
+		return nil, err
+	}
+	return verbs.Status(ctx, ws)
+}
+
+// carryOutSelfClose is the turn-end edge's self-close (workspace.SelfCloses),
+// read out of the verbs, which are built after the edges.
+func (f *verbsForwarder) carryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a turn's end carried a self-close out")
+	if err != nil {
+		return err
+	}
+	return verbs.CarryOutSelfClose(ctx, ws)
+}
+
 // healthForwarder carries the session watcher's diagnostics verdict to the
 // health reporter, which is built after the fleet the watchers live in.
 type healthForwarder struct {
