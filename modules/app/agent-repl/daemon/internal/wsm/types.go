@@ -71,6 +71,9 @@ type Workspace struct {
 	// CloseWhenTurnEnds is when the workspace asked to close itself, set while
 	// it waits for that asking turn to end (selfclose.go); nil otherwise.
 	CloseWhenTurnEnds *time.Time
+	// Awaiting is the workspace this one awaits correspondence from
+	// (standings.go), nil while it awaits none.
+	Awaiting *WorkspaceID
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
 	// Closure is when the workspace was closed and by whom (MarkClosed); nil

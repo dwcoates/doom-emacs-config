@@ -510,6 +510,12 @@ type DB interface {
 	// TakeCloseWhenTurnEnds clears a workspace's self-close mark in one
 	// statement, answering whether one stood.
 	TakeCloseWhenTurnEnds(ctx context.Context, id WorkspaceID) (bool, error)
+	// SetAwaiting marks a workspace awaiting correspondence from another, or
+	// clears the mark with nil (standings.go).
+	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error
+	// SetOneShot marks a workspace's creation a one-shot or unmarks it; a
+	// workspace with no creation job is ErrNotFound (standings.go).
+	SetOneShot(ctx context.Context, id WorkspaceID, oneShot bool) error
 	// SubscribeWorkspace records a workspace subscription, replacing the
 	// events of one its subscriber holds to the same workspace, and answers
 	// whether it replaced one (workspacesubscriptions.go).
