@@ -70,7 +70,7 @@ func TestAnAsyncMergeLandsWithItsBubblePlacedInTheRequestersFeed(t *testing.T) {
 	s.repo.AddBranch("agent-fix")
 
 	// Act.
-	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
+	s.asyncMerge(t, "async-fix", "agent-fix")
 	merge := awaitRow(t, s.f, root, "the async merge's terminal", isMergeTerminal)
 	s.d.AwaitLandingDeployed()
 
@@ -108,7 +108,7 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 
 	// Act: the merge workspace's agent is briefed on the conflict, and gives up.
-	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
+	s.asyncMerge(t, "async-fix", "agent-fix")
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
 	shim := s.d.Shim(mergeWS)
 	shim.ExpectStartTurn()
@@ -152,7 +152,7 @@ func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *tes
 
 	// Act: the merge workspace's agent is briefed with the instruction,
 	// resolves (a commit lands in its worktree), and ends its turn.
-	s.mergeAs(t, harness.Async("pick-fix", "agent-fix", harness.WithInstruction("the clean work")))
+	s.asyncMerge(t, "pick-fix", "agent-fix", harness.WithInstruction("the clean work"))
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
 	shim := s.d.Shim(mergeWS)
 	brief := shim.ExpectStartTurn()
@@ -198,7 +198,7 @@ func TestAnAsyncLandingIsReportedOnlyOnceItsDeployHasRun(t *testing.T) {
 	s.repo.AddBranch("agent-fix")
 
 	// Act
-	s.mergeAs(t, harness.Async("async-fix", "agent-fix"))
+	s.asyncMerge(t, "async-fix", "agent-fix")
 	s.d.AwaitLandingDeployed()
 
 	// Assert: owed, then covered, then deployed, then handed back.
@@ -283,7 +283,7 @@ func TestAnAsyncMergeFromTheMainCheckoutLandsInItsMainWorktree(t *testing.T) {
 	s.repo.AddBranch("agent-fix")
 
 	// Act
-	s.mergeAs(t, harness.Async("main-fix", "agent-fix"))
+	s.asyncMerge(t, "main-fix", "agent-fix")
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
 	merge := awaitRow(t, s.f, root, "the async merge's terminal", isMergeTerminal)
 	s.d.AwaitLandingDeployed()
@@ -303,13 +303,13 @@ func TestAnAsyncRequestsBeforeMergeActionRunsInItsMergeWorkspace(t *testing.T) {
 	s := newSourcedRepo(t)
 	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
-	withBefore := func(async *agentreplv1.MergeWorkspaceAsync) {
+	withBefore := func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
 		async.MergeActions = &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the request's linters")}
 	}
 
 	// Act: the merge workspace is handed the request's before-merge prompt,
 	// and concludes it.
-	s.mergeAs(t, harness.Async("async-fix", "agent-fix", withBefore))
+	s.asyncMerge(t, "async-fix", "agent-fix", withBefore)
 	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
 	shim := s.d.Shim(mergeWS)
 	req := shim.ExpectStartTurn()

@@ -153,12 +153,10 @@ func forkIndexOf(texts []string, want string) int {
 func forkOf(t *testing.T, f *fixture) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := f.d.Client().CreateWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: createRepositoryRef(t, f.d, f.repo),
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-		Parent: &agentreplv1.CreateWorkspaceParent{
-			Workspace: f.ws,
-			Fork:      &agentreplv1.CreateWorkspaceFork{},
-		},
+		Repository:    createRepositoryRef(t, f.d, f.repo),
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fork(f.ws),
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: harness.ChildOf(f.ws, "")}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)

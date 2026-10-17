@@ -327,7 +327,7 @@ func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 	}
 
 	// Act
-	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
 	}
 	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.workspace.close")
@@ -907,7 +907,7 @@ func vanishedWorktree(t *testing.T, repo *harness.Repo, name string) (*harness.D
 	ws := harness.Register(t, d, dir)
 	// CLOSED FIRST: the boot recreates an OPEN workspace's worktree itself,
 	// so only a closed row reaches the open with its directory still gone.
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ws})); err != nil {
+	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: ws})); err != nil {
 		t.Fatalf("CloseWorkspace: %v", err)
 	}
 	d.Stop()

@@ -183,7 +183,7 @@ func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 	unknown := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
 
 	// Act
-	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: unknown}))
+	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: unknown}))
 
 	// Assert
 	if err != nil {
@@ -208,7 +208,7 @@ func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 	mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: t.TempDir()}
 
 	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: mismatched}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: mismatched}))
 
 	// Assert
 	if err != nil {
@@ -304,7 +304,7 @@ func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace, closed.
 	f := newRegistered(t, harness.Opts{})
-	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
 	}
 	roster := f.d.WatchRoster()

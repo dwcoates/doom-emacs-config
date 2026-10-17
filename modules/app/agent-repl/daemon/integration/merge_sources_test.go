@@ -54,6 +54,29 @@ func (s *sourcedRepo) mergeAs(t *testing.T, mode harness.MergeMode) {
 	}
 }
 
+// asyncMerge asks for an async merge of BRANCH by the fixture workspace's
+// agent, which made the branch, shaped by EDITS.
+func (s *sourcedRepo) asyncMerge(t *testing.T, name, branch string, edits ...func(*agentreplv1.CreateWorkspaceAsyncMerge)) {
+	t.Helper()
+	resp, err := s.d.Client().CreateWorkspace(s.d.Ctx(), connect.NewRequest(s.asyncRequest(name, branch, edits...)))
+	requireRPCAnswered(t, "CreateWorkspace", resp, err)
+	if resp.Msg.GetAsyncMergeAccepted() == nil {
+		t.Fatalf("CreateWorkspace = (%v), want the async merge accepted", resp.Msg.GetResult())
+	}
+}
+
+// asyncRequest is the fixture workspace's async merge of BRANCH. The
+// fixture's repository is the daemon's own checkout, so the agent's merge
+// moves the version by a patch.
+func (s *sourcedRepo) asyncRequest(name, branch string, edits ...func(*agentreplv1.CreateWorkspaceAsyncMerge)) *agentreplv1.CreateWorkspaceRequest {
+	// A version increment needs a version to increment.
+	if len(s.repo.Tags()) == 0 {
+		s.repo.Tag("0.0.1")
+	}
+	edits = append([]func(*agentreplv1.CreateWorkspaceAsyncMerge){harness.AsyncPatch("Land " + name)}, edits...)
+	return harness.AsyncMerge(&workspacev1.RepositoryRef{Dir: s.repo.Dir}, s.f.ws, name, branch, edits...)
+}
+
 // awaitConcluded waits for the fixture bubble's terminal and answers it.
 func (s *sourcedRepo) awaitConcluded(t *testing.T, root *harness.Stream[*frontendv1.FeedRow]) *frontendv1.FeedMerge {
 	t.Helper()
@@ -79,7 +102,7 @@ func TestAnAsyncMergeOfABranchWithAWorktreeLandsAndKeepsThatWorktree(t *testing.
 	branchDir := s.repo.AddBranchWorktree("agent-fix")
 
 	// Act.
-	s.mergeAs(t, harness.Async("fix-merge", "agent-fix"))
+	s.asyncMerge(t, "fix-merge", "agent-fix")
 	merge := s.awaitConcluded(t, root)
 	s.d.AwaitLandingDeployed()
 
@@ -99,34 +122,40 @@ func TestAnAsyncMergeIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		mode func(s *sourcedRepo) harness.MergeMode
-		want func(*agentreplv1.MergeWorkspaceError) bool
+		req  func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest
+		want func(*agentreplv1.CreateWorkspaceError) bool
 	}{
 		{
-			name: "the branch the requester has checked out",
-			mode: func(s *sourcedRepo) harness.MergeMode { return harness.Async("own-merge", mergeBranchOf(t, s.f.ws)) },
-			want: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetBranchCheckedOutInRequester() != nil },
+			name: "the branch the requester owns",
+			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
+				return s.asyncRequest("own-merge", mergeBranchOf(t, s.f.ws))
+			},
+			want: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeBranchOwned() != nil },
 		},
 		{
-			name: "a one-shot that names the requester",
-			mode: func(s *sourcedRepo) harness.MergeMode {
+			name: "a close-after that names the requester",
+			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
 				s.repo.AddBranch("agent-fix")
-				return harness.Async("fix-merge", "agent-fix", harness.ClosingOnLanding(s.f.ws))
+				return s.asyncRequest("fix-merge", "agent-fix", harness.ClosingOnLanding(s.f.ws))
 			},
-			want: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetUnknownOneShotWorkspace() != nil },
+			want: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeUnknownCloseAfter() != nil },
 		},
 		{
-			name: "a one-shot that names no workspace",
-			mode: func(s *sourcedRepo) harness.MergeMode {
+			name: "a close-after that names no workspace",
+			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
 				s.repo.AddBranch("agent-fix")
-				return harness.Async("fix-merge", "agent-fix", harness.ClosingOnLanding(&workspacev1.WorkspaceRef{Id: "nowhere", Dir: "/nowhere"}))
+				return s.asyncRequest("fix-merge", "agent-fix", harness.ClosingOnLanding(&workspacev1.WorkspaceRef{Id: "nowhere", Dir: "/nowhere"}))
 			},
-			want: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetUnknownOneShotWorkspace() != nil },
+			want: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeUnknownCloseAfter() != nil },
 		},
 		{
 			name: "a branch that does not exist",
-			mode: func(*sourcedRepo) harness.MergeMode { return harness.Async("fix-merge", "no-such-branch") },
-			want: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetUnknownBranch() != nil },
+			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
+				return s.asyncRequest("fix-merge", "no-such-branch")
+			},
+			want: func(e *agentreplv1.CreateWorkspaceError) bool {
+				return e.GetAsyncMergeUnknownBranch().GetBranch() == "no-such-branch"
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -137,11 +166,11 @@ func TestAnAsyncMergeIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 			s.d.ExpectWarnings("daemon.merge.enqueue")
 
 			// Act.
-			resp, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(harness.MergeRequest(s.f.ws, tt.mode(s))))
+			resp, err := s.d.Client().CreateWorkspace(s.d.Ctx(), connect.NewRequest(tt.req(s)))
 
 			// Assert.
 			if err != nil || !tt.want(resp.Msg.GetError()) {
-				t.Fatalf("MergeWorkspace = (%v, %v), want the %s refusal", resp.Msg.GetResult(), err, tt.name)
+				t.Fatalf("CreateWorkspace = (%v, %v), want the %s refusal", resp.Msg.GetResult(), err, tt.name)
 			}
 		})
 	}
@@ -338,12 +367,18 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 	roster := s.d.WatchRoster()
 	root := s.f.watchRootFeed()
 
-	// Act: the agent's command file is applied while its turn runs. A merge
-	// onto agent-repl's own master names its version increment.
-	path := commandfileWrite(t, s.d, "workspace_commands_ask.json",
-		`[{"type":"merge","project_dir":"`+s.f.ws.GetDir()+`","one_shot":true,"version_part":"patch","changelog_line":"Fix the footer"}]`)
-	applied := filepath.Join(filepath.Dir(path), "applied", filepath.Base(path))
-	s.d.AwaitFileExists(applied)
+	// Act: the agent asks while its turn runs. A merge onto agent-repl's own
+	// master names its version increment.
+	ask := harness.MergeRequest(s.f.ws, harness.OneShot(), func(req *agentreplv1.MergeWorkspaceRequest) {
+		req.Requester = harness.AskedBy(s.f.ws)
+		req.VersionIncrement = &agentreplv1.MergeWorkspaceVersionIncrement{ChangelogLine: "Fix the footer",
+			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}}
+	})
+	resp, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(ask))
+	requireRPCAnswered(t, "MergeWorkspace", resp, err)
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("MergeWorkspace = (%v), want the merge recorded", resp.Msg.GetResult())
+	}
 
 	// Assert: nothing about the merge on the roster or the feed.
 	harness.ExpectNoPush(t, root, harness.ProbeWindow, "a merge row before the requesting turn ended")
@@ -567,7 +602,7 @@ func TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain(t *testing.T) {
 	s := newSourcedRepo(t)
 	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
-	s.mergeAs(t, harness.Async("fix-merge", "agent-fix"))
+	s.asyncMerge(t, "fix-merge", "agent-fix")
 	head := awaitRow(t, s.f, root, "the merge's landed terminal", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})

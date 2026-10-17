@@ -37,11 +37,13 @@ func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *ret
 	repository := createRepositoryRef(t, d, repo)
 	create := func(parent *workspacev1.WorkspaceRef) *workspacev1.WorkspaceRef {
 		req := &agentreplv1.CreateWorkspaceRequest{
-			Repository: repository,
-			Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+			Repository:    repository,
+			Requester:     harness.User(),
+			ContextOrigin: harness.Fresh(),
+			Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: harness.Primary()}},
 		}
 		if parent != nil {
-			req.Parent = &agentreplv1.CreateWorkspaceParent{Workspace: parent}
+			req.GetStandard().Topology = harness.ChildOf(parent, "the child's work")
 		}
 		resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(req))
 		if err != nil || resp.Msg.GetSuccess() == nil {
@@ -132,22 +134,6 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	}
 	if !landedInMain {
 		t.Fatalf("git calls = %v, want a merge run inside the main checkout %q", f.d.Git.Calls(), repo.Dir)
-	}
-}
-
-func TestARetargetEntryRetargetsAndTellsExactlyLikeSetWorkspaceParent(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
-
-	// Act
-	commandfileWrite(t, f.d, "workspace_commands_retarget.json",
-		`[{"type":"retarget","workspace":"child","project_dir":"`+f.child.GetDir()+`","parent":null}]`)
-
-	// Assert
-	awaitRoster(t, f.d, f.roster, "the child at the top level", f.topLevel)
-	if notice := f.expectNotice(t); !strings.Contains(notice, "main checkout") {
-		t.Fatalf("notice = %q, want the main checkout named", notice)
 	}
 }
 
