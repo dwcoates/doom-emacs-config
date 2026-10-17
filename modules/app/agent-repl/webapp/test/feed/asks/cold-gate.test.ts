@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import {
+  KillWorkspaceErrorSchema,
+  KillWorkspaceResponseSchema,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
+import {
   SetWorkspaceHiddenErrorSchema,
   SetWorkspaceHiddenResponseSchema,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
@@ -298,6 +302,7 @@ describe("the standing gate", () => {
       COLD_GATE_COPY.compact.hint,
       COLD_GATE_COPY.clear.hint,
       COLD_GATE_COPY.pay.hint,
+      COLD_GATE_COPY.kill.hint,
       COLD_GATE_COPY.hide.hint,
     ]);
   });
@@ -313,6 +318,7 @@ describe("the standing gate", () => {
       COLD_GATE_COPY.compact.label,
       COLD_GATE_COPY.clear.label,
       COLD_GATE_COPY.pay.label,
+      COLD_GATE_COPY.kill.label,
       COLD_GATE_COPY.hide.label,
     ]);
   });
@@ -1120,6 +1126,7 @@ describe("the compact-and-resume button", () => {
       COLD_GATE_COPY.compactAndResume.label,
       COLD_GATE_COPY.clear.label,
       COLD_GATE_COPY.pay.label,
+      COLD_GATE_COPY.kill.label,
       COLD_GATE_COPY.hide.label,
     ]);
   });
@@ -1363,6 +1370,135 @@ describe("the hide workspace button", () => {
     // Assert
     expect(info).toHaveBeenCalledWith("hiding the workspace from a cold gate", {
       operation: "feed.asks.cold-gate.hide",
+      context: { workspace: WORKSPACE.id },
+    });
+    info.mockRestore();
+  });
+});
+
+describe("the kill workspace button", () => {
+  /** The kill button, as the card drew it. */
+  function killButton(el: HTMLElement): Control | null {
+    return el.querySelector<Control>("[data-cold-gate-kill]");
+  }
+
+  /** A refused kill carrying CAUSE. */
+  function refusedKill(cause: MessageInitShape<typeof KillWorkspaceErrorSchema>["cause"]) {
+    return create(KillWorkspaceResponseSchema, { result: { case: "error", value: { cause } } });
+  }
+
+  it("sits between pay and hide", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    const row = [...(el.querySelector(".cold-gate-buttons")?.children ?? [])];
+    expect(row.slice(-3).map((b) => b.textContent)).toEqual([
+      COLD_GATE_COPY.pay.label,
+      "kill workspace",
+      COLD_GATE_COPY.hide.label,
+    ]);
+  });
+
+  it("is labelled \"kill workspace\"", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(killButton(el)?.textContent).toBe("kill workspace");
+  });
+
+  it("is drawn grey", () => {
+    expect(
+      css.includes(".cold-gate-buttons > ar-button.cold-gate-kill { color: var(--muted); border-color: var(--muted); }"),
+    ).toBe(true);
+  });
+
+  it("is not a remediation the gate answers with", () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    expect(killButton(el)?.hasAttribute("data-cold-gate")).toBe(false);
+  });
+
+  it("kills the gate's own workspace synchronously", async () => {
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    expect(h.calls.kill.map((r) => [r.workspace?.id, r.opId])).toEqual([[WORKSPACE.id, undefined]]);
+  });
+
+  it("answers nothing about the gate", async () => {
+    const h = askHarness();
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    expect(h.calls.coldGate).toEqual([]);
+  });
+
+  it("latches every button inert while the kill is in flight", () => {
+    const el = drawFeedColdGate(gate(standing({ heldPrompts: 1 })), askHarness().rc);
+    killButton(el)?.click();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => b.disabled)).toBe(true);
+  });
+
+  it("draws nothing on success and keeps the buttons latched", async () => {
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    killButton(el)?.click();
+    await settle();
+    expect([el.querySelector(".refusal"), killButton(el)?.disabled]).toEqual([null, true]);
+  });
+
+  it("words a refused kill as every other control does, at the buttons", async () => {
+    const h = askHarness({ kill: refusedKill({ case: "unknownWorkspace", value: {} }) });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    const drawn = el.querySelector(".hibernation-actions .refusal");
+    expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([
+      "unknownWorkspace",
+      "the daemon does not know this workspace",
+    ]);
+  });
+
+  it("gives the buttons back after a refused kill", async () => {
+    const h = askHarness({ kill: refusedKill({ case: "notYetAdopted", value: {} }) });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => !b.disabled)).toBe(true);
+  });
+
+  it("draws a transport failure at the buttons when the daemon was not reached", async () => {
+    const h = askHarness({ fail: true, failCode: Code.Unavailable });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("gives the buttons back after a kill that threw", async () => {
+    const h = askHarness({ fail: true });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    expect([...el.querySelectorAll<Control>("ar-button")].every((b) => !b.disabled)).toBe(true);
+  });
+
+  it("refuses an accepted answer to a kill that sent no op id as a malformed view", async () => {
+    const h = askHarness({
+      kill: create(KillWorkspaceResponseSchema, { result: { case: "accepted", value: { opId: "op-1" } } }),
+    });
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    killButton(el)?.click();
+    await settle();
+    expect(el.querySelector(".hibernation-actions .refusal")).toBeNull();
+  });
+
+  it("logs the kill with the workspace it kills", async () => {
+    // Arrange
+    const { log } = await import("../../../src/log.js");
+    const info = vi.spyOn(log, "info");
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Act
+    killButton(el)?.click();
+    await settle();
+    // Assert
+    expect(info).toHaveBeenCalledWith("killing the workspace from a cold gate", {
+      operation: "feed.asks.cold-gate.kill",
       context: { workspace: WORKSPACE.id },
     });
     info.mockRestore();

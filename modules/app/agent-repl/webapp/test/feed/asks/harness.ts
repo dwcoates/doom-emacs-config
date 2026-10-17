@@ -30,6 +30,11 @@ import {
   type SetWorkspaceHiddenResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import {
+  KillWorkspaceResponseSchema,
+  type KillWorkspaceRequest,
+  type KillWorkspaceResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
+import {
   FeedIdSchema,
   FeedRowSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -58,6 +63,7 @@ export interface AskScript {
   draft?: UpdateQuestionDraftResponse;
   coldGate?: AnswerColdGateResponse;
   hide?: SetWorkspaceHiddenResponse;
+  kill?: KillWorkspaceResponse;
   /** Throw instead of answering, standing in for a call that did not land. */
   fail?: boolean;
   /**
@@ -77,6 +83,7 @@ export interface AskCalls {
   draft: UpdateQuestionDraftRequest[];
   coldGate: AnswerColdGateRequest[];
   hide: SetWorkspaceHiddenRequest[];
+  kill: KillWorkspaceRequest[];
 }
 
 export interface AskHarness {
@@ -86,7 +93,7 @@ export interface AskHarness {
 
 /** A row context on a card row, with the ask cards' verbs scripted. */
 export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskHarness {
-  const calls: AskCalls = { permission: [], draft: [], coldGate: [], hide: [] };
+  const calls: AskCalls = { permission: [], draft: [], coldGate: [], hide: [], kill: [] };
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       answerPermission: (req) => {
@@ -119,6 +126,14 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
         return (
           script.hide ??
           create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } })
+        );
+      },
+      killWorkspace: (req) => {
+        calls.kill.push(req);
+        if (script.fail === true) throw scriptedFailure(script);
+        return (
+          script.kill ??
+          create(KillWorkspaceResponseSchema, { result: { case: "success", value: {} } })
         );
       },
     });
