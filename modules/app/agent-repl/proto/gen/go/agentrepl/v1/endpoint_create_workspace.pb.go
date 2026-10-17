@@ -78,7 +78,9 @@ type CreateWorkspaceRequest struct {
 	// workspace its branch was made by (`async_merge_context_not_maker`).
 	ContextOrigin *WorkspaceContextOrigin `protobuf:"bytes,12,opt,name=context_origin,json=contextOrigin,proto3" json:"context_origin,omitempty"`
 	// The session model at creation. UNSET = the daemon's default; presence,
-	// never an empty-string sentinel.
+	// never an empty-string sentinel. Refused as invalid beside `async_merge`,
+	// whose workspace forks its maker's session under the maker's model;
+	// `priority` and `allow_ungated` are refused beside it likewise.
 	Model *string `protobuf:"bytes,5,opt,name=model,proto3,oneof" json:"model,omitempty"`
 	// The workspace's priority. UNSET = unprioritized, except that a child
 	// inherits its owner's priority. A new workspace lands second-to-last among

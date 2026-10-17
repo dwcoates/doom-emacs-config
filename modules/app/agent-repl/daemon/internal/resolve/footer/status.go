@@ -2,6 +2,7 @@ package footer
 
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"strings"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
@@ -839,6 +840,16 @@ func substatusName(status *frontendv1.FooterStatus) string {
 		return "unset"
 	}
 	return string(field.Name())
+}
+
+// StatusWords names a status in plain words, its arm and its substatus when
+// it states one: "vendor fault · usage limit", "degraded".
+func StatusWords(status *frontendv1.FooterStatus) string {
+	words := strings.ReplaceAll(statusName(status), "_", " ")
+	if sub := substatusName(status); sub != "none" && sub != "unset" {
+		words += " · " + strings.ReplaceAll(sub, "_", " ")
+	}
+	return words
 }
 
 // coldGateCostLine is the cold gate's cost line on the wire: the whole line

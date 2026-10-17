@@ -114,7 +114,9 @@ export type CreateWorkspaceRequest = Message<"agentrepl.v1.CreateWorkspaceReques
 
   /**
    * The session model at creation. UNSET = the daemon's default; presence,
-   * never an empty-string sentinel.
+   * never an empty-string sentinel. Refused as invalid beside `async_merge`,
+   * whose workspace forks its maker's session under the maker's model;
+   * `priority` and `allow_ungated` are refused beside it likewise.
    *
    * @generated from field: optional string model = 5;
    */

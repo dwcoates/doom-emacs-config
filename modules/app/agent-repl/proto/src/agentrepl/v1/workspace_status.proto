@@ -93,6 +93,11 @@ message WorkspaceStatusActivity {
     // the gate is answered (AnswerColdGate: pay and resume, clear, compact, or
     // compact and resume).
     WorkspaceStatusActivityColdGate cold_gate = 6;
+    // A fault stands in the way of the session: the vendor's (an outage, a
+    // usage limit, a retried call), agent-repl's own, the network's, or a
+    // degraded link. Whether a turn is mid-flight beneath it is not said: the
+    // fault is what decides what the workspace can do next.
+    WorkspaceStatusActivityFault fault = 7;
   }
 }
 // Being brought up. No fields.
@@ -120,6 +125,12 @@ message WorkspaceStatusActivityColdGate {
   // The gate, as AnswerColdGate names it (AnswerColdGateRequest.gate),
   // echoed back unchanged.
   frontend.v1.FeedId gate = 1;
+}
+// A standing fault.
+message WorkspaceStatusActivityFault {
+  // The fault in the footer's own words ("vendor fault · usage limit"), for
+  // an agent to report. Prose to be read, not a vocabulary to switch on.
+  string description = 1;
 }
 // The workspace's own merge is queued or running. No fields: the queue's
 // status (GetMergeQueueStatus) says where it stands.

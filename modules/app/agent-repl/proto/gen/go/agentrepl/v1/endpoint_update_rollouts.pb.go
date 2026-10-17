@@ -549,8 +549,9 @@ func (*UpdateRolloutsSuccessReleasedUpToDate) Descriptor() ([]byte, []int) {
 // A rollout started.
 type UpdateRolloutsSuccessReleasedRollingOut struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The commit being rolled out, as git names it.
-	Commit        string `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
+	// The deploy's decisions, one per component, exactly as the Deploy rpc
+	// answers them.
+	Deploy        *DeploySuccess `protobuf:"bytes,1,opt,name=deploy,proto3" json:"deploy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -585,11 +586,11 @@ func (*UpdateRolloutsSuccessReleasedRollingOut) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_rollouts_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *UpdateRolloutsSuccessReleasedRollingOut) GetCommit() string {
+func (x *UpdateRolloutsSuccessReleasedRollingOut) GetDeploy() *DeploySuccess {
 	if x != nil {
-		return x.Commit
+		return x.Deploy
 	}
-	return ""
+	return nil
 }
 
 type UpdateRolloutsError struct {
@@ -798,7 +799,7 @@ var File_agentrepl_v1_endpoint_update_rollouts_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_rollouts_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_update_rollouts.proto\x12\fagentrepl.v1\"\x9a\x01\n" +
+	"+agentrepl/v1/endpoint_update_rollouts.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/endpoint_deploy.proto\"\x9a\x01\n" +
 	"\x15UpdateRolloutsRequest\x126\n" +
 	"\x04hold\x18\x01 \x01(\v2 .agentrepl.v1.UpdateRolloutsHoldH\x00R\x04hold\x12?\n" +
 	"\arelease\x18\x02 \x01(\v2#.agentrepl.v1.UpdateRolloutsReleaseH\x00R\areleaseB\b\n" +
@@ -821,9 +822,9 @@ const file_agentrepl_v1_endpoint_update_rollouts_proto_rawDesc = "" +
 	"rollingOut\x12[\n" +
 	"\fstart_failed\x18\x03 \x01(\v26.agentrepl.v1.UpdateRolloutsSuccessReleasedStartFailedH\x00R\vstartFailedB\b\n" +
 	"\x06deploy\"'\n" +
-	"%UpdateRolloutsSuccessReleasedUpToDate\"A\n" +
-	"'UpdateRolloutsSuccessReleasedRollingOut\x12\x16\n" +
-	"\x06commit\x18\x01 \x01(\tR\x06commit\"\xae\x01\n" +
+	"%UpdateRolloutsSuccessReleasedUpToDate\"^\n" +
+	"'UpdateRolloutsSuccessReleasedRollingOut\x123\n" +
+	"\x06deploy\x18\x01 \x01(\v2\x1b.agentrepl.v1.DeploySuccessR\x06deploy\"\xae\x01\n" +
 	"\x13UpdateRolloutsError\x12L\n" +
 	"\falready_held\x18\x01 \x01(\v2'.agentrepl.v1.UpdateRolloutsAlreadyHeldH\x00R\valreadyHeld\x12@\n" +
 	"\bnot_held\x18\x02 \x01(\v2#.agentrepl.v1.UpdateRolloutsNotHeldH\x00R\anotHeldB\a\n" +
@@ -860,6 +861,7 @@ var file_agentrepl_v1_endpoint_update_rollouts_proto_goTypes = []any{
 	(*UpdateRolloutsAlreadyHeld)(nil),                // 10: agentrepl.v1.UpdateRolloutsAlreadyHeld
 	(*UpdateRolloutsNotHeld)(nil),                    // 11: agentrepl.v1.UpdateRolloutsNotHeld
 	(*UpdateRolloutsSuccessReleasedStartFailed)(nil), // 12: agentrepl.v1.UpdateRolloutsSuccessReleasedStartFailed
+	(*DeploySuccess)(nil),                            // 13: agentrepl.v1.DeploySuccess
 }
 var file_agentrepl_v1_endpoint_update_rollouts_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateRolloutsRequest.hold:type_name -> agentrepl.v1.UpdateRolloutsHold
@@ -871,13 +873,14 @@ var file_agentrepl_v1_endpoint_update_rollouts_proto_depIdxs = []int32{
 	7,  // 6: agentrepl.v1.UpdateRolloutsSuccessReleased.up_to_date:type_name -> agentrepl.v1.UpdateRolloutsSuccessReleasedUpToDate
 	8,  // 7: agentrepl.v1.UpdateRolloutsSuccessReleased.rolling_out:type_name -> agentrepl.v1.UpdateRolloutsSuccessReleasedRollingOut
 	12, // 8: agentrepl.v1.UpdateRolloutsSuccessReleased.start_failed:type_name -> agentrepl.v1.UpdateRolloutsSuccessReleasedStartFailed
-	10, // 9: agentrepl.v1.UpdateRolloutsError.already_held:type_name -> agentrepl.v1.UpdateRolloutsAlreadyHeld
-	11, // 10: agentrepl.v1.UpdateRolloutsError.not_held:type_name -> agentrepl.v1.UpdateRolloutsNotHeld
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 9: agentrepl.v1.UpdateRolloutsSuccessReleasedRollingOut.deploy:type_name -> agentrepl.v1.DeploySuccess
+	10, // 10: agentrepl.v1.UpdateRolloutsError.already_held:type_name -> agentrepl.v1.UpdateRolloutsAlreadyHeld
+	11, // 11: agentrepl.v1.UpdateRolloutsError.not_held:type_name -> agentrepl.v1.UpdateRolloutsNotHeld
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_rollouts_proto_init() }
@@ -885,6 +888,7 @@ func file_agentrepl_v1_endpoint_update_rollouts_proto_init() {
 	if File_agentrepl_v1_endpoint_update_rollouts_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_deploy_proto_init()
 	file_agentrepl_v1_endpoint_update_rollouts_proto_msgTypes[0].OneofWrappers = []any{
 		(*UpdateRolloutsRequest_Hold)(nil),
 		(*UpdateRolloutsRequest_Release)(nil),

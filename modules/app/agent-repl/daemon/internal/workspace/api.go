@@ -342,6 +342,10 @@ type Verbs interface {
 	// the bounce is done. A workspace with no session is restarted by the
 	// bounce bringing one up.
 	Restart(ctx context.Context, ws ids.WorkspaceID) error
+	// Status answers the workspace's status as an agent reads it, open or
+	// closed (agentrepl.v1.WorkspaceStatus). An unregistered workspace is
+	// refused as unknown_workspace.
+	Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error)
 	// Select records the user's switch to this workspace and clears its
 	// attention marker. Idempotent.
 	Select(ctx context.Context, ws ids.WorkspaceID) error

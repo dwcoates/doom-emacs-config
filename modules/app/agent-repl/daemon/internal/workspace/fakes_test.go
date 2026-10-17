@@ -1594,6 +1594,9 @@ func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *fron
 type fakeFooter struct {
 	footer.Resolver
 
+	// statuses is the status each workspace's strip answers.
+	statuses map[ids.WorkspaceID]*frontendv1.FooterStatus
+
 	// mainAgents is every main agent the footer was told, and historyPages the
 	// entry count of every page it was handed, in order.
 	mainAgents   []string
@@ -2302,6 +2305,9 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 	}
 	return *c.coldGate, true
 }
+
+// Status answers the status seeded for WS, nil when none was.
+func (f *fakeFooter) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus { return f.statuses[ws] }
 
 // EndColdGate records the remediated gate retired.
 func (c *fakeCards) EndColdGate(_ ids.WorkspaceID, vendorSessionID string) {

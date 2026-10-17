@@ -1849,3 +1849,29 @@ func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
 		t.Fatalf("status = %v, want blocked · usage_limit over the retry", h.view(t).GetStrip().GetStatus())
 	}
 }
+
+func TestStatusWordsNamesTheArmAndItsSubstatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status *frontendv1.FooterStatus
+		want   string
+	}{
+		{name: "an arm with no substatus", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Idle{Idle: &frontendv1.FooterStatusIdle{}}}, want: "idle"},
+		{name: "an arm stating its substatus",
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: &frontendv1.FooterStatusWaiting{
+				Substatus: &frontendv1.FooterStatusWaiting_ColdGate{ColdGate: &frontendv1.FooterSubStatusWaitingColdGate{}}}}},
+			want: "waiting · cold gate"},
+		{name: "an arm whose substatus is unset", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: &frontendv1.FooterStatusWaiting{}}}, want: "waiting"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := StatusWords(tt.status)
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("StatusWords = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

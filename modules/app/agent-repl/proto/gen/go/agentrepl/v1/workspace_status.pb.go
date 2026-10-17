@@ -489,6 +489,7 @@ type WorkspaceStatusActivity struct {
 	//	*WorkspaceStatusActivity_NeedsInput
 	//	*WorkspaceStatusActivity_Merging
 	//	*WorkspaceStatusActivity_ColdGate
+	//	*WorkspaceStatusActivity_Fault
 	Activity      isWorkspaceStatusActivity_Activity `protobuf_oneof:"activity"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -585,6 +586,15 @@ func (x *WorkspaceStatusActivity) GetColdGate() *WorkspaceStatusActivityColdGate
 	return nil
 }
 
+func (x *WorkspaceStatusActivity) GetFault() *WorkspaceStatusActivityFault {
+	if x != nil {
+		if x, ok := x.Activity.(*WorkspaceStatusActivity_Fault); ok {
+			return x.Fault
+		}
+	}
+	return nil
+}
+
 type isWorkspaceStatusActivity_Activity interface {
 	isWorkspaceStatusActivity_Activity()
 }
@@ -622,6 +632,14 @@ type WorkspaceStatusActivity_ColdGate struct {
 	ColdGate *WorkspaceStatusActivityColdGate `protobuf:"bytes,6,opt,name=cold_gate,json=coldGate,proto3,oneof"`
 }
 
+type WorkspaceStatusActivity_Fault struct {
+	// A fault stands in the way of the session: the vendor's (an outage, a
+	// usage limit, a retried call), agent-repl's own, the network's, or a
+	// degraded link. Whether a turn is mid-flight beneath it is not said: the
+	// fault is what decides what the workspace can do next.
+	Fault *WorkspaceStatusActivityFault `protobuf:"bytes,7,opt,name=fault,proto3,oneof"`
+}
+
 func (*WorkspaceStatusActivity_Starting) isWorkspaceStatusActivity_Activity() {}
 
 func (*WorkspaceStatusActivity_Idle) isWorkspaceStatusActivity_Activity() {}
@@ -633,6 +651,8 @@ func (*WorkspaceStatusActivity_NeedsInput) isWorkspaceStatusActivity_Activity() 
 func (*WorkspaceStatusActivity_Merging) isWorkspaceStatusActivity_Activity() {}
 
 func (*WorkspaceStatusActivity_ColdGate) isWorkspaceStatusActivity_Activity() {}
+
+func (*WorkspaceStatusActivity_Fault) isWorkspaceStatusActivity_Activity() {}
 
 // Being brought up. No fields.
 type WorkspaceStatusActivityStarting struct {
@@ -953,6 +973,53 @@ func (x *WorkspaceStatusActivityColdGate) GetGate() *v11.FeedId {
 	return nil
 }
 
+// A standing fault.
+type WorkspaceStatusActivityFault struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The fault in the footer's own words ("vendor fault · usage limit"), for
+	// an agent to report. Prose to be read, not a vocabulary to switch on.
+	Description   string `protobuf:"bytes,1,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceStatusActivityFault) Reset() {
+	*x = WorkspaceStatusActivityFault{}
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceStatusActivityFault) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceStatusActivityFault) ProtoMessage() {}
+
+func (x *WorkspaceStatusActivityFault) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceStatusActivityFault.ProtoReflect.Descriptor instead.
+func (*WorkspaceStatusActivityFault) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *WorkspaceStatusActivityFault) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
 // The workspace's own merge is queued or running. No fields: the queue's
 // status (GetMergeQueueStatus) says where it stands.
 type WorkspaceStatusActivityMerging struct {
@@ -963,7 +1030,7 @@ type WorkspaceStatusActivityMerging struct {
 
 func (x *WorkspaceStatusActivityMerging) Reset() {
 	*x = WorkspaceStatusActivityMerging{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -975,7 +1042,7 @@ func (x *WorkspaceStatusActivityMerging) String() string {
 func (*WorkspaceStatusActivityMerging) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -988,7 +1055,7 @@ func (x *WorkspaceStatusActivityMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivityMerging.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{16}
 }
 
 var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
@@ -1019,7 +1086,7 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\bstanding\"X\n" +
 	"\x13WorkspaceStatusOpen\x12A\n" +
 	"\bactivity\x18\x01 \x01(\v2%.agentrepl.v1.WorkspaceStatusActivityR\bactivity\"\x17\n" +
-	"\x15WorkspaceStatusClosed\"\xf6\x03\n" +
+	"\x15WorkspaceStatusClosed\"\xba\x04\n" +
 	"\x17WorkspaceStatusActivity\x12K\n" +
 	"\bstarting\x18\x01 \x01(\v2-.agentrepl.v1.WorkspaceStatusActivityStartingH\x00R\bstarting\x12?\n" +
 	"\x04idle\x18\x02 \x01(\v2).agentrepl.v1.WorkspaceStatusActivityIdleH\x00R\x04idle\x12U\n" +
@@ -1027,7 +1094,8 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\vneeds_input\x18\x04 \x01(\v2/.agentrepl.v1.WorkspaceStatusActivityNeedsInputH\x00R\n" +
 	"needsInput\x12H\n" +
 	"\amerging\x18\x05 \x01(\v2,.agentrepl.v1.WorkspaceStatusActivityMergingH\x00R\amerging\x12L\n" +
-	"\tcold_gate\x18\x06 \x01(\v2-.agentrepl.v1.WorkspaceStatusActivityColdGateH\x00R\bcoldGateB\n" +
+	"\tcold_gate\x18\x06 \x01(\v2-.agentrepl.v1.WorkspaceStatusActivityColdGateH\x00R\bcoldGate\x12B\n" +
+	"\x05fault\x18\a \x01(\v2*.agentrepl.v1.WorkspaceStatusActivityFaultH\x00R\x05faultB\n" +
 	"\n" +
 	"\bactivity\"!\n" +
 	"\x1fWorkspaceStatusActivityStarting\"\x1d\n" +
@@ -1042,7 +1110,9 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	")WorkspaceStatusActivityNeedsInputQuestion\"-\n" +
 	"+WorkspaceStatusActivityNeedsInputPermission\"J\n" +
 	"\x1fWorkspaceStatusActivityColdGate\x12'\n" +
-	"\x04gate\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x04gate\" \n" +
+	"\x04gate\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x04gate\"@\n" +
+	"\x1cWorkspaceStatusActivityFault\x12 \n" +
+	"\vdescription\x18\x01 \x01(\tR\vdescription\" \n" +
 	"\x1eWorkspaceStatusActivityMergingB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -1057,7 +1127,7 @@ func file_agentrepl_v1_workspace_status_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_status_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_status_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agentrepl_v1_workspace_status_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_agentrepl_v1_workspace_status_proto_goTypes = []any{
 	(*WorkspaceStatus)(nil),                             // 0: agentrepl.v1.WorkspaceStatus
 	(*WorkspaceStatusMergeTarget)(nil),                  // 1: agentrepl.v1.WorkspaceStatusMergeTarget
@@ -1074,17 +1144,18 @@ var file_agentrepl_v1_workspace_status_proto_goTypes = []any{
 	(*WorkspaceStatusActivityNeedsInputQuestion)(nil),   // 12: agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
 	(*WorkspaceStatusActivityNeedsInputPermission)(nil), // 13: agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
 	(*WorkspaceStatusActivityColdGate)(nil),             // 14: agentrepl.v1.WorkspaceStatusActivityColdGate
-	(*WorkspaceStatusActivityMerging)(nil),              // 15: agentrepl.v1.WorkspaceStatusActivityMerging
-	(*v1.WorkspaceRef)(nil),                             // 16: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                                  // 17: frontend.v1.FeedId
+	(*WorkspaceStatusActivityFault)(nil),                // 15: agentrepl.v1.WorkspaceStatusActivityFault
+	(*WorkspaceStatusActivityMerging)(nil),              // 16: agentrepl.v1.WorkspaceStatusActivityMerging
+	(*v1.WorkspaceRef)(nil),                             // 17: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                                  // 18: frontend.v1.FeedId
 }
 var file_agentrepl_v1_workspace_status_proto_depIdxs = []int32{
-	16, // 0: agentrepl.v1.WorkspaceStatus.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 0: agentrepl.v1.WorkspaceStatus.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.WorkspaceStatus.merge_target:type_name -> agentrepl.v1.WorkspaceStatusMergeTarget
 	4,  // 2: agentrepl.v1.WorkspaceStatus.standing:type_name -> agentrepl.v1.WorkspaceStatusStanding
 	2,  // 3: agentrepl.v1.WorkspaceStatusMergeTarget.primary:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetPrimary
 	3,  // 4: agentrepl.v1.WorkspaceStatusMergeTarget.owner:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetOwner
-	16, // 5: agentrepl.v1.WorkspaceStatusMergeTargetOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	17, // 5: agentrepl.v1.WorkspaceStatusMergeTargetOwner.owner:type_name -> workspace.v1.WorkspaceRef
 	5,  // 6: agentrepl.v1.WorkspaceStatusStanding.open:type_name -> agentrepl.v1.WorkspaceStatusOpen
 	6,  // 7: agentrepl.v1.WorkspaceStatusStanding.closed:type_name -> agentrepl.v1.WorkspaceStatusClosed
 	7,  // 8: agentrepl.v1.WorkspaceStatusOpen.activity:type_name -> agentrepl.v1.WorkspaceStatusActivity
@@ -1092,16 +1163,17 @@ var file_agentrepl_v1_workspace_status_proto_depIdxs = []int32{
 	9,  // 10: agentrepl.v1.WorkspaceStatusActivity.idle:type_name -> agentrepl.v1.WorkspaceStatusActivityIdle
 	10, // 11: agentrepl.v1.WorkspaceStatusActivity.turn_running:type_name -> agentrepl.v1.WorkspaceStatusActivityTurnRunning
 	11, // 12: agentrepl.v1.WorkspaceStatusActivity.needs_input:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInput
-	15, // 13: agentrepl.v1.WorkspaceStatusActivity.merging:type_name -> agentrepl.v1.WorkspaceStatusActivityMerging
+	16, // 13: agentrepl.v1.WorkspaceStatusActivity.merging:type_name -> agentrepl.v1.WorkspaceStatusActivityMerging
 	14, // 14: agentrepl.v1.WorkspaceStatusActivity.cold_gate:type_name -> agentrepl.v1.WorkspaceStatusActivityColdGate
-	12, // 15: agentrepl.v1.WorkspaceStatusActivityNeedsInput.question:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
-	13, // 16: agentrepl.v1.WorkspaceStatusActivityNeedsInput.permission:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
-	17, // 17: agentrepl.v1.WorkspaceStatusActivityColdGate.gate:type_name -> frontend.v1.FeedId
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	15, // 15: agentrepl.v1.WorkspaceStatusActivity.fault:type_name -> agentrepl.v1.WorkspaceStatusActivityFault
+	12, // 16: agentrepl.v1.WorkspaceStatusActivityNeedsInput.question:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
+	13, // 17: agentrepl.v1.WorkspaceStatusActivityNeedsInput.permission:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
+	18, // 18: agentrepl.v1.WorkspaceStatusActivityColdGate.gate:type_name -> frontend.v1.FeedId
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_status_proto_init() }
@@ -1124,6 +1196,7 @@ func file_agentrepl_v1_workspace_status_proto_init() {
 		(*WorkspaceStatusActivity_NeedsInput)(nil),
 		(*WorkspaceStatusActivity_Merging)(nil),
 		(*WorkspaceStatusActivity_ColdGate)(nil),
+		(*WorkspaceStatusActivity_Fault)(nil),
 	}
 	file_agentrepl_v1_workspace_status_proto_msgTypes[11].OneofWrappers = []any{
 		(*WorkspaceStatusActivityNeedsInput_Question)(nil),
@@ -1135,7 +1208,7 @@ func file_agentrepl_v1_workspace_status_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_status_proto_rawDesc), len(file_agentrepl_v1_workspace_status_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

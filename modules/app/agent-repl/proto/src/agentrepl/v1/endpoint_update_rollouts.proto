@@ -16,6 +16,8 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_deploy.proto";
+
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message UpdateRolloutsRequest {
@@ -70,8 +72,9 @@ message UpdateRolloutsSuccessReleased {
 message UpdateRolloutsSuccessReleasedUpToDate {}
 // A rollout started.
 message UpdateRolloutsSuccessReleasedRollingOut {
-  // The commit being rolled out, as git names it.
-  string commit = 1;
+  // The deploy's decisions, one per component, exactly as the Deploy rpc
+  // answers them.
+  DeploySuccess deploy = 1;
 }
 message UpdateRolloutsError {
   oneof cause {
