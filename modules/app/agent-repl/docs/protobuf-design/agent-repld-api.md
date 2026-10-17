@@ -31,8 +31,9 @@ offered.
    Consequences: no `optional` field may stand for an implicit choice (the
    context origin is a required oneof with a `fresh` arm, not an unset
    field). Reopens: the "optional fork source, unset is fresh" ruling.
-   Does not claim: that ANCILLARY settings (model, priority) lose their
-   defaults; it governs the topology and landing choices.
+   (UNCONFIRMED, settled during the proto increments: whether this reopening
+   holds, and whether ancillary settings such as model and priority keep their
+   defaults.)
 2. THE DAEMON ENFORCES THE RULES. Every combination the rules refuse is
    refused by the daemon; skills and proto comments state the same rules but
    are never the enforcement. Consequences: wherever the daemon lacks the
@@ -58,6 +59,24 @@ offered.
 7. AN ASYNC MERGE FORKS WHEN IT STARTS, not when it is requested.
 8. THE AGENT API IS RPC ONLY. No agent-facing operation writes a command file;
    the command-file ingress is retired.
+
+## Scope (settled 2026-10-17)
+
+- Objective: an agent manages workspaces and the merge queue only through
+  explicit, documented `agent-repld` RPC calls, and the daemon refuses every
+  combination the rules forbid.
+- Built: the create contract (branch source, merge target, context origin;
+  landing and notice), one-shot merge with no target, async and subagent
+  merges as creates that land when done, workspace and queue subscriptions,
+  `workspace set`, `editor eval`, status reads, the rollout hold under
+  `runtime`.
+- No new on-screen component; the editor and webapp callers are ported with
+  behavior unchanged.
+- Systems: the protos (`agentrepl.v1`, possibly `workspace.v1`), the daemon and
+  its CLI, the Emacs lisp, the webapp, the Emacs test fake daemon, the skills,
+  install manifests and metaprompt; the shim likely untouched.
+- Which existing fields and features are replaced or removed (including queue
+  racing) is decided during the proto increments, not up front.
 
 ## Landed changes
 
