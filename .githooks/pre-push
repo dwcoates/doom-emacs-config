@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# pre-push — every push of master is a release, tagged release-<version>.
+#
+# The merge queue gives every landing on master an annotated version tag, its
+# VERSION LABEL (`0.97.5`; daemon/internal/merge/version.go). A push that moves
+# a remote's master publishes one of those versions, and the remote records
+# which one with a lightweight tag release-<version> on the pushed commit.
+#
+# THE RULES, checked against the refs this push sends (stdin, one
+# "<local ref> <local sha> <remote ref> <remote sha>" line each):
+#   - A push that moves refs/heads/master names a commit carrying exactly one
+#     version label. No label: refused, since the commit was never landed by the
+#     queue. Two: refused, since the queue never tags one commit twice.
+#   - The same push carries refs/tags/release-<that version> at that commit.
+#     A master push without its release tag is refused.
+#   - A release-<version> tag is pushed only beside master moving to its
+#     commit, and only when that commit's version label is <version>.
+#   Deleting a remote ref is never refused.
+#
+# modules/app/agent-repl/bin/push-release.sh makes such a push: it tags master's
+# tip and pushes master and the tag in ONE atomic push, so the remote takes both
+# or neither. A hook cannot tell an atomic push from another one, so a hand push
+# that carries both refs passes it too.
+#
+# The wrapper sources this file for version_label (one lookup, shared); the
+# guard below the functions stops a sourced copy before it reads stdin.
+#
+# Installed through `git config core.hooksPath .githooks`, or as a copy in the
+# repository's hooks directory (requirements.json pre-push-hook).
+# AGENT_REPL_MANAGED_HOOK: agent-repl-release-tag
+set -euo pipefail
+
+readonly MASTER_REF="refs/heads/master"
+readonly RELEASE_PREFIX="refs/tags/release-"
+readonly ZERO_OID="0000000000000000000000000000000000000000"
+readonly WRAPPER="modules/app/agent-repl/bin/push-release.sh"
+
+# version_label SHA prints the one version label on SHA. It fails, naming why,
+# when SHA carries none or more than one.
+version_label() {
+  local sha="$1" tag labels=() count
+  while IFS= read -r tag; do
+    [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && labels+=("$tag")
+  done < <(git tag --points-at "$sha")
+  count="${#labels[@]}"
+  if [ "$count" -eq 0 ]; then
+    echo "[pre-push] $sha carries no version label; only the merge queue's landings on master do" >&2
+    return 1
+  fi
+  if [ "$count" -gt 1 ]; then
+    echo "[pre-push] $sha carries $count version labels (${labels[*]}); the merge queue tags a commit once, so this is a bug" >&2
+    return 1
+  fi
+  printf '%s\n' "${labels[0]}"
+}
+
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
+# An absolute core.hooksPath can be inherited by nested fixture repositories.
+# Scope the hook to the repository that owns it (pre-commit does the same).
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+COMMON_DIR="$(git rev-parse --git-common-dir)"
+if [[ "$COMMON_DIR" != /* ]]; then
+  COMMON_DIR="$REPO_ROOT/$COMMON_DIR"
+fi
+COMMON_DIR="$(cd "$COMMON_DIR" && pwd -P)"
+if [ "$(basename "$HOOK_DIR")" = ".githooks" ]; then
+  [ "$(cd "$REPO_ROOT" && pwd -P)" = "$(cd "$HOOK_DIR/.." && pwd -P)" ] || exit 0
+elif [ "$(basename "$HOOK_DIR")" = "hooks" ]; then
+  [ "$COMMON_DIR" = "$(cd "$HOOK_DIR/.." && pwd -P)" ] || exit 0
+fi
+
+remote="${1:-}"
+master_sha=""
+releases=""
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [ -n "${remote_ref:-}" ] || continue
+  [ "$local_sha" != "$ZERO_OID" ] || continue
+  case "$remote_ref" in
+    "$MASTER_REF") master_sha="$local_sha" ;;
+    "$RELEASE_PREFIX"*) releases="$releases${remote_ref#"$RELEASE_PREFIX"} $local_sha
+" ;;
+  esac
+done
+
+refuse() {
+  echo "[pre-push] REFUSED push to $remote: $1" >&2
+  echo "[pre-push] Push master with $WRAPPER, which tags it release-<version> and pushes both atomically." >&2
+  exit 1
+}
+
+if [ -n "$master_sha" ]; then
+  version="$(version_label "$master_sha")" || refuse "master's new tip $master_sha has no single version label"
+  grep -qxF -- "$version $master_sha" <<<"$releases" ||
+    refuse "master moves to $version ($master_sha) without ${RELEASE_PREFIX}$version at that commit"
+fi
+
+while read -r tagged sha; do
+  [ -n "$tagged" ] || continue
+  [ "$sha" = "$master_sha" ] || refuse "${RELEASE_PREFIX}$tagged names $sha, but this push does not move master there"
+  label="$(version_label "$sha")" || refuse "${RELEASE_PREFIX}$tagged names $sha, which has no single version label"
+  [ "$label" = "$tagged" ] || refuse "${RELEASE_PREFIX}$tagged names $sha, whose version label is $label"
+done <<<"$releases"
+
+if [ -n "$master_sha" ]; then
+  echo "[pre-push] master at $version ($master_sha) goes to $remote with ${RELEASE_PREFIX}$version" >&2
+fi

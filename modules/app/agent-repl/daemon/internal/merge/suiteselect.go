@@ -184,6 +184,9 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: ".githooks/test-pre-commit.sh", Suites: []string{"precommit-harness", backgroundHarness, testrunSuite}},
 	{Kind: matchExact, Path: ".githooks/reference-transaction", Suites: []string{"merge-queue-hook-harness", backgroundHarness}},
 	{Kind: matchExact, Path: ".githooks/test-reference-transaction.sh", Suites: []string{"merge-queue-hook-harness", backgroundHarness, testrunSuite}},
+	// push-release.sh sources the pre-push hook for its version lookup.
+	{Kind: matchExact, Path: ".githooks/pre-push", Suites: []string{"release-tag-hook-harness", "push-release-harness", backgroundHarness}},
+	{Kind: matchExact, Path: ".githooks/test-pre-push.sh", Suites: []string{"release-tag-hook-harness", backgroundHarness, testrunSuite}},
 	{Kind: matchSubtree, Path: ".githooks/", Suites: []string{backgroundHarness, testrunSuite}},
 	// The .claude scripts: the merge-queue skill, the safe test runner and the
 	// installer each have their harness; the background harness scans the

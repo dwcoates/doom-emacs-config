@@ -215,6 +215,30 @@ parsed:
 			return die(2, "no branch is recorded in %s/branch", r.g)
 		}
 		fmt.Fprintf(out, "%s\n", branch)
+	case strings.HasPrefix(joined, "tag --points-at "):
+		if len(opts) != 2 {
+			return die(2, "unmodelled tag form: %s", argsJoined)
+		}
+		return r.pointsAt(out, opts[1])
+	case strings.HasPrefix(joined, "rev-parse --verify --quiet "):
+		if len(opts) != 3 {
+			return die(2, "unmodelled rev-parse form: %s", argsJoined)
+		}
+		sha, ok := r.resolve(opts[2])
+		if !ok {
+			return die(1, "")
+		}
+		fmt.Fprintf(out, "%s\n", sha)
+	case strings.HasPrefix(joined, "push --atomic "):
+		if len(opts) < 3 {
+			return die(2, "unmodelled push form: %s", argsJoined)
+		}
+		return r.push(opts[1], opts[2:])
+	case strings.HasPrefix(joined, "ls-remote "):
+		if len(opts) != 1 {
+			return die(2, "unmodelled ls-remote form: %s", argsJoined)
+		}
+		return r.lsRemote(out, opts[0])
 	case strings.HasPrefix(joined, "tag "), strings.HasPrefix(joined, "update-ref "):
 		return r.refCommand(out, cmd, opts, argsJoined)
 	case strings.HasPrefix(joined, "config --type=bool --get "):
@@ -449,7 +473,12 @@ func (r *repo) refCommand(out io.Writer, cmd string, opts []string, argsJoined s
 }
 
 func (r *repo) readRefs() (map[string]string, error) {
-	lines, err := readLines(r.g + "/refs")
+	return readStore(r.g + "/refs")
+}
+
+// readStore reads a flat ref store, one "<ref> <sha>" line each.
+func readStore(file string) (map[string]string, error) {
+	lines, err := readLines(file)
 	if err != nil {
 		return nil, err
 	}
@@ -460,6 +489,24 @@ func (r *repo) readRefs() (map[string]string, error) {
 		}
 	}
 	return refs, nil
+}
+
+// writeStore writes REFS as a flat ref store, sorted by ref.
+func writeStore(file string, refs map[string]string) error {
+	var b strings.Builder
+	for _, name := range sortedKeys(refs) {
+		fmt.Fprintf(&b, "%s %s\n", name, refs[name])
+	}
+	return os.WriteFile(file, []byte(b.String()), 0o644)
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // transact moves REF from OLD to NEW (zeroOID deletes it) as one transaction.
@@ -484,26 +531,22 @@ func (r *repo) transact(ref, old, new string) error {
 	} else {
 		refs[ref] = new
 	}
-	names := make([]string, 0, len(refs))
-	for name := range refs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var b strings.Builder
-	for _, name := range names {
-		fmt.Fprintf(&b, "%s %s\n", name, refs[name])
-	}
-	if err := os.WriteFile(r.g+"/refs", []byte(b.String()), 0o644); err != nil {
+	if err := writeStore(r.g+"/refs", refs); err != nil {
 		return err
 	}
 	_, err = r.runRefHook("committed", tx)
 	return err
 }
 
-// runRefHook runs the reference-transaction hook, when one is installed, in
-// PHASE with TX on stdin, from the worktree's top, and answers its exit status.
-// Like git, it sends the hook's stdout to stderr.
+// runRefHook runs the reference-transaction hook in PHASE with TX on stdin.
 func (r *repo) runRefHook(phase, tx string) (int, error) {
+	return r.runHook("reference-transaction", tx, phase)
+}
+
+// runHook runs the hook NAME, when one is installed, with ARGS and STDIN, from
+// the worktree's top, and answers its exit status. Like git, it sends the
+// hook's stdout to stderr.
+func (r *repo) runHook(name, stdin string, args ...string) (int, error) {
 	hooks, err := r.hooksPath()
 	if err != nil {
 		return 0, err
@@ -511,7 +554,7 @@ func (r *repo) runRefHook(phase, tx string) (int, error) {
 	if !filepath.IsAbs(hooks) {
 		hooks = filepath.Join(r.top, hooks)
 	}
-	hook := filepath.Join(hooks, "reference-transaction")
+	hook := filepath.Join(hooks, name)
 	info, err := os.Stat(hook)
 	if errors.Is(err, fs.ErrNotExist) || (err == nil && info.Mode().Perm()&0o111 == 0) {
 		return 0, nil
@@ -519,8 +562,8 @@ func (r *repo) runRefHook(phase, tx string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	c := exec.Command(hook, phase)
-	c.Dir, c.Stdin, c.Stdout, c.Stderr = r.top, strings.NewReader(tx), os.Stderr, os.Stderr
+	c := exec.Command(hook, args...)
+	c.Dir, c.Stdin, c.Stdout, c.Stderr = r.top, strings.NewReader(stdin), os.Stderr, os.Stderr
 	if err := c.Run(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
@@ -529,6 +572,95 @@ func (r *repo) runRefHook(phase, tx string) (int, error) {
 		return 0, err
 	}
 	return 0, nil
+}
+
+// pointsAt is tag --points-at REV: every tag naming REV's commit, sorted.
+func (r *repo) pointsAt(out io.Writer, rev string) error {
+	sha, ok := r.resolve(rev)
+	if !ok {
+		return die(129, "malformed object name %s", rev)
+	}
+	refs, err := r.readRefs()
+	if err != nil {
+		return err
+	}
+	var names []string
+	for ref, target := range refs {
+		if name, ok := strings.CutPrefix(ref, "refs/tags/"); ok && target == sha {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(out, "%s\n", name)
+	}
+	return nil
+}
+
+// ---- remotes ------------------------------------------------------------------
+//
+// A remote is a flat ref store, one "<ref> <sha>" line each in
+// .fakegit/remotes/<name>, holding what pushes to it have sent. Only an atomic
+// push is modelled: the pre-push hook hears every ref the push changes, as git
+// sends them, and a nonzero exit leaves the remote untouched.
+
+// push is push --atomic REMOTE SRC:DST..., each SRC a ref or commit.
+func (r *repo) push(remote string, specs []string) error {
+	store := r.g + "/remotes/" + remote
+	have, err := readStore(store)
+	if err != nil {
+		return err
+	}
+	var tx strings.Builder
+	updates := map[string]string{}
+	for _, spec := range specs {
+		src, dst, ok := strings.Cut(spec, ":")
+		if !ok || src == "" || dst == "" {
+			return die(2, "unmodelled push refspec: %s", spec)
+		}
+		sha, ok := r.resolve(src)
+		if !ok {
+			return die(1, "src refspec %s does not match any", src)
+		}
+		old, ok := have[dst]
+		if !ok {
+			old = zeroOID
+		}
+		if old == sha {
+			continue
+		}
+		fmt.Fprintf(&tx, "%s %s %s %s\n", src, sha, dst, old)
+		updates[dst] = sha
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	code, err := r.runHook("pre-push", tx.String(), remote, remote)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return die(1, "failed to push some refs to '%s'", remote)
+	}
+	for ref, sha := range updates {
+		have[ref] = sha
+	}
+	if err := os.MkdirAll(r.g+"/remotes", 0o755); err != nil {
+		return err
+	}
+	return writeStore(store, have)
+}
+
+// lsRemote is ls-remote REMOTE: "<sha>\t<ref>" for every ref the remote holds.
+func (r *repo) lsRemote(out io.Writer, remote string) error {
+	have, err := readStore(r.g + "/remotes/" + remote)
+	if err != nil {
+		return err
+	}
+	for _, ref := range sortedKeys(have) {
+		fmt.Fprintf(out, "%s\t%s\n", have[ref], ref)
+	}
+	return nil
 }
 
 // hooksPath is core.hooksPath as configured, else <repository>/hooks.
@@ -612,6 +744,14 @@ func (r *repo) resolve(rev string) (string, bool) {
 	}
 	if isDir(r.g + "/commits/" + rev) {
 		return rev, true
+	}
+	if branch, err := firstLineRaw(r.g + "/branch"); err == nil && branch != "" && rev == "refs/heads/"+branch {
+		return r.headSHA, r.headSHA != ""
+	}
+	if refs, err := r.readRefs(); err == nil {
+		if sha, ok := refs[rev]; ok {
+			return sha, true
+		}
 	}
 	return "", false
 }

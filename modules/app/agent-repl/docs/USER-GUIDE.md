@@ -125,6 +125,8 @@ These clicks jump to an entry in the feed:
   - The merge queue tags the landed merge with the next version (for example `0.5.0`), and the changelog entry is that tag's annotation.
   - The head draws the version after the clock, the number the merge moved in green.
   - Only a person moves the major version, by tagging master by hand; the next merge counts up from that tag.
+  - Push master to origin with `modules/app/agent-repl/bin/push-release.sh`, which tags master's tip `release-<version>` and pushes master and that tag together.
+    - The `pre-push` hook refuses a master push whose tip has no version, and one that does not carry its `release-<version>` tag.
 - **A merge never opens the expanded footer.**
 - **The bubble has one rebasing tab and one tests tab, each with tabs of its own inside.**
   - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.
