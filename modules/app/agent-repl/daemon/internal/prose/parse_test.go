@@ -221,6 +221,11 @@ func TestParseRepairsAndShapesTrees(t *testing.T) {
 			want: lines("tree", `  1 🧑‍💻 ^- "Coded"`, `  1.1 ^0 "a"`, ""),
 		},
 		{
+			name: "a skin-toned emoji is one marker",
+			text: lines("1 👍🏽 Agreed", "└── 1.1 a"),
+			want: lines("tree", `  1 👍🏽 ^- "Agreed"`, `  1.1 ^0 "a"`, ""),
+		},
+		{
 			name:  "the label the model is still typing on the last line is not drawn",
 			text:  lines("1 🔧 A", "├── 1.1 a", "└── 1"),
 			stage: Arriving,
