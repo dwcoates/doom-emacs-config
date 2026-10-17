@@ -3206,13 +3206,13 @@ html[data-page-unshown] *::after {
 .bubble[data-cap-lines="unbounded"] > .bubble-scroll.expanded {
   max-height: none;
 }
-/* A REPLY'S QUOTE (src/bubble/quote.ts): the earlier bubble a prompt replied
-   to, a block among the prompt's own, shown ONLY once the bubble is opened
-   (owner request, 2026-10-08), so a collapsed prompt is the person's words
-   alone. Keyed on the same one toggle's `.expanded`, on the box the body sits
-   in; child combinators keep an open bubble from showing the quotes of a
-   bubble nested inside it. */
-.bubble-scroll:not(.expanded) > .bubble-body > .bubble-quote { display: none; }
+/* AN EXPANDED-ONLY BLOCK (src/bubble/expanded-only.ts): a reply's quote among
+   a prompt's blocks, shown ONLY once the bubble is opened (owner request,
+   2026-10-08), so a collapsed prompt is the person's words alone. Keyed on
+   the same one toggle's `.expanded`, on the box the body sits in; child
+   combinators keep an open bubble from showing the blocks of a bubble nested
+   inside it. */
+.bubble-scroll:not(.expanded) > .bubble-body > .bubble-expanded-only { display: none; }
 /* A FEED PROMPT'S QUOTE is drawn from its parts (src/bubble/quote.ts
    `QUOTE_PARTS_CLASS`): its HEADING shows folded too (owner request,
    2026-10-19), and every other part (the heading's colon, the quoted code

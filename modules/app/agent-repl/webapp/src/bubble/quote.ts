@@ -5,12 +5,10 @@
  *
  * EXPANDED ONLY (owner request, 2026-10-08). A collapsed prompt bubble shows
  * the words the person typed and nothing else; the quote appears, in its
- * place among the blocks, once the bubble is opened. The stylesheet hides
- * every element wearing `BUBBLE_QUOTE_CLASS` in a body whose scroll box is not
- * `.expanded`, so the one toggle (expand.ts) that opens the text opens the
- * quote too. The has-more measurer (feed/bubble-more.ts) never counts a
- * hidden quote: the fade is the person's words' alone (owner ruling,
- * 2026-10-14).
+ * place among the blocks, once the bubble is opened -- it is one of the
+ * expanded-only blocks (src/bubble/expanded-only.ts). The has-more measurer
+ * (feed/bubble-more.ts) never counts a hidden quote: the fade is the
+ * person's words' alone (owner ruling, 2026-10-14).
  *
  * A HELD prompt's quote is drawn VERBATIM as markdown: the record carries the
  * text the daemon composed (preamble, fenced quote, closing marker), and this
@@ -19,6 +17,7 @@
  * request, 2026-10-19): see `QUOTE_PARTS_CLASS`.
  */
 import { markdownSlot } from "./body.js";
+import { expandedOnly } from "./expanded-only.js";
 
 /** The class every quote block wears, whichever bubble draws it. */
 export const BUBBLE_QUOTE_CLASS = "bubble-quote";
@@ -36,8 +35,9 @@ export const QUOTE_MARKER_CLASS = "prompt-quote-marker";
 
 /**
  * A quote block: a markdown slot the bubble's body paints, wearing CLASSNAME
- * (the drawing kind's own hook) and `BUBBLE_QUOTE_CLASS`.
+ * (the drawing kind's own hook) and `BUBBLE_QUOTE_CLASS`, drawn only while the
+ * bubble is expanded.
  */
 export function quoteSlot(className: string, text: string): HTMLElement {
-  return markdownSlot(`${className} ${BUBBLE_QUOTE_CLASS}`, text);
+  return expandedOnly(markdownSlot(`${className} ${BUBBLE_QUOTE_CLASS}`, text));
 }

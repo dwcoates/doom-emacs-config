@@ -60,6 +60,7 @@ import {
   type HeldStatus,
 } from "../../src/held/held-prompt.js";
 import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
+import { BUBBLE_EXPANDED_ONLY_CLASS } from "../../src/bubble/expanded-only.js";
 import * as heldPromptModule from "../../src/held/held-prompt.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
@@ -899,7 +900,7 @@ describe("the said body", () => {
     const body = heldReply().querySelector(".bubble-body");
     // Assert
     expect([...(body?.children ?? [])].map((child) => child.className)).toEqual([
-      `queued-quote ${BUBBLE_QUOTE_CLASS}`,
+      `queued-quote ${BUBBLE_QUOTE_CLASS} ${BUBBLE_EXPANDED_ONLY_CLASS}`,
       "queued-text",
     ]);
   });
