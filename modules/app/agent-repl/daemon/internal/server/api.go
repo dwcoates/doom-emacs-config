@@ -68,6 +68,9 @@ type Deps struct {
 	Retarget retarget.Retargeter
 	// Merge backs MergeWorkspace, UpdateMergeQueue and AnswerMergeQueueOffer.
 	Merge merge.Orchestrator
+	// SubagentMakers answers the workspace that spawned a subagent, the maker
+	// of an async merge of its branch (CreateWorkspaceAsyncMergeMakerSubagent).
+	SubagentMakers SubagentMakers
 	// Drain backs UpdateShutdownSchedule.
 	Drain drain.Controller
 	// Rollout backs AdoptHostWorkspace and AdoptWebWorkspace.
@@ -422,6 +425,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the retarget operation")
 	case deps.Merge == nil:
 		return nil, missing("a merge orchestrator")
+	case deps.SubagentMakers == nil:
+		return nil, missing("a subagent maker finder")
 	case deps.Drain == nil:
 		return nil, missing("a drain controller")
 	case deps.Rollout == nil:

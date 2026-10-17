@@ -702,3 +702,73 @@ func (s *requestLoggingServer) ListSlashCommands(
 ) (*connect.Response[agentreplv1.ListSlashCommandsResponse], error) {
 	return serveUnary(s, ctx, "ListSlashCommands", req, s.server.ListSlashCommands)
 }
+
+func (s *requestLoggingServer) AnswerEditorEvaluation(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.AnswerEditorEvaluationRequest],
+) (*connect.Response[agentreplv1.AnswerEditorEvaluationResponse], error) {
+	return serveUnary(s, ctx, "AnswerEditorEvaluation", req, s.server.AnswerEditorEvaluation)
+}
+
+func (s *requestLoggingServer) CompactWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.CompactWorkspaceRequest],
+) (*connect.Response[agentreplv1.CompactWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "CompactWorkspace", req, s.server.CompactWorkspace)
+}
+
+func (s *requestLoggingServer) EvaluateInEditor(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.EvaluateInEditorRequest],
+) (*connect.Response[agentreplv1.EvaluateInEditorResponse], error) {
+	return serveUnary(s, ctx, "EvaluateInEditor", req, s.server.EvaluateInEditor)
+}
+
+func (s *requestLoggingServer) GetMergeQueueStatus(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetMergeQueueStatusRequest],
+) (*connect.Response[agentreplv1.GetMergeQueueStatusResponse], error) {
+	return serveUnary(s, ctx, "GetMergeQueueStatus", req, s.server.GetMergeQueueStatus)
+}
+
+func (s *requestLoggingServer) GetWorkspaceStatus(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetWorkspaceStatusRequest],
+) (*connect.Response[agentreplv1.GetWorkspaceStatusResponse], error) {
+	return serveUnary(s, ctx, "GetWorkspaceStatus", req, s.server.GetWorkspaceStatus)
+}
+
+func (s *requestLoggingServer) SubscribeMergeQueue(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SubscribeMergeQueueRequest],
+) (*connect.Response[agentreplv1.SubscribeMergeQueueResponse], error) {
+	return serveUnary(s, ctx, "SubscribeMergeQueue", req, s.server.SubscribeMergeQueue)
+}
+
+func (s *requestLoggingServer) SubscribeWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SubscribeWorkspaceRequest],
+) (*connect.Response[agentreplv1.SubscribeWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "SubscribeWorkspace", req, s.server.SubscribeWorkspace)
+}
+
+func (s *requestLoggingServer) UnsubscribeMergeQueue(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UnsubscribeMergeQueueRequest],
+) (*connect.Response[agentreplv1.UnsubscribeMergeQueueResponse], error) {
+	return serveUnary(s, ctx, "UnsubscribeMergeQueue", req, s.server.UnsubscribeMergeQueue)
+}
+
+func (s *requestLoggingServer) UnsubscribeWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UnsubscribeWorkspaceRequest],
+) (*connect.Response[agentreplv1.UnsubscribeWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "UnsubscribeWorkspace", req, s.server.UnsubscribeWorkspace)
+}
+
+func (s *requestLoggingServer) UpdateRollouts(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateRolloutsRequest],
+) (*connect.Response[agentreplv1.UpdateRolloutsResponse], error) {
+	return serveUnary(s, ctx, "UpdateRollouts", req, s.server.UpdateRollouts)
+}

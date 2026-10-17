@@ -66,8 +66,8 @@ func (s *server) UpdateShutdownSchedule(
 
 // UpdateMergeQueue is the operator's control of the merge queue: pause or
 // resume (daemon-wide when the repository ref is UNSET), evict one
-// workspace's queued merge, move one a place up or down its queue, or flip a
-// daemon-wide switch (the rollout hold, the racing switch).
+// workspace's queued merge, move one a place up or down its queue, or flip
+// the daemon-wide racing switch.
 func (s *server) UpdateMergeQueue(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateMergeQueueRequest],
@@ -88,21 +88,6 @@ func (s *server) UpdateMergeQueue(
 		return s.actOnQueuedMerge(ctx, rpc, ref, resp, func(ws ids.WorkspaceID) error {
 			_, err := s.deps.Merge.Move(ctx, ws, move)
 			return err
-		})
-	}
-
-	if subscribe := req.Msg.GetSubscribe(); subscribe != nil {
-		scope, detail := scopeOf(subscribe.GetRepository()), subscriptionDetailOf(subscribe.GetDetail())
-		return s.actOnQueuedMerge(ctx, rpc, subscribe.GetSubscriber(), resp, func(ws ids.WorkspaceID) error {
-			_, err := s.deps.Merge.Subscribe(ctx, ws, scope, detail)
-			return err
-		})
-	}
-
-	if unsubscribe := req.Msg.GetUnsubscribe(); unsubscribe != nil {
-		scope := scopeOf(unsubscribe.GetRepository())
-		return s.actOnQueuedMerge(ctx, rpc, unsubscribe.GetSubscriber(), resp, func(ws ids.WorkspaceID) error {
-			return s.deps.Merge.Unsubscribe(ctx, ws, scope)
 		})
 	}
 
@@ -139,7 +124,7 @@ func (s *server) UpdateMergeQueue(
 }
 
 // actOnQueuedMerge is the one body of every UpdateMergeQueue arm that acts on
-// ONE workspace -- its queued merge, or its subscription: the ref resolved to
+// ONE workspace's queued merge: the ref resolved to
 // a registered workspace, ACT run on it, a refusal answered as its typed arm,
 // and success otherwise.
 func (s *server) actOnQueuedMerge(
@@ -163,14 +148,10 @@ func (s *server) actOnQueuedMerge(
 }
 
 // daemonWideMergeAction reads a daemon-wide operator switch's arm -- the
-// rollout hold or the racing switch -- as its action name and the
+// racing switch -- as its action name and the
 // orchestrator verb that applies it; ok is false for every other arm.
 func (s *server) daemonWideMergeAction(req *agentreplv1.UpdateMergeQueueRequest) (string, func(context.Context) error, bool) {
 	switch req.GetAction().(type) {
-	case *agentreplv1.UpdateMergeQueueRequest_HoldRollouts:
-		return "hold_rollouts", s.deps.Merge.HoldRollouts, true
-	case *agentreplv1.UpdateMergeQueueRequest_ReleaseRollouts:
-		return "release_rollouts", s.deps.Merge.ReleaseRollouts, true
 	case *agentreplv1.UpdateMergeQueueRequest_DisableRacing:
 		return "disable_racing", s.deps.Merge.DisableRacing, true
 	case *agentreplv1.UpdateMergeQueueRequest_EnableRacing:
@@ -189,22 +170,6 @@ func mergeMoveOf(req *agentreplv1.UpdateMergeQueueRequest) (*workspacev1.Workspa
 		return action.MoveDown.GetWorkspace(), wsm.MergeMoveDown, true
 	}
 	return nil, 0, false
-}
-
-// subscriptionDetailOf renders a subscription's detail arm as the store's
-// detail. validateUpdateMergeQueueRequest has refused a detail with no arm,
-// so an arm this switch does not know is a contract arm added without its
-// mapping, and fails hard.
-func subscriptionDetailOf(detail *agentreplv1.UpdateMergeQueueSubscribeDetail) wsm.MergeQueueDetail {
-	switch detail.GetLevel().(type) {
-	case *agentreplv1.UpdateMergeQueueSubscribeDetail_EveryChange:
-		return wsm.MergeQueueDetailEveryChange
-	case *agentreplv1.UpdateMergeQueueSubscribeDetail_Advances:
-		return wsm.MergeQueueDetailAdvances
-	case *agentreplv1.UpdateMergeQueueSubscribeDetail_Depletes:
-		return wsm.MergeQueueDetailDepletes
-	}
-	panic(fmt.Sprintf("server: a merge queue subscription detail %T has no store detail", detail.GetLevel()))
 }
 
 // scopeOf renders an optional RepositoryRef as the orchestrator's scope. An

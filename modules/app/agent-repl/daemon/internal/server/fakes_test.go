@@ -837,10 +837,16 @@ func (f *fakeMerge) InterruptTab(_ context.Context, _ ids.WorkspaceID, tab feedi
 	return f.tabRunning, f.tabErr
 }
 
-func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
+func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
 	f.enqueuedBy = append(f.enqueuedBy, req.By)
 	f.requests = append(f.requests, req)
-	return f.enqueueErr
+	if f.enqueueErr != nil {
+		return merge.Enqueued{}, f.enqueueErr
+	}
+	if req.Detached != nil {
+		return merge.Enqueued{MergeBranch: "agent/" + req.Detached.Name}, nil
+	}
+	return merge.Enqueued{}, nil
 }
 
 func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {

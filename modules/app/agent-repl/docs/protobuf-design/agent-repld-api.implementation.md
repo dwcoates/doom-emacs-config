@@ -8,14 +8,14 @@ Each item is checked off as it lands, with its commit.
 
 ## Daemon (Go, `daemon/`)
 
-- [ ] D1 `internal/workspace`: CreateSpec gains `Requester`, `OwnerLands`,
+- [x] D1 (885857bcfe) `internal/workspace`: CreateSpec gains `Requester`, `OwnerLands`,
       `OwnerNotice`; `ForkFrom` is independent of `Parent`; `parentWorkspace()`
       never falls back to `ForkFrom`; `ForkIntoPrimary` becomes "forked from a
       workspace other than the branch source" (`ForkElsewhere`) and its note
       applies to children forked from a non-owner too; public `BaseRef`,
       `settleParentAndBase`, `requireOnPrimary` retired (the merge workspace
       keeps its internal base); a closed owner is reopened first.
-- [ ] D2 `internal/wsm`: persist `owner_lands`, `context_from` and `requester`
+- [x] D2 (ab49cac61c) `internal/wsm`: persist `owner_lands`, `context_from` and `requester`
       on the workspace row (migration), read by MergeWorkspace refusals,
       WorkspaceStatus and the derived-workspace notices.
 - [ ] D3 Notices: owner notice (PROMPT_ORIGIN_OWNER_NOTICE) on create;
