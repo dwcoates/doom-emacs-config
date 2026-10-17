@@ -343,6 +343,16 @@ contract's nesting states."
     (agent-repl-roster--walk-rows (plist-get row :children) label section acc collapsed))
   acc)
 
+(defun agent-repl-roster-section-rows (section)
+  "Return repository SECTION's top-level rows in drawn order.
+Its own unsectioned rows, then each subsection's in turn
+\(`frontend.v1.RosterRepoSection.subsections').  A reader that took only
+the section's own `rows' would miss every workspace in a subsection."
+  (apply #'append
+         (plist-get (plist-get section :rows) :rows)
+         (mapcar (lambda (sub) (plist-get (plist-get sub :rows) :rows))
+                 (plist-get section :subsections))))
+
 (defun agent-repl-roster--section-collapsed-p (section)
   "Return non-nil when the daemon holds repository SECTION collapsed."
   (eq (plist-get (plist-get section :fold) :arm) :collapsed))
@@ -356,6 +366,7 @@ so its workspaces leave the bar exactly as that repository's others do."
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order, as `agent-repl-roster--walk-rows' entries.
 Repository sections in the resolver's order, each section's rows
+\(its subsections' included, `agent-repl-roster-section-rows')
 depth-first, then the hidden section's rows, then the recently-merged
 band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same
 workspaces regrouped, and walking it too would give every workspace a
@@ -369,7 +380,7 @@ hidden from the bar whichever way it is folded."
   (let ((acc (list nil)))
     (dolist (section (plist-get (plist-get roster :repository) :sections))
       (agent-repl-roster--walk-rows
-       (plist-get (plist-get section :rows) :rows)
+       (agent-repl-roster-section-rows section)
        (plist-get (plist-get (plist-get section :header) :label) :text)
        :repository
        acc
@@ -396,7 +407,7 @@ hidden from the bar whichever way it is folded."
   "Return non-nil when SECTION's rows include the workspace ID."
   (let ((acc (list nil)))
     (agent-repl-roster--walk-rows
-     (plist-get (plist-get section :rows) :rows) nil :repository acc)
+     (agent-repl-roster-section-rows section) nil :repository acc)
     (seq-some (lambda (entry)
                 (equal (agent-repl-roster-row-id (plist-get entry :row)) id))
               (car acc))))

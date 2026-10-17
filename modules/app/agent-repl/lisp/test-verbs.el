@@ -4695,3 +4695,16 @@ name or closed flag is roster.el's, so the two files cannot disagree."
                   (buffer-string))))
     ;; Act / Assert
     (should-not (string-match-p "(defun agent-repl-verbs--row-\\(ref\\|name\\|closed-p\\) " source))))
+
+(ert-deftest agent-repl-verbs-section-of-ws-finds-a-workspace-in-a-subsection ()
+  "A workspace whose row sits in a subsection is in its section's repository."
+  ;; Arrange
+  (let* ((row (list :workspace (list :workspace (list :id "ws-sub" :dir "/w/sub"))))
+         (section (list :key (list :repository (list :id "repo-1" :dir "/r/1"))
+                        :rows (list :rows nil)
+                        :subsections (list (list :rows (list :rows (list row))))))
+         (roster (list :repository (list :sections (list section)))))
+    (cl-letf (((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) (list :id "ws-sub" :dir "/w/sub"))))
+      ;; Act / Assert
+      (should (eq (agent-repl-verbs--section-of-ws "ws-sub" roster) section)))))

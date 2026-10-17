@@ -228,6 +228,57 @@ whose calls are the observation."
       ;; Assert
       (should (equal ids '("b" "a"))))))
 
+(defun agent-repl-test-roster--with-subsections (section &rest subsection-rows)
+  "Return SECTION carrying one subsection per list of SUBSECTION-ROWS."
+  (append section
+          (list :subsections
+                (seq-map-indexed (lambda (rows i)
+                                   (list :key (list :subsection-id (format "sub-%d" i))
+                                         :header (list :label (list :text (format "sub %d" i)))
+                                         :rows (list :rows rows)))
+                                 subsection-rows))))
+
+(ert-deftest agent-repl-test-roster-section-rows-follow-the-sections-own-with-its-subsections ()
+  "A section's rows are its unsectioned rows, then each subsection's in turn."
+  ;; Arrange
+  (let ((section (agent-repl-test-roster--with-subsections
+                  (agent-repl-test-roster--section
+                   "alpha" (list (agent-repl-test-roster--row "a" "a-row" :ready)))
+                  (list (agent-repl-test-roster--row "s" "s-row" :ready))
+                  nil
+                  (list (agent-repl-test-roster--row "t" "t-row" :ready)))))
+    ;; Act
+    (let ((ids (mapcar #'agent-repl-roster-row-id (agent-repl-roster-section-rows section))))
+      ;; Assert
+      (should (equal ids '("a" "s" "t"))))))
+
+(ert-deftest agent-repl-test-roster-walk-visits-a-sections-subsections ()
+  "The walk finds a workspace in a subsection, after the section's own rows."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--with-subsections
+                                  (agent-repl-test-roster--section
+                                   "alpha" (list (agent-repl-test-roster--row "a" "a-row" :ready)))
+                                  (list (agent-repl-test-roster--row "s" "s-row" :ready)))
+                                 (agent-repl-test-roster--section
+                                  "beta" (list (agent-repl-test-roster--row "b" "b-row" :ready)))))))
+    ;; Act
+    (let ((ids (mapcar (lambda (e) (agent-repl-roster-row-id (plist-get e :row)))
+                       (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should (equal ids '("a" "s" "b"))))))
+
+(ert-deftest agent-repl-test-roster-repository-of-finds-a-workspace-in-a-subsection ()
+  "A workspace in a subsection belongs to its section's repository."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--with-subsections
+                                  (agent-repl-test-roster--section "alpha" nil)
+                                  (list (agent-repl-test-roster--row "s" "s-row" :ready)))))))
+    ;; Act / Assert
+    (should (equal (plist-get (agent-repl-roster-repository-of "s" roster) :id)
+                   "repo-alpha"))))
+
 (ert-deftest agent-repl-test-roster-repository-of-answers-the-section-key ()
   "A workspace's repository is ITS SECTION'S OWN key, the imported join token."
   ;; Arrange

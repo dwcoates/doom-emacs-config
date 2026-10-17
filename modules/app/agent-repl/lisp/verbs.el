@@ -128,6 +128,7 @@
 ;; Defined by roster.el.  Declared, never defined here.
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-section-rows "agent-repl-roster" (section))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
@@ -525,7 +526,7 @@ obvious answer is the repo the user is already working in."
                        (equal (plist-get (agent-repl-roster-row-ref row) :id)
                               (plist-get ref :id)))
                      (agent-repl-verbs--flatten-rows
-                      (plist-get (plist-get section :rows) :rows))))
+                      (agent-repl-roster-section-rows section))))
        (agent-repl-verbs--repo-sections roster)))))
 
 ;;;; ---- The workspace verbs ----------------------------------------------

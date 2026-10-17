@@ -905,12 +905,45 @@ ARM IS THE MEASUREMENT'S OUTCOME, and it is never unset."
               (noUpstream :no-upstream agent-repl-wire-decode-roster-repo-divergence-no-upstream)
               (failed :failed agent-repl-wire-decode-roster-repo-divergence-failed)))))))
 
+(defun agent-repl-wire-decode-roster-subsection-key (value)
+  "Decode VALUE as `RosterSubsectionKey', a plist `(:subsection-id)'.
+The ID, NOT the name: a subsection can be renamed without becoming another."
+  (let ((object (agent-repl-wire--object "RosterSubsectionKey" value)))
+    (agent-repl-wire--check-keys "RosterSubsectionKey" object '(subsectionId))
+    (agent-repl-wire--decoded
+     "RosterSubsectionKey"
+     (list :subsection-id (agent-repl-wire--decode-string
+                           "RosterSubsectionKey" 'subsectionId object)))))
+
+(defun agent-repl-wire-decode-roster-subsection (value)
+  "Decode VALUE as `RosterSubsection', a plist `(:key :header :rows)'.
+One user-named subsection of a repository's section.  Emacs draws nothing
+from it but walks its rows, because a workspace in a subsection has its
+row there and nowhere else in the repository grouping."
+  (let ((object (agent-repl-wire--object "RosterSubsection" value)))
+    (agent-repl-wire--check-keys "RosterSubsection" object '(key header rows))
+    (agent-repl-wire--decoded
+     "RosterSubsection"
+     (list :key (agent-repl-wire--decode-message
+                 "RosterSubsection" 'key object
+                 #'agent-repl-wire-decode-roster-subsection-key)
+           :header (agent-repl-wire--decode-message
+                    "RosterSubsection" 'header object
+                    #'agent-repl-wire-decode-roster-section-header)
+           :rows (agent-repl-wire--decode-message
+                  "RosterSubsection" 'rows object
+                  #'agent-repl-wire-decode-roster-rows)))))
+
+(defun agent-repl-wire-decode-roster-repo-section-subsections (value)
+  "Decode one element of `RosterRepoSection''s repeated `subsections'."
+  (agent-repl-wire-decode-roster-subsection value))
+
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.
-A plist `(:key :header :rows :fold :divergence)'."
+A plist `(:key :header :rows :fold :divergence :subsections)'."
   (let ((object (agent-repl-wire--object "RosterRepoSection" value)))
     (agent-repl-wire--check-keys "RosterRepoSection" object
-                                 '(key header rows expanded collapsed divergence))
+                                 '(key header rows expanded collapsed divergence subsections))
     (agent-repl-wire--decoded
      "RosterRepoSection"
      (list :key (agent-repl-wire--decode-message
@@ -925,7 +958,10 @@ A plist `(:key :header :rows :fold :divergence)'."
            :fold (agent-repl-wire-decode-roster-repo-section-fold object)
            :divergence (agent-repl-wire--decode-message
                         "RosterRepoSection" 'divergence object
-                        #'agent-repl-wire-decode-roster-repo-divergence)))))
+                        #'agent-repl-wire-decode-roster-repo-divergence)
+           :subsections (agent-repl-wire--decode-repeated
+                         "RosterRepoSection" 'subsections object
+                         #'agent-repl-wire-decode-roster-repo-section-subsections)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE."

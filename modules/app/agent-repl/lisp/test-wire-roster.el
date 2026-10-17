@@ -833,7 +833,41 @@ message."
                    :header (:label (:text "doom") :count (:workspaces 2))
                    :rows (:rows nil)
                    :fold (:arm :expanded :value nil)
-                   :divergence (:state (:arm :pending :value nil))))))
+                   :divergence (:state (:arm :pending :value nil))
+                   :subsections nil))))
+
+(defconst agent-repl-test-wire-roster--subsection
+  (concat "{\"key\":{\"subsectionId\":\"s1\"},"
+          "\"header\":{\"label\":{\"text\":\"later\"},\"count\":{\"workspaces\":0}},"
+          "\"rows\":{\"rows\":[]}}")
+  "One empty subsection named later.")
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-its-subsections ()
+  "A repo section's subsections decode in order, each with key, header and rows."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-repo-section
+                   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
+                           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":0}},"
+                           "\"rows\":{\"rows\":[]},\"expanded\":{},"
+                           (format "\"subsections\":[%s]}" agent-repl-test-wire-roster--subsection)))
+                  :subsections)
+                 '((:key (:subsection-id "s1")
+                    :header (:label (:text "later") :count (:workspaces 0))
+                    :rows (:rows nil))))))
+
+(ert-deftest agent-repl-test-wire-roster-subsection-without-a-key-is-a-breach ()
+  "A subsection's identity is required."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-subsection
+                  "{\"header\":{\"label\":{\"text\":\"later\"},\"count\":{\"workspaces\":0}},\"rows\":{\"rows\":[]}}")
+                 '("RosterSubsection" key "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-subsection-with-an-unknown-field-is-a-breach ()
+  "The codec refuses a field the contract does not spell."
+  (should (agent-repl-test-wire-roster--breach
+           #'agent-repl-wire-decode-roster-subsection
+           "{\"key\":{\"subsectionId\":\"s1\"},\"header\":{\"label\":{\"text\":\"x\"},\"count\":{\"workspaces\":0}},\"rows\":{\"rows\":[]},\"fold\":{}}")))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-decodes-a-collapsed-fold ()
   "A collapsed section decodes its fold arm as `:collapsed'."
@@ -973,7 +1007,8 @@ message."
                                             :header (:label (:text "doom") :count (:workspaces 2))
                                             :rows (:rows nil)
                                             :fold (:arm :expanded :value nil)
-                                            :divergence (:state (:arm :pending :value nil))))
+                                            :divergence (:state (:arm :pending :value nil))
+                                            :subsections nil))
                                :open-count (:workspaces 2))
                    :open (:label (:text "Open") :fold (:arm :collapsed :value nil))
                    :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))
