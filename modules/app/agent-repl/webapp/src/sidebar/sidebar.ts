@@ -43,6 +43,7 @@ import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
+import { createSelectionBlink } from "./selection-blink.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -190,6 +191,8 @@ function mountSidebarIn(
     applySearch(body, search.query());
     placeOpenRowDetails(body);
   });
+  const body = document.createElement("div");
+  body.className = "sb-scroll";
   const rail: RailContext = {
     ctx,
     parentWorkspace: () => (placement.case === "page" ? placement.ctx.workspace : current),
@@ -200,10 +203,8 @@ function mountSidebarIn(
     rowHover: createRowHover(dropdowns, openDetails),
     attention,
     reveal,
+    selectionBlink: createSelectionBlink(body),
   };
-
-  const body = document.createElement("div");
-  body.className = "sb-scroll";
   // THE BAND FIT (band-fit.ts): the Hidden Workspaces and Recently Merged
   // viewports, re-fitted after every draw and on every resize of the rail or
   // a pane.
