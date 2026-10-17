@@ -132,10 +132,15 @@ export function drawFeedMergeCommit(success: FeedMergeSuccess, rc: RowContext): 
   if (success.landedOn !== undefined) {
     return renderMergeCommitLink(rc.ctx, success.commit, success.landedOn);
   }
-  const commit = document.createElement("span");
-  commit.className = "merge-commit";
-  commit.textContent = success.commit;
-  return commit;
+  return drawMergeCommitText(success.commit);
+}
+
+/** A commit drawn as plain text, in the merge bubble's commit face. */
+export function drawMergeCommitText(commit: string): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "merge-commit";
+  el.textContent = commit;
+  return el;
 }
 
 /** The constant props of the head: the kind glyph and the branch line. */

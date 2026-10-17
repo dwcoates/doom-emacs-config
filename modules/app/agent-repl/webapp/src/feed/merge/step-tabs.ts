@@ -13,6 +13,7 @@
  * side, never a count of the narration lines under it.
  */
 import { log } from "../../log.js";
+import { drawMergeCommitText } from "./merge.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedMergeCommitSubject,
@@ -123,11 +124,7 @@ export function drawFeedMergeUpdatingMainStep(u: FeedMergeUpdatingMainStep, path
       el.textContent = "fetching";
       return el;
     case "fastForwarding": {
-      el.append(document.createTextNode("fast-forwarding to "));
-      const commit = document.createElement("span");
-      commit.className = "merge-commit";
-      commit.textContent = step.value.commit;
-      el.append(commit);
+      el.append(document.createTextNode("fast-forwarding to "), drawMergeCommitText(step.value.commit));
       return el;
     }
     default: {

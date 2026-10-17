@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -9,7 +12,7 @@ import {
   FeedMergeWorkspaceSwitchSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { drawFeedMerge, drawFeedMergeGlyph } from "../../../src/feed/merge/merge.js";
+import { drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText } from "../../../src/feed/merge/merge.js";
 import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
@@ -390,5 +393,19 @@ describe("the landed commit's paint", () => {
     } finally {
       teardown();
     }
+  });
+});
+
+describe("drawMergeCommitText", () => {
+  it("draws the commit as plain text in the merge commit face", () => {
+    const el = drawMergeCommitText("a1b2c3d");
+    expect([el.tagName, el.className, el.textContent]).toEqual(["SPAN", "merge-commit", "a1b2c3d"]);
+  });
+
+  it("is the one place a plain merge commit is drawn: no merge source hand-rolls its own", () => {
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "feed", "merge");
+    const count = (file: string) =>
+      (readFileSync(path.join(dir, file), "utf8").match(/className = "merge-commit"/g) ?? []).length;
+    expect([count("merge.ts"), count("step-tabs.ts")]).toEqual([1, 0]);
   });
 });
