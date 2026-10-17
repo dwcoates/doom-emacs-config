@@ -617,6 +617,44 @@ the first-restored-workspace splash-screen bug."
       (should (equal (nreverse order)
                      '((require magit t) (status)))))))
 
+;;;; ---- Tests: agent-repl--magit-displaying ----
+
+(ert-deftest agent-repl-test-magit-displaying-requires-magit-before-binding ()
+  "Requires magit (NOERROR) before the display function is bound."
+  (let ((order nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &optional _file noerror)
+                 (push (list 'require feature noerror magit-display-buffer-function) order)
+                 'magit)))
+      (let ((magit-display-buffer-function 'global-default))
+        (agent-repl--magit-displaying
+         'shown (lambda (_) (push (list 'open magit-display-buffer-function) order)))))
+    (should (equal (nreverse order)
+                   '((require magit t global-default) (open shown))))))
+
+(ert-deftest agent-repl-test-magit-displaying-hands-the-require-result-over ()
+  "OPEN-FN receives the `require' result and its value is returned."
+  (cl-letf (((symbol-function 'require) (lambda (&rest _) 'loaded)))
+    (should (equal (agent-repl--magit-displaying 'shown (lambda (result) (list :got result)))
+                   '(:got loaded)))))
+
+(ert-deftest agent-repl-test-magit-displaying-restores-the-global-display-fn ()
+  "The binding ends with OPEN-FN, leaving the global display function alone."
+  (let ((magit-display-buffer-function 'global-default))
+    (cl-letf (((symbol-function 'require) #'ignore))
+      (agent-repl--magit-displaying 'shown #'ignore))
+    (should (eq magit-display-buffer-function 'global-default))))
+
+(defconst agent-repl-test-magit--source
+  (expand-file-name "magit.el" (file-name-directory (or load-file-name buffer-file-name)))
+  "The magit.el source these tests load.")
+
+(ert-deftest agent-repl-test-magit-every-display-binding-goes-through-the-helper ()
+  "No magit.el definition but the helper let-binds the display function itself."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test-magit--source)
+    (should (= (how-many "(let\\*? ((magit-display-buffer-function" (point-min) (point-max)) 1))))
+
 ;;;; ---- Tests: commit decorations keep their tags ----
 
 (ert-deftest agent-repl-test-magit-ref-labels-keep-tags ()

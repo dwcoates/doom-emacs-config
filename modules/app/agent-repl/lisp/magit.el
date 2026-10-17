@@ -309,6 +309,25 @@ new window.  Returns the window magit should select."
                               ws buffer (selected-window))
     (display-buffer buffer '(display-buffer-same-window))))
 
+(defun agent-repl--magit-displaying (display-fn open-fn)
+  "Call OPEN-FN with magit loaded and DISPLAY-FN showing its buffers.
+Every magit buffer agent-repl opens at a place of its own choosing goes
+through here: magit is required (NOERROR) FIRST, and only then is
+`magit-display-buffer-function' let-bound to DISPLAY-FN around OPEN-FN.
+OPEN-FN receives the `require' result, for its caller's log record.
+
+THE ORDER IS THE POINT.  When magit has not loaded yet,
+`magit-display-buffer-function' is not yet special, so a `let' of it
+binds LEXICALLY, and the magit entry point inside then autoloads magit,
+whose own `defvar' signals (\"Defining as dynamic an already lexical
+var\") and aborts magit's load halfway (see
+`agent-repl--magit-status-same-window').  The require is quiet because
+the magit entry point OPEN-FN calls still signals loudly when magit is
+genuinely unavailable.  Returns OPEN-FN's value."
+  (let ((require-result (require 'magit nil t)))
+    (let ((magit-display-buffer-function display-fn))
+      (funcall open-fn require-result))))
+
 (defun agent-repl--magit-status-same-window (dir)
   "Open `magit-status' for DIR, forcing same-window display.
 Binds `magit-display-buffer-function' to
@@ -368,15 +387,15 @@ entirely — a permanent stall whose only witness was a native backtrace
 be asked at all; a directory that is genuinely not a repository signals
 loudly from magit's own refresh instead, which is what this module
 wants anyway."
-  (let* ((ws (agent-repl--ws-current-name))
-         (require-result (require 'magit nil t)))
-    (agent-repl--log ws "magit-status-same-window: ws=%s dir=%s require-result=%S magit-loaded=%s selected-window=%S"
-                      ws dir require-result (featurep 'magit) (selected-window))
-    (let ((magit-display-buffer-function
-           #'agent-repl--magit-display-buffer-same-window))
-      (magit-status-setup-buffer (file-name-as-directory (expand-file-name dir)))
-      (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
-                        ws dir (selected-window)))))
+  (let ((ws (agent-repl--ws-current-name)))
+    (agent-repl--magit-displaying
+     #'agent-repl--magit-display-buffer-same-window
+     (lambda (require-result)
+       (agent-repl--log ws "magit-status-same-window: ws=%s dir=%s require-result=%S magit-loaded=%s selected-window=%S"
+                         ws dir require-result (featurep 'magit) (selected-window))
+       (magit-status-setup-buffer (file-name-as-directory (expand-file-name dir)))
+       (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
+                         ws dir (selected-window))))))
 
 (defun agent-repl--magit-status-workspace-open (target-fn)
   "Open magit-status for the workspace in the SELECTED window, at TARGET-FN's dir.
