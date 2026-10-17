@@ -74,7 +74,7 @@ Each item is checked off as it lands, with its commit.
 
 ## Skills, manifests, docs
 
-- [ ] S1 `/agent-repl-workspaces` (create, prompt, set incl. hidden, merge,
+- [x] S1 (17b7d51303) `/agent-repl-workspaces` (create, prompt, set incl. hidden, merge,
       open, close, kill, compact, status, subscribe), replacing CEE's
       `/create-or-update-workspace`.
       It states that `workspace kill` and every cold-gate answer (`workspace
@@ -82,14 +82,14 @@ Each item is checked off as it lands, with its commit.
       only when the user explicitly asked for or approved them.
 - [x] D15 `workspace gate` CLI over AnswerColdGate; WorkspaceStatus reports
       `cold_gate` with the gate's FeedId.
-- [ ] S2 `/agent-repl-merge-queue` from `/agent-repl-merge-queue`.
-- [ ] S3 `/agent-repl-runtime` from `/agent-repl-runtime`, absorbing
+- [x] S2 (17b7d51303) `/agent-repl-merge-queue` from `/agent-repl-merge-queue`.
+- [x] S3 (17b7d51303) `/agent-repl-runtime` from `/agent-repl-runtime`, absorbing
       `/agent-repl-runtime` as a runbook over `agent-repld editor eval`.
-- [ ] S4 `/agent-repl-debug`, `/agent-repl-profile`, `/agent-repl-tests`,
+- [x] S4 (17b7d51303) `/agent-repl-debug`, `/agent-repl-profile`, `/agent-repl-tests`,
       `/agent-repl-install` renames; `/agent-repl-help` removed.
-- [ ] S5 Tests: every command a skill names exists; every agent command is
+- [x] S5 (17b7d51303) Tests: every command a skill names exists; every agent command is
       reachable from a skill.
-- [ ] S6 requirements.json skill entries, metaprompt merge rule, guard hook,
+- [x] S6 (17b7d51303) requirements.json skill entries, metaprompt merge rule, guard hook,
       AGENTS.md, USER-GUIDE.
 - [ ] S7 CEE pull request removing `/create-or-update-workspace` (confirm
       with the owner before opening).
