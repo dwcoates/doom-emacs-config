@@ -266,6 +266,10 @@ var Suites = []Suite{
 			// (integration/scenariogoldens_test.go) reads the shim's goldens
 			// and keeps its own feed.json beside them.
 			"testdata/scenario-goldens/",
+			// internal/prose holds the daemon's parse to the old webapp
+			// parser's golden answers, and writes the webapp's parsed-prose
+			// fixture from its inputs, failing while it is stale.
+			"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/",
 		}}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
