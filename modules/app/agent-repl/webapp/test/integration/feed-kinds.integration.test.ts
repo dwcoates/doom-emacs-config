@@ -1607,6 +1607,7 @@ describe("merge tabs", () => {
     const row = await drawRow(mergeTabRow("rebasing"));
     // Assert
     expect([...row.querySelectorAll(".merge-line")].map((el) => el.textContent)).toEqual([
+      "replaying 7 commits of ws-1 onto master at 4f2a1c900000",
       "replaying 2/7 · tidy the queue",
       "replaying 3/7 · fix the reconnect loop",
     ]);

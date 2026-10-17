@@ -58,7 +58,7 @@ describe("a merge tab drawn as its own row", () => {
 
   it("draws the tab's own body", () => {
     // Arrange / Act
-    const el = draw({ kind: "rebasing", state: "live", payload: { lines: [{ text: "replaying 1/1" }] } });
+    const el = draw({ kind: "rebasing", state: "live", payload: { lines: [{ line: { case: "text", value: "replaying 1/1" } }] } });
     // Assert
     expect(el.textContent).toContain("replaying 1/1");
   });

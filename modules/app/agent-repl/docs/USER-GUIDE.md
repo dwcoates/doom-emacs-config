@@ -138,6 +138,12 @@ These clicks jump to an entry in the feed:
 - **A merge never opens the expanded footer.**
 - **The bubble has one rebasing tab and one tests tab, each with tabs of its own inside.**
   - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.
+    - The short hash is drawn smaller and in a darker grey than the subject.
+  - Above the commits' tabs, the rebasing tab reads "replaying N commits of <branch> onto <target> at <commit>".
+    - The branch and the target are drawn in the merge purple.
+    - Clicking the target, underlined, switches to the target's workspace, opening it first if it is closed. A target whose checkout is no workspace is not underlined, and clicking it does nothing.
+    - Clicking the commit, in underlined darker grey, opens the target branch's magit log in the popup on the right, with point on that commit.
+  - A tab's live dot, and the hollow dot of a run waiting its turn, are drawn at 70% of the tab's text size.
   - A commit whose replay conflicted shows the conflicted files, and below them the agent's conflict resolution as it streams.
   - The tests tab has a tab for each full run of the suites (`run 1`, `run 2`, ...).
     - Each run's tab shows its passed/failed/total test counts, summed over its suites, between its clock and its state glyph.

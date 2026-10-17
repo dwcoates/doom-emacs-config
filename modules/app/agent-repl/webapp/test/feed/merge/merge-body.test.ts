@@ -232,7 +232,7 @@ describe("a rebasing tab is a strip of its commits", () => {
       tabRow("c2", { kind: "rebaseCommit", state: "pending", parent: "t-rebase", label: "c2" }),
     ]);
     const { host } = mount(view);
-    expect(host.querySelector(".merge-strip.is-nested .merge-tab.is-active .merge-tab-label")?.textContent).toBe("c1");
+    expect(host.querySelector(".merge-strip.is-nested .merge-tab.is-active .merge-tab-subject")?.textContent).toBe("c1");
   });
 
   it("draws a pending commit with no glyph and no clock", () => {
@@ -248,7 +248,7 @@ describe("a rebasing tab is a strip of its commits", () => {
   it("draws a commit's narration lines", () => {
     const view = new FakeSubfeed([
       tabRow("t-rebase", { kind: "rebasing", state: "live" }),
-      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase", payload: { lines: [{ text: "replayed 1/2" }] } }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase", payload: { lines: [{ line: { case: "text", value: "replayed 1/2" } }] } }),
     ]);
     const { host } = mount(view);
     expect(host.querySelector(".merge-rebase-commit .merge-line")?.textContent).toBe("replayed 1/2");
@@ -431,7 +431,7 @@ describe("resolved tabs draw the tab row's own content", () => {
       tabRow("t1", {
         kind: "rebasing",
         state: "live",
-        payload: { lines: [{ text: "replaying 1/2 · tidy" }, { text: "replaying 2/2 · fix the loop" }] },
+        payload: { lines: [{ line: { case: "text", value: "replaying 1/2 · tidy" } }, { line: { case: "text", value: "replaying 2/2 · fix the loop" } }] },
       }),
     ]);
     const { host } = mount(view);

@@ -46,7 +46,6 @@ import {
 import { isFileLinkHref } from "./href.js";
 import type {
   FeedId,
-  FeedMergeLandedOn,
   FeedMergeTestLog,
   FeedMergeTestLogToken,
 } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -197,21 +196,24 @@ export function renderMergeTestLogLink(
 }
 
 /**
- * A landed merge's commit, drawn on the merge bubble's head.
+ * A merge's commit in its branch's log: a landed merge's commit on the merge
+ * bubble's head, and a replay header's tip in the rebasing tab.
  *
  * THE CLICK OPENS THE BRANCH'S LOG IN THE EDITOR with point on the commit:
- * `OpenInEditorRequest.commit_log`, every field echoed from the head the
- * daemon served. Muted, smaller and underlined rather than the link blue, so
- * it reads as the head's quiet detail that also opens.
+ * `OpenInEditorRequest.commit_log`, every field echoed from the row the
+ * daemon served. Muted and underlined rather than the link blue, so it reads
+ * as the row's quiet detail that also opens. TEXT is what is drawn, the
+ * commit itself unless the row gave a shorter spelling of it.
  */
 export function renderMergeCommitLink(
   ctx: AppContext,
   commit: string,
-  landedOn: FeedMergeLandedOn,
+  on: { readonly repositoryDir: string; readonly branch: string },
+  text: string = commit,
 ): HTMLElement {
-  const anchor = editorTargetAnchor(ctx, "merge-commit merge-commit-link", commit, {
+  const anchor = editorTargetAnchor(ctx, "merge-commit merge-commit-link", text, {
     case: "commitLog",
-    value: { repositoryDir: landedOn.repositoryDir, branch: landedOn.branch, commit },
+    value: { repositoryDir: on.repositoryDir, branch: on.branch, commit },
   });
   anchor.setAttribute("data-merge-commit", "");
   return anchor;

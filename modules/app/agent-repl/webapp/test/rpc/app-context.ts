@@ -9,7 +9,13 @@
  * A test that wants the REAL page mux calls `createAppContext` itself — the
  * webapp-layer harness does exactly that, against a real daemon.
  */
+import type { ServiceImpl } from "@connectrpc/connect";
+import { createRouterTransport } from "@connectrpc/connect";
+import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { createTicker } from "../../src/clock.js";
+import { createAgentReplClient } from "../../src/rpc/client.js";
 import { createAppContext, type AppContext, type AppContextInit } from "../../src/rpc/context.js";
+import type { FailureSink } from "../../src/failure/sink.js";
 import { directPageStreams } from "./direct-page-streams.js";
 import { fakePageSeen } from "../page-seen-fake.js";
 
@@ -25,5 +31,36 @@ export function testAppContext(
     ...init,
     page: "test-page",
     streams: directPageStreams(init.client),
+  });
+}
+
+/** What a scripted context may say beyond its rpcs (`scriptedAppContext`). */
+export interface ScriptedAppContextOptions {
+  /** The workspace the page belongs to. */
+  readonly workspace: AppContextInit["workspace"];
+  /** The ticker's period in ms; 1000 unless stated. */
+  readonly tickMs?: number;
+  /** Where the page files its failure cards. */
+  readonly failures: FailureSink;
+}
+
+/**
+ * A context whose daemon answers exactly the rpcs RPCS implements, over an
+ * in-memory router: what a unit test that scripts its daemon's answers uses,
+ * so every such test builds its client the same way.
+ */
+export function scriptedAppContext(
+  rpcs: Partial<ServiceImpl<typeof AgentRepl>>,
+  opts: ScriptedAppContextOptions,
+): AppContext {
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, rpcs);
+  });
+  return testAppContext({
+    client: createAgentReplClient(transport),
+    workspace: opts.workspace,
+    ticker: createTicker(opts.tickMs ?? 1000),
+    failures: opts.failures,
+    composerEnabled: false,
   });
 }

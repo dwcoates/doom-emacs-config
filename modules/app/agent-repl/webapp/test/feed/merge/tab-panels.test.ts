@@ -143,13 +143,13 @@ describe("mergeTabPanel", () => {
   it("redraws a commit's lines in place when they grew", () => {
     const view = new FakeSubfeed();
     const panel = mergeTabPanel(
-      tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ text: "a" }] } })),
+      tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ line: { case: "text", value: "a" } }] } })),
       view,
       rc(),
     );
     const host = document.createElement("div");
     host.append(...panel.nodes);
-    panel.update(tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ text: "a" }, { text: "b" }] } })));
+    panel.update(tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ line: { case: "text", value: "a" } }, { line: { case: "text", value: "b" } }] } })));
     expect([...host.querySelectorAll(".merge-line")].map((e) => e.textContent)).toEqual(["a", "b"]);
   });
 

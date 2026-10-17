@@ -3411,9 +3411,17 @@ message FeedMergeTab {
 
 // The tab's drawn label, resolved by the daemon.
 message FeedMergeTabLabel {
-  // The tab's words ("queue", "rebasing", "tests", a commit's short hash and
-  // subject, "run 2"), drawn verbatim.
-  string text = 1;
+  // WHAT THE BADGE SAYS. The arm is the label's shape: words drawn verbatim,
+  // or a replayed commit drawn as its two parts. Unset is a malformed row.
+  oneof words {
+    // The tab's words ("queue", "rebasing", "tests", "run 2"), drawn
+    // verbatim.
+    string text = 1;
+    // A `rebase_commit` subtab's commit: its short hash, drawn smaller and in
+    // a darker grey than the subject beside it, and its subject. Only a
+    // `rebase_commit` tab carries this arm, and it always does.
+    FeedMergeRebaseCommitIdentity commit = 3;
+  }
   // The 1-based round; the client decorates rounds beyond the first
   // ("committing (2)") and draws nothing for round 1. A commit's subtab
   // carries the replay it belongs to (a merge that started over replays its
@@ -3539,10 +3547,50 @@ message FeedMergeRebaseProgress {
   // How many commits the branch replays in all. At least 1.
   uint32 total = 2;
 }
-// One narration line of the rebase or of one replayed commit.
+// One narration line of the rebase or of one replayed commit. The arm is the
+// line's shape. Unset is a malformed row.
 message FeedMergeRebaseLine {
-  // The daemon-composed line, drawn verbatim.
-  string text = 1;
+  oneof line {
+    // The daemon-composed line, drawn verbatim.
+    string text = 1;
+    // The rebasing tab's account of one replay beginning, drawn "replaying 5
+    // commits of ABC/fix onto master at 4f2a1c" from its parts. Only the
+    // rebasing tab's own lines carry this arm; a commit's lines never do.
+    FeedMergeRebaseReplaying replaying = 2;
+  }
+}
+// One replay beginning: how many commits of which branch are replayed onto
+// which target, at which of the target's commits. The branch and the target
+// are drawn in the merge purple; the tip is a link to the target branch's log
+// with the tip selected (agentrepl.v1.OpenInEditorRequest.commit_log, echoed
+// from `target`), drawn underlined in a slightly darker grey; the target is a
+// link that switches to the target's workspace, opening it first, when the
+// target's checkout is one.
+message FeedMergeRebaseReplaying {
+  // How many of the branch's commits this replay replays. At least 1.
+  uint32 commits = 1;
+  // The branch replayed, drawn verbatim.
+  string branch = 2;
+  // Where the branch is replayed onto.
+  FeedMergeRebaseTarget target = 3;
+  // The target's commit the replay stands the branch on, in full: what its
+  // link selects in the target branch's log.
+  string tip = 4;
+  // The same commit's short hash, drawn verbatim.
+  string tip_short_sha = 5;
+}
+// The branch a replay is replayed onto, and the checkout it is checked out in.
+message FeedMergeRebaseTarget {
+  // The target branch, drawn verbatim.
+  string branch = 1;
+  // The target's checkout on the daemon's host, whose log the tip's link
+  // opens.
+  string repository_dir = 2;
+  // The workspace registered on that checkout, which a click on the target
+  // opens and switches to. UNSET when the checkout is no workspace of the
+  // daemon's (a repository's main worktree nothing registered), and the
+  // target is then drawn as text.
+  optional workspace.v1.WorkspaceRef workspace = 3;
 }
 
 // SUBTAB of the rebasing tab: one commit of one replay. Published for every
@@ -3567,8 +3615,10 @@ message FeedMergeTabRebaseCommit {
     // resolution failed and the merge with it (failed).
     FeedMergeTabSettled settled = 4;
   }
-  // Which commit of the branch this is.
-  FeedMergeRebaseCommitIdentity commit = 5;
+  // Tag 5 (`commit`) is RETIRED: the commit's identity is the tab's label
+  // (FeedMergeTabLabel.commit), drawn from its parts.
+  reserved 5;
+  reserved "commit";
   // The daemon-composed narration of this commit's replay, oldest first
   // ("conflicted in 2 file(s)", "conflicted in 1 file(s), resolved as
   // before", "replayed 3/5").
@@ -3581,7 +3631,7 @@ message FeedMergeTabRebaseCommit {
 }
 // A commit the replay has not reached yet. Drawn with no glyph and no clock.
 message FeedMergeRebaseCommitPending {}
-// The branch commit a subtab replays.
+// The branch commit a subtab replays, as its label draws it.
 message FeedMergeRebaseCommitIdentity {
   // The commit's short hash, drawn verbatim.
   string short_sha = 1;

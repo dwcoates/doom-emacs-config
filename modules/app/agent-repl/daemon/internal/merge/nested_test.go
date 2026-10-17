@@ -2,14 +2,18 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
@@ -185,13 +189,11 @@ func TestCommitTabNamesTheCommitAndItsReplay(t *testing.T) {
 	tab := v.commitTab(0, false)
 
 	// Assert
-	if tab.GetLabel().GetText() != "a1b2c3d4e5f6 fix the loop" || tab.GetLabel().GetRound() != 2 {
-		t.Fatalf("label = %+v, want the short hash, the subject and replay 2", tab.GetLabel())
+	label := tab.GetLabel()
+	if label.GetCommit().GetShortSha() != "a1b2c3d4e5f6" || label.GetCommit().GetSubject() != "fix the loop" || label.GetRound() != 2 {
+		t.Fatalf("label = %+v, want the short hash and the subject as parts, at replay 2", label)
 	}
 	commit := tab.GetRebaseCommit()
-	if commit.GetCommit().GetShortSha() != "a1b2c3d4e5f6" || commit.GetCommit().GetSubject() != "fix the loop" {
-		t.Fatalf("identity = %+v", commit.GetCommit())
-	}
 	if len(commit.GetLines()) != 1 || commit.GetLines()[0].GetText() != "replayed 1/1" {
 		t.Fatalf("lines = %+v", commit.GetLines())
 	}
@@ -393,16 +395,108 @@ func TestFrontTabLabelNamesTheTopLevelTab(t *testing.T) {
 
 func TestRebaseViewCloneSharesNothing(t *testing.T) {
 	// Arrange
-	v := rebaseView{Lines: []string{"a"}, Commits: []commitView{{Lines: []string{"b"}, Conflict: &conflictView{Files: []string{"c"}}}}}
+	v := rebaseView{
+		Lines:   []rebaseLine{textLine("a"), {Replaying: &replayingLine{Branch: "b1", TargetWorkspace: &workspaceRefDoc{ID: "ws-t"}}}},
+		Commits: []commitView{{Lines: []string{"b"}, Conflict: &conflictView{Files: []string{"c"}}}},
+	}
 
 	// Act
 	c := v.clone()
-	c.Lines[0], c.Commits[0].Lines[0], c.Commits[0].Conflict.Files[0] = "x", "y", "z"
+	c.Lines[0], c.Commits[0].Lines[0], c.Commits[0].Conflict.Files[0] = textLine("x"), "y", "z"
+	c.Lines[1].Replaying.Branch, c.Lines[1].Replaying.TargetWorkspace.ID = "b2", "ws-other"
 	c.Commits[0].Conflict.Span.StartedMS = 5
 
 	// Assert
-	if v.Lines[0] != "a" || v.Commits[0].Lines[0] != "b" || v.Commits[0].Conflict.Files[0] != "c" || v.Commits[0].Conflict.Span.StartedMS != 0 {
+	if v.Lines[0].Text != "a" || v.Commits[0].Lines[0] != "b" || v.Commits[0].Conflict.Files[0] != "c" || v.Commits[0].Conflict.Span.StartedMS != 0 {
 		t.Fatalf("original = %+v, want it untouched by its clone", v)
+	}
+	if v.Lines[1].Replaying.Branch != "b1" || v.Lines[1].Replaying.TargetWorkspace.ID != "ws-t" {
+		t.Fatalf("original replay line = %+v, want it untouched by its clone", v.Lines[1].Replaying)
+	}
+}
+
+func TestRebaseLineReadsEveryRecordedShape(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		want    rebaseLine
+		wantErr bool
+	}{
+		{name: "a bare string, as lines were recorded before their parts", data: `"already on master; nothing to merge"`, want: textLine("already on master; nothing to merge")},
+		{name: "a text line object", data: `{"text":"failed: boom"}`, want: textLine("failed: boom")},
+		{
+			name: "a replay line object",
+			data: `{"replaying":{"commits":2,"branch":"ABC/fix","target_branch":"master","target_dir":"/t","tip":"4f2a1c","target_workspace":{"id":"ws-t","dir":"/t"}}}`,
+			want: rebaseLine{Replaying: &replayingLine{Commits: 2, Branch: "ABC/fix", TargetBranch: "master", TargetDir: "/t", Tip: "4f2a1c", TargetWorkspace: &workspaceRefDoc{ID: "ws-t", Dir: "/t"}}},
+		},
+		{name: "neither", data: `7`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var got rebaseLine
+
+			// Act
+			err := json.Unmarshal([]byte(tt.data), &got)
+
+			// Assert
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "neither a string nor a line object") {
+					t.Fatalf("err = %v, want the line refused by name", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("line = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRebaseLineDrawsItsArm(t *testing.T) {
+	replay := func(ws *workspaceRefDoc) rebaseLine {
+		return rebaseLine{Replaying: &replayingLine{Commits: 5, Branch: "ABC/fix", TargetBranch: "master", TargetDir: "/repo", Tip: "4f2a1c0123456789", TargetWorkspace: ws}}
+	}
+	tests := []struct {
+		name string
+		line rebaseLine
+		want *frontendv1.FeedMergeRebaseLine
+	}{
+		{
+			name: "a sentence is drawn verbatim",
+			line: textLine("ABC/fix is already on master's tip; nothing to replay"),
+			want: &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Text{Text: "ABC/fix is already on master's tip; nothing to replay"}},
+		},
+		{
+			name: "a replay onto a workspace's checkout names that workspace",
+			line: replay(&workspaceRefDoc{ID: "ws-t", Dir: "/repo"}),
+			want: &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Replaying{Replaying: &frontendv1.FeedMergeRebaseReplaying{
+				Commits: 5, Branch: "ABC/fix", Tip: "4f2a1c0123456789", TipShortSha: "4f2a1c012345",
+				Target: &frontendv1.FeedMergeRebaseTarget{Branch: "master", RepositoryDir: "/repo", Workspace: &workspacev1.WorkspaceRef{Id: "ws-t", Dir: "/repo"}},
+			}}},
+		},
+		{
+			name: "a replay onto a checkout no workspace is names none",
+			line: replay(nil),
+			want: &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Replaying{Replaying: &frontendv1.FeedMergeRebaseReplaying{
+				Commits: 5, Branch: "ABC/fix", Tip: "4f2a1c0123456789", TipShortSha: "4f2a1c012345",
+				Target: &frontendv1.FeedMergeRebaseTarget{Branch: "master", RepositoryDir: "/repo"},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.line.drawn()
+
+			// Assert
+			if !proto.Equal(got, tt.want) {
+				t.Fatalf("drawn = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -576,5 +670,35 @@ func TestEveryRunEndingSettlesThroughEndRun(t *testing.T) {
 		if handSettled.Match(body) {
 			t.Fatalf("%s settles a run and its tests tab by hand instead of through endRun", file)
 		}
+	}
+}
+
+func TestNarrationLinesAreDrawnInOrderThroughOneShape(t *testing.T) {
+	tests := []struct {
+		name string
+		got  []*frontendv1.FeedMergeRebaseLine
+	}{
+		{name: "a commit's sentences", got: textLines([]string{"a", "b"})},
+		{name: "the rebase-wide narration", got: drawnLines([]rebaseLine{textLine("a"), textLine("b")})},
+		{name: "drawn one by one", got: drawEach([]string{"a", "b"}, textLine)},
+	}
+	want := []*frontendv1.FeedMergeRebaseLine{textLine("a").drawn(), textLine("b").drawn()}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Assert
+			if len(tt.got) != len(want) || !proto.Equal(tt.got[0], want[0]) || !proto.Equal(tt.got[1], want[1]) {
+				t.Fatalf("lines = %v, want %v", tt.got, want)
+			}
+		})
+	}
+}
+
+func TestNoNarrationIsDrawnAsNoLines(t *testing.T) {
+	// Act
+	got := drawEach(nil, textLine)
+
+	// Assert
+	if got == nil || len(got) != 0 {
+		t.Fatalf("lines = %#v, want an empty, non-nil list", got)
 	}
 }

@@ -128,7 +128,7 @@ func mergeTabRow() (feedid.Feed, *frontendv1.FeedRow) {
 // liveTestsTab is a live tests tab: a merge tab of a kind every daemon draws.
 func liveTestsTab() *frontendv1.FeedMergeTab {
 	return &frontendv1.FeedMergeTab{
-		Label: &frontendv1.FeedMergeTabLabel{Text: "tests", Round: 1},
+		Label: &frontendv1.FeedMergeTabLabel{Words: &frontendv1.FeedMergeTabLabel_Text{Text: "tests"}, Round: 1},
 		Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{
 			State: &frontendv1.FeedMergeTabTests_Live{Live: &frontendv1.FeedMergeTabLive{StartedAtMs: 1}},
 		}},
@@ -356,7 +356,7 @@ func TestARedrawnMergeTabOfARetiredKindIsNotDrawn(t *testing.T) {
 	first.UpsertDurable(testWorkspace, tabFeed, tab)
 	retired, err := proto.Marshal(&frontendv1.FeedRow{
 		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: tabFeed, Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}),
-		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{Label: &frontendv1.FeedMergeTabLabel{Text: "conflicts", Round: 1}}},
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{Label: &frontendv1.FeedMergeTabLabel{Words: &frontendv1.FeedMergeTabLabel_Text{Text: "conflicts"}, Round: 1}}},
 	})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)

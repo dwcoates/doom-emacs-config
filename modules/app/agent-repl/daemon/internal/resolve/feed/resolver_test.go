@@ -1085,7 +1085,7 @@ func TestMergeTabsAreAppendOnlyTopLevelRowsOfTheBubblesOwnFeed(t *testing.T) {
 				Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "tests:" + string(rune('0'+round)),
 			}),
 			Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{
-				Label: &frontendv1.FeedMergeTabLabel{Text: "tests", Round: round},
+				Label: &frontendv1.FeedMergeTabLabel{Words: &frontendv1.FeedMergeTabLabel_Text{Text: "tests"}, Round: round},
 				Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{
 					State: &frontendv1.FeedMergeTabTests_Live{Live: &frontendv1.FeedMergeTabLive{}},
 				}},

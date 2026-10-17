@@ -60,6 +60,8 @@ type fakeDB struct {
 
 	// tabErr, when set, is what RecordTabInterval answers, recording nothing.
 	tabErr error
+	// byDirErr, when set, is what WorkspaceByDir answers.
+	byDirErr error
 
 	mu sync.Mutex
 
@@ -352,10 +354,13 @@ func (f *fakeDB) SetLeasePolicy(_ context.Context, lease wsm.LeaseID, p wsm.Leas
 	return nil
 }
 
-// WorkspaceByDir answers the workspace registered at DIR.
+// WorkspaceByDir answers the workspace registered at DIR, or byDirErr when set.
 func (f *fakeDB) WorkspaceByDir(_ context.Context, dir string) (wsm.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.byDirErr != nil {
+		return wsm.Workspace{}, f.byDirErr
+	}
 	for _, ws := range f.workspaces {
 		if ws.Dir == dir {
 			return ws, nil
@@ -2780,6 +2785,9 @@ func (f *fakeFeed) labelsOfKind(kind string) []string {
 			continue
 		}
 		label := tab.GetLabel().GetText()
+		if c := tab.GetLabel().GetCommit(); c != nil {
+			label = c.GetShortSha() + " " + c.GetSubject()
+		}
 		if seen[label] {
 			continue
 		}

@@ -2,8 +2,6 @@
 import { type Control } from "../../../src/control.js";
 import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   AnswerMergeQueueOfferErrorSchema,
   AnswerMergeQueueOfferResponseSchema,
@@ -20,12 +18,10 @@ import {
   type FeedRow,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createTicker } from "../../../src/clock.js";
 import type { FailureSink } from "../../../src/failure/sink.js";
 import { log } from "../../../src/log.js";
-import { createAgentReplClient } from "../../../src/rpc/client.js";
 import type { AppContext } from "../../../src/rpc/context.js";
-import { testAppContext } from "../../rpc/app-context.js";
+import { scriptedAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { OverlayControls } from "../../../src/feed/bubble.js";
 import {
@@ -60,21 +56,15 @@ function context(
   answer: () => ReturnType<typeof successResponse> = successResponse,
   seen: AnswerMergeQueueOfferRequest[] = [],
 ): AppContext {
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
+  return scriptedAppContext(
+    {
       answerMergeQueueOffer: (request) => {
         seen.push(request);
         return answer();
       },
-    });
-  });
-  return testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker: createTicker(60_000),
-    failures: SINK,
-    composerEnabled: false,
-  });
+    },
+    { workspace: WORKSPACE, tickMs: 60_000, failures: SINK },
+  );
 }
 
 /** Overlay controls that record what the overlay asked of its bubble. */
