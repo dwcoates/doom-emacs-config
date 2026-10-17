@@ -1769,7 +1769,10 @@ func (s *sidecar) enrollWatchers() {
 	if s.pass == nil {
 		s.pass = &pollPass{seen: make(map[string]bool, len(s.watchers))}
 	}
-	fresh := make([]string, 0, len(s.watchers)-len(s.pass.seen))
+	// THE ROSTER CAN OUTNUMBER THE WATCHERS: a file dropped as drained mid-pass
+	// stays in `seen`, so the capacity hint is floored at zero (a negative one
+	// panicked the sidecar during the 2026-10-17 backfill).
+	fresh := make([]string, 0, max(0, len(s.watchers)-len(s.pass.seen)))
 	for path := range s.watchers {
 		if s.pass.seen[path] {
 			continue
