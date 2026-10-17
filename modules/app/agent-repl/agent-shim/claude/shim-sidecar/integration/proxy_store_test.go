@@ -185,6 +185,10 @@ func (p *proxyStore) GetDetachedWork(context.Context, *connect.Request[storev1.G
 	return nil, p.unexpected("GetDetachedWork")
 }
 
+func (p *proxyStore) GetPeerDelivery(context.Context, *connect.Request[storev1.GetPeerDeliveryRequest]) (*connect.Response[storev1.GetPeerDeliveryResponse], error) {
+	return nil, p.unexpected("GetPeerDelivery")
+}
+
 func (p *proxyStore) ListResidueShapes(context.Context, *connect.Request[storev1.ListResidueShapesRequest]) (*connect.Response[storev1.ListResidueShapesResponse], error) {
 	return nil, p.unexpected("ListResidueShapes")
 }

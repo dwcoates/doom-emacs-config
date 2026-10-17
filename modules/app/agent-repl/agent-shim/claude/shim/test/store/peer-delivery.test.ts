@@ -98,7 +98,7 @@ describe("lookupPeerDelivery", () => {
     const answer = await lookupPeerDelivery({ client, retry: RETRY, sleep: noSleep }, "m-1");
 
     // Assert
-    expect(answer).toEqual({ kind: "read", sender: expect.objectContaining({ value: "session-a" }), recipient: undefined });
+    expect(answer.kind === "read" ? [answer.sender?.value, answer.recipient] : "failed").toEqual(["session-a", undefined]);
   });
 
   it("asks naming the delivery id verbatim", async () => {

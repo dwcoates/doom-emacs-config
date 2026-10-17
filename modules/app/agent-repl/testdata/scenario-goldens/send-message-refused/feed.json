@@ -31,7 +31,12 @@
     {
       "agentPrompt": {
         "address": {
-          "text": "→ a85a6434719755df1"
+          "name": {
+            "text": "a85a6434719755df1"
+          },
+          "sent": {
+            "unclassified": {}
+          }
         },
         "body": {
           "blocks": [

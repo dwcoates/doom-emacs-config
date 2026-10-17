@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -257,12 +256,12 @@ func TestSubagentSyncNestedActivity(t *testing.T) {
 }
 
 // pageHasAgentPromptText answers whether any row on the page is an
-// agent_prompt whose body carries `text` in a text block, under an address
-// naming a sender.
+// agent_prompt whose body carries `text` in a text block, under a header that
+// says it came in from another agent.
 func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 	for _, row := range rows {
 		prompt := row.GetAgentPrompt()
-		if prompt == nil || !strings.HasPrefix(prompt.GetAddress().GetText(), "from ") {
+		if prompt == nil || prompt.GetAddress().GetReceived() == nil {
 			continue
 		}
 		for _, block := range prompt.GetBody().GetBlocks() {
