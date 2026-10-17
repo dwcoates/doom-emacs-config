@@ -810,6 +810,59 @@ func agentByVendorTaskFailure(ref *refusal) *connect.Response[storev1.GetAgentBy
 	})
 }
 
+// ---- GetPeerRecipient ----
+
+// GetPeerRecipient answers which session holds the delivered copy of one
+// cross-session message. NOT-FOUND IS AN ANSWER, not a refusal: the storage
+// layer read the index and recorded the outcome at info, found or not, so this
+// layer adds only a verbose trace for either.
+func (s *Server) GetPeerRecipient(ctx context.Context, req *connect.Request[storev1.GetPeerRecipientRequest]) (*connect.Response[storev1.GetPeerRecipientResponse], error) {
+	delivery := req.Msg.GetDeliveryId().GetValue()
+	fields := logging.Fields{}
+	log := s.rpcLogger(storev1connect.ShimStoreGetPeerRecipientProcedure, req.Header()).With(fields)
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-recipient"}, "resolving delivery %s to the session that holds it", delivery)
+
+	if ref := validateGetPeerRecipientRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-peer-recipient", ref, logging.Fields{})
+		return peerRecipientFailure(ref), nil
+	}
+
+	session, found, err := s.store.PeerRecipient(correlated(ctx, req.Header()), delivery)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-peer-recipient", err, fields)
+		return peerRecipientFailure(ref), nil
+	}
+	if !found {
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-recipient"}, "answering not_found for delivery %s", delivery)
+		return connect.NewResponse(&storev1.GetPeerRecipientResponse{
+			Result: &storev1.GetPeerRecipientResponse_NotFound{NotFound: &storev1.GetPeerRecipientNotFound{}},
+		}), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-peer-recipient"}, "answering session %s for delivery %s", session, delivery)
+	return connect.NewResponse(&storev1.GetPeerRecipientResponse{
+		Result: &storev1.GetPeerRecipientResponse_Success{Success: &storev1.GetPeerRecipientSuccess{
+			Session: &conversationv1.AgentId{Value: session},
+		}},
+	}), nil
+}
+
+// peerRecipientFailure has TWO arms: the request was malformed (no delivery
+// id), or the storage layer failed — which includes a delivery the index holds
+// in two sessions.
+func peerRecipientFailure(ref *refusal) *connect.Response[storev1.GetPeerRecipientResponse] {
+	failure := &storev1.GetPeerRecipientFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetPeerRecipientFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetPeerRecipientInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetPeerRecipientFailure_StorageFailure{StorageFailure: &storev1.GetPeerRecipientStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetPeerRecipientResponse{
+		Result: &storev1.GetPeerRecipientResponse_Failure{Failure: failure},
+	})
+}
+
 // ---- GetDetachedWork ----
 
 // GetDetachedWork answers the kind and end of the detached work that left one

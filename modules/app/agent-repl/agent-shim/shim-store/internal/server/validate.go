@@ -46,6 +46,7 @@ const (
 	SiteVendorTaskEmpty        = "vendor_task_empty"
 	SiteRunIDEmpty             = "run_id_empty"
 	SiteUnitEmpty              = "unit_empty"
+	SiteDeliveryEmpty          = "delivery_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 	// SitePositionUnset is a ReadAgentPage that names no position arm: the
@@ -382,6 +383,16 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 	}
 	if req.GetVendorTaskId() == "" {
 		return refuse(SiteVendorTaskEmpty, "vendor_task_id", "vendor_task_id: the lookup names no vendor task locator")
+	}
+	return nil
+}
+
+// validateGetPeerRecipientRequest is the use site for GetPeerRecipient: the
+// delivery id, set and non-empty. Unscoped on purpose: the answer is always
+// another session.
+func validateGetPeerRecipientRequest(req *storev1.GetPeerRecipientRequest) *refusal {
+	if req.GetDeliveryId().GetValue() == "" {
+		return refuse(SiteDeliveryEmpty, "delivery_id", "delivery_id: the lookup names no delivery")
 	}
 	return nil
 }
