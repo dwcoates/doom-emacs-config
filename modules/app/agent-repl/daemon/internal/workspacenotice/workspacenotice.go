@@ -91,6 +91,9 @@ type Event struct {
 	// OwnerNotice is the requester's notice to the owner, set only on the
 	// Created event of a workspace its owner lands.
 	OwnerNotice string
+	// unread marks an event whose Workspace carries only its ID (a landing,
+	// told by id): the delivery reads the rest from the registry.
+	unread bool
 }
 
 // Workspaces reads the registry.
@@ -126,6 +129,28 @@ func New(deps Deps) *Service {
 
 // Report appends EVENT for the loop and never blocks.
 func (s *Service) Report(event Event) { s.loop.Report(event) }
+
+// TurnStarted implements wsedges.Observer: a turn is no derived event.
+func (s *Service) TurnStarted(ids.WorkspaceID) {}
+
+// TurnEnded implements wsedges.Observer: a turn is no derived event.
+func (s *Service) TurnEnded(ids.WorkspaceID) {}
+
+// NeedsInput implements wsedges.Observer: an ask is no derived event.
+func (s *Service) NeedsInput(ids.WorkspaceID) {}
+
+// Landed implements wsedges.Observer: WS's branch landed.
+func (s *Service) Landed(ws ids.WorkspaceID) {
+	s.Report(Event{Kind: Landed, Workspace: wsm.Workspace{ID: ws}, unread: true})
+}
+
+// Closed implements wsedges.Observer: a workspace closing tells its sources
+// only when its branch never landed, since its landing was told at the edge.
+func (s *Service) Closed(before wsm.Workspace) {
+	if before.MergedAt == nil {
+		s.Report(Event{Kind: ClosedWithoutLanding, Workspace: before})
+	}
+}
 
 // Run delivers every reported event, in order, until ctx ends, then delivers
 // every event still pending before it returns.
@@ -169,6 +194,14 @@ func Recipients(ws wsm.Workspace) []Recipient {
 
 // deliver tells EVENT to each of its recipients.
 func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, event Event) {
+	if event.unread {
+		record, err := s.deps.Workspaces.Workspace(ctx, event.Workspace.ID)
+		if err != nil {
+			s.deps.Log.Global().Error(op, "could not read the workspace a derived event is about; its sources are not told", dlog.WithCause(eventFields(event), err))
+			return
+		}
+		event.Workspace, event.unread = record, false
+	}
 	for _, told := range Recipients(event.Workspace) {
 		s.notify(ctx, prompts, told, event)
 	}

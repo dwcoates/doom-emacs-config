@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -311,5 +313,75 @@ func TestReportAfterRunEndedIsRecordedAndNotTold(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op}); !ok {
 		t.Errorf("no record of the untold event: %+v", f.logs.Records())
+	}
+}
+
+// pendingKinds answers the kinds the service holds, undelivered.
+func pendingKinds(s *Service) []Kind {
+	var kinds []Kind
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.loop.Run(ctx, func(_ context.Context, e Event) { kinds = append(kinds, e.Kind) })
+	return kinds
+}
+
+func TestTheEdgesReportOnlyTheDerivedEvents(t *testing.T) {
+	landedAt := time.Unix(1, 0)
+	tests := []struct {
+		name string
+		edge func(s *Service)
+		want []Kind
+	}{
+		{name: "a turn starting reports nothing", edge: func(s *Service) { s.TurnStarted(child) }},
+		{name: "a turn ending reports nothing", edge: func(s *Service) { s.TurnEnded(child) }},
+		{name: "an ask opening reports nothing", edge: func(s *Service) { s.NeedsInput(child) }},
+		{name: "a landing reports the landing", edge: func(s *Service) { s.Landed(child) }, want: []Kind{Landed}},
+		{name: "a close after a landing reports nothing more", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child, MergedAt: &landedAt}) }},
+		{name: "a close without a landing reports it", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child}) }, want: []Kind{ClosedWithoutLanding}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+
+			// Act
+			tt.edge(f.s)
+
+			// Assert
+			if got := pendingKinds(f.s); !slices.Equal(got, tt.want) {
+				t.Errorf("reported = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestALandingToldByIDReadsTheWorkspaceAtDelivery(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.reg.byID[child] = derived(idp(owner), nil, nil, false)
+
+	// Act
+	f.deliverNow(Event{Kind: Landed, Workspace: wsm.Workspace{ID: child}, unread: true})
+
+	// Assert
+	if len(f.prompts.got) != 1 || f.prompts.got[0].ws != owner {
+		t.Fatalf("submitted = %+v, want the owner told", f.prompts.got)
+	}
+}
+
+func TestALandingWhoseWorkspaceCannotBeReadTellsNobody(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.reg.failFor[child] = errors.New("db gone")
+
+	// Act
+	f.deliverNow(Event{Kind: Landed, Workspace: wsm.Workspace{ID: child}, unread: true})
+
+	// Assert
+	if len(f.prompts.got) != 0 {
+		t.Fatalf("submitted = %+v, want nobody told", f.prompts.got)
+	}
+	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not read the workspace a derived event is about; its sources are not told"}); !ok {
+		t.Errorf("no error record: %+v", f.logs.Records())
 	}
 }
