@@ -11,6 +11,7 @@ import {
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   bindHeadingSessionReveal,
+  drawHeadingLine,
   drawTopbarAccount,
   drawTopbarConnectivity,
   drawTopbarHeading,
@@ -183,6 +184,26 @@ describe("drawTopbarConnectivity", () => {
 });
 
 const workspaceName = (text: string) => create(TopbarWorkspaceNameSchema, { text });
+
+describe("drawHeadingLine", () => {
+  it("draws the text verbatim under the given class", () => {
+    const line = drawHeadingLine("topbar-x", "some text");
+    expect([line.className, line.textContent]).toEqual(["topbar-x", "some text"]);
+  });
+
+  it("keeps the whole text in the tooltip", () => {
+    expect(drawHeadingLine("topbar-x", "some text").title).toBe("some text");
+  });
+
+  // Both heading lines are the one shape: a hand-rolled line that dropped the
+  // tooltip or the class would fail here.
+  it.each([
+    ["title", () => drawTopbarTitle(create(TopbarTitleSchema, { text: "t" })), "topbar-title"],
+    ["workspace name", () => drawTopbarWorkspaceName(workspaceName("t")), "topbar-workspace-name"],
+  ])("draws the %s as a heading line", (_, draw, className) => {
+    expect(draw().outerHTML).toBe(drawHeadingLine(className, "t").outerHTML);
+  });
+});
 
 describe("drawTopbarHeading", () => {
   it("draws the summary above the workspace's name", () => {

@@ -155,20 +155,24 @@ export function drawTopbarHeading(
   return heading;
 }
 
+/**
+ * One heading line of daemon text, drawn verbatim. The strip ellipsis-clips
+ * every heading line, so the whole text also rides the tooltip.
+ */
+export function drawHeadingLine(className: string, text: string): HTMLElement {
+  const element = document.createElement("div");
+  element.className = className;
+  element.title = text;
+  element.textContent = text;
+  return element;
+}
+
 /** The title: the workspace's generated summary, drawn verbatim. */
 export function drawTopbarTitle(u: TopbarTitle): HTMLElement {
-  const element = document.createElement("div");
-  element.className = "topbar-title";
-  element.title = u.text;
-  element.textContent = u.text;
-  return element;
+  return drawHeadingLine("topbar-title", u.text);
 }
 
 /** The workspace's name, drawn verbatim on the heading's second line. */
 export function drawTopbarWorkspaceName(u: TopbarWorkspaceName): HTMLElement {
-  const element = document.createElement("div");
-  element.className = "topbar-workspace-name";
-  element.title = u.text;
-  element.textContent = u.text;
-  return element;
+  return drawHeadingLine("topbar-workspace-name", u.text);
 }
