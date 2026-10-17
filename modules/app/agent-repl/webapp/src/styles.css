@@ -971,7 +971,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 
 /* THE EMACS TAB NUMBER (owner request, 2026-10-17): an open row leads with
    the numeral its tab carries on the Emacs tab bar (src/sidebar/tab-numbers.ts),
-   in white, a step smaller than the name. The box is a fixed width, so a
+   in the muted grey, two steps smaller than the name (owner request,
+   2026-10-17: grey and slightly smaller than the first white cut). The box is a fixed width, so a
    one- or two-digit number and an unnumbered row all start their mark and
    name at one edge; the row's left padding gives a little of that width back,
    so the rows indent only slightly. */
@@ -981,8 +982,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   width: var(--tab-number-w);
   margin-right: -0.2rem;
   text-align: right;
-  color: white;
-  font-size: 0.72rem;
+  color: var(--muted);
+  font-size: 0.66rem;
   font-variant-numeric: tabular-nums;
 }
 
