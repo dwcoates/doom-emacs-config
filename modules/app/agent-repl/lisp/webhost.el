@@ -145,12 +145,19 @@ kills its buffers would otherwise take every workspace's page with it."
                           "elisp.webhost.kill-refused command=%S" this-command)
         nil)))
 
-(defun agent-repl--webhost-on-load (event-type)
-  "Replay the desired state when the host reports EVENT-TYPE `load-changed'."
+(defun agent-repl--webhost-on-load (event-type status)
+  "Replay the desired state when the host's EVENT-TYPE is `load-changed' at STATUS.
+ONE REPLAY PER DOCUMENT, when it is committed.  A navigation reports
+`load-started', `load-committed' and `load-finished' (and a redirect),
+and a replay at each ran it three times per load (2026-10-17).  A call
+before commit reaches the document being left; from commit on it reaches
+the new one, which queues it until the host starts (main.ts).  So the
+replay at commit is the earliest that lands, and the only one needed."
   (when (eq event-type 'load-changed)
-    (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed pages=%d shown=%s"
-                      (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
-    (agent-repl--webhost-replay)))
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
+                      status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
+    (when (equal status "load-committed")
+      (agent-repl--webhost-replay))))
 
 (defun agent-repl--webhost-watch-load (xw)
   "Make XW replay the desired state on every load, keeping its own handler.
@@ -161,7 +168,9 @@ every event it needs."
     (xwidget-put xw 'callback
                  (lambda (xwidget event-type)
                    (when (functionp prior) (funcall prior xwidget event-type))
-                   (agent-repl--webhost-on-load event-type)))))
+                   ;; The event's status rides only the event itself, as
+                   ;; `xwidget-webkit-callback' reads it.
+                   (agent-repl--webhost-on-load event-type (nth 3 last-input-event))))))
 
 (defun agent-repl-webhost-ensure (conn)
   "Return the host's live xwidget, creating the host on CONN's daemon if needed.

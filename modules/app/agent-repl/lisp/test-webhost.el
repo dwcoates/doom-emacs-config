@@ -413,7 +413,7 @@ so stubbing the accessor would not reach the code under test."
     (agent-repl-webhost-ensure-page "beta")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed)
+    (agent-repl--webhost-on-load 'load-changed "load-committed")
     ;; Assert
     (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
 
@@ -426,7 +426,7 @@ so stubbing the accessor would not reach the code under test."
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed)
+    (agent-repl--webhost-on-load 'load-changed "load-committed")
     ;; Assert
     (should (equal (agent-repl-test-wh--sent "ensure")
                    (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/")
@@ -448,7 +448,7 @@ The current tab's page, not shown here, is the nearest of all."
     (setq agent-repl-test-wh--calls nil)
     (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "c"
       ;; Act
-      (agent-repl--webhost-on-load 'load-changed))
+      (agent-repl--webhost-on-load 'load-changed "load-committed"))
     ;; Assert
     (should (equal (agent-repl-test-wh--ensured-lanes)
                    '(("c" . "after") ("d" . "after") ("e" . "after") ("b" . "before") ("a" . "before"))))))
@@ -511,7 +511,7 @@ The current tab's page, not shown here, is the nearest of all."
       (cl-letf (((symbol-function 'agent-repl--info)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
         ;; Act
-        (agent-repl--webhost-on-load 'load-changed))
+        (agent-repl--webhost-on-load 'load-changed "load-committed"))
       ;; Assert
       (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-in-turn after=1 before=0" text)) logged)))))
 
@@ -523,7 +523,7 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed)
+    (agent-repl--webhost-on-load 'load-changed "load-committed")
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
@@ -551,14 +551,14 @@ The current tab's page, not shown here, is the nearest of all."
     (let ((agent-repl--webhost-log-level nil))
       (agent-repl-webhost-set-log-level 'debug (round (* 1000 (+ (float-time) 60))))
       (setq agent-repl-test-wh--calls nil)
-      (agent-repl--webhost-on-load 'load-changed)
+      (agent-repl--webhost-on-load 'load-changed "load-committed")
       (should (= 1 (length (agent-repl-test-wh--sent "setLogLevel")))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-no-ended-log-level-window ()
   "A window that has ended is not handed to a host that loads after it."
   (agent-repl-test-wh--with-host
     (let ((agent-repl--webhost-log-level (cons 'debug (round (* 1000 (- (float-time) 1))))))
-      (agent-repl--webhost-on-load 'load-changed)
+      (agent-repl--webhost-on-load 'load-changed "load-committed")
       (should (null (agent-repl-test-wh--sent "setLogLevel"))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-each-pages-state ()
@@ -570,10 +570,23 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-set-gate-dock "alpha" 90 "#101010")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed)
+    (agent-repl--webhost-on-load 'load-changed "load-committed")
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-once-at-commit ()
+  "Of a navigation's stages only the commit replays."
+  (dolist (case '(("load-started" . 0) ("load-redirected" . 0)
+                  ("load-committed" . 1) ("load-finished" . 0)))
+    ;; Arrange
+    (agent-repl-test-wh--with-host
+      (agent-repl-webhost-ensure-page "alpha")
+      (setq agent-repl-test-wh--calls nil)
+      ;; Act
+      (agent-repl--webhost-on-load 'load-changed (car case))
+      ;; Assert
+      (should (= (cdr case) (length (agent-repl-test-wh--sent "ensure")))))))
 
 (ert-deftest agent-repl-test-wh-another-event-replays-nothing ()
   "Only a load replays."
@@ -582,7 +595,7 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-ensure-page "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'decide-policy)
+    (agent-repl--webhost-on-load 'decide-policy nil)
     ;; Assert
     (should (null agent-repl-test-wh--calls))))
 
@@ -596,9 +609,26 @@ The current tab's page, not shown here, is the nearest of all."
         (setq props (list 'callback (lambda (_xw event) (push event seen))))
         (agent-repl--webhost-watch-load 'host-xwidget)
         ;; Act
-        (funcall (plist-get props 'callback) 'host-xwidget 'load-changed))
+        (let ((last-input-event '(xwidget-event host-xwidget load-changed "load-finished")))
+          (funcall (plist-get props 'callback) 'host-xwidget 'load-changed)))
       ;; Assert
       (should (equal seen '(load-changed))))))
+
+(ert-deftest agent-repl-test-wh-the-load-watch-replays-at-the-events-commit ()
+  "The watch reads the load's status off the event and replays at its commit."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    (let ((props nil))
+      (cl-letf (((symbol-function 'xwidget-get) (lambda (_xw prop) (plist-get props prop)))
+                ((symbol-function 'xwidget-put) (lambda (_xw prop value) (setq props (plist-put props prop value)))))
+        (agent-repl--webhost-watch-load 'host-xwidget)
+        ;; Act
+        (let ((last-input-event '(xwidget-event host-xwidget load-changed "load-committed")))
+          (funcall (plist-get props 'callback) 'host-xwidget 'load-changed))))
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "ensure"))))))
 
 ;;;; ---- Reload ----
 
