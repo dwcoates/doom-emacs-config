@@ -514,7 +514,7 @@ hand any more:
   it: "more below" is the FADE (or the ellipsis a spec chooses), never a chevron, and `has-more` means the
   BODY's rendered lines run past the cap (never the box's `scrollHeight`, which
   counts the usage corner's hit area); no prompt wears a border: the user's own and
-  a held prompt never did, and an agent-to-agent bubble (an agent-addressed
+  a held prompt wear none, and an agent-to-agent bubble (an agent-addressed
   prompt or a peer message) is marked by its header alone, the other end's
   name beside one arrow glyph (`src/feed/rows/peer-arrow.ts`), on the final
   response's fill (owner spec, 2026-10-17); every scroll box wears the SYSTEM default bar (no
