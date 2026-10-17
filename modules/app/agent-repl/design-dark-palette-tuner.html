@@ -1,0 +1,202 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>agent-repl dark palette tuner</title>
+<script>
+// ===================== DEFAULTS (edited by the agent on request) =====================
+// Every neutral is oklch(L, C, H): its own lightness L, one shared hue H, and the
+// chroma (tint strength) of its group. A token's `hex` override, when set, wins.
+const DEFAULTS = {
+  // Matched to the Claude desktop app's dark theme (sampled from a screenshot,
+  // 2026-10-17). Its surfaces are almost pure gray, and its warmth sits mostly
+  // in the text, at a yellow-leaning hue near 95.
+  hue: 95,              // 0-360. ~60-90 reads brown/warm, ~95 is Claude's, ~265 is the old blue.
+  surfaceChroma: 0.0015, // tint of the backgrounds. Claude's run 0 to 0.002; the landed palette ~0.004.
+  textChroma: 0.008,     // tint of the text grays. Claude's run 0.004 to 0.014; the landed palette ~0.009.
+  lightnessShift: 0,     // added to every token's L.
+  tokens: {
+    // name:            [L,      group,     hex override or null]   Claude counterpart
+    "--sidebar-bg":        [0.1776, "surface", null],            // sidebar #111111
+    "--bg":                [0.1957, "surface", null],            // main pane #151515
+    "--tool-card-bg":      [0.2174, "surface", null],            // code block #1a1a19
+    "--panel-bg":          [0.2174, "surface", null],            // code block #1a1a19
+    "--composer-bg":       [0.2431, "surface", null],            // composer #20201f
+    "--card":              [0.2562, "surface", null],            // selected sidebar row #232323
+    "--border":            [0.2931, "surface", null],            // code block edge #2c2c2c
+    "--selected-bubble-bg":[0.3138, "surface", null],            // (none; keeps its old lightness)
+    "button-disabled":     [0.3427, "surface", null],            // (none)
+    "button":              [0.4444, "surface", null],            // (none)
+    "--repo-head-collapsed":[0.6236, "text",   null],            // project heading #898782
+    "--muted":             [0.6236, "text",    null],            // muted text #898782
+    "--hl-comment":        [null,   "fixed",   "#838897"],       // code comment (Claude's is blue-gray)
+    "--fg":                [0.9521, "text",    null],            // body text #f0efec
+    "--user":              [null,   "fixed",   "#0764c2"],
+  },
+};
+// =====================================================================================
+</script>
+<style>
+  body { margin: 0; background: #000; color: #ddd; font: 13px -apple-system, system-ui, sans-serif; display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
+  #controls { overflow: auto; padding: 14px; border-right: 1px solid #222; background: #0a0a0a; }
+  #controls h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #888; margin: 18px 0 8px; }
+  .ctl { display: grid; grid-template-columns: 120px 1fr 64px; align-items: center; gap: 8px; margin: 4px 0; }
+  .ctl input[type=range] { width: 100%; }
+  .ctl output, .tok code { font: 11px ui-monospace, Menlo, monospace; color: #aaa; }
+  .tok { display: grid; grid-template-columns: 18px 150px 1fr 26px; align-items: center; gap: 6px; margin: 3px 0; }
+  .tok .chip { width: 16px; height: 16px; border-radius: 3px; border: 1px solid #333; }
+  .tok label { font: 11px ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tok input[type=color] { width: 26px; height: 20px; padding: 0; border: 0; background: none; }
+  .tok.overridden label { color: #fbbf24; }
+  .tok .clear { cursor: pointer; color: #666; font-size: 11px; }
+  button { background: #222; color: #ddd; border: 1px solid #333; border-radius: 5px; padding: 4px 10px; cursor: pointer; margin: 2px 4px 2px 0; }
+  textarea { width: 100%; height: 160px; background: #111; color: #ccc; border: 1px solid #222; font: 11px ui-monospace, Menlo, monospace; }
+  #stage { overflow: auto; padding: 20px; }
+
+  /* ---- the mock, painted only from the tuned tokens ---- */
+  .app { display: flex; height: 560px; border-radius: 10px; overflow: hidden; padding: 10px; gap: 10px; background: var(--bg); color: var(--fg); }
+  aside { width: 260px; flex: none; background: var(--sidebar-bg); border-radius: 10px; box-shadow: 0 2px 14px rgba(0,0,0,.48); }
+  .sbh { padding: 10px 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 12px; }
+  .repo { padding: 8px 12px 2px; font-size: 11px; color: var(--repo-head-collapsed); text-transform: uppercase; letter-spacing: .05em; }
+  .row { padding: 6px 12px; font-size: 13px; white-space: nowrap; overflow: hidden; }
+  .row b { display: inline-block; width: 1.4em; font-weight: 400; color: var(--muted); }
+  .row.sel { background: var(--card); }
+  .row.dim { color: var(--muted); }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .top { display: flex; gap: 16px; padding: 8px 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 12px; }
+  .feed { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow: hidden; }
+  .user { align-self: flex-end; max-width: 70%; background: var(--user); color: #fff; padding: 7px 12px; border-radius: 16px; }
+  .bub { max-width: 85%; background: var(--panel-bg); padding: 9px 12px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.05); line-height: 1.45; }
+  .bub.sel { background: var(--selected-bubble-bg); }
+  .bub code { background: rgba(255,255,255,.12); padding: 0 4px; border-radius: 3px; font-size: 12px; }
+  .bub .c { color: var(--hl-comment); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .tool { background: var(--tool-card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font: 12px ui-monospace, Menlo, monospace; }
+  .tool .t { color: var(--muted); margin-right: 8px; }
+  .btns { display: flex; gap: 8px; }
+  .nb { background: var(--button); color: var(--fg); border-radius: 5px; padding: 2px 10px; font-size: 12px; box-shadow: inset 0 .5px 0 rgba(255,255,255,.09), inset 0 0 0 .5px rgba(0,0,0,.25); }
+  .nb.off { background: var(--button-disabled); color: var(--muted); }
+  .composer { margin: 0 12px 4px; background: var(--composer-bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; color: var(--muted); }
+</style>
+
+<div id="controls">
+  <h2>Global</h2>
+  <div class="ctl"><span>Hue</span><input id="hue" type="range" min="0" max="360" step="1"><output></output></div>
+  <div class="ctl"><span>Surface tint</span><input id="surfaceChroma" type="range" min="0" max="0.03" step="0.0005"><output></output></div>
+  <div class="ctl"><span>Text tint</span><input id="textChroma" type="range" min="0" max="0.04" step="0.0005"><output></output></div>
+  <div class="ctl"><span>Lightness shift</span><input id="lightnessShift" type="range" min="-0.08" max="0.15" step="0.002"><output></output></div>
+  <div>
+    <button data-preset="old">Old blue</button>
+    <button data-preset="landed">Landed brown</button>
+    <button data-preset="claude">Claude</button>
+    <button data-preset="neutral">Neutral</button>
+    <button id="reset">Reset to defaults</button>
+  </div>
+  <h2>Tokens <span style="text-transform:none;color:#666">(pick a color to override, ✕ to clear)</span></h2>
+  <div id="tokens"></div>
+  <h2>CSS (dark block values)</h2>
+  <textarea id="css" readonly></textarea>
+  <button id="copyCss">Copy CSS</button>
+  <h2>Settings (paste to the agent)</h2>
+  <textarea id="json" readonly></textarea>
+  <button id="copyJson">Copy settings</button>
+</div>
+
+<div id="stage">
+  <div class="app" id="app">
+    <aside>
+      <div class="sbh">Workspaces</div>
+      <div class="repo">doom</div>
+      <div class="row sel"><b>1</b>dark-theme-brown-palette</div>
+      <div class="row"><b>2</b>footer-activity-updates</div>
+      <div class="row dim"><b>3</b>merge-queue-racing</div>
+      <div class="repo">explanation-engine</div>
+      <div class="row dim"><b>4</b>criticality-axis</div>
+    </aside>
+    <main>
+      <div class="top"><span>opus · medium</span><span>42k tokens</span><span>3 agents</span></div>
+      <div class="feed">
+        <div class="user">the dark theme reads a bit too brown, make it subtler</div>
+        <div class="bub">The neutrals live in the dark block of <code>styles.css</code>. Each keeps its lightness, and only the tint changes. <span class="c">// a comment in a code block</span></div>
+        <div class="tool"><span class="t">Bash</span>grep -n "prefers-color-scheme: dark" styles.css</div>
+        <div class="bub sel">A selected response bubble.</div>
+        <div class="btns"><span class="nb">Allow</span><span class="nb">Deny</span><span class="nb off">Disabled</span></div>
+      </div>
+      <div class="composer">Reply…</div>
+    </main>
+  </div>
+</div>
+
+<script>
+const PRESETS = {
+  old:     { hue: 265, surfaceChroma: 0.011, textChroma: 0.019 },
+  landed:  { hue: 75,  surfaceChroma: 0.0042, textChroma: 0.0099 },
+  neutral: { surfaceChroma: 0, textChroma: 0 },
+  claude:  { hue: 95, surfaceChroma: 0.0015, textChroma: 0.008, lightnessShift: 0 },
+};
+let state = structuredClone(DEFAULTS);
+
+// oklch -> sRGB hex, clamped into gamut.
+function oklchToHex(L, C, H) {
+  const h = H * Math.PI / 180, a = C * Math.cos(h), b = C * Math.sin(h);
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+  const lin = [
+     4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+  ];
+  return "#" + lin.map(c => {
+    const v = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, "0");
+  }).join("");
+}
+
+function tokenHex(name) {
+  const [L, group, override] = state.tokens[name];
+  if (override) return override;
+  const C = group === "text" ? state.textChroma : state.surfaceChroma;
+  return oklchToHex(L + state.lightnessShift, C, state.hue);
+}
+
+function render() {
+  for (const id of ["hue", "surfaceChroma", "textChroma", "lightnessShift"]) {
+    const el = document.getElementById(id);
+    el.value = state[id];
+    el.nextElementSibling.textContent = state[id];
+  }
+  const app = document.getElementById("app");
+  const rows = [];
+  for (const name of Object.keys(state.tokens)) {
+    const hex = tokenHex(name);
+    app.style.setProperty(name.startsWith("--") ? name : "--" + name, hex);
+    rows.push({ name, hex, overridden: !!state.tokens[name][2] && state.tokens[name][1] !== "fixed" });
+  }
+  const box = document.getElementById("tokens");
+  box.innerHTML = "";
+  for (const { name, hex, overridden } of rows) {
+    const div = document.createElement("div");
+    div.className = "tok" + (overridden ? " overridden" : "");
+    div.innerHTML = `<span class="chip" style="background:${hex}"></span><label title="${name}">${name}</label><code>${hex}</code><input type="color" value="${hex}">`;
+    div.querySelector("input").addEventListener("input", e => { state.tokens[name][2] = e.target.value; render(); });
+    if (overridden) {
+      const x = document.createElement("span");
+      x.className = "clear"; x.textContent = " ✕"; x.title = "clear override";
+      x.onclick = () => { state.tokens[name][2] = null; render(); };
+      div.querySelector("code").append(x);
+    }
+    box.append(div);
+  }
+  document.getElementById("css").value = rows.map(r => `${r.name}: ${r.hex};`).join("\n");
+  document.getElementById("json").value = JSON.stringify(
+    { hue: state.hue, surfaceChroma: state.surfaceChroma, textChroma: state.textChroma, lightnessShift: state.lightnessShift,
+      overrides: Object.fromEntries(rows.filter(r => r.overridden).map(r => [r.name, r.hex])) }, null, 1);
+}
+
+for (const id of ["hue", "surfaceChroma", "textChroma", "lightnessShift"]) {
+  document.getElementById(id).addEventListener("input", e => { state[id] = +e.target.value; render(); });
+}
+document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => { Object.assign(state, PRESETS[b.dataset.preset]); render(); });
+document.getElementById("reset").onclick = () => { state = structuredClone(DEFAULTS); render(); };
+document.getElementById("copyCss").onclick = () => navigator.clipboard.writeText(document.getElementById("css").value);
+document.getElementById("copyJson").onclick = () => navigator.clipboard.writeText(document.getElementById("json").value);
+render();
+</script>
