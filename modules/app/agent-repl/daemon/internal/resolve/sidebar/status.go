@@ -65,7 +65,7 @@ func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *fron
 			})
 		return "none"
 	}
-	arm := idleArm(s, session, log)
+	arm := idleArm(s, session, status, log)
 	if claim != ladder.Idle {
 		arm = projectArm(status, log)
 	}
@@ -223,23 +223,34 @@ func parked(session *wsm.Session) bool {
 // idleArm names the bottom rung's arm. It always answers: every path ends at
 // `ready`.
 //
-// LIVE DETACHED WORK OUTRANKS AN UNREAD TURN END: a turn that ends with
+// `idle_async` IS THE BACKGROUND: detached work running, or correspondence
+// awaited from another workspace, while no turn runs. Detached liveness is
+// read from the watcher's live-work set, the one authority the footer reads
+// too (see livework.go). Awaited correspondence is PROJECTED from the
+// footer's background arm, so the roster holds no awaiting fact of its own
+// and the two surfaces color an awaiting workspace alike by construction.
+//
+// THE BACKGROUND OUTRANKS AN UNREAD TURN END: a turn that ends with
 // background work still running draws `idle_async` at once, without waiting
 // for the user to read the result first. The result stays unread under it, so
-// the row returns FULL on its turn-end arm when the work ends, unless the user
-// read it meanwhile (SetViewed).
-func idleArm(s *wsState, session *wsm.Session, log dlog.Logger) string {
+// the row returns FULL on its turn-end arm when the background ends, unless
+// the user read it meanwhile (SetViewed).
+func idleArm(s *wsState, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
+	awaited := status.GetBackground().GetAwaiting()
 	switch {
 	case noSessionArm(s, session) != "":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "no session was ever created"})
 		return "none"
-	case s.asyncLive():
+	case s.asyncLive() || awaited != nil:
 		if s.resultUnreadNow() {
 			log.Debug("daemon.sidebar.async_outranks_unread",
-				"detached work runs, so the row is idle_async at once though the last turn's result is unread",
+				"the workspace is in the background, so the row is idle_async at once though the last turn's result is unread",
 				dlog.Context{"held": s.turnEndArm()})
 		}
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.asyncLive()"})
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{
+			"function": "status", "branch": "the workspace is in the background",
+			"async_live": s.asyncLive(), "awaiting": awaited.GetAwaitedName(),
+		})
 		return "idle_async"
 	case s.resultUnreadNow():
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
