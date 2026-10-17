@@ -23,6 +23,11 @@
  * SubmitPromptAskAnswered). The card draws what was typed; it has no text field
  * of its own.
  *
+ * AN ANSWER IS SEEN THE MOMENT IT IS GIVEN. Answering a batch's question moves
+ * the card on to the next unanswered one, which would hide what was just sent
+ * behind its tab; so a batch's open card draws every answered question but the
+ * shown one as a verdict line, the settled card's own (typed text italic).
+ *
  * EVERY OPTION IS NUMBERED, `1.` first in the served order, because a send of
  * only option numbers picks by them: the daemon reads it (feed/questiondraft.go)
  * as the shown question's choice rather than as typed text.
@@ -40,22 +45,24 @@ import { drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
 import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
+import { create } from "@bufbuild/protobuf";
 import { log } from "../../log.js";
 import { setInlineMarkdown } from "../../markdown.js";
 import {
   UpdateQuestionDraftResponseSchema,
   type UpdateQuestionDraftResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
-import type {
-  FeedQuestion,
-  FeedQuestionAnswered,
-  FeedQuestionDraft,
-  FeedQuestionGivenAnswer,
-  FeedQuestionHeader,
-  FeedQuestionItem,
-  FeedQuestionOpen,
-  FeedQuestionOption,
-  FeedQuestionText,
+import {
+  FeedQuestionGivenAnswerSchema,
+  type FeedQuestion,
+  type FeedQuestionAnswered,
+  type FeedQuestionDraft,
+  type FeedQuestionGivenAnswer,
+  type FeedQuestionHeader,
+  type FeedQuestionItem,
+  type FeedQuestionOpen,
+  type FeedQuestionOption,
+  type FeedQuestionText,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -193,6 +200,8 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
       strip.append(tab);
     });
     wrap.append(strip);
+    const given = drawGivenSoFar(u.questions, open);
+    if (given !== null) wrap.append(given);
   }
 
   const shown = document.createElement("div");
@@ -207,6 +216,33 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
 
   wrap.append(status);
   return wrap;
+}
+
+/**
+ * THE ANSWERS GIVEN SO FAR: one verdict line per answered question other than
+ * the shown one (whose panel already draws its answer), in the batch's order,
+ * drawn exactly as the settled card draws it. Null when there is none.
+ */
+function drawGivenSoFar(items: readonly FeedQuestionItem[], open: FeedQuestionOpen): HTMLElement | null {
+  const lines = items.flatMap((item, index) => {
+    const draft = open.drafts[index];
+    if (index === open.active || !draft.answered) return [];
+    const path = `${PATH}.questions[${index}]`;
+    const given = create(FeedQuestionGivenAnswerSchema, {
+      header: requireMessage(item.header, `${path}.header`),
+      chosen: draft.chosen,
+      otherText: draft.otherText,
+    });
+    const line = drawFeedQuestionGivenAnswer(given, `${PATH}.open.drafts[${index}]`);
+    line.setAttribute("data-question-given", String(index));
+    return [line];
+  });
+  if (lines.length === 0) return null;
+  const el = document.createElement("div");
+  el.className = "q-verdicts q-given list-rows";
+  el.setAttribute("data-question-given-so-far", "");
+  el.append(...lines);
+  return el;
 }
 
 /** One drawn question: its panel and the header its tab is labelled with. */

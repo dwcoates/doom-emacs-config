@@ -297,6 +297,94 @@ describe("the tabs", () => {
   });
 });
 
+describe("the answers given so far", () => {
+  const batch = (): FeedQuestionItem[] => [
+    item({ header: "Auth", text: "Which auth?" }),
+    item({ header: "Scope", text: "Which scope?", multi: true, options: [{ label: "read" }, { label: "write" }] }),
+    item({ header: "Store", text: "Which store?" }),
+  ];
+
+  it("draws an answer typed for a question the card moved on from, its text italic", () => {
+    const el = drawFeedQuestion(
+      open(batch(), { active: 1, drafts: [{ otherText: { text: "mutual TLS" }, answered: true }] }),
+      askHarness().rc,
+    );
+    const line = el.querySelector('[data-question-given="0"]');
+    expect(line?.querySelector(".q-chip")?.textContent).toBe("Auth");
+    const typed = line?.querySelector(".q-other-given");
+    expect(typed?.textContent).toBe("mutual TLS");
+    expect(typed?.className).toBe("q-other-given");
+  });
+
+  it("draws the labels chosen for an answered question", () => {
+    const el = drawFeedQuestion(
+      open(batch(), { active: 2, drafts: [{}, { chosen: ["read", "write"], answered: true }] }),
+      askHarness().rc,
+    );
+    expect(el.querySelector('[data-question-given="1"] .q-chosen')?.textContent).toBe("read, write");
+  });
+
+  it("draws the answered questions in the batch's order", () => {
+    const el = drawFeedQuestion(
+      open(batch(), {
+        active: 1,
+        drafts: [{ otherText: { text: "a" }, answered: true }, {}, { otherText: { text: "c" }, answered: true }],
+      }),
+      askHarness().rc,
+    );
+    const lines = [...el.querySelectorAll("[data-question-given]")].map((l) => l.getAttribute("data-question-given"));
+    expect(lines).toEqual(["0", "2"]);
+  });
+
+  it("draws no line for the shown question, whose panel draws its answer", () => {
+    const el = drawFeedQuestion(
+      open(batch(), { active: 0, drafts: [{ otherText: { text: "mutual TLS" }, answered: true }] }),
+      askHarness().rc,
+    );
+    expect(el.querySelector("[data-question-given-so-far]")).toBeNull();
+  });
+
+  it("draws no line for a question only ticked, not yet answered", () => {
+    const el = drawFeedQuestion(
+      open(batch(), { active: 0, drafts: [{}, { chosen: ["read"], answered: false }] }),
+      askHarness().rc,
+    );
+    expect(el.querySelector("[data-question-given-so-far]")).toBeNull();
+  });
+
+  it("draws no answers-so-far block on a one-question card", () => {
+    const el = drawFeedQuestion(open([item()], { drafts: [{ otherText: { text: "x" }, answered: true }] }), askHarness().rc);
+    expect(el.querySelector("[data-question-given-so-far]")).toBeNull();
+  });
+
+  it("draws a line exactly as the settled card draws the same answer", () => {
+    const standing = drawFeedQuestion(
+      open(batch(), { active: 1, drafts: [{ otherText: { text: "mutual TLS" }, answered: true }] }),
+      askHarness().rc,
+    ).querySelector('[data-question-given="0"]')!;
+    const settled = drawFeedQuestion(
+      question(
+        { case: "answered", value: { answers: [{ header: { text: "Auth" }, chosen: [], otherText: { text: "mutual TLS" } }] } },
+        batch(),
+      ),
+      askHarness().rc,
+    ).querySelector(".q-verdict")!;
+    standing.removeAttribute("data-question-given");
+    expect(standing.outerHTML).toBe(settled.outerHTML);
+  });
+
+  it("draws the block between the tabs and the shown question", () => {
+    const el = drawFeedQuestion(
+      open(batch(), { active: 1, drafts: [{ otherText: { text: "a" }, answered: true }] }),
+      askHarness().rc,
+    );
+    const order = [...el.querySelector(".q-tabbed")!.children].map((c) =>
+      c.hasAttribute("data-question-tabs") ? "tabs" : c.hasAttribute("data-question-given-so-far") ? "given" : c.className,
+    );
+    expect(order.slice(0, 3)).toEqual(["tabs", "given", "q-panels"]);
+  });
+});
+
 describe("a click edits the daemon's draft", () => {
   it("sends a tab click as a show of its question, echoing the served text", async () => {
     const h = askHarness();
