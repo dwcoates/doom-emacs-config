@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/prose.proto.
  */
 export const file_frontend_v1_prose: GenFile = /*@__PURE__*/
-  fileDesc("Chdmcm9udGVuZC92MS9wcm9zZS5wcm90bxILZnJvbnRlbmQudjEiNgoLUGFyc2VkUHJvc2USJwoGYmxvY2tzGAEgAygLMhcuZnJvbnRlbmQudjEuUHJvc2VCbG9jayJnCgpQcm9zZUJsb2NrEigKBXBsYWluGAEgASgLMhcuZnJvbnRlbmQudjEuUHJvc2VQbGFpbkgAEiYKBHRyZWUYAiABKAsyFi5mcm9udGVuZC52MS5Qcm9zZVRyZWVIAEIHCgVibG9jayIeCgpQcm9zZVBsYWluEhAKCG1hcmtkb3duGAEgASgJInQKCVByb3NlVHJlZRIxCgZoZWFkZXIYASABKAsyHC5mcm9udGVuZC52MS5Qcm9zZVRyZWVIZWFkZXJIAIgBARIpCgVub2RlcxgCIAMoCzIaLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVCCQoHX2hlYWRlciIfCg9Qcm9zZVRyZWVIZWFkZXISDAoEdGV4dBgBIAEoCSKuAgoNUHJvc2VUcmVlTm9kZRIoCgJpZBgBIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVJZBIuCgRyb290GAIgASgLMh4uZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZVJvb3RIABIyCgZicmFuY2gYAyABKAsyIC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlQnJhbmNoSAASLgoFbGFiZWwYBCABKAsyHy5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlTGFiZWwSLAoEdGV4dBgFIAEoCzIeLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVUZXh0EigKBGNvZGUYBiADKAsyGi5mcm9udGVuZC52MS5Qcm9zZVRyZWVDb2RlQgcKBXBsYWNlIiAKD1Byb3NlVHJlZU5vZGVJZBINCgVpbmRleBgBIAEoDSJFChFQcm9zZVRyZWVOb2RlUm9vdBIwCgZtYXJrZXIYASABKAsyIC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlTWFya2VyIkMKE1Byb3NlVHJlZU5vZGVCcmFuY2gSLAoGcGFyZW50GAEgASgLMhwuZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZUlkIiMKE1Byb3NlVHJlZU5vZGVNYXJrZXISDAoEdGV4dBgBIAEoCSIiChJQcm9zZVRyZWVOb2RlTGFiZWwSDAoEdGV4dBgBIAEoCSIlChFQcm9zZVRyZWVOb2RlVGV4dBIQCghtYXJrZG93bhgBIAEoCSJBCg1Qcm9zZVRyZWVDb2RlEhUKCGxhbmd1YWdlGAEgASgJSACIAQESDAoEYm9keRgCIAEoCUILCglfbGFuZ3VhZ2VCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
+  fileDesc("Chdmcm9udGVuZC92MS9wcm9zZS5wcm90bxILZnJvbnRlbmQudjEiYAoLUGFyc2VkUHJvc2USJwoGYmxvY2tzGAEgAygLMhcuZnJvbnRlbmQudjEuUHJvc2VCbG9jaxIoCgZzb3VyY2UYAiABKAsyGC5mcm9udGVuZC52MS5Qcm9zZVNvdXJjZSIfCgtQcm9zZVNvdXJjZRIQCghtYXJrZG93bhgBIAEoCSJnCgpQcm9zZUJsb2NrEigKBXBsYWluGAEgASgLMhcuZnJvbnRlbmQudjEuUHJvc2VQbGFpbkgAEiYKBHRyZWUYAiABKAsyFi5mcm9udGVuZC52MS5Qcm9zZVRyZWVIAEIHCgVibG9jayIeCgpQcm9zZVBsYWluEhAKCG1hcmtkb3duGAEgASgJInQKCVByb3NlVHJlZRIxCgZoZWFkZXIYASABKAsyHC5mcm9udGVuZC52MS5Qcm9zZVRyZWVIZWFkZXJIAIgBARIpCgVub2RlcxgCIAMoCzIaLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVCCQoHX2hlYWRlciIfCg9Qcm9zZVRyZWVIZWFkZXISDAoEdGV4dBgBIAEoCSKuAgoNUHJvc2VUcmVlTm9kZRIoCgJpZBgBIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVJZBIuCgRyb290GAIgASgLMh4uZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZVJvb3RIABIyCgZicmFuY2gYAyABKAsyIC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlQnJhbmNoSAASLgoFbGFiZWwYBCABKAsyHy5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlTGFiZWwSLAoEdGV4dBgFIAEoCzIeLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVUZXh0EigKBGNvZGUYBiADKAsyGi5mcm9udGVuZC52MS5Qcm9zZVRyZWVDb2RlQgcKBXBsYWNlIiAKD1Byb3NlVHJlZU5vZGVJZBINCgVpbmRleBgBIAEoDSJVChFQcm9zZVRyZWVOb2RlUm9vdBI1CgZtYXJrZXIYASABKAsyIC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlTWFya2VySACIAQFCCQoHX21hcmtlciJDChNQcm9zZVRyZWVOb2RlQnJhbmNoEiwKBnBhcmVudBgBIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVJZCIjChNQcm9zZVRyZWVOb2RlTWFya2VyEgwKBHRleHQYASABKAkiIgoSUHJvc2VUcmVlTm9kZUxhYmVsEgwKBHRleHQYASABKAkiJQoRUHJvc2VUcmVlTm9kZVRleHQSEAoIbWFya2Rvd24YASABKAkiQQoNUHJvc2VUcmVlQ29kZRIVCghsYW5ndWFnZRgBIAEoCUgAiAEBEgwKBGJvZHkYAiABKAlCCwoJX2xhbmd1YWdlQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
  * A text the webapp draws as markdown, parsed by the daemon. It replaces the
@@ -51,6 +51,15 @@ export type ParsedProse = Message<"frontend.v1.ParsedProse"> & {
    * @generated from field: repeated frontend.v1.ProseBlock blocks = 1;
    */
   blocks: ProseBlock[];
+
+  /**
+   * The text itself, with its tree's labels repaired in place, for whatever
+   * reads the text rather than draws it: a reply that quotes it, a search of
+   * it, a copy of it. The webapp draws `blocks` and never this.
+   *
+   * @generated from field: frontend.v1.ProseSource source = 2;
+   */
+  source?: ProseSource | undefined;
 };
 
 /**
@@ -59,6 +68,31 @@ export type ParsedProse = Message<"frontend.v1.ParsedProse"> & {
  */
 export const ParsedProseSchema: GenMessage<ParsedProse> = /*@__PURE__*/
   messageDesc(file_frontend_v1_prose, 0);
+
+/**
+ * A parsed text's own markdown, its tree's labels rewritten to the labels its
+ * nodes carry, so the text a reply quotes names the nodes the reader sees.
+ * Only the text's main tree is repaired here: a tree inside a code fence keeps
+ * the labels it was written with in the source, which for a quoted response
+ * are already the repaired ones it was served with.
+ *
+ * @generated from message frontend.v1.ProseSource
+ */
+export type ProseSource = Message<"frontend.v1.ProseSource"> & {
+  /**
+   * The markdown.
+   *
+   * @generated from field: string markdown = 1;
+   */
+  markdown: string;
+};
+
+/**
+ * Describes the message frontend.v1.ProseSource.
+ * Use `create(ProseSourceSchema)` to create a new message.
+ */
+export const ProseSourceSchema: GenMessage<ProseSource> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 1);
 
 /**
  * One stretch of a parsed text.
@@ -98,7 +132,7 @@ export type ProseBlock = Message<"frontend.v1.ProseBlock"> & {
  * Use `create(ProseBlockSchema)` to create a new message.
  */
 export const ProseBlockSchema: GenMessage<ProseBlock> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 1);
+  messageDesc(file_frontend_v1_prose, 2);
 
 /**
  * A run of ordinary markdown, exactly as written.
@@ -120,7 +154,7 @@ export type ProsePlain = Message<"frontend.v1.ProsePlain"> & {
  * Use `create(ProsePlainSchema)` to create a new message.
  */
 export const ProsePlainSchema: GenMessage<ProsePlain> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 2);
+  messageDesc(file_frontend_v1_prose, 3);
 
 /**
  * A metaprompt TLDR tree, as a flat list of nodes related by identifier.
@@ -165,7 +199,7 @@ export type ProseTree = Message<"frontend.v1.ProseTree"> & {
  * Use `create(ProseTreeSchema)` to create a new message.
  */
 export const ProseTreeSchema: GenMessage<ProseTree> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 3);
+  messageDesc(file_frontend_v1_prose, 4);
 
 /**
  * The tree's opening `Response (…)` line, drawn above its first root.
@@ -186,7 +220,7 @@ export type ProseTreeHeader = Message<"frontend.v1.ProseTreeHeader"> & {
  * Use `create(ProseTreeHeaderSchema)` to create a new message.
  */
 export const ProseTreeHeaderSchema: GenMessage<ProseTreeHeader> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 4);
+  messageDesc(file_frontend_v1_prose, 5);
 
 /**
  * One node of a tree: a root or a branch, with its label, its text and any
@@ -204,8 +238,9 @@ export type ProseTreeNode = Message<"frontend.v1.ProseTreeNode"> & {
   id?: ProseTreeNodeId | undefined;
 
   /**
-   * Where the node sits. A root has no parent and carries a marker; a branch
-   * has a parent and no marker, so neither fact exists where it means nothing.
+   * Where the node sits. A root has no parent and may carry a marker; a branch
+   * has a parent and never a marker, so neither fact exists where it means
+   * nothing.
    *
    * @generated from oneof frontend.v1.ProseTreeNode.place
    */
@@ -258,7 +293,7 @@ export type ProseTreeNode = Message<"frontend.v1.ProseTreeNode"> & {
  * Use `create(ProseTreeNodeSchema)` to create a new message.
  */
 export const ProseTreeNodeSchema: GenMessage<ProseTreeNode> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 5);
+  messageDesc(file_frontend_v1_prose, 6);
 
 /**
  * A node's identity within one tree.
@@ -279,7 +314,7 @@ export type ProseTreeNodeId = Message<"frontend.v1.ProseTreeNodeId"> & {
  * Use `create(ProseTreeNodeIdSchema)` to create a new message.
  */
 export const ProseTreeNodeIdSchema: GenMessage<ProseTreeNodeId> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 6);
+  messageDesc(file_frontend_v1_prose, 7);
 
 /**
  * A top-level node of the tree.
@@ -288,9 +323,11 @@ export const ProseTreeNodeIdSchema: GenMessage<ProseTreeNodeId> = /*@__PURE__*/
  */
 export type ProseTreeNodeRoot = Message<"frontend.v1.ProseTreeNodeRoot"> & {
   /**
-   * The symbol or emoji the root opens with (`🔧`).
+   * The symbol or emoji the root opens with (`🔧`). UNSET for a node the model
+   * drew as a branch with no root above it, as a fragment of a tree can open:
+   * it is a root by its place, and has no marker.
    *
-   * @generated from field: frontend.v1.ProseTreeNodeMarker marker = 1;
+   * @generated from field: optional frontend.v1.ProseTreeNodeMarker marker = 1;
    */
   marker?: ProseTreeNodeMarker | undefined;
 };
@@ -300,7 +337,7 @@ export type ProseTreeNodeRoot = Message<"frontend.v1.ProseTreeNodeRoot"> & {
  * Use `create(ProseTreeNodeRootSchema)` to create a new message.
  */
 export const ProseTreeNodeRootSchema: GenMessage<ProseTreeNodeRoot> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 7);
+  messageDesc(file_frontend_v1_prose, 8);
 
 /**
  * A node under another node.
@@ -321,7 +358,7 @@ export type ProseTreeNodeBranch = Message<"frontend.v1.ProseTreeNodeBranch"> & {
  * Use `create(ProseTreeNodeBranchSchema)` to create a new message.
  */
 export const ProseTreeNodeBranchSchema: GenMessage<ProseTreeNodeBranch> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 8);
+  messageDesc(file_frontend_v1_prose, 9);
 
 /**
  * A root's opening symbol or emoji, drawn between its label and its text.
@@ -342,7 +379,7 @@ export type ProseTreeNodeMarker = Message<"frontend.v1.ProseTreeNodeMarker"> & {
  * Use `create(ProseTreeNodeMarkerSchema)` to create a new message.
  */
 export const ProseTreeNodeMarkerSchema: GenMessage<ProseTreeNodeMarker> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 9);
+  messageDesc(file_frontend_v1_prose, 10);
 
 /**
  * A node's label, drawn before its text.
@@ -363,7 +400,7 @@ export type ProseTreeNodeLabel = Message<"frontend.v1.ProseTreeNodeLabel"> & {
  * Use `create(ProseTreeNodeLabelSchema)` to create a new message.
  */
 export const ProseTreeNodeLabelSchema: GenMessage<ProseTreeNodeLabel> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 10);
+  messageDesc(file_frontend_v1_prose, 11);
 
 /**
  * A node's text, drawn after its label (and a root's marker).
@@ -386,7 +423,7 @@ export type ProseTreeNodeText = Message<"frontend.v1.ProseTreeNodeText"> & {
  * Use `create(ProseTreeNodeTextSchema)` to create a new message.
  */
 export const ProseTreeNodeTextSchema: GenMessage<ProseTreeNodeText> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 11);
+  messageDesc(file_frontend_v1_prose, 12);
 
 /**
  * A code block drawn beneath a node, opaque: never parsed as tree lines and
@@ -417,5 +454,5 @@ export type ProseTreeCode = Message<"frontend.v1.ProseTreeCode"> & {
  * Use `create(ProseTreeCodeSchema)` to create a new message.
  */
 export const ProseTreeCodeSchema: GenMessage<ProseTreeCode> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 12);
+  messageDesc(file_frontend_v1_prose, 13);
 

@@ -100,3 +100,29 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - The golden answers recorded from the old webapp parser
     (`tree-sitter-tldr/tldr/test/golden/golden.json`) move to the daemon: its reading
     of the grammar's parse is held to them, below the structure and repair layers.
+
+### 2. `ParsedProse.source`, and a root without a marker
+
+- **What:** `ParsedProse` gained `ProseSource source`: the text with its main tree's
+  labels rewritten in place to the labels its nodes carry. `ProseTreeNodeRoot.marker`
+  became optional.
+- **Why:**
+  - The daemon reads served text back: `daemon/internal/resolve/feed/selection.go`
+    takes a selected bubble's markdown for the Emacs response view's search and for
+    the copy a reply prepends to the prompt. With the parse on the wire, that text
+    had no home. Carrying the repaired text keeps one parse (no second renderer of
+    trees back into text in Go) and makes a quoted response name the same labels
+    the reader sees, so the agent and the person agree on what `3.1.2` means.
+  - A fragment of a tree can open on a branch with no root above it
+    (`├── 1.1 Detail`). By its place it is a root, so it has no parent, and it has
+    no marker to carry.
+- **Consequences:**
+  - Only the main tree is repaired in `source`; a tree inside a code fence keeps its
+    written labels there. A quoted response was already repaired when it was served,
+    so its quote carries repaired labels anyway.
+  - The webapp ignores `source`.
+- **Retraction of change 1's rejoin consequence:** rejoining wrapped lines by
+  structure is not needed. The tree region already ends at the first line that is
+  neither a root, a branch, a blank line nor an interior fence (findTreeRegion's rule,
+  ported exactly), so a wrapped line the model wrote never sits inside a tree. The
+  error was assuming the region kept continuation lines; it never did.

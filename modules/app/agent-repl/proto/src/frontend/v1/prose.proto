@@ -37,6 +37,20 @@ message ParsedProse {
   // The text in reading order: runs of ordinary markdown and the trees between
   // them. Empty for an empty text. A text with no tree is one ProsePlain block.
   repeated ProseBlock blocks = 1;
+  // The text itself, with its tree's labels repaired in place, for whatever
+  // reads the text rather than draws it: a reply that quotes it, a search of
+  // it, a copy of it. The webapp draws `blocks` and never this.
+  ProseSource source = 2;
+}
+
+// A parsed text's own markdown, its tree's labels rewritten to the labels its
+// nodes carry, so the text a reply quotes names the nodes the reader sees.
+// Only the text's main tree is repaired here: a tree inside a code fence keeps
+// the labels it was written with in the source, which for a quoted response
+// are already the repaired ones it was served with.
+message ProseSource {
+  // The markdown.
+  string markdown = 1;
 }
 
 // One stretch of a parsed text.
@@ -99,8 +113,9 @@ message ProseTreeNode {
   // This node's identity: its index in ProseTree.nodes. Stable while the
   // response streams in.
   ProseTreeNodeId id = 1;
-  // Where the node sits. A root has no parent and carries a marker; a branch
-  // has a parent and no marker, so neither fact exists where it means nothing.
+  // Where the node sits. A root has no parent and may carry a marker; a branch
+  // has a parent and never a marker, so neither fact exists where it means
+  // nothing.
   oneof place {
     // A top-level node: `1 🔧 Root`.
     ProseTreeNodeRoot root = 2;
@@ -127,8 +142,10 @@ message ProseTreeNodeId {
 
 // A top-level node of the tree.
 message ProseTreeNodeRoot {
-  // The symbol or emoji the root opens with (`🔧`).
-  ProseTreeNodeMarker marker = 1;
+  // The symbol or emoji the root opens with (`🔧`). UNSET for a node the model
+  // drew as a branch with no root above it, as a fragment of a tree can open:
+  // it is a root by its place, and has no marker.
+  optional ProseTreeNodeMarker marker = 1;
 }
 
 // A node under another node.

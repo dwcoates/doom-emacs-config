@@ -52,7 +52,11 @@ type ParsedProse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The text in reading order: runs of ordinary markdown and the trees between
 	// them. Empty for an empty text. A text with no tree is one ProsePlain block.
-	Blocks        []*ProseBlock `protobuf:"bytes,1,rep,name=blocks,proto3" json:"blocks,omitempty"`
+	Blocks []*ProseBlock `protobuf:"bytes,1,rep,name=blocks,proto3" json:"blocks,omitempty"`
+	// The text itself, with its tree's labels repaired in place, for whatever
+	// reads the text rather than draws it: a reply that quotes it, a search of
+	// it, a copy of it. The webapp draws `blocks` and never this.
+	Source        *ProseSource `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -94,6 +98,63 @@ func (x *ParsedProse) GetBlocks() []*ProseBlock {
 	return nil
 }
 
+func (x *ParsedProse) GetSource() *ProseSource {
+	if x != nil {
+		return x.Source
+	}
+	return nil
+}
+
+// A parsed text's own markdown, its tree's labels rewritten to the labels its
+// nodes carry, so the text a reply quotes names the nodes the reader sees.
+// Only the text's main tree is repaired here: a tree inside a code fence keeps
+// the labels it was written with in the source, which for a quoted response
+// are already the repaired ones it was served with.
+type ProseSource struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The markdown.
+	Markdown      string `protobuf:"bytes,1,opt,name=markdown,proto3" json:"markdown,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProseSource) Reset() {
+	*x = ProseSource{}
+	mi := &file_frontend_v1_prose_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProseSource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProseSource) ProtoMessage() {}
+
+func (x *ProseSource) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_prose_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProseSource.ProtoReflect.Descriptor instead.
+func (*ProseSource) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ProseSource) GetMarkdown() string {
+	if x != nil {
+		return x.Markdown
+	}
+	return ""
+}
+
 // One stretch of a parsed text.
 type ProseBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -112,7 +173,7 @@ type ProseBlock struct {
 
 func (x *ProseBlock) Reset() {
 	*x = ProseBlock{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[1]
+	mi := &file_frontend_v1_prose_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -124,7 +185,7 @@ func (x *ProseBlock) String() string {
 func (*ProseBlock) ProtoMessage() {}
 
 func (x *ProseBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[1]
+	mi := &file_frontend_v1_prose_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -137,7 +198,7 @@ func (x *ProseBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseBlock.ProtoReflect.Descriptor instead.
 func (*ProseBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{1}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ProseBlock) GetBlock() isProseBlock_Block {
@@ -196,7 +257,7 @@ type ProsePlain struct {
 
 func (x *ProsePlain) Reset() {
 	*x = ProsePlain{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[2]
+	mi := &file_frontend_v1_prose_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -208,7 +269,7 @@ func (x *ProsePlain) String() string {
 func (*ProsePlain) ProtoMessage() {}
 
 func (x *ProsePlain) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[2]
+	mi := &file_frontend_v1_prose_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -221,7 +282,7 @@ func (x *ProsePlain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProsePlain.ProtoReflect.Descriptor instead.
 func (*ProsePlain) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{2}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ProsePlain) GetMarkdown() string {
@@ -262,7 +323,7 @@ type ProseTree struct {
 
 func (x *ProseTree) Reset() {
 	*x = ProseTree{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[3]
+	mi := &file_frontend_v1_prose_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -274,7 +335,7 @@ func (x *ProseTree) String() string {
 func (*ProseTree) ProtoMessage() {}
 
 func (x *ProseTree) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[3]
+	mi := &file_frontend_v1_prose_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -287,7 +348,7 @@ func (x *ProseTree) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTree.ProtoReflect.Descriptor instead.
 func (*ProseTree) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{3}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProseTree) GetHeader() *ProseTreeHeader {
@@ -315,7 +376,7 @@ type ProseTreeHeader struct {
 
 func (x *ProseTreeHeader) Reset() {
 	*x = ProseTreeHeader{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[4]
+	mi := &file_frontend_v1_prose_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -327,7 +388,7 @@ func (x *ProseTreeHeader) String() string {
 func (*ProseTreeHeader) ProtoMessage() {}
 
 func (x *ProseTreeHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[4]
+	mi := &file_frontend_v1_prose_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -340,7 +401,7 @@ func (x *ProseTreeHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeHeader.ProtoReflect.Descriptor instead.
 func (*ProseTreeHeader) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ProseTreeHeader) GetText() string {
@@ -357,8 +418,9 @@ type ProseTreeNode struct {
 	// This node's identity: its index in ProseTree.nodes. Stable while the
 	// response streams in.
 	Id *ProseTreeNodeId `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Where the node sits. A root has no parent and carries a marker; a branch
-	// has a parent and no marker, so neither fact exists where it means nothing.
+	// Where the node sits. A root has no parent and may carry a marker; a branch
+	// has a parent and never a marker, so neither fact exists where it means
+	// nothing.
 	//
 	// Types that are valid to be assigned to Place:
 	//
@@ -381,7 +443,7 @@ type ProseTreeNode struct {
 
 func (x *ProseTreeNode) Reset() {
 	*x = ProseTreeNode{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[5]
+	mi := &file_frontend_v1_prose_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +455,7 @@ func (x *ProseTreeNode) String() string {
 func (*ProseTreeNode) ProtoMessage() {}
 
 func (x *ProseTreeNode) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[5]
+	mi := &file_frontend_v1_prose_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +468,7 @@ func (x *ProseTreeNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNode.ProtoReflect.Descriptor instead.
 func (*ProseTreeNode) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ProseTreeNode) GetId() *ProseTreeNodeId {
@@ -491,7 +553,7 @@ type ProseTreeNodeId struct {
 
 func (x *ProseTreeNodeId) Reset() {
 	*x = ProseTreeNodeId{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[6]
+	mi := &file_frontend_v1_prose_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -503,7 +565,7 @@ func (x *ProseTreeNodeId) String() string {
 func (*ProseTreeNodeId) ProtoMessage() {}
 
 func (x *ProseTreeNodeId) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[6]
+	mi := &file_frontend_v1_prose_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -516,7 +578,7 @@ func (x *ProseTreeNodeId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNodeId.ProtoReflect.Descriptor instead.
 func (*ProseTreeNodeId) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ProseTreeNodeId) GetIndex() uint32 {
@@ -529,15 +591,17 @@ func (x *ProseTreeNodeId) GetIndex() uint32 {
 // A top-level node of the tree.
 type ProseTreeNodeRoot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The symbol or emoji the root opens with (`🔧`).
-	Marker        *ProseTreeNodeMarker `protobuf:"bytes,1,opt,name=marker,proto3" json:"marker,omitempty"`
+	// The symbol or emoji the root opens with (`🔧`). UNSET for a node the model
+	// drew as a branch with no root above it, as a fragment of a tree can open:
+	// it is a root by its place, and has no marker.
+	Marker        *ProseTreeNodeMarker `protobuf:"bytes,1,opt,name=marker,proto3,oneof" json:"marker,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProseTreeNodeRoot) Reset() {
 	*x = ProseTreeNodeRoot{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[7]
+	mi := &file_frontend_v1_prose_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -549,7 +613,7 @@ func (x *ProseTreeNodeRoot) String() string {
 func (*ProseTreeNodeRoot) ProtoMessage() {}
 
 func (x *ProseTreeNodeRoot) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[7]
+	mi := &file_frontend_v1_prose_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -562,7 +626,7 @@ func (x *ProseTreeNodeRoot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNodeRoot.ProtoReflect.Descriptor instead.
 func (*ProseTreeNodeRoot) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ProseTreeNodeRoot) GetMarker() *ProseTreeNodeMarker {
@@ -583,7 +647,7 @@ type ProseTreeNodeBranch struct {
 
 func (x *ProseTreeNodeBranch) Reset() {
 	*x = ProseTreeNodeBranch{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[8]
+	mi := &file_frontend_v1_prose_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -595,7 +659,7 @@ func (x *ProseTreeNodeBranch) String() string {
 func (*ProseTreeNodeBranch) ProtoMessage() {}
 
 func (x *ProseTreeNodeBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[8]
+	mi := &file_frontend_v1_prose_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -608,7 +672,7 @@ func (x *ProseTreeNodeBranch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNodeBranch.ProtoReflect.Descriptor instead.
 func (*ProseTreeNodeBranch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ProseTreeNodeBranch) GetParent() *ProseTreeNodeId {
@@ -629,7 +693,7 @@ type ProseTreeNodeMarker struct {
 
 func (x *ProseTreeNodeMarker) Reset() {
 	*x = ProseTreeNodeMarker{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[9]
+	mi := &file_frontend_v1_prose_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +705,7 @@ func (x *ProseTreeNodeMarker) String() string {
 func (*ProseTreeNodeMarker) ProtoMessage() {}
 
 func (x *ProseTreeNodeMarker) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[9]
+	mi := &file_frontend_v1_prose_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +718,7 @@ func (x *ProseTreeNodeMarker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNodeMarker.ProtoReflect.Descriptor instead.
 func (*ProseTreeNodeMarker) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ProseTreeNodeMarker) GetText() string {
@@ -675,7 +739,7 @@ type ProseTreeNodeLabel struct {
 
 func (x *ProseTreeNodeLabel) Reset() {
 	*x = ProseTreeNodeLabel{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[10]
+	mi := &file_frontend_v1_prose_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +751,7 @@ func (x *ProseTreeNodeLabel) String() string {
 func (*ProseTreeNodeLabel) ProtoMessage() {}
 
 func (x *ProseTreeNodeLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[10]
+	mi := &file_frontend_v1_prose_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +764,7 @@ func (x *ProseTreeNodeLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNodeLabel.ProtoReflect.Descriptor instead.
 func (*ProseTreeNodeLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProseTreeNodeLabel) GetText() string {
@@ -723,7 +787,7 @@ type ProseTreeNodeText struct {
 
 func (x *ProseTreeNodeText) Reset() {
 	*x = ProseTreeNodeText{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[11]
+	mi := &file_frontend_v1_prose_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -735,7 +799,7 @@ func (x *ProseTreeNodeText) String() string {
 func (*ProseTreeNodeText) ProtoMessage() {}
 
 func (x *ProseTreeNodeText) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[11]
+	mi := &file_frontend_v1_prose_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -748,7 +812,7 @@ func (x *ProseTreeNodeText) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeNodeText.ProtoReflect.Descriptor instead.
 func (*ProseTreeNodeText) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProseTreeNodeText) GetMarkdown() string {
@@ -774,7 +838,7 @@ type ProseTreeCode struct {
 
 func (x *ProseTreeCode) Reset() {
 	*x = ProseTreeCode{}
-	mi := &file_frontend_v1_prose_proto_msgTypes[12]
+	mi := &file_frontend_v1_prose_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +850,7 @@ func (x *ProseTreeCode) String() string {
 func (*ProseTreeCode) ProtoMessage() {}
 
 func (x *ProseTreeCode) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_prose_proto_msgTypes[12]
+	mi := &file_frontend_v1_prose_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +863,7 @@ func (x *ProseTreeCode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProseTreeCode.ProtoReflect.Descriptor instead.
 func (*ProseTreeCode) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{12}
+	return file_frontend_v1_prose_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ProseTreeCode) GetLanguage() string {
@@ -820,9 +884,12 @@ var File_frontend_v1_prose_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_prose_proto_rawDesc = "" +
 	"\n" +
-	"\x17frontend/v1/prose.proto\x12\vfrontend.v1\">\n" +
+	"\x17frontend/v1/prose.proto\x12\vfrontend.v1\"p\n" +
 	"\vParsedProse\x12/\n" +
-	"\x06blocks\x18\x01 \x03(\v2\x17.frontend.v1.ProseBlockR\x06blocks\"t\n" +
+	"\x06blocks\x18\x01 \x03(\v2\x17.frontend.v1.ProseBlockR\x06blocks\x120\n" +
+	"\x06source\x18\x02 \x01(\v2\x18.frontend.v1.ProseSourceR\x06source\")\n" +
+	"\vProseSource\x12\x1a\n" +
+	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown\"t\n" +
 	"\n" +
 	"ProseBlock\x12/\n" +
 	"\x05plain\x18\x01 \x01(\v2\x17.frontend.v1.ProsePlainH\x00R\x05plain\x12,\n" +
@@ -846,9 +913,10 @@ const file_frontend_v1_prose_proto_rawDesc = "" +
 	"\x04code\x18\x06 \x03(\v2\x1a.frontend.v1.ProseTreeCodeR\x04codeB\a\n" +
 	"\x05place\"'\n" +
 	"\x0fProseTreeNodeId\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\"M\n" +
-	"\x11ProseTreeNodeRoot\x128\n" +
-	"\x06marker\x18\x01 \x01(\v2 .frontend.v1.ProseTreeNodeMarkerR\x06marker\"K\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\"]\n" +
+	"\x11ProseTreeNodeRoot\x12=\n" +
+	"\x06marker\x18\x01 \x01(\v2 .frontend.v1.ProseTreeNodeMarkerH\x00R\x06marker\x88\x01\x01B\t\n" +
+	"\a_marker\"K\n" +
 	"\x13ProseTreeNodeBranch\x124\n" +
 	"\x06parent\x18\x01 \x01(\v2\x1c.frontend.v1.ProseTreeNodeIdR\x06parent\")\n" +
 	"\x13ProseTreeNodeMarker\x12\x12\n" +
@@ -874,41 +942,43 @@ func file_frontend_v1_prose_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_prose_proto_rawDescData
 }
 
-var file_frontend_v1_prose_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_frontend_v1_prose_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_frontend_v1_prose_proto_goTypes = []any{
 	(*ParsedProse)(nil),         // 0: frontend.v1.ParsedProse
-	(*ProseBlock)(nil),          // 1: frontend.v1.ProseBlock
-	(*ProsePlain)(nil),          // 2: frontend.v1.ProsePlain
-	(*ProseTree)(nil),           // 3: frontend.v1.ProseTree
-	(*ProseTreeHeader)(nil),     // 4: frontend.v1.ProseTreeHeader
-	(*ProseTreeNode)(nil),       // 5: frontend.v1.ProseTreeNode
-	(*ProseTreeNodeId)(nil),     // 6: frontend.v1.ProseTreeNodeId
-	(*ProseTreeNodeRoot)(nil),   // 7: frontend.v1.ProseTreeNodeRoot
-	(*ProseTreeNodeBranch)(nil), // 8: frontend.v1.ProseTreeNodeBranch
-	(*ProseTreeNodeMarker)(nil), // 9: frontend.v1.ProseTreeNodeMarker
-	(*ProseTreeNodeLabel)(nil),  // 10: frontend.v1.ProseTreeNodeLabel
-	(*ProseTreeNodeText)(nil),   // 11: frontend.v1.ProseTreeNodeText
-	(*ProseTreeCode)(nil),       // 12: frontend.v1.ProseTreeCode
+	(*ProseSource)(nil),         // 1: frontend.v1.ProseSource
+	(*ProseBlock)(nil),          // 2: frontend.v1.ProseBlock
+	(*ProsePlain)(nil),          // 3: frontend.v1.ProsePlain
+	(*ProseTree)(nil),           // 4: frontend.v1.ProseTree
+	(*ProseTreeHeader)(nil),     // 5: frontend.v1.ProseTreeHeader
+	(*ProseTreeNode)(nil),       // 6: frontend.v1.ProseTreeNode
+	(*ProseTreeNodeId)(nil),     // 7: frontend.v1.ProseTreeNodeId
+	(*ProseTreeNodeRoot)(nil),   // 8: frontend.v1.ProseTreeNodeRoot
+	(*ProseTreeNodeBranch)(nil), // 9: frontend.v1.ProseTreeNodeBranch
+	(*ProseTreeNodeMarker)(nil), // 10: frontend.v1.ProseTreeNodeMarker
+	(*ProseTreeNodeLabel)(nil),  // 11: frontend.v1.ProseTreeNodeLabel
+	(*ProseTreeNodeText)(nil),   // 12: frontend.v1.ProseTreeNodeText
+	(*ProseTreeCode)(nil),       // 13: frontend.v1.ProseTreeCode
 }
 var file_frontend_v1_prose_proto_depIdxs = []int32{
-	1,  // 0: frontend.v1.ParsedProse.blocks:type_name -> frontend.v1.ProseBlock
-	2,  // 1: frontend.v1.ProseBlock.plain:type_name -> frontend.v1.ProsePlain
-	3,  // 2: frontend.v1.ProseBlock.tree:type_name -> frontend.v1.ProseTree
-	4,  // 3: frontend.v1.ProseTree.header:type_name -> frontend.v1.ProseTreeHeader
-	5,  // 4: frontend.v1.ProseTree.nodes:type_name -> frontend.v1.ProseTreeNode
-	6,  // 5: frontend.v1.ProseTreeNode.id:type_name -> frontend.v1.ProseTreeNodeId
-	7,  // 6: frontend.v1.ProseTreeNode.root:type_name -> frontend.v1.ProseTreeNodeRoot
-	8,  // 7: frontend.v1.ProseTreeNode.branch:type_name -> frontend.v1.ProseTreeNodeBranch
-	10, // 8: frontend.v1.ProseTreeNode.label:type_name -> frontend.v1.ProseTreeNodeLabel
-	11, // 9: frontend.v1.ProseTreeNode.text:type_name -> frontend.v1.ProseTreeNodeText
-	12, // 10: frontend.v1.ProseTreeNode.code:type_name -> frontend.v1.ProseTreeCode
-	9,  // 11: frontend.v1.ProseTreeNodeRoot.marker:type_name -> frontend.v1.ProseTreeNodeMarker
-	6,  // 12: frontend.v1.ProseTreeNodeBranch.parent:type_name -> frontend.v1.ProseTreeNodeId
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	2,  // 0: frontend.v1.ParsedProse.blocks:type_name -> frontend.v1.ProseBlock
+	1,  // 1: frontend.v1.ParsedProse.source:type_name -> frontend.v1.ProseSource
+	3,  // 2: frontend.v1.ProseBlock.plain:type_name -> frontend.v1.ProsePlain
+	4,  // 3: frontend.v1.ProseBlock.tree:type_name -> frontend.v1.ProseTree
+	5,  // 4: frontend.v1.ProseTree.header:type_name -> frontend.v1.ProseTreeHeader
+	6,  // 5: frontend.v1.ProseTree.nodes:type_name -> frontend.v1.ProseTreeNode
+	7,  // 6: frontend.v1.ProseTreeNode.id:type_name -> frontend.v1.ProseTreeNodeId
+	8,  // 7: frontend.v1.ProseTreeNode.root:type_name -> frontend.v1.ProseTreeNodeRoot
+	9,  // 8: frontend.v1.ProseTreeNode.branch:type_name -> frontend.v1.ProseTreeNodeBranch
+	11, // 9: frontend.v1.ProseTreeNode.label:type_name -> frontend.v1.ProseTreeNodeLabel
+	12, // 10: frontend.v1.ProseTreeNode.text:type_name -> frontend.v1.ProseTreeNodeText
+	13, // 11: frontend.v1.ProseTreeNode.code:type_name -> frontend.v1.ProseTreeCode
+	10, // 12: frontend.v1.ProseTreeNodeRoot.marker:type_name -> frontend.v1.ProseTreeNodeMarker
+	7,  // 13: frontend.v1.ProseTreeNodeBranch.parent:type_name -> frontend.v1.ProseTreeNodeId
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_prose_proto_init() }
@@ -916,23 +986,24 @@ func file_frontend_v1_prose_proto_init() {
 	if File_frontend_v1_prose_proto != nil {
 		return
 	}
-	file_frontend_v1_prose_proto_msgTypes[1].OneofWrappers = []any{
+	file_frontend_v1_prose_proto_msgTypes[2].OneofWrappers = []any{
 		(*ProseBlock_Plain)(nil),
 		(*ProseBlock_Tree)(nil),
 	}
-	file_frontend_v1_prose_proto_msgTypes[3].OneofWrappers = []any{}
-	file_frontend_v1_prose_proto_msgTypes[5].OneofWrappers = []any{
+	file_frontend_v1_prose_proto_msgTypes[4].OneofWrappers = []any{}
+	file_frontend_v1_prose_proto_msgTypes[6].OneofWrappers = []any{
 		(*ProseTreeNode_Root)(nil),
 		(*ProseTreeNode_Branch)(nil),
 	}
-	file_frontend_v1_prose_proto_msgTypes[12].OneofWrappers = []any{}
+	file_frontend_v1_prose_proto_msgTypes[8].OneofWrappers = []any{}
+	file_frontend_v1_prose_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_prose_proto_rawDesc), len(file_frontend_v1_prose_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
