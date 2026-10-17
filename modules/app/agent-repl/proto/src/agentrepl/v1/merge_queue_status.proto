@@ -1,0 +1,102 @@
+// merge_queue_status.proto — A MERGE QUEUE'S STATUS AS AN AGENT READS IT:
+// whether it advances, and every merge in line, front first. Shared by the
+// one-time read (GetMergeQueueStatus), a subscription's opening answer
+// (SubscribeMergeQueue), and every merge-queue notice, so a notice can never
+// describe a queue differently from a read.
+//
+// A merge only REQUESTED -- its asking turn still running, so not yet put in
+// line -- is not in any queue and never appears here.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// One repository's merge queue.
+message MergeQueueStatus {
+  // The repository whose queue this is.
+  workspace.v1.RepositoryRef repository = 1;
+  // Whether the queue advances.
+  MergeQueueStatusAdvance advance = 2;
+  // Every merge in line, front first: the running merge (when one runs) is
+  // first, then every waiting merge in the order it will run.
+  repeated MergeQueueStatusEntry entries = 3;
+}
+
+// Whether a queue advances.
+message MergeQueueStatusAdvance {
+  // THE ARM IS THE STATE.
+  oneof state {
+    // The queue admits, promotes and runs merges.
+    MergeQueueStatusAdvanceRunning running = 1;
+    // The queue is paused: merges still join it, but nothing runs until it
+    // is resumed.
+    MergeQueueStatusAdvancePaused paused = 2;
+  }
+}
+// Advancing. No fields.
+message MergeQueueStatusAdvanceRunning {}
+// Paused. No fields.
+message MergeQueueStatusAdvancePaused {}
+
+// One merge in line.
+message MergeQueueStatusEntry {
+  // The workspace whose merge this is: the one landing its own branch, or an
+  // async merge's merge workspace once it exists. For an async merge waiting
+  // to start, the REQUESTER (whose feed carries its bubble).
+  workspace.v1.WorkspaceRef workspace = 1;
+  // That workspace's name, or, for an async merge waiting to start, the name
+  // its merge workspace will carry.
+  string name = 2;
+  // The branch that lands.
+  string branch = 3;
+  // What kind of merge this is.
+  MergeQueueStatusEntryKind kind = 4;
+  // Whether it runs or waits.
+  MergeQueueStatusEntryStage stage = 5;
+  // TRUE when it was put in line at the front (agentrepl.v1
+  // .MergeQueuePlacementFront).
+  bool placed_at_front = 6;
+}
+
+// What kind of merge an entry is.
+message MergeQueueStatusEntryKind {
+  // THE ARM IS THE KIND.
+  oneof kind {
+    // A workspace landing its own branch (MergeWorkspace).
+    MergeQueueStatusEntryKindOwnBranch own_branch = 1;
+    // An async merge (CreateWorkspaceAsyncMerge).
+    MergeQueueStatusEntryKindAsyncMerge async_merge = 2;
+  }
+}
+// A workspace landing its own branch. No fields.
+message MergeQueueStatusEntryKindOwnBranch {}
+// An async merge.
+message MergeQueueStatusEntryKindAsyncMerge {
+  // The workspace that asked for it, which is told how it ended.
+  workspace.v1.WorkspaceRef requester = 1;
+}
+
+// Whether an entry runs or waits.
+message MergeQueueStatusEntryStage {
+  // THE ARM IS THE STAGE.
+  oneof stage {
+    // Waiting its turn.
+    MergeQueueStatusEntryStageWaiting waiting = 1;
+    // Running.
+    MergeQueueStatusEntryStageRunning running = 2;
+  }
+}
+// Waiting. No fields.
+message MergeQueueStatusEntryStageWaiting {}
+// Running, at a step.
+message MergeQueueStatusEntryStageRunning {
+  // The step the merge stands on, in the queue's own words ("rebasing onto
+  // master", "running the integration suite"), for an agent to report. Prose
+  // to be read, not a vocabulary to switch on: the queue's steps change with
+  // its gates, and no consumer acts on which one runs.
+  string step_description = 1;
+}

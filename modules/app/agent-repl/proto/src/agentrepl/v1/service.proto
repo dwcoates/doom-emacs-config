@@ -96,6 +96,15 @@ import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_page.proto";
 import "agentrepl/v1/endpoint_open_tabs.proto";
 import "agentrepl/v1/endpoint_report_page_drawn.proto";
+import "agentrepl/v1/endpoint_get_workspace_status.proto";
+import "agentrepl/v1/endpoint_get_merge_queue_status.proto";
+import "agentrepl/v1/endpoint_subscribe_workspace.proto";
+import "agentrepl/v1/endpoint_unsubscribe_workspace.proto";
+import "agentrepl/v1/endpoint_subscribe_merge_queue.proto";
+import "agentrepl/v1/endpoint_unsubscribe_merge_queue.proto";
+import "agentrepl/v1/endpoint_update_rollouts.proto";
+import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
+import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -210,7 +219,9 @@ service AgentRepl {
   // undo for a registration. See endpoint_forget_workspace.proto.
   rpc ForgetWorkspace(ForgetWorkspaceRequest) returns (ForgetWorkspaceResponse);
 
-  // Enqueue this workspace's merge; its life from there is the feed's bubble.
+  // Land this workspace's own branch in the target fixed at its creation;
+  // its life from there is the feed's bubble. See
+  // endpoint_merge_workspace.proto.
   rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
 
 
@@ -332,6 +343,9 @@ service AgentRepl {
   // Operator control of the merge queue. See
   // endpoint_update_merge_queue.proto.
   rpc UpdateMergeQueue(UpdateMergeQueueRequest) returns (UpdateMergeQueueResponse);
+  // Hold or release the runtime's rollouts; releasing deploys what landed
+  // during the hold. See endpoint_update_rollouts.proto.
+  rpc UpdateRollouts(UpdateRolloutsRequest) returns (UpdateRolloutsResponse);
 
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.
@@ -468,4 +482,29 @@ service AgentRepl {
   // Makes a digest now instead of at the daily cadence. See
   // endpoint_refresh_news_digest.proto.
   rpc RefreshNewsDigest(RefreshNewsDigestRequest) returns (RefreshNewsDigestResponse);
+
+  // ---- AGENT API: what an agent reads and follows ----
+  // One workspace's status, now. See endpoint_get_workspace_status.proto.
+  rpc GetWorkspaceStatus(GetWorkspaceStatusRequest) returns (GetWorkspaceStatusResponse);
+  // Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
+  rpc GetMergeQueueStatus(GetMergeQueueStatusRequest) returns (GetMergeQueueStatusResponse);
+  // Tell one workspace's agent when another workspace changes, answering with
+  // its status now. See endpoint_subscribe_workspace.proto.
+  rpc SubscribeWorkspace(SubscribeWorkspaceRequest) returns (SubscribeWorkspaceResponse);
+  // End a workspace subscription. See endpoint_unsubscribe_workspace.proto.
+  rpc UnsubscribeWorkspace(UnsubscribeWorkspaceRequest) returns (UnsubscribeWorkspaceResponse);
+  // Tell one workspace's agent about a merge queue's changes, answering with
+  // the queue now. See endpoint_subscribe_merge_queue.proto.
+  rpc SubscribeMergeQueue(SubscribeMergeQueueRequest) returns (SubscribeMergeQueueResponse);
+  // End a merge-queue subscription. See
+  // endpoint_unsubscribe_merge_queue.proto.
+  rpc UnsubscribeMergeQueue(UnsubscribeMergeQueueRequest) returns (UnsubscribeMergeQueueResponse);
+
+  // ---- EDITOR: elisp evaluated in the running editor ----
+  // Evaluate elisp in the running editor and answer with the result. See
+  // endpoint_evaluate_in_editor.proto.
+  rpc EvaluateInEditor(EvaluateInEditorRequest) returns (EvaluateInEditorResponse);
+  // The editor's answer to a pushed evaluation. See
+  // endpoint_answer_editor_evaluation.proto.
+  rpc AnswerEditorEvaluation(AnswerEditorEvaluationRequest) returns (AnswerEditorEvaluationResponse);
 }

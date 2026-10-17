@@ -1,0 +1,114 @@
+// workspace_status.proto — A WORKSPACE'S STATUS AS AN AGENT READS IT: what
+// the workspace is, where its work lands, and what it is doing. Shared by the
+// one-time read (GetWorkspaceStatus), a subscription's opening answer
+// (SubscribeWorkspace), and every subscription notice, so a notice can never
+// describe a workspace differently from a read.
+//
+// NOT A VIEW. The roster row (frontend.v1.RosterRow) is what the sidebar
+// DRAWS; this is what an agent DECIDES on, in the daemon's own terms, and the
+// two are resolved separately from the same records.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// One workspace's status.
+message WorkspaceStatus {
+  // The workspace, as the roster serves it.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The workspace's name, as the roster draws it.
+  string name = 2;
+  // The workspace's branch, as git spells it.
+  string branch = 3;
+  // Where the workspace's branch lands, fixed at its creation.
+  WorkspaceStatusMergeTarget merge_target = 4;
+  // TRUE while the workspace is in the hidden section (off the Emacs tab bar);
+  // SetWorkspaceHidden moves it in and out.
+  bool hidden = 5;
+  // Whether the workspace is open, and what it is doing if so.
+  WorkspaceStatusStanding standing = 6;
+}
+
+// Where a workspace's branch lands.
+message WorkspaceStatusMergeTarget {
+  // THE ARM IS THE TARGET.
+  oneof target {
+    // The primary branch, in the repository's main worktree.
+    WorkspaceStatusMergeTargetPrimary primary = 1;
+    // The owner's branch, in the owner's worktree.
+    WorkspaceStatusMergeTargetOwner owner = 2;
+  }
+}
+// Onto the primary branch. No fields.
+message WorkspaceStatusMergeTargetPrimary {}
+// Into an owning workspace.
+message WorkspaceStatusMergeTargetOwner {
+  // The owning workspace.
+  workspace.v1.WorkspaceRef owner = 1;
+  // TRUE when the owner arbitrates and lands this workspace's work, because
+  // its context was not forked from the owner; FALSE when it lands itself.
+  bool owner_lands = 2;
+}
+
+// Whether a workspace is open.
+message WorkspaceStatusStanding {
+  // THE ARM IS THE STANDING.
+  oneof standing {
+    // Open, with what its session is doing.
+    WorkspaceStatusOpen open = 1;
+    // Closed: no session runs, and nothing it was asked to do proceeds until
+    // it is opened.
+    WorkspaceStatusClosed closed = 2;
+  }
+}
+// An open workspace.
+message WorkspaceStatusOpen {
+  // What the open workspace's session is doing.
+  WorkspaceStatusActivity activity = 1;
+}
+// A closed workspace. No fields.
+message WorkspaceStatusClosed {}
+
+// What an open workspace's session is doing, as the footer would say it.
+message WorkspaceStatusActivity {
+  // THE ARM IS THE ACTIVITY.
+  oneof activity {
+    // The session is being brought up and takes no prompt yet.
+    WorkspaceStatusActivityStarting starting = 1;
+    // No turn runs; a prompt starts one.
+    WorkspaceStatusActivityIdle idle = 2;
+    // A turn is running.
+    WorkspaceStatusActivityTurnRunning turn_running = 3;
+    // A turn waits on the user: a question or a permission is open.
+    WorkspaceStatusActivityNeedsInput needs_input = 4;
+    // The workspace's own merge is in its queue or running.
+    WorkspaceStatusActivityMerging merging = 5;
+  }
+}
+// Being brought up. No fields.
+message WorkspaceStatusActivityStarting {}
+// Idle. No fields.
+message WorkspaceStatusActivityIdle {}
+// A turn is running. No fields.
+message WorkspaceStatusActivityTurnRunning {}
+// Waiting on the user.
+message WorkspaceStatusActivityNeedsInput {
+  // THE ARM IS WHAT IS ASKED.
+  oneof ask {
+    // A question the agent asked.
+    WorkspaceStatusActivityNeedsInputQuestion question = 1;
+    // A tool call awaiting permission.
+    WorkspaceStatusActivityNeedsInputPermission permission = 2;
+  }
+}
+// A question is open. No fields.
+message WorkspaceStatusActivityNeedsInputQuestion {}
+// A permission is open. No fields.
+message WorkspaceStatusActivityNeedsInputPermission {}
+// The workspace's own merge is queued or running. No fields: the queue's
+// status (GetMergeQueueStatus) says where it stands.
+message WorkspaceStatusActivityMerging {}

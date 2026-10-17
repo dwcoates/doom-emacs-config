@@ -1,0 +1,40 @@
+// endpoint_answer_editor_evaluation.proto — AnswerEditorEvaluation: the
+// editor's answer to an evaluation the daemon pushed it
+// (agentrepl.v1.WatchHostWorkspaceResponse.evaluate). EDITOR section. The
+// daemon hands the outcome to the EvaluateInEditor call waiting on the token.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/editor_evaluation.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerEditorEvaluationRequest {
+  // The workspace the evaluation was pushed for.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The token the push carried, unchanged.
+  EditorEvaluationToken token = 2;
+  // How the evaluation went.
+  EditorEvaluationOutcome outcome = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message AnswerEditorEvaluationResponse {
+  oneof result {
+    AnswerEditorEvaluationSuccess success = 1;
+    AnswerEditorEvaluationError error = 2;
+  }
+}
+// Taken. Whether a caller still waited is the daemon's to know, not the
+// editor's: a late answer is discarded and logged, and still succeeds here.
+message AnswerEditorEvaluationSuccess {}
+message AnswerEditorEvaluationError {
+  oneof cause {
+    // The token names no evaluation this daemon pushed.
+    AnswerEditorEvaluationUnknownToken unknown_token = 1;
+  }
+}
+message AnswerEditorEvaluationUnknownToken {}

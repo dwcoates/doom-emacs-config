@@ -10559,7 +10559,7 @@ export const FeedMergeTabQueueSchema: GenMessage<FeedMergeTabQueue> = /*@__PURE_
 /**
  * AGENTIC: an async merge's resolving turn -- the first turn of its merge
  * workspace, carrying out the requester's instruction
- * (agentrepl.v1.MergeWorkspaceAsync.instruction) on the merge's branch and
+ * (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction) on the merge's branch and
  * resolving whatever does not apply on its own. Present only on a merge that
  * carries an instruction, as its first tab, left of queue. Live while the
  * turn runs; settled succeeded when the turn ended with at least one commit

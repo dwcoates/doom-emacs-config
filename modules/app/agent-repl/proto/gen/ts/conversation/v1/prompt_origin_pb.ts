@@ -15,7 +15,7 @@ import { enumDesc, fileDesc } from "@bufbuild/protobuf/codegenv2";
  * Describes the file conversation/v1/prompt_origin.proto.
  */
 export const file_conversation_v1_prompt_origin: GenFile = /*@__PURE__*/
-  fileDesc("CiNjb252ZXJzYXRpb24vdjEvcHJvbXB0X29yaWdpbi5wcm90bxIPY29udmVyc2F0aW9uLnYxKosLCgxQcm9tcHRPcmlnaW4SHQoZUFJPTVBUX09SSUdJTl9VTlNQRUNJRklFRBAAEhsKF1BST01QVF9PUklHSU5fVVNFUl9TRU5UEAESJAogUFJPTVBUX09SSUdJTl9VU0VSX1NFTlRfQU5EX0hJREUQAhIrCidQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9XSVRIX01FVEFQUk9NUFQQAxIoCiRQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9XSVRIX1BPU1RGSVgQBBInCiNQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9XSVRIX1BSRUZJWBAFEiEKHVBST01QVF9PUklHSU5fTUVUQVBST01QVF9SRUFEEAYSJwojUFJPTVBUX09SSUdJTl9DT01NQU5EX0RJRkZfQU5BTFlTSVMQBxIpCiVQUk9NUFRfT1JJR0lOX0NPTU1BTkRfRVhQTEFJTl9DT05URVhUEAgSKAokUFJPTVBUX09SSUdJTl9DT01NQU5EX0VYUExBSU5fUFJPTVBUEAkSIwofUFJPTVBUX09SSUdJTl9DT01NQU5EX1VQREFURV9QUhAKEiAKHFBST01QVF9PUklHSU5fQ09NTUFORF9SRUJBU0UQCxItCilQUk9NUFRfT1JJR0lOX0NPTU1BTkRfQ1JFQVRFX09SX1VQREFURV9QUhAMEiEKHVBST01QVF9PUklHSU5fUEFORUxfU0VMRUNUSU9OEA0SIQodUFJPTVBUX09SSUdJTl9ERUZFUlJFRF9QUk9NUFQQDhIkCiBQUk9NUFRfT1JJR0lOX0xFR0FDWV9IT1NUX1BST01QVBAPEiMKH1BST01QVF9PUklHSU5fR05TX1NPQ0tFVFNfQ0xPU0UQEBIpCiVQUk9NUFRfT1JJR0lOX0xFR0FDWV9IT1NUX0VWQUxfUkVTVUxUEBESIAocUFJPTVBUX09SSUdJTl9FWFBMQUlOX0NPTkZJRxASEiIKHlBST01QVF9PUklHSU5fV0VCQVBQX1VTRVJfU0VOVBATEiQKIFBST01QVF9PUklHSU5fV0VCQVBQX0NBUkRfQUNUSU9OEBQSIwofUFJPTVBUX09SSUdJTl9XT1JLU1BBQ0VfQ1JFQVRFRBAVEicKI1BST01QVF9PUklHSU5fTUVSR0VfQ09ORkxJQ1RfUkVQQUlSEBYSIwofUFJPTVBUX09SSUdJTl9NRVJHRV9URVNUX1JFUEFJUhAXEiUKIVBST01QVF9PUklHSU5fTUVSR0VfQkVGT1JFX0FDVElPThAYEiQKIFBST01QVF9PUklHSU5fTUVSR0VfQUZURVJfQUNUSU9OEBkSLQopUFJPTVBUX09SSUdJTl9NRVJHRV9ESVNQTEFDRURfVFVSTl9SRVNVTUUQGhImCiJQUk9NUFRfT1JJR0lOX1JFU1VNRV9BRlRFUl9SRVNUQVJUEBwSIAocUFJPTVBUX09SSUdJTl9WRU5ET1JfU1RBUlRFRBAdEiEKHVBST01QVF9PUklHSU5fTElOS19VTlJFU09MVkVEEB4SIAocUFJPTVBUX09SSUdJTl9NRVJHRV9IQU5EQkFDSxAfEiYKIlBST01QVF9PUklHSU5fV09SS1NQQUNFX1JFVEFSR0VURUQQIBIcChhQUk9NUFRfT1JJR0lOX01FUkdFX1BJQ0sQIRIlCiFQUk9NUFRfT1JJR0lOX01FUkdFX0NPTVBBQ1RfQUZURVIQIhIpCiVQUk9NUFRfT1JJR0lOX1dPUktTUEFDRV9DUkVBVEVfRkFJTEVEECMSJAogUFJPTVBUX09SSUdJTl9NRVJHRV9RVUVVRV9OT1RJQ0UQJBIeChpQUk9NUFRfT1JJR0lOX01FUkdFX1JFVkVSVBAlQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw");
+  fileDesc("CiNjb252ZXJzYXRpb24vdjEvcHJvbXB0X29yaWdpbi5wcm90bxIPY29udmVyc2F0aW9uLnYxKvsLCgxQcm9tcHRPcmlnaW4SHQoZUFJPTVBUX09SSUdJTl9VTlNQRUNJRklFRBAAEhsKF1BST01QVF9PUklHSU5fVVNFUl9TRU5UEAESJAogUFJPTVBUX09SSUdJTl9VU0VSX1NFTlRfQU5EX0hJREUQAhIrCidQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9XSVRIX01FVEFQUk9NUFQQAxIoCiRQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9XSVRIX1BPU1RGSVgQBBInCiNQUk9NUFRfT1JJR0lOX1VTRVJfU0VOVF9XSVRIX1BSRUZJWBAFEiEKHVBST01QVF9PUklHSU5fTUVUQVBST01QVF9SRUFEEAYSJwojUFJPTVBUX09SSUdJTl9DT01NQU5EX0RJRkZfQU5BTFlTSVMQBxIpCiVQUk9NUFRfT1JJR0lOX0NPTU1BTkRfRVhQTEFJTl9DT05URVhUEAgSKAokUFJPTVBUX09SSUdJTl9DT01NQU5EX0VYUExBSU5fUFJPTVBUEAkSIwofUFJPTVBUX09SSUdJTl9DT01NQU5EX1VQREFURV9QUhAKEiAKHFBST01QVF9PUklHSU5fQ09NTUFORF9SRUJBU0UQCxItCilQUk9NUFRfT1JJR0lOX0NPTU1BTkRfQ1JFQVRFX09SX1VQREFURV9QUhAMEiEKHVBST01QVF9PUklHSU5fUEFORUxfU0VMRUNUSU9OEA0SIQodUFJPTVBUX09SSUdJTl9ERUZFUlJFRF9QUk9NUFQQDhIkCiBQUk9NUFRfT1JJR0lOX0xFR0FDWV9IT1NUX1BST01QVBAPEiMKH1BST01QVF9PUklHSU5fR05TX1NPQ0tFVFNfQ0xPU0UQEBIpCiVQUk9NUFRfT1JJR0lOX0xFR0FDWV9IT1NUX0VWQUxfUkVTVUxUEBESIAocUFJPTVBUX09SSUdJTl9FWFBMQUlOX0NPTkZJRxASEiIKHlBST01QVF9PUklHSU5fV0VCQVBQX1VTRVJfU0VOVBATEiQKIFBST01QVF9PUklHSU5fV0VCQVBQX0NBUkRfQUNUSU9OEBQSIwofUFJPTVBUX09SSUdJTl9XT1JLU1BBQ0VfQ1JFQVRFRBAVEicKI1BST01QVF9PUklHSU5fTUVSR0VfQ09ORkxJQ1RfUkVQQUlSEBYSIwofUFJPTVBUX09SSUdJTl9NRVJHRV9URVNUX1JFUEFJUhAXEiUKIVBST01QVF9PUklHSU5fTUVSR0VfQkVGT1JFX0FDVElPThAYEiQKIFBST01QVF9PUklHSU5fTUVSR0VfQUZURVJfQUNUSU9OEBkSLQopUFJPTVBUX09SSUdJTl9NRVJHRV9ESVNQTEFDRURfVFVSTl9SRVNVTUUQGhImCiJQUk9NUFRfT1JJR0lOX1JFU1VNRV9BRlRFUl9SRVNUQVJUEBwSIAocUFJPTVBUX09SSUdJTl9WRU5ET1JfU1RBUlRFRBAdEiEKHVBST01QVF9PUklHSU5fTElOS19VTlJFU09MVkVEEB4SIAocUFJPTVBUX09SSUdJTl9NRVJHRV9IQU5EQkFDSxAfEiYKIlBST01QVF9PUklHSU5fV09SS1NQQUNFX1JFVEFSR0VURUQQIBIcChhQUk9NUFRfT1JJR0lOX01FUkdFX1BJQ0sQIRIlCiFQUk9NUFRfT1JJR0lOX01FUkdFX0NPTVBBQ1RfQUZURVIQIhIpCiVQUk9NUFRfT1JJR0lOX1dPUktTUEFDRV9DUkVBVEVfRkFJTEVEECMSJAogUFJPTVBUX09SSUdJTl9NRVJHRV9RVUVVRV9OT1RJQ0UQJBIeChpQUk9NUFRfT1JJR0lOX01FUkdFX1JFVkVSVBAlEioKJlBST01QVF9PUklHSU5fREVSSVZFRF9XT1JLU1BBQ0VfTk9USUNFECYSHgoaUFJPTVBUX09SSUdJTl9PV05FUl9OT1RJQ0UQJxIiCh5QUk9NUFRfT1JJR0lOX1dPUktTUEFDRV9OT1RJQ0UQKEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM");
 
 /**
  * Why a prompt entered the agent-repl submit pipeline.
@@ -226,7 +226,7 @@ export enum PromptOrigin {
 
   /**
    * The daemon's report to a workspace's session that a merge it asked for
-   * has ended: an ASYNC merge (agentrepl.v1.MergeWorkspaceAsync) that landed
+   * has ended: an ASYNC merge (agentrepl.v1.CreateWorkspaceAsyncMerge) that landed
    * or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
    * failed — a one-shot that lands closes the workspace and is not reported.
    * It says that the branch landed, or what failed and where the user
@@ -254,7 +254,7 @@ export enum PromptOrigin {
   /**
    * The daemon's resolving brief: the first turn of an ASYNC merge workspace
    * whose request carries an instruction
-   * (agentrepl.v1.MergeWorkspaceAsync.instruction). It carries the requesting
+   * (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction). It carries the requesting
    * agent's instruction, wrapped in the brief that tells the merge agent its
    * worktree is on the merge's branch and has it prepare that branch as the
    * instruction says. The turn is the merge's own: its rows draw under the
@@ -268,7 +268,7 @@ export enum PromptOrigin {
   /**
    * The daemon's `/compact` of a requester whose ASYNC merge landed and asked
    * to compact after it
-   * (agentrepl.v1.MergeWorkspaceAsync.compact_after).
+   * (agentrepl.v1.CreateWorkspaceAsyncMerge.compact_after).
    * Submitted through the prompt queue right after the landed handback, so it
    * runs behind the handback's turn. It is a context cut like any `/compact`:
    * no prompt bubble, and the compaction's status, footer and separator drawn
@@ -327,6 +327,42 @@ export enum PromptOrigin {
    * @generated from enum value: PROMPT_ORIGIN_MERGE_REVERT = 37;
    */
   MERGE_REVERT = 37,
+
+  /**
+   * The daemon's brief notice to a workspace that another workspace was
+   * derived from it -- cut from its branch, or created with its conversation
+   * forked -- sent when the derived workspace is created, when it lands, and
+   * when it closes without landing (one combined notice when it is both). It
+   * names the derived workspace and what happened. Submitted as a deferred
+   * prompt, like a merge-queue notice, and drawn as NO row: it is the daemon's
+   * word to the agent. Never sent to the workspace that asked for the create.
+   *
+   * @generated from enum value: PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE = 38;
+   */
+  DERIVED_WORKSPACE_NOTICE = 38,
+
+  /**
+   * The requester's notice to a child's OWNER when the child does not carry
+   * the owner's context (agentrepl.v1.WorkspaceTopologyChild.owner_notice):
+   * the requester's own words, followed by the daemon's addendum that landing
+   * the child's work into the owner is the owner's responsibility and how to
+   * do it. Submitted as a deferred prompt once the child exists, and drawn as
+   * an ordinary prompt bubble, since the user follows the owner's arbitration
+   * from its feed.
+   *
+   * @generated from enum value: PROMPT_ORIGIN_OWNER_NOTICE = 39;
+   */
+  OWNER_NOTICE = 39,
+
+  /**
+   * A notice that a workspace a subscriber follows changed
+   * (agentrepl.v1.SubscribeWorkspaceRequest): the change, and the followed
+   * workspace's status after it. Submitted and drawn as a merge-queue notice
+   * is.
+   *
+   * @generated from enum value: PROMPT_ORIGIN_WORKSPACE_NOTICE = 40;
+   */
+  WORKSPACE_NOTICE = 40,
 }
 
 /**

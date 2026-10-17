@@ -1,0 +1,40 @@
+// endpoint_get_merge_queue_status.proto — GetMergeQueueStatus: merge queues'
+// status, now. AGENT API section. A pull, answered inside the caller's turn
+// (where is my merge right now? did that move take effect?). Following a
+// queue's changes is SubscribeMergeQueue, which answers with the same status
+// and then sends a notice on each change.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/merge_queue_status.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GetMergeQueueStatusRequest {
+  // WHICH repository's queue. UNSET = every registered repository's, an empty
+  // queue included.
+  optional workspace.v1.RepositoryRef repository = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message GetMergeQueueStatusResponse {
+  oneof result {
+    GetMergeQueueStatusSuccess success = 1;
+    GetMergeQueueStatusError error = 2;
+  }
+}
+// The queues asked for, one per repository, in registry order.
+message GetMergeQueueStatusSuccess {
+  repeated MergeQueueStatus queues = 1;
+}
+message GetMergeQueueStatusError {
+  oneof cause {
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    GetMergeQueueStatusUnknownRepository unknown_repository = 1;
+  }
+}
+// Empty: the echoed ref is the only identity involved.
+message GetMergeQueueStatusUnknownRepository {}

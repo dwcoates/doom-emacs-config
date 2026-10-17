@@ -108,7 +108,7 @@ const (
 	// interrupting the running turn.
 	PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED PromptOrigin = 30
 	// The daemon's report to a workspace's session that a merge it asked for
-	// has ended: an ASYNC merge (agentrepl.v1.MergeWorkspaceAsync) that landed
+	// has ended: an ASYNC merge (agentrepl.v1.CreateWorkspaceAsyncMerge) that landed
 	// or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
 	// failed — a one-shot that lands closes the workspace and is not reported.
 	// It says that the branch landed, or what failed and where the user
@@ -126,7 +126,7 @@ const (
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED PromptOrigin = 32
 	// The daemon's resolving brief: the first turn of an ASYNC merge workspace
 	// whose request carries an instruction
-	// (agentrepl.v1.MergeWorkspaceAsync.instruction). It carries the requesting
+	// (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction). It carries the requesting
 	// agent's instruction, wrapped in the brief that tells the merge agent its
 	// worktree is on the merge's branch and has it prepare that branch as the
 	// instruction says. The turn is the merge's own: its rows draw under the
@@ -135,7 +135,7 @@ const (
 	PromptOrigin_PROMPT_ORIGIN_MERGE_PICK PromptOrigin = 33
 	// The daemon's `/compact` of a requester whose ASYNC merge landed and asked
 	// to compact after it
-	// (agentrepl.v1.MergeWorkspaceAsync.compact_after).
+	// (agentrepl.v1.CreateWorkspaceAsyncMerge.compact_after).
 	// Submitted through the prompt queue right after the landed handback, so it
 	// runs behind the handback's turn. It is a context cut like any `/compact`:
 	// no prompt bubble, and the compaction's status, footer and separator drawn
@@ -176,6 +176,27 @@ const (
 	// gate on the very bring-up the brief follows. Drawn as an ordinary prompt
 	// bubble, so the user follows the revert from the workspace's feed.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT PromptOrigin = 37
+	// The daemon's brief notice to a workspace that another workspace was
+	// derived from it -- cut from its branch, or created with its conversation
+	// forked -- sent when the derived workspace is created, when it lands, and
+	// when it closes without landing (one combined notice when it is both). It
+	// names the derived workspace and what happened. Submitted as a deferred
+	// prompt, like a merge-queue notice, and drawn as NO row: it is the daemon's
+	// word to the agent. Never sent to the workspace that asked for the create.
+	PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE PromptOrigin = 38
+	// The requester's notice to a child's OWNER when the child does not carry
+	// the owner's context (agentrepl.v1.WorkspaceTopologyChild.owner_notice):
+	// the requester's own words, followed by the daemon's addendum that landing
+	// the child's work into the owner is the owner's responsibility and how to
+	// do it. Submitted as a deferred prompt once the child exists, and drawn as
+	// an ordinary prompt bubble, since the user follows the owner's arbitration
+	// from its feed.
+	PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE PromptOrigin = 39
+	// A notice that a workspace a subscriber follows changed
+	// (agentrepl.v1.SubscribeWorkspaceRequest): the change, and the followed
+	// workspace's status after it. Submitted and drawn as a merge-queue notice
+	// is.
+	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE PromptOrigin = 40
 )
 
 // Enum value maps for PromptOrigin.
@@ -218,6 +239,9 @@ var (
 		35: "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED",
 		36: "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE",
 		37: "PROMPT_ORIGIN_MERGE_REVERT",
+		38: "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE",
+		39: "PROMPT_ORIGIN_OWNER_NOTICE",
+		40: "PROMPT_ORIGIN_WORKSPACE_NOTICE",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -257,6 +281,9 @@ var (
 		"PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED":     35,
 		"PROMPT_ORIGIN_MERGE_QUEUE_NOTICE":          36,
 		"PROMPT_ORIGIN_MERGE_REVERT":                37,
+		"PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE":    38,
+		"PROMPT_ORIGIN_OWNER_NOTICE":                39,
+		"PROMPT_ORIGIN_WORKSPACE_NOTICE":            40,
 	}
 )
 
@@ -291,7 +318,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x8b\v\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xfb\v\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -330,7 +357,10 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x12)\n" +
 	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#\x12$\n" +
 	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$\x12\x1e\n" +
-	"\x1aPROMPT_ORIGIN_MERGE_REVERT\x10%B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1aPROMPT_ORIGIN_MERGE_REVERT\x10%\x12*\n" +
+	"&PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE\x10&\x12\x1e\n" +
+	"\x1aPROMPT_ORIGIN_OWNER_NOTICE\x10'\x12\"\n" +
+	"\x1ePROMPT_ORIGIN_WORKSPACE_NOTICE\x10(B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

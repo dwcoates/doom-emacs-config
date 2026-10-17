@@ -1,0 +1,107 @@
+// endpoint_subscribe_workspace.proto — SubscribeWorkspace: tell one
+// workspace's agent when another workspace changes. AGENT API section.
+//
+// FOR AGENTS, NOT PROGRAMS. An agent's call ends with its command, long before
+// the change it waits for, so a subscription is not a stream: the daemon holds
+// it and delivers each notice to the SUBSCRIBER's session as a deferred prompt
+// of origin conversation.v1.PromptOrigin.PROMPT_ORIGIN_WORKSPACE_NOTICE, the
+// path a merge-queue notice takes: it waits behind a running turn, wakes an
+// idle agent, and the feed draws no row for it. Each notice names the change
+// and carries the followed workspace's status after it (WorkspaceStatus).
+//
+// NOTHING SLIPS BETWEEN READING AND FOLLOWING. The answer carries the followed
+// workspace's status as it stands when the subscription is taken, and every
+// change after that answer is noticed.
+//
+// SCOPE AND LIFETIME. A subscriber holds AT MOST ONE subscription per followed
+// workspace; subscribing again replaces its events. A subscription ends when
+// the subscriber unsubscribes, when the SUBSCRIBER closes however it closes
+// (re-opening it does not restore it), and when the followed workspace is
+// forgotten or nuked. It is DURABLE across a daemon restart and a handover. A
+// change made while no daemon serves is never noticed; the next notice's status
+// carries its effect.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_status.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SubscribeWorkspaceRequest {
+  // The workspace whose agent receives the notices: the caller's own when an
+  // agent subscribes itself. Must be open (`subscriber_closed`).
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The workspace followed. May be the subscriber's own child, its owner, or
+  // any workspace of any registered repository; may not be the subscriber.
+  workspace.v1.WorkspaceRef followed = 2;
+  // The changes that produce a notice. REQUIRED: at least one; repeats are
+  // ignored.
+  repeated WorkspaceNoticeEvent events = 3;
+}
+
+// A change of a followed workspace that a subscription may ask to be told
+// about. A closed set of event kinds, not a state: a notice names the kind and
+// carries the status the change left.
+enum WorkspaceNoticeEvent {
+  // Never sent; a request that carries it is refused as invalid.
+  WORKSPACE_NOTICE_EVENT_UNSPECIFIED = 0;
+  // A turn started.
+  WORKSPACE_NOTICE_EVENT_TURN_STARTED = 1;
+  // A turn ended, however it ended.
+  WORKSPACE_NOTICE_EVENT_TURN_ENDED = 2;
+  // A question or a permission was opened and waits on the user.
+  WORKSPACE_NOTICE_EVENT_NEEDS_INPUT = 3;
+  // The followed workspace's branch landed in its merge target.
+  WORKSPACE_NOTICE_EVENT_LANDED = 4;
+  // The followed workspace closed, however it closed.
+  WORKSPACE_NOTICE_EVENT_CLOSED = 5;
+}
+
+// THE ARM IS THE OUTCOME.
+message SubscribeWorkspaceResponse {
+  oneof result {
+    SubscribeWorkspaceSuccess success = 1;
+    SubscribeWorkspaceError error = 2;
+  }
+}
+// Subscribed, with the followed workspace's status as it stands now.
+message SubscribeWorkspaceSuccess {
+  // Whether the subscription is new or replaced one already held.
+  SubscribeWorkspaceSuccessTaken taken = 1;
+  // The followed workspace's status when the subscription was taken.
+  WorkspaceStatus status = 2;
+}
+// New or replacing.
+message SubscribeWorkspaceSuccessTaken {
+  // THE ARM IS WHICH.
+  oneof taken {
+    // The subscriber held no subscription to this workspace.
+    SubscribeWorkspaceSuccessTakenSubscribed subscribed = 1;
+    // The subscriber's subscription to this workspace now has these events.
+    SubscribeWorkspaceSuccessTakenResubscribed resubscribed = 2;
+  }
+}
+// A new subscription. No fields.
+message SubscribeWorkspaceSuccessTakenSubscribed {}
+// A replaced subscription. No fields.
+message SubscribeWorkspaceSuccessTakenResubscribed {}
+message SubscribeWorkspaceError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SubscribeWorkspaceUnknownSubscriber unknown_subscriber = 1;
+    // The followed workspace is not in the daemon's registry.
+    SubscribeWorkspaceUnknownFollowed unknown_followed = 2;
+    // The subscriber is closed: it runs no agent to tell, and a close is what
+    // ends a subscription, so one taken while closed would never end.
+    SubscribeWorkspaceSubscriberClosed subscriber_closed = 3;
+    // The followed workspace is the subscriber itself.
+    SubscribeWorkspaceFollowsItself follows_itself = 4;
+  }
+}
+message SubscribeWorkspaceUnknownSubscriber {}
+message SubscribeWorkspaceUnknownFollowed {}
+message SubscribeWorkspaceSubscriberClosed {}
+message SubscribeWorkspaceFollowsItself {}

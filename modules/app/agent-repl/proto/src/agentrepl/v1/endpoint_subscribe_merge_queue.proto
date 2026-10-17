@@ -1,0 +1,121 @@
+// endpoint_subscribe_merge_queue.proto — SubscribeMergeQueue: tell one
+// workspace's agent about a merge queue's changes as they happen, so it can
+// wait on the queue (land after the queue drains, report a landing to the
+// user) without polling it. AGENT API section.
+//
+// DELIVERY: each notice is submitted to the subscriber's session as a
+// deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, the same
+// path an async merge's handback takes: it waits behind a running turn, wakes
+// an idle agent, and the feed draws no row for it. Every notice names the
+// changes it reports and carries the queue AS IT STANDS AFTER THEM
+// (MergeQueueStatus).
+//
+// SCOPE: a workspace holds AT MOST ONE subscription per scope -- one
+// repository's queue, or every repository's -- and subscribing again in a
+// scope it holds replaces that subscription's detail. A scoped and an
+// unscoped subscription may stand together; a change both admit is delivered
+// once, as one notice.
+//
+// LIFETIME: a subscription ends when its workspace unsubscribes in its scope,
+// and when the workspace closes, however it closes (closed, killed, nuked, or
+// closed by its own landing); re-opening the workspace does not restore it.
+// It is DURABLE across a daemon restart and a handover: a landing's own deploy
+// restarts the daemon, so a subscription that a restart dropped would end at
+// the very change it exists to report. A change made while no daemon serves
+// is never reported; the next notice's snapshot carries its effect.
+//
+// NOTHING SLIPS BETWEEN READING AND FOLLOWING. The answer carries the queues
+// in scope as they stand when the subscription is taken (MergeQueueStatus,
+// the same status every notice carries), and every change after that answer
+// is noticed.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/merge_queue_status.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SubscribeMergeQueueRequest {
+  // The workspace whose agent receives the notices: the caller's own
+  // workspace when an agent subscribes itself.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // WHICH repository's queue. UNSET = every repository's queue, including a
+  // repository whose queue is empty or does not exist yet.
+  optional workspace.v1.RepositoryRef repository = 2;
+  // Which changes the subscriber is told about.
+  SubscribeMergeQueueDetail detail = 3;
+}
+// How much of a queue's change a subscription reports.
+message SubscribeMergeQueueDetail {
+  // THE ARM IS THE LEVEL. The levels nest -- every depletion is an advance,
+  // and every advance is a change -- so a subscriber picks the coarsest one
+  // that still wakes it for what it waits on.
+  oneof level {
+    // Every change of the queue.
+    SubscribeMergeQueueEveryChange every_change = 1;
+    // Only a merge leaving the queue.
+    SubscribeMergeQueueAdvances advances = 2;
+    // Only the queue running out of merges.
+    SubscribeMergeQueueDepletes depletes = 3;
+  }
+}
+// EVERY CHANGE: a merge put in line, started, moved to a new step, landed,
+// failed, or taken off the queue (evicted, dequeued, or abandoned under its
+// closing workspace or a restart); the queue's order changed by a move; and
+// the queue paused or resumed. Several changes made at once arrive as one
+// notice per change, each carrying the queue as it stood after its own.
+message SubscribeMergeQueueEveryChange {}
+// ADVANCES: a merge leaves the queue -- landed, failed, or taken off it. A
+// merge's start, its steps, a reorder and a pause are not reported.
+message SubscribeMergeQueueAdvances {}
+// DEPLETES: a merge leaves the queue and no merge is left in line, reported
+// once per emptying. A queue that empties by a removal of a merge never put
+// in line is not reported, since nothing left the line.
+message SubscribeMergeQueueDepletes {}
+
+// THE ARM IS THE OUTCOME.
+message SubscribeMergeQueueResponse {
+  oneof result {
+    SubscribeMergeQueueSuccess success = 1;
+    SubscribeMergeQueueError error = 2;
+  }
+}
+// Subscribed, with the queues in scope as they stand now.
+message SubscribeMergeQueueSuccess {
+  // Whether the subscription is new or replaced one already held in scope.
+  SubscribeMergeQueueSuccessTaken taken = 1;
+  // The queues in scope when the subscription was taken, one per repository.
+  repeated MergeQueueStatus queues = 2;
+}
+// New or replacing.
+message SubscribeMergeQueueSuccessTaken {
+  // THE ARM IS WHICH.
+  oneof taken {
+    // The subscriber held no subscription in this scope.
+    SubscribeMergeQueueSuccessTakenSubscribed subscribed = 1;
+    // The subscriber's subscription in this scope now has this detail.
+    SubscribeMergeQueueSuccessTakenResubscribed resubscribed = 2;
+  }
+}
+// A new subscription. No fields.
+message SubscribeMergeQueueSuccessTakenSubscribed {}
+// A replaced subscription. No fields.
+message SubscribeMergeQueueSuccessTakenResubscribed {}
+message SubscribeMergeQueueError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SubscribeMergeQueueUnknownSubscriber unknown_subscriber = 1;
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    SubscribeMergeQueueUnknownRepository unknown_repository = 2;
+    // The subscriber is closed: it runs no agent to tell, and a close is what
+    // ends a subscription, so one taken while closed would never end.
+    SubscribeMergeQueueSubscriberClosed subscriber_closed = 3;
+  }
+}
+message SubscribeMergeQueueUnknownSubscriber {}
+message SubscribeMergeQueueUnknownRepository {}
+message SubscribeMergeQueueSubscriberClosed {}

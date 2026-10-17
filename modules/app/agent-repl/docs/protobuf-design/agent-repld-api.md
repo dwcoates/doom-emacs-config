@@ -31,9 +31,10 @@ offered.
    Consequences: no `optional` field may stand for an implicit choice (the
    context origin is a required oneof with a `fresh` arm, not an unset
    field). Reopens: the "optional fork source, unset is fresh" ruling.
-   (UNCONFIRMED, settled during the proto increments: whether this reopening
-   holds, and whether ancillary settings such as model and priority keep their
-   defaults.)
+   Settled 2026-10-17 (owner delegated the contract design): the reopening
+   holds; ancillary settings (model, priority, ungated consent, op id) keep
+   their optional fields, since none of them decides where work comes from,
+   lands, or what context it starts with.
 2. THE DAEMON ENFORCES THE RULES. Every combination the rules refuse is
    refused by the daemon; skills and proto comments state the same rules but
    are never the enforcement. Consequences: wherever the daemon lacks the
@@ -78,9 +79,102 @@ offered.
 - Which existing fields and features are replaced or removed (including queue
   racing) is decided during the proto increments, not up front.
 
+## Iteration sequence (settled 2026-10-17)
+
+Transport (the existing ConnectRPC `agentrepl.v1.AgentRepl`), then groups by
+command noun (Workspaces with landing and status; Merge queue; Editor;
+Runtime), then each group's rpc list, then shared conventions (the existing
+success-or-failure result; refusals as error arms), then shapes one rpc at a
+time. The owner then delegated every remaining design ruling to the agent
+("I think you got all the ideas, implement yourself"), so the shapes below were
+decided and landed by the agent without per-shape review; each entry records
+why, so the owner can revisit any of them.
+
 ## Landed changes
 
-(none yet)
+All on branch `contract/agent-repld-api`, 2026-10-17.
+
+1. TOPOLOGY IS STRUCTURAL (`workspace_topology.proto`). A standard or one-shot
+   create carries `WorkspaceTopology`, whose arm names both the branch source
+   and the merge target: `primary` (main onto main) or `child` (an owner's
+   branch into that owner). The refused combinations are unrepresentable
+   rather than validated. This refines the earlier "three independent fields":
+   the three choices are still each always made, but source and target are
+   one choice because the ownership rule ties each source to one target.
+   `base_ref` is retired: a workspace is always cut from its source's tip.
+2. CONTEXT ORIGIN IS REQUIRED (`WorkspaceContextOrigin`: `fresh` or
+   `fork{workspace}`), independent of the topology. Replaces `parent.fork`
+   and `fork_source`; `CreateWorkspaceParent`, `CreateWorkspaceFork` and
+   `CreateWorkspaceForkSource` are deleted.
+3. REQUESTER IS REQUIRED (`WorkspaceRequester`: `user` or `workspace`) on
+   CreateWorkspace and MergeWorkspace, because notices, reports and the
+   owner-lands rule depend on who asked.
+4. OWNER NOTICE. `WorkspaceTopologyChild.owner_notice` is required exactly
+   when the context is not a fork of the owner, and refused otherwise; such a
+   child is refused as a one-shot and refused landing itself. Delivered with
+   the daemon's addendum as `PROMPT_ORIGIN_OWNER_NOTICE`.
+5. DERIVED-WORKSPACE NOTICES. `PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE`: brief
+   daemon notices to workspaces branched from or forked from, on create, land,
+   and close without landing. No request field: the daemon derives them.
+6. ASYNC MERGE MOVES INTO CREATEWORKSPACE as a third form,
+   `CreateWorkspaceAsyncMerge`. Its source is a branch NO workspace owns plus
+   its maker (`subagent{agent_id}`, verified against the transcript on disk,
+   or `workspace{ref}` for a branch an agent cut by hand), its target is
+   `primary` or `maker`, and its context must fork the maker. Answered with a
+   new `async_merge_accepted` arm because its workspace does not exist until
+   the merge starts; `op_id` is refused beside it. DECISION beyond the
+   discussion: a hand-cut branch (the common "land a tangential fix while my
+   branch carries other work") is kept as a maker kind, because the rules
+   otherwise left it nowhere to land. DECISION: the merge workspace's
+   readiness stays daemon-driven (its resolving turn settles, then the queue
+   lands it), rather than its agent calling MergeWorkspace, because the
+   daemon already knows when that turn ends and a step the agent must
+   remember can be forgotten.
+7. MERGEWORKSPACE LANDS ONLY A WORKSPACE'S OWN BRANCH, in the target recorded
+   at creation; the `async` arm is retired. New: `requester`, required
+   `placement` (`MergeQueuePlacement` back/front, which before existed only in
+   the command file), and refusals `owner_lands` and `requester_may_not_land`.
+8. VERSION-INCREMENT MESSAGES MOVED unchanged into
+   `merge_version_increment.proto` (pure move, same names), since both
+   MergeWorkspace and the async merge carry them.
+9. STATUS. `WorkspaceStatus` and `MergeQueueStatus` (agent-facing, not views),
+   read by `GetWorkspaceStatus` and `GetMergeQueueStatus`. DECISION: no
+   streaming variant yet; programs already follow the roster and footer
+   streams, and a stream can be added later carrying the same status.
+10. SUBSCRIPTIONS. `SubscribeWorkspace`/`UnsubscribeWorkspace` (events: turn
+    started, turn ended, needs input, landed, closed; notices as
+    `PROMPT_ORIGIN_WORKSPACE_NOTICE`) and `SubscribeMergeQueue`/
+    `UnsubscribeMergeQueue` (moved out of UpdateMergeQueue with the same
+    detail levels). Each subscribe answers with the current status, so
+    nothing slips between reading and following. "Not subscribed" is now a
+    success answer, per the outcome convention.
+11. ROLLOUTS. `UpdateRollouts` (hold/release) replaces UpdateMergeQueue's
+    rollout arms; release answers `up_to_date`, `rolling_out{commit}` or
+    `start_failed{detail}`.
+12. EDITOR EVAL. `EvaluateInEditor` (agent → daemon), push arm
+    `WatchHostWorkspaceResponse.evaluate` (daemon → Emacs, with a daemon-minted
+    `EditorEvaluationToken`), and `AnswerEditorEvaluation` (Emacs → daemon),
+    sharing `EditorEvaluationOutcome` (value, read error, eval error, plus
+    `*Messages*` lines). This is the first daemon→Emacs request that is
+    answered; every earlier host push was a fact nothing acked.
+
+Not changed, deliberately: queue racing (its removal is its own change);
+`SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
+when it runs, and `agent-repld workspace set` calls it); hiding and showing
+(`SetWorkspaceHidden` already serves `workspace set hidden`, per the owner's
+request that the API and the workspace skill cover it).
+
+Consequences, accepted:
+
+- Every caller of CreateWorkspace and MergeWorkspace breaks: the editor
+  (`lisp/verbs.el`, `lisp/wire-verbs.el` and the fake daemon), the webapp
+  (`sidebar/create.ts`, `sidebar/roster.ts`, `feed/bubble-more.ts`), the
+  daemon's command-file ingress (being removed) and `agent-repld merge-queue`.
+- The daemon must locate a subagent's transcript under a workspace's session
+  to verify an async merge's maker (vetting register item 1).
+- The daemon must hold durable workspace subscriptions alongside the
+  merge-queue ones, and correlate editor evaluations by token with a
+  deadline.
 
 ## No defaults (ruled 2026-10-16)
 

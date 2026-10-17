@@ -193,6 +193,9 @@ const (
 	// AgentReplUpdateMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateMergeQueue RPC.
 	AgentReplUpdateMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UpdateMergeQueue"
+	// AgentReplUpdateRolloutsProcedure is the fully-qualified name of the AgentRepl's UpdateRollouts
+	// RPC.
+	AgentReplUpdateRolloutsProcedure = "/agentrepl.v1.AgentRepl/UpdateRollouts"
 	// AgentReplDaemonHealthProcedure is the fully-qualified name of the AgentRepl's DaemonHealth RPC.
 	AgentReplDaemonHealthProcedure = "/agentrepl.v1.AgentRepl/DaemonHealth"
 	// AgentReplSessionHealthProcedure is the fully-qualified name of the AgentRepl's SessionHealth RPC.
@@ -272,6 +275,30 @@ const (
 	// AgentReplRefreshNewsDigestProcedure is the fully-qualified name of the AgentRepl's
 	// RefreshNewsDigest RPC.
 	AgentReplRefreshNewsDigestProcedure = "/agentrepl.v1.AgentRepl/RefreshNewsDigest"
+	// AgentReplGetWorkspaceStatusProcedure is the fully-qualified name of the AgentRepl's
+	// GetWorkspaceStatus RPC.
+	AgentReplGetWorkspaceStatusProcedure = "/agentrepl.v1.AgentRepl/GetWorkspaceStatus"
+	// AgentReplGetMergeQueueStatusProcedure is the fully-qualified name of the AgentRepl's
+	// GetMergeQueueStatus RPC.
+	AgentReplGetMergeQueueStatusProcedure = "/agentrepl.v1.AgentRepl/GetMergeQueueStatus"
+	// AgentReplSubscribeWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// SubscribeWorkspace RPC.
+	AgentReplSubscribeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/SubscribeWorkspace"
+	// AgentReplUnsubscribeWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// UnsubscribeWorkspace RPC.
+	AgentReplUnsubscribeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeWorkspace"
+	// AgentReplSubscribeMergeQueueProcedure is the fully-qualified name of the AgentRepl's
+	// SubscribeMergeQueue RPC.
+	AgentReplSubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/SubscribeMergeQueue"
+	// AgentReplUnsubscribeMergeQueueProcedure is the fully-qualified name of the AgentRepl's
+	// UnsubscribeMergeQueue RPC.
+	AgentReplUnsubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeMergeQueue"
+	// AgentReplEvaluateInEditorProcedure is the fully-qualified name of the AgentRepl's
+	// EvaluateInEditor RPC.
+	AgentReplEvaluateInEditorProcedure = "/agentrepl.v1.AgentRepl/EvaluateInEditor"
+	// AgentReplAnswerEditorEvaluationProcedure is the fully-qualified name of the AgentRepl's
+	// AnswerEditorEvaluation RPC.
+	AgentReplAnswerEditorEvaluationProcedure = "/agentrepl.v1.AgentRepl/AnswerEditorEvaluation"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -334,6 +361,7 @@ var (
 	agentReplUpdateShutdownScheduleMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
 	agentReplDeployMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("Deploy")
 	agentReplUpdateMergeQueueMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
+	agentReplUpdateRolloutsMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateRollouts")
 	agentReplDaemonHealthMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ClientLog")
@@ -364,6 +392,14 @@ var (
 	agentReplReportPageDrawnMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportPageDrawn")
 	agentReplDismissNewsDigestMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("DismissNewsDigest")
 	agentReplRefreshNewsDigestMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RefreshNewsDigest")
+	agentReplGetWorkspaceStatusMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceStatus")
+	agentReplGetMergeQueueStatusMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("GetMergeQueueStatus")
+	agentReplSubscribeWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
+	agentReplUnsubscribeWorkspaceMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("UnsubscribeWorkspace")
+	agentReplSubscribeMergeQueueMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
+	agentReplUnsubscribeMergeQueueMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
+	agentReplEvaluateInEditorMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
+	agentReplAnswerEditorEvaluationMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("AnswerEditorEvaluation")
 )
 
 // AgentReplClient is a client for the agentrepl.v1.AgentRepl service.
@@ -455,7 +491,9 @@ type AgentReplClient interface {
 	// Remove a CLOSED workspace's registry record; every file survives. The
 	// undo for a registration. See endpoint_forget_workspace.proto.
 	ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error)
-	// Enqueue this workspace's merge; its life from there is the feed's bubble.
+	// Land this workspace's own branch in the target fixed at its creation;
+	// its life from there is the feed's bubble. See
+	// endpoint_merge_workspace.proto.
 	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
@@ -547,6 +585,9 @@ type AgentReplClient interface {
 	// Operator control of the merge queue. See
 	// endpoint_update_merge_queue.proto.
 	UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error)
+	// Hold or release the runtime's rollouts; releasing deploys what landed
+	// during the hold. See endpoint_update_rollouts.proto.
+	UpdateRollouts(context.Context, *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -644,6 +685,29 @@ type AgentReplClient interface {
 	// Makes a digest now instead of at the daily cadence. See
 	// endpoint_refresh_news_digest.proto.
 	RefreshNewsDigest(context.Context, *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error)
+	// ---- AGENT API: what an agent reads and follows ----
+	// One workspace's status, now. See endpoint_get_workspace_status.proto.
+	GetWorkspaceStatus(context.Context, *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error)
+	// Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
+	GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error)
+	// Tell one workspace's agent when another workspace changes, answering with
+	// its status now. See endpoint_subscribe_workspace.proto.
+	SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error)
+	// End a workspace subscription. See endpoint_unsubscribe_workspace.proto.
+	UnsubscribeWorkspace(context.Context, *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error)
+	// Tell one workspace's agent about a merge queue's changes, answering with
+	// the queue now. See endpoint_subscribe_merge_queue.proto.
+	SubscribeMergeQueue(context.Context, *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error)
+	// End a merge-queue subscription. See
+	// endpoint_unsubscribe_merge_queue.proto.
+	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// ---- EDITOR: elisp evaluated in the running editor ----
+	// Evaluate elisp in the running editor and answer with the result. See
+	// endpoint_evaluate_in_editor.proto.
+	EvaluateInEditor(context.Context, *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error)
+	// The editor's answer to a pushed evaluation. See
+	// endpoint_answer_editor_evaluation.proto.
+	AnswerEditorEvaluation(context.Context, *connect.Request[v1.AnswerEditorEvaluationRequest]) (*connect.Response[v1.AnswerEditorEvaluationResponse], error)
 }
 
 // NewAgentReplClient constructs a client for the agentrepl.v1.AgentRepl service. By default, it
@@ -998,6 +1062,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdateMergeQueueMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		updateRollouts: connect.NewClient[v1.UpdateRolloutsRequest, v1.UpdateRolloutsResponse](
+			httpClient,
+			baseURL+AgentReplUpdateRolloutsProcedure,
+			connect.WithSchema(agentReplUpdateRolloutsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		daemonHealth: connect.NewClient[v1.DaemonHealthRequest, v1.DaemonHealthResponse](
 			httpClient,
 			baseURL+AgentReplDaemonHealthProcedure,
@@ -1178,6 +1248,54 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplRefreshNewsDigestMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getWorkspaceStatus: connect.NewClient[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse](
+			httpClient,
+			baseURL+AgentReplGetWorkspaceStatusProcedure,
+			connect.WithSchema(agentReplGetWorkspaceStatusMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		getMergeQueueStatus: connect.NewClient[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse](
+			httpClient,
+			baseURL+AgentReplGetMergeQueueStatusProcedure,
+			connect.WithSchema(agentReplGetMergeQueueStatusMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		subscribeWorkspace: connect.NewClient[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplSubscribeWorkspaceProcedure,
+			connect.WithSchema(agentReplSubscribeWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		unsubscribeWorkspace: connect.NewClient[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplUnsubscribeWorkspaceProcedure,
+			connect.WithSchema(agentReplUnsubscribeWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		subscribeMergeQueue: connect.NewClient[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse](
+			httpClient,
+			baseURL+AgentReplSubscribeMergeQueueProcedure,
+			connect.WithSchema(agentReplSubscribeMergeQueueMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		unsubscribeMergeQueue: connect.NewClient[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse](
+			httpClient,
+			baseURL+AgentReplUnsubscribeMergeQueueProcedure,
+			connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		evaluateInEditor: connect.NewClient[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse](
+			httpClient,
+			baseURL+AgentReplEvaluateInEditorProcedure,
+			connect.WithSchema(agentReplEvaluateInEditorMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		answerEditorEvaluation: connect.NewClient[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse](
+			httpClient,
+			baseURL+AgentReplAnswerEditorEvaluationProcedure,
+			connect.WithSchema(agentReplAnswerEditorEvaluationMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -1240,6 +1358,7 @@ type agentReplClient struct {
 	updateShutdownSchedule   *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
 	deploy                   *connect.Client[v1.DeployRequest, v1.DeployResponse]
 	updateMergeQueue         *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
+	updateRollouts           *connect.Client[v1.UpdateRolloutsRequest, v1.UpdateRolloutsResponse]
 	daemonHealth             *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth            *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
@@ -1270,6 +1389,14 @@ type agentReplClient struct {
 	reportPageDrawn          *connect.Client[v1.ReportPageDrawnRequest, v1.ReportPageDrawnResponse]
 	dismissNewsDigest        *connect.Client[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse]
 	refreshNewsDigest        *connect.Client[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse]
+	getWorkspaceStatus       *connect.Client[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse]
+	getMergeQueueStatus      *connect.Client[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse]
+	subscribeWorkspace       *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
+	unsubscribeWorkspace     *connect.Client[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse]
+	subscribeMergeQueue      *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
+	unsubscribeMergeQueue    *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
+	evaluateInEditor         *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
+	answerEditorEvaluation   *connect.Client[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse]
 }
 
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
@@ -1557,6 +1684,11 @@ func (c *agentReplClient) UpdateMergeQueue(ctx context.Context, req *connect.Req
 	return c.updateMergeQueue.CallUnary(ctx, req)
 }
 
+// UpdateRollouts calls agentrepl.v1.AgentRepl.UpdateRollouts.
+func (c *agentReplClient) UpdateRollouts(ctx context.Context, req *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error) {
+	return c.updateRollouts.CallUnary(ctx, req)
+}
+
 // DaemonHealth calls agentrepl.v1.AgentRepl.DaemonHealth.
 func (c *agentReplClient) DaemonHealth(ctx context.Context, req *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error) {
 	return c.daemonHealth.CallUnary(ctx, req)
@@ -1707,6 +1839,46 @@ func (c *agentReplClient) RefreshNewsDigest(ctx context.Context, req *connect.Re
 	return c.refreshNewsDigest.CallUnary(ctx, req)
 }
 
+// GetWorkspaceStatus calls agentrepl.v1.AgentRepl.GetWorkspaceStatus.
+func (c *agentReplClient) GetWorkspaceStatus(ctx context.Context, req *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error) {
+	return c.getWorkspaceStatus.CallUnary(ctx, req)
+}
+
+// GetMergeQueueStatus calls agentrepl.v1.AgentRepl.GetMergeQueueStatus.
+func (c *agentReplClient) GetMergeQueueStatus(ctx context.Context, req *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
+	return c.getMergeQueueStatus.CallUnary(ctx, req)
+}
+
+// SubscribeWorkspace calls agentrepl.v1.AgentRepl.SubscribeWorkspace.
+func (c *agentReplClient) SubscribeWorkspace(ctx context.Context, req *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error) {
+	return c.subscribeWorkspace.CallUnary(ctx, req)
+}
+
+// UnsubscribeWorkspace calls agentrepl.v1.AgentRepl.UnsubscribeWorkspace.
+func (c *agentReplClient) UnsubscribeWorkspace(ctx context.Context, req *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error) {
+	return c.unsubscribeWorkspace.CallUnary(ctx, req)
+}
+
+// SubscribeMergeQueue calls agentrepl.v1.AgentRepl.SubscribeMergeQueue.
+func (c *agentReplClient) SubscribeMergeQueue(ctx context.Context, req *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error) {
+	return c.subscribeMergeQueue.CallUnary(ctx, req)
+}
+
+// UnsubscribeMergeQueue calls agentrepl.v1.AgentRepl.UnsubscribeMergeQueue.
+func (c *agentReplClient) UnsubscribeMergeQueue(ctx context.Context, req *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error) {
+	return c.unsubscribeMergeQueue.CallUnary(ctx, req)
+}
+
+// EvaluateInEditor calls agentrepl.v1.AgentRepl.EvaluateInEditor.
+func (c *agentReplClient) EvaluateInEditor(ctx context.Context, req *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
+	return c.evaluateInEditor.CallUnary(ctx, req)
+}
+
+// AnswerEditorEvaluation calls agentrepl.v1.AgentRepl.AnswerEditorEvaluation.
+func (c *agentReplClient) AnswerEditorEvaluation(ctx context.Context, req *connect.Request[v1.AnswerEditorEvaluationRequest]) (*connect.Response[v1.AnswerEditorEvaluationResponse], error) {
+	return c.answerEditorEvaluation.CallUnary(ctx, req)
+}
+
 // AgentReplHandler is an implementation of the agentrepl.v1.AgentRepl service.
 type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
@@ -1796,7 +1968,9 @@ type AgentReplHandler interface {
 	// Remove a CLOSED workspace's registry record; every file survives. The
 	// undo for a registration. See endpoint_forget_workspace.proto.
 	ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error)
-	// Enqueue this workspace's merge; its life from there is the feed's bubble.
+	// Land this workspace's own branch in the target fixed at its creation;
+	// its life from there is the feed's bubble. See
+	// endpoint_merge_workspace.proto.
 	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
@@ -1888,6 +2062,9 @@ type AgentReplHandler interface {
 	// Operator control of the merge queue. See
 	// endpoint_update_merge_queue.proto.
 	UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error)
+	// Hold or release the runtime's rollouts; releasing deploys what landed
+	// during the hold. See endpoint_update_rollouts.proto.
+	UpdateRollouts(context.Context, *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -1985,6 +2162,29 @@ type AgentReplHandler interface {
 	// Makes a digest now instead of at the daily cadence. See
 	// endpoint_refresh_news_digest.proto.
 	RefreshNewsDigest(context.Context, *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error)
+	// ---- AGENT API: what an agent reads and follows ----
+	// One workspace's status, now. See endpoint_get_workspace_status.proto.
+	GetWorkspaceStatus(context.Context, *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error)
+	// Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
+	GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error)
+	// Tell one workspace's agent when another workspace changes, answering with
+	// its status now. See endpoint_subscribe_workspace.proto.
+	SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error)
+	// End a workspace subscription. See endpoint_unsubscribe_workspace.proto.
+	UnsubscribeWorkspace(context.Context, *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error)
+	// Tell one workspace's agent about a merge queue's changes, answering with
+	// the queue now. See endpoint_subscribe_merge_queue.proto.
+	SubscribeMergeQueue(context.Context, *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error)
+	// End a merge-queue subscription. See
+	// endpoint_unsubscribe_merge_queue.proto.
+	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// ---- EDITOR: elisp evaluated in the running editor ----
+	// Evaluate elisp in the running editor and answer with the result. See
+	// endpoint_evaluate_in_editor.proto.
+	EvaluateInEditor(context.Context, *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error)
+	// The editor's answer to a pushed evaluation. See
+	// endpoint_answer_editor_evaluation.proto.
+	AnswerEditorEvaluation(context.Context, *connect.Request[v1.AnswerEditorEvaluationRequest]) (*connect.Response[v1.AnswerEditorEvaluationResponse], error)
 }
 
 // NewAgentReplHandler builds an HTTP handler from the service implementation. It returns the path
@@ -2335,6 +2535,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdateMergeQueueMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplUpdateRolloutsHandler := connect.NewUnaryHandler(
+		AgentReplUpdateRolloutsProcedure,
+		svc.UpdateRollouts,
+		connect.WithSchema(agentReplUpdateRolloutsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplDaemonHealthHandler := connect.NewUnaryHandler(
 		AgentReplDaemonHealthProcedure,
 		svc.DaemonHealth,
@@ -2515,6 +2721,54 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplRefreshNewsDigestMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplGetWorkspaceStatusHandler := connect.NewUnaryHandler(
+		AgentReplGetWorkspaceStatusProcedure,
+		svc.GetWorkspaceStatus,
+		connect.WithSchema(agentReplGetWorkspaceStatusMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplGetMergeQueueStatusHandler := connect.NewUnaryHandler(
+		AgentReplGetMergeQueueStatusProcedure,
+		svc.GetMergeQueueStatus,
+		connect.WithSchema(agentReplGetMergeQueueStatusMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSubscribeWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplSubscribeWorkspaceProcedure,
+		svc.SubscribeWorkspace,
+		connect.WithSchema(agentReplSubscribeWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUnsubscribeWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplUnsubscribeWorkspaceProcedure,
+		svc.UnsubscribeWorkspace,
+		connect.WithSchema(agentReplUnsubscribeWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSubscribeMergeQueueHandler := connect.NewUnaryHandler(
+		AgentReplSubscribeMergeQueueProcedure,
+		svc.SubscribeMergeQueue,
+		connect.WithSchema(agentReplSubscribeMergeQueueMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUnsubscribeMergeQueueHandler := connect.NewUnaryHandler(
+		AgentReplUnsubscribeMergeQueueProcedure,
+		svc.UnsubscribeMergeQueue,
+		connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplEvaluateInEditorHandler := connect.NewUnaryHandler(
+		AgentReplEvaluateInEditorProcedure,
+		svc.EvaluateInEditor,
+		connect.WithSchema(agentReplEvaluateInEditorMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplAnswerEditorEvaluationHandler := connect.NewUnaryHandler(
+		AgentReplAnswerEditorEvaluationProcedure,
+		svc.AnswerEditorEvaluation,
+		connect.WithSchema(agentReplAnswerEditorEvaluationMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/agentrepl.v1.AgentRepl/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
@@ -2631,6 +2885,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplDeployHandler.ServeHTTP(w, r)
 		case AgentReplUpdateMergeQueueProcedure:
 			agentReplUpdateMergeQueueHandler.ServeHTTP(w, r)
+		case AgentReplUpdateRolloutsProcedure:
+			agentReplUpdateRolloutsHandler.ServeHTTP(w, r)
 		case AgentReplDaemonHealthProcedure:
 			agentReplDaemonHealthHandler.ServeHTTP(w, r)
 		case AgentReplSessionHealthProcedure:
@@ -2691,6 +2947,22 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplDismissNewsDigestHandler.ServeHTTP(w, r)
 		case AgentReplRefreshNewsDigestProcedure:
 			agentReplRefreshNewsDigestHandler.ServeHTTP(w, r)
+		case AgentReplGetWorkspaceStatusProcedure:
+			agentReplGetWorkspaceStatusHandler.ServeHTTP(w, r)
+		case AgentReplGetMergeQueueStatusProcedure:
+			agentReplGetMergeQueueStatusHandler.ServeHTTP(w, r)
+		case AgentReplSubscribeWorkspaceProcedure:
+			agentReplSubscribeWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplUnsubscribeWorkspaceProcedure:
+			agentReplUnsubscribeWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplSubscribeMergeQueueProcedure:
+			agentReplSubscribeMergeQueueHandler.ServeHTTP(w, r)
+		case AgentReplUnsubscribeMergeQueueProcedure:
+			agentReplUnsubscribeMergeQueueHandler.ServeHTTP(w, r)
+		case AgentReplEvaluateInEditorProcedure:
+			agentReplEvaluateInEditorHandler.ServeHTTP(w, r)
+		case AgentReplAnswerEditorEvaluationProcedure:
+			agentReplAnswerEditorEvaluationHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -2928,6 +3200,10 @@ func (UnimplementedAgentReplHandler) UpdateMergeQueue(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateMergeQueue is not implemented"))
 }
 
+func (UnimplementedAgentReplHandler) UpdateRollouts(context.Context, *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateRollouts is not implemented"))
+}
+
 func (UnimplementedAgentReplHandler) DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.DaemonHealth is not implemented"))
 }
@@ -3046,4 +3322,36 @@ func (UnimplementedAgentReplHandler) DismissNewsDigest(context.Context, *connect
 
 func (UnimplementedAgentReplHandler) RefreshNewsDigest(context.Context, *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RefreshNewsDigest is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetWorkspaceStatus(context.Context, *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetWorkspaceStatus is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetMergeQueueStatus is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubscribeWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UnsubscribeWorkspace(context.Context, *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SubscribeMergeQueue(context.Context, *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubscribeMergeQueue is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeMergeQueue is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) EvaluateInEditor(context.Context, *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.EvaluateInEditor is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) AnswerEditorEvaluation(context.Context, *connect.Request[v1.AnswerEditorEvaluationRequest]) (*connect.Response[v1.AnswerEditorEvaluationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AnswerEditorEvaluation is not implemented"))
 }

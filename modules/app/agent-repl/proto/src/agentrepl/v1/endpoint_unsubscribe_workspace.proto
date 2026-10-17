@@ -1,0 +1,47 @@
+// endpoint_unsubscribe_workspace.proto — UnsubscribeWorkspace: end one
+// workspace's subscription to another (SubscribeWorkspace). AGENT API section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UnsubscribeWorkspaceRequest {
+  // The workspace whose subscription ends.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The workspace it followed.
+  workspace.v1.WorkspaceRef followed = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message UnsubscribeWorkspaceResponse {
+  oneof result {
+    UnsubscribeWorkspaceSuccess success = 1;
+    UnsubscribeWorkspaceError error = 2;
+  }
+}
+// The request was served. Holding no such subscription is an answer, not a
+// failure: either way the subscriber now holds none.
+message UnsubscribeWorkspaceSuccess {
+  // THE ARM IS WHAT WAS FOUND.
+  oneof ended {
+    // The subscription ended.
+    UnsubscribeWorkspaceSuccessUnsubscribed unsubscribed = 1;
+    // There was no subscription to end.
+    UnsubscribeWorkspaceSuccessNotSubscribed not_subscribed = 2;
+  }
+}
+// Ended. No fields.
+message UnsubscribeWorkspaceSuccessUnsubscribed {}
+// None held. No fields.
+message UnsubscribeWorkspaceSuccessNotSubscribed {}
+message UnsubscribeWorkspaceError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    UnsubscribeWorkspaceUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+message UnsubscribeWorkspaceUnknownSubscriber {}
