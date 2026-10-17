@@ -1780,7 +1780,9 @@ func TestReleaseRegistry(t *testing.T) {
 }
 
 func TestRegistryHoldersShareReleaseRegistry(t *testing.T) {
-	for _, file := range []string{"ramdisk.go", "investigation.go"} {
+	// The investigation takes no lock: the daemon refusing a second create of
+	// its branch is what keeps two runs from opening two.
+	for _, file := range []string{"ramdisk.go"} {
 		// Arrange
 		src, err := os.ReadFile(file)
 		if err != nil {
@@ -1934,5 +1936,18 @@ func TestReclaimRunKeepsTheRecordWhenTheReapFails(t *testing.T) {
 		if strings.Contains(call, "detach") {
 			t.Fatalf("detached under unreaped members: %q", h.calls)
 		}
+	}
+}
+
+func TestTheInvestigationTakesNoRegistryLock(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("investigation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act / Assert
+	if strings.Contains(string(src), "lockRegistry()") {
+		t.Fatal("investigation.go takes the registry lock; the daemon's refusal of a second create is the deduplication")
 	}
 }
