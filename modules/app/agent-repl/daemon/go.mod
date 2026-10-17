@@ -11,6 +11,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
+	github.com/tree-sitter/go-tree-sitter v0.25.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/net v0.43.0
 	golang.org/x/sys v0.37.0
@@ -18,6 +19,8 @@ require (
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.46.1
 )
+
+require github.com/mattn/go-pointer v0.0.1 // indirect
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -30,6 +33,7 @@ require (
 )
 
 require (
+	agentrepl/tldr v0.0.0
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -47,3 +51,5 @@ replace agentrepl/protohelpers => ../proto/helpers/go
 replace agentrepl/logging => ../agent-shim/logging/go
 
 replace agentrepl/testrun => ../testrun
+
+replace agentrepl/tldr => ../tree-sitter-tldr/tldr/src
