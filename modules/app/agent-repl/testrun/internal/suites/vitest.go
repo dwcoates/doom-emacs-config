@@ -109,8 +109,10 @@ func vitestIntegrationBuild(s roster.Suite, dir string) (run.Spec, bool) {
 
 // vitestIntegrationSplit is the suite's integration files, run under its
 // integration config one worker at a time, exactly as the unit files are. The
-// typecheck already covers the package, and coverage is the unit pass's
-// question, so neither is repeated here.
+// typecheck already covers the package, so it is not repeated here. A
+// coverage run has each chunk write istanbul JSON of the files it loaded
+// (VitestIntegrationCoverage), which the baseline merges into the suite's
+// unit coverage.
 func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string) (Split, error) {
 	group := s.Name + "[integration]"
 	work := filepath.Join(l.Work, "vitest", s.Name+"-integration")
@@ -124,6 +126,17 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 			"npx", "vitest", "run", "--config", s.IntegrationConfig,
 			"--maxWorkers=1", "--minWorkers=1",
 			"--reporter=default", "--reporter=" + reporter,
+		}
+		if l.Coverage {
+			argv = append(argv,
+				// --isolate as `npm run coverage` passes it: istanbul resets a
+				// module's counters after each file, and un-isolated a module
+				// shared across files reports nothing for the later ones
+				// (webapp/vitest.config.ts's coverage note).
+				"--isolate",
+				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json", "--coverage.all=false",
+				"--coverage.reportsDirectory="+filepath.Join(VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
+			)
 		}
 		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
@@ -188,6 +201,13 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 		Atomic: atomic,
 		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Chunk: chunk}},
 	}, nil
+}
+
+// VitestIntegrationCoverage is the directory under which each of a vitest
+// suite's integration chunks writes its istanbul report in a coverage run,
+// one subdirectory per chunk.
+func VitestIntegrationCoverage(work, suite string) string {
+	return filepath.Join(work, "vitest", suite+"-integration", "coverage")
 }
 
 // VitestItemsEnv names the file testrun/vitest/items-reporter.mjs writes.

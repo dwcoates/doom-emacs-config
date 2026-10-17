@@ -1183,6 +1183,46 @@ func TestVitestIntegrationSplitRunsUnderItsConfig(t *testing.T) {
 	}
 }
 
+func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
+	tests := []struct {
+		name     string
+		coverage bool
+		want     []string
+	}{
+		{name: "a coverage run", coverage: true, want: []string{
+			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json --coverage.all=false",
+			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]#00",
+		}},
+		{name: "an ordinary run", coverage: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir, work := t.TempDir(), t.TempDir()
+			l := Layout{Module: dir, Work: work, Coverage: tt.coverage}
+			s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
+			split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+
+			// Assert
+			argv := strings.ReplaceAll(strings.Join(chunk.Argv, " "), work, "WORK")
+			for _, w := range tt.want {
+				if !strings.Contains(argv, w) {
+					t.Errorf("argv %q lacks %q", argv, w)
+				}
+			}
+			if !tt.coverage && (strings.Contains(argv, "--coverage") || strings.Contains(argv, "--isolate")) {
+				t.Errorf("an ordinary run's argv %q collects coverage", argv)
+			}
+		})
+	}
+}
+
 func TestTheRosterRunsEveryIntegrationSuite(t *testing.T) {
 	// The integration suites used to live outside the roster (`make
 	// integration`, `npm run test:integration`), so a full run never ran them.
