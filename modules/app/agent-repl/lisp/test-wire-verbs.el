@@ -5635,3 +5635,32 @@ instead diverges from it unseen."
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted"
                              "hasOpenChildren" "parentNotOpen")
                        #'string<))))
+
+;;;; ---- The one-ref refusal decoder ------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-decode-ref-arm-keys-the-field ()
+  "A one-ref arm decodes to its field's keyword over the ref."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-ref-arm
+                    "M" 'owner (agent-repl-test-wire-verbs--parse
+                                "{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}"))
+                   '(:owner (:id "ws-2" :dir "/w/two"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-ref-arm-refuses-another-field ()
+  "A one-ref arm carrying any other field is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-ref-arm
+                   "M" 'owner (agent-repl-test-wire-verbs--parse "{\"workspace\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-one-ref-arms-share-the-decoder ()
+  "Every refusal arm naming one workspace decodes through the one helper."
+  (dolist (fn '(agent-repl-wire-decode-create-workspace-unknown-fork-source
+                agent-repl-wire-decode-create-workspace-unknown-context-workspace
+                agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation
+                agent-repl-wire-decode-create-workspace-error-unknown-owner
+                agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands
+                agent-repl-wire-decode-create-workspace-error-unknown-requester
+                agent-repl-wire-decode-merge-workspace-error-owner-lands))
+    (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"
+                            (prin1-to-string (symbol-function fn))))))

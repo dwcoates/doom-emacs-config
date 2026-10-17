@@ -605,31 +605,23 @@ The named brief file is absent."
 the form names is not one the daemon knows."
   (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUnknownRepository" json))
 
-(defun agent-repl-wire-decode-create-workspace-fork-source-ref (json)
-  "Decode a fork-source arm's `workspace' use site from JSON."
-  (agent-repl-wire-decode-workspace-ref json))
+(defun agent-repl-wire-verbs--decode-ref-arm (message field json)
+  "Decode MESSAGE, whose one FIELD names a `WorkspaceRef\', from JSON.
+Returns (KEYWORD REF), KEYWORD being FIELD\'s keyword."
+  (agent-repl-wire-verbs--check-keys message json (list field))
+  (list (intern (concat ":" (symbol-name field)))
+        (agent-repl-wire-verbs--decode-optional-message
+         message field json #'agent-repl-wire-decode-workspace-ref)))
 
 (defun agent-repl-wire-decode-create-workspace-unknown-fork-source (json)
   "Decode CreateWorkspaceUnknownForkSource from JSON into (:workspace REF).
 The fork source workspace is not in the daemon's registry."
-  (let ((message "CreateWorkspaceUnknownForkSource"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace (agent-repl-wire-verbs--decode-optional-message
-                      message 'workspace json
-                      #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
-
-(defun agent-repl-wire-decode-create-workspace-unknown-context-workspace-ref (json)
-  "Decode CreateWorkspaceUnknownContextWorkspace's `workspace' use site from JSON."
-  (agent-repl-wire-decode-workspace-ref json))
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceUnknownForkSource" 'workspace json))
 
 (defun agent-repl-wire-decode-create-workspace-unknown-context-workspace (json)
   "Decode CreateWorkspaceUnknownContextWorkspace from JSON into (:workspace REF).
 The one-shot\='s context workspace is not in the daemon\='s registry."
-  (let ((message "CreateWorkspaceUnknownContextWorkspace"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace (agent-repl-wire-verbs--decode-optional-message
-                      message 'workspace json
-                      #'agent-repl-wire-decode-create-workspace-unknown-context-workspace-ref))))
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceUnknownContextWorkspace" 'workspace json))
 
 (defun agent-repl-wire-decode-create-workspace-error-unknown-context-workspace (json)
   "Decode CreateWorkspaceError's `unknown_context_workspace' cause arm."
@@ -638,11 +630,7 @@ The one-shot\='s context workspace is not in the daemon\='s registry."
 (defun agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation (json)
   "Decode CreateWorkspaceForkSourceHasNoConversation from JSON into
 \(:workspace REF).  The fork source workspace has no conversation to copy."
-  (let ((message "CreateWorkspaceForkSourceHasNoConversation"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace (agent-repl-wire-verbs--decode-optional-message
-                      message 'workspace json
-                      #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceForkSourceHasNoConversation" 'workspace json))
 
 (defun agent-repl-wire-decode-create-workspace-name-reserved (json)
   "Decode CreateWorkspaceNameReserved from JSON into (:branch BRANCH).
@@ -755,14 +743,6 @@ The repository, or the worktree the create would register, lies inside a
 temporary directory; JSON carries the canonical `dir' and `temporary_root'."
   (agent-repl-wire-decode-inside-temporary-directory
    "CreateWorkspaceInsideTemporaryDirectory" json))
-
-(defun agent-repl-wire-verbs--decode-ref-arm (message field json)
-  "Decode MESSAGE, whose one FIELD names a `WorkspaceRef\', from JSON.
-Returns (KEYWORD REF), KEYWORD being FIELD\'s keyword."
-  (agent-repl-wire-verbs--check-keys message json (list field))
-  (list (intern (concat ":" (symbol-name field)))
-        (agent-repl-wire-verbs--decode-optional-message
-         message field json #'agent-repl-wire-decode-workspace-ref)))
 
 (defun agent-repl-wire-decode-create-workspace-error-unknown-owner (json)
   "Decode CreateWorkspaceError's `unknown_owner' arm into (:owner REF).
