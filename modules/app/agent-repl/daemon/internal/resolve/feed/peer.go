@@ -48,13 +48,21 @@ func (r *resolver) drawPeerMessage(s *wsState, peer *conversationv1.PeerMessage)
 		r.upsert(s, at, row, true)
 		return
 	}
+	// THE RECIPIENT'S END OF A CROSS-SESSION MESSAGE: remembered, so the bubble
+	// is drawn again when the workspace that sent it becomes known, and stated
+	// as an end of its delivery, so the sender's row can name this workspace
+	// (peerdelivery.go).
+	s.peerMessages[peer.GetId()] = peer
+	if id := peer.GetInterSession().GetDeliveryId().GetValue(); id != "" {
+		r.noteDeliveryEnd(id, deliveryRecipient, s.id, peer.GetId())
+	}
 	row.Row = &frontendv1.FeedRow_PeerMessage{PeerMessage: &frontendv1.FeedPeerMessage{
-		Sender: peerLabel(peer.GetSender()),
-		Body:   peer.GetBody(),
+		From: r.peerFrom(s.id, peer.GetInterSession()),
+		Body: peer.GetBody(),
 	}}
 	log.Debug("daemon.feed.peer_message",
 		"a message from another Claude session was drawn as a peer bubble",
-		dlog.Context{"peer_id": peer.GetId(), "sender": peer.GetSender(), "agent": recipient.GetValue(), "kind": peerKindName(peer)})
+		dlog.Context{"peer_id": peer.GetId(), "sender": row.GetPeerMessage().GetFrom().GetName().GetText(), "agent": recipient.GetValue(), "kind": peerKindName(peer)})
 	r.upsert(s, at, row, true)
 }
 

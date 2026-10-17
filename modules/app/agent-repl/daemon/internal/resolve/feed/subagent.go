@@ -516,9 +516,7 @@ func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state
 			Kind: feedid.KindPrompt, ID: unitID, Sub: "commission",
 		}),
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{
-				Text: "from " + feedLabel(s, r.feedKey(s.id, at.feed)),
-			},
+			Address: inSessionAddress("from " + feedLabel(s, r.feedKey(s.id, at.feed))),
 			Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{
 				Block: &frontendv1.FeedAgentPromptBlock_Text{
 					Text: &frontendv1.FeedTextBlock{Text: prompt.GetText()},

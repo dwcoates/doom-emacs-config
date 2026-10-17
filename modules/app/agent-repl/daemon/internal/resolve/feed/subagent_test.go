@@ -1185,7 +1185,7 @@ func TestACommissionNamesTheFeedThatSentIt(t *testing.T) {
 
 	// Assert: the recipient's address line, exactly as an agent prompt draws it.
 	row := h.commissionRow("spawn-1", created)
-	if got := row.GetAgentPrompt().GetAddress().GetText(); got != "from the main agent" {
+	if got := addressLine(row.GetAgentPrompt().GetAddress()); got != "from the main agent" {
 		t.Fatalf("address = %q, want the sender's feed named", got)
 	}
 }

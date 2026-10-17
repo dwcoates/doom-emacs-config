@@ -284,13 +284,22 @@ func (f *healthForwarder) reporter() (health.Reporter, bool) {
 type historyForwarder struct {
 	mu    sync.RWMutex
 	fleet feed.HistorySource
+	peers feed.PeerDeliverySource
+}
+
+// historyAndPeers is what the fleet serves the feed: its history and the ends
+// of its cross-session messages.
+type historyAndPeers interface {
+	feed.HistorySource
+	feed.PeerDeliverySource
 }
 
 // bind installs the fleet.
-func (h *historyForwarder) bind(fleet feed.HistorySource) {
+func (h *historyForwarder) bind(fleet historyAndPeers) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.fleet = fleet
+	h.peers = fleet
 }
 
 // ReadHistory reads through the fleet. A read before the fleet exists is a
@@ -315,6 +324,19 @@ func (h *historyForwarder) ReadInherited(ctx context.Context, ws ids.WorkspaceID
 		return nil, errors.New("agent-repld: history was read before the session fleet was built")
 	}
 	return fleet.ReadInherited(ctx, ws, book, after, throughMs)
+}
+
+// ResolvePeerDelivery asks through the fleet which sessions hold the two ends
+// of one cross-session message. A lookup before the fleet exists is a
+// boot-order defect and fails loudly.
+func (h *historyForwarder) ResolvePeerDelivery(ctx context.Context, ws ids.WorkspaceID, deliveryID string) (feed.PeerDeliveryEnds, error) {
+	h.mu.RLock()
+	fleet := h.peers
+	h.mu.RUnlock()
+	if fleet == nil {
+		return feed.PeerDeliveryEnds{}, errors.New("agent-repld: a peer delivery was resolved before the session fleet was built")
+	}
+	return fleet.ResolvePeerDelivery(ctx, ws, deliveryID)
 }
 
 // deliveryForwarder carries the fleet's fork to the prompt queue's

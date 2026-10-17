@@ -30,6 +30,7 @@ const (
 	RPCReadHistory              = "ReadHistory"
 	RPCGatherTitleDigest        = "GatherTitleDigest"
 	RPCReadTranscripts          = "ReadTranscripts"
+	RPCResolvePeerDelivery      = "ResolvePeerDelivery"
 	RPCGetForkPoint             = "GetForkPoint"
 	RPCForkSession              = "ForkSession"
 )
@@ -72,6 +73,8 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.GatherTitleDigestResponse{}
 	case RPCReadTranscripts:
 		return &shimv1.ReadTranscriptsResponse{}
+	case RPCResolvePeerDelivery:
+		return &shimv1.ResolvePeerDeliveryResponse{}
 	case RPCGetForkPoint:
 		return &shimv1.GetForkPointResponse{}
 	case RPCForkSession:

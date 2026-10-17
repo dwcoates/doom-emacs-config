@@ -1730,6 +1730,11 @@ func (c *client) ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest
 	return unary(ctx, c, "read_history", req, validateReadHistoryRequest, c.rpc.ReadHistory)
 }
 
+// ResolvePeerDelivery asks which sessions hold the two ends of one delivery.
+func (c *client) ResolvePeerDelivery(ctx context.Context, req *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error) {
+	return unary(ctx, c, "resolve_peer_delivery", req, validateResolvePeerDeliveryRequest, c.rpc.ResolvePeerDelivery)
+}
+
 // ReadTranscripts lists the conversations filed under the shim's directory.
 func (c *client) ReadTranscripts(ctx context.Context, req *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error) {
 	return unary(ctx, c, "read_transcripts", req, validateReadTranscriptsRequest, c.rpc.ReadTranscripts)

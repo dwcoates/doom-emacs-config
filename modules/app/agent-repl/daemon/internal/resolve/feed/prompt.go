@@ -168,7 +168,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		Id:   r.rowID(s.id, senderAddr, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue(), Sub: "out"}),
 		Turn: turn,
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{Text: "→ " + recipientLabel},
+			Address: inSessionAddress("→ " + recipientLabel),
 			Body:    &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(blocks)},
 		}},
 	}
@@ -176,7 +176,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		Id:   r.rowID(s.id, recipientFeed, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue(), Sub: "in"}),
 		Turn: turn,
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{Text: "from " + senderLabel},
+			Address: inSessionAddress("from " + senderLabel),
 			Body:    &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(blocks)},
 		}},
 	}

@@ -47,6 +47,24 @@ func sendActivity(t *testing.T, unit string, result any) *conversationv1.AgentAc
 	}
 }
 
+// addressLine spells a header for an assertion: an in-session line verbatim,
+// and the other arms by their arm and name.
+func addressLine(address *frontendv1.FeedAgentPromptAddress) string {
+	switch arm := address.GetAddress().(type) {
+	case *frontendv1.FeedAgentPromptAddress_InSession:
+		return arm.InSession.GetText()
+	case *frontendv1.FeedAgentPromptAddress_PeerSession:
+		if arm.PeerSession.GetWorkspace() != nil {
+			return "workspace " + arm.PeerSession.GetName().GetText() + " →"
+		}
+		return "unresolved " + arm.PeerSession.GetName().GetText() + " →"
+	case *frontendv1.FeedAgentPromptAddress_Unclassified:
+		return "unclassified " + arm.Unclassified.GetName().GetText() + " →"
+	default:
+		return "no address arm"
+	}
+}
+
 // sendRow returns the agent-prompt row a send drew on the sender's feed,
 // failing when the row is any other kind.
 func (h *harness) sendRow() *frontendv1.FeedAgentPrompt {
@@ -79,7 +97,7 @@ func TestASendDrawsAnAgentPromptOnTheSendersFeed(t *testing.T) {
 	h.sendMessage("unit-1", startTo("ac8caa658f5487d6d", "Report even/odd status for each number"))
 
 	// Assert.
-	if got := h.sendRow().GetAddress().GetText(); got != "→ ac8caa658f5487d6d" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "unclassified ac8caa658f5487d6d →" {
 		t.Fatalf("address = %q, want the addressed recipient", got)
 	}
 }
@@ -119,14 +137,14 @@ func TestASendAddressesAResolvedRecipientByItsBubbleLabel(t *testing.T) {
 	// Act.
 	h.sendMessage("unit-1", startTo("agent-sub", "count out loud"))
 	h.sendMessage("unit-1", &conversationv1.AgentSendMessageSuccess{
-		RecipientAgentId: recipient,
+		Recipient: &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: recipient},
 		Delivery: &conversationv1.AgentSendMessageSuccess_QueuedToLive{
 			QueuedToLive: &conversationv1.AgentSendMessageQueuedToLive{},
 		},
 	})
 
 	// Assert.
-	got := h.sendRowAt(rootFeed(), "unit-1").GetAddress().GetText()
+	got := addressLine(h.sendRowAt(rootFeed(), "unit-1").GetAddress())
 	if got != "→ longhand counter" {
 		t.Fatalf("address = %q, want the recipient's bubble label", got)
 	}
@@ -151,7 +169,7 @@ func TestAQueuedThenResumedSendDrawsOneRowNotTwo(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			success := &conversationv1.AgentSendMessageSuccess{
-				RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"},
+				Recipient: &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"}},
 			}
 			switch d := tc.delivery.(type) {
 			case *conversationv1.AgentSendMessageQueuedToLive:
@@ -179,7 +197,7 @@ func TestASendKeepsTheStartsSummaryWhenTheSuccessRestatesNone(t *testing.T) {
 
 	// Act.
 	h.sendMessage("unit-1", &conversationv1.AgentSendMessageSuccess{
-		RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"},
+		Recipient: &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"}},
 	})
 
 	// Assert.
@@ -196,7 +214,7 @@ func TestASendWhoseRecipientIsUnnameableSaysSo(t *testing.T) {
 	h.sendMessage("unit-1", startTo("", "vet the diff"))
 
 	// Assert.
-	if got := h.sendRow().GetAddress().GetText(); got != "→ an agent the send did not name" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "unclassified an agent the send did not name →" {
 		t.Fatalf("address = %q, want the honest unnamed address", got)
 	}
 }
@@ -208,11 +226,11 @@ func TestASendWithNoAddressedStringFallsBackToTheResolvedIdentity(t *testing.T) 
 
 	// Act. The identity resolves, but names no feed this workspace knows.
 	h.sendMessage("unit-1", &conversationv1.AgentSendMessageSuccess{
-		RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"},
+		Recipient: &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"}},
 	})
 
 	// Assert.
-	if got := h.sendRow().GetAddress().GetText(); got != "→ agent-unknown" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "→ agent-unknown" {
 		t.Fatalf("address = %q, want the resolved identity", got)
 	}
 }
@@ -226,7 +244,7 @@ func TestAFailedSendStillDrawsTheAttempt(t *testing.T) {
 	h.sendMessage("unit-1", &conversationv1.AgentSendMessageFailure{})
 
 	// Assert.
-	if got := h.sendRow().GetAddress().GetText(); got != "→ vetter" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "unclassified vetter →" {
 		t.Fatalf("address = %q, want the attempted recipient", got)
 	}
 }
@@ -304,7 +322,7 @@ func TestASendDrawsTheProducersDeliveryArmOnTheSendersRow(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			success := &conversationv1.AgentSendMessageSuccess{
-				RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"},
+				Recipient: &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"}},
 			}
 			if tc.delivery != nil {
 				tc.delivery(success)
@@ -493,14 +511,14 @@ func TestAReplayedStartKeepsTheRecipientTheSuccessResolved(t *testing.T) {
 	h := newHarness(t)
 	h.sendMessage("unit-1", startTo("", "vet the diff"))
 	h.sendMessage("unit-1", &conversationv1.AgentSendMessageSuccess{
-		RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"},
+		Recipient: &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"}},
 	})
 
 	// Act.
 	h.sendMessage("unit-1", startTo("", "vet the diff"))
 
 	// Assert.
-	if got := h.sendRow().GetAddress().GetText(); got != "→ agent-unknown" {
+	if got := addressLine(h.sendRow().GetAddress()); got != "→ agent-unknown" {
 		t.Fatalf("address after the replayed start = %q, want the resolved identity, not the unnamed fallback", got)
 	}
 }
@@ -516,26 +534,31 @@ func TestAReplayedStartKeepsTheRecipientTheSuccessResolved(t *testing.T) {
 func replayedSends(to, summary string) []struct {
 	name   string
 	settle any
+	// wantAddress is the header the settle alone draws.
+	wantAddress string
 } {
 	var restated *conversationv1.AgentSendMessageSummary
 	if summary != "" {
 		restated = &conversationv1.AgentSendMessageSummary{Text: summary}
 	}
 	return []struct {
-		name   string
-		settle any
+		name        string
+		settle      any
+		wantAddress string
 	}{
 		{
 			name: "a delivered send",
 			settle: &conversationv1.AgentSendMessageSuccess{
-				RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"},
-				AddressedTo:      to,
-				Summary:          restated,
+				Recipient:   &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"}},
+				AddressedTo: to,
+				Summary:     restated,
 			},
+			wantAddress: "→ " + to,
 		},
 		{
-			name:   "a refused send",
-			settle: &conversationv1.AgentSendMessageFailure{AddressedTo: to, Summary: restated},
+			name:        "a refused send",
+			settle:      &conversationv1.AgentSendMessageFailure{AddressedTo: to, Summary: restated},
+			wantAddress: "unclassified " + to + " →",
 		},
 	}
 }
@@ -568,7 +591,7 @@ func TestAReplayedSettledSendDrawsItsAddress(t *testing.T) {
 			h.sendMessage("unit-1", tc.settle)
 
 			// Assert.
-			if got := h.sendRow().GetAddress().GetText(); got != "→ vetter" {
+			if got := addressLine(h.sendRow().GetAddress()); got != tc.wantAddress {
 				t.Fatalf("address = %q, want the restated addressed string", got)
 			}
 		})

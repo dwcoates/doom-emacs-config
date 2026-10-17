@@ -60,7 +60,20 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		if err := r.restateSend(s, act, u, state.Success.GetAddressedTo(), state.Success.GetSummary()); err != nil {
 			return nil, err
 		}
-		u.sendResolved = state.Success.GetRecipientAgentId()
+		switch recipient := state.Success.GetRecipient().(type) {
+		case *conversationv1.AgentSendMessageSuccess_PeerSession:
+			// ANOTHER CLAUDE SESSION: the header names it by the delivery id the
+			// recipient's own record carries (peerdelivery.go). A send that
+			// states no id joins nothing and stays unclassified.
+			if id := recipient.PeerSession.GetDeliveryId().GetValue(); id != "" {
+				u.sendReached = sendPeerSession
+				u.sendDeliveryID = id
+				r.noteDeliveryEnd(id, deliverySender, s.id, unitID)
+			}
+		case *conversationv1.AgentSendMessageSuccess_RecipientAgentId:
+			u.sendReached = sendInSession
+			u.sendResolved = recipient.RecipientAgentId
+		}
 		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Failure"})
@@ -80,10 +93,8 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: unitID, Sub: "send"}),
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
-			Address: &frontendv1.FeedAgentPromptAddress{
-				Text: "→ " + r.sendRecipientLabel(s, u.sendResolved, u.sendAddressedTo),
-			},
-			Body: &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
+			Address: r.sendAddress(s, u),
+			Body:    &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
 		}},
 	}
 	// THE DELIVERY IS THE UNIT'S, NOT THIS FRAME'S. See unitState.sendDelivery
@@ -94,6 +105,61 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	}
 	u.row = row
 	return row, nil
+}
+
+// sendAddress composes a send's header from what its unit has settled on.
+// THE ARM IS WHICH KIND OF RECIPIENT, and it decides the bubble's border:
+//
+//   - an agent of this session: the "→ name" line, bordered;
+//   - another Claude session: the recipient workspace by the delivery-id
+//     join, or the address the caller wrote while that is unknown;
+//   - neither said yet (unsettled, or refused): the address the caller wrote,
+//     drawn as a cross-session send is.
+func (r *resolver) sendAddress(s *wsState, u *unitState) *frontendv1.FeedAgentPromptAddress {
+	switch u.sendReached {
+	case sendInSession:
+		return inSessionAddress("→ " + r.sendRecipientLabel(s, u.sendResolved, u.sendAddressedTo))
+	case sendPeerSession:
+		return r.peerSessionAddress(s.id, u.sendDeliveryID, u.sendAddressedTo)
+	default:
+		return &frontendv1.FeedAgentPromptAddress{Address: &frontendv1.FeedAgentPromptAddress_Unclassified{
+			Unclassified: &frontendv1.FeedAgentPromptAddressUnclassified{
+				Name: &frontendv1.FeedAgentPromptAddressUnclassifiedName{Text: r.sendRecipientLabel(s, nil, u.sendAddressedTo)},
+			},
+		}}
+	}
+}
+
+// redrawSendAddress draws a send's row again under its own FeedId with its
+// header recomposed, because the recipient it names became known
+// (peerdelivery.go). A unit that has drawn no row yet draws its header when it
+// does. Called with r.mu held.
+func (r *resolver) redrawSendAddress(s *wsState, unitID string) {
+	u, ok := s.units[unitID]
+	if !ok || u.row.GetAgentPrompt() == nil {
+		return
+	}
+	id := u.row.GetId().GetValue()
+	stored, ok := r.feed(s, u.at.feed).rows[id]
+	if !ok {
+		return
+	}
+	address := r.sendAddress(s, u)
+	r.restateRow(s, u.at, stored, true, unclonable{
+		operation: "daemon.feed.send_address_unclonable",
+		message:   "a send's row could not be copied to name the session it reached; its header stays as drawn",
+		context:   dlog.Context{"unit": unitID, "row": id},
+	}, func(row *frontendv1.FeedRow) {
+		row.GetAgentPrompt().Address = address
+	})
+}
+
+// inSessionAddress is the header of a prompt between two agents of this
+// session: one composed line, drawn verbatim.
+func inSessionAddress(text string) *frontendv1.FeedAgentPromptAddress {
+	return &frontendv1.FeedAgentPromptAddress{Address: &frontendv1.FeedAgentPromptAddress_InSession{
+		InSession: &frontendv1.FeedAgentPromptAddressInSession{Text: text},
+	}}
 }
 
 // restateSend takes a SETTLED send's address and summary from the settle itself.

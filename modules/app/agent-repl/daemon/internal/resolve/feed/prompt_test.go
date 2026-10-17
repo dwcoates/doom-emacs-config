@@ -294,12 +294,12 @@ func TestAnAgentAddressedPromptIsDrawnAtBothEnds(t *testing.T) {
 	var outgoing, delivered string
 	for _, row := range h.rows(rootFeed()) {
 		if prompt := row.GetAgentPrompt(); prompt != nil {
-			outgoing = prompt.GetAddress().GetText()
+			outgoing = addressLine(prompt.GetAddress())
 		}
 	}
 	for _, row := range h.rows(feedid.Feed{Agent: created}) {
 		if prompt := row.GetAgentPrompt(); prompt != nil {
-			delivered = prompt.GetAddress().GetText()
+			delivered = addressLine(prompt.GetAddress())
 		}
 	}
 	if outgoing != "→ map the daemon" {
