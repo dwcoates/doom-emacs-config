@@ -123,7 +123,7 @@ func TestRefuseWithLogsTheTypedRefusalAtInfo(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false,
+	refuseWith(log, "CreateWorkspace", ArmBriefMissing, "no such ref", false,
 		map[string]any{"ref": "origin/nope"})
 
 	// Assert.
@@ -141,7 +141,7 @@ func TestRefuseWithRecordsTheArmsFieldsInTheLog(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false,
+	refuseWith(log, "CreateWorkspace", ArmBriefMissing, "no such ref", false,
 		map[string]any{"ref": "origin/nope"})
 
 	// Assert.
@@ -159,7 +159,7 @@ func TestRefuseWithCarriesTheArmsOwnFieldValues(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	r := refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false,
+	r := refuseWith(log, "CreateWorkspace", ArmBriefMissing, "no such ref", false,
 		map[string]any{"ref": "origin/nope"})
 
 	// Assert.
@@ -174,7 +174,7 @@ func TestRefuseWithDoesNotShareTheCallersFieldMap(t *testing.T) {
 	fields := map[string]any{"ref": "origin/nope"}
 
 	// Act.
-	r := refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false, fields)
+	r := refuseWith(log, "CreateWorkspace", ArmBriefMissing, "no such ref", false, fields)
 	fields["ref"] = "mutated"
 
 	// Assert.
@@ -185,7 +185,7 @@ func TestRefuseWithDoesNotShareTheCallersFieldMap(t *testing.T) {
 
 func TestWithRpcKeepsTheArmsFieldValues(t *testing.T) {
 	// Arrange.
-	r := &Refusal{Arm: ArmBaseRefUnresolved, Reason: "no such ref",
+	r := &Refusal{Arm: ArmBriefMissing, Reason: "no such ref",
 		Fields: map[string]any{"ref": "origin/nope"}}
 
 	// Act.

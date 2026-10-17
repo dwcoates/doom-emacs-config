@@ -547,7 +547,7 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	fields["parent_branch"] = record.ParentBranch
 	fields["actions_before"] = len(source.Actions.Before)
 	fields["actions_after"] = len(source.Actions.After)
-	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, CompactAfter: source.CompactAfter,
+	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, Maker: requester, CompactAfter: source.CompactAfter,
 		CloseOnLanding: source.CloseOnLanding, CleanupWorktree: source.CleanupWorktree, CleanupDir: source.CleanupDir,
 		TargetDir: target, ParentBranch: record.ParentBranch, Actions: source.Actions}
 	forked, err := o.deps.Detached.Fork(ctx, record, origin, source.DetachName, base)

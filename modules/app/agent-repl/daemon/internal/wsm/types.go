@@ -1071,6 +1071,12 @@ type MergeOrigin struct {
 	Requester WorkspaceID
 	// Request is the detached request the merge workspace was forked for.
 	Request DetachedMergeID
+	// Maker is the workspace whose conversation the merge workspace forks:
+	// the one the merged work was done in (a subagent's spawning workspace,
+	// or the workspace that cut the branch). TRANSPORT-ONLY, like the landing
+	// fields below: the create records it as the merge workspace's
+	// ContextFrom.
+	Maker WorkspaceID
 	// ForkHead is the commit the merge workspace was cut at: the requester's
 	// branch tip when the merge was handed off, which is exactly what the
 	// merge lands. Empty only on a merge workspace forked before layout 41

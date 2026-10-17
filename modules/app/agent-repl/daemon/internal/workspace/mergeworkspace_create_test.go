@@ -43,7 +43,7 @@ var theLanding = wsm.MergeOrigin{TargetDir: "/decided/target", ParentBranch: "de
 // theLanding.
 func landedOrigin(requester ids.WorkspaceID) wsm.MergeOrigin {
 	origin := theLanding
-	origin.Requester, origin.Request = requester, "request-1"
+	origin.Requester, origin.Request, origin.Maker = requester, "request-1", requester
 	return origin
 }
 
@@ -56,7 +56,9 @@ func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) Cre
 	return CreateSpec{
 		RepoDir:   mainWorktree(t, f),
 		BaseRef:   "ABC/sample",
+		Parent:    &requester,
 		ForkFrom:  &requester,
+		Requester: &requester,
 		MergeOf:   &origin,
 		MergeName: "reconnect-fix",
 	}

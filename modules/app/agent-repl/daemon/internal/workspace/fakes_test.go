@@ -2526,10 +2526,26 @@ type fixture struct {
 	running Running
 	// hasSession gates both the freeness probe and the shim resolver.
 	hasSession bool
+	// derived is every derived-workspace event the verbs reported.
+	derived *fakeDerived
 	// briefs is what the injected prompt loader answers, by brief name.
 	briefs map[string]prompts.Prompt
 	// briefErr fails every brief load.
 	briefErr error
+}
+
+// derivedEvent is one reported derived-workspace event.
+type derivedEvent struct {
+	kind        DerivedKind
+	workspace   ids.WorkspaceID
+	ownerNotice string
+}
+
+// fakeDerived records every derived-workspace event.
+type fakeDerived struct{ events []derivedEvent }
+
+func (d *fakeDerived) ReportDerived(kind DerivedKind, ws wsm.Workspace, ownerNotice string) {
+	d.events = append(d.events, derivedEvent{kind: kind, workspace: ws.ID, ownerNotice: ownerNotice})
 }
 
 // newFixture arranges a verb surface with a live session, an owned workspace
@@ -2559,6 +2575,7 @@ func newFixture(t *testing.T) *fixture {
 		log:       newFakeSurfaces(),
 		headless:  &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
 		briefs:    map[string]prompts.Prompt{},
+		derived:   &fakeDerived{},
 	}
 	f.queue.db = f.db
 	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
@@ -2575,7 +2592,7 @@ func newFixture(t *testing.T) *fixture {
 	f.hasSession = true
 
 	verbs, err := New(Deps{
-		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
+		DB: f.db, Derived: f.derived, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
@@ -2712,6 +2729,25 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's
 	// own parent is one the caller's `t.TempDir()' already made.
 	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: filepath.Dir(dir)})
+	return ws
+}
+
+// workspaceInRepo registers workspace ID at a fresh directory, in the
+// repository whose main worktree is repoDir (as mainWorktree registered it),
+// so a create in that repository may name it as owner, fork source or
+// requester.
+func (f *fixture) workspaceInRepo(t *testing.T, id ids.WorkspaceID, repoDir string) wsm.Workspace {
+	t.Helper()
+	repo, found := wsm.RepositoryAt(f.db.repositories, repoDir)
+	if !found {
+		t.Fatalf("no repository is registered at %s", repoDir)
+	}
+	dir, err := normalizeDir(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalizeDir: %v", err)
+	}
+	ws := wsm.Workspace{ID: id, Dir: dir, Repo: repo.ID, Name: string(id), Branch: "ABC/" + string(id)}
+	f.db.with(ws)
 	return ws
 }
 

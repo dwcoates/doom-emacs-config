@@ -55,27 +55,31 @@ type CreateSpec struct {
 	// corresponds to. It is no parent and no fork source; nothing of it is
 	// carried into the one-shot but its identity.
 	ContextWorkspace *ids.WorkspaceID
-	// BaseRef is the base to cut from. Empty is the repository's default
-	// branch for a top-level workspace and the parent's tip for a child. A
-	// top-level workspace's base must already lie on the primary branch
-	// (ArmBaseRefOffPrimaryBranch otherwise).
+	// BaseRef is the base a MERGE WORKSPACE is cut from (its branch), set only
+	// with MergeOf. Every other workspace is cut from its source's tip: the
+	// parent's branch for a child, the repository's default branch otherwise
+	// (agentrepl.v1.WorkspaceTopology), so no request names a base.
 	BaseRef string
-	// Parent, when set, is the workspace this create was SPAWNED FROM: the
+	// Parent, when set, is the workspace this create's branch is cut from and
+	// lands into: its OWNER (agentrepl.v1.WorkspaceTopologyChild). The
 	// child's merge target is the parent's worktree, and the roster nests the
-	// child under it. It is recorded on the workspace at creation, so the
-	// nesting is a stated fact rather than one derived from the branch
-	// lineage.
+	// child under it. Nil cuts from and lands on the primary branch.
 	Parent *ids.WorkspaceID
-	// ForkFrom, when set, is the parent workspace whose transcript the daemon
-	// PORTS into the child's config root before StartSession(resume). A fork
-	// is always FROM the spawning parent, so a spec that sets it and leaves
-	// Parent unset names the same workspace for both.
+	// ForkFrom, when set, is the workspace whose conversation is forked into
+	// this one (agentrepl.v1.WorkspaceContextOrigin.fork). It is INDEPENDENT
+	// of Parent: a child may fork its owner, another workspace, or nothing,
+	// and a top-level workspace may fork any workspace. When it is not the
+	// branch source (forkedElsewhere), the first message opens with the note
+	// naming it.
 	ForkFrom *ids.WorkspaceID
-	// ForkIntoPrimary makes ForkFrom a TOP-LEVEL fork: the conversation is
-	// ForkFrom's, but the workspace has no parent, is cut from the primary
-	// branch and merges into it, and its first message opens with the
-	// fork-into-primary preamble naming ForkFrom. Parent must be unset.
-	ForkIntoPrimary bool
+	// Requester is the workspace whose agent asked for the create, nil when
+	// the user asked (agentrepl.v1.WorkspaceRequester). Recorded on the
+	// workspace; it is never told about its own act.
+	Requester *ids.WorkspaceID
+	// OwnerNotice is the requester's notice to the owner of a child that does
+	// not carry the owner's context (OwnerLands): set exactly then, delivered
+	// with the daemon's addendum.
+	OwnerNotice string
 	// ConsentedUngatedMode is the permission mode the user consented to at
 	// creation. An ungated mode with no consent recorded is REFUSED.
 	ConsentedUngatedMode string
@@ -550,6 +554,26 @@ type Banners interface {
 }
 
 // Deps are the verbs' collaborators.
+// DerivedKind is what happened to a workspace derived from others: created,
+// landed, or closed without landing.
+type DerivedKind int
+
+const (
+	// DerivedCreated: the workspace was created.
+	DerivedCreated DerivedKind = iota
+	// DerivedLanded: its branch landed.
+	DerivedLanded
+	// DerivedClosedWithoutLanding: it closed and never landed.
+	DerivedClosedWithoutLanding
+)
+
+// DerivedReporter tells the workspaces a workspace was derived from -- its
+// owner and its context source -- what happened to it
+// (internal/workspacenotice). It never blocks.
+type DerivedReporter interface {
+	ReportDerived(kind DerivedKind, ws wsm.Workspace, ownerNotice string)
+}
+
 type Deps struct {
 	// Instance is THIS DAEMON's identity. Registration claims serving
 	// ownership of every workspace under it, which is what a handover hands
@@ -568,11 +592,13 @@ type Deps struct {
 	Rollout   rollout.Controller
 	Drain     drain.Controller
 	Health    health.Reporter
-	Feed      feed.Resolver
-	Footer    footer.Resolver
-	Topbar    topbar.Resolver
-	Sidebar   sidebar.Resolver
-	Host      HostRelay
+	// Derived tells a created, landed or closed workspace's sources about it.
+	Derived DerivedReporter
+	Feed    feed.Resolver
+	Footer  footer.Resolver
+	Topbar  topbar.Resolver
+	Sidebar sidebar.Resolver
+	Host    HostRelay
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own
@@ -908,6 +934,8 @@ func New(deps Deps) (Verbs, error) {
 	switch {
 	case deps.DB == nil:
 		return nil, missing("a state client")
+	case deps.Derived == nil:
+		return nil, missing("a derived-workspace reporter")
 	case deps.Git == nil:
 		return nil, missing("a git client")
 	case deps.Accounts == nil:
