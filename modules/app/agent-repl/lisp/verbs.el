@@ -76,7 +76,6 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-require-known "agent-repl-workspace" (ws context))
-(declare-function agent-repl--main-worktree-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
@@ -1105,7 +1104,7 @@ notice.  MODEL, PRIORITY (a bare level keyword) and ALLOW-UNGATED are the
 remaining creation facts and are omitted when nil.
 
 CREATING A WORKSPACE NEVER MOVES THE USER (owner ruling, 2026-10-16).
-No creation -- dynamic, static, fork, one-shot or help -- selects what it
+No creation -- dynamic, static, fork or one-shot -- selects what it
 made: the user may be typing in a minibuffer, or simply working where they
 stand, and the new tab appearing on the bar is the whole of the news.
 
@@ -2686,39 +2685,7 @@ user knows which one the commission will be read against."
      :context context
      :model model)))
 
-;;;; ---- The help workspace (`SPC o h') ----------------------------------
-;;
-;; A help workspace is a STANDARD workspace whose opening prompt is the
-;; user's question about agent-repl behind a meta-wrapped preamble.  The
-;; preamble is what makes it help: it names the `/agent-repl-help' skill
-;; (the static map of agent-repl's documentation and code) and forbids
-;; implementation without the user's explicit approval.  It is not a
-;; one-shot -- nothing is merged on completion, and the conversation goes
-;; on for as long as the user keeps asking.
-;;
-;; THE REPOSITORY IS FIXED, never derived from the current workspace: the
-;; question is about agent-repl, so the workspace is made in the repository
-;; agent-repl's own source lives in, from whichever workspace (or none) the
-;; user asks from.
-
-(defcustom agent-repl-help-preamble
-  "The following prompt is a QUESTION about agent-repl, not a commission. \
-Answer it with the /agent-repl-help skill, which maps agent-repl's user, \
-architecture and developer documentation and its code. Do not implement \
-anything, edit any file, or commit anything without the user's explicit \
-approval; that holds for every turn of this conversation, not only this one. \
-Here is the question:"
-  "The meta-wrapped preamble `agent-repl-create-help-workspace' opens with.
-It reaches the agent verbatim ahead of the user\='s question, and is
-stripped from the drawn bubble like every other harness-injected span."
-  :type 'string
-  :group 'agent-repl)
-
-(defun agent-repl-verbs--help-prompt (question)
-  "Compose a help workspace\='s opening prompt from the user\='s QUESTION.
-The preamble is meta-wrapped, so the drawn bubble is QUESTION alone while
-the agent receives both."
-  (concat (agent-repl--meta-wrap agent-repl-help-preamble) "\n\n" question))
+;;;; ---- A fixed repository on the roster ---------------------------------
 
 (defun agent-repl-verbs--roster-repository-at (main)
   "Return the `RepositoryRef' of the roster section whose directory is MAIN.
@@ -2761,32 +2728,6 @@ user\='s act."
                             module-root main)
           (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
                       main)))))
-
-(defun agent-repl-create-help-workspace ()
-  "Create a HELP workspace (`SPC o h\='): a question about agent-repl.
-Asks for the question alone, defaulting to the composer\='s text, and
-creates a standard workspace in agent-repl\='s own repository
-\(`agent-repl-verbs--agent-repl-repository\=') whose opening prompt is the
-question behind `agent-repl-help-preamble'.  The daemon mints the name.
-
-THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
-\(`agent-repl-verb-create\='), so the answer waits on its tab."
-  (interactive)
-  (let ((command 'agent-repl-create-help-workspace))
-    (agent-repl-verbs--create-invoked command)
-    (let* ((repository (agent-repl-verbs--read-for
-                        command 'repository #'agent-repl-verbs--agent-repl-repository))
-           (question (agent-repl-verbs--read-for
-                      command 'prompt
-                      (lambda ()
-                        (string-trim
-                         (agent-repl-verbs--read-required-prompt
-                          "agent-repl question: " "a help workspace IS its question"))))))
-      (agent-repl--info agent-repl-verbs--create-log-scope
-                        "elisp.verbs.create-help repository=%s" (plist-get repository :dir))
-      (agent-repl-verb-create
-       repository :standard
-       :initial-prompt (agent-repl-verbs--help-prompt question)))))
 
 ;;;; ---- Shutdown and merge-queue commands --------------------------------
 

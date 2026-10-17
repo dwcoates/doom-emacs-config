@@ -29,18 +29,6 @@ and the daemon Emacs starts, see them.
 | `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-workspace` and `/create-or-update-skill` skills from `$MULTI_REPO_ROOT/explanation-engine`, workspaces worked under the work account, and `SPC TAB O`, which makes its one-shot in `$MULTI_REPO_ROOT/explanation-engine`. | Those two skills are not linked, and the installer reports it. `SPC TAB O` refuses, naming the variable. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
 
-## Asking about agent-repl
-
-`SPC o h` asks a question about agent-repl in a new help workspace.
-
-- It asks for the question alone, and the composer's text is the default.
-- The workspace is made in the repository agent-repl's own source lives in, whichever workspace you ask from.
-  - That repository must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
-- The agent answers with the `/agent-repl-help` skill, which maps agent-repl's user, architecture and developer documentation and its code.
-- The agent changes nothing without your explicit approval, in that turn or any later one.
-  - The help workspace is not a one-shot. Nothing merges when the answer is done, and you can keep asking.
-- The opening instruction the agent receives is `agent-repl-help-preamble`. It is hidden from the drawn prompt.
-
 ## Selecting a bubble
 
 One bubble at a time can be selected in the feed. A selected bubble has the
@@ -409,7 +397,7 @@ The one-shot commission prompt (`SPC TAB o` and `SPC TAB C-o`) saves what you ty
 
 No way of creating a workspace switches you to it.
 
-- This covers `SPC TAB n`, `SPC TAB N`, the forks (`SPC TAB c`, `SPC TAB C`, `SPC TAB f`, `SPC TAB F`), `SPC TAB o` and `SPC o h`.
+- This covers `SPC TAB n`, `SPC TAB N`, the forks (`SPC TAB c`, `SPC TAB C`, `SPC TAB f`, `SPC TAB F`) and `SPC TAB o`.
   - The new workspace's tab appears on the bar, and you switch to it when you want.
 - Nothing agent-repl does on its own takes you out of a minibuffer prompt.
   - While you type, a workspace's panels being built, a switch made from the sidebar or by an agent, and the landing on a registered or reopened workspace all wait.

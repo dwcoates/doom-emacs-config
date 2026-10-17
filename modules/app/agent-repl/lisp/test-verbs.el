@@ -2665,7 +2665,7 @@ directories need not exist."
     (should-not (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/nowhere"))))
 
 (ert-deftest agent-repl-verbs-fixed-repository-creates-share-the-roster-lookup ()
-  "The help and explanation-engine repositories are both found by `agent-repl-verbs--roster-repository-at'."
+  "The explanation-engine repository is found by `agent-repl-verbs--roster-repository-at'."
   ;; Arrange.
   (let (asked)
     (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
@@ -2718,24 +2718,6 @@ directories need not exist."
                              :type 'user-error)))
       ;; Assert.
       (should (equal (cadr err) "agent-repl: it IS its prompt")))))
-
-(ert-deftest agent-repl-verbs-prompt-only-creates-share-the-required-prompt-reader ()
-  "The one-shot and help creates both read their prompt through the shared reader."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
-                                        (agent-repl-test-verbs--agent-repl-sections)))
-        (prompts nil))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-required-prompt)
-                   (lambda (prompt-text _refusal &optional _history-file _unseeded) (push prompt-text prompts) "q")))
-          ;; Act.
-          (agent-repl-create-oneshot nil)
-          (agent-repl-create-help-workspace)
-          ;; Assert.
-          (should (equal (reverse prompts)
-                         '("One-shot commission: " "agent-repl question: "))))))))
 
 ;;;; ---- Create: which prompts the composer seeds ----
 
@@ -2822,8 +2804,7 @@ composer was `:read'."
   "Every prompted create other than the one-shot still starts from the composer."
   (dolist (command '(agent-repl-create-workspace
                      agent-repl-fork-workspace
-                     agent-repl-fork-workspace-into-primary
-                     agent-repl-create-help-workspace))
+                     agent-repl-fork-workspace-into-primary))
     (ert-info ((symbol-name command))
       ;; Act / Assert.
       (should-not (agent-repl-test-verbs--unseeded-by command)))))
@@ -3047,7 +3028,7 @@ That is what survives a crash: nothing waits for the read to end."
   (should (equal (file-name-directory (agent-repl-verbs--oneshot-history-file))
                  (agent-repl--global-state-dir))))
 
-;;;; ---- Create: the help workspace (SPC o h) ----
+;;;; ---- Create: agent-repl's own repository ----
 
 (defmacro agent-repl-test-verbs--with-agent-repl-repo (common-dir &rest body)
   "Run BODY with agent-repl's module root resolving to COMMON-DIR.
@@ -3073,8 +3054,8 @@ trailing-slash removal alone, so the fixture directories need not exist."
 
 (defmacro agent-repl-test-verbs--with-create-commands (&rest body)
   "Run BODY with the creation commands' questions answered.
-The repository is the current workspace's section, the prompt and the
-name are fixed, and agent-repl's own repository is the help target."
+The repository is the current workspace's section, and the prompt and the
+name are fixed."
   (declare (indent 0))
   `(let ((agent-repl-roster-view
           (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
@@ -3097,8 +3078,7 @@ name are fixed, and agent-repl's own repository is the help target."
     agent-repl-fork-workspace
     agent-repl-fork-workspace-static
     agent-repl-fork-workspace-into-primary
-    agent-repl-fork-workspace-into-primary-static
-    agent-repl-create-help-workspace)
+    agent-repl-fork-workspace-into-primary-static)
   "Every command that creates a standard workspace from a keybinding.")
 
 (defun agent-repl-test-verbs--create-and-arrive (command)
@@ -3158,13 +3138,6 @@ project landed on."
     ;; Assert.
     (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
 
-(ert-deftest agent-repl-verbs-help-create-stands-still ()
-  "`SPC o h' leaves the user where they are once the help tab arrives."
-  ;; Arrange / Act.
-  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-create-help-workspace)))
-    ;; Assert.
-    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
-
 (ert-deftest agent-repl-verbs-no-creation-command-asks-to-select ()
   "Every creation command creates through `agent-repl-verb-create' with no
 selection argument at all, so a new creation path cannot select by habit."
@@ -3188,92 +3161,7 @@ selection argument at all, so a new creation path cannot select by habit."
     ;; Act / Assert.
     (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t))))
 
-(ert-deftest agent-repl-verbs-help-prompt-meta-wraps-the-preamble ()
-  "The preamble is an injected span ahead of the question, which stays bare."
-  ;; Arrange.
-  (let ((agent-repl-help-preamble "PREAMBLE"))
-    ;; Act / Assert.
-    (should (equal (agent-repl-verbs--help-prompt "how do tabs work?")
-                   (concat (agent-repl--meta-wrap "PREAMBLE") "\n\nhow do tabs work?")))))
-
-(ert-deftest agent-repl-verbs-help-preamble-names-the-skill-and-forbids-changes ()
-  "The shipped preamble names the skill and withholds implementation."
-  ;; Assert.
-  (should (string-match-p "/agent-repl-help" agent-repl-help-preamble))
-  (should (string-match-p "explicit approval" agent-repl-help-preamble)))
-
-(ert-deftest agent-repl-verbs-help-preamble-names-a-skill-the-module-ships ()
-  "The skill the preamble names is one this module ships, under its own name."
-  ;; Arrange.
-  (let ((skill-md (expand-file-name "skills/agent-repl-help/SKILL.md"
-                                    (file-name-directory agent-repl-metaprompt-file))))
-    ;; Act / Assert.
-    (should (file-exists-p skill-md))
-    (with-temp-buffer
-      (insert-file-contents skill-md)
-      (should (re-search-forward "^name: agent-repl-help$" nil t)))))
-
-(ert-deftest agent-repl-verbs-help-creates-in-agent-repls-repository ()
-  "The help workspace goes to agent-repl's repository, not the current workspace's."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "q")))
-          ;; Act.
-          (agent-repl-create-help-workspace)
-          ;; Assert.
-          (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
-                         (agent-repl-test-verbs--repo-ref
-                          "agent-repl-repo" "/tmp/agent-repl-test/doom"))))))))
-
-(ert-deftest agent-repl-verbs-help-sends-a-standard-form-with-the-composed-prompt ()
-  "The help workspace is a STANDARD create whose initial prompt is the composition."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections)))
-        (agent-repl-help-preamble "PREAMBLE"))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file _unseeded) "  how do tabs work?  ")))
-          ;; Act.
-          (agent-repl-create-help-workspace)
-          ;; Assert.
-          (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
-            (should (eq (plist-get form :arm) :standard))
-            (should (equal (plist-get (plist-get form :value) :initial-prompt)
-                           (agent-repl-verbs--said
-                            (agent-repl-verbs--help-prompt "how do tabs work?"))))))))))
-
-(ert-deftest agent-repl-verbs-help-needs-no-current-workspace ()
-  "The repository is fixed, so asking from no workspace still creates."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
-                  ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "q")))
-          ;; Act.
-          (agent-repl-create-help-workspace)
-          ;; Assert.
-          (should (agent-repl-test-verbs--request :create)))))))
-
-(ert-deftest agent-repl-verbs-help-refuses-a-blank-question ()
-  "A help workspace IS its question, so a blank one sends nothing."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
-    (agent-repl-test-verbs--with nil
-      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "   ")))
-          ;; Act / Assert.
-          (should-error (agent-repl-create-help-workspace) :type 'user-error)
-          (should-not agent-repl-test-verbs--sent))))))
-
-(ert-deftest agent-repl-verbs-help-refuses-when-the-module-is-in-no-repository ()
+(ert-deftest agent-repl-verbs-agent-repl-repository-refuses-when-the-module-is-in-no-repository ()
   "No git common-dir for the module root is refused and logged as an error."
   ;; Arrange.
   (let ((agent-repl-roster-view
@@ -3282,19 +3170,16 @@ selection argument at all, so a new creation path cannot select by habit."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-agent-repl-repo nil
         (cl-letf (((symbol-function 'agent-repl--error)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
-                  ((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file _unseeded) (error "the question must not be asked"))))
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
           ;; Act / Assert.
-          (should-error (agent-repl-create-help-workspace) :type 'user-error)
-          (should-not agent-repl-test-verbs--sent)
+          (should-error (agent-repl-verbs--agent-repl-repository) :type 'user-error)
           (should (cl-some (lambda (m)
                              (string-match-p
                               "\\`elisp.verbs.agent-repl-repository-unresolved module-root=.+ cause=not-a-git-repository\\'"
                               m))
                            logged)))))))
 
-(ert-deftest agent-repl-verbs-help-refuses-when-the-repository-is-not-on-the-roster ()
+(ert-deftest agent-repl-verbs-agent-repl-repository-refuses-when-the-repository-is-not-on-the-roster ()
   "agent-repl's repository missing from the roster is refused and logged as a warning."
   ;; Arrange.
   (let ((agent-repl-roster-view
@@ -3303,20 +3188,17 @@ selection argument at all, so a new creation path cannot select by habit."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
-                  ((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file _unseeded) (error "the question must not be asked"))))
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
           ;; Act / Assert.
-          (should-error (agent-repl-create-help-workspace) :type 'user-error)
-          (should-not agent-repl-test-verbs--sent)
+          (should-error (agent-repl-verbs--agent-repl-repository) :type 'user-error)
           (should (cl-some (lambda (m)
                              (string-match-p
                               "\\`elisp.verbs.agent-repl-repository-unregistered module-root=.+ main=/tmp/agent-repl-test/doom\\'"
                               m))
                            logged)))))))
 
-(ert-deftest agent-repl-verbs-help-resolves-the-repository-through-the-shared-main-worktree-helper ()
-  "The help repository is found by `agent-repl--main-worktree-for-dir', not a hand-rolled derivation."
+(ert-deftest agent-repl-verbs-agent-repl-repository-resolves-through-the-shared-main-worktree-helper ()
+  "agent-repl's repository is found by `agent-repl--main-worktree-for-dir', not a hand-rolled derivation."
   ;; Arrange.
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections)))

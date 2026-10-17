@@ -109,7 +109,6 @@ the module."
       ;; workspace's shim (session resumed) and webapp page.
       :desc "Restart workspace (shim + page)" "o C-c" #'agent-repl-restart-workspace
       :desc "Claude input" "o v" #'agent-repl-focus-input
-      :desc "Ask about agent-repl (help workspace)" "o h" #'agent-repl-create-help-workspace
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
       :desc "Reload webview (rebuilt bundle)" "o l" #'agent-repl-frontend-reload-webview
       ;; SPC o L sits on the shifted twin of the reload because the two are
