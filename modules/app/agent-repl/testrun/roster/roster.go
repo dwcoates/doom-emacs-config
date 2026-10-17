@@ -230,8 +230,9 @@ var Suites = []Suite{
 			// Source scans walk the daemon's own tree; the briefs and the
 			// vocabulary are read as data.
 			"daemon/", "prompts/", "proto/vocab/",
-			// The agent CLI's tests check every command a skill names.
-			"skills/",
+			// The agent CLI's tests check every command a skill names, and that
+			// each API skill links the front door.
+			"skills/", "bin/agent-repld",
 			// gitclient pins the markers the merge queue's hook spells.
 			"/.githooks/reference-transaction",
 			// The daemon half of every mocked-vendor scenario
