@@ -1366,33 +1366,6 @@ rather than as anything injected into a prompt."
                              enabled-p (length raw) force-p skip-p result)
     result))
 
-(defcustom agent-repl-workspace-command-prefix "/wor"
-  "String prefix that identifies workspace-related commands.
-Used to detect workspace-generation and workspace-update skills so the
-source workspace identity can be tagged onto the request."
-  :type 'string
-  :group 'agent-repl)
-
-(defun agent-repl--workspace-command-p (raw)
-  "Return non-nil if RAW is a /wor workspace-generation/update command."
-  (string-prefix-p agent-repl-workspace-command-prefix (string-trim-left raw)))
-
-(defun agent-repl--maybe-inject-source-ws (ws raw)
-  "Return RAW with a source-workspace tag appended, if RAW is a /wor command.
-Appends \" [source-ws:<ws-name> path:<project-dir>]\" so the
-workspace-generation and workspace-update skills know both which
-workspace initiated the request and the repo root.  Only the returned
-string carries the tag; the caller keeps its own RAW, used for posthook
-matching and history, untagged."
-  (if (agent-repl--workspace-command-p raw)
-      (let ((dir (agent-repl--ws-get ws :project-dir)))
-        (unless dir
-          (agent-repl--fatal ws "elisp.input.inject-source-ws-no-dir ws=%s" ws))
-        (agent-repl--log ws "elisp.input.inject-source-ws ws=%s path=%s" ws dir)
-        (concat raw (format " [source-ws:%s path:%s]" ws dir)))
-    (agent-repl--log-verbose ws "elisp.input.inject-source-ws-skipped raw-len=%d" (length raw))
-    raw))
-
 (defun agent-repl--metaprompt-file-for (ws)
   "Metaprompt path the read-directive should point WS at.
 `agent-repl-metaprompt-file' is fixed at load time to the checkout Emacs
@@ -1424,15 +1397,15 @@ PROMPT COMPOSITION IS FREE: everything this function does happens BEFORE
 submission, and what is submitted is what is drawn.  The read-directive
 is prepended ONLY when FORCE-METAPROMPT is non-nil, bracketed as a
 harness-injected span (`agent-repl--meta-wrap') so the daemon strips it
-from the DRAWN row while the agent still receives it verbatim.  A /wor
-command additionally gets a source-workspace tag appended."
-  (let* ((tagged (agent-repl--maybe-inject-source-ws ws raw))
-         (prepend-p (agent-repl--should-prepend-metaprompt-p raw force-metaprompt ws)))
-    (agent-repl--log ws "elisp.input.prepare raw-len=%d tagged-len=%d force=%s prepend=%s"
-                     (length raw) (length tagged) force-metaprompt prepend-p)
+from the DRAWN row while the agent still receives it verbatim.  The
+agent API finds the asking workspace from the agent's working directory,
+so a prompt carries no workspace tag of its own."
+  (let ((prepend-p (agent-repl--should-prepend-metaprompt-p raw force-metaprompt ws)))
+    (agent-repl--log ws "elisp.input.prepare raw-len=%d force=%s prepend=%s"
+                     (length raw) force-metaprompt prepend-p)
     (if prepend-p
-        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" tagged)
-      tagged)))
+        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" raw)
+      raw)))
 
 ;;;; ---- Identity --------------------------------------------------------
 
