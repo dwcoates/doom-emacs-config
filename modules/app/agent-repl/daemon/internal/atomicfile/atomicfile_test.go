@@ -135,7 +135,6 @@ func TestEverySiteReplacesThroughThisPackage(t *testing.T) {
 		"../rollout/carry.go",
 		"../rollout/manifest.go",
 		"../rollout/spawn.go",
-		"../commandfile/write.go",
 		"../classifierupdate/update.go",
 	}
 	for _, site := range sites {

@@ -326,13 +326,6 @@ func eventSentence(event Event) string {
 
 func eventFields(event Event) dlog.Context {
 	return dlog.Context{"workspace": string(event.Workspace.ID), "event": event.Kind.String(),
-		"owner": optionalID(event.Workspace.Parent), "context_from": optionalID(event.Workspace.ContextFrom),
-		"requested_by": optionalID(event.Workspace.RequestedBy), "owner_lands": event.Workspace.OwnerLands}
-}
-
-func optionalID(id *wsm.WorkspaceID) string {
-	if id == nil {
-		return ""
-	}
-	return string(*id)
+		"owner": ids.Optional(event.Workspace.Parent), "context_from": ids.Optional(event.Workspace.ContextFrom),
+		"requested_by": ids.Optional(event.Workspace.RequestedBy), "owner_lands": event.Workspace.OwnerLands}
 }
