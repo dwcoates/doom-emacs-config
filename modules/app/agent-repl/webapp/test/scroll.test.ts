@@ -2924,6 +2924,16 @@ describe("TailFollow.lastBubbleExpanded", () => {
     expect(await moves(capture)).toEqual([{ cause: "lastBubbleExpanded", from: 500, to: 1600, follow: false }]);
   });
 
+  it("records the click hold it ends under lastBubbleExpanded", async () => {
+    // Arrange
+    const capture = captureLogRecords("info");
+    // Act
+    expandedIn(3);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-hold-ended");
+    expect(record.context).toMatchObject({ by: "lastBubbleExpanded", held_top: 500, row: "r3" });
+  });
+
   it("holds the view the click held for any other row's bubble", () => {
     // Arrange / Act
     const f = expandedIn(2);

@@ -645,7 +645,7 @@ export class TailFollow {
       });
       return;
     }
-    this.supersedeClick();
+    this.supersedeClick("lastBubbleExpanded");
     this.park("lastBubbleExpanded");
   }
 
