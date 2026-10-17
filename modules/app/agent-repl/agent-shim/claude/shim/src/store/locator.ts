@@ -31,8 +31,8 @@ import { bindLog } from "../log.js";
 import { type conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import { PersistenceError } from "./persistence.js";
-import { readFailure, transportFailure } from "./reader.js";
-import { readWithRetry, type ReadRetryOptions } from "./retry.js";
+import { answeredLookup, lookupRefused, sendLookup } from "./answered-lookup.js";
+import type { ReadRetryOptions } from "./retry.js";
 
 const LOGGER = bindLog({ component: "shim-store-locator", operation: "shim.store.locator" });
 
@@ -76,14 +76,9 @@ async function lookupOnce(
   session: conversationv1.AgentId,
   vendorTaskId: string,
 ): Promise<VendorTaskAnswer> {
-  let response: storev1.GetAgentByVendorTaskResponse;
-  try {
-    response = await client.getAgentByVendorTask(
-      create(storev1.GetAgentByVendorTaskRequestSchema, { session, vendorTaskId }),
-    );
-  } catch (error) {
-    throw transportFailure(error);
-  }
+  const response = await sendLookup(() =>
+    client.getAgentByVendorTask(create(storev1.GetAgentByVendorTaskRequestSchema, { session, vendorTaskId })),
+  );
   const result = response.result;
   switch (result.case) {
     case "success": {
@@ -96,14 +91,7 @@ async function lookupOnce(
     case "notFound":
       return { kind: "not_found" };
     case "failure":
-      if (result.value.kind.case === "invalidRequest") {
-        // A REQUEST THIS PROCESS BUILT, REFUSED: a shim defect, never retried.
-        throw new PersistenceError(
-          "invalid_request",
-          `the store refused the lookup as malformed (field ${result.value.kind.value.field}): ${result.value.detail}`,
-        );
-      }
-      throw readFailure(result.value);
+      return lookupRefused(result.value);
     default:
       throw new PersistenceError("store_unavailable", "the store answered GetAgentByVendorTask with no result arm set");
   }
@@ -127,23 +115,21 @@ export async function lookupAgentByVendorTask(
       detail: `the lookup names ${session.value === "" ? "no session" : "no vendor task locator"}; the store is never asked an incomplete question`,
     };
   }
-  try {
-    const answer = await readWithRetry(
-      "GetAgentByVendorTask",
-      () => lookupOnce(options.client, session, vendorTaskId),
-      options,
-    );
+  const answer = await answeredLookup(
+    "GetAgentByVendorTask",
+    () => lookupOnce(options.client, session, vendorTaskId),
+    options,
+  );
+  if (answer.kind === "failed") {
     LOGGER.debug(
-      { agent: session.value, task_id: vendorTaskId, answer: describeVendorTaskAnswer(answer) },
-      "the store answered a vendor task locator lookup",
-    );
-    return answer;
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    LOGGER.debug(
-      { agent: session.value, task_id: vendorTaskId, detail },
+      { agent: session.value, task_id: vendorTaskId, detail: answer.detail },
       "the vendor task locator lookup failed; the caller records the outcome",
     );
-    return { kind: "failed", detail };
+    return answer;
   }
+  LOGGER.debug(
+    { agent: session.value, task_id: vendorTaskId, answer: describeVendorTaskAnswer(answer) },
+    "the store answered a vendor task locator lookup",
+  );
+  return answer;
 }
