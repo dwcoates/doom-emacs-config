@@ -49,7 +49,7 @@
   :type 'integer
   :group 'agent-repl-page-unload)
 
-(defcustom agent-repl-page-unload-dwell 2
+(defcustom agent-repl-page-unload-dwell 1
   "Seconds a page must be shown for the showing to count as a look."
   :type 'number
   :group 'agent-repl-page-unload)

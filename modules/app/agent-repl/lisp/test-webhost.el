@@ -397,12 +397,6 @@ so stubbing the accessor would not reach the code under test."
 
 ;;;; ---- Replay ----
 
-(defun agent-repl-test-wh--drain-replay ()
-  "Bring back every page the replay queued, as its timer would, one at a time."
-  (while agent-repl--webhost-replay-queue
-    (agent-repl--webhost-replay-next))
-  (agent-repl--webhost-replay-cancel))
-
 (defmacro agent-repl-test-wh--with-order (order current &rest body)
   "Run BODY with ORDER as the drawn tab order and CURRENT the current workspace."
   (declare (indent 2))
@@ -420,12 +414,11 @@ so stubbing the accessor would not reach the code under test."
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl--webhost-on-load 'load-changed)
-    (agent-repl-test-wh--drain-replay)
     ;; Assert
     (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
 
-(ert-deftest agent-repl-test-wh-a-load-brings-back-the-shown-page-at-once ()
-  "The shown page comes back in the load's own turn; the rest wait their turn."
+(ert-deftest agent-repl-test-wh-a-load-loads-the-shown-page-now-and-the-rest-in-turn ()
+  "The shown page is ensured plainly and shown; every other page is ensured in turn."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
@@ -435,10 +428,23 @@ so stubbing the accessor would not reach the code under test."
     ;; Act
     (agent-repl--webhost-on-load 'load-changed)
     ;; Assert
-    (should (equal (list (length (agent-repl-test-wh--sent "ensure")) agent-repl--webhost-replay-queue)
-                   '(1 ("id-beta"))))
-    (should (string-search "id-alpha" (car (agent-repl-test-wh--sent "ensure"))))
-    (agent-repl--webhost-replay-cancel)))
+    (should (equal (agent-repl-test-wh--sent "ensure")
+                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/")
+                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" t))))))
+
+(ert-deftest agent-repl-test-wh-the-in-turn-pages-are-handed-over-nearest-first ()
+  "The pages handed over in turn go nearest the current tab first."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (dolist (ws '("a" "b" "c" "d" "e")) (agent-repl-webhost-ensure-page ws))
+    (setq agent-repl-test-wh--calls nil)
+    (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "c"
+      ;; Act
+      (agent-repl--webhost-on-load 'load-changed))
+    ;; Assert
+    (should (equal (mapcar (lambda (script) (and (string-match "\"id-\\([a-e]\\)\"" script) (match-string 1 script)))
+                           (agent-repl-test-wh--sent "ensure"))
+                   '("c" "d" "b" "e" "a")))))
 
 (ert-deftest agent-repl-test-wh-the-replay-comes-back-nearest-first-around-a-ring ()
   "Pages come back by distance from the current tab, the ends of the bar adjacent."
@@ -460,56 +466,8 @@ so stubbing the accessor would not reach the code under test."
         ;; Assert
         (should (equal order '("id-b" "id-z")))))))
 
-(ert-deftest agent-repl-test-wh-a-switch-to-a-queued-page-brings-it-back-at-once ()
-  "Showing a page the replay has not reached ensures it before the show."
-  ;; Arrange
-  (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-ensure-page "beta")
-    (agent-repl--webhost-on-load 'load-changed)
-    (setq agent-repl-test-wh--calls nil)
-    ;; Act
-    (agent-repl-webhost-show "beta")
-    ;; Assert
-    (should (equal (mapcar (lambda (script) (if (string-search "h.ensure(" script) 'ensure 'show))
-                           (seq-filter (lambda (script) (or (string-search "h.ensure(" script)
-                                                            (string-search "h.show(" script)))
-                                       (reverse (mapcar #'car agent-repl-test-wh--calls))))
-                   '(ensure show)))
-    (should-not (member "id-beta" agent-repl--webhost-replay-queue))
-    (agent-repl--webhost-replay-cancel)))
-
-(ert-deftest agent-repl-test-wh-a-removed-page-leaves-the-replay-queue ()
-  "A page removed while queued is never brought back."
-  ;; Arrange
-  (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl--webhost-on-load 'load-changed)
-    ;; Act
-    (agent-repl-webhost-remove "alpha")
-    ;; Assert
-    (should-not agent-repl--webhost-replay-queue)
-    (agent-repl--webhost-replay-cancel)))
-
-(ert-deftest agent-repl-test-wh-killing-the-host-cancels-its-replay ()
-  "A host killed mid-replay brings back nothing more."
-  ;; Arrange
-  (agent-repl-test-wh--with-host
-    (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl--webhost-on-load 'load-changed)
-    (let ((buf (generate-new-buffer " *test-wh-host*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl-webhost-buffer) (lambda () buf))
-                    ((symbol-function 'agent-repl--frontend-kill-webview) #'ignore))
-            ;; Act
-            (agent-repl-webhost-kill)
-            ;; Assert
-            (should (equal (list agent-repl--webhost-replay-queue agent-repl--webhost-replay-timer)
-                           '(nil nil))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-wh-the-replay-records-its-start-and-end ()
-  "A staggered replay is recorded when queued and when complete."
+(ert-deftest agent-repl-test-wh-the-replay-records-the-pages-handed-over-in-turn ()
+  "A load records how many pages it handed over in turn."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
@@ -517,11 +475,9 @@ so stubbing the accessor would not reach the code under test."
       (cl-letf (((symbol-function 'agent-repl--info)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
         ;; Act
-        (agent-repl--webhost-on-load 'load-changed)
-        (agent-repl-test-wh--drain-replay))
+        (agent-repl--webhost-on-load 'load-changed))
       ;; Assert
-      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-staggered queued=1" text)) logged))
-      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-complete" text)) logged)))))
+      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-in-turn pages=1" text)) logged)))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-the-shown-page ()
   "A loaded host shows the page Emacs stands on again."
@@ -579,7 +535,6 @@ so stubbing the accessor would not reach the code under test."
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl--webhost-on-load 'load-changed)
-    (agent-repl-test-wh--drain-replay)
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))
