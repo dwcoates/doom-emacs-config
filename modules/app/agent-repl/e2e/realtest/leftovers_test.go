@@ -4,7 +4,6 @@ package realtest
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,81 +219,40 @@ func TestDescribeLeftoversNamesEveryRowAndItsDirectory(t *testing.T) {
 	}
 }
 
-// TestWriteWorkspaceCommandNamesTheVerbAndTheWorkspace is the command-file
-// edge: the entry the daemon reads must be exactly one, of the verb asked for,
-// naming the workspace asked for.
-func TestWriteWorkspaceCommandNamesTheVerbAndTheWorkspace(t *testing.T) {
-	// Arrange.
-	stateDir := t.TempDir()
+// recordingVerbs is a daemon that takes every close and forget and changes
+// nothing, recording "<verb> <workspace>" for each.
+type recordingVerbs struct{ calls map[string]int }
 
-	// Act.
-	path, err := WriteWorkspaceCommand(stateDir, "close", "ws-123")
+func newRecordingVerbs() *recordingVerbs { return &recordingVerbs{calls: map[string]int{}} }
 
-	// Assert.
-	if err != nil {
-		t.Fatalf("write the close command file: %v", err)
-	}
-	var entries []struct {
-		Type      string `json:"type"`
-		Workspace string `json:"workspace"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read the command file back: %v", err)
-	}
-	if err := json.Unmarshal(data, &entries); err != nil {
-		t.Fatalf("the command file %s did not decode as JSON: %v", path, err)
-	}
-	if len(entries) != 1 || entries[0].Type != "close" || entries[0].Workspace != "ws-123" {
-		t.Fatalf("expected one close entry naming ws-123, got %+v", entries)
-	}
+func (r *recordingVerbs) Close(_ context.Context, id string) error {
+	r.calls["close "+id]++
+	return nil
 }
 
-// TestWriteWorkspaceCommandMatchesTheDaemonsOwnGlob is its own edge case
-// because getting it wrong is silent: a file the glob does not claim is never
-// read, and the clean would report a daemon that refused when nothing was ever
-// asked.
-func TestWriteWorkspaceCommandMatchesTheDaemonsOwnGlob(t *testing.T) {
-	// Arrange.
-	stateDir := t.TempDir()
-
-	// Act.
-	path, err := WriteWorkspaceCommand(stateDir, "forget", "ws-123")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("write the forget command file: %v", err)
-	}
-	matched, err := filepath.Match("workspace_commands_*.json", filepath.Base(path))
-	if err != nil {
-		t.Fatalf("match the daemon's glob: %v", err)
-	}
-	if !matched {
-		t.Fatalf("%s does not match the daemon's own glob workspace_commands_*.json "+
-			"(daemon/internal/stateroot/stateroot.go CommandFileGlob), so nothing would ever read it",
-			filepath.Base(path))
-	}
+func (r *recordingVerbs) Forget(_ context.Context, id string) error {
+	r.calls["forget "+id]++
+	return nil
 }
 
-// TestCleanLeftoversReportsWhatSurvivedWhenNoDaemonSweepsTheIngress is the
-// failure edge, and the one the sweep's verdict rests on: with nothing reading
-// the command files, every row is still there afterwards and the caller is
+// TestCleanLeftoversReportsWhatSurvivedWhenTheDaemonRemovesNothing is the
+// failure edge, and the one the sweep's verdict rests on: with no row ever
+// leaving the registry, every row is still there afterwards and the caller is
 // told so rather than being told the clean succeeded.
-func TestCleanLeftoversReportsWhatSurvivedWhenNoDaemonSweepsTheIngress(t *testing.T) {
+func TestCleanLeftoversReportsWhatSurvivedWhenTheDaemonRemovesNothing(t *testing.T) {
 	// Arrange.
 	dbPath, runDir := leftoverFixture(t)
-	stateDir := filepath.Dir(dbPath)
 	shrinkLeftoverWaits(t)
 
 	// Act.
-	remaining, err := CleanLeftovers(context.Background(), dbPath, stateDir, runDir, nil)
+	remaining, err := CleanLeftovers(context.Background(), dbPath, newRecordingVerbs(), runDir, nil)
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("clean the leftovers: %v", err)
 	}
 	if len(remaining) != 2 {
-		t.Fatalf("no daemon read the command files, so both rows must be reported as survivors; got %d: %+v",
+		t.Fatalf("no row left the registry, so both rows must be reported as survivors; got %d: %+v",
 			len(remaining), remaining)
 	}
 }
@@ -306,50 +264,42 @@ func TestCleanLeftoversReportsWhatSurvivedWhenNoDaemonSweepsTheIngress(t *testin
 func TestCleanLeftoversAsksTheDaemonToCloseAnOpenRowBeforeForgettingIt(t *testing.T) {
 	// Arrange.
 	dbPath, runDir := leftoverFixture(t)
-	stateDir := filepath.Dir(dbPath)
 	shrinkLeftoverWaits(t)
+	verbs := newRecordingVerbs()
 
 	// Act.
-	if _, err := CleanLeftovers(context.Background(), dbPath, stateDir, runDir, nil); err != nil {
+	if _, err := CleanLeftovers(context.Background(), dbPath, verbs, runDir, nil); err != nil {
 		t.Fatalf("clean the leftovers: %v", err)
 	}
 
 	// Assert: the open row got a close and, since it never read back closed,
 	// no forget; the closed row got a forget and no close.
-	verbs := commandFileVerbs(t, filepath.Join(stateDir, "output"))
-	if verbs["close ws-open"] != 1 {
-		t.Errorf("expected exactly one close for the open row, got %d (all: %v)", verbs["close ws-open"], verbs)
+	if verbs.calls["close ws-open"] != 1 || verbs.calls["forget ws-open"] != 0 {
+		t.Errorf("the open row must be closed once and, never reading back closed, not forgotten: %v", verbs.calls)
 	}
-	if verbs["forget ws-open"] != 0 {
-		t.Errorf("the open row never read back closed, so it must not have been forgotten: %v", verbs)
-	}
-	if verbs["forget ws-closed"] != 1 {
-		t.Errorf("expected exactly one forget for the already-closed row, got %d (all: %v)",
-			verbs["forget ws-closed"], verbs)
-	}
-	if verbs["close ws-closed"] != 0 {
-		t.Errorf("an already-closed row must not be closed again: %v", verbs)
+	if verbs.calls["forget ws-closed"] != 1 || verbs.calls["close ws-closed"] != 0 {
+		t.Errorf("the closed row must be forgotten once and not closed again: %v", verbs.calls)
 	}
 }
 
 // TestCleanLeftoversTouchesNoRowOutsideThePrefix is the safety edge stated as
-// a test of the WRITES rather than of the read: no command file may ever name
-// a workspace the run did not create.
+// a test of the ASKS rather than of the read: no verb may ever name a
+// workspace the run did not create.
 func TestCleanLeftoversTouchesNoRowOutsideThePrefix(t *testing.T) {
 	// Arrange.
 	dbPath, runDir := leftoverFixture(t)
-	stateDir := filepath.Dir(dbPath)
 	shrinkLeftoverWaits(t)
+	verbs := newRecordingVerbs()
 
 	// Act.
-	if _, err := CleanLeftovers(context.Background(), dbPath, stateDir, runDir, nil); err != nil {
+	if _, err := CleanLeftovers(context.Background(), dbPath, verbs, runDir, nil); err != nil {
 		t.Fatalf("clean the leftovers: %v", err)
 	}
 
 	// Assert.
-	for verb := range commandFileVerbs(t, filepath.Join(stateDir, "output")) {
-		if strings.HasSuffix(verb, "ws-owner") {
-			t.Fatalf("a command file named the owner's own workspace: %s", verb)
+	for call := range verbs.calls {
+		if strings.HasSuffix(call, "ws-owner") {
+			t.Fatalf("the clean asked about the owner's own workspace: %s", call)
 		}
 	}
 }
@@ -362,35 +312,4 @@ func shrinkLeftoverWaits(t *testing.T) {
 	ceiling, interval := leftoverCleanCeiling, leftoverPollInterval
 	leftoverCleanCeiling, leftoverPollInterval = 20*time.Millisecond, 5*time.Millisecond
 	t.Cleanup(func() { leftoverCleanCeiling, leftoverPollInterval = ceiling, interval })
-}
-
-// commandFileVerbs reads every command file in the ingress directory and
-// counts "<verb> <workspace>" pairs.
-func commandFileVerbs(t *testing.T, dir string) map[string]int {
-	t.Helper()
-	counts := make(map[string]int)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return counts
-		}
-		t.Fatalf("list the ingress directory %s: %v", dir, err)
-	}
-	for _, entry := range entries {
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		var parsed []struct {
-			Type      string `json:"type"`
-			Workspace string `json:"workspace"`
-		}
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			t.Fatalf("decode %s: %v", entry.Name(), err)
-		}
-		for _, one := range parsed {
-			counts[one.Type+" "+one.Workspace]++
-		}
-	}
-	return counts
 }

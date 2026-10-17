@@ -4,13 +4,18 @@ package realtest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 // A REALTEST LEAVES THE OWNER'S STATE EXACTLY AS IT FOUND IT, and until
@@ -40,8 +45,8 @@ import (
 //     (`LeftoverWorkspaces`);
 //   - how to say so to a human (`DescribeLeftovers`);
 //   - how to remove them THROUGH THE PRODUCT (`CleanLeftovers`) — close, then
-//     forget, through the daemon's command-file ingress, never by writing to
-//     the owner's database.
+//     forget, through the daemon's CloseWorkspace and ForgetWorkspace, never
+//     by writing to the owner's database.
 //
 // NOTHING HERE EVER DELETES A ROW ITSELF. The registry is the daemon's, and a
 // harness that edited it directly would be repairing the evidence rather than
@@ -65,10 +70,9 @@ const LeftoverRemedy = "bin/realtest.sh --clean-leftovers"
 // leftoverCleanCeiling bounds how long one close or one forget may take to
 // show up in the registry.
 //
-// It is wsActForgetCeiling's reasoning: the command-file ingress polls its
-// directory every commandfile.DefaultInterval (250ms, daemon/internal
-// /commandfile/api.go), and thirty seconds is that poll a hundred and twenty
-// times over — generous past a slow sweep without turning an unreachable
+// It is wsActForgetCeiling's reasoning: the daemon answers a close and a
+// forget inside the call, and thirty seconds is generous past the snapshot
+// this reads catching up under a slow sweep, without turning an unreachable
 // daemon into a run that hangs.
 //
 // A var rather than a const only so leftovers_test.go can shrink it: a unit
@@ -196,34 +200,60 @@ func DescribeLeftovers(prefix string, rows []LeftoverRow) string {
 	return b.String()
 }
 
-// WriteWorkspaceCommand asks the daemon to run one workspace verb on one
-// workspace, through the command-file ingress, and answers the path it wrote.
-//
-// THE COMMAND FILE IS A REAL PRODUCTION INGRESS, not a side channel invented
-// for a test: it is the same door `agent-repl workspace-dispatch` scripts
-// write through, swept by daemon/internal/commandfile/ingress.go, whose
-// `apply` maps each entry onto the same internal verb the equivalent rpc
-// reaches. `forget` has no rpc arm at all (that needs a proto addition nobody
-// has made), so for the one verb that actually removes a registry record this
-// is the only door there is.
-//
-// The name must match the daemon's own glob, `workspace_commands_*.json`
-// (daemon/internal/stateroot/stateroot.go, CommandFileGlob), or nothing ever
-// reads it.
-func WriteWorkspaceCommand(stateDir, verb, id string) (string, error) {
-	dir := filepath.Join(stateDir, "output")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create the command-file ingress directory %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, fmt.Sprintf("workspace_commands_realtest-%s-%d.json", verb, time.Now().UnixNano()))
-	entry, err := json.Marshal([]map[string]string{{"type": verb, "workspace": id}})
+// LeftoverVerbs are the daemon verbs a clean asks for.
+type LeftoverVerbs interface {
+	// Close closes the workspace, as the user.
+	Close(ctx context.Context, id string) error
+	// Forget removes the closed workspace's registry record.
+	Forget(ctx context.Context, id string) error
+}
+
+// DaemonVerbs is the LeftoverVerbs of the daemon serving STATEDIR: its own
+// CloseWorkspace and ForgetWorkspace rpcs, over the address its daemon.addr
+// advertises. They are the same doors the editor's close and forget take.
+func DaemonVerbs(stateDir string) LeftoverVerbs { return daemonVerbs{stateDir: stateDir} }
+
+type daemonVerbs struct{ stateDir string }
+
+func (d daemonVerbs) client() (agentreplv1connect.AgentReplClient, error) {
+	addr, err := DaemonStopAddress(d.stateDir)
 	if err != nil {
-		return "", fmt.Errorf("render a %s command for %s: %w", verb, id, err)
+		return nil, err
 	}
-	if err := os.WriteFile(path, entry, 0o644); err != nil {
-		return "", fmt.Errorf("write the command file %s: %w", path, err)
+	return daemonStopClient(addr), nil
+}
+
+func (d daemonVerbs) Close(ctx context.Context, id string) error {
+	client, err := d.client()
+	if err != nil {
+		return err
 	}
-	return path, nil
+	resp, err := client.CloseWorkspace(ctx, connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: id},
+		Requester: &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}}},
+	}))
+	if err != nil {
+		return fmt.Errorf("CloseWorkspace %s: %w", id, err)
+	}
+	if refused := resp.Msg.GetError(); refused != nil {
+		return fmt.Errorf("the daemon refused to close %s: %v", id, refused)
+	}
+	return nil
+}
+
+func (d daemonVerbs) Forget(ctx context.Context, id string) error {
+	client, err := d.client()
+	if err != nil {
+		return err
+	}
+	resp, err := client.ForgetWorkspace(ctx, connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: &workspacev1.WorkspaceRef{Id: id}}))
+	if err != nil {
+		return fmt.Errorf("ForgetWorkspace %s: %w", id, err)
+	}
+	if refused := resp.Msg.GetError(); refused != nil {
+		return fmt.Errorf("the daemon refused to forget %s: %v", id, refused)
+	}
+	return nil
 }
 
 // CleanLeftovers removes every row under prefix THROUGH THE DAEMON and answers
@@ -238,7 +268,7 @@ func WriteWorkspaceCommand(stateDir, verb, id string) (string, error) {
 // one of those has a T. An error answer is reserved for "the registry could
 // not be read at all"; a row the daemon declined to forget is not an error but
 // a SURVIVOR, returned so the caller can fail on it with the evidence in hand.
-func CleanLeftovers(ctx context.Context, dbPath, stateDir, prefix string, log func(string)) ([]LeftoverRow, error) {
+func CleanLeftovers(ctx context.Context, dbPath string, verbs LeftoverVerbs, prefix string, log func(string)) ([]LeftoverRow, error) {
 	if log == nil {
 		log = func(string) {}
 	}
@@ -253,12 +283,11 @@ func CleanLeftovers(ctx context.Context, dbPath, stateDir, prefix string, log fu
 
 	for _, row := range rows {
 		if !row.Closed {
-			path, err := WriteWorkspaceCommand(stateDir, "close", row.ID)
-			if err != nil {
-				log(fmt.Sprintf("could not ask the daemon to close %s (%s): %v", row.ID, row.Name, err))
+			if err := verbs.Close(ctx, row.ID); err != nil {
+				log(fmt.Sprintf("could not have the daemon close %s (%s): %v", row.ID, row.Name, err))
 				continue
 			}
-			log(fmt.Sprintf("asked the daemon to close %s (%s) through %s", row.ID, row.Name, path))
+			log(fmt.Sprintf("the daemon closed %s (%s)", row.ID, row.Name))
 			if !pollUntil(ctx, leftoverCleanCeiling, leftoverPollInterval, func() bool {
 				return leftoverRowIsClosed(ctx, dbPath, row.ID)
 			}) {
@@ -267,12 +296,11 @@ func CleanLeftovers(ctx context.Context, dbPath, stateDir, prefix string, log fu
 				continue
 			}
 		}
-		path, err := WriteWorkspaceCommand(stateDir, "forget", row.ID)
-		if err != nil {
-			log(fmt.Sprintf("could not ask the daemon to forget %s (%s): %v", row.ID, row.Name, err))
+		if err := verbs.Forget(ctx, row.ID); err != nil {
+			log(fmt.Sprintf("could not have the daemon forget %s (%s): %v", row.ID, row.Name, err))
 			continue
 		}
-		log(fmt.Sprintf("asked the daemon to forget %s (%s) through %s", row.ID, row.Name, path))
+		log(fmt.Sprintf("the daemon forgot %s (%s)", row.ID, row.Name))
 		if !pollUntil(ctx, leftoverCleanCeiling, leftoverPollInterval, func() bool {
 			return !leftoverRowExists(ctx, dbPath, row.ID)
 		}) {

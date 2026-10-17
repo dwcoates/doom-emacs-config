@@ -14,7 +14,7 @@ import (
 //
 // It is a `go test` rather than a second program because everything it needs
 // already lives in this package — the snapshot read of the owner's registry
-// (state.go), the command-file ingress (leftovers.go) — and a second spelling
+// (state.go), the daemon's close and forget (leftovers.go) — and a second spelling
 // of either in bash is the drift the shared implementation exists to prevent.
 //
 // IT IS NOT A REALTEST AND MUST NEVER BE NAMED LIKE ONE. bin/test-realtest.sh
@@ -74,7 +74,7 @@ func TestCleanRealtestLeftovers(t *testing.T) {
 			"(registered-dir=... [MISSING])` — every time the workspace is touched.\nRemedy: %s",
 			leftoverFindingName, DescribeLeftovers(prefix, rows), LeftoverRemedy)
 	case "clean":
-		remaining, err := CleanLeftovers(ctx, dbPath, stateDir, prefix, func(line string) { t.Log(line) })
+		remaining, err := CleanLeftovers(ctx, dbPath, DaemonVerbs(stateDir), prefix, func(line string) { t.Log(line) })
 		if err != nil {
 			t.Fatalf("clean the rows under %s: %v", prefix, err)
 		}
@@ -82,11 +82,10 @@ func TestCleanRealtestLeftovers(t *testing.T) {
 			t.Logf("no workspace row in %s names a directory under %s", dbPath, prefix)
 			return
 		}
-		t.Errorf("%s\n%s\nThese were asked to close and forget through the daemon's command-file ingress "+
-			"and are still in the registry. Either no daemon is sweeping %s, or it refused; the daemon's own "+
-			"log (%s) carries the refusal.\nRemedy once a daemon is serving: %s",
-			leftoverFindingName, DescribeLeftovers(prefix, remaining),
-			filepath.Join(stateDir, "output"),
+		t.Errorf("%s\n%s\nThese were asked to close and forget through the daemon's CloseWorkspace and "+
+			"ForgetWorkspace and are still in the registry. Either no daemon is serving %s, or it refused; the "+
+			"daemon's own log (%s) carries the refusal.\nRemedy once a daemon is serving: %s",
+			leftoverFindingName, DescribeLeftovers(prefix, remaining), stateDir,
 			filepath.Join(stateDir, "logs", "daemon.run.log"), LeftoverRemedy)
 	default:
 		t.Fatalf("%s=%q is not a mode this check knows; it is `report` or `clean`", leftoverModeEnv, mode)
