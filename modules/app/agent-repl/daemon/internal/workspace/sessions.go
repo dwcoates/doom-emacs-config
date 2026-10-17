@@ -22,6 +22,7 @@ import (
 	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/opentabs"
@@ -2556,15 +2557,14 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 // raiseColdGate publishes the gate's row and the footer's parked status, and
 // remembers the MENU it served so the answer can be echoed against it.
 //
-// The compact menu is the models the session could be compacted onto: the model
-// the cold start requested, plus the model the record holds when it differs.
-// Every scope but the unspecified one is offered, because an unspecified scope
-// is not a choice.
+// The compact menu is the summarizers the session could be compacted by (see
+// coldCompactMenu). Every scope but the unspecified one is offered, because an
+// unspecified scope is not a choice.
 func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string) {
 	// EVERY ACCOUNT IS OFFERED COMPACTION (owner ruling 2026-10-06, reversing
 	// the 2026-09-30 work-account exclusion): the work account's gate offers
 	// compact too.
-	compact, menu := coldCompactMenu(cold)
+	compact, menu := coldCompactMenu()
 
 	window := f.deps.Topbar.ContextWindow(ws)
 	cost := coldGateCost(cold, window)
@@ -2644,13 +2644,21 @@ func (f *Fleet) SetColdGateHeld(ws ids.WorkspaceID, held int) {
 	f.publishColdGateRow(ws)
 }
 
-// coldCompactMenu is the compact menu a gate serves: the model the cold start
-// requested, and every scope but the unspecified one, which is not a choice.
+// coldCompactMenu is the compact menu a gate serves: Haiku then Sonnet as the
+// summarizer, and every scope but the unspecified one, which is not a choice.
 // The served half is what the answer is echoed against; the drawn half is the
 // gate card's submenu.
-func coldCompactMenu(cold *conversationv1.SessionCold) (*ServedColdGateCompact, *frontendv1.FeedColdGateCompactMenu) {
+//
+// THE SUMMARIZER DEFAULTS TO HAIKU (owner ruling, 2026-10-17): the card
+// pre-selects the first model served, and a summary is a job a cheap model
+// does well, so the session's own (often Opus) model is not offered. Sonnet
+// is the stronger choice for a transcript Haiku would summarize too thinly.
+func coldCompactMenu() (*ServedColdGateCompact, *frontendv1.FeedColdGateCompactMenu) {
 	served := &ServedColdGateCompact{
-		Models: []*conversationv1.AgentModel{cold.GetRequestedModel()},
+		Models: []*conversationv1.AgentModel{
+			{Name: headless.ModelHaiku},
+			{Name: headless.ModelSonnet},
+		},
 		Scopes: []conversationv1.SessionCompactScope{
 			conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
 			conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS,

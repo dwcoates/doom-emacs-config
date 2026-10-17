@@ -6980,7 +6980,7 @@ ar-button.outcome-marker-pill {
    Emacs hides the input window while it stands and this webview grows into
    that space, so the banner takes the input's exact slot: #gate-dock, the
    body grid's full-width second row under the rail AND the main column (the
-   rail keeps its height), exactly the input window's height. Emacs tells
+   rail keeps its height), at least the input window's height. Emacs tells
    the page that height in pixels (--gate-dock-height, set on the root before the input
    hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
    fallback only for a page Emacs never told, which gate-dock.ts records. The
@@ -6989,13 +6989,14 @@ ar-button.outcome-marker-pill {
 #gate-dock {
   grid-column: 1 / -1;
   grid-row: 2;
-  /* THE DOCK IS EXACTLY THE INPUT WINDOW'S HEIGHT (owner request,
-     2026-10-13), so the banner neither grows nor shrinks the feed as it
-     replaces the input; a gate taller than the slot (the open compact
-     submenu) scrolls inside it rather than squeezing the feed further. A
-     column, so the docked card can fill it. */
-  height: var(--gate-dock-height, 18.4vh);
-  overflow-y: auto;
+  /* THE DOCK IS AT LEAST THE INPUT WINDOW'S HEIGHT (owner request,
+     2026-10-13), so a gate that fits neither grows nor shrinks the feed as
+     it replaces the input. A GATE TALLER THAN THE SLOT GROWS THE DOCK AND
+     NEVER SCROLLS (owner request, 2026-10-17): the open compact submenu
+     takes the height it needs from the feed above, and the dock shrinks
+     back to the input's height once that extra height is no longer needed.
+     A column, so the docked card can fill it. */
+  min-height: var(--gate-dock-height, 18.4vh);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -7023,7 +7024,7 @@ ar-button.outcome-marker-pill {
      row are each centered on the card's middle, and the slot's spare height
      is split evenly above the title and below the buttons; the gaps between
      them stay what they always were. The card grows past the slot rather than
-     shrinking its content, so a taller gate's top stays reachable by scroll. */
+     shrinking its content, and the dock grows with it. */
   flex: 1 0 auto;
   display: flex;
   flex-direction: column;

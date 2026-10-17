@@ -269,14 +269,34 @@ describe("installGateDock", () => {
     expect(toldDockHeight(document)).toBeNull();
   });
 
-  it("sizes the dock to exactly the told property (the fraction only as fallback)", () => {
+  it("floors the dock at the told property (the fraction only as fallback)", () => {
     // Arrange
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).toMatch(/(?<!-)height: var\(--gate-dock-height, 18\.4vh\)/);
+    expect(rule).toMatch(/(?<![-\w])min-height: var\(--gate-dock-height, 18\.4vh\)/);
+  });
+
+  it("never fixes the dock's height, so a taller gate grows it", () => {
+    // Arrange
+
+    // Act
+    const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/(?<![-\w])(max-)?height:/);
+  });
+
+  it("never scrolls the dock", () => {
+    // Arrange
+
+    // Act
+    const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/overflow(-y)?:\s*(auto|scroll)/);
   });
 });
 
