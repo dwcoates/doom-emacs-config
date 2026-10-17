@@ -1,19 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { FeedMergeWorkspaceSwitchSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createTicker } from "../../../src/clock.js";
-import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawMergeWorkspaceSwitch, switchFacts } from "../../../src/feed/merge/workspace-switch.js";
-import { testAppContext } from "../../rpc/app-context.js";
+import { scriptedAppContext } from "../../rpc/app-context.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "../harness.js";
 
 beforeEach(() => {
@@ -29,21 +25,15 @@ const TARGET = create(WorkspaceRefSchema, { id: "ws-merge", dir: "/w/merge" });
 /** A row context whose SelectWorkspace succeeds, with the calls it received. */
 function selecting() {
   const calls: SelectWorkspaceRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
+  const ctx = scriptedAppContext(
+    {
       selectWorkspace: (req) => {
         calls.push(req);
         return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
       },
-    });
-  });
-  const ctx = testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker: createTicker(1000),
-    failures: new RecordingSink(),
-    composerEnabled: false,
-  });
+    },
+    { workspace: WORKSPACE, failures: new RecordingSink() },
+  );
   return { rc: rowContext(ctx, mergeRow("m1")), calls };
 }
 

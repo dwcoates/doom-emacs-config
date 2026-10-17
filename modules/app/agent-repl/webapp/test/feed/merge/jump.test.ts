@@ -4,8 +4,7 @@ import { join } from "node:path";
 import { codeOf } from "../../source-text.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
@@ -16,10 +15,8 @@ import {
   type OpenWorkspaceResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createTicker } from "../../../src/clock.js";
-import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { jumpToWorkspace, openAndJumpToWorkspace, type JumpSite } from "../../../src/feed/merge/jump.js";
-import { testAppContext } from "../../rpc/app-context.js";
+import { scriptedAppContext } from "../../rpc/app-context.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "../harness.js";
 
@@ -39,22 +36,16 @@ const TARGET = create(WorkspaceRefSchema, { id: "ws-merge", dir: "/w/merge" });
 /** A context whose SelectWorkspace answers ANSWER, or throws THROWN. */
 function scripted(answer: SelectWorkspaceResponse | Error) {
   const calls: SelectWorkspaceRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
+  const ctx = scriptedAppContext(
+    {
       selectWorkspace: (req) => {
         calls.push(req);
         if (answer instanceof Error) throw answer;
         return answer;
       },
-    });
-  });
-  const ctx = testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker: createTicker(1000),
-    failures: new RecordingSink(),
-    composerEnabled: false,
-  });
+    },
+    { workspace: WORKSPACE, failures: new RecordingSink() },
+  );
   return { rc: rowContext(ctx, mergeRow("m1")), calls };
 }
 
@@ -137,8 +128,8 @@ describe("jumpToWorkspace", () => {
 /** A context whose OpenWorkspace answers OPENED and whose SelectWorkspace answers SELECTED. */
 function scriptedOpen(opened: OpenWorkspaceResponse | Error) {
   const calls: string[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
+  const ctx = scriptedAppContext(
+    {
       openWorkspace: (req) => {
         calls.push(`open ${req.workspace?.id}`);
         if (opened instanceof Error) throw opened;
@@ -148,15 +139,9 @@ function scriptedOpen(opened: OpenWorkspaceResponse | Error) {
         calls.push(`select ${req.workspace?.id}`);
         return SELECTED;
       },
-    });
-  });
-  const ctx = testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker: createTicker(1000),
-    failures: new RecordingSink(),
-    composerEnabled: false,
-  });
+    },
+    { workspace: WORKSPACE, failures: new RecordingSink() },
+  );
   return { rc: rowContext(ctx, mergeRow("m1")), calls };
 }
 

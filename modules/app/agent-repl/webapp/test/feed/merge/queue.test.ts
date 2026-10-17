@@ -3,8 +3,7 @@ import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../../src/rpc/refusal.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
   SelectWorkspaceErrorSchema,
   SelectWorkspaceResponseSchema,
@@ -26,7 +25,7 @@ import { createTicker } from "../../../src/clock.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { type AppContext } from "../../../src/rpc/context.js";
-import { testAppContext } from "../../rpc/app-context.js";
+import { scriptedAppContext, testAppContext } from "../../rpc/app-context.js";
 import {
   drawFeedMergeQueue,
   drawFeedMergeQueueEntry,
@@ -54,21 +53,15 @@ interface Scripted {
 /** A context whose SelectWorkspace answers ANSWER. */
 function scripted(answer: SelectWorkspaceResponse): Scripted {
   const calls: SelectWorkspaceRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
+  const ctx = scriptedAppContext(
+    {
       selectWorkspace: (req) => {
         calls.push(req);
         return answer;
       },
-    });
-  });
-  const ctx = testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker: createTicker(1000),
-    failures: new RecordingSink(),
-    composerEnabled: false,
-  });
+    },
+    { workspace: WORKSPACE, failures: new RecordingSink() },
+  );
   return { ctx, calls };
 }
 
@@ -421,20 +414,14 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
 
 describe("a daemon that cannot be reached answers at the clicked row", () => {
   it("draws the transport refusal in the row, and does not raise a malformed view", async () => {
-    const transport = createRouterTransport(({ service }) => {
-      service(AgentRepl, {
-        selectWorkspace: () => {
-          throw new ConnectError("socket is gone", Code.Unavailable);
-        },
-      });
-    });
-    const ctx = testAppContext({
-      client: createAgentReplClient(transport),
-      workspace: WORKSPACE,
-      ticker: createTicker(1000),
-      failures: new RecordingSink(),
-      composerEnabled: false,
-    });
+    const ctx = scriptedAppContext(
+      {
+          selectWorkspace: () => {
+            throw new ConnectError("socket is gone", Code.Unavailable);
+          },
+      },
+      { workspace: WORKSPACE, failures: new RecordingSink() },
+    );
     const row = document.createElement("div");
     const ref = create(WorkspaceRefSchema, { id: "front", dir: "/w/front" });
 
@@ -460,8 +447,8 @@ interface MoveScripted {
 function moveScripted(answer: () => UpdateMergeQueueResponse): MoveScripted {
   const moves: UpdateMergeQueueRequest[] = [];
   const selects: SelectWorkspaceRequest[] = [];
-  const transport = createRouterTransport(({ service }) => {
-    service(AgentRepl, {
+  const ctx = scriptedAppContext(
+    {
       updateMergeQueue: (req) => {
         moves.push(req);
         return answer();
@@ -470,15 +457,9 @@ function moveScripted(answer: () => UpdateMergeQueueResponse): MoveScripted {
         selects.push(req);
         return SELECTED;
       },
-    });
-  });
-  const ctx = testAppContext({
-    client: createAgentReplClient(transport),
-    workspace: WORKSPACE,
-    ticker: createTicker(1000),
-    failures: new RecordingSink(),
-    composerEnabled: false,
-  });
+    },
+    { workspace: WORKSPACE, failures: new RecordingSink() },
+  );
   return { ctx, moves, selects };
 }
 

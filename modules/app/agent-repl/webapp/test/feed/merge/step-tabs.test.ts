@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   OpenInEditorResponseSchema,
   type OpenInEditorRequest,
@@ -15,9 +13,7 @@ import {
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
-import { createTicker } from "../../../src/clock.js";
-import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { testAppContext } from "../../rpc/app-context.js";
+import { scriptedAppContext } from "../../rpc/app-context.js";
 import { RecordingSink, WORKSPACE, harness, mergeRow, rowContext } from "../harness.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import {
@@ -198,8 +194,8 @@ describe("drawFeedMergeRebaseReplaying", () => {
   /** The rebasing tab drawn over one replay header, in a page that answers both clicks. */
   function header(replaying: typeof REPLAYING = REPLAYING) {
     const calls = { openWorkspace: [] as OpenWorkspaceRequest[], selectWorkspace: [] as SelectWorkspaceRequest[], openInEditor: [] as OpenInEditorRequest[] };
-    const transport = createRouterTransport(({ service }) => {
-      service(AgentRepl, {
+    const ctx = scriptedAppContext(
+      {
         openWorkspace: (req) => {
           calls.openWorkspace.push(req);
           return create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } });
@@ -212,15 +208,9 @@ describe("drawFeedMergeRebaseReplaying", () => {
           calls.openInEditor.push(req);
           return create(OpenInEditorResponseSchema, { result: { case: "success", value: {} } });
         },
-      });
-    });
-    const ctx = testAppContext({
-      client: createAgentReplClient(transport),
-      workspace: WORKSPACE,
-      ticker: createTicker(1000),
-      failures: new RecordingSink(),
-      composerEnabled: false,
-    });
+      },
+      { workspace: WORKSPACE, failures: new RecordingSink() },
+    );
     const u = create(FeedMergeTabRebasingSchema, {
       state: LIVE,
       progress: { replayed: 0, total: 5 },
@@ -248,9 +238,12 @@ describe("drawFeedMergeRebaseReplaying", () => {
     const { line, calls } = header();
     line.querySelector<HTMLElement>(".merge-commit-link")!.click();
     await vi.waitFor(() => expect(calls.openInEditor).toHaveLength(1));
-    expect(calls.openInEditor[0]?.target).toEqual(
-      expect.objectContaining({ case: "commitLog", value: expect.objectContaining({ repositoryDir: "/r/main", branch: "master", commit: TIP }) }),
-    );
+    const target = calls.openInEditor[0]?.target;
+    expect(target?.case === "commitLog" ? [target.value.repositoryDir, target.value.branch, target.value.commit] : null).toEqual([
+      "/r/main",
+      "master",
+      TIP,
+    ]);
   });
 
   it("opens the target's workspace and then switches to it when the target is clicked", async () => {

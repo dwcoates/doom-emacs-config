@@ -206,7 +206,7 @@ describe("the badge's paint", () => {
   function painted(spec: Parameters<typeof tabRow>[1]) {
     const teardownCss = installStylesheet();
     const [tab] = childTabsOf([tabRow("t1", spec)], undefined);
-    const el = drawFeedMergeTab(tab!, { active: false, ticker: createTicker(1000) });
+    const el = drawFeedMergeTab(tab, { active: false, ticker: createTicker(1000) });
     document.body.append(el);
     return {
       el,
