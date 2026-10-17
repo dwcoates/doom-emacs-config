@@ -198,6 +198,9 @@ type sidecar struct {
 	// the LOST policy's bounds, or a full scan not yet completed since the end
 	// that could still discover one (active.go's dropDrained).
 	draining map[string]drainingConversation
+	// backfillFailure is the last error the backfill request directory could
+	// not be read with, so a repeat is stated once (backfill.go).
+	backfillFailure string
 	// fullScans counts the full rescans whose discovery pass completed, so a
 	// draining conversation can tell whether every file it owned when it ended
 	// has since been enumerated.
