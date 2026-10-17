@@ -13,6 +13,7 @@ import { drawFeedMerge, drawFeedMergeGlyph } from "../../../src/feed/merge/merge
 import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -273,5 +274,121 @@ describe("drawFeedMerge: the badge before the clock", () => {
     const el = drawFeedMerge(mergeHead(result), rowContext(h.ctx, mergeRow("m1")));
     // Assert
     expect(drawnBefore(el.querySelector(".merge-badge"), el.querySelector(".merge-clock"))).toBe(true);
+  });
+});
+
+describe("drawFeedMerge: the landed commit", () => {
+  const landed = () =>
+    mergeHead({
+      case: "success",
+      endedAtMs: 61_000n,
+      commit: "a1b2c3d",
+      landedOn: { repositoryDir: "/home/u/repo", branch: "master" },
+    });
+
+  it("draws the commit as a link to its branch's log when the head says where it landed", () => {
+    const link = draw(landed()).querySelector(".merge-commit-link");
+    expect([link?.tagName, link?.textContent, link?.hasAttribute("data-merge-commit")]).toEqual(["A", "a1b2c3d", true]);
+  });
+
+  it("draws the commit as plain text on a head recorded before heads said where it landed", () => {
+    const el = draw(mergeHead({ case: "success", endedAtMs: 61_000n, commit: "a1b2c3d" }));
+    expect([el.querySelector(".merge-commit")?.tagName, el.querySelector(".merge-commit-link")]).toEqual(["SPAN", null]);
+  });
+
+  it("sits at the head's right end, before the workspace switch", () => {
+    const msg = landed();
+    msg.head!.mode = create(FeedMergeModeSchema, {
+      mode: {
+        case: "async",
+        value: {
+          workspaceSwitch: create(FeedMergeWorkspaceSwitchSchema, {
+            label: { text: "open merge workspace" },
+            availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
+          }),
+        },
+      },
+    });
+    const end = draw(msg).querySelector(".merge-head-end");
+    expect(Array.from(end?.children ?? [], (c) => c.classList.contains("merge-commit"))).toEqual([true, false]);
+  });
+});
+
+describe("the landed commit's paint", () => {
+  /** The commit link inside a merge bubble's head, folded or not. */
+  function commitIn(expanded: boolean): { link: HTMLElement; teardown: () => void } {
+    const teardownCss = installStylesheet();
+    const fold = document.createElement("div");
+    fold.className = "tool-card bubble-fold";
+    fold.setAttribute("data-expanded", expanded ? "true" : "false");
+    const headLine = document.createElement("div");
+    headLine.className = "bubble-head";
+    headLine.append(
+      draw(
+        mergeHead({
+          case: "success",
+          endedAtMs: 61_000n,
+          commit: "a1b2c3d",
+          landedOn: { repositoryDir: "/r", branch: "master" },
+        }),
+      ),
+    );
+    fold.append(headLine);
+    document.body.append(fold);
+    return {
+      link: fold.querySelector<HTMLElement>(".merge-commit-link")!,
+      teardown: () => {
+        fold.remove();
+        teardownCss();
+      },
+    };
+  }
+
+  it("hides the commit on a folded bubble's head", () => {
+    const { link, teardown } = commitIn(false);
+    try {
+      expect(cascadedValue(link, "display")).toBe("none");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("shows the commit on an expanded bubble's head", () => {
+    const { link, teardown } = commitIn(true);
+    try {
+      expect(cascadedValue(link, "display")).not.toBe("none");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("underlines the commit in a grey darker than the muted text", () => {
+    const { link, teardown } = commitIn(true);
+    try {
+      expect([cascadedValue(link, "text-decoration"), cascadedValue(link, "color")]).toEqual([
+        "underline",
+        "color-mix(in srgb, var(--muted) 80%, black)",
+      ]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("draws the commit smaller than the head's text", () => {
+    const { link, teardown } = commitIn(true);
+    try {
+      expect(cascadedValue(link, "font-size")).toBe("0.8em");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("pushes the head's right end to the right", () => {
+    const { link, teardown } = commitIn(true);
+    try {
+      expect(cascadedValue(link.closest(".merge-head-end")!, "margin-left")).toBe("auto");
+    } finally {
+      teardown();
+    }
   });
 });

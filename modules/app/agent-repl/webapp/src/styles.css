@@ -7632,6 +7632,26 @@ ar-button.outcome-marker-pill {
 .merge-clock,
 .merge-commit { color: var(--muted); font-variant-numeric: tabular-nums; }
 .merge-commit { font-family: var(--mono, monospace); }
+/* The head's right end (merge.ts): the landed commit, then the switch. */
+.merge-head-end {
+  order: 1;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+.merge-head-end:empty { display: none; }
+/* The landed commit on the head: smaller, and a link to its branch's log,
+   underlined in a slightly darker grey than the muted text beside it. */
+.merge-head-end .merge-commit { font-size: 0.8em; }
+.merge-commit-link {
+  color: color-mix(in srgb, var(--muted) 80%, black);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* A folded bubble's head shows no commit: it is the expanded head's detail. */
+.bubble-fold:not([data-expanded="true"]) > .bubble-head .merge-head-end .merge-commit { display: none; }
 /* The version a merge onto agent-repl's master landed as (version.ts): the
    number the merge incremented is green, the rest muted. */
 .merge-version { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -7651,7 +7671,7 @@ ar-button.outcome-marker-pill {
    prominent button at the head line's right end, there for the bubble's whole
    life, and in an agentic tab's content in place of the rows the requester's
    copy never streams. Disabled once the workspace was removed. */
-.merge-workspace-switch-head { order: 1; margin-left: auto; flex: 0 0 auto; }
+.merge-workspace-switch-head { flex: 0 0 auto; }
 .merge-workspace-switch-tab { display: block; padding: 0.3rem 0; }
 .merge-workspace-switch-refusal { color: var(--err); font-size: 0.85em; }
 /* BREATHING, NOT BLINKING: a live thing should read as alive at a glance

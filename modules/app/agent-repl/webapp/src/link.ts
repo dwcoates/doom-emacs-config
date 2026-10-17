@@ -23,6 +23,8 @@
  * `renderMergeTestLogLink` is the same verb with the other target: a merge's
  * test log, named by the opaque token the merge bubble served, because the
  * log lives in the daemon's state and has no workspace path to send.
+ * `renderMergeCommitLink` is the same verb again, opening the branch log a
+ * landed merge's commit sits in.
  *
  * NOTHING IS DRAWN ON SUCCESS. The result of either click happens elsewhere —
  * in a browser window, in an editor — so a confirmation on this page would be
@@ -42,7 +44,12 @@ import {
   type OpenInEditorError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { isFileLinkHref } from "./href.js";
-import type { FeedId, FeedMergeTestLog, FeedMergeTestLogToken } from "../../proto/gen/ts/frontend/v1/feed_pb";
+import type {
+  FeedId,
+  FeedMergeLandedOn,
+  FeedMergeTestLog,
+  FeedMergeTestLogToken,
+} from "../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AppContext } from "./rpc/context.js";
 import {
   clearRefusals,
@@ -189,10 +196,32 @@ export function renderMergeTestLogLink(
   return anchor;
 }
 
-/** What an editor link opens: a workspace file, or a merge's test log. */
+/**
+ * A landed merge's commit, drawn on the merge bubble's head.
+ *
+ * THE CLICK OPENS THE BRANCH'S LOG IN THE EDITOR with point on the commit:
+ * `OpenInEditorRequest.commit_log`, every field echoed from the head the
+ * daemon served. Muted, smaller and underlined rather than the link blue, so
+ * it reads as the head's quiet detail that also opens.
+ */
+export function renderMergeCommitLink(
+  ctx: AppContext,
+  commit: string,
+  landedOn: FeedMergeLandedOn,
+): HTMLElement {
+  const anchor = editorTargetAnchor(ctx, "merge-commit merge-commit-link", commit, {
+    case: "commitLog",
+    value: { repositoryDir: landedOn.repositoryDir, branch: landedOn.branch, commit },
+  });
+  anchor.setAttribute("data-merge-commit", "");
+  return anchor;
+}
+
+/** What an editor link opens: a workspace file, a merge's test log, or a commit in its branch's log. */
 export type EditorTarget =
   | { case: "workspaceFile"; value: { path: string; line?: number } }
   | { case: "mergeTestLog"; value: FeedMergeTestLogToken }
+  | { case: "commitLog"; value: { repositoryDir: string; branch: string; commit: string } }
   | {
       case: "feedLink";
       value: { href: string; sourceRow: FeedId; onUnresolved: { case: "report" | "webFallback"; value: Record<string, never> } };
@@ -222,6 +251,13 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
       return { target: target.case, path: target.value.path, line: target.value.line };
     case "mergeTestLog":
       return { target: target.case, token: target.value.value };
+    case "commitLog":
+      return {
+        target: target.case,
+        repositoryDir: target.value.repositoryDir,
+        branch: target.value.branch,
+        commit: target.value.commit,
+      };
     case "feedLink":
       return { target: target.case, href: target.value.href, sourceRow: target.value.sourceRow.value };
     default: {

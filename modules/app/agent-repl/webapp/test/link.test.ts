@@ -18,6 +18,7 @@ import {
   type OpenInEditorWorkspaceFile,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import {
+  FeedMergeLandedOnSchema,
   FeedMergeTestLogSchema,
   type FeedMergeTestLog,
 } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -33,6 +34,7 @@ import {
   openInEditorRefusal,
   renderEditorLink,
   renderExternalLink,
+  renderMergeCommitLink,
   renderMergeTestLogLink,
 } from "../src/link.js";
 import { renderMarkdown } from "../src/markdown.js";
@@ -214,6 +216,51 @@ describe("editorTargetAnchor", () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(path.join(here, "..", "src", "link.ts"), "utf8");
     expect(source.match(/armButtonRole\(/g)).toHaveLength(1);
+  });
+});
+
+describe("renderMergeCommitLink", () => {
+  const landedOn = () => create(FeedMergeLandedOnSchema, { repositoryDir: "/home/u/repo", branch: "master" });
+
+  it("draws the commit as its text, with the merge commit hook", () => {
+    const { ctx } = harness();
+    const a = renderMergeCommitLink(ctx, "a1b2c3d", landedOn());
+    expect([a.textContent, a.hasAttribute("data-merge-commit")]).toEqual(["a1b2c3d", true]);
+  });
+
+  it("wears the merge commit classes, not the link blue", () => {
+    const { ctx } = harness();
+    expect(renderMergeCommitLink(ctx, "a1b2c3d", landedOn()).className).toBe("merge-commit merge-commit-link");
+  });
+
+  it("sends the commit_log target, every field echoed from the head", async () => {
+    const { ctx, editor } = harness();
+    click(renderMergeCommitLink(ctx, "a1b2c3d", landedOn()));
+    await settle();
+    const target = editor[0].target;
+    expect(target.case === "commitLog" ? [target.value.repositoryDir, target.value.branch, target.value.commit] : null).toEqual([
+      "/home/u/repo",
+      "master",
+      "a1b2c3d",
+    ]);
+  });
+
+  it("warns on a refusal, naming the commit it was opening", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { ctx } = harness("error", "invalidUrl", "unknownWorkspace");
+    click(renderMergeCommitLink(ctx, "a1b2c3d", landedOn()));
+    await settle();
+    expect(
+      lines.some(
+        ([level, line]) =>
+          level === "warn" &&
+          line.includes("link.open-in-editor-refused") &&
+          line.includes("commitLog") &&
+          line.includes("a1b2c3d") &&
+          line.includes("/home/u/repo"),
+      ),
+    ).toBe(true);
   });
 });
 
