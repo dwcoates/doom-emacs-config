@@ -110,3 +110,37 @@ their border and to be marked by their header alone:
 - Whether subagent prompts also go borderless is with the owner (the parent is asking).
 - CONSEQUENCE: a send's row updates IN PLACE when its recipient resolves, with only the name changing.
   - The daemon re-resolves rows whose other end was unresolved whenever that end's record lands, or the holding workspace's main agent is learned.
+
+### 6. Subagent prompts follow the same rules (owner ruling, 2026-10-17, superseding change 5's border split)
+
+- WHAT: `frontend.v1.FeedAgentPromptAddress` is the other end's `name`, plus a `direction` oneof.
+  - `sent` puts a right arrow after the name.
+    - Its recipient is `agent` (main, named or identified), `peer_session` (workspace or unresolved), or `unclassified`.
+  - `received` puts a left arrow before the name.
+    - Its sender is an `agent`.
+  - Every agent-to-agent bubble is borderless.
+    - The border token `--agent-prompt-border` is removed, because nothing reads it any more.
+- WHY: the owner ruled subagent bubbles take EXACTLY the cross-session rules.
+  - No border, and the same icon header.
+  - The subagent's requested name, else its identifier. Description and type are never used (parent confirmation).
+- The identifier is the subagent's AgentId (the spawning `tool_use_id`), the same value every other surface keys it by.
+
+### 7. A message from an agent of this session: `conversation.v1.PeerMessageInSession` and `shim.v1.ResolveVendorTask`
+
+- WHAT: a peer record stating `origin.senderTaskId` (and not a hand-back) is a new kind on both planes.
+  - It carries the sender's vendor task id.
+  - The daemon asks the record which agent the task id names, through `shim.v1.ResolveVendorTask`.
+    - That reads the store's existing locator pairing, `store.v1.GetAgentByVendorTask`, within the workspace's own lineage, which the daemon passes.
+  - The bubble is headed `<- <requested name, else agent id>`, with the task id under `unresolved` until the record answers.
+- EVIDENCE (observed, 2026-10-17): every `senderTaskId` record on the host is one of two kinds.
+  - A hand-back (`handback: true`).
+  - Or a subagent's message: 135 in main transcripts, and 388 in sibling subagents' transcripts.
+  - The task id is the sending subagent's LOCATOR (the `<id>` of `agent-<id>.jsonl`), not its AgentId.
+- SCOPE (parent ruling): the hand-back proper stays the inline badge it is.
+- The sidecar's test fixture had stated `senderTaskId` on every peer line. It now states it only on a hand-back, matching the observed records.
+
+### 8. Agent-to-agent bubbles take the final response's fill (owner request, 2026-10-17)
+
+- WHAT: the `agent` and `peer` variants feed `--bubble-bg` from `--assistant`, the response bubble's own token.
+- The muted header reads at a higher contrast on it than on the prompt blue, so it was not brightened.
+  - Dark theme: 7.1:1 against 2.3:1 on the blue.
