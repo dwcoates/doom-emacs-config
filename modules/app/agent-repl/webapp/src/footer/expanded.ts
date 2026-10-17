@@ -64,6 +64,9 @@ import type {
   FooterTaskRowSubject,
   FooterTokensLineAlarm,
   FooterTokensLineVerdict,
+  FooterWakeupRow,
+  FooterWakeupRowReason,
+  FooterWakeupRowWakeAt,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
@@ -612,18 +615,12 @@ export function drawFooterAgentRowWaitingForApi(
 
 /** The subagent's type label, verbatim. */
 export function drawFooterAgentRowLabel(u: FooterAgentRowLabel): HTMLElement {
-  const label = document.createElement("span");
-  label.className = "footer-row-label";
-  label.textContent = u.text;
-  return label;
+  return rowText("footer-row-label", u.text);
 }
 
 /** The commission's description, verbatim; never synthesized when unset. */
 export function drawFooterAgentRowDescription(u: FooterAgentRowDescription): HTMLElement {
-  const description = document.createElement("span");
-  description.className = "footer-row-description";
-  description.textContent = u.text;
-  return description;
+  return rowText("footer-row-description", u.text);
 }
 
 /** The subagent's running token sum, daemon-formatted. */
@@ -748,10 +745,7 @@ export function drawFooterShellRow(
 
 /** The command line, verbatim — what arrives is what is drawn. */
 export function drawFooterShellRowCommand(u: FooterShellRowCommand): HTMLElement {
-  const command = document.createElement("span");
-  command.className = "footer-row-command";
-  command.textContent = u.text;
-  return command;
+  return rowText("footer-row-command", u.text);
 }
 
 /** The shell's ticking runtime, from the ORIGINAL start instant. */
@@ -806,10 +800,7 @@ export function drawFooterMonitorRow(
 
 /** What is being watched, verbatim. */
 export function drawFooterMonitorRowDescription(u: FooterMonitorRowDescription): HTMLElement {
-  const description = document.createElement("span");
-  description.className = "footer-row-description";
-  description.textContent = u.text;
-  return description;
+  return rowText("footer-row-description", u.text);
 }
 
 /** The monitor's ticking runtime, from the arm instant. */
@@ -829,8 +820,44 @@ export function drawFooterExpandedCrons(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement[] {
-  if (u.rows.length === 0) return [emptyRow("nothing scheduled")];
-  return u.rows.map((row, index) => drawFooterCronRow(row, deps, `${path}.rows[${index}]`));
+  const rows = u.rows.map((row, index) => drawFooterCronRow(row, deps, `${path}.rows[${index}]`));
+  if (u.wakeup !== undefined) rows.unshift(drawFooterWakeupRow(u.wakeup, deps, `${path}.wakeup`));
+  if (rows.length === 0) return [emptyRow("nothing scheduled")];
+  return rows;
+}
+
+/** The pending wakeup: ◷ · wakeup · reason · countdown. NOT a jump target. */
+export function drawFooterWakeupRow(
+  u: FooterWakeupRow,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  const row = plainRow("crons");
+  row.setAttribute("data-wakeup", "");
+  row.appendChild(glyph("crons", "◷"));
+  row.appendChild(rowText("footer-row-label", "wakeup"));
+  if (u.reason !== undefined) row.appendChild(drawFooterWakeupRowReason(u.reason));
+  if (u.wakeAt !== undefined) {
+    const figures = document.createElement("span");
+    figures.className = "footer-row-figures";
+    figures.appendChild(drawFooterWakeupRowWakeAt(u.wakeAt, deps, `${path}.wake_at`));
+    row.appendChild(figures);
+  }
+  return row;
+}
+
+/** The agent's reason for the wakeup, verbatim. */
+export function drawFooterWakeupRowReason(u: FooterWakeupRowReason): HTMLElement {
+  return rowText("footer-row-description", u.text);
+}
+
+/** The countdown to the wakeup, ticking from the daemon's instant. */
+export function drawFooterWakeupRowWakeAt(
+  u: FooterWakeupRowWakeAt,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  return countdownClock(u.wakeAtMs, deps, `${path}.wake_at_ms`);
 }
 
 /** One job: ◷ · schedule · prompt · countdown · markers. */
@@ -858,18 +885,12 @@ export function drawFooterCronRow(
 
 /** The vendor-composed human schedule, verbatim. */
 export function drawFooterCronRowSchedule(u: FooterCronRowSchedule): HTMLElement {
-  const schedule = document.createElement("span");
-  schedule.className = "footer-row-label";
-  schedule.textContent = u.text;
-  return schedule;
+  return rowText("footer-row-label", u.text);
 }
 
 /** The job's prompt, daemon-truncated; what arrives is what is drawn. */
 export function drawFooterCronRowPrompt(u: FooterCronRowPrompt): HTMLElement {
-  const prompt = document.createElement("span");
-  prompt.className = "footer-row-description";
-  prompt.textContent = u.text;
-  return prompt;
+  return rowText("footer-row-description", u.text);
 }
 
 /**
@@ -881,10 +902,7 @@ export function drawFooterCronRowNextFire(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {
-  const fireAtMs = msOf(u.fireAtMs, `${path}.fire_at_ms`);
-  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
-    span.textContent = remainingLabel(fireAtMs - nowMs);
-  });
+  return countdownClock(u.fireAtMs, deps, `${path}.fire_at_ms`);
 }
 
 // ---- shared row parts -----------------------------------------------------
@@ -1076,6 +1094,14 @@ function emptyRow(text: string): HTMLElement {
   return empty;
 }
 
+/** One of a row's text spans: its label, description or command, verbatim. */
+export function rowText(className: string, text: string): HTMLElement {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  return span;
+}
+
 /** A named glyph element, so the suite can target the glyph and not the text. */
 function glyph(name: string, character: string): HTMLElement {
   const el = document.createElement("span");
@@ -1098,6 +1124,14 @@ function marker(name: string): HTMLElement {
 /** A ticking elapsed clock from an instant on the wire. */
 function runtimeClock(startedAtMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
   return liveElapsedClock(deps.ctx.ticker, "footer-row-clock", msOf(startedAtMs, path));
+}
+
+/** A ticking countdown to an instant on the wire. */
+export function countdownClock(atMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
+  const targetMs = msOf(atMs, path);
+  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
+    span.textContent = remainingLabel(targetMs - nowMs);
+  });
 }
 
 /** The jump affordance's caret. */

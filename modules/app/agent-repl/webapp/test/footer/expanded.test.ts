@@ -12,7 +12,9 @@ import type { FooterActivity } from "../../src/footer/activity.js";
 import {
   EXPANDED_FOOTER_MAX_ROWS,
   FOOTER_PANELS,
+  countdownClock,
   createJumpNotices,
+  rowText,
   drawFooterExpanded,
   type ExpandedDeps,
   type FooterPanel,
@@ -29,6 +31,7 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import stylesheet from "../../src/styles.css?raw";
+import expandedSource from "../../src/footer/expanded.ts?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 const NOW = 1_800_000_000_000;
@@ -1058,6 +1061,96 @@ describe("the crons panel", () => {
   it("draws its empty line when nothing is scheduled", () => {
     const { panel } = drawPanel("crons");
     expect(panel.querySelector("[data-empty]")?.textContent).toBe("nothing scheduled");
+  });
+
+  it("draws a pending wakeup alone as a row, not the empty line", () => {
+    const { panel } = drawPanel("crons", { wakeup: {} });
+    expect(panel.querySelector("[data-empty]")).toBeNull();
+    expect(panel.querySelector("[data-wakeup] .footer-row-label")?.textContent).toBe("wakeup");
+  });
+
+  it("draws the wakeup row ahead of the cron rows", () => {
+    const { panel } = drawPanel("crons", { crons: [CRON_ROW], wakeup: {} });
+    const rows = panel.querySelectorAll("[data-row]");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].hasAttribute("data-wakeup")).toBe(true);
+  });
+
+  it("draws the wakeup's reason verbatim when it has one", () => {
+    const { panel } = drawPanel("crons", { wakeup: { reason: { text: "waiting on CI" } } });
+    expect(panel.querySelector("[data-wakeup] .footer-row-description")?.textContent).toBe(
+      "waiting on CI",
+    );
+  });
+
+  it("draws no reason when the wakeup has none", () => {
+    const { panel } = drawPanel("crons", { wakeup: {} });
+    expect(panel.querySelector("[data-wakeup] .footer-row-description")).toBeNull();
+  });
+
+  it("counts down to the wakeup when the daemon sent its instant", () => {
+    const { panel } = drawPanel("crons", { wakeup: { wakeAt: { wakeAtMs: BigInt(NOW + 312_000) } } });
+    expect(panel.querySelector("[data-wakeup] [data-countdown]")?.textContent).toBe("5m 12s");
+  });
+
+  it("draws no countdown while the wakeup's instant is unconfirmed", () => {
+    const { panel } = drawPanel("crons", { wakeup: {} });
+    expect(panel.querySelector("[data-countdown]")).toBeNull();
+  });
+
+  it("does not make the wakeup a jump target", () => {
+    const { panel } = drawPanel("crons", { wakeup: {} });
+    expect(panel.querySelector("[data-jump]")).toBeNull();
+  });
+
+  it("refuses a wakeup instant past the safe integer range", () => {
+    expect(() =>
+      drawPanel("crons", { wakeup: { wakeAt: { wakeAtMs: BigInt(Number.MAX_SAFE_INTEGER) + 1n } } }),
+    ).toThrow(MalformedView);
+  });
+});
+
+describe("rowText", () => {
+  it("draws its text verbatim under its class", () => {
+    const span = rowText("footer-row-label", "every 5 min");
+    expect([span.tagName, span.className, span.textContent]).toEqual([
+      "SPAN",
+      "footer-row-label",
+      "every 5 min",
+    ]);
+  });
+
+  it("is the one way a row's text span is built", () => {
+    const source = withoutBlockComments(expandedSource);
+    expect(source).not.toMatch(/\.className = "footer-row-(label|description|command)";\n\s*\w+\.textContent/);
+  });
+});
+
+describe("countdownClock", () => {
+  it("ticks the remaining duration to its instant", () => {
+    const h = harness();
+    const deps = { ctx: h.ctx } as ExpandedDeps;
+    expect(countdownClock(BigInt(NOW + 65_000), deps, "x").textContent).toBe("1m 5s");
+  });
+
+  it("refuses an instant past the safe integer range", () => {
+    const h = harness();
+    const deps = { ctx: h.ctx } as ExpandedDeps;
+    expect(() => countdownClock(BigInt(Number.MAX_SAFE_INTEGER) + 1n, deps, "x")).toThrow(MalformedView);
+  });
+
+  it("is the one countdown both scheduled-job rows draw", () => {
+    const at = { fireAtMs: BigInt(NOW + 65_000) };
+    const { panel } = drawPanel("crons", {
+      crons: [{ ...CRON_ROW, nextFire: at }],
+      wakeup: { wakeAt: { wakeAtMs: at.fireAtMs } },
+    });
+    const h = harness();
+    const reference = countdownClock(at.fireAtMs, { ctx: h.ctx } as ExpandedDeps, "x");
+    const shape = (el: Element) => [el.tagName, el.className, el.getAttributeNames().sort(), el.textContent];
+    const clocks = [...panel.querySelectorAll("[data-countdown]")];
+    expect(clocks).toHaveLength(2);
+    for (const clock of clocks) expect(shape(clock)).toEqual(shape(reference));
   });
 });
 

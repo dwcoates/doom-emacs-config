@@ -884,14 +884,11 @@ func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	if n := len(r.monitorRowsDrawn(s)); n > 0 {
 		out.Monitors = &frontendv1.FooterChipMonitors{Count: uint32(n)}
 	}
-	// THE ⏱ CHIP COUNTS EVERY SCHEDULED JOB, not just the crons: footer.proto
-	// words it as "live scheduled jobs (cron/wakeup schedules)", and a pending
-	// self-scheduled wakeup is one of them. It retires only once both are gone.
-	scheduled := len(s.crons)
-	if s.wakeup != nil {
-		scheduled++
-	}
-	if scheduled > 0 {
+	// THE ⏱ CHIP COUNTS THE PANEL'S ROWS, read off the panel itself: footer.proto
+	// words it as "live scheduled jobs (cron/wakeup schedules)", and the panel
+	// draws a pending self-scheduled wakeup as a row beside the crons, so the
+	// chip never opens onto an empty panel. It retires only once both are gone.
+	if scheduled := scheduledRows(r.cronsPanel(s)); scheduled > 0 {
 		out.Crons = &frontendv1.FooterChipCrons{Count: uint32(scheduled)}
 	}
 	return out
@@ -1057,7 +1054,35 @@ func (r *resolver) cronsPanel(s *wsState) *frontendv1.FooterExpandedCrons {
 		}
 		out.Rows = append(out.Rows, drawn)
 	}
+	out.Wakeup = wakeupRow(s.wakeup)
 	return out
+}
+
+// wakeupRow renders the pending self-scheduled wakeup as the ⏱ panel's row,
+// nil when none is pending. The countdown is left unset until the vendor has
+// confirmed the instant, rather than counting toward the zero time.
+func wakeupRow(wakeup *wakeupState) *frontendv1.FooterWakeupRow {
+	if wakeup == nil {
+		return nil
+	}
+	row := &frontendv1.FooterWakeupRow{}
+	if wakeup.reason != "" {
+		row.Reason = &frontendv1.FooterWakeupRowReason{Text: wakeup.reason}
+	}
+	if !wakeup.wakeAt.IsZero() {
+		row.WakeAt = &frontendv1.FooterWakeupRowWakeAt{WakeAtMs: epochMs(wakeup.wakeAt)}
+	}
+	return row
+}
+
+// scheduledRows is how many rows the ⏱ panel draws: its cron rows plus its
+// wakeup row. The ⏱ chip's count is this figure and nothing else.
+func scheduledRows(panel *frontendv1.FooterExpandedCrons) int {
+	n := len(panel.GetRows())
+	if panel.GetWakeup() != nil {
+		n++
+	}
+	return n
 }
 
 // ---- where a detached-work row's click lands --------------------------------
