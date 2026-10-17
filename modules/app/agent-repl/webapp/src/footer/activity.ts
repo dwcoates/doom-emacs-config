@@ -39,6 +39,7 @@ import type {
   FooterActivityTransient,
   FooterActivityTransientApiRestored,
   FooterActivityTransientCompactionConcluded,
+  FooterColdGateFiguredLine,
   FooterActivityTransientContextInjected,
   FooterActivityTransientDaemonError,
   FooterActivityTransientDaemonWarning,
@@ -566,14 +567,16 @@ export function drawFooterActivityTransientDaemonError(
 }
 
 /**
- * A compaction's concluded outcome ("compacted and resumed (101.6k → 12.4k)"),
- * verbatim, in the running compaction line's own class, so the outcome reads
- * as that line's last word rather than a new kind of line.
+ * A compaction's concluded outcome ("compacted and resumed (101.6k → 12.4k) ·
+ * claude-sonnet-5 spent 104.3k tokens"), in the running compaction line's own
+ * class, so the outcome reads as that line's last word rather than a new kind
+ * of line. Drawn from its parts when it names the summarizer's spend, so the
+ * spend takes the cold gate's gradient; verbatim otherwise.
  */
 export function drawFooterActivityTransientCompactionConcluded(
   u: FooterActivityTransientCompactionConcluded,
 ): HTMLElement {
-  return textLine("footer-activity-compaction", u.text);
+  return compactionLine(u.text, u.parts, "FooterActivityTransientCompactionConcluded.parts");
 }
 
 /** A session setting's change, as the daemon composed it. */
@@ -945,7 +948,21 @@ export function orderedAllowances(
 export function drawFooterStatusActivityCompaction(
   u: FooterStatusActivityCompaction,
 ): HTMLElement {
-  return textLine("footer-activity-compaction", u.text);
+  return compactionLine(u.text, u.parts, "FooterStatusActivityCompaction.parts");
+}
+
+/**
+ * A compaction line, running or concluded: from its parts when it names what
+ * the summary cost, so the spend wears the cold gate's gradient; verbatim when
+ * it names no spend.
+ */
+function compactionLine(
+  text: string,
+  parts: FooterColdGateFiguredLine | undefined,
+  path: string,
+): HTMLElement {
+  if (parts === undefined) return textLine("footer-activity-compaction", text);
+  return coldGateFiguredLine("footer-activity-compaction", text, parts, path);
 }
 
 /** The gated call's composed line, verbatim. */
