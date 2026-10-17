@@ -95,13 +95,13 @@ func tabBarIDs(r *frontendv1.WorkspaceRoster) []string {
 	return out
 }
 
-// moveWorkspace moves ws onto target's place and requires a success.
-func moveWorkspace(t *testing.T, d *harness.Daemon, ws, target *workspacev1.WorkspaceRef) {
+// swapWorkspaces exchanges ws's and target's places and requires a success.
+func swapWorkspaces(t *testing.T, d *harness.Daemon, ws, target *workspacev1.WorkspaceRef) {
 	t.Helper()
-	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
-		&agentreplv1.MoveWorkspaceRequest{Workspace: ws, Target: target}))
+	resp, err := d.Client().SwapWorkspaces(d.Ctx(), connect.NewRequest(
+		&agentreplv1.SwapWorkspacesRequest{Workspace: ws, Target: target}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MoveWorkspace = (%v, %v), want success", resp, err)
+		t.Fatalf("SwapWorkspaces = (%v, %v), want success", resp, err)
 	}
 }
 
@@ -152,7 +152,7 @@ func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
 	})
 }
 
-func TestMoveWorkspaceTakesTheTargetsPlace(t *testing.T) {
+func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 	t.Parallel()
 	// Arrange: the bar is a, c, b.
 	d := newDaemon(t, harness.Opts{})
@@ -162,16 +162,16 @@ func TestMoveWorkspaceTakesTheTargetsPlace(t *testing.T) {
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
 	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
 
-	// Act: a moves right onto b's place.
-	moveWorkspace(t, d, a, b)
+	// Act: a swaps with b, two tabs to its right.
+	swapWorkspaces(t, d, a, b)
 
-	// Assert: the passed tabs shift left.
-	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(tabBarIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
+	// Assert: a and b exchange places and c, between them, stays put.
+	awaitRoster(t, d, roster, "the bar b, c, a", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{b.GetId(), c.GetId(), a.GetId()})
 	})
 }
 
-func TestMoveWorkspaceCrossesRepositories(t *testing.T) {
+func TestSwapWorkspacesCrossesRepositories(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
 	d := newDaemon(t, harness.Opts{})
@@ -180,7 +180,7 @@ func TestMoveWorkspaceCrossesRepositories(t *testing.T) {
 	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
 
 	// Act.
-	moveWorkspace(t, d, two, one)
+	swapWorkspaces(t, d, two, one)
 
 	// Assert.
 	awaitRoster(t, d, roster, "the bar two, one", func(r *frontendv1.WorkspaceRoster) bool {

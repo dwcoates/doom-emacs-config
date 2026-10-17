@@ -646,9 +646,9 @@ func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentReques
 	}
 }
 
-// validateMoveWorkspaceRequest is MoveWorkspaceRequest's base function: two
+// validateSwapWorkspacesRequest is SwapWorkspacesRequest's base function: two
 // refs naming two different workspaces.
-func validateMoveWorkspaceRequest(req *agentreplv1.MoveWorkspaceRequest) *connect.Error {
+func validateSwapWorkspacesRequest(req *agentreplv1.SwapWorkspacesRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
@@ -656,7 +656,7 @@ func validateMoveWorkspaceRequest(req *agentreplv1.MoveWorkspaceRequest) *connec
 		return err
 	}
 	if req.GetWorkspace().GetId() == req.GetTarget().GetId() {
-		return invalid("target", "a workspace cannot move onto itself")
+		return invalid("target", "a workspace cannot swap with itself")
 	}
 	return nil
 }

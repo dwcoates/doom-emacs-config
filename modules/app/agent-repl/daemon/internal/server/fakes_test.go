@@ -283,9 +283,9 @@ type fakeVerbs struct {
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec
-	// moves records every Move pair; moveErr is what it answers.
-	moves   [][2]ids.WorkspaceID
-	moveErr error
+	// swaps records every Swap pair; swapErr is what it answers.
+	swaps   [][2]ids.WorkspaceID
+	swapErr error
 
 	// editorOpens records every relayed open, a workspace file's path or a
 	// daemon file's.
@@ -1724,9 +1724,9 @@ type repositoryFold struct {
 	folded bool
 }
 
-func (v *fakeVerbs) Move(_ context.Context, ws, target ids.WorkspaceID) error {
-	v.moves = append(v.moves, [2]ids.WorkspaceID{ws, target})
-	return v.moveErr
+func (v *fakeVerbs) Swap(_ context.Context, ws, target ids.WorkspaceID) error {
+	v.swaps = append(v.swaps, [2]ids.WorkspaceID{ws, target})
+	return v.swapErr
 }
 
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {

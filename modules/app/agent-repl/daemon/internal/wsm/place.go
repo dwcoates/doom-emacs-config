@@ -20,8 +20,8 @@ import (
 //   - PRIORITY SET: the same landing, recomputed without the workspace itself;
 //     clearing a priority moves nothing.
 //   - CLOSED and RE-OPENED: nothing moves; it returns to the place it held.
-//   - MOVED (MovePlace): onto another workspace's place, the ones between
-//     shifting one step toward the place it left.
+//   - SWAPPED (SwapPlaces): it and another workspace exchange places; every
+//     other workspace keeps its own.
 //
 // Places are unique (the workspaces_by_place index) and at least 1 at rest. 0
 // is the one parking slot a write steps a row onto inside its own transaction,
@@ -132,16 +132,16 @@ func reland(ctx context.Context, tx *sql.Tx, id WorkspaceID, p *Priority) (int64
 	return at, requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
 }
 
-// MovePlace moves workspace ws onto target's place in one transaction. Every
-// workspace between the two shifts one place toward the place ws left, so ws
-// ends exactly where target was and target ends beside it, on the side ws came
-// from. An unknown id is refused (ErrNotFound) with nothing written.
-func (s *store) MovePlace(ctx context.Context, ws, target WorkspaceID) error {
-	const op = "daemon.wsm.move_place"
+// SwapPlaces exchanges the places of workspaces ws and target in one
+// transaction: ws takes target's place, target takes ws's, and every other
+// workspace keeps its own. An unknown id is refused (ErrNotFound) with nothing
+// written.
+func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
+	const op = "daemon.wsm.swap_places"
 	fields := dlog.Context{"workspace": string(ws), "target": string(target)}
 	if ws == target {
-		err := fmt.Errorf("wsm: move place: workspace %s onto itself", ws)
-		s.log.Error(op, "refused to move a workspace onto its own place", withError(fields, err))
+		err := fmt.Errorf("wsm: swap places: workspace %s with itself", ws)
+		s.log.Error(op, "refused to swap a workspace with itself", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
@@ -153,21 +153,12 @@ func (s *store) MovePlace(ctx context.Context, ws, target WorkspaceID) error {
 			return err
 		}
 		fields["from"], fields["to"] = from, to
+		// ws steps onto the parking slot first, so the unique index never sees
+		// two rows on one place while target takes the place ws left.
 		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, parkedPlace, ws); err != nil {
 			return err
 		}
-		// Rightward, the places in (from, to] step down one; leftward, the
-		// places in [to, from) step up one. Both run through negatives.
-		shift := `UPDATE workspaces SET place = -(place - 1) WHERE place > ? AND place <= ?`
-		lo, hi := from, to
-		if from > to {
-			shift = `UPDATE workspaces SET place = -(place + 1) WHERE place >= ? AND place < ?`
-			lo, hi = to, from
-		}
-		if _, err := tx.ExecContext(ctx, shift, lo, hi); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = -place WHERE place < 0`); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, from, target); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, to, ws)
