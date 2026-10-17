@@ -56,6 +56,7 @@ import "agentrepl/v1/endpoint_set_effort.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_fold_repository.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
+import "agentrepl/v1/endpoint_arrange_sidebar.proto";
 import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
 import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
 import "agentrepl/v1/endpoint_set_workspace_parent.proto";
@@ -237,6 +238,11 @@ service AgentRepl {
   // pushed to every page on the roster stream. See
   // endpoint_update_sidebar_view.proto.
   rpc UpdateSidebarView(UpdateSidebarViewRequest) returns (UpdateSidebarViewResponse);
+  // Change how the repository grouping is ARRANGED: the repositories' order,
+  // a repository's subsections, and which subsection a workspace sits in and
+  // where. The tab bar follows the arrangement. See
+  // endpoint_arrange_sidebar.proto.
+  rpc ArrangeSidebar(ArrangeSidebarRequest) returns (ArrangeSidebarResponse);
 
   // A new user task; the roster's task view renders it. See
   // endpoint_create_task.proto.

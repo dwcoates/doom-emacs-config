@@ -1,0 +1,192 @@
+// endpoint_arrange_sidebar.proto — ArrangeSidebar: change how the repository
+// grouping is ARRANGED. SIDEBAR section.
+//
+// THE ARRANGEMENT IS THE TAB BAR'S ORDER. The repository grouping draws its
+// repositories in their stored order; inside each repository, the workspaces
+// in no subsection first, then each subsection in its stored order with its
+// own workspaces below its header. The Emacs tab bar
+// (frontend.v1.WorkspaceRoster.tab_bar) lists the open workspaces in exactly
+// that order: every workspace of an earlier repository before any of a later
+// one, and inside a repository, the unsectioned workspaces, then the first
+// subsection's, then the next's. So every change here moves tabs as well as
+// rows, and the new order arrives on the roster stream for both.
+//
+// NOT VIEW STATE (endpoint_update_sidebar_view.proto): a fold or the grouping
+// shown changes what a page draws, while an arrangement changes the order
+// every surface walks.
+//
+// The arrangement is DURABLE: it survives a daemon restart. A NEW repository
+// lands after every other one; a NEW subsection lands after its repository's
+// other subsections; a NEW workspace lands in no subsection.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/subsection.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ArrangeSidebarRequest {
+  // THE ARM IS THE CHANGE. Unset is a malformed request (Connect
+  // InvalidArgument).
+  oneof change {
+    // Add a named subsection at the bottom of one repository's section.
+    ArrangeCreateSubsection create_subsection = 1;
+    // Rename one subsection.
+    ArrangeRenameSubsection rename_subsection = 2;
+    // Remove one subsection; its workspaces return to no subsection.
+    ArrangeDeleteSubsection delete_subsection = 3;
+    // Move one subsection among its repository's subsections.
+    ArrangeMoveSubsection move_subsection = 4;
+    // Move one repository among the repositories.
+    ArrangeMoveRepository move_repository = 5;
+    // Put one workspace into a subsection (or none) at a place.
+    ArrangePlaceWorkspace place_workspace = 6;
+  }
+}
+
+// Add a subsection named `name` after the repository's other subsections.
+message ArrangeCreateSubsection {
+  // The repository, echoed from frontend.v1.RosterRepoKey.
+  workspace.v1.RepositoryRef repository = 1;
+  // The subsection's drawn label. Blank (empty or only whitespace) is
+  // refused on the blank_name arm; surrounding whitespace is trimmed.
+  string name = 2;
+}
+
+// Rename one subsection.
+message ArrangeRenameSubsection {
+  SubsectionRef subsection = 1;
+  // The new label, refused and trimmed as ArrangeCreateSubsection.name is.
+  string name = 2;
+}
+
+// Remove one subsection. Its workspaces return to no subsection, keeping
+// their order among themselves, so they draw after the repository's other
+// unsectioned workspaces.
+message ArrangeDeleteSubsection {
+  SubsectionRef subsection = 1;
+}
+
+// Move one subsection among its own repository's subsections.
+message ArrangeMoveSubsection {
+  SubsectionRef subsection = 1;
+  // WHERE IT GOES. THE ARM IS THE PLACE; unset is malformed.
+  oneof to {
+    // Just before this subsection of the same repository. Naming the moved
+    // subsection itself is malformed.
+    SubsectionRef before = 2;
+    // After every other subsection of its repository.
+    ArrangeEnd end = 3;
+  }
+}
+
+// Move one repository among the repositories. Its workspaces move with it,
+// on the sidebar and on the tab bar.
+message ArrangeMoveRepository {
+  workspace.v1.RepositoryRef repository = 1;
+  // WHERE IT GOES. THE ARM IS THE PLACE; unset is malformed.
+  oneof to {
+    // Just before this repository. Naming the moved repository itself is
+    // malformed.
+    workspace.v1.RepositoryRef before = 2;
+    // After every other repository.
+    ArrangeEnd end = 3;
+  }
+}
+
+// Put one workspace into a subsection of its own repository, or into none,
+// at a place among the workspaces already there.
+//
+// A WORKSPACE MOVES WITH ITS NESTED FAMILY. Its descendants that sit where it
+// sat (same repository, same subsection or none) move into the destination
+// with it, because the sidebar draws them as one block under it.
+message ArrangePlaceWorkspace {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHERE IT GOES. THE ARM IS THE DESTINATION; unset is malformed.
+  oneof into {
+    // The repository's unsectioned workspaces, above its subsections.
+    ArrangeNoSubsection no_subsection = 2;
+    // One subsection of the workspace's own repository.
+    SubsectionRef subsection = 3;
+  }
+  // WHERE AMONG THEM. THE ARM IS THE PLACE; unset is malformed.
+  oneof at {
+    // Just before this workspace, which must already sit in the
+    // destination. Naming the moved workspace itself is malformed.
+    workspace.v1.WorkspaceRef before = 4;
+    // After every workspace already in the destination.
+    ArrangeEnd end = 5;
+  }
+}
+
+// The repository's unsectioned workspaces. DELIBERATELY EMPTY: the arm is
+// the destination.
+message ArrangeNoSubsection {}
+
+// After every other item of the list. DELIBERATELY EMPTY: the arm is the
+// place.
+message ArrangeEnd {}
+
+// THE ARM IS THE OUTCOME.
+message ArrangeSidebarResponse {
+  oneof result {
+    ArrangeSidebarSuccess success = 1;
+    ArrangeSidebarError error = 2;
+  }
+}
+
+// Recorded; the roster push carries the new arrangement to every page and to
+// the tab bar.
+message ArrangeSidebarSuccess {}
+
+// Validation failures (an unset field or arm, a blank id, an item placed
+// relative to itself) are Connect InvalidArgument, never an arm. Nothing
+// changes on any arm.
+message ArrangeSidebarError {
+  oneof cause {
+    // No registered repository matches a repository ref.
+    ArrangeSidebarUnknownRepository unknown_repository = 1;
+    // No subsection by a subsection ref's id.
+    ArrangeSidebarUnknownSubsection unknown_subsection = 2;
+    // A workspace ref's id is not in the daemon's registry.
+    ArrangeSidebarUnknownWorkspace unknown_workspace = 3;
+    // A workspace ref's dir disagrees with the registry's dir for its id.
+    ArrangeSidebarWorkspaceRefMismatch workspace_ref_mismatch = 4;
+    // This daemon released a workspace to a successor; dial `address`.
+    ArrangeSidebarTransferringAway transferring_away = 5;
+    // A joining daemon has not finished adopting a workspace yet.
+    ArrangeSidebarNotYetAdopted not_yet_adopted = 6;
+    // A subsection's name is blank.
+    ArrangeSidebarBlankName blank_name = 7;
+    // The change relates two things of different repositories: a subsection
+    // placed before another repository's subsection, or a workspace put into
+    // another repository's subsection.
+    ArrangeSidebarOtherRepository other_repository = 8;
+    // A workspace was placed before a workspace that does not sit in the
+    // destination (it moved since the roster the client drew from).
+    ArrangeSidebarAnchorElsewhere anchor_elsewhere = 9;
+  }
+}
+message ArrangeSidebarUnknownRepository {}
+// Names the subsection ref no subsection matches.
+message ArrangeSidebarUnknownSubsection { SubsectionRef subsection = 1; }
+// Names the ref the registry does not hold.
+message ArrangeSidebarUnknownWorkspace { workspace.v1.WorkspaceRef workspace = 1; }
+// Names the mismatched ref and the dir the registry holds for its id.
+message ArrangeSidebarWorkspaceRefMismatch {
+  workspace.v1.WorkspaceRef workspace = 1;
+  string registry_dir = 2;
+}
+// The successor's `127.0.0.1:<port>`.
+message ArrangeSidebarTransferringAway { string address = 1; }
+// Adoption of a named workspace is still in progress.
+message ArrangeSidebarNotYetAdopted {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarBlankName {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarOtherRepository {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarAnchorElsewhere {}
