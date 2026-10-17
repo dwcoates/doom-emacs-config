@@ -127,3 +127,31 @@ func TestForgettingADerivationSourceLeavesTheDerivedWorkspace(t *testing.T) {
 		t.Errorf("ContextFrom = %v, RequestedBy = %v, want both nil", got.ContextFrom, got.RequestedBy)
 	}
 }
+
+func TestMayActIsTheUserTheWorkspaceOrItsOwner(t *testing.T) {
+	owner := WorkspaceID("ws-owner")
+	child := Workspace{ID: "ws-child", Parent: &owner}
+	tests := []struct {
+		name  string
+		ws    Workspace
+		asker WorkspaceID
+		want  bool
+	}{
+		{name: "the user", ws: child, asker: "", want: true},
+		{name: "the workspace itself", ws: child, asker: "ws-child", want: true},
+		{name: "its owner", ws: child, asker: owner, want: true},
+		{name: "a stranger", ws: child, asker: "ws-stranger"},
+		{name: "a stranger to a workspace with no owner", ws: Workspace{ID: "ws-top"}, asker: "ws-stranger"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.ws.MayAct(tt.asker)
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("MayAct(%q) = %v, want %v", tt.asker, got, tt.want)
+			}
+		})
+	}
+}

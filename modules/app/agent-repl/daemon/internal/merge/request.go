@@ -243,15 +243,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 // other workspace is refused (requester_may_not_land).
 func checkAsker(ws wsm.Workspace, asker ids.WorkspaceID) error {
 	switch {
-	case asker == "":
-		return nil
 	case asker == ws.ID && ws.OwnerLands:
 		refusal := refuse(ArmOwnerLands, ws.ID, "the workspace's context was not forked from its owner %s, which lands it", *ws.Parent)
 		refusal.Fields = map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*ws.Parent)}}
 		return refusal
-	case asker == ws.ID:
-		return nil
-	case ws.Parent != nil && asker == *ws.Parent:
+	case ws.MayAct(asker):
 		return nil
 	}
 	return refuse(ArmRequesterMayNotLand, ws.ID, "workspace %s is neither the workspace nor its owner", asker)

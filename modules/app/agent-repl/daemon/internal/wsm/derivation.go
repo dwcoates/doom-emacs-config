@@ -26,3 +26,11 @@ ALTER TABLE workspaces ADD COLUMN owner_lands INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE workspaces ADD COLUMN context_from TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
 ALTER TABLE workspaces ADD COLUMN requested_by TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
 `
+
+// MayAct reports whether ASKER may act on the workspace's own work -- land
+// it, or mark it a one-shot: the user (an empty ASKER), the workspace itself,
+// or its owner. Whether the workspace itself may land is narrowed further by
+// OwnerLands, which the act decides.
+func (ws Workspace) MayAct(asker WorkspaceID) bool {
+	return asker == "" || asker == ws.ID || (ws.Parent != nil && asker == *ws.Parent)
+}
