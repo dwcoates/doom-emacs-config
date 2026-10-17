@@ -277,6 +277,9 @@ func (q *queue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 		}
 		log.Info(opTurnEnded, "closed a turn that ended while no daemon was watching", fields)
 	}
+	if len(turns) > 0 {
+		q.deps.Edges.TurnEndedUnobserved(ws)
+	}
 }
 
 // popAndDeliver delivers the next deliverable hold: the SEMANTIC HEAD an

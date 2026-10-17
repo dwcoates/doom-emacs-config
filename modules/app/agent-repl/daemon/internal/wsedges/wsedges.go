@@ -5,7 +5,8 @@
 //
 // EACH EDGE HAS ONE ORIGIN, so no observer can miss one another sees:
 //   - a turn starts where the shim took it (promptqueue's turn acknowledgement);
-//   - a turn ends where the prompt queue closes it;
+//   - a turn ends where the prompt queue closes it, and a turn that ended
+//     while no daemon watched is told as such where an adoption closes it;
 //   - an ask opens where the session watcher routes a live question or
 //     permission;
 //   - a branch lands where the merge queue reports the landing
@@ -36,6 +37,11 @@ type Observer interface {
 	TurnStarted(ws ids.WorkspaceID)
 	// TurnEnded: a turn of WS ended, however it ended.
 	TurnEnded(ws ids.WorkspaceID)
+	// TurnEndedUnobserved: turns of WS ended while no daemon watched, and an
+	// adoption closed them. No observer reports such an end as news (a
+	// change no daemon served is never noticed); it settles what waited on
+	// the turn.
+	TurnEndedUnobserved(ws ids.WorkspaceID)
 	// NeedsInput: a question or a permission of WS opened.
 	NeedsInput(ws ids.WorkspaceID)
 	// Landed: WS's merge landed in its target.
@@ -62,6 +68,13 @@ func (h *Hub) TurnStarted(ws ids.WorkspaceID) {
 func (h *Hub) TurnEnded(ws ids.WorkspaceID) {
 	for _, o := range h.observers {
 		o.TurnEnded(ws)
+	}
+}
+
+// TurnEndedUnobserved implements Observer.
+func (h *Hub) TurnEndedUnobserved(ws ids.WorkspaceID) {
+	for _, o := range h.observers {
+		o.TurnEndedUnobserved(ws)
 	}
 }
 

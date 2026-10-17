@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -21,6 +22,12 @@ func TestTheTurnEdgesAreToldWhereTheyHappen(t *testing.T) {
 			h.watcher.idle()
 			h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseFailed)
 		}, want: []string{"ended:" + string(theWorkspace)}},
+		{name: "turns an adoption found ended are one unobserved end", act: func(_ *testing.T, h *harness) {
+			h.q.OnTurnsEndedUnobserved(theWorkspace, []ids.TurnID{"t1", "t2"})
+		}, want: []string{"ended_unobserved:" + string(theWorkspace)}},
+		{name: "an adoption that found no ended turn ends nothing", act: func(_ *testing.T, h *harness) {
+			h.q.OnTurnsEndedUnobserved(theWorkspace, nil)
+		}},
 		{name: "a prompt folded into the running turn ends nothing", act: func(t *testing.T, h *harness) {
 			running(t, h, "running-turn", "the running work")
 			h.q.OnTurnEnded(theWorkspace, "folded-turn", wsm.CloseFolded)

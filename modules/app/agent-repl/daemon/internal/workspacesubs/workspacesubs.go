@@ -92,6 +92,10 @@ func (s *Service) TurnStarted(ws ids.WorkspaceID) {
 // TurnEnded implements wsedges.Observer.
 func (s *Service) TurnEnded(ws ids.WorkspaceID) { s.loop.Report(edge{ws, wsm.WorkspaceEventTurnEnded}) }
 
+// TurnEndedUnobserved implements wsedges.Observer: an end no daemon watched
+// is never told as news.
+func (s *Service) TurnEndedUnobserved(ids.WorkspaceID) {}
+
 // NeedsInput implements wsedges.Observer.
 func (s *Service) NeedsInput(ws ids.WorkspaceID) {
 	s.loop.Report(edge{ws, wsm.WorkspaceEventNeedsInput})

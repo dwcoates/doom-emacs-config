@@ -161,6 +161,21 @@ func otherEvent(e wsm.WorkspaceEvent) wsm.WorkspaceEvent {
 	return wsm.WorkspaceEventClosed
 }
 
+func TestATurnEndNoDaemonWatchedIsToldToNobody(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.subs.subs = []wsm.WorkspaceSubscription{subscribed(watcherA, wsm.WorkspaceEventTurnEnded)}
+
+	// Act
+	f.s.TurnEndedUnobserved(followed)
+	f.deliverAll()
+
+	// Assert
+	if len(f.prompts.got) != 0 {
+		t.Errorf("submitted = %+v, want nothing: a change no daemon served is never noticed", f.prompts.got)
+	}
+}
+
 func TestAnEdgeNobodyAskedForReadsNoStatus(t *testing.T) {
 	// Arrange
 	f := newFixture()
@@ -247,4 +262,3 @@ func TestStatusWordsStatesTheStatus(t *testing.T) {
 		})
 	}
 }
-

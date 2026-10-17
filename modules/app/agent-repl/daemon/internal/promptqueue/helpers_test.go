@@ -1739,6 +1739,9 @@ type fakeEdges struct {
 
 func (e *fakeEdges) TurnStarted(ws ids.WorkspaceID) { e.record("started:" + string(ws)) }
 func (e *fakeEdges) TurnEnded(ws ids.WorkspaceID)   { e.record("ended:" + string(ws)) }
+func (e *fakeEdges) TurnEndedUnobserved(ws ids.WorkspaceID) {
+	e.record("ended_unobserved:" + string(ws))
+}
 
 func (e *fakeEdges) record(edge string) {
 	e.mu.Lock()

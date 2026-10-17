@@ -19,9 +19,12 @@ type recorder struct{ got []string }
 
 func (r *recorder) TurnStarted(ws ids.WorkspaceID) { r.got = append(r.got, "turn_started:"+string(ws)) }
 func (r *recorder) TurnEnded(ws ids.WorkspaceID)   { r.got = append(r.got, "turn_ended:"+string(ws)) }
-func (r *recorder) NeedsInput(ws ids.WorkspaceID)  { r.got = append(r.got, "needs_input:"+string(ws)) }
-func (r *recorder) Landed(ws ids.WorkspaceID)      { r.got = append(r.got, "landed:"+string(ws)) }
-func (r *recorder) Closed(before wsm.Workspace)    { r.got = append(r.got, "closed:"+string(before.ID)) }
+func (r *recorder) TurnEndedUnobserved(ws ids.WorkspaceID) {
+	r.got = append(r.got, "turn_ended_unobserved:"+string(ws))
+}
+func (r *recorder) NeedsInput(ws ids.WorkspaceID) { r.got = append(r.got, "needs_input:"+string(ws)) }
+func (r *recorder) Landed(ws ids.WorkspaceID)     { r.got = append(r.got, "landed:"+string(ws)) }
+func (r *recorder) Closed(before wsm.Workspace)   { r.got = append(r.got, "closed:"+string(before.ID)) }
 
 func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 	tests := []struct {
@@ -31,6 +34,7 @@ func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 	}{
 		{name: "a turn starting", edge: func(h *Hub) { h.TurnStarted(ws) }, want: "turn_started:ws-1"},
 		{name: "a turn ending", edge: func(h *Hub) { h.TurnEnded(ws) }, want: "turn_ended:ws-1"},
+		{name: "a turn ending unobserved", edge: func(h *Hub) { h.TurnEndedUnobserved(ws) }, want: "turn_ended_unobserved:ws-1"},
 		{name: "an ask opening", edge: func(h *Hub) { h.NeedsInput(ws) }, want: "needs_input:ws-1"},
 		{name: "a landing", edge: func(h *Hub) { h.Landed(ws) }, want: "landed:ws-1"},
 		{name: "a close", edge: func(h *Hub) { h.Closed(wsm.Workspace{ID: ws}) }, want: "closed:ws-1"},

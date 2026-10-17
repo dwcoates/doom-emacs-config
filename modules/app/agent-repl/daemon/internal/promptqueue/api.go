@@ -398,6 +398,7 @@ type Queue interface {
 type TurnEdges interface {
 	TurnStarted(ws ids.WorkspaceID)
 	TurnEnded(ws ids.WorkspaceID)
+	TurnEndedUnobserved(ws ids.WorkspaceID)
 }
 
 // Deps are the queue's collaborators.

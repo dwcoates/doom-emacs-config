@@ -136,6 +136,10 @@ func (s *Service) TurnStarted(ids.WorkspaceID) {}
 // TurnEnded implements wsedges.Observer: a turn is no derived event.
 func (s *Service) TurnEnded(ids.WorkspaceID) {}
 
+// TurnEndedUnobserved implements wsedges.Observer: an end no daemon watched
+// is never told as news.
+func (s *Service) TurnEndedUnobserved(ids.WorkspaceID) {}
+
 // NeedsInput implements wsedges.Observer: an ask is no derived event.
 func (s *Service) NeedsInput(ids.WorkspaceID) {}
 

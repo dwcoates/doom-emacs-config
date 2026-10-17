@@ -334,6 +334,7 @@ func TestTheEdgesReportOnlyTheDerivedEvents(t *testing.T) {
 	}{
 		{name: "a turn starting reports nothing", edge: func(s *Service) { s.TurnStarted(child) }},
 		{name: "a turn ending reports nothing", edge: func(s *Service) { s.TurnEnded(child) }},
+		{name: "a turn ending unobserved reports nothing", edge: func(s *Service) { s.TurnEndedUnobserved(child) }},
 		{name: "an ask opening reports nothing", edge: func(s *Service) { s.NeedsInput(child) }},
 		{name: "a landing reports the landing", edge: func(s *Service) { s.Landed(child) }, want: []Kind{Landed}},
 		{name: "a close after a landing reports nothing more", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child, MergedAt: &landedAt}) }},
