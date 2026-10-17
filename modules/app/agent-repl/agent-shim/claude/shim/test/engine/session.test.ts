@@ -5481,6 +5481,26 @@ describe("the teardown's waits are bounded", () => {
     );
   });
 
+  it("names where the message loop was parked when it outlives its budget after the close", async () => {
+    // Arrange: the loop waits on a vendor iterator the close never ends.
+    const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
+    await started(h);
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) =>
+      entry.message.startsWith("the vendor message loop did not end within its budget"),
+    );
+    expect([record?.level, record?.context?.parked_at, typeof record?.context?.parked_ms]).toEqual([
+      "error",
+      "vendor",
+      "number",
+    ]);
+  });
+
   it("finishes KillSession when the store never answers the head read a watcher's conclusion needs", async () => {
     const h = harness({ watcherConclusionBudgetMs: 5 });
     await started(h);

@@ -184,6 +184,7 @@ import {
 import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
+import { type LoopPark, loopParkFields } from "./loop-park.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
 import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
 import { VendorErrorRetry, type UsageReading } from "./vendor-error-retry.js";
@@ -1015,6 +1016,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let vendorExit: VendorEnd | undefined;
   let loop: Promise<void> | undefined;
+  /**
+   * WHERE THE LIVE QUERY'S MESSAGE LOOP IS PARKED: waiting on the vendor for
+   * the next message, handling one, or held by the store writer's
+   * backpressure. The teardown states it when the loop outlives its budget
+   * after the close, so the overrun names what it was waiting on.
+   */
+  let loopPark: LoopPark | undefined;
   /**
    * What the cold gate's own compaction measured, kept for the phases AFTER it.
    *
@@ -3582,7 +3590,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     await pushAppliedEffort();
   }
 
-  function runLoop(active: QueryLike): Promise<void> {
+  function runLoop(active: QueryLike, park: LoopPark): Promise<void> {
+    const parkAt = (at: LoopPark["at"], message: string): void => {
+      park.at = at;
+      park.message = message;
+      park.sinceMs = deps.nowMs();
+    };
     return (async (): Promise<void> => {
       // WHERE A CLUMP OF VENDOR MESSAGES FORMED: each wait on the vendor for
       // the next message is timed, and a long one is recorded with how busy
@@ -3591,15 +3604,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       try {
         for await (const message of active) {
           cadence.received();
+          const named = messageKind(message);
           try {
             if (heldByRollbackBoot(active, message)) continue;
+            parkAt("handling", named);
             await onSdkMessage(message);
             // THE BACKPRESSURE. The vendor stream is the one producer of rows
             // with no bound of its own, so while the store writer's backlog is
             // past its high-water mark the next message is not read. The writer
             // never evicts a row; this wait is what keeps its buffer bounded.
+            parkAt("backpressure", named);
             await deps.persistence.whenWritable();
           } finally {
+            parkAt("vendor", named);
             cadence.waiting();
           }
         }
@@ -4620,7 +4637,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // query's first word.
     if (options.keepsAnchor === true) keepaliveScope.rewound();
     beforeLoop?.(created);
-    loop = runLoop(created);
+    const park: LoopPark = { at: "vendor", message: "", sinceMs: deps.nowMs() };
+    loopPark = park;
+    loop = runLoop(created, park);
     return created;
   }
 
@@ -7006,12 +7025,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // given the same budget a tail's conclusion gets and the overrun is stated
     // at error level rather than swallowed.
     const ending = loop;
+    const endingPark = loopPark;
     loop = undefined;
+    loopPark = undefined;
     if (ending !== undefined) {
       await withBudget(
         ending.catch(() => undefined),
         watcherConclusionBudgetMs,
         "the vendor message loop did not end within its budget after the query was closed; standing down without it",
+        () => loopParkFields(endingPark, deps.nowMs()),
       );
     }
     // A23: the stand-down is only clean if the record actually landed. The
@@ -7282,7 +7304,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
-  async function withBudget(work: Promise<void>, budgetMs: number, complaint: string): Promise<void> {
+  async function withBudget(
+    work: Promise<void>,
+    budgetMs: number,
+    complaint: string,
+    overrun: () => Record<string, unknown> = () => ({}),
+  ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expiry = new Promise<"expired">((resolve) => {
       timer = setTimeout(() => resolve("expired"), budgetMs);
@@ -7291,7 +7318,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       const outcome = await Promise.race([work.then(() => "ended" as const), expiry]);
       if (outcome === "expired") {
-        LOGGER.error({ budget_ms: budgetMs, detail: complaint }, complaint);
+        LOGGER.error({ ...overrun(), budget_ms: budgetMs, detail: complaint }, complaint);
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);
