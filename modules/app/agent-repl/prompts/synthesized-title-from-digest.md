@@ -12,7 +12,7 @@ and changes to make, and the context of these fixes and changes was some feature
 called "foo", around some complexity called "bar", focused on "baz", then the
 summary would be devoid of minutia and cut right to the core description that
 best differentiates the workspace among a group of other workspaces while having
-as little detail as possible: "Fixing bar issues in foo around baz"
+as little detail as possible: "Fix bar issues in foo around baz."
 
 Your whole reply is the sentence and nothing else. No preamble, no quotes, no
 backticks, no label, no trailing punctuation beyond the sentence's own period.
