@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!write-update"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!write-update"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!write-update"
+                    }
+                  }
                 }
               }
             ]
@@ -89,7 +100,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Updated the file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Updated the file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Updated the file."
+                }
+              }
             }
           },
           "usage": {

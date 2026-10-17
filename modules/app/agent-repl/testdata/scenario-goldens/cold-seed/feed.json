@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!cold-seed"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!cold-seed"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!cold-seed"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "An answer the next resume finds expensive."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "An answer the next resume finds expensive."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "An answer the next resume finds expensive."
+                }
+              }
             }
           },
           "usage": {

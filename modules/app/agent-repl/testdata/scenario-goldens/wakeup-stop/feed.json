@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!wakeup-stop"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!wakeup-stop"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!wakeup-stop"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Stopped the wakeup loop."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Stopped the wakeup loop."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Stopped the wakeup loop."
+                }
+              }
             }
           },
           "usage": {

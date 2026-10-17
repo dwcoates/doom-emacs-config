@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash"
+                    }
+                  }
                 }
               }
             ]
@@ -68,7 +79,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Ran the command."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Ran the command."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Ran the command."
+                }
+              }
             }
           },
           "usage": {

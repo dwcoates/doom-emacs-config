@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!read-head"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!read-head"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!read-head"
+                    }
+                  }
                 }
               }
             ]
@@ -133,7 +144,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Read the head of the file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Read the head of the file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Read the head of the file."
+                }
+              }
             }
           },
           "usage": {

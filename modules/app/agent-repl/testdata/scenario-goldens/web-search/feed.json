@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!web-search"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!web-search"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!web-search"
+                    }
+                  }
                 }
               }
             ]
@@ -78,7 +89,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Searched the web and summarized the hits."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Searched the web and summarized the hits."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Searched the web and summarized the hits."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!skill"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!skill"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!skill"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Invoked the fake-skill skill and read its document."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Invoked the fake-skill skill and read its document."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Invoked the fake-skill skill and read its document."
+                }
+              }
             }
           },
           "usage": {

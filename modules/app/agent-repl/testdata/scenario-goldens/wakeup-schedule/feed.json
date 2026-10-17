@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!wakeup-schedule"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!wakeup-schedule"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!wakeup-schedule"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Scheduled the wakeup."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Scheduled the wakeup."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Scheduled the wakeup."
+                }
+              }
             }
           },
           "usage": {

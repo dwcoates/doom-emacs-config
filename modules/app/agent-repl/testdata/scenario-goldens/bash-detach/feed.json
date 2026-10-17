@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-detach"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-detach"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-detach"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Backgrounded the command."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Backgrounded the command."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Backgrounded the command."
+                }
+              }
             }
           },
           "usage": {

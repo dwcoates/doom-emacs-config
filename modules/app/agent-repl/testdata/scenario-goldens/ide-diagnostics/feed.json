@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!ide-diagnostics"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!ide-diagnostics"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!ide-diagnostics"
+                    }
+                  }
                 }
               }
             ]
@@ -94,7 +105,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The edit introduced a type error."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The edit introduced a type error."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The edit introduced a type error."
+                }
+              }
             }
           },
           "usage": {

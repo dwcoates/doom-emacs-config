@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!memory"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!memory"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!memory"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Read the injected memory."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Read the injected memory."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Read the injected memory."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!ask-multi"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!ask-multi"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!ask-multi"
+                    }
+                  }
                 }
               }
             ]
@@ -139,7 +150,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Both questions were answered."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Both questions were answered."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Both questions were answered."
+                }
+              }
             }
           },
           "usage": {

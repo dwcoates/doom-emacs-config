@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!artifact-publish"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!artifact-publish"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!artifact-publish"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Published the artifact."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Published the artifact."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Published the artifact."
+                }
+              }
             }
           },
           "usage": {

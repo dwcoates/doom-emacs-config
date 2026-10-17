@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!max-tokens"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!max-tokens"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!max-tokens"
+                    }
+                  }
                 }
               }
             ]
@@ -33,7 +44,18 @@
         "response": {
           "error": {
             "prose": {
-              "markdown": "The answer begins and then stops mid-"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The answer begins and then stops mid-"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The answer begins and then stops mid-"
+                }
+              }
             }
           },
           "finalAnswer": true,

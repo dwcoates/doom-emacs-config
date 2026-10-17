@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!glob"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!glob"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!glob"
+                    }
+                  }
                 }
               }
             ]
@@ -74,7 +85,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Two of several files matched."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Two of several files matched."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Two of several files matched."
+                }
+              }
             }
           },
           "usage": {

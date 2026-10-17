@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-fail"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-fail"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-fail"
+                    }
+                  }
                 }
               }
             ]
@@ -71,7 +82,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The command exited non-zero."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The command exited non-zero."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The command exited non-zero."
+                }
+              }
             }
           },
           "usage": {

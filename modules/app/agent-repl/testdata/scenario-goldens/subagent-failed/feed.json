@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!subagent-failed"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!subagent-failed"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!subagent-failed"
+                    }
+                  }
                 }
               }
             ]
@@ -65,7 +76,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Dispatched an agent that will fail."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Dispatched an agent that will fail."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Dispatched an agent that will fail."
+                }
+              }
             }
           },
           "usage": {

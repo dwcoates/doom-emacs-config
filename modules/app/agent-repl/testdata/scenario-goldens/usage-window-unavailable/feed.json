@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!usage-window-unavailable"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!usage-window-unavailable"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!usage-window-unavailable"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The account-usage probe now answers with the window_unavailable shape."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The account-usage probe now answers with the window_unavailable shape."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The account-usage probe now answers with the window_unavailable shape."
+                }
+              }
             }
           },
           "usage": {

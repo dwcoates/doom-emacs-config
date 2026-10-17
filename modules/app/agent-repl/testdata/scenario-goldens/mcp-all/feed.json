@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!mcp-all"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!mcp-all"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!mcp-all"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Every MCP health is now reported."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Every MCP health is now reported."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Every MCP health is now reported."
+                }
+              }
             }
           },
           "usage": {

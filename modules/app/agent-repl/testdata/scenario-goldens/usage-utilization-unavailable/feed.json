@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!usage-utilization-unavailable"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!usage-utilization-unavailable"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!usage-utilization-unavailable"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The account-usage probe now answers with the utilization_unavailable shape."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The account-usage probe now answers with the utilization_unavailable shape."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The account-usage probe now answers with the utilization_unavailable shape."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!grep-content"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!grep-content"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!grep-content"
+                    }
+                  }
                 }
               }
             ]
@@ -74,7 +85,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Found two matching lines."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Found two matching lines."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Found two matching lines."
+                }
+              }
             }
           },
           "usage": {

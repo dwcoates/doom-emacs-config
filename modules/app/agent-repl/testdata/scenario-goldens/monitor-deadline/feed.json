@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!monitor-deadline"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!monitor-deadline"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!monitor-deadline"
+                    }
+                  }
                 }
               }
             ]
@@ -61,7 +72,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Monitoring until the deadline."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Monitoring until the deadline."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Monitoring until the deadline."
+                }
+              }
             }
           },
           "usage": {

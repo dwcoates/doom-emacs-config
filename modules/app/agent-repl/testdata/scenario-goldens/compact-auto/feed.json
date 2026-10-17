@@ -10,7 +10,18 @@
       "separation": {
         "compacted": {
           "summary": {
-            "markdown": "The conversation was compacted automatically."
+            "prose": {
+              "blocks": [
+                {
+                  "plain": {
+                    "markdown": "The conversation was compacted automatically."
+                  }
+                }
+              ],
+              "source": {
+                "markdown": "The conversation was compacted automatically."
+              }
+            }
           }
         },
         "label": {
@@ -28,7 +39,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The conversation was compacted automatically."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The conversation was compacted automatically."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The conversation was compacted automatically."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!task-create"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!task-create"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!task-create"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Created two tasks and linked them."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Created two tasks and linked them."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Created two tasks and linked them."
+                }
+              }
             }
           },
           "usage": {

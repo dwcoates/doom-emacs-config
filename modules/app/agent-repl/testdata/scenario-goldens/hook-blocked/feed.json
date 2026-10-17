@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!hook-blocked"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!hook-blocked"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!hook-blocked"
+                    }
+                  }
                 }
               }
             ]
@@ -89,7 +100,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "A hook blocked the edit."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "A hook blocked the edit."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "A hook blocked the edit."
+                }
+              }
             }
           },
           "usage": {

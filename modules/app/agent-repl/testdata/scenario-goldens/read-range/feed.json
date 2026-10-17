@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!read-range"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!read-range"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!read-range"
+                    }
+                  }
                 }
               }
             ]
@@ -133,7 +144,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Read a range of the file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Read a range of the file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Read a range of the file."
+                }
+              }
             }
           },
           "usage": {

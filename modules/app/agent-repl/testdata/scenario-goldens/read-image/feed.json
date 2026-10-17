@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!read-image"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!read-image"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!read-image"
+                    }
+                  }
                 }
               }
             ]
@@ -66,7 +77,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Read the image."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Read the image."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Read the image."
+                }
+              }
             }
           },
           "usage": {

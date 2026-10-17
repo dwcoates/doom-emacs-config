@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fast-on"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fast-on"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fast-on"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Fast mode is on."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Fast mode is on."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Fast mode is on."
+                }
+              }
             }
           },
           "usage": {

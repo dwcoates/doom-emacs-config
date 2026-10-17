@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!worktree-keep"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!worktree-keep"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!worktree-keep"
+                    }
+                  }
                 }
               }
             ]
@@ -81,7 +92,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Kept the worktree."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Kept the worktree."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Kept the worktree."
+                }
+              }
             }
           },
           "usage": {

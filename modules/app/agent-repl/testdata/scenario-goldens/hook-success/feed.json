@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!hook-success"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!hook-success"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!hook-success"
+                    }
+                  }
                 }
               }
             ]
@@ -72,7 +83,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The hook allowed the read."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The hook allowed the read."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The hook allowed the read."
+                }
+              }
             }
           },
           "usage": {

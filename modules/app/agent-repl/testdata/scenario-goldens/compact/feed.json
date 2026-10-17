@@ -10,7 +10,18 @@
       "separation": {
         "compacted": {
           "summary": {
-            "markdown": "Compacted the conversation."
+            "prose": {
+              "blocks": [
+                {
+                  "plain": {
+                    "markdown": "Compacted the conversation."
+                  }
+                }
+              ],
+              "source": {
+                "markdown": "Compacted the conversation."
+              }
+            }
           }
         },
         "label": {
@@ -28,7 +39,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Compacted the conversation."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Compacted the conversation."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Compacted the conversation."
+                }
+              }
             }
           },
           "usage": {

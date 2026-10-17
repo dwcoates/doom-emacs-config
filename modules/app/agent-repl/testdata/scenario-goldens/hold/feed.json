@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!hold"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!hold"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!hold"
+                    }
+                  }
                 }
               }
             ]
@@ -33,7 +44,18 @@
         "response": {
           "success": {
             "prose": {
-              "markdown": "Working…"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Working…"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Working…"
+                }
+              }
             }
           },
           "usage": {

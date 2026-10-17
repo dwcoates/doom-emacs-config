@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!read-truncated"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!read-truncated"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!read-truncated"
+                    }
+                  }
                 }
               }
             ]
@@ -133,7 +144,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The read was truncated at the token cap."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The read was truncated at the token cap."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The read was truncated at the token cap."
+                }
+              }
             }
           },
           "usage": {

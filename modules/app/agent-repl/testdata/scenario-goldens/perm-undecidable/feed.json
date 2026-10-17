@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!perm-undecidable"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!perm-undecidable"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!perm-undecidable"
+                    }
+                  }
                 }
               }
             ]
@@ -79,7 +90,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Nothing could decide whether to allow that."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Nothing could decide whether to allow that."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Nothing could decide whether to allow that."
+                }
+              }
             }
           },
           "usage": {

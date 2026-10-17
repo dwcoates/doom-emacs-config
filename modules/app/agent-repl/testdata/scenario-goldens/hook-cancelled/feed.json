@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!hook-cancelled"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!hook-cancelled"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!hook-cancelled"
+                    }
+                  }
                 }
               }
             ]
@@ -66,7 +77,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The hook was cancelled and the edit stood."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The hook was cancelled and the edit stood."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The hook was cancelled and the edit stood."
+                }
+              }
             }
           },
           "usage": {

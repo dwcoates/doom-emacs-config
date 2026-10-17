@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!grep-files"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!grep-files"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!grep-files"
+                    }
+                  }
                 }
               }
             ]
@@ -70,7 +81,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "One file matched."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "One file matched."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "One file matched."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!compact-failed"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!compact-failed"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!compact-failed"
+                    }
+                  }
                 }
               }
             ]
@@ -65,7 +76,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The compaction failed and nothing was cut."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The compaction failed and nothing was cut."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The compaction failed and nothing was cut."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!grep-count"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!grep-count"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!grep-count"
+                    }
+                  }
                 }
               }
             ]
@@ -68,7 +79,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Counted four matches."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Counted four matches."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Counted four matches."
+                }
+              }
             }
           },
           "usage": {

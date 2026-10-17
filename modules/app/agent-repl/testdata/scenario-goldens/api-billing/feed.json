@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!api-billing"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!api-billing"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!api-billing"
+                    }
+                  }
                 }
               }
             ]

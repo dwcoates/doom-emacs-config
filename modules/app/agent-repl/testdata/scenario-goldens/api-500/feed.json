@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!api-500"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!api-500"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!api-500"
+                    }
+                  }
                 }
               }
             ]

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!usage-sampling-failure"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!usage-sampling-failure"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!usage-sampling-failure"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The account-usage probe now answers with the sampling_failure shape."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The account-usage probe now answers with the sampling_failure shape."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The account-usage probe now answers with the sampling_failure shape."
+                }
+              }
             }
           },
           "usage": {

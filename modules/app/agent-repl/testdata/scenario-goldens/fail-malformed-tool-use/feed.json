@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fail-malformed-tool-use"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fail-malformed-tool-use"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fail-malformed-tool-use"
+                    }
+                  }
                 }
               }
             ]
@@ -33,7 +44,18 @@
         "response": {
           "success": {
             "prose": {
-              "markdown": "Working on it…"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Working on it…"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Working on it…"
+                }
+              }
             }
           },
           "usage": {

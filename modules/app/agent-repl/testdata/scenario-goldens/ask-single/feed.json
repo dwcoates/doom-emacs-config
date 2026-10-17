@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!ask-single"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!ask-single"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!ask-single"
+                    }
+                  }
                 }
               }
             ]
@@ -111,7 +122,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The setup question was answered."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The setup question was answered."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The setup question was answered."
+                }
+              }
             }
           },
           "usage": {

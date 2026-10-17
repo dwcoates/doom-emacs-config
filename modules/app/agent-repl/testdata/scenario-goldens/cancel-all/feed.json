@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!cancel-all"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!cancel-all"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!cancel-all"
+                    }
+                  }
                 }
               }
             ]
@@ -125,7 +136,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Three detached items are live."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Three detached items are live."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Three detached items are live."
+                }
+              }
             }
           },
           "usage": {

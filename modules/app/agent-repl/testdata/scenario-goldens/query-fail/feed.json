@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!query-fail"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!query-fail"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!query-fail"
+                    }
+                  }
                 }
               }
             ]

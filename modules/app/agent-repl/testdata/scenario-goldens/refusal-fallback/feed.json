@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!refusal-fallback"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!refusal-fallback"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!refusal-fallback"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Here is the answer from the fallback model."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Here is the answer from the fallback model."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Here is the answer from the fallback model."
+                }
+              }
             }
           },
           "usage": {

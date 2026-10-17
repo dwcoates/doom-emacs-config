@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!task-reject"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!task-reject"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!task-reject"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The board rejected the update."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The board rejected the update."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The board rejected the update."
+                }
+              }
             }
           },
           "usage": {

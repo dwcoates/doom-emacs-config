@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!keepalive"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!keepalive"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!keepalive"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "ok"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "ok"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "ok"
+                }
+              }
             }
           },
           "usage": {

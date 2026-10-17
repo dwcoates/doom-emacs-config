@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!unmodeled"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!unmodeled"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!unmodeled"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The unmodeled tool answered."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The unmodeled tool answered."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The unmodeled tool answered."
+                }
+              }
             }
           },
           "usage": {

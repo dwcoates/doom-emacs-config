@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!rate-limit"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!rate-limit"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!rate-limit"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The account is approaching its overage threshold."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The account is approaching its overage threshold."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The account is approaching its overage threshold."
+                }
+              }
             }
           },
           "usage": {

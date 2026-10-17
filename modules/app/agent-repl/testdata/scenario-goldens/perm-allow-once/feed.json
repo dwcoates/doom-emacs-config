@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!perm-allow-once"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!perm-allow-once"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!perm-allow-once"
+                    }
+                  }
                 }
               }
             ]
@@ -102,7 +113,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Ran the command."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Ran the command."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Ran the command."
+                }
+              }
             }
           },
           "usage": {
