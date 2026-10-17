@@ -10,9 +10,17 @@ import conversationv1 "agentrepl/proto/conversation/v1"
 // no prompt row in the feed, and no held card while it waits behind a
 // running turn. Such a prompt is the daemon's word to the agent alone, which
 // the user neither said nor needs to read: a merge queue subscription's
-// notice. The agent's reply to it is drawn as any reply is.
+// notice, a workspace subscription's notice, and the brief notice that a
+// workspace derived from this one was created, landed or closed. The agent's
+// reply to it is drawn as any reply is.
 func Unseen(origin conversationv1.PromptOrigin) bool {
-	return origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:
+		return true
+	}
+	return false
 }
 
 // UnseenNamed is Unseen for an origin spelled as conversation.v1.PromptOrigin

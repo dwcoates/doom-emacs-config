@@ -398,6 +398,14 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		// promptorigin.Unseen: no row is drawn for it; the label only keeps
 		// any other reader from naming the user as its author.
 		return "Merge queue"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:
+		// promptorigin.Unseen, as the merge queue's notice is.
+		return "Workspace notice"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
+		return "Owner notice"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:
+		return "Agent"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED:
 		return "Workspace brief"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED:

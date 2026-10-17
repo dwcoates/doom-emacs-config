@@ -6,7 +6,15 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
-func TestOnlyAMergeQueueNoticeIsUnseen(t *testing.T) {
+// unseenOrigins are the notices the contract says no row is drawn for: the
+// daemon's word to an agent, which the user neither said nor needs to read.
+var unseenOrigins = map[conversationv1.PromptOrigin]bool{
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:       true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE:         true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE: true,
+}
+
+func TestOnlyTheAgentNoticesAreUnseen(t *testing.T) {
 	for value := range conversationv1.PromptOrigin_name {
 		origin := conversationv1.PromptOrigin(value)
 		t.Run(origin.String(), func(t *testing.T) {
@@ -14,7 +22,7 @@ func TestOnlyAMergeQueueNoticeIsUnseen(t *testing.T) {
 			got := Unseen(origin)
 
 			// Assert.
-			if want := origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE; got != want {
+			if want := unseenOrigins[origin]; got != want {
 				t.Fatalf("Unseen(%s) = %v, want %v", origin, got, want)
 			}
 		})
