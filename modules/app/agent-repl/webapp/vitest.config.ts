@@ -28,7 +28,7 @@ export default defineConfig({
     // isolated against ~5.5s here, with the tests themselves unchanged.
     // Reusing one environment per worker is only safe because no file leaves
     // global state behind for the next one — test/setup-shared-worker.ts hands back the real
-    // clock and empties the page before every test, and each file uninstalls
+    // clock after every test and empties the page before it, and each file uninstalls
     // what it installs. `npx vitest run --no-isolate --sequence.shuffle
     // --sequence.seed=<n>` is how that is checked; it must stay green for any
     // seed, so a new order dependency is a bug in the file that leaks, never a

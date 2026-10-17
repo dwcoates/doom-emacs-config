@@ -17,7 +17,7 @@
  * drives this one".
  */
 import { createControl, type Control } from "../../src/control.js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
 import { COMPOSER_READY_BUDGET_MS, press, send } from "./drive";
@@ -71,6 +71,9 @@ function stubPage(options: { text?: string; disabled?: boolean } = {}): StubPage
 
 beforeEach(() => {
   vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("send", () => {
