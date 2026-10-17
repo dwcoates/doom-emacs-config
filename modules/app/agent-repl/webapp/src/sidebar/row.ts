@@ -66,6 +66,7 @@ import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
 import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
+import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
 import { clampBeside } from "../topbar/clamp.js";
@@ -263,7 +264,10 @@ export function drawRosterRow(
   // 2026-10-13): a recently-merged row and a hidden row show no dot or glyph.
   // Both bands' names are in the repository names' grey; a hidden row's is
   // struck through only at a cold gate.
+  // AN OPEN ROW LEADS WITH ITS EMACS TAB NUMBER (owner request, 2026-10-17),
+  // filled in by the roster drawer once the push is drawn (`tab-numbers.ts`).
   if (place === "grouping") {
+    line.appendChild(drawTabNumberSlot());
     line.appendChild(drawStatusMark(status.case, `${path}.status`, markers));
   }
 

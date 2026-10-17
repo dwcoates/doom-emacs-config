@@ -1821,3 +1821,94 @@ describe("the recently-merged band: rows out of view are not drawn", () => {
   });
 });
 
+
+describe("the open rows' tab numbers", () => {
+  /** The number drawn on workspace ID's row, or null when its slot is empty. */
+  const numberOf = (drawn: HTMLElement, id: string): string | null =>
+    drawn.querySelector(`[data-roster-row='${id}'] > .row > .sb-num`)?.getAttribute("data-tab-number") ?? null;
+
+  it("numbers each open row by its drawn tab, across repositories", () => {
+    // Arrange
+    const u = roster({
+      repos: [repoSection({ id: "a", rows: [row({ id: "x" })] }), repoSection({ id: "b", rows: [row({ id: "y" })] })],
+      tabs: [{ id: "y" }, { id: "x" }],
+    });
+
+    // Act
+    const drawn = createRosterDrawer(sidebarContext()).draw(u);
+
+    // Assert
+    expect([numberOf(drawn, "x"), numberOf(drawn, "y")]).toEqual(["2", "1"]);
+  });
+
+  it("numbers a child row by its own tab", () => {
+    // Arrange
+    const u = roster({
+      repos: [repoSection({ id: "a", rows: [row({ id: "p", children: [row({ id: "c" })] })] })],
+      tabs: [{ id: "c" }, { id: "p" }],
+    });
+
+    // Act
+    const drawn = createRosterDrawer(sidebarContext()).draw(u);
+
+    // Assert
+    expect([numberOf(drawn, "p"), numberOf(drawn, "c")]).toEqual(["2", "1"]);
+  });
+
+  it("renumbers a kept section's rows when a tab elsewhere shifts them", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const repos = [repoSection({ id: "a", rows: [row({ id: "x" })] }), repoSection({ id: "b", rows: [row({ id: "y" })] })];
+    const first = drawer.draw(roster({ repos, tabs: [{ id: "y" }, { id: "x" }] }));
+    const kept = first.querySelector("[data-roster-row='x']");
+
+    // Act
+    const second = drawer.draw(roster({ repos, tabs: [{ id: "y", drawn: "withheldHidden" }, { id: "x" }] }));
+
+    // Assert
+    expect([second.querySelector("[data-roster-row='x']") === kept, numberOf(second, "x")]).toEqual([true, "1"]);
+  });
+
+  it("leaves the slot of a row with no drawn tab empty", () => {
+    // Arrange
+    const u = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })], tabs: [] });
+
+    // Act
+    const drawn = createRosterDrawer(sidebarContext()).draw(u);
+
+    // Assert
+    expect([numberOf(drawn, "x"), drawn.querySelector("[data-roster-row='x'] .sb-num")?.textContent]).toEqual([null, ""]);
+  });
+
+  it("refuses a roster with no tab bar as a malformed view", () => {
+    // Arrange
+    const u = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })] });
+    u.tabBar = undefined;
+
+    // Act
+    const draw = (): unknown => createRosterDrawer(sidebarContext()).draw(u);
+
+    // Assert
+    expect(draw).toThrow(/WorkspaceRoster\.tab_bar/);
+  });
+});
+
+describe("the tab number's stylesheet", () => {
+  it.each([
+    ["color", "rgb(255, 255, 255)"],
+    ["text-align", "right"],
+    ["width", "var(--tab-number-w)"],
+  ])("draws the number with %s %s", (property, want) => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })], tabs: [{ id: "x" }] }),
+      sidebarContext(),
+    );
+
+    // Act
+    const value = inRail(drawn, (rail) => cascadedValue(rail.querySelector(".sb-num")!, property));
+
+    // Assert
+    expect(value).toBe(want);
+  });
+});

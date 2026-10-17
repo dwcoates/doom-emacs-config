@@ -69,6 +69,7 @@ import {
   type RowPlace,
 } from "./row.js";
 import { countNoun } from "../count-noun.js";
+import { paintTabNumbers, tabNumbers } from "./tab-numbers.js";
 
 /**
  * The whole roster, drawn through RAIL's one roster drawer (`createRosterDrawer`):
@@ -232,6 +233,9 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         discarded,
       );
       placeChildren(open.drawn.body, [...repos.values()].map((section) => section.drawn.element));
+      // EVERY PUSH RENUMBERS EVERY OPEN ROW, kept sections too: a tab opened
+      // anywhere shifts the numbers of rows whose own wire did not change.
+      paintTabNumbers(open.drawn.body, tabNumbers(requireMessage(u.tabBar, `${path}.tab_bar`), `${path}.tab_bar`));
 
       hidden = keepOrDraw(
         hidden,

@@ -2476,3 +2476,26 @@ describe("drawnRowEntries", () => {
     expect([body.includes("drawnRowEntries("), body.includes("expandVisibleRows(")]).toEqual([true, false]);
   });
 });
+
+describe("the tab number slot", () => {
+  it("leads an open row's line with an empty number slot before the status mark", () => {
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+
+    // Assert
+    const line = drawn.querySelector(":scope > .row")!;
+    expect([line.children[0].className, line.children[0].textContent, line.children[1].classList.contains("st")]).toEqual([
+      "sb-num",
+      "",
+      true,
+    ]);
+  });
+
+  it.each<RowPlace>(["merged", "hidden"])("draws no number slot on a %s band row", (place) => {
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: place === "merged" }), sidebarContext(), "R", place);
+
+    // Assert
+    expect(drawn.querySelector(".sb-num")).toBeNull();
+  });
+});

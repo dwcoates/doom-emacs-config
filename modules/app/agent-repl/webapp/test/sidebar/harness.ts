@@ -366,6 +366,8 @@ export function roster(init: {
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
   current?: string;
+  /** The Emacs tab bar, first tab first; unless said, no tabs. */
+  tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" | "withheldHidden" }>;
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
@@ -374,6 +376,12 @@ export function roster(init: {
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
+    tabBar: {
+      tabs: (init.tabs ?? []).map((tab) => ({
+        workspace: { id: tab.id, dir: `/w/${tab.id}` },
+        visibility: { case: tab.drawn ?? "drawn", value: {} },
+      })),
+    },
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
