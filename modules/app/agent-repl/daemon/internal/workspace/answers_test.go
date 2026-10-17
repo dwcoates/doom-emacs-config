@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/sourcescan"
 )
 
 // permissionAnswer composes one permission answer around a built decision.
@@ -1194,5 +1195,28 @@ func TestAnswerColdGateWhoseFateFailsLeavesTheGateRowStanding(t *testing.T) {
 	// Assert.
 	if len(f.feed.retired) != 0 {
 		t.Fatalf("retired rows = %v, want the gate row left for the gate standing again", f.feed.retired)
+	}
+}
+
+// TestARefusedColdGateStandsAgainInOneHome fails when a verb stands a spent
+// gate again by hand instead of through reraiseRefusedColdGate (a refused
+// answer) or coldGateSettled (a failed re-open).
+func TestARefusedColdGateStandsAgainInOneHome(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+
+	// Act
+	sites := 0
+	for _, file := range files {
+		n := strings.Count(string(file.Source), "v.deps.Cards.ReraiseColdGate(")
+		if n > 0 && file.Name != "answers.go" {
+			t.Fatalf("%s stands a cold gate again by hand", file.Name)
+		}
+		sites += n
+	}
+
+	// Assert
+	if sites != 2 {
+		t.Fatalf("ReraiseColdGate is called at %d sites, want reraiseRefusedColdGate and coldGateSettled", sites)
 	}
 }

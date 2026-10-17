@@ -226,14 +226,7 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	if err := v.deps.Queue.ColdGateAnswered(ctx, ws, coldGateFate(answer)); err != nil {
 		// The queue recorded the failure at ERROR as its owner; what is the
 		// verb's own is that the gate stands again, unspent.
-		stood := v.deps.Cards.ReraiseColdGate(ws, served.VendorSessionID)
-		log.Info(opColdGate, "the prompts held at the cold gate could not be settled; the answer is refused", dlog.Context{
-			"choice": choice, "gate_stands_again": stood, "cause": err.Error(),
-		})
-		if !stood {
-			log.Error(opColdGate, "the refused answer's gate could not stand again: its cold facts are gone",
-				dlog.Context{"vendor_session_id": served.VendorSessionID})
-		}
+		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the prompts held at the cold gate could not be settled", err)
 		return fmt.Errorf("settle the prompts held at the cold gate of %q: %w", ws, err)
 	}
 	v.deps.Feed.RetireRow(ws, rootFeed(), coldGateRowID(ws, served.VendorSessionID))
@@ -258,6 +251,20 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		v.coldGateSettled(runCtx, log, ws, served.VendorSessionID, choice, err)
 	})
 	return nil
+}
+
+// reraiseRefusedColdGate stands a spent gate again when its answer is
+// refused before the re-open starts. The step that failed recorded its own
+// failure at ERROR; WHY names it for this record.
+func (v *verbs) reraiseRefusedColdGate(log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice, why string, cause error) {
+	stood := v.deps.Cards.ReraiseColdGate(ws, vendorSessionID)
+	log.Info(opColdGate, why+"; the answer is refused", dlog.Context{
+		"choice": choice, "gate_stands_again": stood, "cause": cause.Error(),
+	})
+	if !stood {
+		log.Error(opColdGate, "the refused answer's gate could not stand again: its cold facts are gone",
+			dlog.Context{"vendor_session_id": vendorSessionID})
+	}
 }
 
 // coldGateSettled is an answered gate's outcome, once its re-open settles.
