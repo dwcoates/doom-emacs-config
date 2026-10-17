@@ -13,7 +13,7 @@ import (
 // asyncRequest asks for the harness workspace's async merge of asyncBranch as
 // RUN says, as the user.
 func asyncRequest(h *harness, run *DetachedRun) error {
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: run})
+	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: run}))
 }
 
 func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
@@ -96,7 +96,7 @@ func TestAnAsyncRequestFromAWorkspaceTheDaemonNeverCreatedIsAccepted(t *testing.
 	h.inFlight = "turn-asking"
 
 	// Act: an agent's request, still waiting on the turn that asked.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace,
 		Detached: &DetachedRun{Maker: theWorkspace, Name: "n"}})
 
 	// Assert.
@@ -118,7 +118,7 @@ func TestAnAsyncRequestRecordsItsLandingEffects(t *testing.T) {
 	h.inFlight = "turn-asking"
 
 	// Act: an agent's request, still waiting on the turn that asked.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace,
 		Detached: &DetachedRun{Maker: theWorkspace, Name: "n", Pick: "rebase it", CloseOnLanding: otherWorkspace, CleanupWorktree: true}})
 
 	// Assert.
@@ -175,5 +175,37 @@ func TestACleanupRecordsNothingWhenNoWorktreeHasTheBranch(t *testing.T) {
 	// Assert.
 	if err != nil || got != "" {
 		t.Fatalf("cleanupDirFor = (%q, %v), want none", got, err)
+	}
+}
+
+func TestEnqueueAnswersWhatTheRequestReserved(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+		want Enqueued
+	}{
+		{name: "an async request reserves its merge workspace's branch",
+			req:  Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}},
+			want: Enqueued{MergeBranch: "agent/reconnect-fix"}},
+		{name: "an in-place request reserves nothing",
+			req:  Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: RequestedByUser},
+			want: Enqueued{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			got, err := h.o.Enqueue(context.Background(), tt.req)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Enqueue = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

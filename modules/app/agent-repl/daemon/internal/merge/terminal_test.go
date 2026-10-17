@@ -1864,7 +1864,7 @@ func landAsync(t *testing.T, h *harness, run *DetachedRun) {
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
-	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: run}); err != nil {
+	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: run}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	if err := h.admit(context.Background()); err != nil {
@@ -1901,7 +1901,7 @@ func TestAnAsyncOneShotWhoseWorkspaceClosedMeanwhileClosesNothingMore(t *testing
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
-	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
+	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
 		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CloseOnLanding: otherWorkspace}}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}

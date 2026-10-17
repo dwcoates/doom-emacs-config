@@ -33,7 +33,7 @@ func pickHarness(t *testing.T) *harness {
 // fix", as the user, which forks the merge workspace and begins the pick.
 func requestPick(t *testing.T, h *harness) {
 	t.Helper()
-	err := h.o.Enqueue(context.Background(), Request{
+	_, err := h.o.Enqueue(context.Background(), Request{
 		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
 		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Pick: "the reconnect fix"},
 	})
@@ -405,7 +405,7 @@ func TestAnAsyncMergeWithAnInstructionWaitsInLineUntilItHeadsTheQueue(t *testing
 	h := pickHarness(t)
 
 	// Act: the hand-off, with no admission yet.
-	err := h.o.Enqueue(context.Background(), Request{
+	_, err := h.o.Enqueue(context.Background(), Request{
 		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
 		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Pick: "the reconnect fix"},
 	})

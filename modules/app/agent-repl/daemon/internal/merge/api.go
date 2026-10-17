@@ -102,8 +102,8 @@ type Orchestrator interface {
 	// The request is DURABLE from here, and it is put in line -- and reported
 	// to any client -- only once the turn that asked for it has ended (a
 	// merge the USER asked for over an rpc has no requesting turn and is put
-	// in line at once).
-	Enqueue(ctx context.Context, req Request) error
+	// in line at once). It answers what the request reserved.
+	Enqueue(ctx context.Context, req Request) (Enqueued, error)
 	// Pause stops the queue from starting new merges; an in-flight merge runs
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
@@ -230,6 +230,11 @@ type Request struct {
 	// By says who asked, which decides whether the admission may displace the
 	// requester's turn in flight (see Requester).
 	By Requester
+	// Asker is the workspace whose agent asked, set exactly when By is
+	// RequestedByAgent (agentrepl.v1.WorkspaceRequesterWorkspace). An
+	// in-place merge lands only on the ask of the workspace itself (unless
+	// its owner lands it), of its owner, or of the user (checkAsker).
+	Asker ids.WorkspaceID
 	// Detached runs a named branch's merge ASYNC, in a hidden MERGE WORKSPACE
 	// forked from the requester instead of in the requester
 	// (agentrepl.v1.MergeWorkspaceAsync); nil runs it SYNC, in place. It is
@@ -242,6 +247,15 @@ type Request struct {
 	// from. It is legal on an in-place own-branch source that does not keep
 	// the requester open, alone.
 	OneShot bool
+}
+
+// Enqueued is what a recorded request reserved.
+type Enqueued struct {
+	// MergeBranch is the branch an ASYNC request's merge workspace will be
+	// created under, reserved from now until it exists
+	// (agentrepl.v1.CreateWorkspaceAsyncMergeAccepted.merge_workspace_branch).
+	// Empty for an in-place merge.
+	MergeBranch string
 }
 
 // DetachedRun is what an async request says about its merge workspace.
@@ -440,12 +454,13 @@ func (k DetachedOutcomeKind) String() string {
 type Requester int
 
 const (
-	// RequestedByAgent is a merge an agent's turn asked for through the
-	// command-file ingress. It is the zero value on purpose: a merge whose
+	// RequestedByAgent is a merge an agent's turn asked for over the agent
+	// API (agentrepl.v1.WorkspaceRequesterWorkspace). It is the zero value on purpose: a merge whose
 	// requester is not known (one the boot recovery put back) never
 	// displaces anything either.
 	RequestedByAgent Requester = iota
-	// RequestedByUser is a merge the user asked for over an rpc.
+	// RequestedByUser is a merge the user asked for
+	// (agentrepl.v1.WorkspaceRequesterUser).
 	RequestedByUser
 )
 

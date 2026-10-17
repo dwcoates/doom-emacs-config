@@ -2751,7 +2751,7 @@ func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
 // test if it is refused.
 func enqueue(t *testing.T, h *harness) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
+	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 }
@@ -2949,7 +2949,7 @@ func (h *harness) registerOther(ws ids.WorkspaceID, name, branch string) string 
 // request records the harness workspace's merge of one source, as asked by.
 func (h *harness) request(t *testing.T, source wsm.MergeSource, by Requester) error {
 	t.Helper()
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by})
+	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by, Asker: askerFor(by)}))
 }
 
 // requestOneShot asks for the harness workspace's one-shot merge, as an agent.
@@ -2959,7 +2959,7 @@ func (h *harness) requestOneShot(t *testing.T, source wsm.MergeSource, detached 
 	if detached {
 		run = &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}
 	}
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Detached: run, OneShot: true})
+	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Asker: theWorkspace, Detached: run, OneShot: true}))
 }
 
 // publishes answers how many times the roster's durable half was republished.
@@ -3113,6 +3113,19 @@ func (f *fakeQueueEvents) kinds() []QueueChangeKind {
 		out = append(out, change.Kind)
 	}
 	return out
+}
+
+// enqueueErr drops what a recorded request reserved, for the helpers that
+// assert only on whether Enqueue refused.
+func enqueueErr(_ Enqueued, err error) error { return err }
+
+// askerFor is the asking workspace a test request names for BY: the harness
+// workspace when its agent asked, none when the user did.
+func askerFor(by Requester) ids.WorkspaceID {
+	if by == RequestedByAgent {
+		return theWorkspace
+	}
+	return ""
 }
 
 // RequireNoOpenChildren answers openChildrenErr, recording what it was asked.

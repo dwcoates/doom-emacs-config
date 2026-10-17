@@ -1358,13 +1358,13 @@ func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 	m.closed = append(m.closed, ws)
 }
 
-func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
+func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
 	ws := req.Workspace
 	if m.enqueueErr != nil {
-		return m.enqueueErr
+		return merge.Enqueued{}, m.enqueueErr
 	}
 	m.enqueued = append(m.enqueued, ws)
-	return nil
+	return merge.Enqueued{}, nil
 }
 
 // fakeRollout is a rollout.Controller.

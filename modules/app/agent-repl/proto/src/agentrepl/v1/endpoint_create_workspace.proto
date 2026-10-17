@@ -53,7 +53,10 @@ message CreateWorkspaceRequest {
   }
 
   // Who asked. Notices about the new workspace and an async merge's report go
-  // to a requesting workspace, never to the user. REQUIRED.
+  // to a requesting workspace, never to the user. REQUIRED. An async merge's
+  // requester is a workspace: the merge waits in that workspace's queue row
+  // until its turn ends, and its report goes to that workspace, so a user
+  // requester beside `async_merge` is refused as invalid.
   WorkspaceRequester requester = 11;
 
   // The conversation the new workspace starts with. REQUIRED: a fresh one, or
@@ -449,6 +452,17 @@ message CreateWorkspaceError {
     // The merge carries a version increment but does not land on agent-repl's
     // master. Nothing was recorded.
     MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 35;
+    // The requester's merge queue row is taken: an async merge it asked for
+    // earlier in the same turn, or a merge of its own branch, is still
+    // waiting. A requester holds one queue row, and an async merge moves to
+    // its own merge workspace's row only when the requesting turn ends.
+    // Nothing was recorded; the caller asks again in a later turn.
+    CreateWorkspaceAsyncMergeRequesterQueued async_merge_requester_queued = 36;
+    // The requester's own merge is running. Nothing was recorded.
+    CreateWorkspaceAsyncMergeRequesterMerging async_merge_requester_merging = 37;
+    // The requester's session was deleted, so the merge's report could never
+    // reach it. Nothing was recorded.
+    CreateWorkspaceAsyncMergeRequesterSessionDeleted async_merge_requester_session_deleted = 38;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -544,6 +558,9 @@ message CreateWorkspaceAsyncMergeNameTaken {
 }
 // The async merge's close-after workspace cannot be closed by this merge.
 message CreateWorkspaceAsyncMergeUnknownCloseAfter {}
+message CreateWorkspaceAsyncMergeRequesterQueued {}
+message CreateWorkspaceAsyncMergeRequesterMerging {}
+message CreateWorkspaceAsyncMergeRequesterSessionDeleted {}
 // An op id was set beside an async merge.
 message CreateWorkspaceOpIdWithAsyncMerge {}
 message CreateWorkspaceWorktreeCreationFailed {

@@ -299,7 +299,7 @@ func TestClosingAWorkspaceWithNoQueuedMergeAbandonsNothing(t *testing.T) {
 func queueAnother(t *testing.T, h *harness, ws wsm.WorkspaceID, name string) {
 	t.Helper()
 	h.registerOther(ws, name, "b-"+name)
-	if err := h.o.Enqueue(context.Background(), Request{Workspace: ws, Source: ownBranch, By: RequestedByUser}); err != nil {
+	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: ws, Source: ownBranch, By: RequestedByUser}); err != nil {
 		t.Fatalf("Enqueue %s: %v", ws, err)
 	}
 }

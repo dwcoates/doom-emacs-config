@@ -455,7 +455,7 @@ func TestAnAsyncMergeFromTheMainCheckoutOntoAgentReplsMasterNeedsAnIncrement(t *
 			source.Version = tt.version
 
 			// Act
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent,
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Asker: theWorkspace,
 				Detached: &DetachedRun{Maker: theWorkspace, Name: "n"}})
 
 			// Assert
@@ -466,11 +466,6 @@ func TestAnAsyncMergeFromTheMainCheckoutOntoAgentReplsMasterNeedsAnIncrement(t *
 		})
 	}
 }
-
-
-
-
-
 
 func TestAnAsyncRequestLandsWhereItsRequestNamed(t *testing.T) {
 	tests := []struct {

@@ -472,7 +472,7 @@ func TestAFailedWriteReportsNothing(t *testing.T) {
 	h.db.queueErr = errors.New("the queue write failed")
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
 	// Assert.
 	if err == nil {

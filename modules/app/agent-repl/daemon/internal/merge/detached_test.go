@@ -165,7 +165,7 @@ func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, reque
 // async, as BY asks, under the name "reconnect-fix".
 func requestDetached(t *testing.T, h *harness, by Requester) error {
 	t.Helper()
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: by, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}})
+	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: by, Asker: askerFor(by), Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}}))
 }
 
 // entryOf answers ws's queue entry, false when it has none.
@@ -234,7 +234,7 @@ func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *test
 	}{
 		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}},
 		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}},
-		{name: "no name", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, run: &DetachedRun{Maker: theWorkspace, }},
+		{name: "no name", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, run: &DetachedRun{Maker: theWorkspace}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *test
 			h := newHarness(t)
 
 			// Act
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: tt.source, By: RequestedByUser, Detached: tt.run})
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: tt.source, By: RequestedByUser, Detached: tt.run})
 
 			// Assert
 			if err == nil {
@@ -384,8 +384,8 @@ func TestAnAsyncRequestThatCompactsAfterRecordsTheAskOnItsEntry(t *testing.T) {
 	h.mu.Unlock()
 
 	// Act: an agent's request, still waiting on the turn that asked.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-		By: RequestedByAgent, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CompactAfter: true}})
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
+		By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CompactAfter: true}})
 
 	// Assert
 	if err != nil {
@@ -411,7 +411,7 @@ func TestAnAsyncRequestsHandOffForksWithItsCompactAfterAsk(t *testing.T) {
 			h := newHarness(t)
 
 			// Act: the user's ask is put in line at once, which hands it off.
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
 				By: RequestedByUser, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CompactAfter: tt.compactAfter}})
 
 			// Assert: the fork's origin names the requester, the request, and
@@ -1100,7 +1100,7 @@ func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) 
 			tt.arrange(h)
 
 			// Act: the user's ask is put in line at once, which hands it off.
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
 				By: RequestedByUser, Detached: detachedRunFor(tt.intoMaker, tt.actions)})
 
 			// Assert
@@ -1150,8 +1150,8 @@ func TestAnAsyncRequestRecordsItsMergeActionsOnItsEntry(t *testing.T) {
 	actions := wsm.MergeActions{Before: []string{"run the linters"}}
 
 	// Act: an agent's request, still waiting on the turn that asked.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-		By: RequestedByAgent, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Actions: actions}})
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
+		By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Actions: actions}})
 
 	// Assert
 	if err != nil {
@@ -1196,4 +1196,3 @@ func TestAHandOffWhoseLandingCannotBeDecidedDropsTheRequestAndTellsTheRequester(
 		t.Fatalf("handbacks = %+v, want one abandoned handback", sent)
 	}
 }
-

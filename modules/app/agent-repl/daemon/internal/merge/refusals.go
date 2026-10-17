@@ -89,6 +89,15 @@ const (
 	// reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
 	// field names the branch the name resolves to.
 	ArmNameTaken = "async_merge_name_taken"
+	// ArmOwnerLands refuses a workspace's own ask to land a child whose
+	// context was not forked from its owner: only the owner, or the user,
+	// lands it (MergeWorkspaceError.owner_lands). Its `owner` field names the
+	// owner.
+	ArmOwnerLands = "owner_lands"
+	// ArmRequesterMayNotLand refuses an ask from a workspace that is neither
+	// the workspace being landed nor its owner
+	// (MergeWorkspaceError.requester_may_not_land).
+	ArmRequesterMayNotLand = "requester_may_not_land"
 	// ArmNotMergeTab refuses a merge-tab interrupt whose row is no live agentic
 	// merge tab (InterruptError.not_merge_tab).
 	ArmNotMergeTab = "not_merge_tab"
