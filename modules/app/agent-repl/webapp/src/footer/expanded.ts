@@ -881,10 +881,7 @@ export function drawFooterCronRowNextFire(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {
-  const fireAtMs = msOf(u.fireAtMs, `${path}.fire_at_ms`);
-  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
-    span.textContent = remainingLabel(fireAtMs - nowMs);
-  });
+  return countdownClock(u.fireAtMs, deps, `${path}.fire_at_ms`);
 }
 
 // ---- shared row parts -----------------------------------------------------
@@ -1098,6 +1095,14 @@ function marker(name: string): HTMLElement {
 /** A ticking elapsed clock from an instant on the wire. */
 function runtimeClock(startedAtMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
   return liveElapsedClock(deps.ctx.ticker, "footer-row-clock", msOf(startedAtMs, path));
+}
+
+/** A ticking countdown to an instant on the wire. */
+export function countdownClock(atMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
+  const targetMs = msOf(atMs, path);
+  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
+    span.textContent = remainingLabel(targetMs - nowMs);
+  });
 }
 
 /** The jump affordance's caret. */

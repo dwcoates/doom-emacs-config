@@ -12,6 +12,7 @@ import type { FooterActivity } from "../../src/footer/activity.js";
 import {
   EXPANDED_FOOTER_MAX_ROWS,
   FOOTER_PANELS,
+  countdownClock,
   createJumpNotices,
   drawFooterExpanded,
   type ExpandedDeps,
@@ -1058,6 +1059,20 @@ describe("the crons panel", () => {
   it("draws its empty line when nothing is scheduled", () => {
     const { panel } = drawPanel("crons");
     expect(panel.querySelector("[data-empty]")?.textContent).toBe("nothing scheduled");
+  });
+});
+
+describe("countdownClock", () => {
+  it("ticks the remaining duration to its instant", () => {
+    const h = harness();
+    const deps = { ctx: h.ctx } as ExpandedDeps;
+    expect(countdownClock(BigInt(NOW + 65_000), deps, "x").textContent).toBe("1m 5s");
+  });
+
+  it("refuses an instant past the safe integer range", () => {
+    const h = harness();
+    const deps = { ctx: h.ctx } as ExpandedDeps;
+    expect(() => countdownClock(BigInt(Number.MAX_SAFE_INTEGER) + 1n, deps, "x")).toThrow(MalformedView);
   });
 });
 
