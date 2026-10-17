@@ -84,3 +84,32 @@ do them all yourselves").
     a hidden workspace.
 - Webapp: `src/sidebar/cache-lapse.ts` and the shared `src/heat.ts` gradient.
 - Emacs: the strict roster decoder accepts `RosterRowWhenHidden.cache`.
+
+## A closed workspace gets one last round, then the same lapse
+
+Owner request, 2026-10-17: "closed workspaces should only keepalive in shim for
+just one more keep alive round. after that, they should compaction gate just
+like normal".
+
+- Closing a workspace still leaves its session up, but no longer keeps its
+  cache warm forever.
+  - The daemon asks the shim for `shim.v1.SetKeepaliveLastRound`
+    (`SetKeepaliveRequest.last_round = 3`).
+  - The shim's cadence sends the ONE beat it already had scheduled from the
+    conversation's last request, then holds exactly as `SetKeepaliveHold`
+    does, stating the projected lapse (`conversation.v1.SessionCacheLapse`).
+  - A cache no beat can keep warm (already lapsed, or a tier no longer than
+    the interval) is held at once.
+  - A spent round is never granted again: only `SetKeepaliveRun` restarts the
+    keep-alives.
+- From the hold on, the daemon treats the closed workspace as it treats a
+  hidden one (`wsm.Workspace.LetsCacheLapse`).
+  - The projection is recorded on its row, and the session is stood down when
+    the lapse comes, so reopening it afterwards meets the cold gate.
+  - Reopening it before the lapse runs the cadence again, and clears the
+    recorded lapse in the same statement (`wsm.Reopen`).
+  - A hidden workspace that is closed stays held: the hide wins, and grants no
+    round.
+- Every close and reopen reaches the keeper through the one state client every
+  close path writes through (`cachelapse.ObserveClosures`), so no close path
+  can skip the round.

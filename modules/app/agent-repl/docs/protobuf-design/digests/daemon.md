@@ -349,7 +349,7 @@ replaces the old request-id refusal.
 **The verb triad.** Emacs commands are THIN WRAPPERS — send the request, await the daemon's
 ack, tear the tab down; every piece of real machinery is the daemon's.
 - `CloseWorkspace` — the USER's close, a VIEW act: fast ack, tab gone, the daemon↔shim
-  session UNTOUCHED (keepalives continue; the workspace is merely unviewed). REQUIRES QUIET:
+  session stays up (one last keep-alive round, then its cache lapses and the session is stood down; the workspace is merely unviewed). REQUIRES QUIET:
   a busy workspace refuses, and the refusal manifests in the FOOTER — status `closing`,
   sub-status `close blocked`, and the daemon's composed plain-English reasons as the activity
   line. The response carries only the `blocked` cause arm; the footer owns the reasons.
