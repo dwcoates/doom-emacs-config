@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
@@ -1290,4 +1291,31 @@ func TestTheRosterRunsTheRepositoryHarnesses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The coverage run's merge unit writes the unit report where the baseline
+// reads it (cover.VitestCoverage).
+func TestTheVitestMergeUnitWritesWhereTheBaselineReads(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir(), Coverage: true}
+	s := roster.Suite{Name: "webapp"}
+
+	// Act
+	u, err := vitestUnitsForFiles(l, s, dir, []string{"test/a.test.ts"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "--coverage.reportsDirectory=" + filepath.Dir(cover.VitestCoverage(l.Work, "webapp"))
+	for _, a := range u.Atomic {
+		if a.ID == "webapp:coverage" {
+			if !slices.Contains(a.Argv, want) {
+				t.Fatalf("merge argv %v lacks %s", a.Argv, want)
+			}
+			return
+		}
+	}
+	t.Fatal("no webapp:coverage unit")
 }

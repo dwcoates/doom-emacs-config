@@ -193,7 +193,7 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	if l.Coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
 			"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",
-			"--coverage.reportsDirectory=" + filepath.Join(work, "coverage"),
+			"--coverage.reportsDirectory=" + filepath.Dir(cover.VitestCoverage(l.Work, s.Name)),
 		})
 		merge.Deps = []string{s.Name}
 		atomic = append(atomic, merge)
