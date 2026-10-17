@@ -25,9 +25,10 @@ type SelfCloses struct {
 	loop  *noticeloop.Loop[ids.WorkspaceID]
 }
 
-// NewSelfCloses builds the observer over VERBS.
-func NewSelfCloses(verbs Verbs, log dlog.Logger) *SelfCloses {
-	s := &SelfCloses{carry: verbs.CarryOutSelfClose, log: log}
+// NewSelfCloses builds the observer over CARRY, the verbs'
+// CarryOutSelfClose.
+func NewSelfCloses(carry func(ctx context.Context, ws ids.WorkspaceID) error, log dlog.Logger) *SelfCloses {
+	s := &SelfCloses{carry: carry, log: log}
 	s.loop = noticeloop.New(func(ws ids.WorkspaceID) {
 		log.Info(opSelfClose, "a turn ended after the self-close carrier stopped, as the daemon stood down; the next daemon carries the close out", dlog.Context{"workspace": string(ws)})
 	})

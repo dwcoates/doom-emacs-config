@@ -180,6 +180,16 @@ type QueueObserver interface {
 	QueueChanged(change QueueChange)
 }
 
+// QueueObservers tells every observer each change, in order.
+type QueueObservers []QueueObserver
+
+// QueueChanged implements QueueObserver.
+func (o QueueObservers) QueueChanged(change QueueChange) {
+	for _, observer := range o {
+		observer.QueueChanged(change)
+	}
+}
+
 // queueEvents serializes every reported write of every queue with its reads,
 // so the reports reach the observer in the order the writes were made, and a
 // merge leaving the queue judges whether it emptied the line against exactly

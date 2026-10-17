@@ -769,3 +769,24 @@ func TestUnsubscribeRecordsAStoreFailure(t *testing.T) {
 		t.Fatalf("no error record: %+v", h.logs.Records())
 	}
 }
+
+// recordingObserver records the kinds it is told.
+type recordingObserver struct{ kinds []QueueChangeKind }
+
+func (r *recordingObserver) QueueChanged(change QueueChange) { r.kinds = append(r.kinds, change.Kind) }
+
+func TestQueueObserversTellEveryObserverEachChange(t *testing.T) {
+	// Arrange
+	a, b := &recordingObserver{}, &recordingObserver{}
+	observers := QueueObservers{a, b}
+
+	// Act
+	observers.QueueChanged(QueueChange{Kind: QueueChangeLanded})
+	observers.QueueChanged(QueueChange{Kind: QueueChangePaused})
+
+	// Assert
+	want := []QueueChangeKind{QueueChangeLanded, QueueChangePaused}
+	if !reflect.DeepEqual(a.kinds, want) || !reflect.DeepEqual(b.kinds, want) {
+		t.Fatalf("told %v and %v, want both %v", a.kinds, b.kinds, want)
+	}
+}

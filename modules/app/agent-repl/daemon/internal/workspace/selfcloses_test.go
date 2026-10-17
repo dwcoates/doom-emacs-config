@@ -191,7 +191,7 @@ func TestSelfClosesCarriesOutEachTurnEnd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			var carried []ids.WorkspaceID
-			s := NewSelfCloses(stubCarrier{carried: &carried}, dlog.NewTestLogger())
+			s := NewSelfCloses(func(_ context.Context, ws ids.WorkspaceID) error { carried = append(carried, ws); return nil }, dlog.NewTestLogger())
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
@@ -210,7 +210,7 @@ func TestSelfClosesCarriesOutEachTurnEnd(t *testing.T) {
 func TestSelfClosesRecordsACloseItCannotCarryOut(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	s := NewSelfCloses(stubCarrier{err: errors.New("db gone")}, log)
+	s := NewSelfCloses(func(context.Context, ids.WorkspaceID) error { return errors.New("db gone") }, log)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -223,19 +223,4 @@ func TestSelfClosesRecordsACloseItCannotCarryOut(t *testing.T) {
 		Message: "could not carry out the close a workspace asked of itself at its turn's end"}); !ok || record.Context["workspace"] != "w1" {
 		t.Fatalf("no error record naming the workspace: %+v", log.Records())
 	}
-}
-
-// stubCarrier is a Verbs whose self-close carrying records the workspace in
-// carried, when set, and answers err.
-type stubCarrier struct {
-	Verbs
-	carried *[]ids.WorkspaceID
-	err     error
-}
-
-func (c stubCarrier) CarryOutSelfClose(_ context.Context, ws ids.WorkspaceID) error {
-	if c.carried != nil {
-		*c.carried = append(*c.carried, ws)
-	}
-	return c.err
 }
