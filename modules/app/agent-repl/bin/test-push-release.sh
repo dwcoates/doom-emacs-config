@@ -50,17 +50,8 @@ fail() {
 # mkrepo — a fake repository with two commits on master and the pre-push hook
 # installed. FIRST and SECOND hold the commits' ids; SECOND is master's tip.
 mkrepo() {
-  local repo
-  repo="$(mktemp -d "$TMP/repo.XXXXXX")"
-  git -C "$repo" init
-  install_checked_in_hook "$repo" pre-push
-  echo one >"$repo/file"
-  (cd "$repo" && git add -A && git commit -qm one)
-  FIRST="$(git -C "$repo" rev-parse HEAD)"
-  echo two >"$repo/file"
-  (cd "$repo" && git add -A && git commit -qm two)
-  SECOND="$(git -C "$repo" rev-parse HEAD)"
-  REPO="$(cd "$repo" && pwd)"
+  two_commit_repo "$TMP" pre-push
+  REPO="$FIXTURE_REPO" FIRST="$FIXTURE_FIRST" SECOND="$FIXTURE_SECOND"
 }
 
 label() { git -C "$REPO" tag "$1" "$2"; }
