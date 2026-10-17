@@ -235,7 +235,7 @@ func TestAnEdgeThatCannotBeToldIsRecorded(t *testing.T) {
 
 func TestStatusWordsStatesTheStatus(t *testing.T) {
 	owner := &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-		Owner: &workspacev1.WorkspaceRef{Id: "ws-owner"}, OwnerLands: true}}}
+		Owner: &workspacev1.WorkspaceRef{Id: "ws-owner", Dir: "/wt/owner"}, OwnerLands: true}}}
 	closed := &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}
 	tests := []struct {
 		name   string
@@ -248,7 +248,7 @@ func TestStatusWordsStatesTheStatus(t *testing.T) {
 			s := idleStatus()
 			s.MergeTarget, s.Standing, s.Hidden = owner, closed, true
 			return s
-		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace `ws-owner` and is landed by its owner; closed, hidden."},
+		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace at `/wt/owner` and is landed by its owner; closed, hidden."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -197,13 +197,13 @@ func eventSentence(event wsm.WorkspaceEvent) string {
 // notice carries.
 func StatusWords(status *agentreplv1.WorkspaceStatus) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Its status now: `%s`, on branch `%s`, ", status.GetName(), status.GetBranch())
+	b.WriteString(fmt.Sprintf("Its status now: `%s`, on branch `%s`, ", status.GetName(), status.GetBranch()))
 	if owner := status.GetMergeTarget().GetOwner(); owner != nil {
 		lands := "lands itself"
 		if owner.GetOwnerLands() {
 			lands = "is landed by its owner"
 		}
-		fmt.Fprintf(&b, "lands into the workspace `%s` and %s; ", owner.GetOwner().GetId(), lands)
+		b.WriteString(fmt.Sprintf("lands into the workspace at `%s` and %s; ", owner.GetOwner().GetDir(), lands))
 	} else {
 		b.WriteString("lands on the primary branch; ")
 	}
