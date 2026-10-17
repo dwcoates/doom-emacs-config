@@ -59,11 +59,43 @@ test_install_checked_in_hook_refuses_an_unknown_hook() {
   fi
 }
 
+# two_commit_repo needs the fake as `git`, as every harness that calls it has.
+with_fake_git() {
+  [ -x "$TMP/bin/git" ] || { mkdir -p "$TMP/bin" && "$THIS_DIR/fake-git.sh" --install "$TMP/bin/git"; }
+  PATH="$TMP/bin:$PATH" "$@"
+}
+
+test_two_commit_repo_builds_two_commits_with_the_hook() {
+  local parent="$TMP/two-ok" head tags
+  mkdir -p "$parent"
+  with_fake_git two_commit_repo "$parent" pre-push
+  head="$(cd "$FIXTURE_REPO" && with_fake_git git rev-parse HEAD)"
+  if [ -n "$FIXTURE_FIRST" ] && [ "$FIXTURE_FIRST" != "$FIXTURE_SECOND" ] && [ "$head" = "$FIXTURE_SECOND" ] &&
+    cmp -s "$REPO_DIR/.githooks/pre-push" "$FIXTURE_REPO/.fakegit/hooks/pre-push" &&
+    [ "$(dirname "$FIXTURE_REPO")" = "$(cd "$parent" && pwd)" ]; then
+    pass "two_commit_repo builds two commits under the parent, master at the second, with the hook installed"
+  else
+    tags="first=$FIXTURE_FIRST second=$FIXTURE_SECOND head=$head repo=$FIXTURE_REPO"
+    fail "two_commit_repo builds two commits under the parent, master at the second, with the hook installed" "$tags"
+  fi
+}
+
+test_two_commit_repo_refuses_an_unknown_hook() {
+  local parent="$TMP/two-missing" rc=0 out
+  mkdir -p "$parent"
+  out="$(with_fake_git two_commit_repo "$parent" no-such-hook 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ] && grep_in "$out" -qF "no checked-in hook $REPO_DIR/.githooks/no-such-hook"; then
+    pass "two_commit_repo fails, naming a hook that is not checked in"
+  else
+    fail "two_commit_repo fails, naming a hook that is not checked in" "rc=$rc" "$out"
+  fi
+}
+
 # The call sites share the helpers: no harness unsets the live bindings or
 # installs a hook into a fake repository itself.
 test_no_harness_hand_rolls_the_fixture_setup() {
   local found
-  found="$(grep -rlE 'unset GIT_DIR|^[[:space:]]*cp .*/hooks/' --include='test-*.sh' \
+  found="$(grep -rlE 'unset GIT_DIR|^[[:space:]]*cp .*/hooks/|git commit -qm two' --include='test-*.sh' \
     "$REPO_DIR/bin" "$REPO_DIR/.githooks" "$REPO_DIR/.claude" "$REPO_DIR/modules/app/agent-repl/bin" "$REPO_DIR/modules/app/agent-repl/scripts" || true)"
   found="$(grep -v '/test-lib-fake-git-fixture\.sh$' <<<"$found" || true)"
   if [ -z "$found" ]; then pass "no harness hand-rolls the fixture setup lib-fake-git-fixture.sh provides"; else fail "these harnesses hand-roll it; source lib-fake-git-fixture.sh instead:" "$found"; fi

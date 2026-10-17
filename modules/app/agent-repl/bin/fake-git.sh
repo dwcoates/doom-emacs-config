@@ -31,6 +31,12 @@
 #                         update-ref -d REF; each is one ref transaction that
 #                         runs the reference-transaction hook as git does
 #                         (prepared, where nonzero aborts; then committed)
+#                         tag --points-at REV, rev-parse --verify --quiet REF
+#                         (the checked-out branch as refs/heads/NAME, or any
+#                         named ref)
+#   remotes:              push --atomic REMOTE SRC:DST..., which runs the
+#                         pre-push hook as git does (a nonzero exit pushes
+#                         nothing), and ls-remote REMOTE
 #
 # A LINKED WORKTREE is a directory whose .fakegit is a FILE naming the main
 # worktree ("main <path>"), as a real linked worktree's .git file names its

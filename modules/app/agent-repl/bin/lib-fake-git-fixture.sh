@@ -13,7 +13,13 @@
 # executable, as the bin/fake-git.sh repository REPO's NAME hook: the hook a
 # harness exercises is the one git runs, never a copy it wrote itself.
 #
-# test-lib-fake-git-fixture.sh fails any harness that hand-rolls either.
+# two_commit_repo PARENT HOOK makes a fake repository under PARENT with the
+# checked-in hook HOOK installed and two commits on master, and sets
+# FIXTURE_REPO (its directory as $PWD names it), FIXTURE_FIRST and
+# FIXTURE_SECOND (the commits; the second is master's tip). The fake must
+# already be the `git` on PATH.
+#
+# test-lib-fake-git-fixture.sh fails any harness that hand-rolls one of these.
 
 LIB_FAKE_GIT_FIXTURE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
@@ -31,4 +37,20 @@ install_checked_in_hook() {
     mkdir -p "$repo/.fakegit/hooks"
     cp "$src" "$repo/.fakegit/hooks/$name"
     chmod +x "$repo/.fakegit/hooks/$name"
+}
+
+# shellcheck disable=SC2034
+# SC2034: FIXTURE_* are this helper's outputs, read by the harness that calls it.
+two_commit_repo() {
+    local parent="$1" hook="$2" repo
+    repo="$(mktemp -d "$parent/repo.XXXXXX")" || return
+    git -C "$repo" init || return
+    install_checked_in_hook "$repo" "$hook" || return
+    echo one >"$repo/file"
+    (cd "$repo" && git add -A && git commit -qm one) || return
+    FIXTURE_FIRST="$(git -C "$repo" rev-parse HEAD)" || return
+    echo two >"$repo/file"
+    (cd "$repo" && git add -A && git commit -qm two) || return
+    FIXTURE_SECOND="$(git -C "$repo" rev-parse HEAD)" || return
+    FIXTURE_REPO="$(cd "$repo" && pwd)"
 }

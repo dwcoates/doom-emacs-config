@@ -118,6 +118,16 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"merge-queue-hook-harness", "background-harness"},
 		},
 		{
+			name:  "the pre-push hook selects its harness, push-release's and the background scan",
+			paths: []string{".githooks/pre-push"},
+			want:  []string{"release-tag-hook-harness", "push-release-harness", "background-harness"},
+		},
+		{
+			name:  "the pre-push hook's own test selects its harness, the background scan and testrun",
+			paths: []string{".githooks/test-pre-push.sh"},
+			want:  []string{"release-tag-hook-harness", "background-harness", "testrun"},
+		},
+		{
 			name:  "another hook selects the background scan and testrun",
 			paths: []string{".githooks/post-checkout"},
 			want:  []string{"background-harness", "testrun"},

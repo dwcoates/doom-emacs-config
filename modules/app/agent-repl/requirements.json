@@ -337,6 +337,17 @@
       ]
     },
     {
+      "id": "pre-push-hook",
+      "kind": "git_hook",
+      "why": "refuses a master push without its version label's release-<version> tag (bin/push-release.sh makes one)",
+      "profile": "dev",
+      "hook": "pre-push",
+      "source": ".githooks/pre-push",
+      "markers": [
+        "AGENT_REPL_MANAGED_HOOK: agent-repl-release-tag"
+      ]
+    },
+    {
       "id": "shellcheck",
       "kind": "program",
       "why": "lints every bin/ and scripts/ shell script in the shell suites",
