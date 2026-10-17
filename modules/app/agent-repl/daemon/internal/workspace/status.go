@@ -41,6 +41,7 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		MergeTarget: target,
 		Hidden:      record.Hidden || record.MergeHidden(),
 		OneShot:     record.OneShot,
+		Repository:  &workspacev1.RepositoryRef{Id: string(record.Repo)},
 	}
 	if record.Awaiting != nil {
 		out.Awaiting = &workspacev1.WorkspaceRef{Id: string(*record.Awaiting)}

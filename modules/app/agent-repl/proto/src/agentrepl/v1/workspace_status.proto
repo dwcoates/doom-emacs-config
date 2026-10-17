@@ -39,6 +39,10 @@ message WorkspaceStatus {
   // The workspace this one awaits correspondence from (SetWorkspaceCorrespondence),
   // UNSET while it awaits none.
   optional workspace.v1.WorkspaceRef awaiting = 8;
+  // The repository the workspace belongs to, by its registry id: what a
+  // create from inside this workspace names to be cut in the same
+  // repository (CreateWorkspaceRequest.repository).
+  workspace.v1.RepositoryRef repository = 9;
 }
 
 // Where a workspace's branch lands.

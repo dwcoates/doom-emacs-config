@@ -216,7 +216,7 @@ func TestStatusReportsTheWorkspacesStandings(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	awaited := ids.WorkspaceID("ws-planner")
-	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", OneShot: true, Awaiting: &awaited}
+	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Repo: "repo-1", OneShot: true, Awaiting: &awaited}
 	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
 
 	// Act
@@ -228,5 +228,8 @@ func TestStatusReportsTheWorkspacesStandings(t *testing.T) {
 	}
 	if !got.GetOneShot() || got.GetAwaiting().GetId() != string(awaited) {
 		t.Errorf("one-shot %v awaiting %v, want a one-shot awaiting %s", got.GetOneShot(), got.GetAwaiting(), awaited)
+	}
+	if got.GetRepository().GetId() != "repo-1" {
+		t.Errorf("repository = %v, want repo-1", got.GetRepository())
 	}
 }
