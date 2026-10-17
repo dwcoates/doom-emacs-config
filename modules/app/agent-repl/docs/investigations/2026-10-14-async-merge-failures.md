@@ -110,3 +110,4 @@ the log records that show it, so the failures can be fixed at their source.
 - `redundancy-procs-land` (merge workspace `redundancy-procs`), from `test-redundancy-measure`: LANDED as `6c98fa4ca2`.
 - `test-shared-setup-d1-land`, from `test-shared-setup`: LANDED as `a159524c28`. Two identical merge tests became one act with an observer subtest each.
 - `test-cross-product-audit`'s daemon cuts: LANDED as `725b0d4363`. The 5040-row walk went to 44 rows, plus three integration tables and RegistryReads were cut. agent-repld coverage is 87.94, against a baseline of 87.85.
+- `webapp-baseline-land` (merge workspace `webapp-baseline`), from `test-redundancy-measure`: LANDED as `e8d41a2c19`. The webapp baseline is now measured across all tiers: 85.17% of 15,658 statements, against 52.47% from the unit tier alone.
