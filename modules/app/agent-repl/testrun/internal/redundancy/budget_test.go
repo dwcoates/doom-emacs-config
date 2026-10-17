@@ -300,9 +300,19 @@ func TestTheCheckedInBaselineHoldsEveryCoverageSystem(t *testing.T) {
 			t.Errorf("the baseline names no %s", sys)
 		}
 	}
-	for _, sys := range []string{"shim", "webapp"} {
-		if s := f.Systems[sys]; !s.Provisional || s.Reason == "" {
-			t.Errorf("%s is not marked provisional with its reason (owner ruling, 2026-10-15)", sys)
+	// The shim's spawned bundle is still unmeasured, so its line stays
+	// provisional (owner ruling, 2026-10-15). The webapp's was re-measured
+	// across every tier (2026-10-17), so it holds removals.
+	if s := f.Systems["shim"]; !s.Provisional || s.Reason == "" {
+		t.Errorf("shim is not marked provisional with its reason (owner ruling, 2026-10-15)")
+	}
+	w := f.Systems["webapp"]
+	for _, tier := range []string{"unit", "integration", "e2e webapp layer"} {
+		if !strings.Contains(w.Tiers, tier) {
+			t.Errorf("webapp's line %q does not merge its %s tier", w.Tiers, tier)
 		}
+	}
+	if w.Provisional {
+		t.Errorf("webapp is still provisional: %s", w.Reason)
 	}
 }

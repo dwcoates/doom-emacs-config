@@ -39,20 +39,18 @@
       "Tiers": "go: unit, integration and e2e, spawned systems included"
     },
     "shim": {
-      "Percent": 96.91681210005817,
-      "Statements": 12033,
-      "Floor": 91.91681210005817,
-      "Tiers": "vitest: the files its --coverage run measures",
+      "Percent": 96.89339437540876,
+      "Statements": 12232,
+      "Floor": 91.89339437540876,
+      "Tiers": "vitest: unit, integration, merged by statement (measured at 2901562592, 2026-10-17)",
       "Provisional": true,
-      "Reason": "the vitest integration configs, the webapp e2e layer and the shim's e2e reach are not merged; no shim or webapp case may be removed against this (owner ruling, 2026-10-15) until the vitest adapter re-measures it all-tier"
+      "Reason": "the shim's e2e reach (its bundle, spawned by the e2e suite) is not merged"
     },
     "webapp": {
-      "Percent": 52.469094102546784,
-      "Statements": 14803,
-      "Floor": 47.469094102546784,
-      "Tiers": "vitest: the files its --coverage run measures",
-      "Provisional": true,
-      "Reason": "the vitest integration configs, the webapp e2e layer and the shim's e2e reach are not merged; no shim or webapp case may be removed against this (owner ruling, 2026-10-15) until the vitest adapter re-measures it all-tier"
+      "Percent": 85.17051986205135,
+      "Statements": 15658,
+      "Floor": 80.17051986205135,
+      "Tiers": "vitest: unit, e2e webapp layer, integration, merged by statement (measured at 2901562592, 2026-10-17)"
     }
   }
 }
