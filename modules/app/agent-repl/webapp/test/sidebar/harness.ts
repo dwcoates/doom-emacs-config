@@ -190,6 +190,7 @@ export function sidebarContext(
     attention: new AttentionRegistry(timers),
     reveal,
     selectionBlink: createSelectionBlink(document),
+    shownAhead: () => null,
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);

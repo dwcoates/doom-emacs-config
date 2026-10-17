@@ -43,12 +43,22 @@ import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
+import { queryAll } from "../dom.js";
 import { createSelectionBlink } from "./selection-blink.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
 export interface Handle {
   dispose(): void;
+}
+
+/** The webhost's sidebar, which the webhost also tells what it shows. */
+export interface WebhostSidebarHandle extends Handle {
+  /**
+   * The webhost now shows workspace ID's page: move the highlight to its row
+   * now, without waiting for the daemon's roster (owner ruling, 2026-10-17).
+   */
+  markShown(id: string): void;
 }
 
 /**
@@ -144,7 +154,11 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
  * whenever any page is), and a child created from the form is a child of the
  * roster's `current`, the workspace Emacs is standing in.
  */
-export function mountWebhostSidebar(host: HTMLElement, ctx: DaemonContext, deps: WebhostSidebarDeps = {}): Handle {
+export function mountWebhostSidebar(
+  host: HTMLElement,
+  ctx: DaemonContext,
+  deps: WebhostSidebarDeps = {},
+): WebhostSidebarHandle {
   return mountSidebarIn(host, ctx, { case: "webhost" }, deps);
 }
 
@@ -166,7 +180,7 @@ function mountSidebarIn(
   ctx: DaemonContext,
   placement: SidebarPlacement,
   deps: SidebarDeps & WebhostSidebarDeps,
-): Handle {
+): WebhostSidebarHandle {
   log.debug("mounting the workspaces rail", { operation: "sidebar.mount", context: { placement: placement.case } });
 
   retireStoredPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
@@ -181,6 +195,17 @@ function mountSidebarIn(
       : createSelectionEdge(placement.ctx.workspace.id, deps.workspaceSelected);
   /** The workspace the roster last named current, for the webhost's create form. */
   let current: WorkspaceRef | null = null;
+  /**
+   * THE PAGE ON SCREEN, AHEAD OF THE ROSTER. A switch reaches the webhost's
+   * page directly from Emacs, but the rail's highlight waited for the
+   * daemon's select, its whole roster, and a full redraw: 82ms after the page
+   * typically and 308ms at p90, worse under load (switch bench, 2026-10-17).
+   * The webhost now tells the rail which page it shows (`markShown`), the
+   * highlight moves at once, and every draw keeps it there until a roster
+   * names that workspace current, so a push sent before the daemon took the
+   * select never moves it back.
+   */
+  let shownAhead: string | null = null;
 
   const openDetails = new Set<string>();
   const dropdowns = createDropdowns();
@@ -204,6 +229,7 @@ function mountSidebarIn(
     attention,
     reveal,
     selectionBlink: createSelectionBlink(body),
+    shownAhead: () => shownAhead,
   };
   // THE BAND FIT (band-fit.ts): the Hidden Workspaces and Recently Merged
   // viewports, re-fitted after every draw and on every resize of the rail or
@@ -280,6 +306,14 @@ function mountSidebarIn(
         roster.current === undefined
           ? null
           : requireMessage(roster.current.workspace, "WorkspaceRoster.current.workspace");
+      // THE ROSTER CAUGHT UP with the page on screen: it decides again.
+      if (shownAhead !== null && current?.id === shownAhead) {
+        log.debug("the roster named the shown workspace current; the rail follows the roster again", {
+          operation: "sidebar.shown-confirmed",
+          context: { workspace: shownAhead },
+        });
+        shownAhead = null;
+      }
       // ONLY A SEEN PAGE DRAWS (unseen.ts): an unseen one keeps the newest
       // roster and draws it once when it is seen again.
       if (unseen === null) drawRoster(roster);
@@ -348,6 +382,24 @@ function mountSidebarIn(
   }
 
   return {
+    markShown(id: string): void {
+      shownAhead = id;
+      let rows = 0;
+      for (const row of queryAll<HTMLElement>(body, "[data-roster-row]")) {
+        const highlighted = row.getAttribute("data-roster-row") === id;
+        row.classList.toggle("current", highlighted);
+        if (highlighted) {
+          row.setAttribute("data-current", "true");
+          rows += 1;
+        } else {
+          row.removeAttribute("data-current");
+        }
+      }
+      log.debug("the webhost showed a page; the rail highlights its row ahead of the roster", {
+        operation: "sidebar.shown-ahead",
+        context: { workspace: id, rows },
+      });
+    },
     dispose(): void {
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       disposed = true;

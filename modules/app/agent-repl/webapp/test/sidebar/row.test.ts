@@ -247,6 +247,20 @@ describe("the highlight and the receded styling", () => {
     expect(drawn.hasAttribute("data-current")).toBe(false);
   });
 
+  it.each([
+    { name: "highlights the shown row the resolver has not named current yet", id: "ws-2", current: false, want: true },
+    { name: "does not highlight the resolver's current row while another is shown", id: "ws-1", current: true, want: false },
+  ])("$name", ({ id, current, want }) => {
+    // Arrange
+    const sc = { ...sidebarContext(), shownAhead: () => "ws-2" };
+
+    // Act
+    const drawn = drawRosterRow(row({ id, current }), sc, "R");
+
+    // Assert
+    expect([drawn.hasAttribute("data-current"), drawn.classList.contains("current")]).toEqual([want, want]);
+  });
+
   /** The declarations of every stylesheet rule that paints a current row. */
   const currentRowDeclarations = (): string[] =>
     rulesOf(stylesheet)

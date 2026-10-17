@@ -210,9 +210,14 @@ export function drawRosterRow(
   ws.setAttribute("data-roster-row", workspace.id);
   ws.setAttribute("data-arm", status.case);
   sc.drawnStatus.note(workspace.id, { arm: status.case, source: "daemon" });
-  if (current) ws.setAttribute("data-current", "true");
+  // THE PAGE ON SCREEN LEADS THE ROSTER (sidebar.ts `markShown`): a row the
+  // webhost has just shown is highlighted before the daemon's push names it
+  // current, and no push from before that moment moves the highlight back.
+  const ahead = sc.shownAhead();
+  const highlighted = ahead === null ? current : ahead === workspace.id;
+  if (highlighted) ws.setAttribute("data-current", "true");
   if (closed) ws.setAttribute("data-closed", "true");
-  if (current) ws.classList.add("current");
+  if (highlighted) ws.classList.add("current");
   // A CLOSED OR HIDDEN ROW RECEDES (owner request, 2026-10-13): a Hidden
   // row's name reads in the Recently Merged band's grey, which is the band
   // name colour at the receded opacity.

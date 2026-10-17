@@ -40,6 +40,7 @@ export function openScope(rail: RailContext): DrawScope {
     rowHover: rail.rowHover,
     reveal: rail.reveal,
     selectionBlink: rail.selectionBlink,
+    shownAhead: () => rail.shownAhead(),
     view: {
       track: (key, wire, paint) => viewScope.track(key, wire, paint),
       ask: (key, value) => rail.view.ask(key, value),
