@@ -4317,6 +4317,105 @@ image, at the text row\='s height."
                ((symbol-function 'agent-repl--cancel-timer-key) #'ignore))
        ,@body)))
 
+;;;; ---- Timed on/off schedules (arm and cancel) -------------------------
+
+(ert-deftest agent-repl-test-status-arm-schedule-arms-one-timer-per-step ()
+  "Every step of the schedule gets its own timer at its own delay."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--capturing-timers steps
+      ;; Act
+      (agent-repl-status--arm-schedule '((0.0 . t) (0.3 . nil)) #'identity #'ignore)
+      ;; Assert
+      (should (equal (mapcar #'car (nreverse steps)) '(0.0 0.3))))))
+
+(ert-deftest agent-repl-test-status-arm-schedule-passes-args-then-on ()
+  "A step calls FN with the caller's ARGS followed by the step's ON."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--capturing-timers steps
+      ;; Act
+      (agent-repl-status--arm-schedule '((0.0 . t) (0.3 . nil)) #'identity #'ignore "a" "b")
+      ;; Assert
+      (should (equal (mapcar (lambda (step) (nth 2 step)) (nreverse steps))
+                     '(("a" "b" t) ("a" "b" nil)))))))
+
+(ert-deftest agent-repl-test-status-arm-schedule-keys-each-step-by-index ()
+  "Step INDEX is registered under KEY-FN's key for INDEX."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((keys nil))
+      (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create)))
+                ((symbol-function 'agent-repl--register-timer)
+                 (lambda (key timer) (push key keys) timer)))
+        ;; Act
+        (agent-repl-status--arm-schedule
+         '((0.0 . t) (0.3 . nil) (0.6 . t))
+         (lambda (i) (intern (format "k%d" i))) #'ignore))
+      ;; Assert
+      (should (equal (nreverse keys) '(k0 k1 k2))))))
+
+(ert-deftest agent-repl-test-status-arm-schedule-answers-the-step-count ()
+  "The return value is the number of steps armed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--capturing-timers _steps
+      ;; Act / Assert
+      (should (= (agent-repl-status--arm-schedule '((0.0 . t) (0.3 . nil)) #'identity #'ignore)
+                 2)))))
+
+(ert-deftest agent-repl-test-status-arm-schedule-of-nothing-arms-nothing ()
+  "An empty schedule arms no timer."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--capturing-timers steps
+      ;; Act
+      (agent-repl-status--arm-schedule nil #'identity #'ignore)
+      ;; Assert
+      (should (null steps)))))
+
+(ert-deftest agent-repl-test-status-cancel-schedule-cancels-every-step-key ()
+  "Cancelling cancels the key of every step, in index order."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((cancelled nil))
+      (cl-letf (((symbol-function 'agent-repl--cancel-timer-key)
+                 (lambda (key) (push key cancelled))))
+        ;; Act
+        (agent-repl-status--cancel-schedule
+         '((0.0 . t) (0.3 . nil)) (lambda (i) (intern (format "k%d" i)))))
+      ;; Assert
+      (should (equal (nreverse cancelled) '(k0 k1))))))
+
+(ert-deftest agent-repl-test-status-blink-arms-through-the-schedule-helper ()
+  "The attention blink arms its cadence through the shared schedule helper,
+not a hand-rolled timer loop that could drift from it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((armed nil))
+      (cl-letf (((symbol-function 'agent-repl-status--arm-schedule)
+                 (lambda (schedule _key-fn fn &rest args)
+                   (push (list schedule fn args) armed))))
+        ;; Act
+        (agent-repl-status-blink-tab "alpha"))
+      ;; Assert
+      (should (equal armed (list (list agent-repl-status-blink-schedule
+                                       #'agent-repl-status--set-marker
+                                       '("alpha"))))))))
+
+(ert-deftest agent-repl-test-status-clear-attention-cancels-through-the-schedule-helper ()
+  "Clearing the marker cancels the blink through the shared schedule helper."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((cancelled nil))
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl-status--cancel-schedule)
+                 (lambda (schedule _key-fn) (push schedule cancelled))))
+        ;; Act
+        (agent-repl-status-clear-attention "alpha"))
+      ;; Assert
+      (should (equal cancelled (list agent-repl-status-blink-schedule))))))
+
 (ert-deftest agent-repl-test-status-blink-schedules-five-steps ()
   "Two blinks then steady is five marker changes, not four and not six."
   ;; Arrange

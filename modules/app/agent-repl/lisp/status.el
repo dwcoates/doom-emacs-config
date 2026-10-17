@@ -1398,6 +1398,32 @@ declares one.  On a text frame, the character itself, in that ink."
 ;; fires and cleared when SelectWorkspace names the workspace, both of which
 ;; arrive as a re-pushed roster.  Emacs times only the blink.
 
+;; A TIMED ON/OFF SCHEDULE is a list of (DELAY . ON) steps: at DELAY seconds
+;; the step's function is called with ON.  Every step is armed under its own
+;; deterministic key, so arming the same schedule again REPLACES each pending
+;; step rather than interleaving with it.  The attention blink and the switch
+;; flash are both such schedules, and both arm and cancel through here.
+
+(defun agent-repl-status--arm-schedule (schedule key-fn fn &rest args)
+  "Arm one keyed timer per step of SCHEDULE, a list of (DELAY . ON).
+Step INDEX is registered under (funcall KEY-FN INDEX) and, DELAY seconds
+from now, calls FN with ARGS followed by the step\='s ON.  A key that
+already holds a timer has it cancelled and replaced
+\(`agent-repl--register-timer'), which is what makes a second arming
+restart the schedule.  Returns the number of steps armed."
+  (let ((index 0))
+    (dolist (step schedule)
+      (agent-repl--register-timer
+       (funcall key-fn index)
+       (apply #'run-with-timer (car step) nil fn (append args (list (cdr step)))))
+      (setq index (1+ index)))
+    index))
+
+(defun agent-repl-status--cancel-schedule (schedule key-fn)
+  "Cancel every step of SCHEDULE still pending under (funcall KEY-FN INDEX)."
+  (dotimes (index (length schedule))
+    (agent-repl--cancel-timer-key (funcall key-fn index))))
+
 (defconst agent-repl-status-blink-schedule
   '((0.0 . t) (0.5 . nil) (1.0 . t) (1.5 . nil) (2.0 . t))
   "The blink cadence of `frontend.v1' `RosterRowAttention', in seconds.
@@ -1443,14 +1469,10 @@ The marker is cleared by `agent-repl-status-clear-attention', which the
 roster drives when the marker leaves the row."
   (agent-repl--info ws "elisp.status.blink: ws=%s steps=%d"
                     ws (length agent-repl-status-blink-schedule))
-  (let ((index 0))
-    (dolist (step agent-repl-status-blink-schedule)
-      (let ((delay (car step))
-            (on (cdr step)))
-        (agent-repl--register-timer
-         (agent-repl-status--blink-timer-key ws index)
-         (run-with-timer delay nil #'agent-repl-status--set-marker ws on)))
-      (setq index (1+ index))))
+  (agent-repl-status--arm-schedule
+   agent-repl-status-blink-schedule
+   (lambda (index) (agent-repl-status--blink-timer-key ws index))
+   #'agent-repl-status--set-marker ws)
   ws)
 
 (defun agent-repl-status-clear-attention (ws)
@@ -1458,10 +1480,9 @@ roster drives when the marker leaves the row."
 Called when the marker LEAVES THE ROW — the daemon clears it on
 SelectWorkspace and re-pushes the roster — so a blink that has not
 finished must not paint a marker the daemon has already retracted."
-  (let ((index 0))
-    (dolist (_step agent-repl-status-blink-schedule)
-      (agent-repl--cancel-timer-key (agent-repl-status--blink-timer-key ws index))
-      (setq index (1+ index))))
+  (agent-repl-status--cancel-schedule
+   agent-repl-status-blink-schedule
+   (lambda (index) (agent-repl-status--blink-timer-key ws index)))
   (if (gethash ws agent-repl-status--marker-on)
       (progn
         (remhash ws agent-repl-status--marker-on)
