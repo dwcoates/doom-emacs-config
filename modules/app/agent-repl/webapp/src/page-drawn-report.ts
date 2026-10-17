@@ -22,6 +22,7 @@ import { CONVERSATION_DRAWN_ATTRIBUTE } from "./feed/conversation-drawn.js";
 import { log } from "./log.js";
 import type { AppContext } from "./rpc/context.js";
 import { callUnary } from "./rpc/unary.js";
+import { pageMutationObserver } from "./dom.js";
 
 /** The installed report; `dispose` stops watching. */
 export interface PageDrawnReport {
@@ -85,7 +86,7 @@ export function installPageDrawnReport(ctx: AppContext, doc: Document): PageDraw
     reportedThisAttach = false;
     if (drawn(doc)) void report("attached");
   });
-  const watch = new MutationObserver(() => {
+  const watch = pageMutationObserver(doc, () => {
     if (drawn(doc)) void report("drawn");
   });
   watch.observe(doc.documentElement, { attributes: true, attributeFilter: [CONVERSATION_DRAWN_ATTRIBUTE] });

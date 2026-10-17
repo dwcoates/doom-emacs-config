@@ -212,3 +212,89 @@ function refuseScope(helper: string, selector: string): void {
   });
   throw new Error(`${helper}: ":scope" selectors are refused (${selector})`);
 }
+
+/** One target a page-scoped observer watches, with the options it watches it under. */
+interface Watched {
+  readonly target: Node;
+  readonly options: MutationObserverInit;
+}
+
+/** A `MutationObserver` the page disconnects as it unloads (see `pageMutationObserver`). */
+export interface PageMutationObserver {
+  /** Watch TARGET under OPTIONS, as `MutationObserver.observe` does. */
+  observe(target: Node, options: MutationObserverInit): void;
+  /** Stop watching everything, as `MutationObserver.disconnect` does. */
+  disconnect(): void;
+}
+
+/**
+ * A `MutationObserver` over DOC's page that is disconnected the moment the
+ * page hides, and the ONE way this webapp observes mutations.
+ *
+ * WHY (WebKit, measured 2026-10-17). A page torn down with an observer still
+ * connected goes on mutating its own DOM after its script context stops: a
+ * visibilitychange handler writes an attribute, a cancelled stream redraws its
+ * failure. The observer queues a record it can never deliver, WebKit parks it
+ * for good, and its pending nodes keep the whole document alive. Every hidden
+ * page held a whole-document observer (host/unshown-animations.ts), so every
+ * webhost reload and every page unload stranded nearly every hidden page.
+ * `pagehide` comes before the context stops, so every observer the page made
+ * is disconnected there, whatever the page goes on to mutate.
+ *
+ * A page restored from the back/forward cache (`pageshow` with `persisted`)
+ * watches everything again; a target asked for while the page is hidden is
+ * watched from that restore on.
+ */
+export function pageMutationObserver(doc: Document, callback: MutationCallback): PageMutationObserver {
+  const win = doc.defaultView;
+  if (win === null) {
+    log.error("a mutation observer was asked for a document with no window", {
+      operation: "dom.page-observer-windowless",
+      context: { document: doc.URL },
+    });
+    throw new Error(`pageMutationObserver: ${doc.URL} has no window`);
+  }
+  // The page's own constructor, so anything wrapping it (busy-probe.ts) sees
+  // every observer the page makes.
+  const observer = new win.MutationObserver(callback);
+  let watched: Watched[] = [];
+  let hidden = false;
+  // Each observer holds its OWN listeners rather than sharing one per page:
+  // nothing can strip a listener this observer is not also told about.
+  const hide = (): void => {
+    hidden = true;
+    observer.disconnect();
+  };
+  const show = (event: PageTransitionEvent): void => {
+    if (!event.persisted) return;
+    hidden = false;
+    for (const { target, options } of watched) observer.observe(target, options);
+  };
+  let listening = false;
+  const listen = (): void => {
+    if (listening) return;
+    listening = true;
+    win.addEventListener("pagehide", hide);
+    win.addEventListener("pageshow", show);
+  };
+  const unlisten = (): void => {
+    listening = false;
+    win.removeEventListener("pagehide", hide);
+    win.removeEventListener("pageshow", show);
+  };
+  // From creation on, so an observer made before the page hid and first used
+  // after it knows the page is hidden.
+  listen();
+  return {
+    observe(target, options) {
+      listen();
+      watched.push({ target, options });
+      if (!hidden) observer.observe(target, options);
+    },
+    disconnect() {
+      observer.disconnect();
+      watched = [];
+      unlisten();
+    },
+  };
+}

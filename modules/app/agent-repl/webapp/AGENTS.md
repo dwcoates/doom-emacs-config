@@ -229,6 +229,17 @@ hand any more:
 
 ## Standing rules
 
+- **NEVER `new MutationObserver`; ASK `pageMutationObserver`** (src/dom.ts;
+  measured in WebKit 2026-10-17). A page torn down with an observer still
+  connected goes on mutating its DOM after its script context stops (a
+  visibilitychange handler, a cancelled stream's failure redraw); the
+  observer queues a record it can never deliver, WebKit parks it for good,
+  and its pending nodes keep the whole document alive. Every hidden page
+  held a whole-document observer (host/unshown-animations.ts), so every
+  webhost reload and every page unload stranded nearly every hidden page.
+  `pageMutationObserver` disconnects at `pagehide`, before the context stops,
+  and watches again on a `persisted` `pageshow`. `test/dom.test.ts` fails on
+  any other source that constructs one.
 - **NEVER `querySelectorAll`; ASK `queryAll` OR `childrenMatching`**
   (src/dom.ts; measured in WebKit 2026-10-16). A `querySelectorAll` that
   matches anything leaves its answer cached on the node it was asked of, and

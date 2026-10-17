@@ -9,6 +9,7 @@ import {
   computedPx,
   nodeLabel,
   pageIntersectionObserver,
+  pageMutationObserver,
   pageResizeObserver,
   placeChildren,
   placeOptional,
@@ -612,5 +613,190 @@ describe("querySelectorAll", () => {
     const direct = code.filter(([, text]) => /\bquerySelectorAll\b/.test(text)).map(([path]) => path);
     // Assert
     expect(direct).toEqual([]);
+  });
+});
+
+/** Let queued mutation records reach their observers. */
+const records = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Dispatch a page transition of TYPE, persisted or not, on the window the document belongs to. */
+const transition = (type: "pagehide" | "pageshow", persisted: boolean): void => {
+  // The document's own window, which the observers are keyed by: in the
+  // un-isolated unit run the global `window` need not be it.
+  const win = document.defaultView;
+  if (win === null) throw new Error("the test document has no window");
+  win.dispatchEvent(new win.PageTransitionEvent(type, { persisted }));
+};
+
+describe("pageMutationObserver", () => {
+  afterEach(() => {
+    // Every test ends with the page shown, as the next one expects it.
+    transition("pageshow", true);
+    document.body.replaceChildren();
+  });
+
+  it("delivers the mutations of what it observes, as MutationObserver does", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    document.body.append(box);
+    const seen: Node[] = [];
+    const watch = pageMutationObserver(document, (list) => seen.push(...list.map((r) => r.target)));
+    watch.observe(box, { childList: true });
+    // Act
+    box.append(document.createElement("span"));
+    await records();
+    // Assert
+    expect(seen).toEqual([box]);
+    watch.disconnect();
+  });
+
+  it("watches every target it is asked to", async () => {
+    // Arrange
+    const a = document.createElement("div");
+    const b = document.createElement("div");
+    document.body.append(a, b);
+    const seen: Node[] = [];
+    const watch = pageMutationObserver(document, (list) => seen.push(...list.map((r) => r.target)));
+    watch.observe(a, { childList: true });
+    watch.observe(b, { childList: true });
+    // Act
+    a.append(document.createElement("span"));
+    b.append(document.createElement("span"));
+    await records();
+    // Assert
+    expect(seen).toEqual([a, b]);
+    watch.disconnect();
+  });
+
+  it("is disconnected when the page hides, so a mutation during teardown queues nothing", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    document.body.append(box);
+    const callback = vi.fn();
+    pageMutationObserver(document, callback).observe(box, { childList: true, subtree: true });
+    pageMutationObserver(document, callback).observe(document.documentElement, { attributes: true, subtree: true });
+    // Act
+    transition("pagehide", false);
+    box.append(document.createElement("span"));
+    document.documentElement.setAttribute("data-teardown", "");
+    await records();
+    // Assert
+    expect(callback).not.toHaveBeenCalled();
+    document.documentElement.removeAttribute("data-teardown");
+  });
+
+  it("watches again when the page is restored from the back/forward cache", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    document.body.append(box);
+    const callback = vi.fn();
+    const watch = pageMutationObserver(document, callback);
+    watch.observe(box, { childList: true });
+    transition("pagehide", true);
+    // Act
+    transition("pageshow", true);
+    box.append(document.createElement("span"));
+    await records();
+    // Assert
+    expect(callback).toHaveBeenCalledTimes(1);
+    watch.disconnect();
+  });
+
+  it("does not watch again on a pageshow that is not a restore", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    document.body.append(box);
+    const callback = vi.fn();
+    const watch = pageMutationObserver(document, callback);
+    watch.observe(box, { childList: true });
+    transition("pagehide", false);
+    // Act
+    transition("pageshow", false);
+    box.append(document.createElement("span"));
+    await records();
+    // Assert
+    expect(callback).not.toHaveBeenCalled();
+    watch.disconnect();
+  });
+
+  it("holds a target asked for while the page is hidden until the page is restored", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    document.body.append(box);
+    const callback = vi.fn();
+    const watch = pageMutationObserver(document, callback);
+    transition("pagehide", true);
+    watch.observe(box, { childList: true });
+    box.append(document.createElement("span"));
+    await records();
+    expect(callback).not.toHaveBeenCalled();
+    // Act
+    transition("pageshow", true);
+    box.append(document.createElement("span"));
+    await records();
+    // Assert
+    expect(callback).toHaveBeenCalledTimes(1);
+    watch.disconnect();
+  });
+
+  it("stays disconnected across a restore once its own disconnect ran", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    document.body.append(box);
+    const callback = vi.fn();
+    const watch = pageMutationObserver(document, callback);
+    watch.observe(box, { childList: true });
+    watch.disconnect();
+    // Act
+    transition("pagehide", true);
+    transition("pageshow", true);
+    box.append(document.createElement("span"));
+    await records();
+    // Assert
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("builds its observer with the page's own MutationObserver, so a wrapper of it sees every observer", () => {
+    // Arrange
+    const win = document.defaultView!;
+    const original = win.MutationObserver;
+    let built = 0;
+    win.MutationObserver = class extends original {
+      constructor(callback: MutationCallback) {
+        super(callback);
+        built += 1;
+      }
+    };
+    try {
+      // Act
+      pageMutationObserver(document, () => undefined).disconnect();
+    } finally {
+      win.MutationObserver = original;
+    }
+    // Assert
+    expect(built).toBe(1);
+  });
+
+  it("refuses a document with no window, and records it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const windowless = document.implementation.createHTMLDocument("detached");
+    // Act
+    expect(() => pageMutationObserver(windowless, () => undefined)).toThrow(/has no window/);
+    // Assert
+    const record = await forwardedRecord(capture, "dom.page-observer-windowless");
+    expect([record.level.case, record.context]).toEqual(["error", expect.objectContaining({ document: windowless.URL })]);
+  });
+});
+
+describe("MutationObserver", () => {
+  it("is built only by pageMutationObserver: no source constructs one a page would carry into teardown", () => {
+    // Arrange — every source under src/, comments stripped.
+    const src = join(process.cwd(), "src");
+    const code = filesUnder(src).map((path) => [relative(src, path), codeOf(readFileSync(path, "utf8"))] as const);
+    // Act
+    const builders = code.filter(([, text]) => /\bnew\s+(?:[\w$]+\.)*MutationObserver\b/.test(text)).map(([path]) => path);
+    // Assert
+    expect(builders).toEqual(["dom.ts"]);
   });
 });
