@@ -243,7 +243,17 @@ message SubmitPromptError {
     // answer, so it is not delivered as a prompt instead. The composer
     // keeps the text.
     SubmitPromptAskNotStanding ask_not_standing = 15;
+    // A prompt of origin PROMPT_ORIGIN_AGENT_SENT begins with a slash command.
+    // Nothing was submitted: an agent performs acts on a conversation through
+    // the rpcs that name them (CompactWorkspace), and the rest -- clearing it
+    // among them -- are the user's alone.
+    SubmitPromptSlashCommandFromAgent slash_command_from_agent = 16;
   }
+}
+// Names the refused slash command.
+message SubmitPromptSlashCommandFromAgent {
+  // The command as the prompt began with it, slash included ("/clear").
+  string command = 1;
 }
 // The settled-ask refusal. Empty: the arm is the whole fact.
 message SubmitPromptAskNotStanding {}

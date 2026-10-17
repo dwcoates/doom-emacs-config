@@ -197,6 +197,15 @@ const (
 	// workspace's status after it. Submitted and drawn as a merge-queue notice
 	// is.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE PromptOrigin = 40
+	// A prompt a workspace's AGENT sent to a workspace through the agent API
+	// (`agent-repld workspace prompt`). Drawn as an ordinary prompt bubble. A
+	// prompt of this origin that begins with a slash command is refused
+	// (agentrepl.v1.SubmitPromptError.slash_command_from_agent): an agent's acts
+	// on a conversation are the ones the API names, such as compaction.
+	PromptOrigin_PROMPT_ORIGIN_AGENT_SENT PromptOrigin = 41
+	// The compaction CompactWorkspace submitted. Waits behind a running turn
+	// like any deferred prompt; drawn as the context cut it produces.
+	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT PromptOrigin = 42
 )
 
 // Enum value maps for PromptOrigin.
@@ -242,6 +251,8 @@ var (
 		38: "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE",
 		39: "PROMPT_ORIGIN_OWNER_NOTICE",
 		40: "PROMPT_ORIGIN_WORKSPACE_NOTICE",
+		41: "PROMPT_ORIGIN_AGENT_SENT",
+		42: "PROMPT_ORIGIN_WORKSPACE_COMPACT",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -284,6 +295,8 @@ var (
 		"PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE":    38,
 		"PROMPT_ORIGIN_OWNER_NOTICE":                39,
 		"PROMPT_ORIGIN_WORKSPACE_NOTICE":            40,
+		"PROMPT_ORIGIN_AGENT_SENT":                  41,
+		"PROMPT_ORIGIN_WORKSPACE_COMPACT":           42,
 	}
 )
 
@@ -318,7 +331,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xfb\v\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xbe\f\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -360,7 +373,9 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1aPROMPT_ORIGIN_MERGE_REVERT\x10%\x12*\n" +
 	"&PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE\x10&\x12\x1e\n" +
 	"\x1aPROMPT_ORIGIN_OWNER_NOTICE\x10'\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_WORKSPACE_NOTICE\x10(B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1ePROMPT_ORIGIN_WORKSPACE_NOTICE\x10(\x12\x1c\n" +
+	"\x18PROMPT_ORIGIN_AGENT_SENT\x10)\x12#\n" +
+	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

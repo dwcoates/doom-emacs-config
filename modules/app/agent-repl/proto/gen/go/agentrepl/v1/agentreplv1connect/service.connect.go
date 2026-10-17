@@ -118,6 +118,9 @@ const (
 	// AgentReplMergeWorkspaceProcedure is the fully-qualified name of the AgentRepl's MergeWorkspace
 	// RPC.
 	AgentReplMergeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/MergeWorkspace"
+	// AgentReplCompactWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// CompactWorkspace RPC.
+	AgentReplCompactWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CompactWorkspace"
 	// AgentReplRestartWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RestartWorkspace RPC.
 	AgentReplRestartWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RestartWorkspace"
@@ -333,6 +336,7 @@ var (
 	agentReplNukeWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("NukeWorkspace")
 	agentReplForgetWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
 	agentReplMergeWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("MergeWorkspace")
+	agentReplCompactWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("CompactWorkspace")
 	agentReplRestartWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
 	agentReplSetWorkspaceHiddenMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
@@ -495,6 +499,9 @@ type AgentReplClient interface {
 	// its life from there is the feed's bubble. See
 	// endpoint_merge_workspace.proto.
 	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
+	// Compact a workspace's conversation through its prompt queue. See
+	// endpoint_compact_workspace.proto.
+	CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
@@ -892,6 +899,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplMergeWorkspaceProcedure,
 			connect.WithSchema(agentReplMergeWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		compactWorkspace: connect.NewClient[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplCompactWorkspaceProcedure,
+			connect.WithSchema(agentReplCompactWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		restartWorkspace: connect.NewClient[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse](
@@ -1330,6 +1343,7 @@ type agentReplClient struct {
 	nukeWorkspace            *connect.Client[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse]
 	forgetWorkspace          *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
 	mergeWorkspace           *connect.Client[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse]
+	compactWorkspace         *connect.Client[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse]
 	restartWorkspace         *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority     *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
 	setWorkspaceHidden       *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
@@ -1542,6 +1556,11 @@ func (c *agentReplClient) ForgetWorkspace(ctx context.Context, req *connect.Requ
 // MergeWorkspace calls agentrepl.v1.AgentRepl.MergeWorkspace.
 func (c *agentReplClient) MergeWorkspace(ctx context.Context, req *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {
 	return c.mergeWorkspace.CallUnary(ctx, req)
+}
+
+// CompactWorkspace calls agentrepl.v1.AgentRepl.CompactWorkspace.
+func (c *agentReplClient) CompactWorkspace(ctx context.Context, req *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error) {
+	return c.compactWorkspace.CallUnary(ctx, req)
 }
 
 // RestartWorkspace calls agentrepl.v1.AgentRepl.RestartWorkspace.
@@ -1972,6 +1991,9 @@ type AgentReplHandler interface {
 	// its life from there is the feed's bubble. See
 	// endpoint_merge_workspace.proto.
 	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
+	// Compact a workspace's conversation through its prompt queue. See
+	// endpoint_compact_workspace.proto.
+	CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
@@ -2365,6 +2387,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplMergeWorkspaceProcedure,
 		svc.MergeWorkspace,
 		connect.WithSchema(agentReplMergeWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplCompactWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplCompactWorkspaceProcedure,
+		svc.CompactWorkspace,
+		connect.WithSchema(agentReplCompactWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplRestartWorkspaceHandler := connect.NewUnaryHandler(
@@ -2829,6 +2857,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplForgetWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplMergeWorkspaceProcedure:
 			agentReplMergeWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplCompactWorkspaceProcedure:
+			agentReplCompactWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplRestartWorkspaceProcedure:
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
@@ -3086,6 +3116,10 @@ func (UnimplementedAgentReplHandler) ForgetWorkspace(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MergeWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CompactWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error) {

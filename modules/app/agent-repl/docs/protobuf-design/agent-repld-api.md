@@ -158,6 +158,18 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     `*Messages*` lines). This is the first daemon→Emacs request that is
     answered; every earlier host push was a fact nothing acked.
 
+13. LIFECYCLE ACTS (owner, 2026-10-17). The agent API covers opening,
+    closing and killing a workspace through the existing OpenWorkspace,
+    CloseWorkspace and KillWorkspace, plus a new `CompactWorkspace`
+    (instructions optional), submitted through the prompt queue as
+    `PROMPT_ORIGIN_WORKSPACE_COMPACT`. CLEARING IS NOT SUPPORTED. To make that
+    a daemon rule rather than a skill caveat, agent-sent prompts carry the new
+    origin `PROMPT_ORIGIN_AGENT_SENT`, and such a prompt that begins with a
+    slash command is refused (`SubmitPromptError.slash_command_from_agent`), so
+    `/clear` cannot arrive as a prompt either. Nuking and forgetting stay out
+    of the agent API: both destroy or drop records, and the owner asked for
+    neither.
+
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing

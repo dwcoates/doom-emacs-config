@@ -186,4 +186,13 @@ enum PromptOrigin {
   // workspace's status after it. Submitted and drawn as a merge-queue notice
   // is.
   PROMPT_ORIGIN_WORKSPACE_NOTICE = 40;
+  // A prompt a workspace's AGENT sent to a workspace through the agent API
+  // (`agent-repld workspace prompt`). Drawn as an ordinary prompt bubble. A
+  // prompt of this origin that begins with a slash command is refused
+  // (agentrepl.v1.SubmitPromptError.slash_command_from_agent): an agent's acts
+  // on a conversation are the ones the API names, such as compaction.
+  PROMPT_ORIGIN_AGENT_SENT = 41;
+  // The compaction CompactWorkspace submitted. Waits behind a running turn
+  // like any deferred prompt; drawn as the context cut it produces.
+  PROMPT_ORIGIN_WORKSPACE_COMPACT = 42;
 }
