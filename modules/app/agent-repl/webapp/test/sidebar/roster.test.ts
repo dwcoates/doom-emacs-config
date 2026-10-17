@@ -1895,7 +1895,8 @@ describe("the open rows' tab numbers", () => {
 
 describe("the tab number's stylesheet", () => {
   it.each([
-    ["color", "rgb(255, 255, 255)"],
+    ["color", "var(--muted)"],
+    ["font-size", "0.66rem"],
     ["text-align", "right"],
     ["width", "var(--tab-number-w)"],
   ])("draws the number with %s %s", (property, want) => {
