@@ -1,0 +1,169 @@
+// prose.proto — PROSE AS THE DAEMON SERVES IT: a markdown text already parsed,
+// with every metaprompt TLDR tree in it carried as a graph of nodes rather than
+// as lines of text.
+//
+// The daemon is the ONLY program that parses prose. It parses every text the
+// webapp draws as markdown with the tree-sitter-tldr grammar, repairs each tree
+// (every node's label is derived from its place in the tree, so a label the
+// model left out or got wrong is corrected), and serves the result here. The
+// webapp never sees a tree as text: it draws the rails, wraps each node to the
+// bubble's live width, and renders the markdown between trees.
+//
+//   ProsePlain       "Some prose before the tree."
+//   ProseTree
+//     header         Response (✏️ changes made)
+//     node 0         1 🔧 Root                       root, marker 🔧
+//     node 1         ├── 1.1 Child                   branch, parent 0
+//     node 2         │   └── 1.1.1 Grandchild        branch, parent 1
+//     node 3         └── 1.2 Other                   branch, parent 0
+//   ProsePlain       "Prose after the tree."
+//
+// The rails (├──, └──, │) are not on the wire: the webapp draws them from the
+// graph — a node's depth, whether it is the last of its siblings, and which of
+// its ancestors still have siblings below.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// ---- Prose: a parsed text ------------------------------------------------
+
+// A text the webapp draws as markdown, parsed by the daemon. It replaces the
+// plain markdown string wherever a drawn text can hold a tree, so the webapp
+// carries no parser of its own and every program reads the same parse.
+message ParsedProse {
+  // The text in reading order: runs of ordinary markdown and the trees between
+  // them. Empty for an empty text. A text with no tree is one ProsePlain block.
+  repeated ProseBlock blocks = 1;
+}
+
+// One stretch of a parsed text.
+message ProseBlock {
+  // What the stretch is. Ordinary markdown and a tree are exclusive: a tree is
+  // never also rendered as markdown, and the markdown around a tree never
+  // holds its lines.
+  oneof block {
+    // Ordinary markdown, rendered as markdown.
+    ProsePlain plain = 1;
+    // A metaprompt TLDR tree: the text's main tree, or one the model wrote
+    // inside a language-less code fence.
+    ProseTree tree = 2;
+  }
+}
+
+// A run of ordinary markdown, exactly as written.
+message ProsePlain {
+  // The markdown. Never empty: a run of only blank lines between two blocks
+  // is not served.
+  string markdown = 1;
+}
+
+// ---- Tree: a graph of nodes ----------------------------------------------
+
+// A metaprompt TLDR tree, as a flat list of nodes related by identifier.
+//
+// THE DAEMON GUARANTEES, and the webapp checks and refuses a tree that breaks:
+//   - `nodes` is in reading order, so a parent always precedes its children;
+//   - a node's id is its index in `nodes`;
+//   - a branch's parent id is smaller than its own id;
+//   - siblings appear in the order their labels count.
+// Children are not listed: they are every node naming this one as parent, in
+// list order. One direction of the relation is on the wire so the two can
+// never disagree.
+//
+// WHILE A RESPONSE STREAMS IN, a later push only appends nodes: the ids, labels
+// and parents of nodes already served never change, though a node may gain a
+// code block once a later line shows the block was drawn beneath it. The last
+// node's text may still grow. A label never shows half-typed: it is derived
+// from the node's place, and the digits the model is still typing as its own
+// label are not drawn as text.
+message ProseTree {
+  // The `Response (…)` line that opened the tree, when the model wrote one.
+  // UNSET when it did not.
+  optional ProseTreeHeader header = 1;
+  // Every node, in reading order.
+  repeated ProseTreeNode nodes = 2;
+}
+
+// The tree's opening `Response (…)` line, drawn above its first root.
+message ProseTreeHeader {
+  // The line as written, without its newline.
+  string text = 1;
+}
+
+// One node of a tree: a root or a branch, with its label, its text and any
+// code blocks drawn beneath it.
+message ProseTreeNode {
+  // This node's identity: its index in ProseTree.nodes. Stable while the
+  // response streams in.
+  ProseTreeNodeId id = 1;
+  // Where the node sits. A root has no parent and carries a marker; a branch
+  // has a parent and no marker, so neither fact exists where it means nothing.
+  oneof place {
+    // A top-level node: `1 🔧 Root`.
+    ProseTreeNodeRoot root = 2;
+    // A node under another: `├── 1.1 Child`.
+    ProseTreeNodeBranch branch = 3;
+  }
+  // The node's label, derived from its place: its parent's label, a dot, and
+  // its position among its siblings (`5.1.2`). Roots count 1, 2, 3 in order.
+  // The model's own label is replaced whenever it differs, so every label in a
+  // tree is unique, and a prompt that answers `5.1.2` names exactly this node.
+  ProseTreeNodeLabel label = 4;
+  // The node's text.
+  ProseTreeNodeText text = 5;
+  // Code blocks the model drew beneath this node, before its first child, in
+  // order. Empty for most nodes.
+  repeated ProseTreeCode code = 6;
+}
+
+// A node's identity within one tree.
+message ProseTreeNodeId {
+  // The node's index in ProseTree.nodes.
+  uint32 index = 1;
+}
+
+// A top-level node of the tree.
+message ProseTreeNodeRoot {
+  // The symbol or emoji the root opens with (`🔧`).
+  ProseTreeNodeMarker marker = 1;
+}
+
+// A node under another node.
+message ProseTreeNodeBranch {
+  // The node this one hangs under. Always an earlier node of the same tree.
+  ProseTreeNodeId parent = 1;
+}
+
+// A root's opening symbol or emoji, drawn between its label and its text.
+message ProseTreeNodeMarker {
+  // The marker, with any variation selector it carries (`✏️`).
+  string text = 1;
+}
+
+// A node's label, drawn before its text.
+message ProseTreeNodeLabel {
+  // The dotted label, with no trailing space (`5.1.2`).
+  string text = 1;
+}
+
+// A node's text, drawn after its label (and a root's marker).
+message ProseTreeNodeText {
+  // Inline markdown, as one line: lines the model already wrapped are joined
+  // back on with single spaces, so the webapp wraps the text afresh to the
+  // bubble's width.
+  string markdown = 1;
+}
+
+// A code block drawn beneath a node, opaque: never parsed as tree lines and
+// never run through inline markdown.
+message ProseTreeCode {
+  // The fence's language, its first info word (`go`). UNSET when the fence
+  // named none.
+  optional string language = 1;
+  // The code, its lines dedented by the fence's own rail and joined with
+  // newlines.
+  string body = 2;
+}

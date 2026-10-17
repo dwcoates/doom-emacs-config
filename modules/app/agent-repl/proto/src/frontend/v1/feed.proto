@@ -55,6 +55,7 @@ import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "frontend/v1/chess_board.proto";
 import "frontend/v1/failure.proto";
+import "frontend/v1/prose.proto";
 import "frontend/v1/status_panel.proto";
 import "frontend/v1/todos_panel.proto";
 import "frontend/v1/token_heat.proto";
@@ -440,9 +441,11 @@ message FeedPeerMessage {
   // The arrow's side and direction alone say the message came IN; nothing
   // else in the header says so.
   FeedPeerMessageFrom from = 3;
-  // The message body as markdown, drawn only when the bubble is EXPANDED.
-  // Rendered with the same markdown machinery a response bubble uses.
-  string body = 2;
+  // The message body, parsed (prose.proto), drawn only when the bubble is
+  // EXPANDED, through the same prose drawing a response bubble uses.
+  ParsedProse prose = 4;
+  reserved 2;
+  reserved "body";
 }
 
 // The received bubble's header: who sent the message. The client draws the
@@ -730,8 +733,10 @@ message FeedSubagentResult {
 
 // The report element.
 message FeedSubagentResultReport {
-  // The report as markdown, drawn verbatim through the markdown pipeline.
-  string text = 1;
+  // The report, parsed (prose.proto), drawn through the prose pipeline.
+  ParsedProse prose = 2;
+  reserved 1;
+  reserved "text";
 }
 
 // The hand-back is still in flight.
@@ -781,8 +786,10 @@ message FeedPlanPlanned {
 }
 // The plan's markdown element.
 message FeedPlanProse {
-  // Markdown, rendered by the client's prose renderer.
-  string markdown = 1;
+  // The plan, parsed (prose.proto), drawn by the client's prose renderer.
+  ParsedProse prose = 2;
+  reserved 1;
+  reserved "markdown";
 }
 // The edit affordance's target.
 message FeedPlanEditTarget {
@@ -1107,8 +1114,11 @@ message FeedResponseError {
 }
 // The bubble's markdown element.
 message FeedResponseProse {
-  // Markdown, rendered by the client's prose renderer.
-  string markdown = 1;
+  // The prose so far, parsed (prose.proto), drawn by the client's prose
+  // renderer. Re-parsed whole on every push, so a missed push self-corrects.
+  ParsedProse prose = 2;
+  reserved 1;
+  reserved "markdown";
 }
 // The cost-corner element: how much FRESH INPUT the bubble's agent spent to
 // produce this bubble.
@@ -2656,9 +2666,12 @@ message FeedUserPromptBlock {
 // ---- the feed's drawn block vocabulary, shared by every row kind in this
 // ---- file that draws content blocks --------------------------------------
 
-// Text, drawn as markdown.
+// Text, drawn as prose.
 message FeedTextBlock {
-  string text = 1;
+  // The text, parsed (prose.proto): a tree the person pasted is drawn as a tree.
+  ParsedProse prose = 2;
+  reserved 1;
+  reserved "text";
 }
 
 // An image the webview can fetch. The daemon RESOLVES the record's reference
@@ -3096,7 +3109,10 @@ message FeedContextCutColdRead {
 
 // The compression of the preceding conversation, drawn as markdown.
 message FeedContextCutSummary {
-  string markdown = 1;
+  // The compaction summary, parsed (prose.proto), drawn as prose.
+  ParsedProse prose = 2;
+  reserved 1;
+  reserved "markdown";
 }
 
 // The entered-worktree payload.
