@@ -682,22 +682,13 @@ async function answer(
  * again when the workspace is shown. The landing elsewhere is the daemon's, as
  * for every hide.
  */
-async function hideWorkspace(
-  rc: RowContext,
-  actions: HTMLElement,
-  buttons: readonly Control[],
-): Promise<void> {
-  log.info("hiding the workspace from a cold gate", {
-    operation: "feed.asks.cold-gate.hide",
-    context: { workspace: rc.ctx.workspace.id },
-  });
-  await callFromGate(rc, actions, buttons, {
+function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly Control[]): Promise<void> {
+  return workspaceVerbFromGate(rc, actions, buttons, {
+    verb: "hide",
+    message: "hiding the workspace from a cold gate",
     rpc: "SetWorkspaceHidden",
     call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
     schema: SetWorkspaceHiddenResponseSchema,
-    // SetWorkspaceHidden answers only the cross-cutting four.
-    own: {},
-    malformedOperation: "feed.asks.cold-gate.hide.malformed-refusal",
   });
 }
 
@@ -705,24 +696,45 @@ async function hideWorkspace(
  * Kill the workspace's session, and nothing else: the gate is not answered,
  * and the worktree and branch survive, as for every kill.
  */
-async function killWorkspace(
-  rc: RowContext,
-  actions: HTMLElement,
-  buttons: readonly Control[],
-): Promise<void> {
-  log.info("killing the workspace from a cold gate", {
-    operation: "feed.asks.cold-gate.kill",
-    context: { workspace: rc.ctx.workspace.id },
-  });
-  await callFromGate(rc, actions, buttons, {
+function killWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly Control[]): Promise<void> {
+  return workspaceVerbFromGate(rc, actions, buttons, {
+    verb: "kill",
+    message: "killing the workspace from a cold gate",
     rpc: "KillWorkspace",
     // NO op_id: the synchronous form, which answers `success` or `error` and
     // never `accepted`.
     call: (client) => client.killWorkspace(buildKillWorkspaceRequest(rc.ctx.workspace)),
     schema: KillWorkspaceResponseSchema,
-    // KillWorkspace answers only the cross-cutting four.
+  });
+}
+
+/**
+ * ONE WORKSPACE VERB FROM THE GATE'S ROW, which is not a remediation: logged
+ * under `feed.asks.cold-gate.<verb>` with the workspace it acts on, and refused
+ * with only the cross-cutting four, which is all a workspace verb answers.
+ */
+export async function workspaceVerbFromGate<Res extends GateResponse>(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly Control[],
+  spec: {
+    verb: "hide" | "kill";
+    message: string;
+    rpc: string;
+    call: (client: AgentReplClient) => Promise<Res>;
+    schema: DescMessage;
+  },
+): Promise<void> {
+  log.info(spec.message, {
+    operation: `feed.asks.cold-gate.${spec.verb}`,
+    context: { workspace: rc.ctx.workspace.id },
+  });
+  await callFromGate(rc, actions, buttons, {
+    rpc: spec.rpc,
+    call: spec.call,
+    schema: spec.schema,
     own: {},
-    malformedOperation: "feed.asks.cold-gate.kill.malformed-refusal",
+    malformedOperation: `feed.asks.cold-gate.${spec.verb}.malformed-refusal`,
   });
 }
 

@@ -6923,13 +6923,10 @@ ar-button.outcome-marker-pill {
    choice, so it is red and last on the row; clear takes the border pay had. */
 .cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }
 .cold-gate-buttons > ar-button.hibernation-direct { border-color: var(--err); }
-/* HIDE WORKSPACE IS GREY (owner request, 2026-10-13): last on the row, and
-   not a remediation, so it wears the muted grey rather than any remediation's
-   color. */
-.cold-gate-buttons > ar-button.cold-gate-hide { color: var(--muted); border-color: var(--muted); }
-/* KILL WORKSPACE IS GREY TOO (owner request, 2026-10-17): like hide, it is
-   not a remediation. */
-.cold-gate-buttons > ar-button.cold-gate-kill { color: var(--muted); border-color: var(--muted); }
+/* HIDE AND KILL WORKSPACE ARE GREY (owner requests, 2026-10-13 and
+   2026-10-17): last on the row, and not remediations, so they wear the muted
+   grey rather than any remediation's color. */
+.cold-gate-buttons > ar-button:is(.cold-gate-hide, .cold-gate-kill) { color: var(--muted); border-color: var(--muted); }
 /* Borders half again as thick as the shared 1px (owner request, 2026-10-03). */
 .cold-gate-buttons > ar-button { border-width: 1.5px; }
 /* A little more room under the buttons, so the gate stands a touch taller
