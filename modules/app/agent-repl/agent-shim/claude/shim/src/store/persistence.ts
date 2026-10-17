@@ -28,6 +28,7 @@ import type { SourceCoordinates } from "./keys.js";
 import type { StoreClient } from "./client.js";
 import type { DetachedWorkAnswer } from "./detached-work.js";
 import type { VendorTaskAnswer } from "./locator.js";
+import type { PeerRecipientAnswer } from "./peer-recipient.js";
 
 // ---------------------------------------------------------------------------
 // What one write is
@@ -493,6 +494,12 @@ export interface Persistence {
    */
   agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer>;
   /**
+   * WHICH SESSION holds the delivered copy of one cross-session message, by its
+   * delivery id (store/peer-recipient.ts). Never rejects: a failure is the
+   * `failed` answer, and the caller writes the one record for it.
+   */
+  peerRecipient(deliveryId: string): Promise<PeerRecipientAnswer>;
+  /**
    * WHAT KIND of detached work `unit` left as, and whether the record holds it
    * as ended (store/detached-work.ts). Never rejects: a failure is the
    * `failed` answer, and the caller writes the one record for whatever came
@@ -682,6 +689,8 @@ export function unavailablePersistence(): Persistence {
       Promise.resolve({ kind: "failed", detail: "shim persistence: agentByVendorTask has no store to reach in this build" }),
     detachedWork: () =>
       Promise.resolve({ kind: "failed", detail: "shim persistence: detachedWork has no store to reach in this build" }),
+    peerRecipient: () =>
+      Promise.resolve({ kind: "failed", detail: "shim persistence: peerRecipient has no store to reach in this build" }),
     openBashRun: () => Promise.reject(refuse("openBashRun")),
     onFault: () => () => undefined,
     onDegradedWindow: () => () => undefined,

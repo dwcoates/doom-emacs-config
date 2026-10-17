@@ -137,10 +137,26 @@ export interface RealQuerySpec {
    * spawn changes.
    */
   readonly onChildExit?: (exit: VendorChildExit) => void;
+  /**
+   * The vendor child's pid, the moment its spawn returned one.
+   *
+   * WHO THE VENDOR IS TO OTHER SESSIONS. The vendor names its cross-session
+   * messaging socket after its own pid, and a peer's record of a message from
+   * this session carries that pid as the verified sender, so the shim states
+   * it (conversation.v1.SessionVendorProcess) for the daemon to map back. Only
+   * fed when `onChildExit` is, because both ride the one custom spawner.
+   */
+  readonly onChildSpawn?: (pid: number) => void;
 }
 
 /** How the vendor child ended. */
 export interface VendorChildExit {
+  /**
+   * The pid of the child that ended, so a consumer tracking the CURRENT child
+   * can tell its end from a replaced child's late one. Absent for a child that
+   * never spawned.
+   */
+  readonly pid?: number;
   /** The exit code, or absence when a signal ended it. */
   readonly code: number | null;
   /** The signal that ended it, or absence when it exited on its own. */
@@ -184,15 +200,20 @@ export function vendorSpawner(
   onChildExit: (exit: VendorChildExit) => void,
   onStderr?: (data: string) => void,
   spawnChild: SpawnChild = defaultSpawn,
+  onChildSpawn?: (pid: number) => void,
 ): SpawnChild {
   return (options: SpawnOptions): SpawnedProcess => {
     const child = spawnChild(options);
+    const pid = (child as { pid?: number }).pid;
     let spawnFailed = false;
     child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       // ONE END PER CHILD: a spawn that failed has already been reported.
       if (spawnFailed) return;
-      onChildExit({ code, signal });
+      onChildExit({ code, signal, ...(pid === undefined ? {} : { pid }) });
     });
+    // A CHILD WITH A PID EXISTS NOW. One without has not spawned, and its
+    // failure is reported as an end below, never as a spawn.
+    if (pid !== undefined && onChildSpawn !== undefined) onChildSpawn(pid);
     // A SPAWN THAT FAILED IS AN END TOO, and its errno says whether trying
     // again can help (a missing or unexecutable binary will not appear by
     // itself). Only a child with no pid failed to SPAWN: an `error` from a
@@ -271,7 +292,7 @@ export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string,
     // the two can never double-report the same chunk.
     ...(spec.onChildExit === undefined
       ? { ...(spec.onStderr === undefined ? {} : { stderr: spec.onStderr }) }
-      : { spawnClaudeCodeProcess: vendorSpawner(spec.onChildExit, spec.onStderr) }),
+      : { spawnClaudeCodeProcess: vendorSpawner(spec.onChildExit, spec.onStderr, defaultSpawn, spec.onChildSpawn) }),
     ...(spec.binding.kind === "fresh"
       ? { sessionId: spec.binding.sessionId }
       : {

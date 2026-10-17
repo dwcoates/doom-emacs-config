@@ -37,7 +37,8 @@ const (
 type ResolvePeerDeliveryRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. The delivery id, verbatim (AgentSendMessagePeerSession
-	// .delivery_id).
+	// .delivery_id). UNSET or empty is refused as an invalid argument, like
+	// every malformed shim request.
 	DeliveryId    *v1.PeerDeliveryId `protobuf:"bytes,1,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -297,7 +298,6 @@ type ResolvePeerDeliveryFailure struct {
 	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
 	// Types that are valid to be assigned to Kind:
 	//
-	//	*ResolvePeerDeliveryFailure_InvalidRequest
 	//	*ResolvePeerDeliveryFailure_StoreUnavailable
 	Kind          isResolvePeerDeliveryFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
@@ -348,15 +348,6 @@ func (x *ResolvePeerDeliveryFailure) GetKind() isResolvePeerDeliveryFailure_Kind
 	return nil
 }
 
-func (x *ResolvePeerDeliveryFailure) GetInvalidRequest() *ResolvePeerDeliveryInvalidRequest {
-	if x != nil {
-		if x, ok := x.Kind.(*ResolvePeerDeliveryFailure_InvalidRequest); ok {
-			return x.InvalidRequest
-		}
-	}
-	return nil
-}
-
 func (x *ResolvePeerDeliveryFailure) GetStoreUnavailable() *ResolvePeerDeliveryStoreUnavailable {
 	if x != nil {
 		if x, ok := x.Kind.(*ResolvePeerDeliveryFailure_StoreUnavailable); ok {
@@ -370,56 +361,12 @@ type isResolvePeerDeliveryFailure_Kind interface {
 	isResolvePeerDeliveryFailure_Kind()
 }
 
-type ResolvePeerDeliveryFailure_InvalidRequest struct {
-	// The delivery id was unset or empty.
-	InvalidRequest *ResolvePeerDeliveryInvalidRequest `protobuf:"bytes,2,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
-}
-
 type ResolvePeerDeliveryFailure_StoreUnavailable struct {
 	// The store could not be reached, or failed to read.
-	StoreUnavailable *ResolvePeerDeliveryStoreUnavailable `protobuf:"bytes,3,opt,name=store_unavailable,json=storeUnavailable,proto3,oneof"`
+	StoreUnavailable *ResolvePeerDeliveryStoreUnavailable `protobuf:"bytes,2,opt,name=store_unavailable,json=storeUnavailable,proto3,oneof"`
 }
-
-func (*ResolvePeerDeliveryFailure_InvalidRequest) isResolvePeerDeliveryFailure_Kind() {}
 
 func (*ResolvePeerDeliveryFailure_StoreUnavailable) isResolvePeerDeliveryFailure_Kind() {}
-
-// The request named no delivery id.
-type ResolvePeerDeliveryInvalidRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResolvePeerDeliveryInvalidRequest) Reset() {
-	*x = ResolvePeerDeliveryInvalidRequest{}
-	mi := &file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResolvePeerDeliveryInvalidRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResolvePeerDeliveryInvalidRequest) ProtoMessage() {}
-
-func (x *ResolvePeerDeliveryInvalidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResolvePeerDeliveryInvalidRequest.ProtoReflect.Descriptor instead.
-func (*ResolvePeerDeliveryInvalidRequest) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDescGZIP(), []int{5}
-}
 
 // The store could not answer.
 type ResolvePeerDeliveryStoreUnavailable struct {
@@ -430,7 +377,7 @@ type ResolvePeerDeliveryStoreUnavailable struct {
 
 func (x *ResolvePeerDeliveryStoreUnavailable) Reset() {
 	*x = ResolvePeerDeliveryStoreUnavailable{}
-	mi := &file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -442,7 +389,7 @@ func (x *ResolvePeerDeliveryStoreUnavailable) String() string {
 func (*ResolvePeerDeliveryStoreUnavailable) ProtoMessage() {}
 
 func (x *ResolvePeerDeliveryStoreUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -455,7 +402,7 @@ func (x *ResolvePeerDeliveryStoreUnavailable) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ResolvePeerDeliveryStoreUnavailable.ProtoReflect.Descriptor instead.
 func (*ResolvePeerDeliveryStoreUnavailable) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDescGZIP(), []int{6}
+	return file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDescGZIP(), []int{5}
 }
 
 var File_shim_v1_endpoint_resolve_peer_delivery_proto protoreflect.FileDescriptor
@@ -474,13 +421,11 @@ const file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDesc = "" +
 	"\asession\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x00R\asession\x12L\n" +
 	"\fnot_recorded\x18\x02 \x01(\v2'.shim.v1.ResolvePeerDeliveryNotRecordedH\x00R\vnotRecordedB\v\n" +
 	"\trecipient\" \n" +
-	"\x1eResolvePeerDeliveryNotRecorded\"\xf0\x01\n" +
+	"\x1eResolvePeerDeliveryNotRecorded\"\x99\x01\n" +
 	"\x1aResolvePeerDeliveryFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\x12U\n" +
-	"\x0finvalid_request\x18\x02 \x01(\v2*.shim.v1.ResolvePeerDeliveryInvalidRequestH\x00R\x0einvalidRequest\x12[\n" +
-	"\x11store_unavailable\x18\x03 \x01(\v2,.shim.v1.ResolvePeerDeliveryStoreUnavailableH\x00R\x10storeUnavailableB\x06\n" +
-	"\x04kind\"#\n" +
-	"!ResolvePeerDeliveryInvalidRequest\"%\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12[\n" +
+	"\x11store_unavailable\x18\x02 \x01(\v2,.shim.v1.ResolvePeerDeliveryStoreUnavailableH\x00R\x10storeUnavailableB\x06\n" +
+	"\x04kind\"%\n" +
 	"#ResolvePeerDeliveryStoreUnavailableB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
@@ -495,31 +440,29 @@ func file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_shim_v1_endpoint_resolve_peer_delivery_proto_goTypes = []any{
 	(*ResolvePeerDeliveryRequest)(nil),          // 0: shim.v1.ResolvePeerDeliveryRequest
 	(*ResolvePeerDeliveryResponse)(nil),         // 1: shim.v1.ResolvePeerDeliveryResponse
 	(*ResolvePeerDeliverySuccess)(nil),          // 2: shim.v1.ResolvePeerDeliverySuccess
 	(*ResolvePeerDeliveryNotRecorded)(nil),      // 3: shim.v1.ResolvePeerDeliveryNotRecorded
 	(*ResolvePeerDeliveryFailure)(nil),          // 4: shim.v1.ResolvePeerDeliveryFailure
-	(*ResolvePeerDeliveryInvalidRequest)(nil),   // 5: shim.v1.ResolvePeerDeliveryInvalidRequest
-	(*ResolvePeerDeliveryStoreUnavailable)(nil), // 6: shim.v1.ResolvePeerDeliveryStoreUnavailable
-	(*v1.PeerDeliveryId)(nil),                   // 7: conversation.v1.PeerDeliveryId
-	(*v1.AgentId)(nil),                          // 8: conversation.v1.AgentId
+	(*ResolvePeerDeliveryStoreUnavailable)(nil), // 5: shim.v1.ResolvePeerDeliveryStoreUnavailable
+	(*v1.PeerDeliveryId)(nil),                   // 6: conversation.v1.PeerDeliveryId
+	(*v1.AgentId)(nil),                          // 7: conversation.v1.AgentId
 }
 var file_shim_v1_endpoint_resolve_peer_delivery_proto_depIdxs = []int32{
-	7, // 0: shim.v1.ResolvePeerDeliveryRequest.delivery_id:type_name -> conversation.v1.PeerDeliveryId
+	6, // 0: shim.v1.ResolvePeerDeliveryRequest.delivery_id:type_name -> conversation.v1.PeerDeliveryId
 	2, // 1: shim.v1.ResolvePeerDeliveryResponse.success:type_name -> shim.v1.ResolvePeerDeliverySuccess
 	4, // 2: shim.v1.ResolvePeerDeliveryResponse.failure:type_name -> shim.v1.ResolvePeerDeliveryFailure
-	8, // 3: shim.v1.ResolvePeerDeliverySuccess.session:type_name -> conversation.v1.AgentId
+	7, // 3: shim.v1.ResolvePeerDeliverySuccess.session:type_name -> conversation.v1.AgentId
 	3, // 4: shim.v1.ResolvePeerDeliverySuccess.not_recorded:type_name -> shim.v1.ResolvePeerDeliveryNotRecorded
-	5, // 5: shim.v1.ResolvePeerDeliveryFailure.invalid_request:type_name -> shim.v1.ResolvePeerDeliveryInvalidRequest
-	6, // 6: shim.v1.ResolvePeerDeliveryFailure.store_unavailable:type_name -> shim.v1.ResolvePeerDeliveryStoreUnavailable
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 5: shim.v1.ResolvePeerDeliveryFailure.store_unavailable:type_name -> shim.v1.ResolvePeerDeliveryStoreUnavailable
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_resolve_peer_delivery_proto_init() }
@@ -536,7 +479,6 @@ func file_shim_v1_endpoint_resolve_peer_delivery_proto_init() {
 		(*ResolvePeerDeliverySuccess_NotRecorded)(nil),
 	}
 	file_shim_v1_endpoint_resolve_peer_delivery_proto_msgTypes[4].OneofWrappers = []any{
-		(*ResolvePeerDeliveryFailure_InvalidRequest)(nil),
 		(*ResolvePeerDeliveryFailure_StoreUnavailable)(nil),
 	}
 	type x struct{}
@@ -545,7 +487,7 @@ func file_shim_v1_endpoint_resolve_peer_delivery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDesc), len(file_shim_v1_endpoint_resolve_peer_delivery_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

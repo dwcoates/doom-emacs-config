@@ -75,6 +75,7 @@ function stubClient(overrides: Partial<StoreClient>): StoreClient {
     getLiveWork: refuse,
     getAgentByVendorTask: refuse,
     getDetachedWork: refuse,
+    getPeerRecipient: refuse,
     writeBatch: refuse,
     ...overrides,
   };
@@ -369,6 +370,7 @@ describe("liveWork", () => {
         }),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       getDetachedWork: () => Promise.reject(new Error("unused")),
+      getPeerRecipient: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -425,6 +427,7 @@ describe("liveWork", () => {
       },
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       getDetachedWork: () => Promise.reject(new Error("unused")),
+      getPeerRecipient: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -461,6 +464,7 @@ describe("liveWork", () => {
       getLiveWork: async () => create(storev1.GetLiveWorkResponseSchema, {}),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       getDetachedWork: () => Promise.reject(new Error("unused")),
+      getPeerRecipient: () => Promise.reject(new Error("unused")),
       writeBatch: async () => {
         throw new Error("unused");
       },
@@ -1258,6 +1262,7 @@ describe("liveWork against a store that cannot be reached", () => {
       getLiveWork: () => Promise.reject(new Error("connect ECONNREFUSED")),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
       getDetachedWork: () => Promise.reject(new Error("unused")),
+      getPeerRecipient: () => Promise.reject(new Error("unused")),
       writeBatch: refuse,
     };
 
@@ -1323,8 +1328,26 @@ describe("the restore of a subagent resumed by a send", () => {
   const reached = (locator: string): conversationv1.AgentSendMessage["result"] => ({
     case: "success",
     value: create(conversationv1.AgentSendMessageSuccessSchema, {
-      recipientAgentId: create(conversationv1.AgentIdSchema, { value: locator }),
+      recipient: { case: "recipientAgentId", value: create(conversationv1.AgentIdSchema, { value: locator }) },
     }),
+  });
+
+  it("reads NO recipient for a send that reached another Claude session", () => {
+    // Arrange.
+    const toPeer: conversationv1.AgentSendMessage["result"] = {
+      case: "success",
+      value: create(conversationv1.AgentSendMessageSuccessSchema, {
+        recipient: {
+          case: "peerSession",
+          value: create(conversationv1.AgentSendMessagePeerSessionSchema, {
+            deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: "m-1" }),
+          }),
+        },
+      }),
+    };
+
+    // Act, Assert.
+    expect(resumedRecipient([send(toPeer)], HANDLE)).toEqual({ kind: "no_recipient" });
   });
 
   it("reads the locator a settled send reached", () => {

@@ -487,6 +487,48 @@ function spawnOptions(): Parameters<SpawnChild>[0] {
 }
 
 describe("the vendor spawner", () => {
+  it("states the pid of a child that spawned", () => {
+    // Arrange.
+    const child = new FakeChild();
+    child.pid = 29021;
+    const spawned: number[] = [];
+    const spawner = vendorSpawner(() => undefined, undefined, () => child as never, (pid) => spawned.push(pid));
+
+    // Act.
+    spawner(spawnOptions());
+
+    // Assert.
+    expect(spawned).toEqual([29021]);
+  });
+
+  it("states no spawn for a child with no pid", () => {
+    // Arrange.
+    const child = new FakeChild();
+    const spawned: number[] = [];
+    const spawner = vendorSpawner(() => undefined, undefined, () => child as never, (pid) => spawned.push(pid));
+
+    // Act.
+    spawner(spawnOptions());
+
+    // Assert.
+    expect(spawned).toEqual([]);
+  });
+
+  it("names the ended child's pid on its exit", () => {
+    // Arrange.
+    const child = new FakeChild();
+    child.pid = 29021;
+    const seen: VendorChildExit[] = [];
+    const spawner = vendorSpawner((exit) => seen.push(exit), undefined, () => child as never);
+
+    // Act.
+    spawner(spawnOptions());
+    child.exit(0, null);
+
+    // Assert.
+    expect(seen).toEqual([{ code: 0, signal: null, pid: 29021 }]);
+  });
+
   it("reports the child's exit code", () => {
     // Arrange.
     const child = new FakeChild();

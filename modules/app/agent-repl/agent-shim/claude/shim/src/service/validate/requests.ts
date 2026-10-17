@@ -280,6 +280,17 @@ export function validateReadTranscriptsRequest(_request: shimv1.ReadTranscriptsR
   // Intentionally empty: an empty message has no illegal shape.
 }
 
+/** `shim.v1.ResolvePeerDeliveryRequest` — one delivery id, never empty. */
+export function validateResolvePeerDeliveryRequest(request: shimv1.ResolvePeerDeliveryRequest): void {
+  try {
+    if ((request.deliveryId?.value ?? "") === "") {
+      throw invalidArgument("resolve_peer_delivery.delivery_id is unset or empty; a delivery id is never the empty string");
+    }
+  } catch (err) {
+    refuse("ResolvePeerDelivery", err);
+  }
+}
+
 /** `shim.v1.ReadHistoryRequest` — whose history, and from where. */
 export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): void {
   try {

@@ -104,6 +104,7 @@ import {
 import { createReader } from "./reader.js";
 import { lookupDetachedWork, type DetachedWorkAnswer } from "./detached-work.js";
 import { lookupAgentByVendorTask, type VendorTaskAnswer } from "./locator.js";
+import { lookupPeerRecipient, type PeerRecipientAnswer } from "./peer-recipient.js";
 import { createReconciler } from "./reconcile.js";
 
 const LOGGER = bindLog({ component: "shim-store-writer", operation: "shim.store.writer" });
@@ -1255,6 +1256,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer> {
       return lookupAgentByVendorTask({ client: options.client, retry, sleep }, session, vendorTaskId);
+    },
+
+    peerRecipient(deliveryId: string): Promise<PeerRecipientAnswer> {
+      return lookupPeerRecipient({ client: options.client, retry, sleep }, deliveryId);
     },
 
     detachedWork(unit: conversationv1.AgentActivityId): Promise<DetachedWorkAnswer> {

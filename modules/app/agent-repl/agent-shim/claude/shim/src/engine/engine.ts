@@ -139,6 +139,14 @@ export interface Engine {
     request: shimv1.ReadTranscriptsRequest,
   ): Promise<shimv1.ReadTranscriptsResponse>;
 
+  /**
+   * Which session holds the delivered copy of one cross-session message, by
+   * its delivery id: the host's one store, read on the daemon's behalf.
+   */
+  resolvePeerDelivery(
+    request: shimv1.ResolvePeerDeliveryRequest,
+  ): Promise<shimv1.ResolvePeerDeliveryResponse>;
+
   // ---- Title digest ----
 
   /**
@@ -268,6 +276,10 @@ export class NotImplementedEngine implements Engine {
 
   readTranscripts(): Promise<shimv1.ReadTranscriptsResponse> {
     return Promise.reject(unimplemented("ReadTranscripts"));
+  }
+
+  resolvePeerDelivery(): Promise<shimv1.ResolvePeerDeliveryResponse> {
+    return Promise.reject(unimplemented("ResolvePeerDelivery"));
   }
 
   gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {

@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_resolve_peer_delivery.proto.
  */
 export const file_shim_v1_endpoint_resolve_peer_delivery: GenFile = /*@__PURE__*/
-  fileDesc("CixzaGltL3YxL2VuZHBvaW50X3Jlc29sdmVfcGVlcl9kZWxpdmVyeS5wcm90bxIHc2hpbS52MSJSChpSZXNvbHZlUGVlckRlbGl2ZXJ5UmVxdWVzdBI0CgtkZWxpdmVyeV9pZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5QZWVyRGVsaXZlcnlJZCKXAQobUmVzb2x2ZVBlZXJEZWxpdmVyeVJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5zaGltLnYxLlJlc29sdmVQZWVyRGVsaXZlcnlTdWNjZXNzSAASNgoHZmFpbHVyZRgCIAEoCzIjLnNoaW0udjEuUmVzb2x2ZVBlZXJEZWxpdmVyeUZhaWx1cmVIAEIICgZyZXN1bHQilwEKGlJlc29sdmVQZWVyRGVsaXZlcnlTdWNjZXNzEisKB3Nlc3Npb24YASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgAEj8KDG5vdF9yZWNvcmRlZBgCIAEoCzInLnNoaW0udjEuUmVzb2x2ZVBlZXJEZWxpdmVyeU5vdFJlY29yZGVkSABCCwoJcmVjaXBpZW50IiAKHlJlc29sdmVQZWVyRGVsaXZlcnlOb3RSZWNvcmRlZCLGAQoaUmVzb2x2ZVBlZXJEZWxpdmVyeUZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEkUKD2ludmFsaWRfcmVxdWVzdBgCIAEoCzIqLnNoaW0udjEuUmVzb2x2ZVBlZXJEZWxpdmVyeUludmFsaWRSZXF1ZXN0SAASSQoRc3RvcmVfdW5hdmFpbGFibGUYAyABKAsyLC5zaGltLnYxLlJlc29sdmVQZWVyRGVsaXZlcnlTdG9yZVVuYXZhaWxhYmxlSABCBgoEa2luZCIjCiFSZXNvbHZlUGVlckRlbGl2ZXJ5SW52YWxpZFJlcXVlc3QiJQojUmVzb2x2ZVBlZXJEZWxpdmVyeVN0b3JlVW5hdmFpbGFibGVCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent_activity]);
+  fileDesc("CixzaGltL3YxL2VuZHBvaW50X3Jlc29sdmVfcGVlcl9kZWxpdmVyeS5wcm90bxIHc2hpbS52MSJSChpSZXNvbHZlUGVlckRlbGl2ZXJ5UmVxdWVzdBI0CgtkZWxpdmVyeV9pZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5QZWVyRGVsaXZlcnlJZCKXAQobUmVzb2x2ZVBlZXJEZWxpdmVyeVJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5zaGltLnYxLlJlc29sdmVQZWVyRGVsaXZlcnlTdWNjZXNzSAASNgoHZmFpbHVyZRgCIAEoCzIjLnNoaW0udjEuUmVzb2x2ZVBlZXJEZWxpdmVyeUZhaWx1cmVIAEIICgZyZXN1bHQilwEKGlJlc29sdmVQZWVyRGVsaXZlcnlTdWNjZXNzEisKB3Nlc3Npb24YASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgAEj8KDG5vdF9yZWNvcmRlZBgCIAEoCzInLnNoaW0udjEuUmVzb2x2ZVBlZXJEZWxpdmVyeU5vdFJlY29yZGVkSABCCwoJcmVjaXBpZW50IiAKHlJlc29sdmVQZWVyRGVsaXZlcnlOb3RSZWNvcmRlZCJ/ChpSZXNvbHZlUGVlckRlbGl2ZXJ5RmFpbHVyZRIOCgZkZXRhaWwYASABKAkSSQoRc3RvcmVfdW5hdmFpbGFibGUYAiABKAsyLC5zaGltLnYxLlJlc29sdmVQZWVyRGVsaXZlcnlTdG9yZVVuYXZhaWxhYmxlSABCBgoEa2luZCIlCiNSZXNvbHZlUGVlckRlbGl2ZXJ5U3RvcmVVbmF2YWlsYWJsZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
 
 /**
  * Ask which session holds the delivered copy of one cross-session message.
@@ -33,7 +33,8 @@ export const file_shim_v1_endpoint_resolve_peer_delivery: GenFile = /*@__PURE__*
 export type ResolvePeerDeliveryRequest = Message<"shim.v1.ResolvePeerDeliveryRequest"> & {
   /**
    * REQUIRED. The delivery id, verbatim (AgentSendMessagePeerSession
-   * .delivery_id).
+   * .delivery_id). UNSET or empty is refused as an invalid argument, like
+   * every malformed shim request.
    *
    * @generated from field: conversation.v1.PeerDeliveryId delivery_id = 1;
    */
@@ -151,17 +152,9 @@ export type ResolvePeerDeliveryFailure = Message<"shim.v1.ResolvePeerDeliveryFai
    */
   kind: {
     /**
-     * The delivery id was unset or empty.
-     *
-     * @generated from field: shim.v1.ResolvePeerDeliveryInvalidRequest invalid_request = 2;
-     */
-    value: ResolvePeerDeliveryInvalidRequest;
-    case: "invalidRequest";
-  } | {
-    /**
      * The store could not be reached, or failed to read.
      *
-     * @generated from field: shim.v1.ResolvePeerDeliveryStoreUnavailable store_unavailable = 3;
+     * @generated from field: shim.v1.ResolvePeerDeliveryStoreUnavailable store_unavailable = 2;
      */
     value: ResolvePeerDeliveryStoreUnavailable;
     case: "storeUnavailable";
@@ -176,21 +169,6 @@ export const ResolvePeerDeliveryFailureSchema: GenMessage<ResolvePeerDeliveryFai
   messageDesc(file_shim_v1_endpoint_resolve_peer_delivery, 4);
 
 /**
- * The request named no delivery id.
- *
- * @generated from message shim.v1.ResolvePeerDeliveryInvalidRequest
- */
-export type ResolvePeerDeliveryInvalidRequest = Message<"shim.v1.ResolvePeerDeliveryInvalidRequest"> & {
-};
-
-/**
- * Describes the message shim.v1.ResolvePeerDeliveryInvalidRequest.
- * Use `create(ResolvePeerDeliveryInvalidRequestSchema)` to create a new message.
- */
-export const ResolvePeerDeliveryInvalidRequestSchema: GenMessage<ResolvePeerDeliveryInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_resolve_peer_delivery, 5);
-
-/**
  * The store could not answer.
  *
  * @generated from message shim.v1.ResolvePeerDeliveryStoreUnavailable
@@ -203,5 +181,5 @@ export type ResolvePeerDeliveryStoreUnavailable = Message<"shim.v1.ResolvePeerDe
  * Use `create(ResolvePeerDeliveryStoreUnavailableSchema)` to create a new message.
  */
 export const ResolvePeerDeliveryStoreUnavailableSchema: GenMessage<ResolvePeerDeliveryStoreUnavailable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_resolve_peer_delivery, 6);
+  messageDesc(file_shim_v1_endpoint_resolve_peer_delivery, 5);
 

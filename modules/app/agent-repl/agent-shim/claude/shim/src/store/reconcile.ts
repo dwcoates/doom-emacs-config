@@ -729,7 +729,10 @@ export function resumedRecipient(
   if (item?.case !== "sendMessage") return { kind: "not_a_send" };
   const result = item.value.result;
   if (result.case !== "success") return { kind: "no_recipient" };
-  const locator = result.value.recipientAgentId?.value ?? "";
+  // A SEND TO ANOTHER SESSION resumed no subagent of this one: only an agent
+  // recipient carries the locator.
+  const recipient = result.value.recipient;
+  const locator = recipient.case === "recipientAgentId" ? recipient.value.value : "";
   return locator === "" ? { kind: "no_recipient" } : { kind: "locator", vendorTaskId: locator };
 }
 

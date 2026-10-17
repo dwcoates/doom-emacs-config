@@ -35,6 +35,7 @@ import {
   validateKillTurnRequest,
   validateReadHistoryRequest,
   validateReadTranscriptsRequest,
+  validateResolvePeerDeliveryRequest,
   validateRollBackSessionRequest,
   validateSetSessionEffortRequest,
   validateSetSessionModelRequest,
@@ -330,6 +331,16 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("ReadTranscripts");
         validateReadTranscriptsRequest(request);
         return answering("ReadTranscripts", () => engine.readTranscripts(request));
+      },
+
+      /**
+       * Which session received one cross-session message. A READ of the host's
+       * one store, like ReadHistory, and answerable by any running shim.
+       */
+      async resolvePeerDelivery(request) {
+        entered("ResolvePeerDelivery");
+        validateResolvePeerDeliveryRequest(request);
+        return answering("ResolvePeerDelivery", () => engine.resolvePeerDelivery(request));
       },
 
       // ---- Title digest ----

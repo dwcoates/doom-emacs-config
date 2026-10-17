@@ -856,6 +856,7 @@ export function queryFactory(
           ...(spec.model === undefined ? {} : { model: spec.model }),
           ...(spec.onStderr === undefined ? {} : { onStderr: spec.onStderr }),
           ...(spec.onChildExit === undefined ? {} : { onChildExit: spec.onChildExit }),
+          ...(spec.onChildSpawn === undefined ? {} : { onChildSpawn: spec.onChildSpawn }),
           ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
           ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
         },

@@ -91,6 +91,8 @@ export interface StoreClient {
   getAgentByVendorTask(
     request: storev1.GetAgentByVendorTaskRequest,
   ): Promise<storev1.GetAgentByVendorTaskResponse>;
+  /** Which session holds the delivered copy of one cross-session message. */
+  getPeerRecipient(request: storev1.GetPeerRecipientRequest): Promise<storev1.GetPeerRecipientResponse>;
   /** What kind of detached work one unit left as, and whether the record holds it as ended. */
   getDetachedWork(request: storev1.GetDetachedWorkRequest): Promise<storev1.GetDetachedWorkResponse>;
   /** One batch, durable or nothing, cursor advance in the same transaction. */
@@ -151,6 +153,7 @@ export function createStoreClient(socketPath: string): StoreClient {
     getAgentByVendorTask: (request) =>
       unaryRoundTrip("GetAgentByVendorTask", () => client.getAgentByVendorTask(request)),
     getDetachedWork: (request) => unaryRoundTrip("GetDetachedWork", () => client.getDetachedWork(request)),
+    getPeerRecipient: (request) => unaryRoundTrip("GetPeerRecipient", () => client.getPeerRecipient(request)),
     writeBatch: (request) => unaryRoundTrip("WriteBatch", () => client.writeBatch(request)),
   };
 }
