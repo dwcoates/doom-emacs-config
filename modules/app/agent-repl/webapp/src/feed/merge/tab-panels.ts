@@ -91,7 +91,7 @@ export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext):
     case "rebaseCommit":
       return commitPanel(tab, view, rc);
     case "rebasing":
-      return parentPanel(tab, view, rc, (t) => drawFeedMergeTabRebasing(armOf(t, "rebasing"), `${PATH}.rebasing`), (t) =>
+      return parentPanel(tab, view, rc, (t) => drawFeedMergeTabRebasing(armOf(t, "rebasing"), `${PATH}.rebasing`, rc), (t) =>
         childTabsOf(view.rows(), t.id),
       );
     case "tests":
@@ -233,7 +233,7 @@ function parentOf(row: FeedRow): string | undefined {
  */
 function commitPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
   let shown = tab;
-  let lines = drawFeedMergeTabRebaseCommit(armOf(tab, "rebaseCommit"));
+  let lines = drawFeedMergeTabRebaseCommit(armOf(tab, "rebaseCommit"), `${PATH}.rebase_commit`);
   const conflict = armOf(tab, "rebaseCommit").conflict;
   let files: HTMLElement | null = null;
   let stream: HTMLElement | null = null;
@@ -258,7 +258,7 @@ function commitPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel
       if ((before.conflict === undefined) !== (after.conflict === undefined)) return false;
       if (before.conflict !== undefined && conflictStoppable(shown) !== conflictStoppable(next)) return false;
       if (changed) {
-        const nextLines = drawFeedMergeTabRebaseCommit(after);
+        const nextLines = drawFeedMergeTabRebaseCommit(after, `${PATH}.rebase_commit`);
         lines.replaceWith(nextLines);
         lines = nextLines;
         if (files !== null && after.conflict !== undefined && !sameFiles(before.conflict?.files ?? [], after.conflict.files)) {

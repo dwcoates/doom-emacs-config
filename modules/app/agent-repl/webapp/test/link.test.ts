@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { codeUnder } from "./files-under.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -243,6 +244,23 @@ describe("renderMergeCommitLink", () => {
       "master",
       "a1b2c3d",
     ]);
+  });
+
+  it("draws a shorter spelling while sending the commit itself", async () => {
+    const { ctx, editor } = harness();
+    const a = renderMergeCommitLink(ctx, "4f2a1c0123456789", { repositoryDir: "/r", branch: "master" }, "4f2a1c012345");
+    click(a);
+    await settle();
+    const target = editor[0].target;
+    expect([a.textContent, target.case === "commitLog" ? target.value.commit : null]).toEqual(["4f2a1c012345", "4f2a1c0123456789"]);
+  });
+
+  it("is the one place a page builds a commit_log target", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const spelling = [...codeUnder(path.join(here, "..", "src"))]
+      .filter(([, code]) => code.includes('"commitLog"'))
+      .map(([file]) => path.basename(file));
+    expect(spelling).toEqual(["link.ts"]);
   });
 
   it("warns on a refusal, naming the commit it was opening", async () => {

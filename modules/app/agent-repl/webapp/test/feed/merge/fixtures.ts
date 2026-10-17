@@ -54,6 +54,10 @@ export interface TabSpec {
   startedAtMs?: bigint;
   /** For `settled`, when it settled; `TAB_ENDED_AT_MS` unless stated. */
   endedAtMs?: bigint;
+  /**
+   * The badge's words; for a commit, its subject beside the fixture's short
+   * hash `FIXTURE_SHORT_SHA` ("fix the loop" unless stated).
+   */
   label?: string;
   round?: number;
   /** Extra kind-level fields (`queue`, `progress`, `lines`, `output`, `conflict`, …). */
@@ -61,6 +65,9 @@ export interface TabSpec {
   /** The row id of the tab this one is a subtab of. */
   parent?: string;
 }
+
+/** The short hash every fixture commit tab's label carries. */
+export const FIXTURE_SHORT_SHA = "a1b2c3d4e5f6";
 
 /** When a fixture tab's work began, unless the spec says otherwise. */
 export const TAB_STARTED_AT_MS = 1_000n;
@@ -88,7 +95,6 @@ const REQUIRED_PAYLOADS: Readonly<Record<string, Record<string, unknown>>> = {
   rebasing: { progress: { replayed: 0, total: 1 } },
   committing: { subject: { text: "Merge branch 'mine'" } },
   updatingMain: { step: { step: { case: "fetching", value: {} } } },
-  rebaseCommit: { commit: { shortSha: "a1b2c3d4e5f6", subject: "fix the loop" } },
   testsRun: { output: { suites: [] } },
   testsRunFixing: { attempt: { attempt: 1, maxAttempts: 3 } },
 };
@@ -126,7 +132,13 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
     row: {
       case: "mergeTab",
       value: create(FeedMergeTabSchema, {
-        label: { text: spec.label ?? spec.kind, round: spec.round ?? 1 },
+        label: {
+          words:
+            spec.kind === "rebaseCommit"
+              ? { case: "commit", value: { shortSha: FIXTURE_SHORT_SHA, subject: spec.label ?? "fix the loop" } }
+              : { case: "text", value: spec.label ?? spec.kind },
+          round: spec.round ?? 1,
+        },
         kind: {
           case: spec.kind,
           value: { state, ...payload },

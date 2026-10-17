@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  FeedMergeTabLabelSchema,
   FeedMergeTabSchema,
   FeedMergeTabSettledSchema,
   FeedRowSchema,
@@ -26,6 +27,7 @@ import {
 import { oneofArms } from "../../arms.js";
 import { TAB_STARTED_AT_MS, id, tabRow } from "./fixtures.js";
 import { orderFor } from "../../feed-order.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 /** The shared clock the badges tick on, stepped by each test's fake timers. */
 let TICKER = createTicker(1000);
@@ -125,7 +127,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
     const row = create(FeedRowSchema, {
       id: id("t1"),
       order: orderFor("t1"),
-      row: { case: "mergeTab", value: create(FeedMergeTabSchema, { label: { text: "x" } }) },
+      row: { case: "mergeTab", value: create(FeedMergeTabSchema, { label: { words: { case: "text", value: "x" } } }) },
     });
     expect(() => childTabsOf([row], undefined)).toThrow(MalformedView);
   });
@@ -137,7 +139,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
       row: {
         case: "mergeTab",
         value: create(FeedMergeTabSchema, {
-          label: { text: "x" },
+          label: { words: { case: "text", value: "x" } },
           kind: { case: "tests", value: {} },
         }),
       },
@@ -152,7 +154,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
       row: {
         case: "mergeTab",
         value: create(FeedMergeTabSchema, {
-          label: { text: "x" },
+          label: { words: { case: "text", value: "x" } },
           kind: { case: "tests", value: { state: { case: "settled", value: {} } } },
         }),
       },
@@ -163,21 +165,102 @@ describe("readMergeTab: the arms are read from the contract", () => {
 
 describe("drawFeedMergeTabLabel: rounds beyond the first", () => {
   it("decorates a second round with its number", () => {
-    const el = drawFeedMergeTabLabel({
-      $typeName: "frontend.v1.FeedMergeTabLabel",
-      text: "tests",
-      round: 2,
-    });
+    const el = drawFeedMergeTabLabel(create(FeedMergeTabLabelSchema, { words: { case: "text", value: "tests" }, round: 2 }));
     expect(el.textContent).toBe("tests (2)");
   });
 
   it("draws round 1 undecorated, so an ordinary run never reads as a retry", () => {
-    const el = drawFeedMergeTabLabel({
-      $typeName: "frontend.v1.FeedMergeTabLabel",
-      text: "tests",
-      round: 1,
-    });
+    const el = drawFeedMergeTabLabel(create(FeedMergeTabLabelSchema, { words: { case: "text", value: "tests" }, round: 1 }));
     expect(el.textContent).toBe("tests");
+  });
+});
+
+describe("drawFeedMergeTabLabel: a replayed commit", () => {
+  const commitLabel = (round: number) =>
+    drawFeedMergeTabLabel(
+      create(FeedMergeTabLabelSchema, {
+        words: { case: "commit", value: { shortSha: "a1b2c3d4e5f6", subject: "fix the loop" } },
+        round,
+      }),
+    );
+
+  it("draws the short hash and the subject as two parts", () => {
+    const el = commitLabel(1);
+    expect([el.querySelector(".merge-tab-sha")?.textContent, el.querySelector(".merge-tab-subject")?.textContent]).toEqual([
+      "a1b2c3d4e5f6",
+      "fix the loop",
+    ]);
+  });
+
+  it("reads as the hash, the subject and a later replay's round", () => {
+    expect(commitLabel(2).textContent).toBe("a1b2c3d4e5f6 fix the loop (2)");
+  });
+
+  it("refuses a label with no words", () => {
+    expect(() => drawFeedMergeTabLabel(create(FeedMergeTabLabelSchema, { round: 1 }))).toThrow(MalformedView);
+  });
+});
+
+describe("the badge's paint", () => {
+  /** A drawn tab of SPEC, in the page with the stylesheet. */
+  function painted(spec: Parameters<typeof tabRow>[1]) {
+    const teardownCss = installStylesheet();
+    const [tab] = childTabsOf([tabRow("t1", spec)], undefined);
+    const el = drawFeedMergeTab(tab!, { active: false, ticker: createTicker(1000) });
+    document.body.append(el);
+    return {
+      el,
+      teardown: () => {
+        el.remove();
+        teardownCss();
+      },
+    };
+  }
+
+  it("draws a commit's short hash at the duration's size, in a grey darker than the muted text", () => {
+    const { el, teardown } = painted({ kind: "rebaseCommit", state: "live" });
+    try {
+      const sha = el.querySelector<HTMLElement>(".merge-tab-sha")!;
+      expect([cascadedValue(sha, "font-size"), cascadedValue(sha, "color")]).toEqual([
+        cascadedValue(el.querySelector<HTMLElement>(".merge-tab-duration")!, "font-size"),
+        "color-mix(in srgb, var(--muted) 80%, black)",
+      ]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("leaves a commit's subject in the badge's own color", () => {
+    const { el, teardown } = painted({ kind: "rebaseCommit", state: "live" });
+    try {
+      expect(cascadedValue(el.querySelector<HTMLElement>(".merge-tab-subject")!, "color")).toBe(cascadedValue(el, "color"));
+    } finally {
+      teardown();
+    }
+  });
+
+  it.each([
+    ["live", { kind: "tests", state: "live" }],
+    ["in line for its turn", { kind: "testsRun", state: "waitingForTurn" }],
+  ] as const)("draws a %s tab's dot at 70%% of the badge's size", (_name, spec) => {
+    const { el, teardown } = painted(spec);
+    try {
+      expect(cascadedValue(el.querySelector<HTMLElement>(".merge-tab-glyph")!, "font-size")).toBe("0.7em");
+    } finally {
+      teardown();
+    }
+  });
+
+  it.each([
+    ["succeeded", { kind: "tests", state: "settled", outcome: "succeeded" }],
+    ["failed", { kind: "tests", state: "settled", outcome: "failed" }],
+  ] as const)("keeps a %s tab's mark at the badge's size", (_name, spec) => {
+    const { el, teardown } = painted(spec);
+    try {
+      expect(cascadedValue(el.querySelector<HTMLElement>(".merge-tab-glyph")!, "font-size")).toBe(cascadedValue(el, "font-size"));
+    } finally {
+      teardown();
+    }
   });
 });
 

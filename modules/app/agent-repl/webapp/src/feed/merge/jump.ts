@@ -8,7 +8,11 @@
  * THE CLICKED ELEMENT, with the four cross-cutting causes worded by the shared
  * `crossCuttingSentence` so a transferring daemon reads the same here as it
  * does in the rail. A merge queue entry and a merge workspace's switch are the
- * two jumps; each names itself through its `JumpSite`.
+ * two jumps; each names itself through its `JumpSite`. A replay header's
+ * target is a third, and it OPENS the workspace first (`openAndJumpToWorkspace`):
+ * the target checkout's workspace may be closed, and selecting a closed
+ * workspace brings nothing up. An open of a workspace already up reconciles
+ * and starts nothing.
  *
  * A MALFORMED VIEW IS NOT A TRANSPORT FAILURE and travels up loudly rather
  * than being drawn as "could not be reached", which would state the wrong
@@ -22,6 +26,12 @@ import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../rpc/refusal.js";
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
 import {
+  OpenWorkspaceRequestSchema,
+  OpenWorkspaceResponseSchema,
+  type OpenWorkspaceError,
+  type OpenWorkspaceResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import {
   SelectWorkspaceRequestSchema,
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceResponse,
@@ -30,6 +40,7 @@ import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspa
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { childrenMatching } from "../../dom.js";
+import { openWorkspaceRefusal } from "../../sidebar/verbs.js";
 
 /** Where one kind of jump is recorded and how its refusal is drawn. */
 export interface JumpSite {
@@ -88,6 +99,50 @@ export async function jumpToWorkspace(
     }
     default:
       return unreachableArm("SelectWorkspaceResponse.result", armName(result));
+  }
+}
+
+/**
+ * Open WORKSPACE from HOST, then select it (`jumpToWorkspace`), drawing a
+ * refusal of either inside HOST. A refused open selects nothing.
+ */
+export async function openAndJumpToWorkspace(
+  host: HTMLElement,
+  rc: RowContext,
+  workspace: WorkspaceRef,
+  site: JumpSite,
+): Promise<void> {
+  for (const stale of childrenMatching(host, `.${site.refusalClass}`)) stale.remove();
+  log.info(`opening a workspace from ${site.describe}`, {
+    operation: `${site.operation}-open`,
+    context: { workspace: workspace.id },
+  });
+  let response: OpenWorkspaceResponse;
+  try {
+    response = await callUnary(
+      rc.ctx,
+      "OpenWorkspace",
+      (client) => client.openWorkspace(create(OpenWorkspaceRequestSchema, { workspace })),
+      OpenWorkspaceResponseSchema,
+    );
+  } catch (err) {
+    refuseTransport(host, site, "OpenWorkspace", workspace, err);
+    return;
+  }
+  const result = requireCase(response.result, "OpenWorkspaceResponse.result");
+  switch (result.case) {
+    case "success":
+      return jumpToWorkspace(host, rc, workspace, site);
+    case "error": {
+      const cause = requireCase(result.value.cause, "OpenWorkspaceError.cause");
+      const sentence =
+        crossCuttingSentence("OpenWorkspace", cause) ??
+        openWorkspaceRefusal(cause as NonNullable<OpenWorkspaceError["cause"]> & { case: string });
+      refuse(host, site, "OpenWorkspace", workspace, cause.case, sentence);
+      return;
+    }
+    default:
+      return unreachableArm("OpenWorkspaceResponse.result", armName(result));
   }
 }
 

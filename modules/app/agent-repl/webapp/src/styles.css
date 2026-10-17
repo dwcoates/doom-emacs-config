@@ -7850,6 +7850,19 @@ ar-button.outcome-marker-pill {
   font-variant-numeric: tabular-nums;
 }
 .merge-tab-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
+/* A TAB'S DOT, live or in line for its turn, at 70% of the badge's size
+   (owner request, 2026-10-17); the check, the cross and the question mark
+   keep the badge's size. */
+.merge-tab-glyph.is-live,
+.merge-tab-glyph.is-waiting-for-turn { font-size: 0.7em; }
+/* A replayed commit's badge (tab-strip.ts): its short hash at the duration's
+   size, in a darker grey than the duration, beside a subject in the badge's
+   own color. */
+.merge-tab-sha {
+  color: color-mix(in srgb, var(--muted) 80%, black);
+  font-size: 0.85em;
+  font-family: var(--mono, monospace);
+}
 /* HOLLOWED OUT FOR DONE: a settled success should recede, not compete with
    the live tab for attention. */
 .merge-tab-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
@@ -8106,6 +8119,12 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 
 /* The merge commit's narration lines. */
 .merge-line { padding: 0.1rem 0; color: var(--muted); }
+/* The replay header (step-tabs.ts): the branch and the target in the merge
+   purple; the target, when its checkout is a workspace, underlined and a
+   switch to it. The tip is the shared commit link (.merge-commit-link). */
+.merge-replaying .merge-ref { color: var(--blocked); }
+.merge-replaying-target-link { text-decoration: underline; cursor: pointer; }
+.merge-replay-target-refusal { color: var(--err); font-size: 0.85em; }
 
 /* ---- searched paths under a sidebar refusal (src/sidebar/verbs.ts) ---- */
 /* `transcript_missing` names the places the daemon looked. They are paths, so

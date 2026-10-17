@@ -778,7 +778,7 @@ export function mergeTabRow(id: string, label = "queue"): FeedRow {
     row: {
       case: "mergeTab",
       value: {
-        label: { text: label, round: 1 },
+        label: { words: { case: "text", value: label }, round: 1 },
         kind: { case: "queue", value: { state: { case: "live", value: {} } } },
       },
     },

@@ -102,7 +102,13 @@ function entry(
     label: { text: name },
     status:
       status.case === "merging"
-        ? { case: "merging", value: { activeTab: status.activeTab, stageEnteredAtMs } }
+        ? {
+            case: "merging",
+            value: {
+              activeTab: { words: { case: "text", value: status.activeTab.text }, round: status.activeTab.round },
+              stageEnteredAtMs,
+            },
+          }
         : { case: "waiting", value: { stageEnteredAtMs } },
   });
 }

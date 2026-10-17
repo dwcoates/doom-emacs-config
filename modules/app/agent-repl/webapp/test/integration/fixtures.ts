@@ -1390,7 +1390,7 @@ const mergeTabKindValue = (
               label: { text: "ws-1" },
               status: {
                 case: "merging",
-                value: { activeTab: { text: "tests", round: 1 }, stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS },
+                value: { activeTab: { words: { case: "text", value: "tests" }, round: 1 }, stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS },
               },
             },
             behind: [
@@ -1409,7 +1409,22 @@ const mergeTabKindValue = (
         value: {
           state: agenticState(state),
           progress: { replayed: 3, total: 7 },
-          lines: [{ text: "replaying 2/7 · tidy the queue" }, { text: "replaying 3/7 · fix the reconnect loop" }],
+          lines: [
+            {
+              line: {
+                case: "replaying",
+                value: {
+                  commits: 7,
+                  branch: "ws-1",
+                  target: { branch: "master", repositoryDir: "/r/main", workspace: workspaceRef("ws-main") },
+                  tip: "4f2a1c9000000000",
+                  tipShortSha: "4f2a1c900000",
+                },
+              },
+            },
+            { line: { case: "text", value: "replaying 2/7 · tidy the queue" } },
+            { line: { case: "text", value: "replaying 3/7 · fix the reconnect loop" } },
+          ],
         },
       };
     case "committing":
@@ -1430,8 +1445,7 @@ const mergeTabKindValue = (
         case: "rebaseCommit",
         value: {
           state: state === "pending" ? { case: "pending" as const, value: {} } : agenticState(state),
-          commit: { shortSha: "a1b2c3d4e5f6", subject: "fix the reconnect loop" },
-          lines: [{ text: "conflicted in 2 file(s)" }],
+          lines: [{ line: { case: "text", value: "conflicted in 2 file(s)" } }],
           conflict: {
             state: agenticState(state === "pending" ? "live" : state),
             files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }],
@@ -1497,7 +1511,13 @@ export const mergeTabRow = (
     {
       case: "mergeTab",
       value: {
-        label: { text: kind, round: kind === "committing" ? 2 : 1 },
+        label: {
+          words:
+            kind === "rebaseCommit"
+              ? { case: "commit", value: { shortSha: "a1b2c3d4e5f6", subject: "fix the reconnect loop" } }
+              : { case: "text", value: kind },
+          round: kind === "committing" ? 2 : 1,
+        },
         kind: mergeTabKindValue(kind, state),
       },
     },

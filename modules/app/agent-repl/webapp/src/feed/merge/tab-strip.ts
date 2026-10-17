@@ -35,7 +35,7 @@ import { repaintMark } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
 import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
-import { msOf, requireCase, requireMessage } from "../../rpc/strict.js";
+import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { stopTicking } from "../ticking.js";
 import { drawFeedMergeTestsRunTally, updateFeedMergeTestsRunTally } from "./tests-tab.js";
 import type {
@@ -300,7 +300,9 @@ export function drawTabDuration(tab: MergeTab, ticker: Ticker): HTMLElement {
 }
 
 /**
- * The tab's drawn word, plus its round when it is not the first.
+ * The tab's drawn words, plus its round when it is not the first. A replayed
+ * commit's label is its short hash, drawn smaller and in a darker grey, then
+ * its subject.
  *
  * ROUND 1 DRAWS NOTHING: the first pass through a phase is just "tests", and
  * decorating it would make an ordinary run look like a retry.
@@ -308,7 +310,27 @@ export function drawTabDuration(tab: MergeTab, ticker: Ticker): HTMLElement {
 export function drawFeedMergeTabLabel(label: FeedMergeTabLabel): HTMLElement {
   const el = document.createElement("span");
   el.className = "merge-tab-label";
-  el.textContent = label.round > 1 ? `${label.text} (${label.round})` : label.text;
+  const words = requireCase(label.words, `${PATH}.label.words`);
+  switch (words.case) {
+    case "text":
+      el.textContent = words.value;
+      break;
+    case "commit": {
+      const sha = document.createElement("span");
+      sha.className = "merge-tab-sha";
+      sha.textContent = words.value.shortSha;
+      const subject = document.createElement("span");
+      subject.className = "merge-tab-subject";
+      subject.textContent = words.value.subject;
+      el.append(sha, " ", subject);
+      break;
+    }
+    default: {
+      const other: { case: string } = words;
+      return unreachableArm(`${PATH}.label.words`, other.case);
+    }
+  }
+  if (label.round > 1) el.append(` (${label.round})`);
   return el;
 }
 
