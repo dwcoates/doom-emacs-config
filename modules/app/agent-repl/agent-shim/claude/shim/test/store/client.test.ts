@@ -49,6 +49,7 @@ describe("createStoreClient", () => {
       "getAgentByVendorTask",
       "getDetachedWork",
       "getLiveWork",
+      "getPeerDelivery",
       "getSidecarCursors",
       "getWorkflow",
       "openAgentSession",
