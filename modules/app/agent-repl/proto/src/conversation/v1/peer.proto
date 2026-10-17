@@ -43,18 +43,42 @@ message PeerMessage {
   // so the live row and the adopted row for one message supersede each other on
   // ONE bubble rather than drawing two. Echoed, never parsed.
   string id = 4;
-  // WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record
-  // (`origin.handback`). A consumer draws the two differently: an inter-session
-  // message is an aside worth reading in place, while a hand-back's report is
-  // the returning subagent's result and belongs with that subagent. UNSET when
-  // the producer did not state the kind; a consumer treats it as an
-  // inter-session message.
+  // WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record:
+  // `origin.handback` marks a hand-back, and `origin.senderTaskId` marks a
+  // message an agent of THIS session sent (it is absent for another session's).
+  // A consumer draws them differently: a message from another agent is an
+  // aside worth reading in place, while a hand-back's report is the returning
+  // subagent's result and belongs with that subagent. UNSET when the producer
+  // did not state the kind; a consumer treats it as an inter-session message.
   oneof kind {
     // Another Claude session sent this agent a message.
     PeerMessageInterSession inter_session = 5;
     // A subagent this agent started handed its final report back.
     PeerMessageSubagentHandback subagent_handback = 6;
+    // An agent of this same session (a subagent, to its lead or to a sibling)
+    // sent this agent a message.
+    PeerMessageInSession in_session = 7;
   }
+}
+
+// An agent of this same session sent this agent a message.
+//
+// THE SENDER IS STATED AS THE VENDOR STATES IT: by the vendor's task id for the
+// sending subagent (its `origin.senderTaskId`, stamped by the vendor from the
+// sending loop), which is the subagent's LOCATOR (the `<id>` of
+// `agent-<id>.jsonl`), not its AgentId. A consumer names the agent by asking
+// the record which agent of the session the locator names
+// (shim.v1.ResolveVendorTask).
+message PeerMessageInSession {
+  // The sending subagent's vendor task id.
+  PeerMessageSenderTask sender_task = 1;
+}
+
+// The vendor's task id for the agent that sent a message.
+message PeerMessageSenderTask {
+  // The task id verbatim. Never empty. Opaque: compared and looked up, never
+  // parsed.
+  string vendor_task_id = 1;
 }
 
 // Another Claude session sent this agent a message.

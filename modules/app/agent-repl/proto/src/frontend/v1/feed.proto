@@ -312,12 +312,13 @@ message FeedRow {
     // daemon REMOVES it (the `removed` arm) once the walk has loaded every
     // step between the prompt and the rows below it.
     FeedTurnEarlierSteps earlier_steps = 24;
-    // A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message. It is
-    // NOT a prompt: it is a low-priority, abbreviated aside, drawn
-    // RIGHT-ALIGNED (the prompt side) but PURPLE rather than the blue prompt
-    // fill, COLLAPSED to the sender's label and a chevron, and expandable to
-    // reveal the body. See FeedPeerMessage. A subagent's hand-back is NOT
-    // drawn here: it is `subagent_handback`.
+    // A MESSAGE FROM ANOTHER AGENT — another Claude session's, or one from
+    // an agent of this session. It is NOT a prompt: it is a low-priority,
+    // abbreviated aside, drawn RIGHT-ALIGNED (the prompt side) but PURPLE
+    // rather than the blue prompt fill, with no border, COLLAPSED to its
+    // header (a left arrow and the sender's name), and expandable to reveal
+    // the body. See FeedPeerMessage. A subagent's hand-back is NOT drawn here:
+    // it is `subagent_handback`.
     FeedPeerMessage peer_message = 19;
     // A SUBAGENT REPORTED BACK: a small inline badge marking where in the
     // conversation a subagent's hand-back reached this agent. Never a bubble
@@ -410,8 +411,9 @@ message FeedRowOrder {
 // carries a new key with this unset.
 message FeedRowOrderPinned {}
 
-// A message another Claude session sent into this conversation: an
-// inter-session peer message. The client
+// A message another agent sent into this conversation: another Claude
+// session's, or one from an agent of this session (a subagent to its lead or
+// a sibling). The client
 // draws it as a distinct, abbreviated, expandable bubble — right-aligned like a
 // prompt but purple, not blue, and with NO border: its header alone marks it as
 // a message from another agent — whose COLLAPSED form is just the sender header
@@ -455,8 +457,31 @@ message FeedPeerMessageFrom {
     // sender stated no session name, so `name` is the daemon's generic
     // stand-in for another session.
     FeedPeerMessageFromUnnamed unnamed = 4;
+    // An agent of THIS session sent it (a subagent, to its lead or to a
+    // sibling). See FeedPeerMessageFromAgent for what `name` is.
+    FeedPeerMessageFromAgent agent = 5;
   }
 }
+// The sender is an agent of this session: WHAT `name` IS.
+message FeedPeerMessageFromAgent {
+  // THE ARM IS WHAT THE NAME IS.
+  oneof identity {
+    // A subagent spawned with a name; `name` is its requested name.
+    FeedPeerMessageFromAgentNamed named = 1;
+    // A subagent spawned with no name; `name` is its identifier.
+    FeedPeerMessageFromAgentIdentified identified = 2;
+    // The record does not yet say which agent sent it; `name` is the vendor's
+    // task id for the sender. The daemon redraws the row in place, as `named`
+    // or `identified`, once the record names the agent.
+    FeedPeerMessageFromAgentUnresolved unresolved = 3;
+  }
+}
+// A subagent named by its requested name.
+message FeedPeerMessageFromAgentNamed {}
+// A subagent with no name, named by its identifier.
+message FeedPeerMessageFromAgentIdentified {}
+// A sender the record does not yet name, named by the vendor's task id.
+message FeedPeerMessageFromAgentUnresolved {}
 // The sender's name element.
 message FeedPeerMessageFromName {
   // Drawn verbatim. Never empty.

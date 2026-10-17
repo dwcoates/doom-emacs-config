@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/peer.proto.
  */
 export const file_conversation_v1_peer: GenFile = /*@__PURE__*/
-  fileDesc("Chpjb252ZXJzYXRpb24vdjEvcGVlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIvYBCgtQZWVyTWVzc2FnZRInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEg4KBnNlbmRlchgCIAEoCRIMCgRib2R5GAMgASgJEgoKAmlkGAQgASgJEkEKDWludGVyX3Nlc3Npb24YBSABKAsyKC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VJbnRlclNlc3Npb25IABJJChFzdWJhZ2VudF9oYW5kYmFjaxgGIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVN1YmFnZW50SGFuZGJhY2tIAEIGCgRraW5kIs0BChdQZWVyTWVzc2FnZUludGVyU2Vzc2lvbhJPChNzZW5kZXJfc2Vzc2lvbl9uYW1lGAEgASgLMi0uY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlU2VuZGVyU2Vzc2lvbk5hbWVIAIgBARI5CgtkZWxpdmVyeV9pZBgCIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5QZWVyRGVsaXZlcnlJZEgBiAEBQhYKFF9zZW5kZXJfc2Vzc2lvbl9uYW1lQg4KDF9kZWxpdmVyeV9pZCIsChxQZWVyTWVzc2FnZVNlbmRlclNlc3Npb25OYW1lEgwKBHRleHQYASABKAkiHQobUGVlck1lc3NhZ2VTdWJhZ2VudEhhbmRiYWNrQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
+  fileDesc("Chpjb252ZXJzYXRpb24vdjEvcGVlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIrMCCgtQZWVyTWVzc2FnZRInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEg4KBnNlbmRlchgCIAEoCRIMCgRib2R5GAMgASgJEgoKAmlkGAQgASgJEkEKDWludGVyX3Nlc3Npb24YBSABKAsyKC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VJbnRlclNlc3Npb25IABJJChFzdWJhZ2VudF9oYW5kYmFjaxgGIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVN1YmFnZW50SGFuZGJhY2tIABI7Cgppbl9zZXNzaW9uGAcgASgLMiUuY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlSW5TZXNzaW9uSABCBgoEa2luZCJTChRQZWVyTWVzc2FnZUluU2Vzc2lvbhI7CgtzZW5kZXJfdGFzaxgBIAEoCzImLmNvbnZlcnNhdGlvbi52MS5QZWVyTWVzc2FnZVNlbmRlclRhc2siLwoVUGVlck1lc3NhZ2VTZW5kZXJUYXNrEhYKDnZlbmRvcl90YXNrX2lkGAEgASgJIs0BChdQZWVyTWVzc2FnZUludGVyU2Vzc2lvbhJPChNzZW5kZXJfc2Vzc2lvbl9uYW1lGAEgASgLMi0uY29udmVyc2F0aW9uLnYxLlBlZXJNZXNzYWdlU2VuZGVyU2Vzc2lvbk5hbWVIAIgBARI5CgtkZWxpdmVyeV9pZBgCIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5QZWVyRGVsaXZlcnlJZEgBiAEBQhYKFF9zZW5kZXJfc2Vzc2lvbl9uYW1lQg4KDF9kZWxpdmVyeV9pZCIsChxQZWVyTWVzc2FnZVNlbmRlclNlc3Npb25OYW1lEgwKBHRleHQYASABKAkiHQobUGVlck1lc3NhZ2VTdWJhZ2VudEhhbmRiYWNrQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
 
 /**
  * A message another Claude session (a peer, or a returning subagent) sent into
@@ -76,12 +76,13 @@ export type PeerMessage = Message<"conversation.v1.PeerMessage"> & {
   id: string;
 
   /**
-   * WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record
-   * (`origin.handback`). A consumer draws the two differently: an inter-session
-   * message is an aside worth reading in place, while a hand-back's report is
-   * the returning subagent's result and belongs with that subagent. UNSET when
-   * the producer did not state the kind; a consumer treats it as an
-   * inter-session message.
+   * WHAT KIND OF MESSAGE this is, from the vendor's own marking of the record:
+   * `origin.handback` marks a hand-back, and `origin.senderTaskId` marks a
+   * message an agent of THIS session sent (it is absent for another session's).
+   * A consumer draws them differently: a message from another agent is an
+   * aside worth reading in place, while a hand-back's report is the returning
+   * subagent's result and belongs with that subagent. UNSET when the producer
+   * did not state the kind; a consumer treats it as an inter-session message.
    *
    * @generated from oneof conversation.v1.PeerMessage.kind
    */
@@ -101,6 +102,15 @@ export type PeerMessage = Message<"conversation.v1.PeerMessage"> & {
      */
     value: PeerMessageSubagentHandback;
     case: "subagentHandback";
+  } | {
+    /**
+     * An agent of this same session (a subagent, to its lead or to a sibling)
+     * sent this agent a message.
+     *
+     * @generated from field: conversation.v1.PeerMessageInSession in_session = 7;
+     */
+    value: PeerMessageInSession;
+    case: "inSession";
   } | { case: undefined; value?: undefined };
 };
 
@@ -110,6 +120,56 @@ export type PeerMessage = Message<"conversation.v1.PeerMessage"> & {
  */
 export const PeerMessageSchema: GenMessage<PeerMessage> = /*@__PURE__*/
   messageDesc(file_conversation_v1_peer, 0);
+
+/**
+ * An agent of this same session sent this agent a message.
+ *
+ * THE SENDER IS STATED AS THE VENDOR STATES IT: by the vendor's task id for the
+ * sending subagent (its `origin.senderTaskId`, stamped by the vendor from the
+ * sending loop), which is the subagent's LOCATOR (the `<id>` of
+ * `agent-<id>.jsonl`), not its AgentId. A consumer names the agent by asking
+ * the record which agent of the session the locator names
+ * (shim.v1.ResolveVendorTask).
+ *
+ * @generated from message conversation.v1.PeerMessageInSession
+ */
+export type PeerMessageInSession = Message<"conversation.v1.PeerMessageInSession"> & {
+  /**
+   * The sending subagent's vendor task id.
+   *
+   * @generated from field: conversation.v1.PeerMessageSenderTask sender_task = 1;
+   */
+  senderTask?: PeerMessageSenderTask | undefined;
+};
+
+/**
+ * Describes the message conversation.v1.PeerMessageInSession.
+ * Use `create(PeerMessageInSessionSchema)` to create a new message.
+ */
+export const PeerMessageInSessionSchema: GenMessage<PeerMessageInSession> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_peer, 1);
+
+/**
+ * The vendor's task id for the agent that sent a message.
+ *
+ * @generated from message conversation.v1.PeerMessageSenderTask
+ */
+export type PeerMessageSenderTask = Message<"conversation.v1.PeerMessageSenderTask"> & {
+  /**
+   * The task id verbatim. Never empty. Opaque: compared and looked up, never
+   * parsed.
+   *
+   * @generated from field: string vendor_task_id = 1;
+   */
+  vendorTaskId: string;
+};
+
+/**
+ * Describes the message conversation.v1.PeerMessageSenderTask.
+ * Use `create(PeerMessageSenderTaskSchema)` to create a new message.
+ */
+export const PeerMessageSenderTaskSchema: GenMessage<PeerMessageSenderTask> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_peer, 2);
 
 /**
  * Another Claude session sent this agent a message.
@@ -149,7 +209,7 @@ export type PeerMessageInterSession = Message<"conversation.v1.PeerMessageInterS
  * Use `create(PeerMessageInterSessionSchema)` to create a new message.
  */
 export const PeerMessageInterSessionSchema: GenMessage<PeerMessageInterSession> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_peer, 1);
+  messageDesc(file_conversation_v1_peer, 3);
 
 /**
  * The sender's asserted display name.
@@ -170,7 +230,7 @@ export type PeerMessageSenderSessionName = Message<"conversation.v1.PeerMessageS
  * Use `create(PeerMessageSenderSessionNameSchema)` to create a new message.
  */
 export const PeerMessageSenderSessionNameSchema: GenMessage<PeerMessageSenderSessionName> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_peer, 2);
+  messageDesc(file_conversation_v1_peer, 4);
 
 /**
  * A subagent this agent started handed its final report back. The report is
@@ -187,5 +247,5 @@ export type PeerMessageSubagentHandback = Message<"conversation.v1.PeerMessageSu
  * Use `create(PeerMessageSubagentHandbackSchema)` to create a new message.
  */
 export const PeerMessageSubagentHandbackSchema: GenMessage<PeerMessageSubagentHandback> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_peer, 3);
+  messageDesc(file_conversation_v1_peer, 5);
 
