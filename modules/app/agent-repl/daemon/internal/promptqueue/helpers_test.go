@@ -1529,6 +1529,7 @@ type harness struct {
 	feed    *fakeFeed
 	footer  *fakeFooter
 	sidebar *fakeSidebar
+	edges   *fakeEdges
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	drain   *noteRecorder
@@ -1584,6 +1585,7 @@ func newHarness(t *testing.T) *harness {
 		feed:    &fakeFeed{},
 		footer:  &fakeFooter{},
 		sidebar: &fakeSidebar{},
+		edges:   &fakeEdges{},
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
@@ -1605,6 +1607,7 @@ func newHarness(t *testing.T) *harness {
 		Feed:    h.feed,
 		Footer:  h.footer,
 		Sidebar: h.sidebar,
+		Edges:   h.edges,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(context.Context, ids.WorkspaceID) error {
@@ -1727,3 +1730,25 @@ func userSaidWithImage(text, path string) *conversationv1.UserSaid {
 // idsTurn spells a turn id in tests, so a subject reads as prose rather than as
 // a conversion.
 func idsTurn(v string) ids.TurnID { return ids.TurnID(v) }
+
+// fakeEdges records every turn edge, as "<edge>:<workspace>".
+type fakeEdges struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (e *fakeEdges) TurnStarted(ws ids.WorkspaceID) { e.record("started:" + string(ws)) }
+func (e *fakeEdges) TurnEnded(ws ids.WorkspaceID)   { e.record("ended:" + string(ws)) }
+
+func (e *fakeEdges) record(edge string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.got = append(e.got, edge)
+}
+
+// edgesTold answers every turn edge told so far.
+func (e *fakeEdges) edgesTold() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.got...)
+}

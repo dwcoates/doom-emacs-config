@@ -948,6 +948,13 @@ func (s *mergeSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId,
 	s.rec.emit(event{sink: "merge", method: "OnQuestion", agent: agent.GetValue()})
 }
 
+// asksSink records each live ask edge.
+type asksSink struct{ rec *recorder }
+
+func (s *asksSink) NeedsInput(ids.WorkspaceID) {
+	s.rec.emit(event{sink: "asks", method: "NeedsInput"})
+}
+
 // mergeSinkOf binds a merge sink to the recorder, or answers no sink at all
 // (a nil interface, not a typed nil) when none was asked for.
 func mergeSinkOf(merge *mergeSink, rec *recorder) MergeSink {
@@ -1242,6 +1249,7 @@ func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), st
 		Stalls:       stalls,
 		Measurements: h.measurementsSink(),
 		Clock:        h.clock,
+		Asks:         &asksSink{rec: h.rec},
 	}, h.log)
 	if err != nil {
 		t.Fatalf("Start: %v", err)

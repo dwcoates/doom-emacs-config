@@ -373,6 +373,7 @@ func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause erro
 func (q *queue) ackTurn(ws ids.WorkspaceID) {
 	q.deps.Footer.AckTurn(ws)
 	q.deps.Sidebar.AckTurn(ws)
+	q.deps.Edges.TurnStarted(ws)
 }
 
 // setTurn tells both status surfaces the turn the daemon accepted, nil when

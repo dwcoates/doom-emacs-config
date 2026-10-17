@@ -44,6 +44,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		q.onFolded(ctx, ws, turn, log)
 		return
 	}
+	q.deps.Edges.TurnEnded(ws)
 
 	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
 	// and the handover's quiesce arrive together, and both deliver from the

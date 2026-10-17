@@ -139,7 +139,7 @@ func TestRouteQuestion(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", questionUpdate("q-1", "Pick a branch", "Which branch should I cut from?"))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnQuestion", "footer.OnQuestion", "lifecycle.OnNotification"})
+	assertNames(t, got, []string{"feed.OnQuestion", "footer.OnQuestion", "lifecycle.OnNotification", "asks.NeedsInput"})
 	note := requireEvent(t, got, "lifecycle.OnNotification").note
 	if note.Kind != NotificationQuestionAsked {
 		t.Fatalf("notification kind = %q, want %q", note.Kind, NotificationQuestionAsked)
@@ -179,7 +179,7 @@ func TestRoutePermission(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnPermission", "footer.OnPermission", "sidebar.OnPermission", "lifecycle.OnNotification"})
+	assertNames(t, got, []string{"feed.OnPermission", "footer.OnPermission", "sidebar.OnPermission", "lifecycle.OnNotification", "asks.NeedsInput"})
 	note := requireEvent(t, got, "lifecycle.OnNotification").note
 	if note.Kind != NotificationPermissionRequested {
 		t.Fatalf("notification kind = %q, want %q", note.Kind, NotificationPermissionRequested)

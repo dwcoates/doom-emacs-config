@@ -394,6 +394,12 @@ type Queue interface {
 	Drain(bound time.Duration) bool
 }
 
+// TurnEdges is told a workspace's turn edges. Both return at once.
+type TurnEdges interface {
+	TurnStarted(ws ids.WorkspaceID)
+	TurnEnded(ws ids.WorkspaceID)
+}
+
 // Deps are the queue's collaborators.
 type Deps struct {
 	// DB is the durable hold store and the lease's policy metadata.
@@ -411,6 +417,10 @@ type Deps struct {
 	// states it, and a roster left to infer it reads `ready` while a turn runs.
 	// REQUIRED.
 	Sidebar sidebar.Resolver
+	// Edges is told each turn's start, where the shim took it, and its end,
+	// where the queue closes it (wsedges.Hub): the one origin of the turn
+	// edges agents are told of.
+	Edges TurnEdges
 	// Holds is the feed's held section, which the queue states its standing
 	// holds and edit claim to.
 	Holds holds.Sink
