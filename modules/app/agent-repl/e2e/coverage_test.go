@@ -21,10 +21,36 @@ package e2e
 // merges what lands; see Makefile.
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"agent-repld/integration/harness"
 )
+
+// WebappLayerCoverageEnv names the directory the webapp layer's vitest driver
+// writes its istanbul reports into (webapp/test/webapp-layer/layer-server.mjs).
+const WebappLayerCoverageEnv = "AGENT_REPL_WEBAPP_LAYER_COVERAGE"
+
+// webappLayerCoverageEnv answers the assignment handing one layer driver a
+// directory of its own under root's webapp-layer directory (testrun's
+// baseline merges every one of them into the webapp's coverage), or nil when
+// root is empty and the run collects no coverage.
+func webappLayerCoverageEnv(root string) ([]string, error) {
+	if root == "" {
+		return nil, nil
+	}
+	parent := filepath.Join(root, "webapp-layer")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return nil, fmt.Errorf("make the webapp layer's coverage directory: %w", err)
+	}
+	dir, err := os.MkdirTemp(parent, "driver-")
+	if err != nil {
+		return nil, fmt.Errorf("make the webapp layer driver's coverage directory: %w", err)
+	}
+	return []string{WebappLayerCoverageEnv + "=" + dir}, nil
+}
 
 // coverageEnv answers the GOCOVERDIR assignment one spawned Go binary must
 // carry, or nil when this run is not collecting coverage. A directory that

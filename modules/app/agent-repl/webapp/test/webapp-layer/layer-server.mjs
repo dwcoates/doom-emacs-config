@@ -29,7 +29,7 @@
 // so a binary that exits for any reason -- or dies -- takes this driver with
 // it, and no warm vitest can outlive its run.
 
-import { readdir } from "node:fs/promises";
+import { access, readdir, rename } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { createVitest } from "vitest/node";
@@ -64,12 +64,42 @@ const progressReporter = {
   },
 };
 
+// COVERAGE, IN A COVERAGE RUN ONLY. e2e/webapplayer_server_test.go hands this
+// driver a directory of its own under the run's coverage root when the run
+// collects coverage (AGENT_REPL_E2E_COVERAGE); unset, nothing here changes
+// the run. vitest with watch off writes each run's coverage-final.json over
+// the last and clears its results, so each run's report is moved aside under
+// its own name (keepCoverage) for testrun's baseline to merge with the
+// webapp's other tiers.
+const COVERAGE_DIR = process.env.AGENT_REPL_WEBAPP_LAYER_COVERAGE;
+const coverage = COVERAGE_DIR
+  ? { coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: COVERAGE_DIR, all: false, clean: false } }
+  : {};
+
 const vitest = await createVitest("test", {
   config: "vitest.webapp-layer.config.ts",
   watch: false,
   run: true,
   reporters: ["default", progressReporter],
+  ...coverage,
 });
+
+let coverageRuns = 0;
+/** Moves the run's coverage report aside, answering a failure when a coverage
+ * run that passed wrote none: a run that measured nothing must never look
+ * like one that measured. */
+async function keepCoverage(label, passed) {
+  if (!COVERAGE_DIR) return [];
+  const report = resolve(COVERAGE_DIR, "coverage-final.json");
+  try {
+    await access(report);
+  } catch {
+    return passed ? [`the coverage run wrote no ${report} for ${label}`] : [];
+  }
+  coverageRuns += 1;
+  await rename(report, resolve(COVERAGE_DIR, `run-${coverageRuns}-${label}.json`));
+  return [];
+}
 const project = vitest.getCoreWorkspaceProject();
 
 /** Every failed test's name and first error, for the area's report. */
@@ -107,6 +137,7 @@ await Promise.all(areaFiles.map((name) => {
 }));
 const warmed = vitest.state.getFiles([warmupPath])[0];
 const warmFailures = warmed === undefined ? ["vitest ran no warm-up file"] : failuresOf(warmed);
+warmFailures.push(...(await keepCoverage("warmup.layer.test.ts", warmed?.result?.state === "pass")));
 const warmOk = warmed?.result?.state === "pass" && warmFailures.length === 0;
 process.stdout.write(READY_PREFIX + JSON.stringify({ ok: warmOk, warmMs: Date.now() - warmStarted, failures: warmFailures }) + "\n");
 if (!warmOk) {
@@ -133,6 +164,7 @@ for await (const line of lines) {
       answer.failures.push(`the file failed: ${err?.message ?? "with no error message"}`);
     }
     if (answer.tests === 0) answer.failures.push(`${request.file} ran no tests`);
+    answer.failures.push(...(await keepCoverage(request.file, file.result?.state === "pass")));
     answer.ok = file.result?.state === "pass" && answer.failures.length === 0;
   }
   process.stdout.write(RESULT_PREFIX + JSON.stringify(answer) + "\n");
