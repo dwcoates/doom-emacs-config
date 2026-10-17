@@ -593,8 +593,9 @@ export type OpenTabsOpened = Message<"agentrepl.v1.OpenTabsOpened"> & {
     case: "failed";
   } | {
     /**
-     * Hidden, or in a collapsed repository section: nothing was started, and
-     * its tab stays withheld until it is shown again.
+     * Hidden, or in a collapsed repository section, and not the workspace
+     * the user is looking at: nothing was started, and its tab stays withheld
+     * until it is shown again.
      *
      * @generated from field: agentrepl.v1.OpenTabsOpenedHidden hidden = 5;
      */

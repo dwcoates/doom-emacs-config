@@ -144,6 +144,51 @@ func TestAClosedWorkspaceIsStoodDown(t *testing.T) {
 	}
 }
 
+// TestTheSelectedHiddenWorkspaceIsNotStoodDown pins the cold gate that stood
+// again after every answer (2026-10-17): a hidden workspace the user selected
+// and paid to resume was stood down the moment its session came up, because
+// its cache had lapsed long before. The one they are looking at runs.
+func TestTheSelectedHiddenWorkspaceIsNotStoodDown(t *testing.T) {
+	tests := []struct {
+		name     string
+		withhold func(t *testing.T, h *harness) ids.WorkspaceID
+	}{
+		{name: "hidden", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) }},
+		{name: "collapsed", withhold: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			record, err := h.db.Workspace(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
+				t.Fatalf("SetRepositoryFolded: %v", err)
+			}
+			return ws
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.withhold(t, h)
+			if err := h.db.SetCurrent(context.Background(), ws, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+
+			// Act
+			h.c.StandDownWithheld(ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none for the selected workspace", killed)
+			}
+			if h.pending(ws) {
+				t.Fatal("a dropped stand-down stayed pending")
+			}
+		})
+	}
+}
+
 func TestAWorkspaceShownAgainIsNotStoodDown(t *testing.T) {
 	// Arrange: asked while hidden, shown again before the attempt reads it.
 	h := newHarness(t)

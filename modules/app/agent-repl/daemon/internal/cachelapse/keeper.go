@@ -23,9 +23,11 @@
 // no deadline is armed twice.
 //
 // THE CADENCE IS RECONCILED, NEVER TOLD ONCE. On a hide, a show, a close, a
-// reopen and every session coming up, the loop reads the workspace's row
-// afresh and sets the shim's cadence to match (cadenceFor): held while
-// hidden, a last round while closed, running otherwise. A hide
+// reopen, a selection moving onto or off the workspace, and every session
+// coming up, the loop reads the workspace's row afresh and sets the shim's
+// cadence to match (cadenceFor): held while hidden and not selected
+// (wsm.Workspace.KeepaliveHeld), a last round while closed, running
+// otherwise. A hide
 // that races a bring-up is caught either way, because the hide writes the row
 // before it queues the edge and the bring-up installs its client before
 // SessionUp queues its own, so whichever edge comes second sees both.
@@ -153,10 +155,10 @@ func (k *Keeper) OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionC
 	k.enqueue(edge{ws: ws, lapse: lapse, why: "the shim stated its projected lapse"})
 }
 
-// VisibilityChanged is a hide or a show of WS, already recorded: its cadence
-// is reconciled. It never blocks.
+// VisibilityChanged is a hide or a show of WS, or the selection moving onto
+// or off it, already recorded: its cadence is reconciled. It never blocks.
 func (k *Keeper) VisibilityChanged(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, why: "the workspace was hidden or shown"})
+	k.enqueue(edge{ws: ws, why: "the workspace was hidden, shown, selected or deselected"})
 }
 
 // ClosureChanged is a close or a reopen of WS, already recorded: its cadence
@@ -296,10 +298,11 @@ const (
 
 // cadenceFor answers the cadence RECORD asks for. THE HIDE WINS over the
 // close: a hidden workspace never beats, closed or not, so closing it grants
-// no last round.
+// no last round. A hidden workspace the user is looking at runs
+// (wsm.Workspace.KeepaliveHeld).
 func cadenceFor(record wsm.Workspace) cadence {
 	switch {
-	case record.InHiddenSection():
+	case record.KeepaliveHeld():
 		return cadenceHold
 	case record.Closed:
 		return cadenceLastRound
@@ -343,7 +346,7 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		delete(k.deadlines, ws)
 	}
 	want := cadenceFor(record)
-	fields := dlog.Context{"cadence": string(want), "hidden": record.InHiddenSection(), "closed": record.Closed}
+	fields := dlog.Context{"cadence": string(want), "hidden": record.InHiddenSection(), "selected": record.Current, "closed": record.Closed}
 	shim, ok := k.deps.Shim(ws)
 	if !ok {
 		log.Debug(opCadence, "no session is served for the workspace; no cadence is set", fields)
@@ -403,7 +406,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	if !record.LetsCacheLapse() || record.CacheLapse == nil {
-		log.Info(opLapse, "the workspace was shown or reopened before its cache lapsed; it keeps running", nil)
+		log.Info(opLapse, "the workspace was shown, selected or reopened before its cache lapsed; it keeps running", nil)
 		return false
 	}
 	if !record.CacheLapse.Lapsed(now) {

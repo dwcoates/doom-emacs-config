@@ -814,8 +814,9 @@ type source struct {
 	// (forking.go). Nil for every bring-up but a fork's first.
 	Fork *wsm.PendingFork
 	// HoldKeepalive starts the session with its keep-alives held: the
-	// workspace is in the hidden section, as the record the bring-up started
-	// from reads (cachelapse.Keeper). A hide or a show after that read is the
+	// workspace is in the hidden section and not the user's selection
+	// (wsm.Workspace.KeepaliveHeld), as the record the bring-up started from
+	// reads (cachelapse.Keeper). A hide or a show after that read is the
 	// keeper's to apply, once the session it starts comes up.
 	HoldKeepalive bool
 }
@@ -1390,7 +1391,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	if !src.Fresh {
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepResuming})
 	}
-	src.HoldKeepalive = record.InHiddenSection()
+	src.HoldKeepalive = record.KeepaliveHeld()
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if errors.Is(err, errSessionAlreadyRunning) {
 		finishRun()
@@ -1597,7 +1598,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	started, err := f.startSession(runCtx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
-		HoldKeepalive:   record.InHiddenSection(),
+		HoldKeepalive:   record.KeepaliveHeld(),
 	}, previous, configDir)
 	finishRun()
 	stopPhases()
@@ -2370,12 +2371,12 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		req.Source = &shimv1.StartSessionRequest_Resume{Resume: resume}
 	}
-	// A HIDDEN WORKSPACE'S SESSION IS BORN HELD, so no keep-alive can fire
+	// A HIDDEN WORKSPACE THE USER IS NOT LOOKING AT IS BORN HELD, so no keep-alive can fire
 	// between its start and the cache keeper's hold (cachelapse.Keeper): its
 	// cache is left to lapse from the first instant it runs.
 	if src.HoldKeepalive {
 		req.HoldKeepalive = &shimv1.StartSessionHoldKeepalive{}
-		log.Info("daemon.workspace.start_session", "the workspace is hidden; its session starts with its keep-alives held", nil)
+		log.Info("daemon.workspace.start_session", "the workspace is hidden and not selected; its session starts with its keep-alives held", nil)
 	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts

@@ -15,7 +15,12 @@ workspace's web page was checked by Emacs alone, never by the daemon.
    collapsed repository section) runs nothing; it is started when shown and
    stood down when hidden. Amended 2026-10-13 (hidden-cache-lapse.md): a
    hidden workspace's session is stood down when its prompt cache lapses,
-   not at the hide, so it can be shown again warm until then.
+   not at the hide, so it can be shown again warm until then. Amended
+   2026-10-17: the workspace the user is looking at (the selection) runs even
+   hidden or collapsed (`wsm.Workspace.Runs`), and keeps its cache warm
+   (`wsm.Workspace.KeepaliveHeld`). Selecting one revives it, and the old
+   rule then stood that session down the moment it came up, so its cold gate
+   stood again after every answer. Moving off it withholds it again.
    - Consequence: boot's bring-up and every open skip invisible workspaces;
      hide and collapse stand sessions down; show and expand start nothing by
      themselves, the editor asks with OpenTabs.

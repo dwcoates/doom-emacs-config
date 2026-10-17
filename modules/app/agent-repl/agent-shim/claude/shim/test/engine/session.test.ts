@@ -5481,6 +5481,26 @@ describe("the teardown's waits are bounded", () => {
     );
   });
 
+  it("names where the message loop was parked when it outlives its budget after the close", async () => {
+    // Arrange: the loop waits on a vendor iterator the close never ends.
+    const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
+    await started(h);
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) =>
+      entry.message.startsWith("the vendor message loop did not end within its budget"),
+    );
+    expect([record?.level, record?.context?.parked_at, typeof record?.context?.parked_ms]).toEqual([
+      "error",
+      "vendor",
+      "number",
+    ]);
+  });
+
   it("finishes KillSession when the store never answers the head read a watcher's conclusion needs", async () => {
     const h = harness({ watcherConclusionBudgetMs: 5 });
     await started(h);
@@ -5518,6 +5538,42 @@ describe("the teardown's vendor half is bounded", () => {
   function closedHow(response: shimv1.KillSessionResponse): string | undefined {
     return response.result.case === "success" ? response.result.value.closed?.how.case : undefined;
   }
+
+  it("asks an idle vendor to interrupt nothing", async () => {
+    // Arrange: nothing open, nothing live; an interrupt would hang.
+    let interrupts = 0;
+    const h = harness({
+      watcherConclusionBudgetMs: 5,
+      onQueryCreated: (query) => {
+        query.interrupt = () => {
+          interrupts += 1;
+          return new Promise(() => undefined);
+        };
+      },
+    });
+    await started(h);
+    const mark = logSinkMark();
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const errors = logRecordsSince(mark).filter((entry) => entry.level === "error" || entry.level === "warn");
+    expect([closedHow(response), interrupts, errors]).toEqual(["idle", 0, []]);
+  });
+
+  it("still interrupts a vendor that holds live work", async () => {
+    // Arrange
+    const h = harness({ watcherConclusionBudgetMs: 5 });
+    await started(h);
+    await liveShell(h, "t01", "toolu_live");
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(h.queries[0]?.query.calls.includes("interrupt")).toBe(true);
+  });
 
   it("answers a forced KillSession when the vendor never answers the interrupt", async () => {
     // Arrange
@@ -11618,9 +11674,20 @@ describe("a vendor failure that is not an Error", () => {
       },
     });
     await started(h);
+    // Live work, because an idle vendor is asked no interrupt at all.
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t08",
+      tool_use_id: "toolu_interrupted",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-0000000000f8",
+      session_id: "s",
+    } as never);
     const before = logSinkMark();
 
-    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
 
     expect(logContextFor(before, "refused the interrupt during teardown")?.cause).toBe(
       "the vendor went away",

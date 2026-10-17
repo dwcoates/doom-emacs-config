@@ -63,6 +63,12 @@ do them all yourselves").
   The request covered hidden workspaces only.
 - "Cold cache" needs no arm of its own: a lapse at or before now IS cold, and
   the daemon republishes the roster at the deadline.
+- The workspace the user is looking at keeps its cache warm even hidden
+  (owner ruling, 2026-10-17; `wsm.Workspace.KeepaliveHeld`).
+  - Selecting it clears its recorded lapse, and the store refuses a
+    projection for it, so no deadline can stand it down while it is shown.
+  - Moving off it is a visibility edge: the keeper holds its keep-alives
+    again, and the shim's fresh projection arms the deadline.
 
 ## Implementation notes
 

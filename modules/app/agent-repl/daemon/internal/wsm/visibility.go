@@ -58,9 +58,11 @@ func (ws Workspace) InHiddenSection() bool {
 // one last keep-alive round is spent (owner request, 2026-10-17): closing
 // leaves its session up, so reopening it before the lapse finds the cache
 // warm, and reopening it after meets the cold gate like any lapsed
-// conversation.
+// conversation. A hidden workspace the user is looking at keeps its cache
+// warm (KeepaliveHeld, owner ruling 2026-10-17); a closed one lapses whether
+// or not it is still the selection.
 func (ws Workspace) LetsCacheLapse() bool {
-	return ws.InHiddenSection() || ws.Closed
+	return ws.KeepaliveHeld() || ws.Closed
 }
 
 // Runs reports whether the daemon runs the workspace's session (owner
@@ -72,9 +74,22 @@ func (ws Workspace) LetsCacheLapse() bool {
 // A HIDDEN MERGE WORKSPACE RUNS. It is withheld by its async merge, not by
 // the user, and its session is what carries that merge; it is drawn in no tab
 // bar until revealed, and once revealed it follows the ordinary rule.
+//
+// THE WORKSPACE THE USER IS LOOKING AT RUNS (owner ruling, 2026-10-17), even
+// hidden or collapsed: selecting one revives it, and a rule that withheld it
+// stood that session down the moment it came up, so its cold gate stood again
+// after every answer. Moving off it withholds it again.
 func (ws Workspace) Runs(repoFolded bool) bool {
-	if ws.MergeHidden() {
+	if ws.MergeHidden() || ws.Current {
 		return true
 	}
 	return ws.Withheld(repoFolded) == Drawn
+}
+
+// KeepaliveHeld reports whether the workspace's keep-alives are held from
+// the start (the keeper's `hold` cadence): it sits in the hidden section and
+// the user is not looking at it. The session's start and the keeper's cadence
+// read it, and LetsCacheLapse is it or a close.
+func (ws Workspace) KeepaliveHeld() bool {
+	return ws.InHiddenSection() && !ws.Current
 }

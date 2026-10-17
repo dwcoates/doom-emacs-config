@@ -1,11 +1,13 @@
 package workspace
 
 import (
+	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +64,40 @@ func TestSelectTellsTheRoster(t *testing.T) {
 	// Assert.
 	if len(f.sidebar.selected) != 1 || f.sidebar.selected[0] != "w1" {
 		t.Fatalf("roster selections = %v, want w1 once", f.sidebar.selected)
+	}
+}
+
+func TestSelectRaisesTheCacheKeepersVisibilityEdges(t *testing.T) {
+	tests := []struct {
+		name     string
+		previous string
+		want     []ids.WorkspaceID
+	}{
+		{name: "the first selection reconciles the selected workspace", want: []ids.WorkspaceID{"w2"}},
+		{name: "a switch reconciles the selected and the deselected workspace", previous: "w1", want: []ids.WorkspaceID{"w2", "w1"}},
+		{name: "a re-selection changes no visibility", previous: "w2", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.workspace("w2", t.TempDir())
+			if tt.previous != "" {
+				previous := ids.WorkspaceID(tt.previous)
+				f.db.current = &previous
+			}
+
+			// Act.
+			if err := f.verbs.Select(context.Background(), "w2"); err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+
+			// Assert.
+			if !slices.Equal(f.visibilityEdges, tt.want) {
+				t.Fatalf("visibility edges = %v, want %v", f.visibilityEdges, tt.want)
+			}
+		})
 	}
 }
 
@@ -1060,6 +1096,85 @@ func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 	if len(f.visibilityEdges) != 0 {
 		t.Fatalf("visibility edges = %v, want none for a failed write", f.visibilityEdges)
+	}
+}
+
+func TestRecordHiddenWritesRepublishesAndRaisesTheEdge(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+	}{
+		{name: "hiding", hidden: true},
+		{name: "showing", hidden: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			prior := f.db.workspaces["w1"]
+			prior.Hidden = !tt.hidden
+			f.db.workspaces["w1"] = prior
+
+			// Act
+			err := f.verbs.(*verbs).recordHidden(context.Background(), f.log.Global(), "w1", tt.hidden)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("recordHidden: %v", err)
+			}
+			if got := f.db.workspaces["w1"].Hidden; got != tt.hidden {
+				t.Fatalf("recorded hidden = %v, want %v", got, tt.hidden)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			if !slices.Equal(f.visibilityEdges, []ids.WorkspaceID{"w1"}) {
+				t.Fatalf("visibility edges = %v, want the workspace", f.visibilityEdges)
+			}
+		})
+	}
+}
+
+func TestRecordHiddenSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setHiddenErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.(*verbs).recordHidden(context.Background(), f.log.Global(), "w1", false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed hidden write was answered as success")
+	}
+	if !loggedAtError(f, opSetHidden) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
+		t.Fatalf("republications %d, edges %v; want none for a failed write", len(f.sidebar.registries), f.visibilityEdges)
+	}
+}
+
+// TestTheHiddenFlagHasOneWrite fails when a verb writes the hidden flag by
+// hand instead of through recordHidden, which would skip the roster push or
+// the cache keeper's edge.
+func TestTheHiddenFlagHasOneWrite(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+
+	// Act
+	var sites []string
+	for _, file := range files {
+		for range strings.Count(string(file.Source), "v.deps.DB.SetHidden(") {
+			sites = append(sites, file.Name)
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "select.go" {
+		t.Fatalf("the hidden flag is written at %v, want only recordHidden in select.go", sites)
 	}
 }
 
