@@ -991,6 +991,77 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo.repo-section > .repo-head .tri { font-size: 0.98rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 
+/* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) sit below its own
+   rows, each a small header over its rows, and fold away with the
+   repository. An empty subsection draws a slot to drag workspaces into. */
+#ws-sidebar .repo.folded > .sb-subsections { display: none; }
+#ws-sidebar .sb-subsection-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem 0.15rem 1.55rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+#ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
+#ws-sidebar .sb-subsection-delete {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  visibility: hidden;
+}
+#ws-sidebar .sb-subsection-head:hover .sb-subsection-delete { visibility: visible; }
+#ws-sidebar .sb-subsection-delete:hover { color: var(--fg); }
+#ws-sidebar .sb-subsection-empty {
+  margin: 0.1rem 0.7rem 0.2rem 1.55rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+#ws-sidebar .sb-subsection > .rows:not(:empty) + .sb-subsection-empty { display: none; }
+
+/* THE DRAG (src/sidebar/drag.ts): the item stays in its list as a dimmed
+   slot that travels to where the drop would land, and a copy follows the
+   pointer above the rail. Every grip leaves the pointer's moves to the page
+   rather than to a touch scroll. */
+#ws-sidebar .sb-sections > .repo-section > .repo-head,
+#ws-sidebar .sb-subsection-head,
+#ws-sidebar .rows[data-subsection] > [data-roster-row] > .row { touch-action: none; }
+#ws-sidebar .sb-drag-slot { opacity: 0.35; outline: 1px dashed var(--border); outline-offset: -1px; }
+#ws-sidebar .sb-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.92;
+  background: var(--card);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
+
+/* THE SUBSECTION NAME POPUP, under the control that asked for it. */
+#ws-sidebar .sb-subsection-popup {
+  position: fixed;
+  z-index: 1001;
+  display: flex;
+  gap: 0.35rem;
+  width: 220px;
+  padding: 0.4rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+#ws-sidebar .sb-subsection-name { flex: 1 1 auto; min-width: 0; }
+#ws-sidebar .sb-arrange-status:empty { display: none; }
+
 /* Workspace rows. Children nest inside .kids, which draws the family guide
    line; indentation therefore compounds per generation. */
 /* ONE GUTTER WIDTH for every bar a rail row draws on its left (the

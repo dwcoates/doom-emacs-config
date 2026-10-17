@@ -682,25 +682,19 @@ describe("hidden workspaces", () => {
 });
 
 describe("the create controls", () => {
-  it("offers a new workspace per repository section", () => {
+  it("offers a new subsection per repository section", () => {
     const drawn = drawWorkspaceRoster(
       roster({ repos: [repoSection({ id: "repo-1" })] }),
       sidebarContext(),
     );
-    expect(pane(drawn).querySelector(".repo-section > .repo-head .sb-add")).not.toBeNull();
+    expect(pane(drawn).querySelector(".repo-section > .repo-head [data-subsection-create='repo-1']")).not.toBeNull();
   });
 
-  it("opens the create form under that section's header", async () => {
-    const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1" })] }),
-      sidebarContext(),
-    );
+  it("asks for the subsection's name in the rail's layer, which outlives a push", async () => {
+    const sc = sidebarContext();
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
     await click(pane(drawn).querySelector(".repo-section > .repo-head .sb-add") as Element);
-    expect(
-      pane(drawn).querySelector(".repo-section > .repo-head")?.nextElementSibling?.hasAttribute(
-        "data-create-form",
-      ),
-    ).toBe(true);
+    expect(sc.arrange.layer.querySelector("[data-subsection-popup] [data-subsection-name]")).not.toBeNull();
   });
 
   it("does not fold the section when the create control is clicked", async () => {

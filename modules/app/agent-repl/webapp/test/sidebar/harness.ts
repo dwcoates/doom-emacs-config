@@ -40,6 +40,7 @@ import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type DrawnView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
+import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
 
@@ -176,7 +177,6 @@ export function sidebarContext(
   const own = view.scope();
   return {
     ctx,
-    parentWorkspace: () => ctx.workspace,
     view: {
       track: (key, wire, paint) => own.track(key, wire, paint),
       ask: (key, value) => view.ask(key, value),
@@ -191,6 +191,11 @@ export function sidebarContext(
     reveal,
     selectionFade: createSelectionFade(document),
     shownAhead: () => null,
+    arrange: {
+      hold: createArrangeHold(() => undefined),
+      layer: document.createElement("div"),
+      status: document.createElement("div"),
+    },
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);
@@ -273,6 +278,8 @@ export function repoSection(init: {
   count?: number;
   /** The label hover's measurement; pending unless said. */
   divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
+  /** The repository's subsections, in order; none unless said. */
+  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[] }>;
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
@@ -280,6 +287,11 @@ export function repoSection(init: {
     rows: { rows: init.rows ?? [] },
     fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
+    subsections: (init.subsections ?? []).map((sub) => ({
+      key: { subsectionId: sub.id },
+      header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
+      rows: { rows: sub.rows ?? [] },
+    })),
   });
 }
 
@@ -386,4 +398,12 @@ export function roster(init: {
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
   });
+}
+
+/**
+ * Dispatch a primary, left-button pointer event of TYPE at TARGET, at height
+ * Y: the one pointer a drag test drives (`src/sidebar/drag.ts`).
+ */
+export function primaryPointer(type: string, target: EventTarget, y: number): void {
+  target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, isPrimary: true, button: 0, clientX: 10, clientY: y }));
 }

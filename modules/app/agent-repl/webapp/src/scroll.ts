@@ -1741,3 +1741,13 @@ export function installIntentScroll(
 export function collapseClicked(section: { scrollTop: number }): void {
   section.scrollTop = 0;
 }
+
+/**
+ * THE READER IS DRAGGING AN ITEM NEAR THE OPEN REGION'S EDGE: scroll it toward
+ * it by STEP pixels (src/sidebar/drag.ts). Like the wheel redirect, this IS the
+ * reader's own gesture carried to the scroller under it, never an implicit
+ * move: it runs only while a drag the reader holds sits within the edge band.
+ */
+export function dragEdgeScroll(scroller: { scrollTop: number }, step: number): void {
+  scroller.scrollTop += step;
+}

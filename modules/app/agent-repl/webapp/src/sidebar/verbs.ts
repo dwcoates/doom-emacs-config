@@ -410,6 +410,12 @@ export interface VerbCall<Res extends VerbResponse> {
    * the request was wrong, and there is nothing for the user to act on here.
    */
   expectedArms?: Readonly<Record<string, string>>;
+  /**
+   * Handed the whole response when the verb succeeds, for a caller whose
+   * success arm carries something it needs (ArrangeSidebar's roster
+   * revision). Called before the verb answers.
+   */
+  took?: (response: Res) => void;
 }
 
 
@@ -441,6 +447,7 @@ export async function runVerb<Res extends VerbResponse>(
     );
     const result = requireCase(response.result, `${spec.rpc}Response.result`);
     if (result.case === "success") {
+      spec.took?.(response);
       if (spec.outlivesPush === true) setDisabled(control, false);
       return true;
     }

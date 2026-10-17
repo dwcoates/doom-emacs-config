@@ -10,6 +10,7 @@ import {
   SCROLL_CAUSES,
   armedWheelAction,
   collapseClicked,
+  dragEdgeScroll,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
@@ -1555,8 +1556,9 @@ describe("collapseClicked", () => {
  * assignment, a `scrollIntoView`/`scrollTo`/`scrollBy` call, a park, place or
  * shift -- and a hit fails here, so an implicit mover cannot come back quietly.
  * Inside scroll.ts, the writes are held to the named list: the tail owner's
- * two primitives, the reader's own wheel redirect, and the reader's own
- * collapse click. A bubble's scroll box has no other writer.
+ * two primitives, the reader's own wheel redirect, the reader's own
+ * collapse click, and the reader's own drag at the rail's edge. A bubble's
+ * scroll box has no other writer.
  */
 describe("no scroll write outside scroll.ts", () => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
@@ -1619,6 +1621,7 @@ describe("no scroll write outside scroll.ts", () => {
       "if (delta !== 0) this.box.scrollTop += delta;",
       "feed.scrollTop += delta;",
       "section.scrollTop = 0;",
+      "scroller.scrollTop += step;",
     ]);
   });
 
@@ -4017,5 +4020,16 @@ describe("heldRowName", () => {
 
   it("is the one way TailFollow names its held row", () => {
     expect([scrollSource.includes('this.clickedRow === null ? "none"'), scrollSource.match(/heldRowName\(this\.clickedRow\)/g)?.length]).toEqual([false, 2]);
+  });
+});
+
+describe("dragEdgeScroll", () => {
+  it("moves the scroller by the step the drag asks for", () => {
+    // Arrange
+    const scroller = { scrollTop: 40 };
+    // Act
+    dragEdgeScroll(scroller, -8);
+    // Assert
+    expect(scroller.scrollTop).toBe(32);
   });
 });

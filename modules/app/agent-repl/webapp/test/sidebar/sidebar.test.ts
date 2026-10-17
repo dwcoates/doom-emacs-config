@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { CreateWorkspaceResponseSchema, type CreateWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
 import { create } from "@bufbuild/protobuf";
@@ -37,6 +36,7 @@ import {
   fakeTicker,
   fakeTimers,
   mergedSection,
+  primaryPointer,
   repoSection,
   roster,
   rosterStream,
@@ -254,7 +254,7 @@ describe("mounting the rail: the search", () => {
   it("hangs the bar between the head and the scroller, so it overlaps the rows", () => {
     const host = document.createElement("nav");
     mountSidebar(host, ctxFor([]), { storage: null, timers: fakeTimers() });
-    expect([...host.children].map((el) => el.className)).toEqual(["sb-head", "sb-search", "sb-scroll"]);
+    expect([...host.children].map((el) => el.className)).toEqual(["sb-head", "sb-search", "sb-arrange-status", "sb-scroll", "sb-arrange-layer"]);
   });
 
   it("narrows the drawn rows as the query is typed", async () => {
@@ -1131,38 +1131,6 @@ describe("mounting the webhost's sidebar", () => {
   });
 });
 
-describe("the webhost sidebar's create form", () => {
-  it("spawns a child from the workspace the roster names current", async () => {
-    // Arrange
-    let request: CreateWorkspaceRequest | null = null;
-    const host = document.createElement("nav");
-    document.body.append(host);
-    mountWebhostSidebar(
-      host,
-      ctxFor([roster({ current: "ws-current", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })], {
-        createWorkspace: (r) => {
-          request = r;
-          return create(CreateWorkspaceResponseSchema, {
-            result: { case: "success", value: { workspace: { id: "ws-new", dir: "/w/new" } } },
-          });
-        },
-      }),
-      { storage: null, timers: fakeTimers() },
-    );
-    await settle();
-    await click(host.querySelector(".sb-add") as Element);
-    const parent = host.querySelector("input[name='parent']") as HTMLInputElement;
-    parent.checked = true;
-
-    // Act
-    await click(host.querySelector("[data-create-submit]") as Element);
-
-    // Assert
-    expect((request as CreateWorkspaceRequest | null)?.parent?.workspace?.id).toBe("ws-current");
-    host.remove();
-  });
-});
-
 describe("the rail reports where the pointer is to the row hover gesture", () => {
   const mounted: Array<{ dispose(): void }> = [];
   afterEach(() => {
@@ -1475,3 +1443,36 @@ describe("mounting the rail: a merged row drawn when it comes into view", () => 
   });
 });
 
+
+describe("the rail holds its drawing while a row is dragged", () => {
+  /** A roster with rows ws-1 and ws-2, ws-2 named NAME. */
+  const named = (name: string): WorkspaceRoster =>
+    roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2", name })] })] });
+  const nameOf = (host: HTMLElement): string | null | undefined =>
+    host.querySelector("[data-roster-row='ws-2'] > .row .name")?.textContent;
+  const pointer = primaryPointer;
+
+  it("draws no push while the drag stands, and the newest once it is cancelled", async () => {
+    // Arrange: a drag lifts ws-1, and a push renames ws-2 meanwhile.
+    const host = document.createElement("nav");
+    document.body.append(host);
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    stream.push(named("before"));
+    await settle();
+    pointer("pointerdown", host.querySelector("[data-roster-row='ws-1'] > .row") as Element, 10);
+    pointer("pointermove", window, 40);
+    stream.push(named("after"));
+    await settle();
+    const whileHeld = nameOf(host);
+
+    // Act
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+
+    // Assert
+    expect([whileHeld, nameOf(host)]).toEqual(["before", "after"]);
+    sidebar.dispose();
+    host.remove();
+  });
+});

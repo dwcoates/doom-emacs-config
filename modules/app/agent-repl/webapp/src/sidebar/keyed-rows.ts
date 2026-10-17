@@ -63,6 +63,13 @@ export function drawKeyedRows(
   return box;
 }
 
+/** One region of a section to bring in place: the rows drawn, and the wire to bring them to. */
+export interface KeyedRegion {
+  kept: KeyedRows;
+  rows: RosterRows;
+  path: string;
+}
+
 /**
  * Bring KEPT to U in place: answers false, changing nothing, when U's drawn
  * rows are not the same workspaces in the same order; otherwise redraws each
@@ -76,20 +83,40 @@ export function patchKeyedRows(
   hideClosed: boolean,
   place: RowPlace,
 ): boolean {
-  const next = visible(u, path, hideClosed);
-  if (next.length !== kept.entries.length || next.some((entry, i) => entry.id !== kept.entries[i].id)) {
-    return false;
-  }
-  next.forEach((entry, i) => {
-    const old = kept.entries[i];
-    if (equals(RosterRowSchema, old.row, entry.row)) {
-      old.row = entry.row;
-      return;
-    }
-    const drawn = drawKeyed(entry, rail, place);
-    old.element.replaceWith(drawn.element);
-    old.scope.dispose(old.element);
-    kept.entries[i] = drawn;
+  return patchKeyedRegions([{ kept, rows: u, path }], rail, hideClosed, place);
+}
+
+/**
+ * Bring every one of a section's REGIONS in place at once: its own rows and
+ * each subsection's. Answers false, changing NOTHING in any region, when any
+ * region's drawn rows are not the same workspaces in the same order, so a
+ * section is either patched whole or left for a full redraw.
+ */
+export function patchKeyedRegions(
+  regions: readonly KeyedRegion[],
+  rail: RailContext,
+  hideClosed: boolean,
+  place: RowPlace,
+): boolean {
+  const next = regions.map((region) => visible(region.rows, region.path, hideClosed));
+  const matches = regions.every(
+    (region, r) =>
+      next[r].length === region.kept.entries.length && next[r].every((entry, i) => entry.id === region.kept.entries[i].id),
+  );
+  if (!matches) return false;
+  regions.forEach((region, r) => {
+    const kept = region.kept;
+    next[r].forEach((entry, i) => {
+      const old = kept.entries[i];
+      if (equals(RosterRowSchema, old.row, entry.row)) {
+        old.row = entry.row;
+        return;
+      }
+      const drawn = drawKeyed(entry, rail, place);
+      old.element.replaceWith(drawn.element);
+      old.scope.dispose(old.element);
+      kept.entries[i] = drawn;
+    });
   });
   return true;
 }

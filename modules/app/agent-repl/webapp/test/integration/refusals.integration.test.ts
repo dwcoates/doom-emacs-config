@@ -952,113 +952,65 @@ describe("a bubble composer's refusal", () => {
 });
 
 // ---------------------------------------------------------------------------
-// THE CREATE FORM AND THE TASK VERBS (audit 1, item 9)
+// THE NEW-SUBSECTION POPUP (agentrepl.v1.ArrangeSidebar)
 //
-// CreateWorkspace is addressed to a REPOSITORY rather than to an existing
-// workspace, so none of the cross-cutting four can reach it: every arm is the
-// endpoint's own, and this table IS the whole vocabulary. The same is true of
-// CreateTask and UpdateTask, which are addressed to a task.
+// The repository section's "+" names a new subsection. Every ArrangeSidebar
+// arm, the cross-cutting four included, is drawn at the popup that asked.
 // ---------------------------------------------------------------------------
 
-describe("the create-workspace form", () => {
-  /** Open the "+" form in the repository section. */
-  const openForm = async (refusal?: string): Promise<void> => {
+describe("the new-subsection popup", () => {
+  /** Open the "+" popup in the repository section and type a name. */
+  const openPopup = async (refusal?: string): Promise<void> => {
     harness = await startHarness({
       arrange: (fake) => fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
     });
-    if (refusal !== undefined) harness.fake.refuse("createWorkspace", refusal);
-    await harness.click(".sb-add");
+    if (refusal !== undefined) harness.fake.refuse("arrangeSidebar", refusal);
+    await harness.click(".repo-section .sb-add");
+    const name = harness.$("[data-subsection-popup] [data-subsection-name]") as HTMLInputElement;
+    name.value = "later";
   };
 
-  it("declares none of the cross-cutting four", () => {
-    // Assert: a creation names no existing workspace, so it cannot be refused
-    // for one — read off the descriptor so a landed arm shows up here.
-    const shared = refusalArmsOf("createWorkspace").filter((arm) =>
-      (CROSS_CUTTING_ARMS as readonly string[]).includes(arm),
+  it("creates a subsection in the section's own repository", async () => {
+    // Arrange
+    await openPopup();
+    // Act
+    await harness.click("[data-subsection-submit]");
+    // Assert
+    const [request] = harness.fake.calls<{ change: { case?: string; value?: { repository?: { id: string }; name?: string } } }>(
+      "arrangeSidebar",
     );
-    expect(shared).toEqual([]);
+    expect([request.change.case, request.change.value?.repository?.id, request.change.value?.name]).toEqual([
+      "createSubsection",
+      "repo-1",
+      "later",
+    ]);
   });
 
-  it("echoes the section's own repository", async () => {
+  it.each(refusalArmsOf("arrangeSidebar"))("draws the %s arm at the popup", async (arm) => {
     // Arrange
-    await openForm();
+    await openPopup(arm);
     // Act
-    await harness.click("[data-create-submit]");
+    await harness.click("[data-subsection-submit]");
     // Assert
-    const [request] = harness.fake.calls<{ repository?: { id: string } }>("createWorkspace");
-    expect(request.repository?.id).toBe("repo-1");
+    expect(harness.$(`[data-subsection-popup] .refusal[data-arm="${arm}"]`)).not.toBeNull();
   });
 
-  it("sends the standard form by default", async () => {
+  it("keeps the popup open on a refusal", async () => {
     // Arrange
-    await openForm();
+    await openPopup("blankName");
     // Act
-    await harness.click("[data-create-submit]");
+    await harness.click("[data-subsection-submit]");
     // Assert
-    const [request] = harness.fake.calls<{ form: { case?: string } }>("createWorkspace");
-    expect(request.form.case).toBe("standard");
+    expect(harness.$("[data-subsection-popup]")).not.toBeNull();
   });
 
-  it("carries a typed field into the request", async () => {
-    // Arrange
-    await openForm();
-    const name = harness.$('[data-create-form] [name="name"]') as HTMLInputElement;
-    name.value = "audit-1";
-    name.dispatchEvent(new Event("input", { bubbles: true }));
+  it("closes the popup on a success", async () => {
+    // Arrange: the new subsection arrives on the roster push.
+    await openPopup();
     // Act
-    await harness.click("[data-create-submit]");
+    await harness.click("[data-subsection-submit]");
     // Assert
-    const [request] = harness.fake.calls<{ form: { value?: { name?: string } } }>("createWorkspace");
-    expect(request.form.value?.name).toBe("audit-1");
-  });
-
-  it("sends the one-shot form when that mode is picked", async () => {
-    // Arrange
-    await openForm();
-    const prompt = harness.$('[data-create-form] [name="one_shot_prompt"]') as HTMLTextAreaElement;
-    prompt.value = "do the thing";
-    prompt.dispatchEvent(new Event("input", { bubbles: true }));
-    await harness.click('[data-create-form] [name="form"][value="one_shot"]');
-    // Act
-    await harness.click("[data-create-submit]");
-    // Assert
-    const [request] = harness.fake.calls<{ form: { case?: string } }>("createWorkspace");
-    expect(request.form.case).toBe("oneShot");
-  });
-
-  it.each(refusalArmsOf("createWorkspace"))("draws the %s arm at the form", async (arm) => {
-    // Arrange
-    await openForm(arm);
-    // Act
-    await harness.click("[data-create-submit]");
-    // Assert
-    expect(harness.$(`[data-create-form] .refusal[data-arm="${arm}"]`)).not.toBeNull();
-  });
-
-  it("names the unresolved base ref the arm carries", async () => {
-    // Arrange
-    await openForm("baseRefUnresolved");
-    // Act
-    await harness.click("[data-create-submit]");
-    // Assert
-    expect(harness.$("[data-create-form] .refusal")?.textContent).toContain(REFUSAL_FACTS.ref);
-  });
-
-  it("keeps the form open on a refusal", async () => {
-    // Arrange: the form's next move depends on which arm it was, so it stays.
-    await openForm("noSlug");
-    // Act
-    await harness.click("[data-create-submit]");
-    // Assert
-    expect(harness.$("[data-create-form]")).not.toBeNull();
-  });
-
-  it("closes the form on a success", async () => {
-    // Arrange: the new row arrives on the roster push.
-    await openForm();
-    // Act
-    await harness.click("[data-create-submit]");
-    // Assert
-    expect(harness.$("[data-create-form]")).toBeNull();
+    expect(harness.$("[data-subsection-popup]")).toBeNull();
   });
 });
+

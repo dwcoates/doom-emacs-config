@@ -81,6 +81,7 @@ import { AnswerQuestionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import { UpdateQuestionDraftResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
 import { AnswerColdGateResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import { CreateWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
+import { ArrangeSidebarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
 import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import { KillWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
@@ -1248,6 +1249,14 @@ export function createFakeDaemon(): FakeDaemon {
             case: "success",
             value: { workspace: { id: "ws-created", dir: "/tmp/ws-created" } },
           },
+        });
+      },
+      // An arrangement lands on the NEXT roster push, as the daemon's does; a
+      // test states that push with `setRoster`.
+      arrangeSidebar(request) {
+        record("arrangeSidebar", request);
+        return answerFor("arrangeSidebar", ArrangeSidebarResponseSchema, {
+          result: { case: "success", value: { rosterRevision: 0n } },
         });
       },
       // The fold lands on the NEXT roster push, as the daemon's does; a test

@@ -6,6 +6,7 @@ import { RosterRowsSchema, type RosterRow } from "../../../proto/gen/ts/frontend
 import {
   disposeKeyedRows,
   drawKeyedRows,
+  patchKeyedRegions,
   patchKeyedRows,
   type KeyedRows,
 } from "../../src/sidebar/keyed-rows.js";
@@ -80,5 +81,59 @@ describe("keyed rows", () => {
 
     // Assert
     expect([ticker.subscribers(), kept.entries.length]).toEqual([before, 0]);
+  });
+});
+
+describe("keyed regions", () => {
+  it("patches every region of a section when each lists the same workspaces", () => {
+    // Arrange: the section's own rows, and one subsection's.
+    const rail = sidebarContext();
+    const own: KeyedRows = { entries: [] };
+    const sub: KeyedRows = { entries: [] };
+    const ownBox = drawKeyedRows(rows(row({ id: "a", current: true })), rail, "own", true, "grouping", own);
+    const subBox = drawKeyedRows(rows(row({ id: "b" })), rail, "sub", true, "grouping", sub);
+
+    // Act
+    const patched = patchKeyedRegions(
+      [
+        { kept: own, rows: rows(row({ id: "a" })), path: "own" },
+        { kept: sub, rows: rows(row({ id: "b", current: true })), path: "sub" },
+      ],
+      rail,
+      true,
+      "grouping",
+    );
+
+    // Assert
+    expect(patched).toBe(true);
+    expect([ownBox.querySelector("[data-current]"), subBox.querySelector("[data-current]")?.getAttribute("data-roster-row")]).toEqual([
+      null,
+      "b",
+    ]);
+  });
+
+  it("changes no region when one region's workspaces moved", () => {
+    // Arrange: the row in the section's own rows changes, and a workspace
+    // moved out of the subsection.
+    const rail = sidebarContext();
+    const own: KeyedRows = { entries: [] };
+    const sub: KeyedRows = { entries: [] };
+    const ownBox = drawKeyedRows(rows(row({ id: "a", current: true })), rail, "own", true, "grouping", own);
+    drawKeyedRows(rows(row({ id: "b" })), rail, "sub", true, "grouping", sub);
+    const before = [...ownBox.children];
+
+    // Act
+    const patched = patchKeyedRegions(
+      [
+        { kept: own, rows: rows(row({ id: "a" })), path: "own" },
+        { kept: sub, rows: rows(), path: "sub" },
+      ],
+      rail,
+      true,
+      "grouping",
+    );
+
+    // Assert
+    expect([patched, [...ownBox.children], ownBox.querySelector("[data-current]") !== null]).toEqual([false, before, true]);
   });
 });
