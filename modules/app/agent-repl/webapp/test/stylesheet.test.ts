@@ -3,14 +3,14 @@
  * THE SHARED STYLESHEET-RULE READERS (`test/stylesheet.ts`).
  *
  * Every test that reads a rule off `src/styles.css` by text goes through
- * `rulesOf` or `selectorOf`, so a comment that names a selector can never be
+ * `rulesOf`, `selectorOf` or `keyframesOf`, so a comment that names a selector can never be
  * credited to the rule after it. `source-text.test.ts` pins that sharing.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cascadedValue, cascadedValueIn, inDocument, inRail, rulesOf, selectorOf } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, inRail, keyframesOf, rulesOf, selectorOf } from "./stylesheet.js";
 import STYLES_TEST from "./styles.test.ts?raw";
 import STYLESHEET from "./stylesheet.ts?raw";
 import { filesUnder } from "./files-under.js";
@@ -61,6 +61,58 @@ describe("selectorOf", () => {
     expect(() => selectorOf(/(\.no-such-class-anywhere)\s*\{/, "phantom rule")).toThrow(
       "the stylesheet has no phantom rule",
     );
+  });
+});
+
+describe("keyframesOf", () => {
+  it.each([
+    { what: "a block of several stops", css: "@keyframes a {\n  0% { opacity: 0; }\n  100% { opacity: 1; }\n}\n", want: "\n  0% { opacity: 0; }\n  100% { opacity: 1; }" },
+    { what: "a block of a single stop", css: "@keyframes a {\n  50% { opacity: 0; }\n}\n", want: "\n  50% { opacity: 0; }" },
+    { what: "the named block among others", css: "@keyframes b {\n  to { color: red; }\n}\n@keyframes a {\n  to { color: blue; }\n}\n", want: "\n  to { color: blue; }" },
+  ])("answers the body of $what", ({ css, want }) => {
+    // Arrange / Act
+    const body = keyframesOf("a", css);
+    // Assert
+    expect(body).toBe(want);
+  });
+
+  it("does not answer a block whose name merely starts with the asked name", () => {
+    // Arrange
+    const css = "@keyframes ab {\n  to { color: red; }\n}\n";
+    // Act / Assert
+    expect(() => keyframesOf("a", css)).toThrow("the stylesheet has no @keyframes a");
+  });
+
+  it("reads the real stylesheet by default", () => {
+    // Arrange / Act
+    const body = keyframesOf("ws-selection-blink");
+    // Assert
+    expect(body).toMatch(/50%\s*\{/);
+  });
+
+  it("fails loudly naming the block when the stylesheet has none", () => {
+    // Arrange / Act / Assert
+    expect(() => keyframesOf("no-such-keyframes")).toThrow("the stylesheet has no @keyframes no-such-keyframes");
+  });
+
+  it("fails loudly when the block never closes", () => {
+    // Arrange
+    const css = "@keyframes a {\n  to { color: red; }";
+    // Act / Assert
+    expect(() => keyframesOf("a", css)).toThrow("the stylesheet's @keyframes a never closes");
+  });
+
+  it("is the only place a test cuts a keyframes block out of the stylesheet", () => {
+    // Arrange: the hand-rolled shape keyframesOf replaced, a regex opening on a keyframes block.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const shape = /\/@keyframes [\w-]+ \\\{/;
+    const owners = new Set([path.join(here, "stylesheet.ts"), fileURLToPath(import.meta.url)]);
+
+    // Act
+    const handRolled = filesUnder(here).filter((file) => !owners.has(file) && shape.test(readFileSync(file, "utf8")));
+
+    // Assert
+    expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
   });
 });
 
