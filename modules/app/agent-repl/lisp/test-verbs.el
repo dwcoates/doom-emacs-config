@@ -221,8 +221,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :set-priority))
                 ((symbol-function 'agent-repl-rpc-set-workspace-hidden)
                  (agent-repl-test-verbs--stub :set-hidden))
-                ((symbol-function 'agent-repl-rpc-move-workspace)
-                 (agent-repl-test-verbs--stub :move))
+                ((symbol-function 'agent-repl-rpc-swap-workspaces)
+                 (agent-repl-test-verbs--stub :swap))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
@@ -1022,7 +1022,7 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
         (should-not agent-repl-test-verbs--sent)
         (should-not agent-repl-test-verbs--switch-requests)))))
 
-;;;; ---- MoveWorkspace ----
+;;;; ---- SwapWorkspaces ----
 
 (defmacro agent-repl-test-verbs--with-two-refs (&rest body)
   "Run BODY with `ws-one' and `ws-two' resolving to two distinct refs."
@@ -1031,36 +1031,36 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
               (lambda (ws) (agent-repl-test-verbs--ref (concat "id-" ws) (concat "/w/" ws)))))
      ,@body))
 
-(ert-deftest agent-repl-verbs-move-carries-both-refs ()
-  "MoveWorkspace names the workspace to move and the target by ref."
+(ert-deftest agent-repl-verbs-swap-carries-both-refs ()
+  "SwapWorkspaces names the two workspaces to swap by ref."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-two-refs
       ;; Act.
-      (agent-repl-verb-move "ws-one" "ws-two")
+      (agent-repl-verb-swap "ws-one" "ws-two")
       ;; Assert.
-      (let ((request (agent-repl-test-verbs--request :move)))
+      (let ((request (agent-repl-test-verbs--request :swap)))
         (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref "id-ws-one" "/w/ws-one")))
         (should (equal (plist-get request :target) (agent-repl-test-verbs--ref "id-ws-two" "/w/ws-two")))))))
 
-(ert-deftest agent-repl-verbs-move-success-says-so ()
-  "A move the daemon made is reported to the user."
+(ert-deftest agent-repl-verbs-swap-success-says-so ()
+  "A swap the daemon made is reported to the user."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-two-refs
       ;; Act.
-      (agent-repl-verb-move "ws-one" "ws-two")
+      (agent-repl-verb-swap "ws-one" "ws-two")
       ;; Assert.
-      (should (agent-repl-test-verbs--messaged-p "moved ws-one to ws-two's place")))))
+      (should (agent-repl-test-verbs--messaged-p "swapped ws-one with ws-two")))))
 
-(ert-deftest agent-repl-verbs-move-refusals-take-the-generic-path ()
-  "A refused move is reported by the generic refusal path."
+(ert-deftest agent-repl-verbs-swap-refusals-take-the-generic-path ()
+  "A refused swap is reported by the generic refusal path."
   (agent-repl-test-verbs--with
-      '((:move . (:response (:arm :error :value (:cause (:arm :unknown-workspace
+      '((:swap . (:response (:arm :error :value (:cause (:arm :unknown-workspace
                                                               :value (:workspace (:id "id-ws-two" :dir "/w/ws-two"))))))))
     (agent-repl-test-verbs--with-two-refs
       ;; Act.
-      (agent-repl-verb-move "ws-one" "ws-two")
+      (agent-repl-verb-swap "ws-one" "ws-two")
       ;; Assert.
-      (should (agent-repl-test-verbs--messaged-p "move refused: unknown-workspace")))))
+      (should (agent-repl-test-verbs--messaged-p "swap refused: unknown-workspace")))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 

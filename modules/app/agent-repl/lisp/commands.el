@@ -79,7 +79,7 @@
 (declare-function agent-repl-host-editor-switch-count "host" ())
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
-(declare-function agent-repl-verb-move "agent-repl-verbs" (ws target))
+(declare-function agent-repl-verb-swap "agent-repl-verbs" (ws target))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
@@ -1304,55 +1304,55 @@ afterwards is a logging defect."
                           index target)
         (agent-repl-host-request-switch target 'slot))))))
 
-(defun agent-repl--place-slot (char)
+(defun agent-repl--swap-slot (char)
   "Return the tab slot the digit CHAR names: `1'..`9' are slots 1-9 and
 `0' is slot 10, the digit row's own order."
   (if (eq char ?0) 10 (- char ?0)))
 
-(defun agent-repl--read-place-slot ()
+(defun agent-repl--read-swap-slot ()
   "Read ONE digit and return the tab slot it names.
 `read-char-choice' returns on the keystroke itself, so the digit needs no
 RET to send, and any other key is refused in place."
-  (agent-repl--place-slot
-   (read-char-choice "Move to tab (1-9, 0 = 10): "
+  (agent-repl--swap-slot
+   (read-char-choice "Swap with tab (1-9, 0 = 10): "
                      (number-sequence ?0 ?9))))
 
-(defun agent-repl-workspace-place (slot)
-  "Move the current workspace onto tab SLOT's place in the registry order.
+(defun agent-repl-workspace-swap (slot)
+  "Swap the current workspace's place in the registry order with tab SLOT's.
 Interactively SLOT is read as one digit, `0' naming slot 10.  SLOT counts
 the DRAWN tabs (`agent-repl--drawn-tab-names'), exactly as the numeral
-chords do, so the digit names the tab the user is looking at, and the
-current workspace ends up as that tab.  The tabs it passes shift one place
-toward where it came from.
+chords do, so the digit names the tab the user is looking at.  The current
+workspace ends up as that tab, the workspace that was there takes the
+current workspace's old tab, and every other tab stays where it was.
 
-The daemon owns the registry order, so the move is REQUESTED of it
-\(`agent-repl-verb-move') and the bar redraws from the next roster push.
+The daemon owns the registry order, so the swap is REQUESTED of it
+\(`agent-repl-verb-swap') and the bar redraws from the next roster push.
 The sidebar follows the same order within each of its lists.
 
 A current workspace with no tab, a slot past the end of the bar, and the
 current workspace's own slot are REPORTED no-ops, recorded at `info' like
 every other navigation gesture."
-  (interactive (list (agent-repl--read-place-slot)))
+  (interactive (list (agent-repl--read-swap-slot)))
   (let* ((names (agent-repl--drawn-tab-names))
          (current (agent-repl--ws-current-name))
          (log-ws (or (agent-repl--ws-log-name current)
-                     '(:agent-repl-context "a move from a placeholder names no workspace")))
+                     '(:agent-repl-context "a swap from a placeholder names no workspace")))
          (target (and (<= 1 slot (length names)) (nth (1- slot) names))))
     (cond
      ((not (member current names))
-      (agent-repl--info log-ws "elisp.commands.place-no-tab current=%s slot=%d" current slot)
-      (message "[agent-repl] The current workspace has no tab to move"))
+      (agent-repl--info log-ws "elisp.commands.swap-no-tab current=%s slot=%d" current slot)
+      (message "[agent-repl] The current workspace has no tab to swap"))
      ((null target)
-      (agent-repl--info log-ws "elisp.commands.place-out-of-range slot=%d tabs=%d"
+      (agent-repl--info log-ws "elisp.commands.swap-out-of-range slot=%d tabs=%d"
                         slot (length names))
       (message "[agent-repl] No workspace tab %d -- the bar draws %d" slot (length names)))
      ((equal target current)
-      (agent-repl--info log-ws "elisp.commands.place-own-slot slot=%d ws=%s" slot current)
+      (agent-repl--info log-ws "elisp.commands.swap-own-slot slot=%d ws=%s" slot current)
       (message "[agent-repl] %s is already tab %d" current slot))
      (t
-      (agent-repl--info log-ws "elisp.commands.place slot=%d ws=%s target=%s"
+      (agent-repl--info log-ws "elisp.commands.swap slot=%d ws=%s target=%s"
                         slot current target)
-      (agent-repl-verb-move current target)))))
+      (agent-repl-verb-swap current target)))))
 
 (eval-and-compile
   ;; The count is needed at EXPANSION time by the macro below and at RUN time

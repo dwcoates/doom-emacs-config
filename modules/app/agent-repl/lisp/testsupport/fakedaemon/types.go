@@ -29,7 +29,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"SetWorkspacePriority":     func() proto.Message { return &v1.SetWorkspacePriorityResponse{} },
 	"SetWorkspaceHidden":       func() proto.Message { return &v1.SetWorkspaceHiddenResponse{} },
 	"SetWorkspaceParent":       func() proto.Message { return &v1.SetWorkspaceParentResponse{} },
-	"MoveWorkspace":            func() proto.Message { return &v1.MoveWorkspaceResponse{} },
+	"SwapWorkspaces":           func() proto.Message { return &v1.SwapWorkspacesResponse{} },
 	"FoldRepository":           func() proto.Message { return &v1.FoldRepositoryResponse{} },
 	"UpdateSidebarView":        func() proto.Message { return &v1.UpdateSidebarViewResponse{} },
 	"CreateTask":               func() proto.Message { return &v1.CreateTaskResponse{} },

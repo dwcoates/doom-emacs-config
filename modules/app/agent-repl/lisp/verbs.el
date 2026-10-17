@@ -117,7 +117,7 @@
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-move-workspace "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-swap-workspaces "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -973,19 +973,19 @@ with a record saying so."
           (agent-repl-host-request-switch target 'hide)
         (agent-repl--info ws "elisp.verbs.hide-landing-none ws=%s" ws)))))
 
-(defun agent-repl-verb-move (ws target)
-  "Move WS onto TARGET's place in the registry order.
-The workspaces between the two shift one step toward the place WS left, so
-WS ends where TARGET was.  The tab bar and the sidebar are both views of
-the registry, and the new order arrives on the roster stream, so success
-changes no editor state."
+(defun agent-repl-verb-swap (ws target)
+  "Exchange the places of WS and TARGET in the registry order.
+WS takes TARGET's place and TARGET takes WS's; every other workspace keeps
+its own.  The tab bar and the sidebar are both views of the registry, and
+the new order arrives on the roster stream, so success changes no editor
+state."
   (agent-repl-verbs--send
-   #'agent-repl-rpc-move-workspace (agent-repl-verbs--conn ws)
+   #'agent-repl-rpc-swap-workspaces (agent-repl-verbs--conn ws)
    (list :workspace (agent-repl-verbs--ref ws) :target (agent-repl-verbs--ref target))
-   :ws ws :op "move"
+   :ws ws :op "swap"
    :on-success
    (lambda (_)
-     (message "agent-repl: moved %s to %s's place" ws target))))
+     (message "agent-repl: swapped %s with %s" ws target))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
