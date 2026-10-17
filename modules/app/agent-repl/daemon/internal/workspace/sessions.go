@@ -2657,9 +2657,9 @@ var englishPrinter = message.NewPrinter(language.English)
 // chip measures against (topbar.Resolver.ContextWindow: the vendor's stated
 // window, else the assumed 1,000,000), so the gate and the chip agree on how
 // full one count is. The gate's fill and the feed figure's are this one value.
-func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.ColdGateCost {
+func coldGateCost(cold *conversationv1.SessionCold, window int64) footer.FiguredLine {
 	tokens := cold.GetContextTokens()
-	return footer.ColdGateCost{
+	return footer.FiguredLine{
 		Lead:       "the conversation is cold at ",
 		Figure:     englishPrinter.Sprintf("%d", tokens),
 		Tail:       " context tokens",

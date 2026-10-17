@@ -311,7 +311,7 @@ func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "context cold — 182k tokens to re-read"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "context cold — 182k tokens to re-read"}})
 
 	// Assert
 	waiting := h.view(t).GetStrip().GetStatus().GetWaiting()
@@ -327,7 +327,7 @@ func TestTheColdGatesCostLineCarriesItsParts(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	cost := ColdGateCost{Lead: "the conversation is cold at ", Figure: "409,051", Tail: " context tokens", WindowFill: 0.41}
+	cost := FiguredLine{Lead: "the conversation is cold at ", Figure: "409,051", Tail: " context tokens", WindowFill: 0.41}
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: cost})
@@ -347,7 +347,7 @@ func TestTheColdGatesCostLineIsExactlyItsParts(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	cost := ColdGateCost{Lead: "the conversation is cold at ", Figure: "409,051", Tail: " context tokens", WindowFill: 0.41}
+	cost := FiguredLine{Lead: "the conversation is cold at ", Figure: "409,051", Tail: " context tokens", WindowFill: 0.41}
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: cost})
@@ -1350,7 +1350,7 @@ func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
 			at: func(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityAt {
 				return status.GetQuestion().GetActivity().GetSalient().GetAt()
 			}},
-		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}}) }, at: waitingAt},
+		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "cold"}}) }, at: waitingAt},
 		{name: "an interrupt", open: func(h *harness) { h.r.SetInterrupting(testWS, true) }, at: waitingAt},
 	}
 	for _, tt := range tests {
@@ -1377,11 +1377,11 @@ func TestARestatedColdGateKeepsItsInstant(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "cold"}})
 	h.clock.Advance(time.Minute)
 
 	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "still cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "still cold"}})
 
 	// Assert
 	at := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetAt()

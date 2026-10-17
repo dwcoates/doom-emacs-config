@@ -193,13 +193,15 @@ type ColdGate struct {
 	// Standing reports whether a gate is open.
 	Standing bool
 	// Cost is the gate's composed cost line, in the parts it is drawn in.
-	Cost ColdGateCost
+	Cost FiguredLine
 }
 
-// ColdGateCost is the cold gate's cost line ("the conversation is cold at
-// 409,051 context tokens") in parts, so a client colors the figure alone
-// (footer.proto FooterStatusActivityColdGateCost).
-type ColdGateCost struct {
+// FiguredLine is a composed line around ONE cold-gate token figure, in the
+// parts it is drawn in, so a client colors the figure alone through the cold
+// gate's gradient: the gate's cost line ("the conversation is cold at 409,051
+// context tokens", footer.proto FooterStatusActivityColdGateCost) and every
+// line that measures a figure the way the gate does.
+type FiguredLine struct {
 	// Lead is the words before the figure.
 	Lead string
 	// Figure is the token count as drawn ("409,051").
@@ -213,7 +215,7 @@ type ColdGateCost struct {
 
 // Text is the whole line, exactly Lead + Figure + Tail. It is DERIVED, never
 // stored beside the parts, so the line and its parts cannot disagree.
-func (c ColdGateCost) Text() string {
+func (c FiguredLine) Text() string {
 	return c.Lead + c.Figure + c.Tail
 }
 

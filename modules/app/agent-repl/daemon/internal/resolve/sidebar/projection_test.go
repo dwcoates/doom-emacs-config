@@ -132,7 +132,7 @@ func TestAGateDrawsTheRowForTheGate(t *testing.T) {
 			})
 		}, want: "permission"},
 		{name: "a cold gate", open: func(f footer.Resolver) {
-			f.SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.ColdGateCost{Lead: "cold"}})
+			f.SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.FiguredLine{Lead: "cold"}})
 		}, want: "cold_gate"},
 	}
 	for _, tt := range tests {

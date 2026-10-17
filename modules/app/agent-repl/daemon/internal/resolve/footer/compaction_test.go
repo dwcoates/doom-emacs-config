@@ -174,7 +174,7 @@ func TestAnAnsweredColdGateThinksRatherThanWaits(t *testing.T) {
 	// lands, and the answer must outrank it.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
@@ -190,7 +190,7 @@ func TestAnAnsweredColdGateDrawsTheDaemonsOwnLine(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
@@ -206,7 +206,7 @@ func TestACompactAndResumeGateAnswerTakesTheCompactingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompactAndResume, Text: "compaction requested"})
@@ -231,7 +231,7 @@ func TestAClearedGateAnswerTakesTheClearingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceClear, Text: "clearing the context"})
@@ -247,7 +247,7 @@ func TestAPaidGateAnswerTakesTheSubmittingStep(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 
 	// Act.
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoicePay, Text: "resuming and paying"})
@@ -263,7 +263,7 @@ func TestClearingTheAnswerGivesTheStandingGateBackTheStrip(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compaction requested"})
 
 	// Act. The re-open failed, so the gate is still the question.
@@ -595,7 +595,7 @@ func TestTheColdGateAnswersLine(t *testing.T) {
 			// Arrange: the gate's verb relayed its concluded phase.
 			h := newHarness(t)
 			connected(h)
-			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 			h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compacted and resumed"})
 
 			// Act
@@ -697,7 +697,7 @@ func TestAConclusionUnderAColdGateAnswerStillRaisesItsTransient(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "the conversation is cold"}})
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "the conversation is cold"}})
 	h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "resuming the session from the summary…"})
 	h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
 		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 101_600, 12_400, "")))

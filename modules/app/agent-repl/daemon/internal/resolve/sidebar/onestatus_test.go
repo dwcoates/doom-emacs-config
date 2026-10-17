@@ -549,7 +549,7 @@ func TestTheFooterAndTheRosterAgreeWhereTheWalkNeverReaches(t *testing.T) {
 		}},
 		{name: "a standing cold gate", wantFooter: "waiting/cold_gate", want: "cold_gate", apply: func(t *testing.T, s *surfaces) {
 			s.ackedTurn()
-			s.footer.SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.ColdGateCost{Lead: "cold"}})
+			s.footer.SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.FiguredLine{Lead: "cold"}})
 		}},
 		{name: "a refused close", wantFooter: "closing/blocked", want: "closing", apply: func(t *testing.T, s *surfaces) {
 			s.footer.SetClosing(theWS, &footer.CloseBlocked{Reason: "held_prompts", Detail: "a prompt is held"})
