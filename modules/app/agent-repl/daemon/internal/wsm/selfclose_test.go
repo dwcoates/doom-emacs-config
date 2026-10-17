@@ -12,14 +12,18 @@ func TestTheSelfCloseMarkRoundTripsAndClears(t *testing.T) {
 	at := instant
 
 	// Act
-	setErr := s.SetCloseWhenTurnEnds(context.Background(), ws.ID, &at)
+	setErr := s.MarkCloseWhenTurnEnds(context.Background(), ws.ID, at)
 	marked, readErr := s.Workspace(context.Background(), ws.ID)
-	clearErr := s.SetCloseWhenTurnEnds(context.Background(), ws.ID, nil)
+	first, firstErr := s.TakeCloseWhenTurnEnds(context.Background(), ws.ID)
+	second, secondErr := s.TakeCloseWhenTurnEnds(context.Background(), ws.ID)
 	cleared, clearedErr := s.Workspace(context.Background(), ws.ID)
 
 	// Assert
-	if setErr != nil || readErr != nil || clearErr != nil || clearedErr != nil {
-		t.Fatalf("errors = %v, %v, %v, %v", setErr, readErr, clearErr, clearedErr)
+	if setErr != nil || readErr != nil || firstErr != nil || secondErr != nil || clearedErr != nil {
+		t.Fatalf("errors = %v, %v, %v, %v, %v", setErr, readErr, firstErr, secondErr, clearedErr)
+	}
+	if !first || second {
+		t.Errorf("takes = %v, %v; want the first alone to take the mark", first, second)
 	}
 	if marked.CloseWhenTurnEnds == nil || !marked.CloseWhenTurnEnds.Equal(at) {
 		t.Errorf("marked = %v, want %v", marked.CloseWhenTurnEnds, at)
@@ -33,9 +37,8 @@ func TestEveryCloseClearsTheSelfCloseMark(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	at := instant
-	if err := s.SetCloseWhenTurnEnds(context.Background(), ws.ID, &at); err != nil {
-		t.Fatalf("SetCloseWhenTurnEnds: %v", err)
+	if err := s.MarkCloseWhenTurnEnds(context.Background(), ws.ID, instant); err != nil {
+		t.Fatalf("MarkCloseWhenTurnEnds: %v", err)
 	}
 
 	// Act
@@ -54,13 +57,11 @@ func TestEveryCloseClearsTheSelfCloseMark(t *testing.T) {
 func TestMarkingAnUnregisteredWorkspaceFails(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	at := instant
-
 	// Act
-	err := s.SetCloseWhenTurnEnds(context.Background(), "ws-none", &at)
+	err := s.MarkCloseWhenTurnEnds(context.Background(), "ws-none", instant)
 
 	// Assert
 	if err == nil {
-		t.Fatal("SetCloseWhenTurnEnds = nil, want a failure")
+		t.Fatal("MarkCloseWhenTurnEnds = nil, want a failure")
 	}
 }

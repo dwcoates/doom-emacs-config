@@ -504,9 +504,12 @@ type DB interface {
 	UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error)
 	// MergeQueueSubscriptions loads every merge queue subscription.
 	MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error)
-	// SetCloseWhenTurnEnds marks a workspace to close when its running turn
-	// ends, or clears the mark with nil (selfclose.go).
-	SetCloseWhenTurnEnds(ctx context.Context, id WorkspaceID, at *time.Time) error
+	// MarkCloseWhenTurnEnds marks a workspace to close when its running turn
+	// ends (selfclose.go).
+	MarkCloseWhenTurnEnds(ctx context.Context, id WorkspaceID, at time.Time) error
+	// TakeCloseWhenTurnEnds clears a workspace's self-close mark in one
+	// statement, answering whether one stood.
+	TakeCloseWhenTurnEnds(ctx context.Context, id WorkspaceID) (bool, error)
 	// SubscribeWorkspace records a workspace subscription, replacing the
 	// events of one its subscriber holds to the same workspace, and answers
 	// whether it replaced one (workspacesubscriptions.go).
