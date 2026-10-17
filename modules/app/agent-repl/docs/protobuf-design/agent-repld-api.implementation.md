@@ -57,7 +57,7 @@ Each item is checked off as it lands, with its commit.
       mark itself when it ends a turn to wait on another workspace and to
       clear it when the answer arrives.
 - [x] D13 Retire `internal/commandfile` and the output-dir ingress.
-- [ ] D14 Integration harness and e2e callers ported.
+- [x] D14 Integration harness and e2e callers ported.
 
 ## Editor (Emacs lisp, `lisp/`)
 
