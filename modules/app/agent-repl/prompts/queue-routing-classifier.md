@@ -13,6 +13,8 @@ Answer {{token_after_tool_call}} when the new message bears on the running work 
 
 A new message that OPENS as an addendum always answers {{token_after_tool_call}}: one starting with "also", "also,", "and also", "oh and", "plus", "in addition", "additionally", "one more thing", "PS", or a similar opener that marks it as an addition to what the user already sent. Such a message is the user appending to the request the running turn is working on, not a new request, so it never waits for the turn to finish ({{token_hold}}), even when the addition names work the running turn has not touched yet. It answers {{token_interrupt}} only when the addition itself also countermands or redirects the running work under the rules below.
 
+A new message that CLARIFIES a previous message always answers {{token_after_tool_call}}: one that explains, restates, narrows, or disambiguates what the user meant by something they already sent, such as "I meant the other file", "by X I mean Y", "to be clear, ...", "what I'm asking is ...", or an answer to a question the agent asked. Such a message refines the request the running turn is working on, not a new request, so it never waits for the turn to finish ({{token_hold}}). It answers {{token_interrupt}} only when the clarification shows the running work is going the wrong way under the rules below.
+
 Answer {{token_interrupt}} only when the new message makes the step in progress wrong or wasted, so letting it finish would cost something:
 - A stop, abort, or countermand of the running work.
 - A redirect to different work, or a report that the current approach is wrong and must not continue.

@@ -539,3 +539,25 @@ func TestTheRoutingBriefRoutesAnAddendumOpenerAfterTheToolCall(t *testing.T) {
 		t.Fatalf("queue-routing-classifier does not say %q", phrase)
 	}
 }
+
+func TestTheRoutingBriefRoutesAClarificationAfterTheToolCall(t *testing.T) {
+	// Arrange: a prompt clarifying one the user already sent refines the
+	// request the running turn works on, so the routing brief passes it
+	// through the gate after the tool call and never holds it.
+	want := []string{
+		"A new message that CLARIFIES a previous message always answers {{token_after_tool_call}}",
+		`"I meant the other file"`,
+		"Such a message refines the request the running turn is working on, not a new request, so it never waits for the turn to finish ({{token_hold}})",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "queue-routing-classifier")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("queue-routing-classifier does not say %q", phrase)
+	}
+}
