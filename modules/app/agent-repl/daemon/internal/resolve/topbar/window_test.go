@@ -53,7 +53,7 @@ func TestTheWindowFillIsZeroWithNoContext(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Assert.
@@ -65,7 +65,7 @@ func TestTheWindowFillIsZeroWithNoContext(t *testing.T) {
 func TestTheColdGatesFigureIsMeasuredAgainstTheAssumedWindow(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act.
@@ -80,7 +80,7 @@ func TestTheColdGatesFigureIsMeasuredAgainstTheAssumedWindow(t *testing.T) {
 func TestTheWindowsSourceIsRecordedWhenItChanges(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act.

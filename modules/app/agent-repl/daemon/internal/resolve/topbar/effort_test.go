@@ -67,7 +67,7 @@ func levelsOf(options []*frontendv1.TopbarEffortOption) []conversationv1.AgentEf
 func TestTheEffortSelectorIsAbsentWithNoSession(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/root"})
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act.

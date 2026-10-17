@@ -65,20 +65,12 @@ type AccountOption struct {
 	Current bool
 }
 
-// Naming is the workspace's title and session line, from WSM.
+// Naming is the workspace's name line and session line, from WSM.
 type Naming struct {
-	// Slug is the workspace's short name.
-	Slug string
-	// Title is the display title.
-	Title string
-	// Branch is the worktree's branch.
-	Branch string
-	// DefaultBranch is the REPOSITORY's default branch. The title shows the
-	// branch only when it DIFFERS from this, so a workspace sitting on the
-	// default branch is named by its name alone; without the comparison the
-	// resolver could not tell a branch worth showing from one that says
-	// nothing.
-	DefaultBranch string
+	// Name is the workspace's registry name, which the topbar draws on its own
+	// line beneath the summary (TopbarWorkspaceName). It is never composed
+	// into the title.
+	Name string
 	// ConfigDir is the account root this session spends from — the middle
 	// field of the session line. A daemon fact (the repo-under-root rule
 	// determines it), so it rides the naming rather than any vendor frame.
