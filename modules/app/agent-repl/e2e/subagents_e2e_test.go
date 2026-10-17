@@ -429,6 +429,9 @@ func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
 	if err := json.Unmarshal(raw, &meta); err != nil || meta.ToolUseID == "" {
 		t.Fatalf("%s names no toolUseId (%v): %s", metas[0], err, raw)
 	}
+	// The book is written from the nested transcript beside the .meta.json,
+	// which the turn's end orders nothing about: wait for its own cursor.
+	awaitFileIngested(t, w, strings.TrimSuffix(metas[0], ".meta.json")+".jsonl")
 	var usages []*conversationv1.TokenUsage
 	for _, line := range rmOpenAgentBook(t, w, &conversationv1.AgentId{Value: meta.ToolUseID}).GetLines() {
 		if u := line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetUsage(); u != nil {
