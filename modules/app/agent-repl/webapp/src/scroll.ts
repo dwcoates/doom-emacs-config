@@ -149,6 +149,9 @@ type ParkCause =
   | "lastBubbleExpanded"
   | "latestVisible";
 
+/** A named cause that supersedes the reader's click hold (`supersedeClick`). */
+type ClickSupersede = Exclude<ParkCause, "latestVisible"> | "selectionCleared" | "detachedWorkSelected" | "entryJumped";
+
 /** What asked the latest-visible latch to look: the one re-latch's callers. */
 type LatchTrigger = "scroll" | "follow" | "reveal" | "selectionEnded";
 
@@ -159,7 +162,7 @@ export type SubscribeScroll = (onScroll: () => void) => void;
 export type SubscribeResize = (onResize: () => void) => void;
 
 /** Registering a listener for the reader's own input on a box. */
-export type SubscribeInput = (onInput: () => void) => void;
+export type SubscribeInput = (onInput: (kind: ReaderInput) => void) => void;
 
 /** Everything the tail owner reads and writes on the box it guards. */
 export type ReanchorBox = ScrollPosition;
@@ -330,6 +333,11 @@ function rowName(row: Element): string {
   return row.getAttribute("data-feed-row") ?? row.tagName.toLowerCase();
 }
 
+/** The click hold's row in a record: its name (`rowName`), or "none" when the click landed outside every row. */
+export function heldRowName(row: Element | null): string {
+  return row === null ? "none" : rowName(row);
+}
+
 /**
  * THE SINGLE OWNER OF THE FEED'S SCROLL POSITION.
  *
@@ -487,37 +495,37 @@ export class TailFollow {
 
   /** A prompt this client sent was drawn: park at the tail and follow. */
   promptSent(): void {
-    this.supersedeClick();
+    this.supersedeClick("promptSent");
     this.park("promptSent");
   }
 
   /** A held prompt's card was drawn for the first time: park at the tail and follow. */
   promptHeld(): void {
-    this.supersedeClick();
+    this.supersedeClick("promptHeld");
     this.park("promptHeld");
   }
 
   /** A feed's first paint: land at the tail and follow. */
   initialPlacement(): void {
-    this.supersedeClick();
+    this.supersedeClick("initialPlacement");
     this.park("initialPlacement");
   }
 
   /** A page replace (re-open after reconnect or handover): land at the tail and follow. */
   replaceRestore(): void {
-    this.supersedeClick();
+    this.supersedeClick("replaceRestore");
     this.park("replaceRestore");
   }
 
   /** The user switched to this page's workspace: land at the tail and follow. */
   workspaceSelected(): void {
-    this.supersedeClick();
+    this.supersedeClick("workspaceSelected");
     this.park("workspaceSelected");
   }
 
   /** The reader cleared the selection: return to the tail and follow. */
   selectionCleared(): void {
-    this.supersedeClick();
+    this.supersedeClick("selectionCleared");
     this.selectionActive = false;
     this.park("selectionMoved");
   }
@@ -545,7 +553,7 @@ export class TailFollow {
    * selection the reader's click made centers nothing (`selectionClicked`).
    */
   selectionMoved(geometry: CenterGeometry | null): void {
-    this.supersedeClick();
+    this.supersedeClick("selectionMoved");
     this.selectionActive = true;
     this.release();
     if (geometry !== null) this.shift("selectionMoved", centerDelta(geometry));
@@ -637,7 +645,7 @@ export class TailFollow {
       });
       return;
     }
-    this.supersedeClick();
+    this.supersedeClick("lastBubbleExpanded");
     this.park("lastBubbleExpanded");
   }
 
@@ -662,12 +670,14 @@ export class TailFollow {
     this.heldTop = this.box.scrollTop;
     this.holdFloor();
     this.takeAnchor();
-    log.debug("the reader clicked; the view holds until the reader's next input", {
+    log.info("the reader clicked; the view holds until the reader's next input", {
       operation: "scroll.click-held",
       context: {
         by,
         at: this.box.scrollTop,
-        row: this.clickedRow === null ? "none" : rowName(this.clickedRow),
+        row: heldRowName(this.clickedRow),
+        target: target === null ? "none" : nodeLabel(target),
+        floor: this.floorExtent,
       },
     });
   }
@@ -736,10 +746,28 @@ export class TailFollow {
    * key while something in it has focus. It decides nothing on its own; it is
    * what makes the NEXT movement of the box attributable to the reader.
    */
-  onInput(): void {
+  onInput(kind: ReaderInput): void {
     this.touched = true;
+    if (this.clickHeld) this.recordHoldEnded(kind);
     this.clickHeld = false;
     this.clickedRow = null;
+  }
+
+  /**
+   * The reader's click hold ended under BY: a reader input's kind, or the
+   * named cause that superseded it. Recorded so a feed that moved after a
+   * click shows whether the hold still stood when it did.
+   */
+  private recordHoldEnded(by: ReaderInput | ClickSupersede): void {
+    log.info("the reader's click hold ended", {
+      operation: "scroll.click-hold-ended",
+      context: {
+        by,
+        at: this.box.scrollTop,
+        held_top: this.heldTop,
+        row: heldRowName(this.clickedRow),
+      },
+    });
   }
 
   /**
@@ -747,7 +775,8 @@ export class TailFollow {
    * The click hold ends and the floor is lifted, so the cause lands on the
    * feed's own content, never on the blank a click held.
    */
-  private supersedeClick(): void {
+  private supersedeClick(by: ClickSupersede): void {
+    if (this.clickHeld) this.recordHoldEnded(by);
     this.clickHeld = false;
     this.clickedRow = null;
     this.setFloor(0);
@@ -771,12 +800,18 @@ export class TailFollow {
     const top = this.box.scrollTop;
     const end = this.box.scrollHeight - this.box.clientHeight;
     const clamped = top < this.heldTop && top >= end - 1;
+    if (!clamped && top !== this.heldTop) {
+      log.info("the view moved under the reader's click hold, and the hold takes the new position", {
+        operation: "scroll.click-hold-moved",
+        context: { from: this.heldTop, to: top, end, scroll_height: this.box.scrollHeight, floor: this.floorExtent },
+      });
+    }
     if (!clamped) this.heldTop = top;
     this.setFloor(this.heldTop + this.box.clientHeight);
     if (!clamped) return;
     this.box.scrollTop = this.heldTop;
     this.lastTop = this.box.scrollTop;
-    log.debug("the box clamped the view the reader's click holds; the floor put it back", {
+    log.info("the box clamped the view the reader's click holds; the floor put it back", {
       operation: "scroll.click-floor-restored",
       context: { from: top, to: this.box.scrollTop, floor: this.floorExtent },
     });
@@ -801,9 +836,16 @@ export class TailFollow {
     this.floorExtent = extent > 0 && (blank > 0 || this.clickHeld) ? extent : 0;
     this.floorBlank = blank;
     if (blank !== was.blank || this.floorExtent !== was.extent) {
-      log.debug("the scroll floor changed", {
+      log.info("the scroll floor changed", {
         operation: "scroll.floor-set",
-        context: { extent: this.floorExtent, blank, held: this.clickHeld },
+        context: {
+          extent: this.floorExtent,
+          blank,
+          held: this.clickHeld,
+          at: this.box.scrollTop,
+          scroll_height: this.box.scrollHeight,
+          client_height: this.box.clientHeight,
+        },
       });
     }
   }
@@ -840,7 +882,7 @@ export class TailFollow {
   ): void {
     subscribeScroll(() => this.onScroll());
     subscribeResize(() => this.onResize());
-    subscribeInput(() => this.onInput());
+    subscribeInput((kind) => this.onInput(kind));
   }
 
   /**
@@ -896,7 +938,7 @@ export class TailFollow {
     cause: "detachedWorkSelected" | "entryJumped",
     delta: number,
   ): void {
-    this.supersedeClick();
+    this.supersedeClick(cause);
     this.release();
     this.shift(cause, delta);
     this.takeAnchor();
@@ -1269,7 +1311,7 @@ function recordMove(cause: ScrollCause, from: number, to: number, follow: boolea
 export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void {
   const observer = new ResizeObserver(() => tail.onResize());
   const onScroll = (): void => tail.onScroll();
-  const onInput = (): void => tail.onInput();
+  const onInput = (event: Event): void => tail.onInput(event.type as ReaderInput);
   const watched = new Set<Element>();
   const watchChildren = (): void => {
     for (const child of box.children) {
@@ -1353,6 +1395,9 @@ export function holdViewOnClicks(zone: HTMLElement, tail: TailFollow): () => voi
  * degradation.
  */
 const READER_INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/** One of `READER_INPUTS`: the event kind a reader input arrived as. */
+export type ReaderInput = (typeof READER_INPUTS)[number];
 
 /**
  * The two boxes a reveal compares, in ONE coordinate system.

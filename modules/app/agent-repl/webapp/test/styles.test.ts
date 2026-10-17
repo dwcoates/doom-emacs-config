@@ -3793,7 +3793,6 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     [".pfooter", "--panel-bg"],
     [".tool-card.bubble-fold[data-merge-bubble]", "--panel-bg"],
     [".merge-strip", "--panel-bg"],
-    [".merge-run-views", "--panel-bg"],
   ])("fills %s with %s", (selector, token) => {
     // Arrange / Act
     const rule = rulesOf(stylesheet).find(
@@ -5102,6 +5101,103 @@ describe("the merge bubble's run badge", () => {
 
   it("leaves every other tab's badge at its own size", () => {
     expect(mountedPaint(badge("tests"), "font-size")).not.toBe("0.7em");
+  });
+});
+
+/** A merge test row's head: its glyph, its name and its counts (src/feed/merge/tests-tab.ts). */
+function suiteHead(): { suite: HTMLElement; glyph: HTMLElement; counts: HTMLElement } {
+  const suite = document.createElement("div");
+  suite.className = "merge-suite";
+  const head = document.createElement("div");
+  head.className = "merge-suite-head";
+  const glyph = document.createElement("span");
+  glyph.className = "merge-suite-glyph is-live is-passing";
+  const name = document.createElement("span");
+  name.className = "merge-suite-name";
+  const counts = document.createElement("span");
+  counts.className = "merge-suite-counts";
+  head.append(glyph, name, counts);
+  suite.append(head);
+  return { suite, glyph, counts };
+}
+
+/** A merge test row's indicator and counts draw smaller than its name (owner request, 2026-10-17). */
+describe("the merge test row's indicator and counts", () => {
+  it("draws the indicator 30% smaller than the row", () => {
+    const { suite, glyph } = suiteHead();
+    expect(inDocument(suite, () => cascadedValue(glyph, "font-size"))).toBe("0.7em");
+  });
+
+  it("draws the counts at 80% of the suite's name", () => {
+    const { suite, counts } = suiteHead();
+    expect(inDocument(suite, () => cascadedValue(counts, "font-size"))).toBe("0.8em");
+  });
+
+  it("leaves the run tally's counts at the strip's own size", () => {
+    const tally = document.createElement("span");
+    tally.className = "merge-run-tally";
+    const counts = document.createElement("span");
+    counts.className = "merge-suite-counts";
+    tally.append(counts);
+    expect(inDocument(tally, () => cascadedValue(counts, "font-size"))).not.toBe("0.8em");
+  });
+});
+
+/**
+ * THE RUN VIEW MENU IS THE TOPBAR'S DROPDOWN (owner request, 2026-10-17): the
+ * menu a run's badge opens draws the topbar reveal's panel and rows.
+ */
+describe("the merge run view menu's dropdown look", () => {
+  const PANEL_PROPS = ["background", "border-top-width", "border-top-style", "border-top-color", "border-top-left-radius", "box-shadow", "font-size"];
+  const ROW_PROPS = ["padding-top", "padding-left", "color", "text-align", "cursor", "width", "background"];
+
+  /** The run menu as `createRunViewMenu` draws it, inside a tests panel; answers CHECK's result. */
+  function inRunMenu<T>(check: (menu: HTMLElement, item: HTMLElement) => T): T {
+    const panel = document.createElement("div");
+    panel.className = "merge-tab-panel";
+    panel.setAttribute("data-merge-tab-body", "tests");
+    const run = document.createElement("div");
+    run.className = "merge-run";
+    const menu = document.createElement("div");
+    menu.className = "merge-run-views list-rows";
+    const item = document.createElement("ar-button");
+    item.className = "merge-run-view-item";
+    menu.append(item);
+    run.append(menu);
+    panel.append(run);
+    return inDocument(panel, () => check(menu, item));
+  }
+
+  /** The topbar effort dropdown inside its reveal; answers CHECK's result. */
+  function inTopbarReveal<T>(check: (reveal: HTMLElement, option: HTMLElement) => T): T {
+    const reveal = document.createElement("div");
+    reveal.className = "topbar-reveal";
+    const list = document.createElement("div");
+    list.className = "topbar-effort-options list-rows";
+    const option = document.createElement("ar-button");
+    option.className = "topbar-effort-option";
+    list.append(option);
+    reveal.append(list);
+    return inDocument(reveal, () => check(reveal, option));
+  }
+
+  /** PROPS of EL, cascaded. */
+  const paints = (el: HTMLElement, props: readonly string[]): string[] => props.map((p) => cascadedValue(el, p));
+
+  it("draws the menu's panel as the topbar reveal's", () => {
+    expect(inRunMenu((menu) => paints(menu, PANEL_PROPS))).toEqual(inTopbarReveal((reveal) => paints(reveal, PANEL_PROPS)));
+  });
+
+  it("draws the menu's rows as the topbar's option rows", () => {
+    expect(inRunMenu((_, item) => paints(item, ROW_PROPS))).toEqual(inTopbarReveal((_, option) => paints(option, ROW_PROPS)));
+  });
+
+  it("lights the current view in the topbar rows' hover fill", () => {
+    const active = inRunMenu((_, item) => {
+      item.classList.add("is-active");
+      return cascadedValue(item, "background");
+    });
+    expect(active).toBe("var(--border)");
   });
 });
 
