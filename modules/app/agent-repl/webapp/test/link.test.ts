@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -24,6 +27,7 @@ import { createTicker } from "../src/clock.js";
 import type { FailureSink } from "../src/failure/sink.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
+  editorTargetAnchor,
   installProseLinkRouting,
   openExternalRefusal,
   openInEditorRefusal,
@@ -166,6 +170,52 @@ function workspaceFileOf(req: OpenInEditorRequest): OpenInEditorWorkspaceFile {
 function testLog(token = "log-7f3a", label = "~/.claude-emacs/merge-logs/ws-tests-2.log"): FeedMergeTestLog {
   return create(FeedMergeTestLogSchema, { token: { value: token }, label: { text: label } });
 }
+
+describe("editorTargetAnchor", () => {
+  const target = { case: "workspaceFile", value: { path: "lisp/core.el" } } as const;
+
+  it("renders an anchor wearing the given class and text", () => {
+    const { ctx } = harness();
+    const a = editorTargetAnchor(ctx, "editor-link x", "core.el", target);
+    expect([a.tagName, a.className, a.textContent]).toEqual(["A", "editor-link x", "core.el"]);
+  });
+
+  it("carries NO href, since every target is on the daemon's host", () => {
+    const { ctx } = harness();
+    expect(editorTargetAnchor(ctx, "c", "t", target).hasAttribute("href")).toBe(false);
+  });
+
+  it("is reachable by keyboard", () => {
+    const { ctx } = harness();
+    expect(editorTargetAnchor(ctx, "c", "t", target).tabIndex).toBe(0);
+  });
+
+  it("cancels a claimed click", () => {
+    const { ctx } = harness();
+    expect(click(editorTargetAnchor(ctx, "c", "t", target)).defaultPrevented).toBe(true);
+  });
+
+  it("sends its target to OpenInEditor for this page's workspace", async () => {
+    const { ctx, editor } = harness();
+    click(editorTargetAnchor(ctx, "c", "t", target));
+    await settle();
+    expect([editor[0].workspace?.id, editor[0].target.case]).toEqual(["ws-1", "workspaceFile"]);
+  });
+
+  it("leaves a modified click to the platform", async () => {
+    const { ctx, editor } = harness();
+    const a = editorTargetAnchor(ctx, "c", "t", target);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+    await settle();
+    expect(editor).toHaveLength(0);
+  });
+
+  it("is the one place an OpenInEditor link is armed: no link hand-rolls its own", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(path.join(here, "..", "src", "link.ts"), "utf8");
+    expect(source.match(/armButtonRole\(/g)).toHaveLength(1);
+  });
+});
 
 describe("renderMergeTestLogLink", () => {
   it("renders an anchor", () => {
