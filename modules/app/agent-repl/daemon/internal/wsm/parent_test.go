@@ -336,3 +336,43 @@ func TestRestoreParent(t *testing.T) {
 		})
 	}
 }
+
+func TestARetargetReDecidesWhoLandsTheWorkspace(t *testing.T) {
+	tests := []struct {
+		name        string
+		contextFrom string
+		chain       [][2]string
+		want        bool
+	}{
+		{name: "a fresh child is its owner's to land", chain: [][2]string{{"child", "parent"}}, want: true},
+		{name: "a child forked from its owner lands itself", contextFrom: "parent", chain: [][2]string{{"child", "parent"}}},
+		{name: "a child moved to an owner it did not fork is that owner's to land", contextFrom: "parent", chain: [][2]string{{"child", "parent"}, {"child", "other"}}, want: true},
+		{name: "a child moved to the top level lands itself", chain: [][2]string{{"child", "parent"}, {"child", ""}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "parent", "child", "other")
+			if tt.contextFrom != "" {
+				if _, err := s.db().Exec(`UPDATE workspaces SET context_from = ? WHERE id = ?`, f.byName[tt.contextFrom].ID, f.byName["child"].ID); err != nil {
+					t.Fatalf("seed context_from: %v", err)
+				}
+			}
+
+			// Act
+			for _, step := range tt.chain {
+				f.retarget(t, s, step[0], step[1])
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), f.byName["child"].ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.OwnerLands != tt.want {
+				t.Fatalf("owner lands = %v, want %v", got.OwnerLands, tt.want)
+			}
+		})
+	}
+}

@@ -254,12 +254,22 @@ func readTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID) (storedTarget, 
 // THE FAMILY'S SUBSECTION FOLLOWS THE PARENT (arrange.go): a workspace given a
 // parent stops storing a subsection and sits wherever the parent does; one
 // left with no parent stores the subsection it sat in until now, so it stays
-// where it was drawn. Both in the same statement as the parent, evaluated
-// against the row as it stood.
+// where it was drawn.
+//
+// WHO LANDS THE WORKSPACE IS RE-DECIDED WITH ITS OWNER: a child its new owner
+// did not lend its context to is the owner's to land, and a workspace with no
+// owner lands itself (owner_lands, derivation.go). A merge workspace keeps its
+// own: its owner is its requester, which never lands it.
+//
+// All in the same statement as the parent, evaluated against the row as it
+// stood.
 func writeTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID, targetDir string) error {
-	res, err := tx.ExecContext(ctx,
-		`UPDATE workspaces SET parent_id = ?, subsection_id = CASE WHEN ? IS NULL THEN `+rootSubsectionColumn+` ELSE NULL END WHERE id = ?`,
-		nullWorkspace(parent), nullWorkspace(parent), id)
+	owner := nullWorkspace(parent)
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET parent_id = ?,
+		subsection_id = CASE WHEN ? IS NULL THEN `+rootSubsectionColumn+` ELSE NULL END,
+		owner_lands = CASE WHEN merge_of IS NOT NULL THEN owner_lands
+			ELSE (? IS NOT NULL AND (context_from IS NULL OR context_from IS NOT ?)) END
+		WHERE id = ?`, owner, owner, owner, owner, id)
 	if err != nil {
 		return err
 	}
