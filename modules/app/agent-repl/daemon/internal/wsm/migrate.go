@@ -146,6 +146,7 @@ var migrations = []migration{
 	{To: 53, Name: "merge_racing_disabled", Kind: MigrationAdditive, DDL: racingDisabledDDL},
 	{To: 54, Name: "workspaces_status_changed_at", Kind: MigrationAdditive, DDL: statusChangedAtDDL},
 	{To: 55, Name: "merge_queue_subscriptions", Kind: MigrationAdditive, DDL: mergeQueueSubscriptionsDDL},
+	{To: 56, Name: "workspace_summaries", Kind: MigrationAdditive, DDL: workspaceSummariesDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its

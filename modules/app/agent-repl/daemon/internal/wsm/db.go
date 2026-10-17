@@ -368,6 +368,17 @@ type DB interface {
 	// DropMergeProgress deletes one merge lease's progress record and
 	// reports whether one stood.
 	DropMergeProgress(ctx context.Context, lease LeaseID) (bool, error)
+	// PutWorkspaceSummary records a workspace's synthesized summary and the
+	// digest it was distilled from, replacing any it had (summaries.go).
+	PutWorkspaceSummary(ctx context.Context, id WorkspaceID, sum WorkspaceSummary) error
+	// ResetWorkspaceSummaryDigest forgets the digest a workspace's summary was
+	// distilled from, keeping the title.
+	ResetWorkspaceSummaryDigest(ctx context.Context, id WorkspaceID) error
+	// DropWorkspaceSummary deletes a workspace's summary.
+	DropWorkspaceSummary(ctx context.Context, id WorkspaceID) error
+	// WorkspaceSummaryOf loads a workspace's summary; the bool is false when
+	// none stands.
+	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error)
 	// AdoptMergeLease takes ownership of the merge lease a previous process
 	// left held, for the merge this process resumes under it.
 	AdoptMergeLease(ctx context.Context, id WorkspaceID, lease LeaseID) (Lease, error)
