@@ -1180,6 +1180,16 @@ message FooterStatusBackground {
   // next to nothing).
   reserved 2;
   reserved "quiet_stretch_ending";
+  // Set while the workspace AWAITS CORRESPONDENCE from another workspace
+  // (agentrepl.v1.SetWorkspaceCorrespondence) and no turn runs: the reason
+  // the workspace stands in the background, whether or not detached work
+  // runs too. UNSET while it awaits nothing.
+  optional FooterStatusBackgroundAwaiting awaiting = 3;
+}
+// What a background workspace awaits.
+message FooterStatusBackgroundAwaiting {
+  // The awaited workspace's name, as the roster draws it.
+  string awaited_name = 1;
 }
 // The activity cell while background: the salient line, or the transient
 // over the enduring line.

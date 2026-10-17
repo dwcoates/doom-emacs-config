@@ -32,6 +32,13 @@ message WorkspaceStatus {
   bool hidden = 5;
   // Whether the workspace is open, and what it is doing if so.
   WorkspaceStatusStanding standing = 6;
+  // TRUE while the workspace is a one-shot: created as one, or marked one
+  // since (SetWorkspaceOneShot). A one-shot lands itself when its work is
+  // done.
+  bool one_shot = 7;
+  // The workspace this one awaits correspondence from (SetWorkspaceCorrespondence),
+  // UNSET while it awaits none.
+  optional workspace.v1.WorkspaceRef awaiting = 8;
 }
 
 // Where a workspace's branch lands.

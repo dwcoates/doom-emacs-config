@@ -3,7 +3,9 @@
 // through the workspace's prompt queue as a deferred prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_WORKSPACE_COMPACT: it waits
 // behind a running turn, and the feed draws the context cut it produces as
-// any compaction's. Success means SUBMITTED; the cut arrives on the feed.
+// any compaction's. Success means SUBMITTED; the cut arrives on the feed. A
+// merge running in the workspace HOLDS the compaction until it ends, as it
+// holds any prompt (frontend.v1.HeldPrompt's `merge` hold arm).
 //
 // COMPACTING IS AN ACT OF ITS OWN, NOT A PROMPT. An agent never sends a slash
 // command as a prompt (SubmitPromptError.slash_command_from_agent), so the
@@ -47,6 +49,9 @@ message CompactWorkspaceResponse {
 // Submitted to the prompt queue.
 message CompactWorkspaceSuccess {}
 message CompactWorkspaceError {
+  // Tag 4 (`merging`) is RETIRED: a merge holds the compaction instead.
+  reserved 4;
+  reserved "merging";
   oneof cause {
     // The workspace id is not in the daemon's registry.
     CompactWorkspaceUnknownWorkspace unknown_workspace = 1;
@@ -54,9 +59,12 @@ message CompactWorkspaceError {
     CompactWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
     // The workspace is closed: no session runs to compact.
     CompactWorkspaceClosed closed = 3;
-    // The workspace's merge holds its feed; nothing is submitted until the
-    // merge ends.
-    CompactWorkspaceMerging merging = 4;
+    // The workspace has no session to submit to.
+    CompactWorkspaceNoSession no_session = 5;
+    // The session is parked at its cold gate. Compacting there is a gate
+    // answer (AnswerColdGate's `compact` or `compact_and_resume`), which the
+    // user must ask for or approve; nothing was submitted.
+    CompactWorkspaceColdGate cold_gate = 6;
   }
 }
 message CompactWorkspaceUnknownWorkspace {}
@@ -65,4 +73,5 @@ message CompactWorkspaceWorkspaceRefMismatch {
   string registry_dir = 1;
 }
 message CompactWorkspaceClosed {}
-message CompactWorkspaceMerging {}
+message CompactWorkspaceNoSession {}
+message CompactWorkspaceColdGate {}

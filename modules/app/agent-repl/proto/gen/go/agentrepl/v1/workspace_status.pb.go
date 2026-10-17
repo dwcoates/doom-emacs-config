@@ -48,7 +48,14 @@ type WorkspaceStatus struct {
 	// SetWorkspaceHidden moves it in and out.
 	Hidden bool `protobuf:"varint,5,opt,name=hidden,proto3" json:"hidden,omitempty"`
 	// Whether the workspace is open, and what it is doing if so.
-	Standing      *WorkspaceStatusStanding `protobuf:"bytes,6,opt,name=standing,proto3" json:"standing,omitempty"`
+	Standing *WorkspaceStatusStanding `protobuf:"bytes,6,opt,name=standing,proto3" json:"standing,omitempty"`
+	// TRUE while the workspace is a one-shot: created as one, or marked one
+	// since (SetWorkspaceOneShot). A one-shot lands itself when its work is
+	// done.
+	OneShot bool `protobuf:"varint,7,opt,name=one_shot,json=oneShot,proto3" json:"one_shot,omitempty"`
+	// The workspace this one awaits correspondence from (SetWorkspaceCorrespondence),
+	// UNSET while it awaits none.
+	Awaiting      *v1.WorkspaceRef `protobuf:"bytes,8,opt,name=awaiting,proto3,oneof" json:"awaiting,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -121,6 +128,20 @@ func (x *WorkspaceStatus) GetHidden() bool {
 func (x *WorkspaceStatus) GetStanding() *WorkspaceStatusStanding {
 	if x != nil {
 		return x.Standing
+	}
+	return nil
+}
+
+func (x *WorkspaceStatus) GetOneShot() bool {
+	if x != nil {
+		return x.OneShot
+	}
+	return false
+}
+
+func (x *WorkspaceStatus) GetAwaiting() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Awaiting
 	}
 	return nil
 }
@@ -1062,14 +1083,17 @@ var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
-	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x9f\x02\n" +
+	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x84\x03\n" +
 	"\x0fWorkspaceStatus\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06branch\x18\x03 \x01(\tR\x06branch\x12K\n" +
 	"\fmerge_target\x18\x04 \x01(\v2(.agentrepl.v1.WorkspaceStatusMergeTargetR\vmergeTarget\x12\x16\n" +
 	"\x06hidden\x18\x05 \x01(\bR\x06hidden\x12A\n" +
-	"\bstanding\x18\x06 \x01(\v2%.agentrepl.v1.WorkspaceStatusStandingR\bstanding\"\xba\x01\n" +
+	"\bstanding\x18\x06 \x01(\v2%.agentrepl.v1.WorkspaceStatusStandingR\bstanding\x12\x19\n" +
+	"\bone_shot\x18\a \x01(\bR\aoneShot\x12;\n" +
+	"\bawaiting\x18\b \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\bawaiting\x88\x01\x01B\v\n" +
+	"\t_awaiting\"\xba\x01\n" +
 	"\x1aWorkspaceStatusMergeTarget\x12K\n" +
 	"\aprimary\x18\x01 \x01(\v2/.agentrepl.v1.WorkspaceStatusMergeTargetPrimaryH\x00R\aprimary\x12E\n" +
 	"\x05owner\x18\x02 \x01(\v2-.agentrepl.v1.WorkspaceStatusMergeTargetOwnerH\x00R\x05ownerB\b\n" +
@@ -1153,27 +1177,28 @@ var file_agentrepl_v1_workspace_status_proto_depIdxs = []int32{
 	17, // 0: agentrepl.v1.WorkspaceStatus.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.WorkspaceStatus.merge_target:type_name -> agentrepl.v1.WorkspaceStatusMergeTarget
 	4,  // 2: agentrepl.v1.WorkspaceStatus.standing:type_name -> agentrepl.v1.WorkspaceStatusStanding
-	2,  // 3: agentrepl.v1.WorkspaceStatusMergeTarget.primary:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetPrimary
-	3,  // 4: agentrepl.v1.WorkspaceStatusMergeTarget.owner:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetOwner
-	17, // 5: agentrepl.v1.WorkspaceStatusMergeTargetOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	5,  // 6: agentrepl.v1.WorkspaceStatusStanding.open:type_name -> agentrepl.v1.WorkspaceStatusOpen
-	6,  // 7: agentrepl.v1.WorkspaceStatusStanding.closed:type_name -> agentrepl.v1.WorkspaceStatusClosed
-	7,  // 8: agentrepl.v1.WorkspaceStatusOpen.activity:type_name -> agentrepl.v1.WorkspaceStatusActivity
-	8,  // 9: agentrepl.v1.WorkspaceStatusActivity.starting:type_name -> agentrepl.v1.WorkspaceStatusActivityStarting
-	9,  // 10: agentrepl.v1.WorkspaceStatusActivity.idle:type_name -> agentrepl.v1.WorkspaceStatusActivityIdle
-	10, // 11: agentrepl.v1.WorkspaceStatusActivity.turn_running:type_name -> agentrepl.v1.WorkspaceStatusActivityTurnRunning
-	11, // 12: agentrepl.v1.WorkspaceStatusActivity.needs_input:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInput
-	16, // 13: agentrepl.v1.WorkspaceStatusActivity.merging:type_name -> agentrepl.v1.WorkspaceStatusActivityMerging
-	14, // 14: agentrepl.v1.WorkspaceStatusActivity.cold_gate:type_name -> agentrepl.v1.WorkspaceStatusActivityColdGate
-	15, // 15: agentrepl.v1.WorkspaceStatusActivity.fault:type_name -> agentrepl.v1.WorkspaceStatusActivityFault
-	12, // 16: agentrepl.v1.WorkspaceStatusActivityNeedsInput.question:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
-	13, // 17: agentrepl.v1.WorkspaceStatusActivityNeedsInput.permission:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
-	18, // 18: agentrepl.v1.WorkspaceStatusActivityColdGate.gate:type_name -> frontend.v1.FeedId
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	17, // 3: agentrepl.v1.WorkspaceStatus.awaiting:type_name -> workspace.v1.WorkspaceRef
+	2,  // 4: agentrepl.v1.WorkspaceStatusMergeTarget.primary:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetPrimary
+	3,  // 5: agentrepl.v1.WorkspaceStatusMergeTarget.owner:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetOwner
+	17, // 6: agentrepl.v1.WorkspaceStatusMergeTargetOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	5,  // 7: agentrepl.v1.WorkspaceStatusStanding.open:type_name -> agentrepl.v1.WorkspaceStatusOpen
+	6,  // 8: agentrepl.v1.WorkspaceStatusStanding.closed:type_name -> agentrepl.v1.WorkspaceStatusClosed
+	7,  // 9: agentrepl.v1.WorkspaceStatusOpen.activity:type_name -> agentrepl.v1.WorkspaceStatusActivity
+	8,  // 10: agentrepl.v1.WorkspaceStatusActivity.starting:type_name -> agentrepl.v1.WorkspaceStatusActivityStarting
+	9,  // 11: agentrepl.v1.WorkspaceStatusActivity.idle:type_name -> agentrepl.v1.WorkspaceStatusActivityIdle
+	10, // 12: agentrepl.v1.WorkspaceStatusActivity.turn_running:type_name -> agentrepl.v1.WorkspaceStatusActivityTurnRunning
+	11, // 13: agentrepl.v1.WorkspaceStatusActivity.needs_input:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInput
+	16, // 14: agentrepl.v1.WorkspaceStatusActivity.merging:type_name -> agentrepl.v1.WorkspaceStatusActivityMerging
+	14, // 15: agentrepl.v1.WorkspaceStatusActivity.cold_gate:type_name -> agentrepl.v1.WorkspaceStatusActivityColdGate
+	15, // 16: agentrepl.v1.WorkspaceStatusActivity.fault:type_name -> agentrepl.v1.WorkspaceStatusActivityFault
+	12, // 17: agentrepl.v1.WorkspaceStatusActivityNeedsInput.question:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
+	13, // 18: agentrepl.v1.WorkspaceStatusActivityNeedsInput.permission:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
+	18, // 19: agentrepl.v1.WorkspaceStatusActivityColdGate.gate:type_name -> frontend.v1.FeedId
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_status_proto_init() }
@@ -1181,6 +1206,7 @@ func file_agentrepl_v1_workspace_status_proto_init() {
 	if File_agentrepl_v1_workspace_status_proto != nil {
 		return
 	}
+	file_agentrepl_v1_workspace_status_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_workspace_status_proto_msgTypes[1].OneofWrappers = []any{
 		(*WorkspaceStatusMergeTarget_Primary)(nil),
 		(*WorkspaceStatusMergeTarget_Owner)(nil),

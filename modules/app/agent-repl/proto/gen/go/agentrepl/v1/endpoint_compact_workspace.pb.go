@@ -3,7 +3,9 @@
 // through the workspace's prompt queue as a deferred prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_WORKSPACE_COMPACT: it waits
 // behind a running turn, and the feed draws the context cut it produces as
-// any compaction's. Success means SUBMITTED; the cut arrives on the feed.
+// any compaction's. Success means SUBMITTED; the cut arrives on the feed. A
+// merge running in the workspace HOLDS the compaction until it ends, as it
+// holds any prompt (frontend.v1.HeldPrompt's `merge` hold arm).
 //
 // COMPACTING IS AN ACT OF ITS OWN, NOT A PROMPT. An agent never sends a slash
 // command as a prompt (SubmitPromptError.slash_command_from_agent), so the
@@ -274,7 +276,8 @@ type CompactWorkspaceError struct {
 	//	*CompactWorkspaceError_UnknownWorkspace
 	//	*CompactWorkspaceError_WorkspaceRefMismatch
 	//	*CompactWorkspaceError_Closed
-	//	*CompactWorkspaceError_Merging
+	//	*CompactWorkspaceError_NoSession
+	//	*CompactWorkspaceError_ColdGate
 	Cause         isCompactWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -344,10 +347,19 @@ func (x *CompactWorkspaceError) GetClosed() *CompactWorkspaceClosed {
 	return nil
 }
 
-func (x *CompactWorkspaceError) GetMerging() *CompactWorkspaceMerging {
+func (x *CompactWorkspaceError) GetNoSession() *CompactWorkspaceNoSession {
 	if x != nil {
-		if x, ok := x.Cause.(*CompactWorkspaceError_Merging); ok {
-			return x.Merging
+		if x, ok := x.Cause.(*CompactWorkspaceError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *CompactWorkspaceError) GetColdGate() *CompactWorkspaceColdGate {
+	if x != nil {
+		if x, ok := x.Cause.(*CompactWorkspaceError_ColdGate); ok {
+			return x.ColdGate
 		}
 	}
 	return nil
@@ -372,10 +384,16 @@ type CompactWorkspaceError_Closed struct {
 	Closed *CompactWorkspaceClosed `protobuf:"bytes,3,opt,name=closed,proto3,oneof"`
 }
 
-type CompactWorkspaceError_Merging struct {
-	// The workspace's merge holds its feed; nothing is submitted until the
-	// merge ends.
-	Merging *CompactWorkspaceMerging `protobuf:"bytes,4,opt,name=merging,proto3,oneof"`
+type CompactWorkspaceError_NoSession struct {
+	// The workspace has no session to submit to.
+	NoSession *CompactWorkspaceNoSession `protobuf:"bytes,5,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type CompactWorkspaceError_ColdGate struct {
+	// The session is parked at its cold gate. Compacting there is a gate
+	// answer (AnswerColdGate's `compact` or `compact_and_resume`), which the
+	// user must ask for or approve; nothing was submitted.
+	ColdGate *CompactWorkspaceColdGate `protobuf:"bytes,6,opt,name=cold_gate,json=coldGate,proto3,oneof"`
 }
 
 func (*CompactWorkspaceError_UnknownWorkspace) isCompactWorkspaceError_Cause() {}
@@ -384,7 +402,9 @@ func (*CompactWorkspaceError_WorkspaceRefMismatch) isCompactWorkspaceError_Cause
 
 func (*CompactWorkspaceError_Closed) isCompactWorkspaceError_Cause() {}
 
-func (*CompactWorkspaceError_Merging) isCompactWorkspaceError_Cause() {}
+func (*CompactWorkspaceError_NoSession) isCompactWorkspaceError_Cause() {}
+
+func (*CompactWorkspaceError_ColdGate) isCompactWorkspaceError_Cause() {}
 
 type CompactWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -503,26 +523,26 @@ func (*CompactWorkspaceClosed) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_compact_workspace_proto_rawDescGZIP(), []int{7}
 }
 
-type CompactWorkspaceMerging struct {
+type CompactWorkspaceNoSession struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CompactWorkspaceMerging) Reset() {
-	*x = CompactWorkspaceMerging{}
+func (x *CompactWorkspaceNoSession) Reset() {
+	*x = CompactWorkspaceNoSession{}
 	mi := &file_agentrepl_v1_endpoint_compact_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CompactWorkspaceMerging) String() string {
+func (x *CompactWorkspaceNoSession) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CompactWorkspaceMerging) ProtoMessage() {}
+func (*CompactWorkspaceNoSession) ProtoMessage() {}
 
-func (x *CompactWorkspaceMerging) ProtoReflect() protoreflect.Message {
+func (x *CompactWorkspaceNoSession) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_compact_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -534,9 +554,45 @@ func (x *CompactWorkspaceMerging) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CompactWorkspaceMerging.ProtoReflect.Descriptor instead.
-func (*CompactWorkspaceMerging) Descriptor() ([]byte, []int) {
+// Deprecated: Use CompactWorkspaceNoSession.ProtoReflect.Descriptor instead.
+func (*CompactWorkspaceNoSession) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_compact_workspace_proto_rawDescGZIP(), []int{8}
+}
+
+type CompactWorkspaceColdGate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompactWorkspaceColdGate) Reset() {
+	*x = CompactWorkspaceColdGate{}
+	mi := &file_agentrepl_v1_endpoint_compact_workspace_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompactWorkspaceColdGate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompactWorkspaceColdGate) ProtoMessage() {}
+
+func (x *CompactWorkspaceColdGate) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_compact_workspace_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompactWorkspaceColdGate.ProtoReflect.Descriptor instead.
+func (*CompactWorkspaceColdGate) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_compact_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 var File_agentrepl_v1_endpoint_compact_workspace_proto protoreflect.FileDescriptor
@@ -555,18 +611,21 @@ const file_agentrepl_v1_endpoint_compact_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.CompactWorkspaceSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.CompactWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17CompactWorkspaceSuccess\"\xee\x02\n" +
+	"\x17CompactWorkspaceSuccess\"\xcb\x03\n" +
 	"\x15CompactWorkspaceError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.CompactWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.CompactWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12>\n" +
-	"\x06closed\x18\x03 \x01(\v2$.agentrepl.v1.CompactWorkspaceClosedH\x00R\x06closed\x12A\n" +
-	"\amerging\x18\x04 \x01(\v2%.agentrepl.v1.CompactWorkspaceMergingH\x00R\amergingB\a\n" +
-	"\x05cause\"\"\n" +
+	"\x06closed\x18\x03 \x01(\v2$.agentrepl.v1.CompactWorkspaceClosedH\x00R\x06closed\x12H\n" +
+	"\n" +
+	"no_session\x18\x05 \x01(\v2'.agentrepl.v1.CompactWorkspaceNoSessionH\x00R\tnoSession\x12E\n" +
+	"\tcold_gate\x18\x06 \x01(\v2&.agentrepl.v1.CompactWorkspaceColdGateH\x00R\bcoldGateB\a\n" +
+	"\x05causeJ\x04\b\x04\x10\x05R\amerging\"\"\n" +
 	" CompactWorkspaceUnknownWorkspace\"I\n" +
 	"$CompactWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"\x18\n" +
-	"\x16CompactWorkspaceClosed\"\x19\n" +
-	"\x17CompactWorkspaceMergingB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x16CompactWorkspaceClosed\"\x1b\n" +
+	"\x19CompactWorkspaceNoSession\"\x1a\n" +
+	"\x18CompactWorkspaceColdGateB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_compact_workspace_proto_rawDescOnce sync.Once
@@ -580,7 +639,7 @@ func file_agentrepl_v1_endpoint_compact_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_compact_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_compact_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_endpoint_compact_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_compact_workspace_proto_goTypes = []any{
 	(*CompactWorkspaceRequest)(nil),              // 0: agentrepl.v1.CompactWorkspaceRequest
 	(*CompactWorkspaceInstructions)(nil),         // 1: agentrepl.v1.CompactWorkspaceInstructions
@@ -590,25 +649,27 @@ var file_agentrepl_v1_endpoint_compact_workspace_proto_goTypes = []any{
 	(*CompactWorkspaceUnknownWorkspace)(nil),     // 5: agentrepl.v1.CompactWorkspaceUnknownWorkspace
 	(*CompactWorkspaceWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.CompactWorkspaceWorkspaceRefMismatch
 	(*CompactWorkspaceClosed)(nil),               // 7: agentrepl.v1.CompactWorkspaceClosed
-	(*CompactWorkspaceMerging)(nil),              // 8: agentrepl.v1.CompactWorkspaceMerging
-	(*v1.WorkspaceRef)(nil),                      // 9: workspace.v1.WorkspaceRef
-	(*WorkspaceRequester)(nil),                   // 10: agentrepl.v1.WorkspaceRequester
+	(*CompactWorkspaceNoSession)(nil),            // 8: agentrepl.v1.CompactWorkspaceNoSession
+	(*CompactWorkspaceColdGate)(nil),             // 9: agentrepl.v1.CompactWorkspaceColdGate
+	(*v1.WorkspaceRef)(nil),                      // 10: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                   // 11: agentrepl.v1.WorkspaceRequester
 }
 var file_agentrepl_v1_endpoint_compact_workspace_proto_depIdxs = []int32{
-	9,  // 0: agentrepl.v1.CompactWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	10, // 1: agentrepl.v1.CompactWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	10, // 0: agentrepl.v1.CompactWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 1: agentrepl.v1.CompactWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
 	1,  // 2: agentrepl.v1.CompactWorkspaceRequest.instructions:type_name -> agentrepl.v1.CompactWorkspaceInstructions
 	3,  // 3: agentrepl.v1.CompactWorkspaceResponse.success:type_name -> agentrepl.v1.CompactWorkspaceSuccess
 	4,  // 4: agentrepl.v1.CompactWorkspaceResponse.error:type_name -> agentrepl.v1.CompactWorkspaceError
 	5,  // 5: agentrepl.v1.CompactWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.CompactWorkspaceUnknownWorkspace
 	6,  // 6: agentrepl.v1.CompactWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.CompactWorkspaceWorkspaceRefMismatch
 	7,  // 7: agentrepl.v1.CompactWorkspaceError.closed:type_name -> agentrepl.v1.CompactWorkspaceClosed
-	8,  // 8: agentrepl.v1.CompactWorkspaceError.merging:type_name -> agentrepl.v1.CompactWorkspaceMerging
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	8,  // 8: agentrepl.v1.CompactWorkspaceError.no_session:type_name -> agentrepl.v1.CompactWorkspaceNoSession
+	9,  // 9: agentrepl.v1.CompactWorkspaceError.cold_gate:type_name -> agentrepl.v1.CompactWorkspaceColdGate
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_compact_workspace_proto_init() }
@@ -626,7 +687,8 @@ func file_agentrepl_v1_endpoint_compact_workspace_proto_init() {
 		(*CompactWorkspaceError_UnknownWorkspace)(nil),
 		(*CompactWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*CompactWorkspaceError_Closed)(nil),
-		(*CompactWorkspaceError_Merging)(nil),
+		(*CompactWorkspaceError_NoSession)(nil),
+		(*CompactWorkspaceError_ColdGate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -634,7 +696,7 @@ func file_agentrepl_v1_endpoint_compact_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_compact_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_compact_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

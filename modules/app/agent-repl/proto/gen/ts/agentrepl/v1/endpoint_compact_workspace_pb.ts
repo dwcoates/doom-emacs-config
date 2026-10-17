@@ -3,7 +3,9 @@
 // through the workspace's prompt queue as a deferred prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_WORKSPACE_COMPACT: it waits
 // behind a running turn, and the feed draws the context cut it produces as
-// any compaction's. Success means SUBMITTED; the cut arrives on the feed.
+// any compaction's. Success means SUBMITTED; the cut arrives on the feed. A
+// merge running in the workspace HOLDS the compaction until it ends, as it
+// holds any prompt (frontend.v1.HeldPrompt's `merge` hold arm).
 //
 // COMPACTING IS AN ACT OF ITS OWN, NOT A PROMPT. An agent never sends a slash
 // command as a prompt (SubmitPromptError.slash_command_from_agent), so the
@@ -26,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_compact_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_compact_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfY29tcGFjdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSLVAQoXQ29tcGFjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIzCglyZXF1ZXN0ZXIYAiABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyEkUKDGluc3RydWN0aW9ucxgDIAEoCzIqLmFnZW50cmVwbC52MS5Db21wYWN0V29ya3NwYWNlSW5zdHJ1Y3Rpb25zSACIAQFCDwoNX2luc3RydWN0aW9ucyIsChxDb21wYWN0V29ya3NwYWNlSW5zdHJ1Y3Rpb25zEgwKBHRleHQYASABKAkilAEKGENvbXBhY3RXb3Jrc3BhY2VSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLkNvbXBhY3RXb3Jrc3BhY2VTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuQ29tcGFjdFdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhkKF0NvbXBhY3RXb3Jrc3BhY2VTdWNjZXNzIrUCChVDb21wYWN0V29ya3NwYWNlRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuQ29tcGFjdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLkNvbXBhY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEjYKBmNsb3NlZBgDIAEoCzIkLmFnZW50cmVwbC52MS5Db21wYWN0V29ya3NwYWNlQ2xvc2VkSAASOAoHbWVyZ2luZxgEIAEoCzIlLmFnZW50cmVwbC52MS5Db21wYWN0V29ya3NwYWNlTWVyZ2luZ0gAQgcKBWNhdXNlIiIKIENvbXBhY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjwKJENvbXBhY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiGAoWQ29tcGFjdFdvcmtzcGFjZUNsb3NlZCIZChdDb21wYWN0V29ya3NwYWNlTWVyZ2luZ0IqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
+  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfY29tcGFjdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSLVAQoXQ29tcGFjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIzCglyZXF1ZXN0ZXIYAiABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyEkUKDGluc3RydWN0aW9ucxgDIAEoCzIqLmFnZW50cmVwbC52MS5Db21wYWN0V29ya3NwYWNlSW5zdHJ1Y3Rpb25zSACIAQFCDwoNX2luc3RydWN0aW9ucyIsChxDb21wYWN0V29ya3NwYWNlSW5zdHJ1Y3Rpb25zEgwKBHRleHQYASABKAkilAEKGENvbXBhY3RXb3Jrc3BhY2VSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLkNvbXBhY3RXb3Jrc3BhY2VTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuQ29tcGFjdFdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhkKF0NvbXBhY3RXb3Jrc3BhY2VTdWNjZXNzIoYDChVDb21wYWN0V29ya3NwYWNlRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuQ29tcGFjdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLkNvbXBhY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEjYKBmNsb3NlZBgDIAEoCzIkLmFnZW50cmVwbC52MS5Db21wYWN0V29ya3NwYWNlQ2xvc2VkSAASPQoKbm9fc2Vzc2lvbhgFIAEoCzInLmFnZW50cmVwbC52MS5Db21wYWN0V29ya3NwYWNlTm9TZXNzaW9uSAASOwoJY29sZF9nYXRlGAYgASgLMiYuYWdlbnRyZXBsLnYxLkNvbXBhY3RXb3Jrc3BhY2VDb2xkR2F0ZUgAQgcKBWNhdXNlSgQIBBAFUgdtZXJnaW5nIiIKIENvbXBhY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjwKJENvbXBhY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiGAoWQ29tcGFjdFdvcmtzcGFjZUNsb3NlZCIbChlDb21wYWN0V29ya3NwYWNlTm9TZXNzaW9uIhoKGENvbXBhY3RXb3Jrc3BhY2VDb2xkR2F0ZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.CompactWorkspaceRequest
@@ -165,13 +167,22 @@ export type CompactWorkspaceError = Message<"agentrepl.v1.CompactWorkspaceError"
     case: "closed";
   } | {
     /**
-     * The workspace's merge holds its feed; nothing is submitted until the
-     * merge ends.
+     * The workspace has no session to submit to.
      *
-     * @generated from field: agentrepl.v1.CompactWorkspaceMerging merging = 4;
+     * @generated from field: agentrepl.v1.CompactWorkspaceNoSession no_session = 5;
      */
-    value: CompactWorkspaceMerging;
-    case: "merging";
+    value: CompactWorkspaceNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The session is parked at its cold gate. Compacting there is a gate
+     * answer (AnswerColdGate's `compact` or `compact_and_resume`), which the
+     * user must ask for or approve; nothing was submitted.
+     *
+     * @generated from field: agentrepl.v1.CompactWorkspaceColdGate cold_gate = 6;
+     */
+    value: CompactWorkspaceColdGate;
+    case: "coldGate";
   } | { case: undefined; value?: undefined };
 };
 
@@ -228,15 +239,28 @@ export const CompactWorkspaceClosedSchema: GenMessage<CompactWorkspaceClosed> = 
   messageDesc(file_agentrepl_v1_endpoint_compact_workspace, 7);
 
 /**
- * @generated from message agentrepl.v1.CompactWorkspaceMerging
+ * @generated from message agentrepl.v1.CompactWorkspaceNoSession
  */
-export type CompactWorkspaceMerging = Message<"agentrepl.v1.CompactWorkspaceMerging"> & {
+export type CompactWorkspaceNoSession = Message<"agentrepl.v1.CompactWorkspaceNoSession"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.CompactWorkspaceMerging.
- * Use `create(CompactWorkspaceMergingSchema)` to create a new message.
+ * Describes the message agentrepl.v1.CompactWorkspaceNoSession.
+ * Use `create(CompactWorkspaceNoSessionSchema)` to create a new message.
  */
-export const CompactWorkspaceMergingSchema: GenMessage<CompactWorkspaceMerging> = /*@__PURE__*/
+export const CompactWorkspaceNoSessionSchema: GenMessage<CompactWorkspaceNoSession> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_compact_workspace, 8);
+
+/**
+ * @generated from message agentrepl.v1.CompactWorkspaceColdGate
+ */
+export type CompactWorkspaceColdGate = Message<"agentrepl.v1.CompactWorkspaceColdGate"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.CompactWorkspaceColdGate.
+ * Use `create(CompactWorkspaceColdGateSchema)` to create a new message.
+ */
+export const CompactWorkspaceColdGateSchema: GenMessage<CompactWorkspaceColdGate> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_compact_workspace, 9);
 

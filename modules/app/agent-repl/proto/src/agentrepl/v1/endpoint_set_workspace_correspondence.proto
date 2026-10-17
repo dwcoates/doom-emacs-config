@@ -1,0 +1,89 @@
+// endpoint_set_workspace_correspondence.proto — SetWorkspaceCorrespondence:
+// mark a workspace as AWAITING CORRESPONDENCE from another workspace, or clear
+// the mark. AGENT API section.
+//
+// A WORKSPACE WAITING ON ANOTHER IS NOT IDLE. An agent that asked another
+// workspace for something and ends its turn to wait for the answer marks
+// itself awaiting that workspace; when the answer arrives it clears the mark.
+// While the mark stands and no turn runs, every surface draws the workspace
+// in the BACKGROUND status, as one whose detached work is still running
+// (frontend.v1.FooterStatusBackground.awaiting), so the user can tell a
+// workspace that is waiting on purpose from one that is done.
+//
+// THE MARK IS THE AGENT'S TO CLEAR: the daemon cannot judge whether a reply
+// is the one awaited. It ends on its own only when the workspace closes, or
+// when the awaited workspace is forgotten.
+//
+// Independent of the one-shot mark (SetWorkspaceOneShot).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspaceCorrespondenceRequest {
+  // The workspace marked or cleared.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked: the workspace itself or the user. Any other workspace is
+  // refused (`requester_may_not_set`). REQUIRED.
+  WorkspaceRequester requester = 2;
+  // THE ARM IS THE MARK. REQUIRED.
+  oneof mark {
+    // Awaiting the named workspace. Marking a workspace that already awaits
+    // replaces what it awaits.
+    SetWorkspaceCorrespondenceAwaiting awaiting = 3;
+    // The awaited correspondence arrived, or is no longer awaited. Clearing a
+    // workspace that awaits nothing is no change and succeeds.
+    SetWorkspaceCorrespondenceClear clear = 4;
+  }
+}
+// Awaiting a workspace.
+message SetWorkspaceCorrespondenceAwaiting {
+  // The workspace awaited: registered, and not the marked workspace
+  // (`unknown_awaited`).
+  workspace.v1.WorkspaceRef awaited = 1;
+}
+// Clear. No fields.
+message SetWorkspaceCorrespondenceClear {}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspaceCorrespondenceResponse {
+  oneof result {
+    SetWorkspaceCorrespondenceSuccess success = 1;
+    SetWorkspaceCorrespondenceError error = 2;
+  }
+}
+// The mark stands as asked. No fields.
+message SetWorkspaceCorrespondenceSuccess {}
+
+// Validation failures (unset field, blank string) are Connect InvalidArgument,
+// never an arm.
+message SetWorkspaceCorrespondenceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetWorkspaceCorrespondenceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetWorkspaceCorrespondenceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // The workspace is closed: it runs no agent to wait.
+    SetWorkspaceCorrespondenceClosed closed = 3;
+    // The awaited workspace is not registered, or is the marked workspace.
+    SetWorkspaceCorrespondenceUnknownAwaited unknown_awaited = 4;
+    // The requester is neither the workspace nor the user.
+    SetWorkspaceCorrespondenceRequesterMayNotSet requester_may_not_set = 5;
+  }
+}
+message SetWorkspaceCorrespondenceUnknownWorkspace {}
+message SetWorkspaceCorrespondenceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetWorkspaceCorrespondenceClosed {}
+message SetWorkspaceCorrespondenceUnknownAwaited {
+  // The awaited workspace as the request named it.
+  workspace.v1.WorkspaceRef awaited = 1;
+}
+message SetWorkspaceCorrespondenceRequesterMayNotSet {}

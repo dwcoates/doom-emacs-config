@@ -1,0 +1,93 @@
+// endpoint_set_workspace_one_shot.proto — SetWorkspaceOneShot: mark a
+// workspace a one-shot after its creation, or unmark it. AGENT API section.
+//
+// A ONE-SHOT LANDS ITSELF WHEN ITS WORK IS DONE. A workspace created as one is
+// told so in its first message (the repository's completion directive); an
+// ordinary workspace whose agent commits to finishing the rest of its work
+// unattended marks itself one here, and the answer carries the same
+// directive, so a workspace that became a one-shot is told exactly what one
+// created as one was told. The mark is what every surface draws a one-shot
+// from (the roster's one-shot mark, WorkspaceStatus.one_shot); the daemon
+// performs nothing on the agent's behalf: the agent carries the directive
+// out.
+//
+// A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
+// so marking one is refused (`owner_lands`), as creating one is
+// (CreateWorkspaceError.one_shot_owner_lands).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspaceOneShotRequest {
+  // The workspace marked or unmarked.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked: the workspace itself, its owner, or the user. Any other
+  // workspace is refused (`requester_may_not_set`). REQUIRED.
+  WorkspaceRequester requester = 2;
+  // TRUE marks the workspace a one-shot; FALSE unmarks it. Marking a
+  // one-shot, or unmarking a workspace that is none, is no change and
+  // succeeds.
+  bool one_shot = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspaceOneShotResponse {
+  oneof result {
+    SetWorkspaceOneShotSuccess success = 1;
+    SetWorkspaceOneShotError error = 2;
+  }
+}
+
+// The mark stands as asked.
+message SetWorkspaceOneShotSuccess {
+  // When marked: the repository's completion directive, behind the framing
+  // sentence a one-shot's first message carries -- what the agent does when
+  // its work is done. UNSET when unmarked.
+  optional string completion_directive = 1;
+}
+
+// Validation failures (unset field, blank string) are Connect InvalidArgument,
+// never an arm.
+message SetWorkspaceOneShotError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetWorkspaceOneShotUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetWorkspaceOneShotWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // The workspace is closed.
+    SetWorkspaceOneShotClosed closed = 3;
+    // The workspace was registered rather than created, so it records no
+    // creation to mark (the repository's main checkout).
+    SetWorkspaceOneShotNoCreationJob no_creation_job = 4;
+    // The workspace is a child its owner lands. Nothing was changed.
+    SetWorkspaceOneShotOwnerLands owner_lands = 5;
+    // The requester is neither the workspace, nor its owner, nor the user.
+    SetWorkspaceOneShotRequesterMayNotSet requester_may_not_set = 6;
+    // The repository's one-shot policy lacks its completion directive, so a
+    // marked workspace could not be told what to do when done. Nothing was
+    // changed.
+    SetWorkspaceOneShotPolicyMissing policy_missing = 7;
+  }
+}
+message SetWorkspaceOneShotUnknownWorkspace {}
+message SetWorkspaceOneShotWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetWorkspaceOneShotClosed {}
+message SetWorkspaceOneShotNoCreationJob {}
+message SetWorkspaceOneShotOwnerLands {
+  // The owner, which lands the workspace.
+  workspace.v1.WorkspaceRef owner = 1;
+}
+message SetWorkspaceOneShotRequesterMayNotSet {}
+message SetWorkspaceOneShotPolicyMissing {
+  // The directory the policy was read from.
+  string policy_dir = 1;
+}
