@@ -86,8 +86,12 @@ interface Frame {
 
 /** The host's API, as Emacs calls it through `window.agentReplHost`. */
 export interface Host {
-  /** Hold workspace ID's page at URL: create it, re-point it, or leave it. */
-  ensure(id: string, url: string): string;
+  /**
+   * Hold workspace ID's page at URL: create it, re-point it, or leave it.
+   * IN TURN, a page created now loads only once every page loading before it
+   * has drawn (see `createHost`'s pacing), or at once if it is shown first.
+   */
+  ensure(id: string, url: string, inTurn?: boolean): string;
   /** Show workspace ID's page and hide every other. */
   show(id: string): string;
   /** Drop workspace ID's page. */
@@ -122,6 +126,13 @@ export interface Host {
   dispose(): void;
 }
 
+/**
+ * How long a page loading in turn may take to say it has drawn before the
+ * next one starts anyway: a page that never says so is recorded at warn, and
+ * the pages after it are not held behind it.
+ */
+export const IN_TURN_BOUND_MS = 10_000;
+
 /** The class every workspace iframe wears; the stylesheet stacks them. */
 const FRAME_CLASS = "workspace-frame";
 /** The attribute naming the workspace an iframe holds. */
@@ -154,6 +165,18 @@ export function createHost(env: HostEnv): Host {
   const now = env.now ?? Date.now;
   /** The log level window every page is told, while one stands. */
   let logLevel: { level: WindowLevel; untilMs: number } | null = null;
+  /**
+   * PAGES LOADED IN TURN load one after another, each once the one before has
+   * drawn (owner ruling, 2026-10-17). Every page booting at once after a host
+   * load stalled the web process for up to 1.8s; a fixed gap between them is
+   * too slow on an idle machine and lets them pile up on a hot one. Pacing on
+   * the page's own `drawn` is as fast as the machine allows and never
+   * overlaps. `waiting` is the queue, oldest first; `loadingInTurn` is the one
+   * in flight, and `inTurnBound` its bound (`IN_TURN_BOUND_MS`).
+   */
+  const waiting: string[] = [];
+  let loadingInTurn: string | null = null;
+  let inTurnBound: number | null = null;
 
   const note = (level: HostNote["level"], text: string): void => {
     notes.push({ level, text });
@@ -215,6 +238,47 @@ export function createHost(env: HostEnv): Host {
     }
   };
 
+  /** Start loading FRAME at its URL. */
+  const load = (frame: Frame): void => {
+    frame.iframe.src = frame.url;
+  };
+
+  /** Start the next page waiting its turn, when none is loading in turn. */
+  const advance = (): void => {
+    if (loadingInTurn !== null) return;
+    const next = waiting.shift();
+    if (next === undefined) return;
+    const frame = frames.get(next);
+    if (frame === undefined) {
+      advance();
+      return;
+    }
+    loadingInTurn = next;
+    load(frame);
+    inTurnBound = win.setTimeout(() => {
+      note("warn", `page ${next} loading in turn did not say it had drawn within ${IN_TURN_BOUND_MS}ms; the next page starts`);
+      finishTurn(next);
+    }, IN_TURN_BOUND_MS);
+  };
+
+  /** ID's turn is over (it drew, or it is gone): start the next. */
+  const finishTurn = (id: string): void => {
+    if (loadingInTurn !== id) return;
+    if (inTurnBound !== null) win.clearTimeout(inTurnBound);
+    inTurnBound = null;
+    loadingInTurn = null;
+    advance();
+  };
+
+  /** Load ID now if it is still waiting its turn (it is being shown). */
+  const loadNow = (frame: Frame): boolean => {
+    const at = waiting.indexOf(frame.id);
+    if (at < 0) return false;
+    waiting.splice(at, 1);
+    load(frame);
+    return true;
+  };
+
   const resetFacts = (frame: Frame): void => {
     frame.drawn = null;
     frame.selection = { text: "", focused: false };
@@ -237,6 +301,7 @@ export function createHost(env: HostEnv): Host {
         return;
       case "drawn":
         frame.drawn = message.what;
+        finishTurn(frame.id);
         return;
       case "selection":
         frame.selection = { text: message.text, focused: message.focused };
@@ -298,7 +363,7 @@ export function createHost(env: HostEnv): Host {
     frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
   };
 
-  const create = (id: string, url: string): Frame => {
+  const create = (id: string, url: string, inTurn = false): Frame => {
     const iframe = doc.createElement("iframe");
     iframe.className = FRAME_CLASS;
     iframe.setAttribute(FRAME_WORKSPACE_ATTRIBUTE, id);
@@ -306,7 +371,6 @@ export function createHost(env: HostEnv): Host {
     // The page copies to the clipboard (copy.ts), which a cross-origin frame
     // may do only when its embedder allows it.
     iframe.allow = "clipboard-read; clipboard-write";
-    iframe.src = url;
     const frame: Frame = {
       id,
       url,
@@ -322,6 +386,12 @@ export function createHost(env: HostEnv): Host {
     frameParent.append(iframe);
     // Laid out first, so a frame created hidden is fixed at the size it fills.
     applyShown(frame, id === shownId);
+    if (inTurn) {
+      waiting.push(id);
+      advance();
+    } else {
+      load(frame);
+    }
     return frame;
   };
 
@@ -331,11 +401,11 @@ export function createHost(env: HostEnv): Host {
   };
 
   return {
-    ensure(id, url) {
+    ensure(id, url, inTurn = false) {
       const frame = frames.get(id);
       if (frame === undefined) {
-        create(id, url);
-        return answer("ensure", id, "created");
+        create(id, url, inTurn);
+        return answer("ensure", id, inTurn && waiting.includes(id) ? "queued" : "created");
       }
       if (frame.url === url) return answer("ensure", id, "unchanged");
       frame.url = url;
@@ -349,6 +419,8 @@ export function createHost(env: HostEnv): Host {
       if (shownId === id) return answer("show", id, "unchanged");
       const previous = shownId === null ? undefined : frames.get(shownId);
       shownId = id;
+      // A PAGE STILL WAITING ITS TURN loads now: it is the one wanted.
+      const jumped = loadNow(next);
       if (previous !== undefined) {
         applyShown(previous, false);
         post(previous, presenceOf(previous));
@@ -359,12 +431,15 @@ export function createHost(env: HostEnv): Host {
       // The keyboard follows the page on screen: Emacs focused this web view,
       // so the focus within it moves to the page now shown.
       if (doc.hasFocus()) next.iframe.focus();
-      return answer("show", id, "shown", { previous: previous?.id ?? null });
+      return answer("show", id, "shown", { previous: previous?.id ?? null, ...(jumped ? { jumped: true } : {}) });
     },
     remove(id) {
       return withFrame("remove", id, (frame) => {
         frames.delete(id);
         frame.iframe.remove();
+        const at = waiting.indexOf(id);
+        if (at >= 0) waiting.splice(at, 1);
+        finishTurn(id);
         if (shownId === id) {
           shownId = null;
           placeSidebar();
@@ -465,6 +540,10 @@ export function createHost(env: HostEnv): Host {
       for (const frame of frames.values()) frame.iframe.remove();
       frames.clear();
       shownId = null;
+      waiting.length = 0;
+      if (inTurnBound !== null) win.clearTimeout(inTurnBound);
+      inTurnBound = null;
+      loadingInTurn = null;
     },
   };
 }

@@ -6,6 +6,7 @@ import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  IN_TURN_BOUND_MS,
   FRAME_SHOWN_ATTRIBUTE,
   FRAME_WORKSPACE_ATTRIBUTE,
   SIDEBAR_BOTTOM_PROPERTY,
@@ -56,6 +57,120 @@ function pages(h: Host, ...ids: string[]): void {
 function fromPage(id: string, data: unknown): void {
   window.dispatchEvent(new MessageEvent("message", { data, source: frame(id).contentWindow }));
 }
+
+/** Ensure ID's page in turn on H, answering the parsed answer. */
+function inTurn(h: Host, id: string): Record<string, unknown> {
+  return parsed(h.ensure(id, `http://ws-${id}.localhost:1/`, true));
+}
+
+/** Whether ID's page has started loading. */
+const loading = (id: string): boolean => frame(id).getAttribute("src") !== null;
+
+describe("ensure in turn", () => {
+  it("loads the first page in turn at once", () => {
+    // Act
+    const answer = inTurn(host, "a");
+
+    // Assert
+    expect([answer.outcome, loading("a")]).toEqual(["created", true]);
+  });
+
+  it("holds a later page until the one loading before it has drawn", () => {
+    // Arrange
+    inTurn(host, "a");
+
+    // Act
+    const answer = inTurn(host, "b");
+
+    // Assert
+    expect([answer.outcome, loading("b")]).toEqual(["queued", false]);
+  });
+
+  it.each(["page", "refused"])("starts the next page once the one before says it drew (%s)", (what) => {
+    // Arrange
+    inTurn(host, "a");
+    inTurn(host, "b");
+    inTurn(host, "c");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "drawn", what });
+
+    // Assert
+    expect([loading("b"), loading("c")]).toEqual([true, false]);
+  });
+
+  it("loads a page still waiting its turn the moment it is shown", () => {
+    // Arrange
+    inTurn(host, "a");
+    inTurn(host, "b");
+
+    // Act
+    const answer = parsed(host.show("b"));
+
+    // Assert
+    expect([answer.jumped, loading("b")]).toEqual([true, true]);
+  });
+
+  it("never loads a page removed while it waited", () => {
+    // Arrange
+    inTurn(host, "a");
+    inTurn(host, "b");
+    inTurn(host, "c");
+    host.remove("b");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "drawn", what: "page" });
+
+    // Assert
+    expect(loading("c")).toBe(true);
+  });
+
+  it("starts the next page when the one loading in turn is removed", () => {
+    // Arrange
+    inTurn(host, "a");
+    inTurn(host, "b");
+
+    // Act
+    host.remove("a");
+
+    // Assert
+    expect(loading("b")).toBe(true);
+  });
+
+  it("loads a page ensured plainly at once, whatever is loading in turn", () => {
+    // Arrange
+    inTurn(host, "a");
+
+    // Act
+    host.ensure("z", "http://ws-z.localhost:1/");
+
+    // Assert
+    expect(loading("z")).toBe(true);
+  });
+
+  it("starts the next page, recorded at warn, when one never says it drew", () => {
+    // Arrange
+    vi.useFakeTimers();
+    try {
+      const timed = createHost({ doc: document, win: window, level: LevelWindow.fixed("info") });
+      try {
+        inTurn(timed, "p");
+        inTurn(timed, "q");
+
+        // Act
+        vi.advanceTimersByTime(IN_TURN_BOUND_MS);
+
+        // Assert
+        const notes = parsed(timed.ids()).notes as { level: string; text: string }[];
+        expect([loading("q"), notes.some((n) => n.level === "warn" && n.text.includes("page p"))]).toEqual([true, true]);
+      } finally {
+        timed.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("ensure", () => {
   it("creates an iframe at the URL for a new workspace", () => {
