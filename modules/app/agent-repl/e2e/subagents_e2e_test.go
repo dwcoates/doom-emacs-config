@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
