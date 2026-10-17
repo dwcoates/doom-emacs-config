@@ -22,20 +22,43 @@ func hiddenWorkspace(t *testing.T, s *store) Workspace {
 	return ws
 }
 
+// closedWorkspace is a registered workspace the user has closed.
+func closedWorkspace(t *testing.T, s *store) Workspace {
+	t.Helper()
+	ws := testWorkspace(t, s)
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: hiddenAtInstant, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+	return ws
+}
+
+// closedHiddenWorkspace is a registered workspace the user hid, then closed.
+func closedHiddenWorkspace(t *testing.T, s *store) Workspace {
+	t.Helper()
+	ws := hiddenWorkspace(t, s)
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: hiddenAtInstant, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+	return ws
+}
+
 func TestSetCacheLapseIsReadBack(t *testing.T) {
 	tokens := uint64(120_000)
 	tests := []struct {
-		name  string
-		lapse CacheLapse
+		name      string
+		workspace func(*testing.T, *store) Workspace
+		lapse     CacheLapse
 	}{
-		{name: "a gated lapse", lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
-		{name: "an ungated lapse", lapse: CacheLapse{LapsesAt: lapseInstant}},
+		{name: "a hidden workspace's gated lapse", workspace: hiddenWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
+		{name: "a hidden workspace's ungated lapse", workspace: hiddenWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
+		{name: "a closed workspace's gated lapse", workspace: closedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant, GatedTokens: &tokens}},
+		{name: "a closed workspace's ungated lapse", workspace: closedWorkspace, lapse: CacheLapse{LapsesAt: lapseInstant}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			ws := hiddenWorkspace(t, s)
+			ws := tt.workspace(t, s)
 
 			// Act
 			recorded, err := s.SetCacheLapse(context.Background(), ws.ID, tt.lapse)
@@ -118,6 +141,38 @@ func TestSetHiddenClearsTheCacheLapse(t *testing.T) {
 	}
 }
 
+func TestReopenClearsAClosedWorkspacesCacheLapse(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace func(*testing.T, *store) Workspace
+		kept      bool
+	}{
+		{name: "a closed workspace", workspace: closedWorkspace, kept: false},
+		{name: "a closed workspace still hidden keeps the hide's", workspace: closedHiddenWorkspace, kept: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := tt.workspace(t, s)
+			if recorded, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil || !recorded {
+				t.Fatalf("SetCacheLapse = %v, %v; want recorded", recorded, err)
+			}
+
+			// Act
+			if err := s.Reopen(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Reopen: %v", err)
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), ws.ID)
+			if err != nil || (got.CacheLapse != nil) != tt.kept {
+				t.Fatalf("CacheLapse = %+v, %v; want kept %v", got.CacheLapse, err, tt.kept)
+			}
+		})
+	}
+}
+
 func TestACorruptCacheLapseIsRefused(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -125,7 +180,7 @@ func TestACorruptCacheLapseIsRefused(t *testing.T) {
 		update string
 		field  string
 	}{
-		{name: "a lapse on a visible workspace", update: `UPDATE workspaces SET cache_lapses_at = 1 WHERE id = ?`, field: "cache_lapses_at"},
+		{name: "a lapse on an open visible workspace", update: `UPDATE workspaces SET cache_lapses_at = 1 WHERE id = ?`, field: "cache_lapses_at"},
 		{name: "a gated verdict with no lapse", hide: true, update: `UPDATE workspaces SET cache_lapse_gated_tokens = 5 WHERE id = ?`, field: "cache_lapse_gated_tokens"},
 		{name: "a gated verdict re-reading nothing", hide: true, update: `UPDATE workspaces SET cache_lapses_at = 1, cache_lapse_gated_tokens = 0 WHERE id = ?`, field: "cache_lapse_gated_tokens"},
 	}

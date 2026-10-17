@@ -181,7 +181,7 @@ func validateSetKeepaliveRequest(req *shimv1.SetKeepaliveRequest) error {
 		return invalid(m, m, "request is nil")
 	}
 	if req.GetCadence() == nil {
-		return invalid(m, m+".cadence", "a keep-alive request names hold or run")
+		return invalid(m, m+".cadence", "a keep-alive request names hold, run or a last round")
 	}
 	return nil
 }

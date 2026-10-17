@@ -1,6 +1,14 @@
 // Package cachelapse keeps a HIDDEN workspace's prompt cache until it lapses
 // (owner request, 2026-10-13; docs/protobuf-design/hidden-cache-lapse.md).
 //
+// A CLOSED WORKSPACE IS KEPT THE SAME WAY, after ONE LAST ROUND (owner
+// request, 2026-10-17). Closing leaves the session up, so its shim is asked
+// for its last keep-alive round (shim.v1.SetKeepaliveLastRound): the beat it
+// had scheduled goes out, then the cadence holds and states the lapse, and the
+// session is stood down when it comes, so reopening it afterwards meets the
+// cold gate like any lapsed conversation. Every close and reopen the daemon
+// records reaches this keeper (ObserveClosures).
+//
 // Hiding a workspace no longer stands its session down at once. Its shim's
 // keep-alives are HELD (shim.v1.SetKeepalive), so the cache lapses on its own
 // clock, and until then the user can show the workspace again with its cache
@@ -14,9 +22,10 @@
 // and owns the one deadline timer, so no two edges for one workspace race and
 // no deadline is armed twice.
 //
-// THE CADENCE IS RECONCILED, NEVER TOLD ONCE. On a hide, a show, and every
-// session coming up, the loop reads the workspace's visibility afresh and sets
-// the shim's cadence to match: held while hidden, running otherwise. A hide
+// THE CADENCE IS RECONCILED, NEVER TOLD ONCE. On a hide, a show, a close, a
+// reopen and every session coming up, the loop reads the workspace's row
+// afresh and sets the shim's cadence to match (cadenceFor): held while
+// hidden, a last round while closed, running otherwise. A hide
 // that races a bring-up is caught either way, because the hide writes the row
 // before it queues the edge and the bring-up installs its client before
 // SessionUp queues its own, so whichever edge comes second sees both.
@@ -63,6 +72,9 @@ type Keepalives interface {
 	Hold(ctx context.Context) error
 	// Run keeps the cache warm again.
 	Run(ctx context.Context) error
+	// LastRound sends the one keep-alive already scheduled, then holds; the
+	// shim states the lapse once the round is spent.
+	LastRound(ctx context.Context) error
 	// Beat sends one keep-alive now, leaving the cadence as it is, and
 	// answers the shim's judgment of it. ErrNoSession when the shim holds no
 	// session; a *BeatSubmitFailed when the submission failed.
@@ -145,6 +157,12 @@ func (k *Keeper) OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionC
 // is reconciled. It never blocks.
 func (k *Keeper) VisibilityChanged(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "the workspace was hidden or shown"})
+}
+
+// ClosureChanged is a close or a reopen of WS, already recorded: its cadence
+// is reconciled. It never blocks.
+func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, why: "the workspace was closed or reopened"})
 }
 
 // SessionUp is a session coming up on WS: its cadence is reconciled. It never
@@ -236,9 +254,9 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	k.reconcile(ctx, e.ws, e.why)
 }
 
-// record stores a stated projection on a hidden workspace's row and arms it.
-// A workspace shown again meanwhile takes none: the store refuses it in the
-// statement that reads the visibility.
+// record stores a stated projection on a hidden or closed workspace's row and
+// arms it. A workspace shown or reopened meanwhile takes none: the store
+// refuses it in the statement that reads the visibility and the close.
 func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *conversationv1.SessionCacheLapse) {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
 	lapse := lapseOf(stated)
@@ -254,21 +272,58 @@ func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *convers
 		if leaving(ctx, log, opProjection, "recording the projected cache lapse", err) {
 			return
 		}
-		log.Error(opProjection, "could not record the hidden workspace's projected cache lapse", dlog.WithCause(fields, err))
+		log.Error(opProjection, "could not record the workspace's projected cache lapse", dlog.WithCause(fields, err))
 		return
 	}
 	if !recorded {
-		log.Info(opProjection, "a projected cache lapse arrived for a workspace that is not hidden; it is dropped", fields)
+		log.Info(opProjection, "a projected cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped", fields)
 		delete(k.deadlines, ws)
 		return
 	}
 	k.deadlines[ws] = lapse.LapsesAt
-	log.Info(opProjection, "recorded the hidden workspace's projected cache lapse", fields)
+	log.Info(opProjection, "recorded the workspace's projected cache lapse", fields)
 	k.publish(ctx, log, opProjection)
 }
 
-// reconcile sets WS's cadence to match its visibility: held while hidden,
-// running otherwise. A workspace not hidden has no deadline.
+// cadence is the keep-alive cadence a workspace's row asks of its shim.
+type cadence string
+
+const (
+	cadenceHold      cadence = "hold"
+	cadenceLastRound cadence = "last_round"
+	cadenceRun       cadence = "run"
+)
+
+// cadenceFor answers the cadence RECORD asks for. THE HIDE WINS over the
+// close: a hidden workspace never beats, closed or not, so closing it grants
+// no last round.
+func cadenceFor(record wsm.Workspace) cadence {
+	switch {
+	case record.InHiddenSection():
+		return cadenceHold
+	case record.Closed:
+		return cadenceLastRound
+	default:
+		return cadenceRun
+	}
+}
+
+// set is the shim call that asks for C.
+func (c cadence) set(shim Keepalives) func(context.Context) error {
+	switch c {
+	case cadenceHold:
+		return shim.Hold
+	case cadenceLastRound:
+		return shim.LastRound
+	case cadenceRun:
+		return shim.Run
+	default:
+		panic(fmt.Sprintf("cachelapse: cadence %q names no shim call", string(c)))
+	}
+}
+
+// reconcile sets WS's cadence to match its row (cadenceFor). A workspace
+// whose cache is not left to lapse has no deadline.
 func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws), "edge": why})
 	record, err := k.deps.DB.Workspace(ctx, ws)
@@ -284,21 +339,17 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		log.Error(opCadence, "could not read the workspace's visibility; its keep-alive cadence is not set", dlog.Context{"cause": err.Error()})
 		return
 	}
-	hidden := record.InHiddenSection()
-	if !hidden {
+	if !record.LetsCacheLapse() {
 		delete(k.deadlines, ws)
 	}
+	want := cadenceFor(record)
+	fields := dlog.Context{"cadence": string(want), "hidden": record.InHiddenSection(), "closed": record.Closed}
 	shim, ok := k.deps.Shim(ws)
 	if !ok {
-		log.Debug(opCadence, "no session is served for the workspace; no cadence is set", dlog.Context{"hidden": hidden})
+		log.Debug(opCadence, "no session is served for the workspace; no cadence is set", fields)
 		return
 	}
-	set, cadence := shim.Run, "run"
-	if hidden {
-		set, cadence = shim.Hold, "hold"
-	}
-	fields := dlog.Context{"cadence": cadence}
-	if err := set(ctx); err != nil {
+	if err := want.set(shim)(ctx); err != nil {
 		if errors.Is(err, ErrNoSession) {
 			log.Debug(opCadence, "the shim holds no session yet; the session's coming up sets its cadence", fields)
 			return
@@ -311,7 +362,7 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		}, fields, err)
 		return
 	}
-	log.Info(opCadence, "set the shim's keep-alive cadence to match the workspace's visibility", fields)
+	log.Info(opCadence, "set the shim's keep-alive cadence to match the workspace's row", fields)
 }
 
 // lapseDue takes every lapse that has come: the session is stood down, and
@@ -350,8 +401,8 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		log.Error(opLapse, "could not read a workspace whose cache lapsed; its session is not stood down", dlog.Context{"cause": err.Error()})
 		return false
 	}
-	if !record.InHiddenSection() || record.CacheLapse == nil {
-		log.Info(opLapse, "the workspace was shown again before its cache lapsed; it keeps running", nil)
+	if !record.LetsCacheLapse() || record.CacheLapse == nil {
+		log.Info(opLapse, "the workspace was shown or reopened before its cache lapsed; it keeps running", nil)
 		return false
 	}
 	if !record.CacheLapse.Lapsed(now) {
@@ -359,7 +410,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		log.Debug(opLapse, "the recorded lapse moved later; it is re-armed", lapseFields(*record.CacheLapse))
 		return false
 	}
-	log.Info(opLapse, "the hidden workspace's cache lapsed; its session is stood down", lapseFields(*record.CacheLapse))
+	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed}))
 	k.deps.StandDowns.StandDownWithheld(ws)
 	return true
 }

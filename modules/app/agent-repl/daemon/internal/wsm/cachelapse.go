@@ -15,7 +15,9 @@ import (
 // own clock, and the shim states when, and whether the cold gate will ask
 // after it. The daemon keeps the projection on the workspace's row so the
 // hidden section counts down to it and the daemon stands the session down at
-// it, across a daemon restart and whether or not the shim still runs.
+// it, across a daemon restart and whether or not the shim still runs. A CLOSED
+// workspace's cache lapses the same way once its last keep-alive round is
+// spent (owner request, 2026-10-17), so its row carries the projection too.
 
 // cacheLapseDDL is the layout-48 addition. It adds:
 //
@@ -50,9 +52,9 @@ func (l CacheLapse) Lapsed(now time.Time) bool {
 }
 
 // decodeCacheLapse rebuilds a row's projected lapse. A projection belongs to a
-// hidden workspace alone (SetHidden clears it, and SetCacheLapse writes only a
-// hidden row), and a gated verdict without a lapse is no projection at all, so
-// either is a corrupt row.
+// hidden or closed workspace alone (SetHidden and Reopen clear it, and
+// SetCacheLapse writes only such a row), and a gated verdict without a lapse
+// is no projection at all, so either is a corrupt row.
 func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse, error) {
 	if !lapsesAt.Valid {
 		if gated.Valid {
@@ -60,8 +62,8 @@ func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse,
 		}
 		return nil, nil
 	}
-	if !ws.Hidden {
-		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "cache_lapses_at", Err: errors.New("only a hidden workspace carries a projected cache lapse")}
+	if !ws.Hidden && !ws.Closed {
+		return nil, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "cache_lapses_at", Err: errors.New("only a hidden or closed workspace carries a projected cache lapse")}
 	}
 	lapse := &CacheLapse{LapsesAt: fromNanos(lapsesAt.Int64)}
 	if gated.Valid {
@@ -74,11 +76,11 @@ func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse,
 	return lapse, nil
 }
 
-// SetCacheLapse records a hidden workspace's projected cache lapse, replacing
-// the one that stood. It answers whether it was recorded: a workspace that is
-// not hidden takes none, IN THE SAME STATEMENT that reads its visibility, so a
-// projection that arrives after the user showed the workspace again can never
-// land on it. An unknown workspace is refused (ErrNotFound).
+// SetCacheLapse records a hidden or closed workspace's projected cache lapse,
+// replacing the one that stood. It answers whether it was recorded: a
+// workspace that is neither takes none, IN THE SAME STATEMENT that reads its
+// visibility and its close, so a projection that arrives after the user showed
+// or reopened the workspace can never land on it. An unknown workspace is refused (ErrNotFound).
 func (s *store) SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLapse) (bool, error) {
 	var gated any
 	fields := dlog.Context{"workspace": string(id), "lapses_at": lapse.LapsesAt}
@@ -89,7 +91,7 @@ func (s *store) SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLa
 	recorded := false
 	err := s.write(ctx, "daemon.wsm.set_cache_lapse", fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE workspaces SET cache_lapses_at = ?, cache_lapse_gated_tokens = ? WHERE id = ? AND hidden = 1`,
+			`UPDATE workspaces SET cache_lapses_at = ?, cache_lapse_gated_tokens = ? WHERE id = ? AND (hidden = 1 OR closed = 1)`,
 			nanos(lapse.LapsesAt), gated, id)
 		if err != nil {
 			return err

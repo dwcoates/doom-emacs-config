@@ -167,3 +167,56 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 		return hiddenRow(r, f.ws.GetId()).GetWhen().GetHidden().GetCache().GetLapsesAtMs() == later.UnixMilli()
 	})
 }
+
+// A CLOSED WORKSPACE GETS ONE LAST KEEP-ALIVE ROUND, THEN THE COLD GATE (owner
+// request, 2026-10-17): closing leaves the session up, asks the shim for its
+// last round, and stands the session down when the lapse the shim then
+// projects comes, so reopening it meets the cold gate.
+
+// closedAndLastRound opens a workspace, closes it, and waits for the daemon to
+// ask its shim for the last keep-alive round.
+func closedAndLastRound(t *testing.T) *fixture {
+	t.Helper()
+	f := newOpened(t, harness.Opts{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("CloseWorkspace = error %v", err)
+	}
+	lastRound := &shimv1.SetKeepaliveRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCSetKeepalive, "the last keep-alive round", lastRound, func() bool {
+		return lastRound.GetLastRound() != nil
+	})
+	return f
+}
+
+func TestClosingAWorkspaceAsksForItsLastKeepaliveRoundAndStandsNothingDown(t *testing.T) {
+	t.Parallel()
+	// Arrange, Act
+	f := closedAndLastRound(t)
+
+	// Assert: the round is recorded, and nothing was stood down for it.
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the keeper's last round", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cachelapse.cadence" && r.Context["cadence"] == "last_round"
+	})
+	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
+		t.Fatalf("the closed workspace was asked to hibernate %d times at the close, want none", n)
+	}
+}
+
+func TestAClosedWorkspaceIsStoodDownWhenItsCacheLapses(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := closedAndLastRound(t)
+	f.d.ExpectWarnings(standDownWarnings...)
+
+	// Act: the spent round's projection names a lapse already come.
+	f.d.OpenedShim(f.ws).PushSessionUpdate(cacheLapse(time.Now().Add(-time.Minute), 120_000))
+
+	// Assert: the idle sweep's stand-down, graceful.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
+	if killed.GetForce() {
+		t.Fatal("the lapsed closed workspace's KillSession was forced, want a graceful stand-down")
+	}
+}

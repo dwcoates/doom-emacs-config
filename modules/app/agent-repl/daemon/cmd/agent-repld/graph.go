@@ -661,6 +661,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
 	}
 	lifecycle.caches = cacheKeeper
+	// EVERY CLOSE AND REOPEN RECONCILES THE CADENCE (cachelapse.ObserveClosures):
+	// a closed workspace's session gets one last keep-alive round and is then
+	// left to lapse. Every component built from here on writes through it; the
+	// ones built above never close or reopen a workspace.
+	p.DB = cachelapse.ObserveClosures(p.DB, cacheKeeper)
 
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,

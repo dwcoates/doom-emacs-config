@@ -635,12 +635,17 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 // workspace sweep retire it again, and, for a merge workspace, its hiding: a
 // merge workspace the user opened is revealed, never drawn nowhere. A row that
 // is not merged keeps every one of those columns as it stands.
+//
+// A REOPENED WORKSPACE KEEPS ITS CACHE WARM AGAIN, so the same statement
+// clears the projected cache lapse its close left (cachelapse.Keeper), unless
+// the row is still hidden, whose projection is the hide's.
 func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 	fields := dlog.Context{"workspace": string(id)}
 	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
 		var mergeOf sql.NullString
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of", &merged, &mergeOf); err != nil {
+		var hidden bool
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, hidden", &merged, &mergeOf, &hidden); err != nil {
 			return err
 		}
 		fields["was_merged"] = merged.Valid
@@ -648,6 +653,11 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 			{name: "closed", value: false},
 			{name: "closure_at", value: nil},
 			{name: "closure_by", value: nil},
+		}
+		if !hidden {
+			columns = append(columns,
+				workspaceColumn{name: "cache_lapses_at", value: nil},
+				workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
 		}
 		if merged.Valid {
 			columns = append(columns,

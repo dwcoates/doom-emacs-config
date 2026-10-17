@@ -30,16 +30,17 @@ func keepaliveSuccess() *shimv1.SetKeepaliveResponse {
 	return &shimv1.SetKeepaliveResponse{Result: &shimv1.SetKeepaliveResponse_Success{Success: &shimv1.SetKeepaliveSuccess{}}}
 }
 
-// TestShimAdapterKeepaliveRequestShape covers that Hold and Run each send
-// their own cadence arm.
+// TestShimAdapterKeepaliveRequestShape covers that Hold, Run and LastRound
+// each send their own cadence arm.
 func TestShimAdapterKeepaliveRequestShape(t *testing.T) {
 	tests := []struct {
 		name string
 		set  func(*shimAdapter) error
-		hold bool
+		want string
 	}{
-		{name: "hold", set: func(a *shimAdapter) error { return a.Hold(context.Background()) }, hold: true},
-		{name: "run", set: func(a *shimAdapter) error { return a.Run(context.Background()) }, hold: false},
+		{name: "hold", set: func(a *shimAdapter) error { return a.Hold(context.Background()) }, want: "hold"},
+		{name: "run", set: func(a *shimAdapter) error { return a.Run(context.Background()) }, want: "run"},
+		{name: "last round", set: func(a *shimAdapter) error { return a.LastRound(context.Background()) }, want: "last_round"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,8 +54,8 @@ func TestShimAdapterKeepaliveRequestShape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("set = %v, want nil", err)
 			}
-			if (transport.req.GetHold() != nil) != tt.hold || (transport.req.GetRun() != nil) == tt.hold {
-				t.Fatalf("cadence = %+v, want hold %v", transport.req.GetCadence(), tt.hold)
+			if got := transport.req.ProtoReflect().WhichOneof(transport.req.ProtoReflect().Descriptor().Oneofs().ByName("cadence")); got == nil || string(got.Name()) != tt.want {
+				t.Fatalf("cadence = %+v, want %s", transport.req.GetCadence(), tt.want)
 			}
 		})
 	}

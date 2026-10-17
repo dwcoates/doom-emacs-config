@@ -57,6 +57,33 @@ func TestInHiddenSection(t *testing.T) {
 	}
 }
 
+func TestLetsCacheLapse(t *testing.T) {
+	merged := time.Unix(100, 0)
+	cases := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "an open visible workspace does not", ws: Workspace{}, want: false},
+		{name: "a hidden workspace does", ws: Workspace{Hidden: true}, want: true},
+		{name: "a closed workspace does", ws: Workspace{Closed: true}, want: true},
+		{name: "a closed hidden workspace does", ws: Workspace{Hidden: true, Closed: true}, want: true},
+		{name: "a merged hidden workspace still open does not", ws: Workspace{Hidden: true, MergedAt: &merged}, want: false},
+		{name: "a merged closed workspace does", ws: Workspace{Closed: true, MergedAt: &merged}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.ws.LetsCacheLapse()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("LetsCacheLapse = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestTheHiddenSectionIsOneStatement pins that Withheld's hidden arm IS
 // InHiddenSection: every workspace it calls hidden, and no other, is in the
 // hidden section, so the tab bar, the start path and the cache keeper cannot

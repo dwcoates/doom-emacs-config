@@ -49,7 +49,8 @@ const (
 )
 
 // StandDownWithheld asks for the stand-down of a workspace whose repository
-// section the user collapsed, or a hidden one whose cache has lapsed. It
+// section the user collapsed, or a hidden or closed one whose cache has
+// lapsed. It
 // returns at once; the attempt runs on the detached lifetime.
 func (c *controller) StandDownWithheld(ws ids.WorkspaceID) {
 	c.mu.Lock()
@@ -113,7 +114,7 @@ func (c *controller) kick(ws ids.WorkspaceID, st *withheldState) {
 // withheldReason is a withheld workspace's stand-down reason.
 var withheldReason = standDownReason{
 	op:     opWithheld,
-	detail: "hidden or collapsed by the user; the transcript was left as it stood",
+	detail: "hidden, collapsed or closed by the user; the transcript was left as it stood",
 	done:   "stood a withheld workspace's session down",
 }
 
@@ -134,15 +135,17 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 		return withheldSettled
 	}
 	log := c.workspaceLog(record)
-	// SHOWN AGAIN MEANWHILE IS NOT STOOD DOWN: the visibility is read afresh
-	// on every attempt.
+	// SHOWN OR REOPENED MEANWHILE IS NOT STOOD DOWN: the visibility and the
+	// close are read afresh on every attempt. A CLOSED workspace is withheld
+	// whatever its visibility: its cache lapsed after its last keep-alive
+	// round (cachelapse.Keeper).
 	visible, err := bringup.Visible(ctx, c.deps.DB, ws)
 	if err != nil {
 		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
-	if visible {
-		log.Info(opWithheld, "the workspace was shown again before its session was stood down; it keeps running", fields)
+	if visible && !record.Closed {
+		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
 		return withheldSettled
 	}
 	session, found, err := c.deps.DB.Session(ctx, ws)
