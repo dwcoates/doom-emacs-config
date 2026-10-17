@@ -193,6 +193,9 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	// through (Emacs re-announces every workspace it holds), so priming here
 	// keeps the topic current. Bind first: Prime writes to the workspace's own
 	// log sink, which bindResolvers just resolved.
+	if err := v.restoreAwaiting(ctx, log, record); err != nil {
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
+	}
 	v.deps.Footer.Prime(record.ID)
 	if err := v.publishNaming(ctx, log, record); err != nil {
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)

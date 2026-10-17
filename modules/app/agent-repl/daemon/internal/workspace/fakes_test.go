@@ -182,6 +182,8 @@ type fakeDB struct {
 	// moves the session between the mark and the recheck; markSelfCloseErr
 	// fails the mark and takeSelfCloseErr the take.
 	onMarkSelfClose  func()
+	setOneShotErr    error
+	setAwaitingErr   error
 	markSelfCloseErr error
 	takeSelfCloseErr error
 	// reopened records every Reopen, in order.
@@ -587,6 +589,35 @@ func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error
 		return d.swapErr
 	}
 	d.swaps = append(d.swaps, [2]ids.WorkspaceID{ws, target})
+	return nil
+}
+
+// SetOneShot marks the fake's creation job; a workspace with none is
+// wsm.ErrNotFound, as the store answers. setOneShotErr fails it.
+func (d *fakeDB) SetOneShot(_ context.Context, id ids.WorkspaceID, oneShot bool) error {
+	if d.setOneShotErr != nil {
+		return d.setOneShotErr
+	}
+	job, ok := d.jobs[id]
+	if !ok {
+		return fmt.Errorf("fake: no creation job for %s: %w", id, wsm.ErrNotFound)
+	}
+	job.OneShot = oneShot
+	d.jobs[id] = job
+	ws := d.workspaces[id]
+	ws.OneShot = oneShot
+	d.workspaces[id] = ws
+	return nil
+}
+
+// SetAwaiting marks the fake's record; setAwaitingErr fails it.
+func (d *fakeDB) SetAwaiting(_ context.Context, id ids.WorkspaceID, awaited *ids.WorkspaceID) error {
+	if d.setAwaitingErr != nil {
+		return d.setAwaitingErr
+	}
+	ws := d.workspaces[id]
+	ws.Awaiting = awaited
+	d.workspaces[id] = ws
 	return nil
 }
 
@@ -1631,6 +1662,8 @@ type fakeFooter struct {
 
 	// statuses is the status each workspace's strip answers.
 	statuses map[ids.WorkspaceID]*frontendv1.FooterStatus
+	// awaiting is the awaited name each workspace's strip was last told.
+	awaiting map[ids.WorkspaceID]string
 
 	// mainAgents is every main agent the footer was told, and historyPages the
 	// entry count of every page it was handed, in order.
@@ -2339,6 +2372,14 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 		return ServedColdGate{}, false
 	}
 	return *c.coldGate, true
+}
+
+// SetAwaiting records the awaited name the strip was told.
+func (f *fakeFooter) SetAwaiting(ws ids.WorkspaceID, name string) {
+	if f.awaiting == nil {
+		f.awaiting = map[ids.WorkspaceID]string{}
+	}
+	f.awaiting[ws] = name
 }
 
 // Status answers the status seeded for WS, nil when none was.

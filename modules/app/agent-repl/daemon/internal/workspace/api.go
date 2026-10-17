@@ -312,6 +312,13 @@ type Verbs interface {
 	// manifests in the footer, not only in the answer. BY is who asked for it,
 	// which the close record keeps.
 	Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error
+	// SetOneShot marks a workspace a one-shot, or unmarks it, as the asker
+	// (nil for the user) asks, answering the completion directive a marked
+	// workspace follows (standings.go).
+	SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error)
+	// SetCorrespondence marks a workspace awaiting another, or clears the mark
+	// with nil, as the asker (nil for the user) asks (standings.go).
+	SetCorrespondence(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, awaited *ids.WorkspaceID) error
 	// CloseSelf is the workspace's own agent closing it: the asking turn is
 	// never a blocker, and a workspace whose turn still runs is marked to
 	// close when that turn ends, answering true (close.go). A workspace with

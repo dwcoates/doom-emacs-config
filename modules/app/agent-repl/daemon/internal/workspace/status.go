@@ -40,6 +40,10 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		Branch:      record.Branch,
 		MergeTarget: target,
 		Hidden:      record.Hidden || record.MergeHidden(),
+		OneShot:     record.OneShot,
+	}
+	if record.Awaiting != nil {
+		out.Awaiting = &workspacev1.WorkspaceRef{Id: string(*record.Awaiting)}
 	}
 	if record.Closed {
 		out.Standing = &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}

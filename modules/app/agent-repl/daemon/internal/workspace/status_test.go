@@ -211,3 +211,22 @@ func TestStatusFails(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusReportsTheWorkspacesStandings(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	awaited := ids.WorkspaceID("ws-planner")
+	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", OneShot: true, Awaiting: &awaited}
+	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
+
+	// Act
+	got, err := f.verbs.Status(context.Background(), "ws-1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if !got.GetOneShot() || got.GetAwaiting().GetId() != string(awaited) {
+		t.Errorf("one-shot %v awaiting %v, want a one-shot awaiting %s", got.GetOneShot(), got.GetAwaiting(), awaited)
+	}
+}
