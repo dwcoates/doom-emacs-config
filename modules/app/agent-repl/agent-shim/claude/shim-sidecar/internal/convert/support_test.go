@@ -173,6 +173,14 @@ func peerMessageLine(uuid, from, body, text string, handback bool) string {
 		`","message":{"role":"user","content":[{"type":"text","text":` + quote(text) + `}]}}`
 }
 
+// interSessionLine builds an inter-session peer record carrying extra origin
+// fields (verifiedPeerPid, name, msg_id) as raw JSON members, ", "-prefixed.
+func interSessionLine(uuid, extraOrigin string) string {
+	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"isMeta":true,"promptSource":"system",` +
+		`"origin":{"kind":"peer","from":"uds:/tmp/cc-socks/5398.sock"` + extraOrigin + `},"timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":"envelope"}]}}`
+}
+
 // assistantWith builds an assistant line carrying the given content blocks.
 func assistantWith(uuid, messageID, timestamp, blocks string) string {
 	return `{"type":"assistant","uuid":"` + uuid + `","isSidechain":false,"timestamp":"` + timestamp +

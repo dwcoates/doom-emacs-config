@@ -567,15 +567,28 @@ func bashSpilledOutput(result map[string]any, total uint64) *conversationv1.Agen
 // sendMessageSuccess states HOW the message got there: one costs nothing beyond
 // the message, the other RESTARTED A DORMANT AGENT, which begins consuming
 // tokens again.
+//
+// A SEND TO ANOTHER CLAUDE SESSION reached no agent of this one: its result
+// names no pin and no resumed agent, only the vendor's `msg_id` for the
+// delivery, so it settles on the peer_session recipient, exactly as the stream
+// plane settles it (shim/src/convert/tools/send-message.ts).
 func sendMessageSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentSendMessageSuccess {
-	recipient := firstNonEmpty(str(result["resumedAgentId"]), sendAddressedTo(call.input))
 	success := &conversationv1.AgentSendMessageSuccess{
-		RecipientAgentId: agentID(recipient),
-		SettledAt:        settledAt(ts, call.startedAt),
+		SettledAt: settledAt(ts, call.startedAt),
 		// RESTATED so the settled frame stands alone: the start it upserts
 		// over is gone once it lands, and a replay draws the send from this.
 		AddressedTo: sendAddressedTo(call.input),
 		Summary:     sendMessageSummary(call.input),
+	}
+	agent := firstNonEmpty(str(result["resumedAgentId"]), str(obj(result["pin"])["id"]))
+	delivery := str(result["msg_id"])
+	switch {
+	case agent == "" && delivery != "":
+		success.Recipient = &conversationv1.AgentSendMessageSuccess_PeerSession{PeerSession: &conversationv1.AgentSendMessagePeerSession{
+			DeliveryId: &conversationv1.PeerDeliveryId{Value: delivery},
+		}}
+	default:
+		success.Recipient = &conversationv1.AgentSendMessageSuccess_RecipientAgentId{RecipientAgentId: agentID(firstNonEmpty(agent, sendAddressedTo(call.input)))}
 	}
 	if str(result["resumedAgentId"]) != "" {
 		success.Delivery = &conversationv1.AgentSendMessageSuccess_ResumedRecipient{ResumedRecipient: &conversationv1.AgentSendMessageResumedRecipient{}}

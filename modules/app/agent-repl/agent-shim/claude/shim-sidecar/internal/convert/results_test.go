@@ -63,6 +63,44 @@ func TestSendMessageSuccessReportsAResumedRecipient(t *testing.T) {
 	}
 }
 
+// THE RECIPIENT ARM IS WHICH KIND OF RECIPIENT the vendor's result names: an
+// agent of this session (resumed, or pinned), or another Claude session joined
+// by its delivery id. Read exactly as the stream plane reads it.
+func TestSendMessageSuccessNamesItsRecipient(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  map[string]any
+		result map[string]any
+		// agent is the agent recipient wanted, "" when the arm must not be the agent's.
+		agent string
+		// delivery is the peer-session delivery id wanted, "" when the arm must not be the peer's.
+		delivery string
+	}{
+		{name: "a resumed agent", input: map[string]any{"to": "vetter"}, result: map[string]any{"resumedAgentId": "agent-7"}, agent: "agent-7"},
+		{name: "a pinned live agent", input: map[string]any{"to": "vetter"}, result: map[string]any{"pin": map[string]any{"id": "b7c"}}, agent: "b7c"},
+		{name: "another Claude session", input: map[string]any{"to": "fix-flaky-3a"}, result: map[string]any{"msg_id": "143abeca"}, delivery: "143abeca"},
+		{name: "an agent named beside a delivery id", input: map[string]any{"to": "vetter"}, result: map[string]any{"pin": map[string]any{"id": "b7c"}, "msg_id": "m-1"}, agent: "b7c"},
+		{name: "neither, falling back to the address", input: map[string]any{"to": "vetter"}, result: map[string]any{}, agent: "vetter"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			call := openCall{input: tt.input}
+
+			// Act
+			got := sendMessageSuccess(call, tt.result, 1000)
+
+			// Assert
+			if gotAgent := got.GetRecipientAgentId().GetValue(); gotAgent != tt.agent {
+				t.Errorf("recipient agent = %q, want %q", gotAgent, tt.agent)
+			}
+			if gotDelivery := got.GetPeerSession().GetDeliveryId().GetValue(); gotDelivery != tt.delivery {
+				t.Errorf("peer delivery = %q, want %q", gotDelivery, tt.delivery)
+			}
+		})
+	}
+}
+
 // A SETTLED SEND STANDS ALONE: it restates the address and the summary, since
 // the start it upserts over is gone once it lands.
 func TestSendMessageSuccessRestatesTheStartsFields(t *testing.T) {

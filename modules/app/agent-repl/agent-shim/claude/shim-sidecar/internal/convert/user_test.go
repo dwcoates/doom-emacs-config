@@ -3,7 +3,12 @@ package convert
 // user_test.go — R15 holds for agent-repl's own prompts (any sdk-* entrypoint, withheld) and
 // is crossed for adopted external prompts (any other entrypoint, emitted).
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+)
 
 func TestAgentReplsOwnSdkCliPromptIsStillWithheld(t *testing.T) {
 	// Arrange. R15 regression lock: a prompt agent-repl submitted through its
@@ -306,6 +311,62 @@ func TestAPeerMessageWithoutHandbackStatesTheInterSessionKind(t *testing.T) {
 	if peerLineOf(entries[0]).GetInterSession() == nil {
 		t.Fatalf("kind = %v, want inter_session", peerLineOf(entries[0]).GetKind())
 	}
+}
+
+// WHO SENT an inter-session message is stated as the vendor states it, each
+// fact UNSET when the vendor states none.
+func TestAnInterSessionMessageStatesItsSender(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		check func(*conversationv1.PeerMessageInterSession) string
+		want  string
+	}{
+		{name: "the verified pid", extra: `,"verifiedPeerPid":5398`,
+			check: func(i *conversationv1.PeerMessageInterSession) string {
+				return strconv.FormatUint(uint64(i.GetSenderProcess().GetVerifiedPid()), 10)
+			}, want: "5398"},
+		{name: "the pid's instant is the record's timestamp", extra: `,"verifiedPeerPid":5398`,
+			check: func(i *conversationv1.PeerMessageInterSession) string {
+				return strconv.FormatInt(i.GetSenderProcess().GetReceivedAtMs(), 10)
+			}, want: strconv.FormatInt(parseInstant(ts1), 10)},
+		{name: "no sender process when the vendor verified no pid", extra: ``,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return presence(i.GetSenderProcess() != nil) }, want: "unset"},
+		{name: "no sender process for a pid that is not a whole positive number", extra: `,"verifiedPeerPid":-3`,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return presence(i.GetSenderProcess() != nil) }, want: "unset"},
+		{name: "the sender's session name, trimmed", extra: `,"name":" agent-repl-test-slimming-54 "`,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return i.GetSenderSessionName().GetText() }, want: "agent-repl-test-slimming-54"},
+		{name: "no session name when the vendor states none", extra: ``,
+			check: func(i *conversationv1.PeerMessageInterSession) string {
+				return presence(i.GetSenderSessionName() != nil)
+			}, want: "unset"},
+		{name: "the delivery id", extra: `,"msg_id":"e0aced60"`,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return i.GetDeliveryId().GetValue() }, want: "e0aced60"},
+		{name: "no delivery id when the vendor states none", extra: ``,
+			check: func(i *conversationv1.PeerMessageInterSession) string { return presence(i.GetDeliveryId() != nil) }, want: "unset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := newTestConverter(t)
+
+			// Act
+			entries := convertLines(t, c, interSessionLine("u1", tt.extra))
+
+			// Assert
+			if got := tt.check(peerLineOf(entries[0]).GetInterSession()); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// presence spells whether an optional field is set, for a table's one column.
+func presence(set bool) string {
+	if set {
+		return "set"
+	}
+	return "unset"
 }
 
 func TestPeerMessageIdentityIsDerivedFromTheRecordUUID(t *testing.T) {

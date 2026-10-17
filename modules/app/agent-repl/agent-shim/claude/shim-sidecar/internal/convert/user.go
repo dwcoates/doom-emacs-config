@@ -226,11 +226,33 @@ func (c *Converter) peerMessage(record, message map[string]any, at Attribution, 
 	if env.peerHandback {
 		peer.Kind = &conversationv1.PeerMessage_SubagentHandback{SubagentHandback: &conversationv1.PeerMessageSubagentHandback{}}
 	} else {
-		peer.Kind = &conversationv1.PeerMessage_InterSession{InterSession: &conversationv1.PeerMessageInterSession{}}
+		peer.Kind = &conversationv1.PeerMessage_InterSession{InterSession: interSessionOf(env)}
 	}
 	c.log.With(at.ctxFor("peer-message")).With(logging.Context{UpsertKey: PeerKey(env.uuid)}).
 		LogVerbose("a peer message (origin.kind=peer, sender=%q, handback=%t) emitted as a page line on the record uuid", env.peerSender, env.peerHandback)
 	return c.landPeerMessage(at, agent, PeerKey(env.uuid), "peer_message", peer)
+}
+
+// interSessionOf states WHO SENT an inter-session message, as the vendor states
+// it, read exactly as the stream plane reads it (shim/src/convert/peer.ts
+// interSessionOf): the verified pid with the record's own instant, the sender's
+// asserted session name, and the delivery id. Each is UNSET when the vendor
+// states none, never a stand-in.
+func interSessionOf(env envelope) *conversationv1.PeerMessageInterSession {
+	inter := &conversationv1.PeerMessageInterSession{}
+	if env.peerVerifiedPid != 0 {
+		inter.SenderProcess = &conversationv1.PeerMessageSenderProcess{
+			VerifiedPid:  env.peerVerifiedPid,
+			ReceivedAtMs: env.timestampMs,
+		}
+	}
+	if env.peerSessionName != "" {
+		inter.SenderSessionName = &conversationv1.PeerMessageSenderSessionName{Text: env.peerSessionName}
+	}
+	if env.peerDeliveryID != "" {
+		inter.DeliveryId = &conversationv1.PeerDeliveryId{Value: env.peerDeliveryID}
+	}
+	return inter
 }
 
 // userSaid builds the one canonical prompt form from a vendor user message: its
