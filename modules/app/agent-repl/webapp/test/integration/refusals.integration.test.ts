@@ -29,6 +29,7 @@ import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/
 import { bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../src/rpc/refusal";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
+import { userRefusalArms } from "../agent-only-arms.js";
 import {
   ACCOUNT_CONFIG_DIR,
   REFUSED_COMMAND,
@@ -805,7 +806,9 @@ describe.each(REFUSAL_SITES)("$name's typed refusals", (testCase) => {
 describe("per-rpc refusal arms", () => {
   /** Every arm that is NOT one of the four cross-cutting ones. */
   const perRpcArms = (rpc: RpcName): string[] =>
-    refusalArmsOf(rpc).filter((a) => !(CROSS_CUTTING_ARMS as readonly string[]).includes(a));
+    userRefusalArms(rpc, refusalArmsOf(rpc)).filter(
+      (a) => !(CROSS_CUTTING_ARMS as readonly string[]).includes(a),
+    );
 
   it.each(
     REFUSAL_SITES.flatMap((testCase) =>
