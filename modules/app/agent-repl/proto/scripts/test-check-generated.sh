@@ -37,11 +37,15 @@ printf 'stable\n' >"$FIXTURE/gen/ts/artifact"
 
 cat >"$STUBS/protoc" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
 for arg in "$@"; do
     case "$arg" in
-        --go_out=*) printf '%s\n' "${PROTO_TEST_OUTPUT:-stable}" >gen/go/artifact ;;
-        --es_out=*) printf '%s\n' "${PROTO_TEST_OUTPUT:-stable}" >gen/ts/artifact ;;
+        --go_out=*) out="${arg#--go_out=}" ;;
+        --es_out=*) out="${arg#--es_out=}" ;;
+        *) continue ;;
     esac
+    printf '%s\n' "$out" >>"$PROTO_TEST_WRITES"
+    printf '%s\n' "${PROTO_TEST_OUTPUT:-stable}" >"$out/artifact"
 done
 EOF
 
@@ -65,9 +69,22 @@ printf '2.14.1\n'
 EOF
 chmod +x "$STUBS/protoc" "$STUBS/npm" "$STUBS/protoc-gen-es" "$STUBS/node"
 
+# The stub protoc records every output directory it writes, so the matching run
+# can be held to never writing the checked tree: check-generated compares
+# against a scratch regeneration, and a write into gen/ fails here instead of
+# passing silently.
+export PROTO_TEST_WRITES="$TMP/writes"
 PATH="$STUBS:/usr/bin:/bin" \
     PROTO_TEST_PLUGIN="$STUBS/protoc-gen-es" \
     make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null
+if [ "$(wc -l <"$PROTO_TEST_WRITES")" -ne 2 ]; then
+    printf 'check-generated did not regenerate both bindings:\n%s\n' "$(cat "$PROTO_TEST_WRITES")" >&2
+    exit 1
+fi
+if grep -qxE 'gen/(go|ts)' "$PROTO_TEST_WRITES"; then
+    printf 'check-generated wrote the checked gen/ tree:\n%s\n' "$(cat "$PROTO_TEST_WRITES")" >&2
+    exit 1
+fi
 
 set +e
 PATH="$STUBS:/usr/bin:/bin" \
@@ -82,4 +99,4 @@ if [ "$rc" -eq 0 ]; then
     exit 1
 fi
 
-printf 'check-generated accepts matching dirty artifacts and rejects stale output\n'
+printf 'check-generated accepts matching dirty artifacts without writing them and rejects stale output\n'
