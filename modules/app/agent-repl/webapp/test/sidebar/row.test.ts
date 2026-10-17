@@ -253,11 +253,11 @@ describe("the highlight and the receded styling", () => {
       .filter((rule) => rule.selectors.some((sel) => sel.includes(".ws.current")))
       .map((rule) => rule.declarations);
 
-  it("marks the current row with the accent gutter bar", () => {
+  it("marks the current row with the brighter accent gutter bar", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
-    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--accent\)/.test(d))).toBe(true);
+    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--row-current-gutter\)/.test(d))).toBe(true);
   });
 
   it.each([

@@ -1115,9 +1115,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 
 /* The workspace Emacs is currently showing. The accent gutter bar is the
    ONLY selection mark (owner ruling, 2026-10-11): no row tint, no bolder
-   name. */
+   name. The bar is the accent a step brighter (owner request, 2026-10-17),
+   mixed from it so the two never drift. */
+#ws-sidebar { --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white); }
 #ws-sidebar .ws.current > .row {
-  border-left: var(--row-gutter-w) solid var(--accent);
+  border-left: var(--row-gutter-w) solid var(--row-current-gutter);
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
