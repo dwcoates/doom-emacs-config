@@ -280,7 +280,9 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 			return wsm.MergeSource{}, fmt.Errorf("merge: asking whether branch %q exists: %w", source.Branch, err)
 		}
 		if !exists {
-			return wsm.MergeSource{}, refuse(ArmUnknownBranch, ws, "no branch %q exists in the repository", source.Branch)
+			refusal := refuse(ArmUnknownBranch, ws, "no branch %q exists in the repository", source.Branch)
+			refusal.Fields = map[string]any{"branch": source.Branch}
+			return wsm.MergeSource{}, refusal
 		}
 		return source, nil
 	default:
@@ -320,15 +322,20 @@ func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, 
 		}
 	}
 	maker, err := o.deps.DB.Workspace(ctx, run.Maker)
+	unknownMaker := func(format string) error {
+		refusal := refuse(ArmUnknownMaker, ws, format, run.Maker)
+		refusal.Fields = map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(run.Maker)}}
+		return refusal
+	}
 	switch {
 	case run.Maker == "":
 		return wsm.MergeSource{}, fmt.Errorf("merge: the async merge of %s names no maker", ws)
 	case errors.Is(err, wsm.ErrNotFound):
-		return wsm.MergeSource{}, refuse(ArmUnknownMaker, ws, "no workspace %s is registered to have made the branch", run.Maker)
+		return wsm.MergeSource{}, unknownMaker("no workspace %s is registered to have made the branch")
 	case err != nil:
 		return wsm.MergeSource{}, fmt.Errorf("merge: reading the maker %s: %w", run.Maker, err)
 	case maker.Repo != requester.Repo:
-		return wsm.MergeSource{}, refuse(ArmUnknownMaker, ws, "the maker %s is in another repository", run.Maker)
+		return wsm.MergeSource{}, unknownMaker("the maker %s is in another repository")
 	}
 	if run.CloseOnLanding != "" {
 		if run.CloseOnLanding == ws {
@@ -411,7 +418,9 @@ func (o *orchestrator) checkedOutBranch(ctx context.Context, ws ids.WorkspaceID,
 		return "", fmt.Errorf("merge: reading the branch checked out in %s: %w", dir, err)
 	}
 	if branch == "" {
-		return "", refuse(ArmUnknownBranch, ws, "the worktree %s has no branch checked out (its HEAD is detached), so there is no branch to merge", dir)
+		refusal := refuse(ArmNoBranchCheckedOut, ws, "the worktree %s has no branch checked out (its HEAD is detached), so there is no branch to merge", dir)
+		refusal.Fields = map[string]any{"dir": dir}
+		return "", refusal
 	}
 	return branch, nil
 }

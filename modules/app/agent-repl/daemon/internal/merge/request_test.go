@@ -260,12 +260,12 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 			h.git.mu.Lock()
 			h.git.branches[h.sourceD] = ""
 			h.git.mu.Unlock()
-		}, source: ownBranch, arm: ArmUnknownBranch},
+		}, source: ownBranch, arm: ArmNoBranchCheckedOut},
 		{name: "merged upstream whose worktree has a detached HEAD", arrange: func(h *harness) {
 			h.git.mu.Lock()
 			h.git.branches[h.sourceD] = ""
 			h.git.mu.Unlock()
-		}, source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, arm: ArmUnknownBranch},
+		}, source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, arm: ArmNoBranchCheckedOut},
 		{name: "a deleted session", arrange: func(h *harness) {
 			h.db.mu.Lock()
 			h.db.sessions[theWorkspace] = wsm.Session{Workspace: theWorkspace, Terminal: &wsm.SessionTerminal{Kind: "deleted"}}

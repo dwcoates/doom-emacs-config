@@ -8,6 +8,8 @@ import (
 
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/wsm"
+
+	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 // asyncRequest asks for the harness workspace's async merge of asyncBranch as
@@ -205,6 +207,44 @@ func TestEnqueueAnswersWhatTheRequestReserved(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("Enqueue = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnAsyncRefusalNamesWhatItRefused(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+		run    *DetachedRun
+		arm    string
+		field  string
+		want   string
+	}{
+		{name: "an unknown maker names the maker", source: asyncSource, run: &DetachedRun{Maker: "ws-9", Name: "n"},
+			arm: ArmUnknownMaker, field: "workspace", want: "ws-9"},
+		{name: "an unknown branch names the branch", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "no-such"}, run: &DetachedRun{Maker: theWorkspace, Name: "n"},
+			arm: ArmUnknownBranch, field: "branch", want: "no-such"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: tt.source, By: RequestedByUser, Detached: tt.run})
+
+			// Assert
+			refusal, ok := Refused(err)
+			if !ok || refusal.Arm != tt.arm {
+				t.Fatalf("Enqueue = %v, want the %s refusal", err, tt.arm)
+			}
+			got := refusal.Fields[tt.field]
+			if ref, isRef := got.(*workspacev1.WorkspaceRef); isRef {
+				got = ref.GetId()
+			}
+			if got != tt.want {
+				t.Errorf("field %s = %v, want %q", tt.field, got, tt.want)
 			}
 		})
 	}

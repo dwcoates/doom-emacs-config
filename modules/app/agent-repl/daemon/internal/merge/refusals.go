@@ -89,6 +89,10 @@ const (
 	// reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
 	// field names the branch the name resolves to.
 	ArmNameTaken = "async_merge_name_taken"
+	// ArmNoBranchCheckedOut refuses a merge of a workspace's own branch whose
+	// worktree has a detached HEAD (MergeWorkspaceError.no_branch_checked_out).
+	// Its `dir` field names the worktree.
+	ArmNoBranchCheckedOut = "no_branch_checked_out"
 	// ArmOwnerLands refuses a workspace's own ask to land a child whose
 	// context was not forked from its owner: only the owner, or the user,
 	// lands it (MergeWorkspaceError.owner_lands). Its `owner` field names the

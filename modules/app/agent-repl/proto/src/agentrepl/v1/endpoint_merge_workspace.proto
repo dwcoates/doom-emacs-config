@@ -135,6 +135,10 @@ message MergeWorkspaceError {
     // The requester is neither the workspace, nor its owner, nor the user.
     // Nothing was recorded.
     MergeWorkspaceRequesterMayNotLand requester_may_not_land = 17;
+    // The workspace's worktree has no branch checked out (its HEAD is
+    // detached), so there is no branch of its own to land. Nothing was
+    // recorded.
+    MergeWorkspaceNoBranchCheckedOut no_branch_checked_out = 18;
   }
 }
 message MergeWorkspaceUnknownWorkspace {}
@@ -152,6 +156,10 @@ message MergeWorkspaceSessionDeleted {}
 message MergeWorkspaceAlreadyQueued {}
 message MergeWorkspaceAlreadyMerging {}
 // Names the owner that lands this workspace.
+message MergeWorkspaceNoBranchCheckedOut {
+  // The worktree with the detached HEAD.
+  string dir = 1;
+}
 message MergeWorkspaceOwnerLands {
   // The workspace whose branch this child was cut from, which arbitrates its
   // work and lands it.

@@ -464,6 +464,7 @@ type MergeWorkspaceError struct {
 	//	*MergeWorkspaceError_HasOpenChildren
 	//	*MergeWorkspaceError_OwnerLands
 	//	*MergeWorkspaceError_RequesterMayNotLand
+	//	*MergeWorkspaceError_NoBranchCheckedOut
 	Cause         isMergeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -623,6 +624,15 @@ func (x *MergeWorkspaceError) GetRequesterMayNotLand() *MergeWorkspaceRequesterM
 	return nil
 }
 
+func (x *MergeWorkspaceError) GetNoBranchCheckedOut() *MergeWorkspaceNoBranchCheckedOut {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_NoBranchCheckedOut); ok {
+			return x.NoBranchCheckedOut
+		}
+	}
+	return nil
+}
+
 type isMergeWorkspaceError_Cause interface {
 	isMergeWorkspaceError_Cause()
 }
@@ -703,6 +713,13 @@ type MergeWorkspaceError_RequesterMayNotLand struct {
 	RequesterMayNotLand *MergeWorkspaceRequesterMayNotLand `protobuf:"bytes,17,opt,name=requester_may_not_land,json=requesterMayNotLand,proto3,oneof"`
 }
 
+type MergeWorkspaceError_NoBranchCheckedOut struct {
+	// The workspace's worktree has no branch checked out (its HEAD is
+	// detached), so there is no branch of its own to land. Nothing was
+	// recorded.
+	NoBranchCheckedOut *MergeWorkspaceNoBranchCheckedOut `protobuf:"bytes,18,opt,name=no_branch_checked_out,json=noBranchCheckedOut,proto3,oneof"`
+}
+
 func (*MergeWorkspaceError_UnknownWorkspace) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_WorkspaceRefMismatch) isMergeWorkspaceError_Cause() {}
@@ -728,6 +745,8 @@ func (*MergeWorkspaceError_HasOpenChildren) isMergeWorkspaceError_Cause() {}
 func (*MergeWorkspaceError_OwnerLands) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_RequesterMayNotLand) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_NoBranchCheckedOut) isMergeWorkspaceError_Cause() {}
 
 type MergeWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1036,6 +1055,51 @@ func (*MergeWorkspaceAlreadyMerging) Descriptor() ([]byte, []int) {
 }
 
 // Names the owner that lands this workspace.
+type MergeWorkspaceNoBranchCheckedOut struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The worktree with the detached HEAD.
+	Dir           string `protobuf:"bytes,1,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceNoBranchCheckedOut) Reset() {
+	*x = MergeWorkspaceNoBranchCheckedOut{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceNoBranchCheckedOut) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceNoBranchCheckedOut) ProtoMessage() {}
+
+func (x *MergeWorkspaceNoBranchCheckedOut) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceNoBranchCheckedOut.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceNoBranchCheckedOut) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MergeWorkspaceNoBranchCheckedOut) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
 type MergeWorkspaceOwnerLands struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace whose branch this child was cut from, which arbitrates its
@@ -1047,7 +1111,7 @@ type MergeWorkspaceOwnerLands struct {
 
 func (x *MergeWorkspaceOwnerLands) Reset() {
 	*x = MergeWorkspaceOwnerLands{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1059,7 +1123,7 @@ func (x *MergeWorkspaceOwnerLands) String() string {
 func (*MergeWorkspaceOwnerLands) ProtoMessage() {}
 
 func (x *MergeWorkspaceOwnerLands) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1072,7 +1136,7 @@ func (x *MergeWorkspaceOwnerLands) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeWorkspaceOwnerLands.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceOwnerLands) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MergeWorkspaceOwnerLands) GetOwner() *v1.WorkspaceRef {
@@ -1092,7 +1156,7 @@ type MergeWorkspaceRequesterMayNotLand struct {
 
 func (x *MergeWorkspaceRequesterMayNotLand) Reset() {
 	*x = MergeWorkspaceRequesterMayNotLand{}
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1168,7 @@ func (x *MergeWorkspaceRequesterMayNotLand) String() string {
 func (*MergeWorkspaceRequesterMayNotLand) ProtoMessage() {}
 
 func (x *MergeWorkspaceRequesterMayNotLand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1181,7 @@ func (x *MergeWorkspaceRequesterMayNotLand) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use MergeWorkspaceRequesterMayNotLand.ProtoReflect.Descriptor instead.
 func (*MergeWorkspaceRequesterMayNotLand) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{17}
 }
 
 var File_agentrepl_v1_endpoint_merge_workspace_proto protoreflect.FileDescriptor
@@ -1144,8 +1208,7 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.MergeWorkspaceSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.MergeWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15MergeWorkspaceSuccess\"\xda\n" +
-	"\n" +
+	"\x15MergeWorkspaceSuccess\"\xbf\v\n" +
 	"\x13MergeWorkspaceError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.MergeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.MergeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
@@ -1160,7 +1223,8 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\x11has_open_children\x18\x0f \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildren\x12I\n" +
 	"\vowner_lands\x18\x10 \x01(\v2&.agentrepl.v1.MergeWorkspaceOwnerLandsH\x00R\n" +
 	"ownerLands\x12f\n" +
-	"\x16requester_may_not_land\x18\x11 \x01(\v2/.agentrepl.v1.MergeWorkspaceRequesterMayNotLandH\x00R\x13requesterMayNotLandB\a\n" +
+	"\x16requester_may_not_land\x18\x11 \x01(\v2/.agentrepl.v1.MergeWorkspaceRequesterMayNotLandH\x00R\x13requesterMayNotLand\x12c\n" +
+	"\x15no_branch_checked_out\x18\x12 \x01(\v2..agentrepl.v1.MergeWorkspaceNoBranchCheckedOutH\x00R\x12noBranchCheckedOutB\a\n" +
 	"\x05causeJ\x04\b\t\x10\n" +
 	"J\x04\b\n" +
 	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\x1aunknown_one_shot_workspaceR\x0eunknown_branchR\n" +
@@ -1174,7 +1238,9 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\x1bMergeWorkspaceNoLayoutFacts\"\x1e\n" +
 	"\x1cMergeWorkspaceSessionDeleted\"\x1d\n" +
 	"\x1bMergeWorkspaceAlreadyQueued\"\x1e\n" +
-	"\x1cMergeWorkspaceAlreadyMerging\"L\n" +
+	"\x1cMergeWorkspaceAlreadyMerging\"4\n" +
+	" MergeWorkspaceNoBranchCheckedOut\x12\x10\n" +
+	"\x03dir\x18\x01 \x01(\tR\x03dir\"L\n" +
 	"\x18MergeWorkspaceOwnerLands\x120\n" +
 	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\"#\n" +
 	"!MergeWorkspaceRequesterMayNotLandB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -1191,7 +1257,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentrepl_v1_endpoint_merge_workspace_proto_goTypes = []any{
 	(*MergeWorkspaceRequest)(nil),                    // 0: agentrepl.v1.MergeWorkspaceRequest
 	(*MergeWorkspaceOneShot)(nil),                    // 1: agentrepl.v1.MergeWorkspaceOneShot
@@ -1208,22 +1274,23 @@ var file_agentrepl_v1_endpoint_merge_workspace_proto_goTypes = []any{
 	(*MergeWorkspaceSessionDeleted)(nil),             // 12: agentrepl.v1.MergeWorkspaceSessionDeleted
 	(*MergeWorkspaceAlreadyQueued)(nil),              // 13: agentrepl.v1.MergeWorkspaceAlreadyQueued
 	(*MergeWorkspaceAlreadyMerging)(nil),             // 14: agentrepl.v1.MergeWorkspaceAlreadyMerging
-	(*MergeWorkspaceOwnerLands)(nil),                 // 15: agentrepl.v1.MergeWorkspaceOwnerLands
-	(*MergeWorkspaceRequesterMayNotLand)(nil),        // 16: agentrepl.v1.MergeWorkspaceRequesterMayNotLand
-	(*v1.WorkspaceRef)(nil),                          // 17: workspace.v1.WorkspaceRef
-	(*WorkspaceRequester)(nil),                       // 18: agentrepl.v1.WorkspaceRequester
-	(*MergeWorkspaceVersionIncrement)(nil),           // 19: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*MergeQueuePlacement)(nil),                      // 20: agentrepl.v1.MergeQueuePlacement
-	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 21: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 22: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	(*WorkspaceHasOpenChildren)(nil),                 // 23: agentrepl.v1.WorkspaceHasOpenChildren
+	(*MergeWorkspaceNoBranchCheckedOut)(nil),         // 15: agentrepl.v1.MergeWorkspaceNoBranchCheckedOut
+	(*MergeWorkspaceOwnerLands)(nil),                 // 16: agentrepl.v1.MergeWorkspaceOwnerLands
+	(*MergeWorkspaceRequesterMayNotLand)(nil),        // 17: agentrepl.v1.MergeWorkspaceRequesterMayNotLand
+	(*v1.WorkspaceRef)(nil),                          // 18: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                       // 19: agentrepl.v1.WorkspaceRequester
+	(*MergeWorkspaceVersionIncrement)(nil),           // 20: agentrepl.v1.MergeWorkspaceVersionIncrement
+	(*MergeQueuePlacement)(nil),                      // 21: agentrepl.v1.MergeQueuePlacement
+	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 22: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 23: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	(*WorkspaceHasOpenChildren)(nil),                 // 24: agentrepl.v1.WorkspaceHasOpenChildren
 }
 var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
-	17, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	18, // 1: agentrepl.v1.MergeWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	18, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	19, // 1: agentrepl.v1.MergeWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
 	1,  // 2: agentrepl.v1.MergeWorkspaceRequest.one_shot:type_name -> agentrepl.v1.MergeWorkspaceOneShot
-	19, // 3: agentrepl.v1.MergeWorkspaceRequest.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
-	20, // 4: agentrepl.v1.MergeWorkspaceRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
+	20, // 3: agentrepl.v1.MergeWorkspaceRequest.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
+	21, // 4: agentrepl.v1.MergeWorkspaceRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
 	2,  // 5: agentrepl.v1.MergeWorkspaceOneShot.own_branch:type_name -> agentrepl.v1.MergeWorkspaceOneShotOwnBranch
 	3,  // 6: agentrepl.v1.MergeWorkspaceOneShot.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceOneShotMergedUpstream
 	5,  // 7: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
@@ -1236,17 +1303,18 @@ var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
 	12, // 14: agentrepl.v1.MergeWorkspaceError.session_deleted:type_name -> agentrepl.v1.MergeWorkspaceSessionDeleted
 	13, // 15: agentrepl.v1.MergeWorkspaceError.already_queued:type_name -> agentrepl.v1.MergeWorkspaceAlreadyQueued
 	14, // 16: agentrepl.v1.MergeWorkspaceError.already_merging:type_name -> agentrepl.v1.MergeWorkspaceAlreadyMerging
-	21, // 17: agentrepl.v1.MergeWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	22, // 18: agentrepl.v1.MergeWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	23, // 19: agentrepl.v1.MergeWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
-	15, // 20: agentrepl.v1.MergeWorkspaceError.owner_lands:type_name -> agentrepl.v1.MergeWorkspaceOwnerLands
-	16, // 21: agentrepl.v1.MergeWorkspaceError.requester_may_not_land:type_name -> agentrepl.v1.MergeWorkspaceRequesterMayNotLand
-	17, // 22: agentrepl.v1.MergeWorkspaceOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	22, // 17: agentrepl.v1.MergeWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	23, // 18: agentrepl.v1.MergeWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	24, // 19: agentrepl.v1.MergeWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	16, // 20: agentrepl.v1.MergeWorkspaceError.owner_lands:type_name -> agentrepl.v1.MergeWorkspaceOwnerLands
+	17, // 21: agentrepl.v1.MergeWorkspaceError.requester_may_not_land:type_name -> agentrepl.v1.MergeWorkspaceRequesterMayNotLand
+	15, // 22: agentrepl.v1.MergeWorkspaceError.no_branch_checked_out:type_name -> agentrepl.v1.MergeWorkspaceNoBranchCheckedOut
+	18, // 23: agentrepl.v1.MergeWorkspaceOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_merge_workspace_proto_init() }
@@ -1282,6 +1350,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 		(*MergeWorkspaceError_HasOpenChildren)(nil),
 		(*MergeWorkspaceError_OwnerLands)(nil),
 		(*MergeWorkspaceError_RequesterMayNotLand)(nil),
+		(*MergeWorkspaceError_NoBranchCheckedOut)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1289,7 +1358,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
