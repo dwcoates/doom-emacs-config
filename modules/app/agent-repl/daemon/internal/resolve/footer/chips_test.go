@@ -1044,6 +1044,142 @@ func TestTheScheduledJobsChipCountsCronsAndTheWakeup(t *testing.T) {
 	}
 }
 
+// THE ⏱ CHIP NEVER OPENS ONTO AN EMPTY PANEL: whatever the chip counts, the
+// panel draws as a row, so its count and the panel's rows agree in every state.
+func TestTheScheduledJobsChipCountsThePanelsRows(t *testing.T) {
+	tests := []struct {
+		name string
+		acts []*conversationv1.AgentActivity
+	}{
+		{name: "nothing scheduled"},
+		{
+			name: "a cron job alone",
+			acts: []*conversationv1.AgentActivity{
+				cronListed(&conversationv1.AgentCronJob{JobId: "j1", Cron: "* * * * *", HumanSchedule: "every min"}),
+			},
+		},
+		{
+			name: "a pending wakeup alone",
+			acts: []*conversationv1.AgentActivity{wakeupScheduled(instant.Add(5 * time.Minute))},
+		},
+		{
+			name: "a wakeup still being scheduled",
+			acts: []*conversationv1.AgentActivity{wakeupStarting("waiting on CI")},
+		},
+		{
+			name: "a cron job and a wakeup",
+			acts: []*conversationv1.AgentActivity{
+				cronListed(&conversationv1.AgentCronJob{JobId: "j1", Cron: "* * * * *", HumanSchedule: "every min"}),
+				wakeupScheduled(instant.Add(5 * time.Minute)),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			for _, act := range tc.acts {
+				h.r.OnActivity(testWS, mainAgent, act)
+			}
+
+			// Assert
+			view := h.view(t)
+			panel := view.GetExpanded().GetCrons()
+			drawn := uint32(len(panel.GetRows()))
+			if panel.GetWakeup() != nil {
+				drawn++
+			}
+			if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got != drawn {
+				t.Fatalf("scheduled-jobs chip = %d, panel draws %d rows", got, drawn)
+			}
+		})
+	}
+}
+
+func TestThePanelDrawsAPendingWakeup(t *testing.T) {
+	tests := []struct {
+		name       string
+		acts       []*conversationv1.AgentActivity
+		wantReason string
+		wantWakeAt int64
+		wantNoRow  bool
+	}{
+		{
+			name:       "a confirmed wakeup draws its reason and its instant",
+			acts:       []*conversationv1.AgentActivity{wakeupStarting("waiting on CI"), wakeupScheduled(instant.Add(5 * time.Minute))},
+			wantReason: "waiting on CI",
+			wantWakeAt: instant.Add(5 * time.Minute).UnixMilli(),
+		},
+		{
+			name:       "a wakeup the vendor has not confirmed draws no countdown",
+			acts:       []*conversationv1.AgentActivity{wakeupStarting("waiting on CI")},
+			wantReason: "waiting on CI",
+		},
+		{
+			name:       "a wakeup without a reason draws no reason",
+			acts:       []*conversationv1.AgentActivity{wakeupScheduled(instant.Add(5 * time.Minute))},
+			wantWakeAt: instant.Add(5 * time.Minute).UnixMilli(),
+		},
+		{
+			name:      "a stopped wakeup draws no row",
+			acts:      []*conversationv1.AgentActivity{wakeupScheduled(instant.Add(5 * time.Minute)), wakeupStopped()},
+			wantNoRow: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			for _, act := range tc.acts {
+				h.r.OnActivity(testWS, mainAgent, act)
+			}
+
+			// Assert
+			row := h.view(t).GetExpanded().GetCrons().GetWakeup()
+			if tc.wantNoRow {
+				if row != nil {
+					t.Fatalf("wakeup row = %+v, want UNSET", row)
+				}
+				return
+			}
+			if row == nil {
+				t.Fatalf("the panel drew no wakeup row")
+			}
+			if (row.Reason != nil) != (tc.wantReason != "") || row.GetReason().GetText() != tc.wantReason {
+				t.Fatalf("wakeup reason = %+v, want %q", row.Reason, tc.wantReason)
+			}
+			if (row.WakeAt != nil) != (tc.wantWakeAt != 0) || row.GetWakeAt().GetWakeAtMs() != tc.wantWakeAt {
+				t.Fatalf("wakeup instant = %+v, want %d", row.WakeAt, tc.wantWakeAt)
+			}
+		})
+	}
+}
+
+// wakeupStarting is a ScheduleWakeup call in flight, before the vendor has
+// confirmed when it fires.
+func wakeupStarting(reason string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "wake-1"},
+		Item: &conversationv1.AgentActivity_ScheduleWakeup{
+			ScheduleWakeup: &conversationv1.AgentScheduleWakeup{
+				Result: &conversationv1.AgentScheduleWakeup_Start{
+					Start: &conversationv1.AgentScheduleWakeupStart{
+						Act: &conversationv1.AgentScheduleWakeupStart_Schedule{
+							Schedule: &conversationv1.AgentScheduleWakeupSchedule{DelaySeconds: 300, Reason: reason},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // subagentStartFrame is a detached run's own opening frame, as its OWN book
 // carries it -- the frame the caller's book never sends.
 func subagentStartFrame(created, subagentType string) *conversationv1.AgentSubagent {
