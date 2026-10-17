@@ -853,7 +853,9 @@ func (v *verbs) decorateForkedElsewhere(ctx context.Context, log dlog.Logger, ra
 		source = "the branch of the workspace `" + record.Name + "`"
 	}
 	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefForkedElsewhere, from,
-		func(origin wsm.Workspace) map[string]string { return map[string]string{"origin": origin.Name, "source": source} })
+		func(origin wsm.Workspace) map[string]string {
+			return map[string]string{"origin": origin.Name, "source": source}
+		})
 }
 
 // BriefOneShotContext is the note a one-shot asked for from inside another

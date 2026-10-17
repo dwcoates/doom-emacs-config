@@ -146,7 +146,6 @@ func TestCreateDefaultsTheBaseRefToTheRepositoryDefaultBranch(t *testing.T) {
 	}
 }
 
-
 func TestCreateRecordsTheCreationJobBeforeMaterialization(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -746,8 +745,6 @@ func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *te
 	}
 }
 
-
-
 // TestCreateRefusesARepositoryThatIsNotOnDisk pins the arm for a repository
 // whose directory is gone. The registry may still hold the row -- a worktree
 // removed underneath it, a scratch repository a run cleaned up -- and the
@@ -1164,9 +1161,6 @@ func TestCreateHandsAPlainCreatesNamingCallNoConversation(t *testing.T) {
 	}
 }
 
-
-
-
 func TestCreateCutsAChildFromItsParentsTip(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -1394,21 +1388,30 @@ func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
 				spec.Parent, spec.OneShot, spec.OwnerNotice = &id, true, "fix it"
 			}},
 		{name: "an owner the registry does not hold", wantArm: ArmUnknownOwner,
-			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) { id := ids.WorkspaceID("nope"); spec.Parent = &id }},
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				id := ids.WorkspaceID("nope")
+				spec.Parent = &id
+			}},
 		{name: "an owner of another repository", wantArm: ArmUnknownOwner,
 			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
 				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
 				spec.Parent, spec.ForkFrom = &elsewhere.ID, &elsewhere.ID
 			}},
 		{name: "a fork source the registry does not hold", wantArm: ArmUnknownForkSource,
-			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) { id := ids.WorkspaceID("nope"); spec.ForkFrom = &id }},
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				id := ids.WorkspaceID("nope")
+				spec.ForkFrom = &id
+			}},
 		{name: "a fork source of another repository", wantArm: ArmUnknownForkSource,
 			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
 				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
 				spec.ForkFrom = &elsewhere.ID
 			}},
 		{name: "a requester the registry does not hold", wantArm: ArmUnknownRequester,
-			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) { id := ids.WorkspaceID("nope"); spec.Requester = &id }},
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				id := ids.WorkspaceID("nope")
+				spec.Requester = &id
+			}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1475,8 +1478,6 @@ func TestResolveBaseAnswersTheCommit(t *testing.T) {
 		t.Fatalf("resolveBase = (%q, %v), want sha-of-main", commit, err)
 	}
 }
-
-
 
 // TestNoCreatePathAsksAboutAncestry pins that a create never asks git whether
 // a base lies on the primary branch: a workspace is always cut from its
@@ -1585,7 +1586,9 @@ func TestCreateNotesShareTheWorkspaceNoteComposition(t *testing.T) {
 	// Act.
 	fork, forkErr := v.decorateForkedElsewhere(context.Background(), f.log.logger, "raw", source.ID, nil)
 	shared, sharedErr := v.decorateWithWorkspaceNote(context.Background(), f.log.logger, "raw", BriefForkedElsewhere, source.ID,
-		func(ws wsm.Workspace) map[string]string { return map[string]string{"origin": ws.Name, "source": "the primary branch"} })
+		func(ws wsm.Workspace) map[string]string {
+			return map[string]string{"origin": ws.Name, "source": "the primary branch"}
+		})
 
 	// Assert.
 	if forkErr != nil || sharedErr != nil || fork != shared {
