@@ -1522,20 +1522,19 @@ blink still in flight."
 
 ;;; The switch flash ----------------------------------------------------------
 ;;
-;; ARRIVING AT A WORKSPACE FLASHES ITS TAB-BAR ENTRY TWICE over 750 ms, so the
-;; eye finds the tab it just landed on.  However the switch was made (a cycle
-;; chord, a slot chord, the picker, a tab click, a sidebar click the roster
-;; follows), the frame's arrival runs the one deferred switch pass
+;; ARRIVING AT A WORKSPACE FLASHES ITS TAB-BAR ENTRY ONCE for 250 ms (owner
+;; request, 2026-10-17: once, not twice), so the eye finds the tab it just
+;; landed on.  However the switch was made (a cycle chord, a slot chord, the
+;; picker, a tab click, a sidebar click the roster follows), the frame's arrival runs the one deferred switch pass
 ;; (`agent-repl--on-workspace-switch'), and that pass starts the flash.  Only
 ;; one workspace is ever flashed: a later arrival restarts the schedule on the
 ;; new workspace, because every step is armed under a key shared by all
 ;; workspaces.
 
 (defconst agent-repl-status-switch-flash-schedule
-  '((0.0 . t) (0.25 . nil) (0.5 . t) (0.75 . nil))
+  '((0.0 . t) (0.25 . nil))
   "The switch flash, as (DELAY . ON) steps in seconds.
-Inverted at 0 ms, normal at 250, inverted at 500, normal from 750 — two
-flashes over 750 ms.")
+Inverted at 0 ms, normal from 250 — one flash of 250 ms.")
 
 (defvar agent-repl-status--switch-flash-ws nil
   "The workspace whose tab-bar entry is drawn flashed right now, or nil.")
@@ -1557,7 +1556,7 @@ arrival's flash still has pending."
   (equal ws agent-repl-status--switch-flash-ws))
 
 (defun agent-repl-status-flash-switched-tab (ws)
-  "Flash WS's tab-bar entry twice, WS being the workspace just switched to.
+  "Flash WS's tab-bar entry once, WS being the workspace just switched to.
 Runs `agent-repl-status-switch-flash-schedule'; a call while a flash is in
 flight restarts the schedule on WS."
   (agent-repl--info ws "elisp.status.switch-flash: ws=%s steps=%d"
