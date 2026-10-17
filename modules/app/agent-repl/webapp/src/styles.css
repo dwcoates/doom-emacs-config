@@ -3529,13 +3529,21 @@ html[data-page-unshown] *::after {
   color: var(--thinking);
   font-size: 0.85rem;
 }
+/* THE ARC SPINNER'S SHAPE, shared by every spinner the webapp draws: a ring in
+   its token at a quarter strength, with its top arc in the full token. Each
+   spinner names its token as `--arc-color` and sets its own size and motion. */
+.thinking-spinner,
+.tool-spinner,
+.feed-load-more-spinner {
+  border: 2px solid color-mix(in srgb, var(--arc-color) 25%, transparent);
+  border-top-color: var(--arc-color);
+  border-radius: 50%;
+}
 .thinking-spinner {
+  --arc-color: var(--thinking);
   flex: none;
   width: 0.9em;
   height: 0.9em;
-  border: 2px solid color-mix(in srgb, var(--thinking) 25%, transparent);
-  border-top-color: var(--thinking);
-  border-radius: 50%;
   animation: thinking-spin 0.8s linear infinite;
 }
 @keyframes thinking-spin {
@@ -3623,12 +3631,10 @@ html[data-page-unshown] *::after {
    update does, as does the input→running flip), which is harmless: each such
    rewrite is itself the liveness signal the arc stands in for. */
 .tool-spinner {
+  --arc-color: var(--thinking);
   flex: none;
   width: 0.7em;
   height: 0.7em;
-  border: 2px solid color-mix(in srgb, var(--thinking) 25%, transparent);
-  border-top-color: var(--thinking);
-  border-radius: 50%;
   opacity: 0;
   animation:
     thinking-spin 0.8s linear infinite,
@@ -5367,12 +5373,10 @@ bubble-body.bubble-body { display: block; }
   line-height: 0;
 }
 .feed-load-more-spinner {
+  --arc-color: var(--muted);
   display: inline-block;
   width: 0.9em;
   height: 0.9em;
-  border: 2px solid color-mix(in srgb, var(--muted) 25%, transparent);
-  border-top-color: var(--muted);
-  border-radius: 50%;
   animation: thinking-spin 0.8s linear infinite;
 }
 /* A TURN'S EARLIER STEPS ON AN OLDER PAGE: the load control's look, under the
