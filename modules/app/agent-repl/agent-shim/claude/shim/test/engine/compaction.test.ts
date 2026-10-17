@@ -23,7 +23,9 @@ import {
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
+  summarizerSpentTokens,
 } from "../../src/engine/compaction.js";
+import { normalizeApiUsage } from "../../src/api-usage.js";
 import { readTranscriptFacts } from "../../src/engine/cold.js";
 
 /** The ambient fields every observed line of one real transcript carries. */
@@ -410,5 +412,22 @@ describe("the ambient fields a bookkeeping last line must not erase", () => {
         "slug",
       ].filter((field) => boundary[field] === undefined),
     ).toEqual([]);
+  });
+});
+
+describe("summarizerSpentTokens", () => {
+  it.each([
+    ["sums uncached input, cache writes, cache reads and output", { input_tokens: 3, cache_creation_input_tokens: 40, cache_read_input_tokens: 500, output_tokens: 7 }, 550],
+    ["counts a null cache counter as nothing spent", { input_tokens: 3, cache_creation_input_tokens: null, cache_read_input_tokens: null, output_tokens: 7 }, 10],
+    ["answers zero for a query that spent nothing", { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 }, 0],
+  ])("%s", (_name, raw, want) => {
+    // Arrange
+    const usage = normalizeApiUsage(raw);
+
+    // Act
+    const spent = summarizerSpentTokens(usage);
+
+    // Assert
+    expect(spent).toBe(want);
   });
 });

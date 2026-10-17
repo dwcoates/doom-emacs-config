@@ -132,7 +132,10 @@ import {
   contextCutCompacted,
   contextCutFailed,
   readAmbient,
+  summarizerSpentTokens,
+  type CompactionFigures,
 } from "./compaction.js";
+import { normalizeApiUsage } from "../api-usage.js";
 import {
   cacheRequestOf,
   judgeCold,
@@ -1021,7 +1024,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * stated, rather than a second reading that could disagree with it. Absent
    * means no cold-gate compaction has landed in this process.
    */
-  let coldCompactionFigures: { tokensBefore: number; tokensAfter: number } | undefined;
+  let coldCompactionFigures: CompactionFigures | undefined;
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
@@ -1605,11 +1608,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * what the proto documents as "not known yet" and is never an estimate: the
    * before figure is the transcript's own, as the gate read it, and the after
    * figure is the summary's output tokens, which is what remains in context.
+   * The spend is the summarizing query's own account of what it cost, so it
+   * is stated only once that query has answered.
    */
   function compactionProgressUpdate(
     phase: conversationv1.SessionCompactionPhase,
-    figures: { tokensBefore?: number; tokensAfter?: number; error?: string } = {},
+    figures: Partial<CompactionFigures> & { error?: string } = {},
   ): conversationv1.SessionUpdate {
+    const spend = figures.spend;
     return create(conversationv1.SessionUpdateSchema, {
       update: {
         case: "compactionProgress",
@@ -1618,6 +1624,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           tokensBefore: asInt64(figures.tokensBefore ?? 0, "compaction.tokensBefore"),
           tokensAfter: asInt64(figures.tokensAfter ?? 0, "compaction.tokensAfter"),
           ...(figures.error === undefined ? {} : { error: figures.error }),
+          ...(spend === undefined
+            ? {}
+            : {
+                spend: create(conversationv1.SessionCompactionSpendSchema, {
+                  model: create(conversationv1.AgentModelSchema, { name: spend.model }),
+                  tokens: asInt64(spend.tokens, "compaction.spend.tokens"),
+                }),
+              }),
         }),
       },
     });
@@ -1642,6 +1656,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         phase: conversationv1.SessionCompactionPhase[which],
         tokens_before: figures?.tokensBefore ?? 0,
         tokens_after: figures?.tokensAfter ?? 0,
+        summarizer_model: figures?.spend.model ?? "",
+        summarizer_tokens: figures?.spend.tokens ?? 0,
       },
       said,
     );
@@ -5305,7 +5321,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     /** Narrate one phase, to the fan-out and to the log. */
     const phase = (
       which: conversationv1.SessionCompactionPhase,
-      figures: { tokensBefore?: number; tokensAfter?: number; error?: string },
+      figures: Partial<CompactionFigures> & { error?: string },
       said: string,
     ): void => {
       pushes.push(compactionProgressUpdate(which, figures));
@@ -5315,6 +5331,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           phase: conversationv1.SessionCompactionPhase[which],
           tokens_before: figures.tokensBefore ?? 0,
           tokens_after: figures.tokensAfter ?? 0,
+          summarizer_model: figures.spend?.model ?? "",
+          summarizer_tokens: figures.spend?.tokens ?? 0,
           ...(figures.error === undefined ? {} : { cause: figures.error }),
         },
         said,
@@ -5370,8 +5388,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       });
       let summary = "";
       let outputTokens = 0;
+      let spentTokens = 0;
+      /** The model the summarizing query runs on, as its own opening states it. */
+      let summarizer: string | undefined;
       streaming = true;
       for await (const message of throwaway) {
+        if (message.type === "system" && message.subtype === "init") {
+          summarizer = message.model;
+          continue;
+        }
         if (message.type !== "result") continue;
         sawResult = true;
         // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE. The vendor ends a
@@ -5402,7 +5427,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           );
         }
         summary = message.result;
-        outputTokens = message.usage.output_tokens;
+        const usage = normalizeApiUsage(message.usage);
+        outputTokens = usage.outputTokens;
+        spentTokens = summarizerSpentTokens(usage);
         break;
       }
       streaming = false;
@@ -5412,6 +5439,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // to this transcript, and it will give the same one again (rejected).
         return failed("the summarizing session produced no summary", sawResult ? "rejected" : "retryable");
       }
+      if (summarizer === undefined) {
+        // THE VENDOR OPENS EVERY QUERY WITH ITS INIT, before any result, so a
+        // summary with no opening before it is a stream that broke the
+        // vendor's own order. The compaction cannot say on which model its
+        // summary was written, and it fails rather than guess one.
+        return failed("the summarizing session answered without stating its model", "rejected");
+      }
+      const spend = { model: summarizer, tokens: spentTokens };
       const durationMs = deps.nowMs() - startedAtMs;
       appendCompactionLines(
         transcript,
@@ -5451,10 +5486,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           requested: true,
         }),
       );
-      coldCompactionFigures = { tokensBefore: facts.contextTokens, tokensAfter: outputTokens };
+      coldCompactionFigures = { tokensBefore: facts.contextTokens, tokensAfter: outputTokens, spend };
       phase(
         conversationv1.SessionCompactionPhase.SUMMARIZED,
-        { tokensBefore: facts.contextTokens, tokensAfter: outputTokens },
+        coldCompactionFigures,
         "the cold gate's summary came back and the compaction boundary was appended to the transcript",
       );
       return { ok: true, summary };

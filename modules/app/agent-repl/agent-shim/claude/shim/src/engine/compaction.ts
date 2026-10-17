@@ -41,8 +41,31 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { compactionIdField } from "../convert/session-updates.js";
 import { conversationv1 } from "../proto.js";
+import type { NormalizedApiUsage } from "../api-usage.js";
 
 const LOGGER = bindLog({ component: "shim-engine-compaction", operation: "shim.engine.compaction" });
+
+/**
+ * What a compaction measured, carried from the summary to every later phase so
+ * the whole sequence states one account of it.
+ */
+export interface CompactionFigures {
+  /** Context tokens the conversation held before the compaction. */
+  tokensBefore: number;
+  /** Context tokens it holds after: the summary's own output. */
+  tokensAfter: number;
+  /** What the summarizing query spent, and on which model. */
+  spend: { model: string; tokens: number };
+}
+
+/**
+ * Every token the summarizing query spent: what it read (uncached, written to
+ * the cache and read from it) plus what it wrote. The four counters are the
+ * vendor's own, validated by `normalizeApiUsage`; this is only their sum.
+ */
+export function summarizerSpentTokens(usage: NormalizedApiUsage): number {
+  return usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens + usage.outputTokens;
+}
 
 /** The sentence the vendor's own compact summary begins with. */
 export const COMPACT_SUMMARY_PREFIX =
