@@ -505,8 +505,6 @@ The top bar's effort selector sits between the model selector and the permission
   - Inside a repository, its own workspaces come first, then each subsection's in turn.
   - A child always sits right after its parent.
   - So a workspace dragged into an empty subsection at the bottom of its repository becomes that repository's last tab.
-- **Agents can arrange it too, with `/arrange-sidebar`.**
-  - Ask an agent to organize the sidebar, or to group the workspaces it just created into a named subsection.
 
 ## Searching the sidebar
 
