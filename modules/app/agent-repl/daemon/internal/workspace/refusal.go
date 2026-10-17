@@ -53,6 +53,19 @@ const (
 	// directory lies inside a temporary root (owner ruling, 2026-10-06). The
 	// arm carries `dir` and `temporary_root`.
 	ArmInsideTemporaryDirectory = "inside_temporary_directory"
+	// ArmUnknownSubsection is an arrangement naming a subsection no
+	// subsection carries (ArrangeSidebarError.unknown_subsection). The arm
+	// carries `subsection`.
+	ArmUnknownSubsection = "unknown_subsection"
+	// ArmBlankName is a subsection named nothing but whitespace
+	// (ArrangeSidebarError.blank_name).
+	ArmBlankName = "blank_name"
+	// ArmOtherRepository is an arrangement relating two things of different
+	// repositories (ArrangeSidebarError.other_repository).
+	ArmOtherRepository = "other_repository"
+	// ArmAnchorElsewhere is a workspace placed before one that does not sit
+	// in the destination (ArrangeSidebarError.anchor_elsewhere).
+	ArmAnchorElsewhere = "anchor_elsewhere"
 	// ArmNotInARepository is a RegisterRepository whose path is readable but
 	// lies inside no git repository with a main worktree. It is DISTINCT from
 	// ArmNotAWorktree, which is about the announced directory being a worktree

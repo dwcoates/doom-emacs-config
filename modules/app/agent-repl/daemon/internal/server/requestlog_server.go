@@ -282,6 +282,13 @@ func (s *requestLoggingServer) SwapWorkspaces(
 	return serveUnary(s, ctx, "SwapWorkspaces", req, s.server.SwapWorkspaces)
 }
 
+func (s *requestLoggingServer) ArrangeSidebar(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ArrangeSidebarRequest],
+) (*connect.Response[agentreplv1.ArrangeSidebarResponse], error) {
+	return serveUnary(s, ctx, "ArrangeSidebar", req, s.server.ArrangeSidebar)
+}
+
 func (s *requestLoggingServer) CreateTask(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.CreateTaskRequest],

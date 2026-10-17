@@ -468,16 +468,12 @@ func (v *verbs) BindViews(ctx context.Context) error {
 // saw the roster at all — including the EMPTY roster, which is a roster.
 func (v *verbs) PublishRegistry(ctx context.Context) error {
 	log := v.deps.Log.Global()
-	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
+	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {
-		log.Error(opRegister, "could not list the workspaces for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: list the workspaces: %w", err)
+		log.Error(opRegister, "could not read the workspaces, repositories and subsections for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: read the arrangement: %w", err)
 	}
-	repositories, err := v.deps.DB.ListRepositories(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not list the repositories for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: list the repositories: %w", err)
-	}
+	workspaces, repositories := arrangement.Workspaces, arrangement.Repositories
 	tasks, err := v.deps.DB.Tasks(ctx)
 	if err != nil {
 		log.Error(opRegister, "could not list the tasks for the opening roster", dlog.Context{"cause": err.Error()})
@@ -545,7 +541,8 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		log.Error(opRegister, "could not read the session records for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: %w", err)
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current, view))
+	arrangement.Workspaces = workspaces
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, arrangement, tasks, sessions, current, view))
 	log.Debug(opRegister, "published the opening roster", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
 		"sessions": len(sessions),

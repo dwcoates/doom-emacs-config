@@ -179,7 +179,7 @@ func TestRosterDropsARepositoryWhoseDirectoryIsGone(t *testing.T) {
 	repos := []wsm.Repository{{ID: "repo-gone", Dir: gone, Name: "scratch-repo"}}
 
 	// Act.
-	kept, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), repos, nil, nil)
+	kept, _, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), wsm.Arrangement{Repositories: repos}, nil)
 
 	// Assert.
 	if len(kept) != 0 {
@@ -192,7 +192,7 @@ func TestRosterKeepsARepositoryWhoseDirectoryIsThere(t *testing.T) {
 	repos := []wsm.Repository{{ID: "repo-live", Dir: t.TempDir(), Name: "scratch-repo"}}
 
 	// Act.
-	kept, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), repos, nil, nil)
+	kept, _, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), wsm.Arrangement{Repositories: repos}, nil)
 
 	// Assert.
 	if len(kept) != 1 {
@@ -210,7 +210,7 @@ func TestRosterDropsTheWorkspacesOfAGoneRepository(t *testing.T) {
 	workspaces := []wsm.Workspace{{ID: "w-gone", Repo: "repo-gone", Dir: gone + "/tree"}}
 
 	// Act.
-	_, kept, _ := withoutGoneRepositories(goneRepositoriesLog(t), repos, workspaces, nil)
+	_, kept, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), wsm.Arrangement{Repositories: repos, Workspaces: workspaces}, nil)
 
 	// Assert.
 	if len(kept) != 0 {
@@ -231,7 +231,7 @@ func TestRosterKeepsTheWorkspacesOfALiveRepository(t *testing.T) {
 	}
 
 	// Act.
-	_, kept, _ := withoutGoneRepositories(goneRepositoriesLog(t), repos, workspaces, nil)
+	_, kept, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), wsm.Arrangement{Repositories: repos, Workspaces: workspaces}, nil)
 
 	// Assert.
 	if len(kept) != 1 || kept[0].ID != "w-live" {
@@ -250,7 +250,7 @@ func TestRosterDropsTheSessionRecordsOfAGoneRepository(t *testing.T) {
 	sessions := []wsm.Session{{Workspace: "w-gone"}}
 
 	// Act.
-	_, _, kept := withoutGoneRepositories(goneRepositoriesLog(t), repos, workspaces, sessions)
+	_, _, _, kept := withoutGoneRepositories(goneRepositoriesLog(t), wsm.Arrangement{Repositories: repos, Workspaces: workspaces}, sessions)
 
 	// Assert.
 	if len(kept) != 0 {
@@ -271,10 +271,31 @@ func TestRosterKeepsARepositoryWhoseDirectoryIsAFile(t *testing.T) {
 	repos := []wsm.Repository{{ID: "repo-odd", Dir: path}}
 
 	// Act.
-	kept, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), repos, nil, nil)
+	kept, _, _, _ := withoutGoneRepositories(goneRepositoriesLog(t), wsm.Arrangement{Repositories: repos}, nil)
 
 	// Assert.
 	if len(kept) != 1 {
 		t.Fatalf("the roster dropped a repository whose path exists; only a not-exist answer is 'gone'")
+	}
+}
+
+// TestRosterDropsTheSubsectionsOfAGoneRepository keeps the resolver's
+// arrangement invariant intact: a subsection naming no published repository
+// would fail the registry install.
+func TestRosterDropsTheSubsectionsOfAGoneRepository(t *testing.T) {
+	// Arrange: one live repository beside one that is gone, a subsection each.
+	live := t.TempDir()
+	gone := filepath.Join(t.TempDir(), "deleted")
+	arrangement := wsm.Arrangement{
+		Repositories: []wsm.Repository{{ID: "repo-live", Dir: live}, {ID: "repo-gone", Dir: gone}},
+		Subsections:  []wsm.Subsection{{ID: "sub-live", Repo: "repo-live", Name: "a", Place: 1}, {ID: "sub-gone", Repo: "repo-gone", Name: "b", Place: 1}},
+	}
+
+	// Act.
+	_, _, kept, _ := withoutGoneRepositories(goneRepositoriesLog(t), arrangement, nil)
+
+	// Assert.
+	if len(kept) != 1 || kept[0].ID != "sub-live" {
+		t.Fatalf("the roster published %v, want only the live repository's subsection", kept)
 	}
 }

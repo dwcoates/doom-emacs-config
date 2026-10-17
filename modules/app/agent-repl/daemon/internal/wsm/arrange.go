@@ -75,6 +75,19 @@ END;
 // ErrNotFound, so a caller asking only "was it there" still reads it.
 var ErrUnknownSubsection = fmt.Errorf("wsm: unknown subsection: %w", ErrNotFound)
 
+// UnknownSubsectionError names the subsection id no subsection carries. It is
+// ErrUnknownSubsection (and so ErrNotFound) to errors.Is.
+type UnknownSubsectionError struct {
+	ID SubsectionID
+}
+
+func (e *UnknownSubsectionError) Error() string {
+	return fmt.Sprintf("wsm: subsection %s: %v", e.ID, ErrUnknownSubsection)
+}
+
+// Unwrap makes the error ErrUnknownSubsection to errors.Is.
+func (e *UnknownSubsectionError) Unwrap() error { return ErrUnknownSubsection }
+
 // ErrUnknownRepository is a repository id no repository carries. It wraps
 // ErrNotFound, as ErrUnknownSubsection does.
 var ErrUnknownRepository = fmt.Errorf("wsm: unknown repository: %w", ErrNotFound)
@@ -354,7 +367,7 @@ func subsectionRow(ctx context.Context, tx *sql.Tx, id SubsectionID) (Subsection
 	err := tx.QueryRowContext(ctx, `SELECT id, repo_id, name, place FROM subsections WHERE id = ?`, id).
 		Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Subsection{}, fmt.Errorf("wsm: subsection %s: %w", id, ErrUnknownSubsection)
+		return Subsection{}, &UnknownSubsectionError{ID: id}
 	}
 	return sub, err
 }
@@ -367,7 +380,7 @@ func requireSubsectionRow(res sql.Result, id SubsectionID) error {
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("wsm: subsection %s: %w", id, ErrUnknownSubsection)
+		return &UnknownSubsectionError{ID: id}
 	}
 	return nil
 }

@@ -653,7 +653,7 @@ func TestPlaceWorkspaceLeavesAFamilyMemberInAnotherSubsectionWhereItIs(t *testin
 func TestPlaceWorkspaceRefusals(t *testing.T) {
 	type world struct {
 		mover, anchor, foreignWs Workspace
-		own, foreign              Subsection
+		own, foreign             Subsection
 	}
 	tests := []struct {
 		name   string
@@ -874,5 +874,22 @@ func TestReadArrangementReadsTheWorkspacesRepositoriesAndSubsections(t *testing.
 	}
 	if len(got.Subsections) != 1 || got.Subsections[0] != later {
 		t.Fatalf("subsections = %+v, want [%+v]", got.Subsections, later)
+	}
+}
+
+func TestAnUnknownSubsectionIsNamedByItsError(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	err := s.RenameSubsection(context.Background(), "absent", "new")
+
+	// Assert
+	var unknown *UnknownSubsectionError
+	if !errors.As(err, &unknown) || unknown.ID != "absent" {
+		t.Fatalf("RenameSubsection = %v, want an UnknownSubsectionError naming absent", err)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RenameSubsection = %v, want it to be ErrNotFound too", err)
 	}
 }

@@ -378,6 +378,24 @@ type Verbs interface {
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error
+	// CreateSubsection adds a named subsection at the bottom of a
+	// repository's section and republishes the roster (arrange.go).
+	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) error
+	// RenameSubsection relabels one subsection and republishes the roster.
+	RenameSubsection(ctx context.Context, id ids.SubsectionID, name string) error
+	// DeleteSubsection removes one subsection, its workspaces returning to
+	// none, and republishes the roster.
+	DeleteSubsection(ctx context.Context, id ids.SubsectionID) error
+	// MoveSubsection moves one subsection before another of its
+	// repository's (nil: last) and republishes the roster.
+	MoveSubsection(ctx context.Context, id ids.SubsectionID, before *ids.SubsectionID) error
+	// MoveRepository moves one repository before another (nil: last) and
+	// republishes the roster.
+	MoveRepository(ctx context.Context, id ids.RepoID, before *ids.RepoID) error
+	// PlaceWorkspace puts one workspace, with its nested family, into a
+	// subsection of its repository (nil: none) before a workspace there
+	// (nil: last), and republishes the roster.
+	PlaceWorkspace(ctx context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error
 	// CreateTask records a new task.
 	CreateTask(ctx context.Context, title string) (wsm.Task, error)
 	// UpdateTask retitles, completes or reopens a task.

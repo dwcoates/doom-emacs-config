@@ -59,6 +59,13 @@ type fakeDB struct {
 	// swaps is every SwapPlaces call, in order; swapErr fails it.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
+	// subsections are what ReadArrangement answers beside the workspaces and
+	// repositories; arrangements is every arrangement write, spelled
+	// "<method> <args>", in order; arrangeErr fails each of them.
+	subsections  []wsm.Subsection
+	arrangements []string
+	arrangeErr   error
+
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -507,6 +514,51 @@ func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
 		return nil, d.currentErr
 	}
 	return d.current, nil
+}
+
+func (d *fakeDB) ReadArrangement(ctx context.Context) (wsm.Arrangement, error) {
+	workspaces, err := d.ListWorkspaces(ctx)
+	if err != nil {
+		return wsm.Arrangement{}, err
+	}
+	repositories, err := d.ListRepositories(ctx)
+	if err != nil {
+		return wsm.Arrangement{}, err
+	}
+	return wsm.Arrangement{Workspaces: workspaces, Repositories: repositories, Subsections: d.subsections}, nil
+}
+
+// arrange records one arrangement write, or fails it with arrangeErr.
+func (d *fakeDB) arrange(call string) error {
+	if d.arrangeErr != nil {
+		return d.arrangeErr
+	}
+	d.arrangements = append(d.arrangements, call)
+	return nil
+}
+
+func (d *fakeDB) CreateSubsection(_ context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
+	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, d.arrange("CreateSubsection " + string(repo) + " " + name)
+}
+
+func (d *fakeDB) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
+	return d.arrange("RenameSubsection " + string(id) + " " + name)
+}
+
+func (d *fakeDB) DeleteSubsection(_ context.Context, id ids.SubsectionID) error {
+	return d.arrange("DeleteSubsection " + string(id))
+}
+
+func (d *fakeDB) MoveSubsection(_ context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
+	return d.arrange("MoveSubsection " + string(id) + " " + ids.Optional(before))
+}
+
+func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
+	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
+}
+
+func (d *fakeDB) PlaceWorkspace(_ context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	return d.arrange("PlaceWorkspace " + string(ws) + " " + ids.Optional(into) + " " + ids.Optional(before))
 }
 
 func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error {

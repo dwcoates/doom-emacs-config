@@ -325,6 +325,11 @@ type fakeVerbs struct {
 	opens, selects atomic.Int32
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
+	// arrangements records every ArrangeSidebar verb call, spelled
+	// "<method> <args>", and arrangeErr is what each answers instead.
+	arrangements []string
+	arrangeErr   error
+
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
 	folds   []repositoryFold
@@ -1745,6 +1750,36 @@ type repositoryFold struct {
 func (v *fakeVerbs) Swap(_ context.Context, ws, target ids.WorkspaceID) error {
 	v.swaps = append(v.swaps, [2]ids.WorkspaceID{ws, target})
 	return v.swapErr
+}
+
+// arrange records one arrangement verb call and answers arrangeErr.
+func (v *fakeVerbs) arrange(call string) error {
+	v.arrangements = append(v.arrangements, call)
+	return v.arrangeErr
+}
+
+func (v *fakeVerbs) CreateSubsection(_ context.Context, repo ids.RepoID, name string) error {
+	return v.arrange("CreateSubsection " + string(repo) + " " + name)
+}
+
+func (v *fakeVerbs) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
+	return v.arrange("RenameSubsection " + string(id) + " " + name)
+}
+
+func (v *fakeVerbs) DeleteSubsection(_ context.Context, id ids.SubsectionID) error {
+	return v.arrange("DeleteSubsection " + string(id))
+}
+
+func (v *fakeVerbs) MoveSubsection(_ context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
+	return v.arrange("MoveSubsection " + string(id) + " " + ids.Optional(before))
+}
+
+func (v *fakeVerbs) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
+	return v.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
+}
+
+func (v *fakeVerbs) PlaceWorkspace(_ context.Context, ws ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	return v.arrange("PlaceWorkspace " + string(ws) + " " + ids.Optional(into) + " " + ids.Optional(before))
 }
 
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {

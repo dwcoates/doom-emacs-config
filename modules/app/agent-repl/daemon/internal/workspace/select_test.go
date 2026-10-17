@@ -219,7 +219,7 @@ func TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection(t *testin
 	if want := []string{"selected"}; !slices.Equal(f.sidebar.calls, want) {
 		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
 	}
-	if got := recordLevel(f, "could not list the workspaces for the roster"); got != "error" {
+	if got := recordLevel(f, "could not read the workspaces, repositories and subsections for the roster"); got != "error" {
 		t.Fatalf("the failed registry read was recorded at %q, want error", got)
 	}
 }

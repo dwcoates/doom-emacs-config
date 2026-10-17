@@ -1740,8 +1740,6 @@ func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	}
 }
 
-// ---- CreateWorkspace: fork into the primary branch ---------------------------
-
 func TestCreateWorkspaceMapsAForkSourceToAForkIntoThePrimaryBranch(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
