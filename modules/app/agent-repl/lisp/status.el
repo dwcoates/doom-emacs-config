@@ -1520,6 +1520,62 @@ blink still in flight."
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-status-sync-attention)
 
+;;; The switch flash ----------------------------------------------------------
+;;
+;; ARRIVING AT A WORKSPACE FLASHES ITS TAB-BAR ENTRY TWICE over 750 ms, so the
+;; eye finds the tab it just landed on.  However the switch was made (a cycle
+;; chord, a slot chord, the picker, a tab click, a sidebar click the roster
+;; follows), the frame's arrival runs the one deferred switch pass
+;; (`agent-repl--on-workspace-switch'), and that pass starts the flash.  Only
+;; one workspace is ever flashed: a later arrival restarts the schedule on the
+;; new workspace, because every step is armed under a key shared by all
+;; workspaces.
+
+(defconst agent-repl-status-switch-flash-schedule
+  '((0.0 . t) (0.25 . nil) (0.5 . t) (0.75 . nil))
+  "The switch flash, as (DELAY . ON) steps in seconds.
+Inverted at 0 ms, normal at 250, inverted at 500, normal from 750 — two
+flashes over 750 ms.")
+
+(defvar agent-repl-status--switch-flash-ws nil
+  "The workspace whose tab-bar entry is drawn flashed right now, or nil.")
+
+(defun agent-repl-status--switch-flash-timer-key (index)
+  "Return the keyed-timer key for the switch flash's step INDEX.
+Shared by every workspace, so a new arrival replaces the steps a previous
+arrival's flash still has pending."
+  (intern (format "agent-repl-status-switch-flash-%d" index)))
+
+(defun agent-repl-status--set-switch-flash (ws on)
+  "Draw WS's tab-bar entry flashed when ON, normally otherwise, and repaint."
+  (setq agent-repl-status--switch-flash-ws (and on ws))
+  (agent-repl--log ws "elisp.status.switch-flash-step: ws=%s flash=%s" ws (if on "on" "off"))
+  (agent-repl--force-tab-bar-redraw))
+
+(defun agent-repl-status-switch-flash-on-p (ws)
+  "Return non-nil when WS's tab-bar entry is drawn flashed right now."
+  (equal ws agent-repl-status--switch-flash-ws))
+
+(defun agent-repl-status-flash-switched-tab (ws)
+  "Flash WS's tab-bar entry twice, WS being the workspace just switched to.
+Runs `agent-repl-status-switch-flash-schedule'; a call while a flash is in
+flight restarts the schedule on WS."
+  (agent-repl--info ws "elisp.status.switch-flash: ws=%s steps=%d"
+                    ws (length agent-repl-status-switch-flash-schedule))
+  (agent-repl-status--arm-schedule
+   agent-repl-status-switch-flash-schedule
+   #'agent-repl-status--switch-flash-timer-key
+   #'agent-repl-status--set-switch-flash ws)
+  ws)
+
+(defun agent-repl-status--flash-entry (entry)
+  "Return ENTRY, a rendered tab-bar entry, drawn in inverse video.
+The face is added over the entry's own faces, so its colors swap rather
+than being replaced, and the entry's width is unchanged."
+  (let ((flashed (copy-sequence entry)))
+    (add-face-text-property 0 (length flashed) '(:inverse-video t) nil flashed)
+    flashed))
+
 (defun agent-repl-status-repaint-on-roster-push (_roster)
   "Repaint the tab bar because a roster push just changed what it draws.
 Registered on `agent-repl-roster-update-functions'.  The roster is the
@@ -2105,7 +2161,10 @@ drawn BEFORE the name.
 Every character of the entry carries NAME under
 `agent-repl--tab-workspace-property', which is how
 `agent-repl--tabline-items' finds the entry again after the rows are
-packed, padded and joined, and binds a click on it to NAME."
+packed, padded and joined, and binds a click on it to NAME.
+
+While NAME\='s switch flash is on (`agent-repl-status-switch-flash-on-p')
+the whole entry is drawn in inverse video (`agent-repl-status--flash-entry')."
   ;; Called on every tab-bar redisplay, potentially many times per second;
   ;; renderer branch traces would overwhelm even verbose diagnostics.
   (let* ((selected      (equal current-name name))
@@ -2123,8 +2182,11 @@ packed, padded and joined, and binds a click on it to NAME."
          (face          (agent-repl--tab-face display-state selected))
          (badge         (agent-repl--tab-badge-str
                          name (or display-state bracket-state))))
-    (propertize (agent-repl--render-tab name spec label face badge)
-                agent-repl--tab-workspace-property name)))
+    (let ((entry (propertize (agent-repl--render-tab name spec label face badge)
+                             agent-repl--tab-workspace-property name)))
+      (if (agent-repl-status-switch-flash-on-p name)
+          (agent-repl-status--flash-entry entry)
+        entry))))
 
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.

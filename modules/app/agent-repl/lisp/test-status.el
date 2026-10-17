@@ -4515,6 +4515,154 @@ on SelectWorkspace and re-pushes the roster."
                        (length agent-repl-status-blink-schedule)))))))
 
 
+;;;; ---- The switch flash -------------------------------------------------
+
+(ert-deftest agent-repl-test-status-switch-flash-flashes-twice-over-750ms ()
+  "Inverted at 0 ms, normal at 250, inverted at 500, normal from 750."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--capturing-timers steps
+      ;; Act
+      (agent-repl-status-flash-switched-tab "alpha")
+      ;; Assert
+      (should (equal (mapcar (lambda (step) (cons (car step) (cadr (nth 2 step))))
+                             (nreverse steps))
+                     '((0.0 . t) (0.25 . nil) (0.5 . t) (0.75 . nil)))))))
+
+(ert-deftest agent-repl-test-status-switch-flash-targets-the-switched-to-workspace ()
+  "Every step is about the workspace switched to."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--capturing-timers steps
+      ;; Act
+      (agent-repl-status-flash-switched-tab "alpha")
+      ;; Assert
+      (should (cl-every (lambda (step) (equal (car (nth 2 step)) "alpha"))
+                        steps)))))
+
+(ert-deftest agent-repl-test-status-switch-flash-keys-are-shared-across-workspaces ()
+  "A flash for a second workspace re-arms the SAME keys, replacing the first
+workspace's pending steps rather than running beside them."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((keys nil))
+      (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create)))
+                ((symbol-function 'agent-repl--register-timer)
+                 (lambda (key timer) (push key keys) timer)))
+        (agent-repl-status-flash-switched-tab "alpha")
+        ;; Act
+        (agent-repl-status-flash-switched-tab "beta"))
+      ;; Assert
+      (should (equal (length (delete-dups (copy-sequence keys)))
+                     (length agent-repl-status-switch-flash-schedule))))))
+
+(ert-deftest agent-repl-test-status-switch-flash-arms-through-the-schedule-helper ()
+  "The switch flash arms through the shared schedule helper."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((armed nil))
+      (cl-letf (((symbol-function 'agent-repl-status--arm-schedule)
+                 (lambda (schedule _key-fn fn &rest args)
+                   (push (list schedule fn args) armed))))
+        ;; Act
+        (agent-repl-status-flash-switched-tab "alpha"))
+      ;; Assert
+      (should (equal armed (list (list agent-repl-status-switch-flash-schedule
+                                       #'agent-repl-status--set-switch-flash
+                                       '("alpha"))))))))
+
+(ert-deftest agent-repl-test-status-switch-flash-step-on-flashes-the-workspace ()
+  "An ON step draws that workspace's entry flashed, and no other."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--switch-flash-ws nil))
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act
+        (agent-repl-status--set-switch-flash "alpha" t)
+        ;; Assert
+        (should (agent-repl-status-switch-flash-on-p "alpha"))
+        (should-not (agent-repl-status-switch-flash-on-p "beta"))))))
+
+(ert-deftest agent-repl-test-status-switch-flash-step-off-unflashes ()
+  "An OFF step draws the entry normally again."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--switch-flash-ws "alpha"))
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act
+        (agent-repl-status--set-switch-flash "alpha" nil)
+        ;; Assert
+        (should-not (agent-repl-status-switch-flash-on-p "alpha"))))))
+
+(ert-deftest agent-repl-test-status-switch-flash-step-repaints ()
+  "Every step repaints the tab bar, so the flash reaches the pixels."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--switch-flash-ws nil)
+          (repaints 0))
+      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (setq repaints (1+ repaints)))))
+        ;; Act
+        (agent-repl-status--set-switch-flash "alpha" t)
+        ;; Assert
+        (should (= repaints 1))))))
+
+(ert-deftest agent-repl-test-status-flash-entry-inverts-every-character ()
+  "The flashed entry carries inverse video on every character."
+  ;; Arrange
+  (let ((entry (concat (propertize "[1]" 'face 'bold) (propertize " ws1" 'face 'italic))))
+    ;; Act
+    (let ((flashed (agent-repl-status--flash-entry entry)))
+      ;; Assert
+      (should (cl-every (lambda (i)
+                          (member '(:inverse-video t)
+                                  (ensure-list (get-text-property i 'face flashed))))
+                        (number-sequence 0 (1- (length flashed))))))))
+
+(ert-deftest agent-repl-test-status-flash-entry-keeps-the-entry-faces ()
+  "The inverse video is added over the entry's own face, not instead of it."
+  ;; Arrange
+  (let ((entry (propertize "ws1" 'face 'bold)))
+    ;; Act
+    (let ((flashed (agent-repl-status--flash-entry entry)))
+      ;; Assert
+      (should (memq 'bold (ensure-list (get-text-property 0 'face flashed)))))))
+
+(ert-deftest agent-repl-test-status-flash-entry-leaves-the-original-alone ()
+  "Flashing copies the entry: the caller's string keeps its own faces."
+  ;; Arrange
+  (let ((entry (propertize "ws1" 'face 'bold)))
+    ;; Act
+    (agent-repl-status--flash-entry entry)
+    ;; Assert
+    (should (eq (get-text-property 0 'face entry) 'bold))))
+
+(ert-deftest agent-repl-test-render-tab-entry-draws-the-flashed-workspace-inverted ()
+  "The entry of the workspace being flashed renders in inverse video."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--switch-flash-ws "ws1"))
+      (agent-repl-test-status--with-entry :done nil
+        ;; Act
+        (let ((result (agent-repl--render-tab-entry "ws1" "ws1" 1)))
+          ;; Assert
+          (should (member '(:inverse-video t)
+                          (ensure-list (get-text-property
+                                        (string-match "ws1" result) 'face result)))))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-leaves-unflashed-workspaces-normal ()
+  "Every other entry renders without inverse video."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--switch-flash-ws "ws2"))
+      (agent-repl-test-status--with-entry :done nil
+        ;; Act
+        (let ((result (agent-repl--render-tab-entry "ws1" "ws1" 1)))
+          ;; Assert
+          (should-not (member '(:inverse-video t)
+                              (ensure-list (get-text-property
+                                            (string-match "ws1" result) 'face result)))))))))
+
 ;;;; ---- Following the roster's attention marker -------------------------
 
 (defmacro agent-repl-test-status--syncing-attention (attention &rest body)
