@@ -444,30 +444,30 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111318;
-    --fg: #e5e7eb;
+    --bg: #151413;
+    --fg: #ece9e2;
     --diff-add-bg: #12351f;
     --diff-del-bg: #3d1a1a;
-    --muted: #9ca3af;
-    --repo-head-expanded: #e5e7eb;
-    --repo-head-collapsed: #6b7280;
+    --muted: #a8a29e;
+    --repo-head-expanded: #ece9e2;
+    --repo-head-collapsed: #78716c;
     --merged-today-gutter: #ece8df;
-    --border: #2a2e37;
-    --card: #16191f;
+    --border: #302e2b;
+    --card: #1b1a18;
     /* The dark theme's shared panel fill (owner ruling, 2026-09-27): a notch
-       darker than --card, still lighter than the feed's #111318. The
+       darker than --card, still lighter than the feed's #151413. The
        response bubble's --assistant is this same fill (owner ruling,
        2026-10-11). */
-    --panel-bg: #14171c;
+    --panel-bg: #191816;
     /* The dark theme's tool card, a touch darker than --panel-bg (owner
        request, 2026-10-14, "halfway closer to the background color of the
-       feed"): each channel the midpoint of --panel-bg's #14171c and the
-       feed's #111318, rounded down, so a card still lifts off the feed. */
-    --tool-card-bg: #12151a;
-    /* Lighter than the feed's #111318, darker than --card, so the rail lifts
+       feed"): each channel the midpoint of --panel-bg's #191816 and the
+       feed's #151413, rounded down, so a card still lifts off the feed. */
+    --tool-card-bg: #171614;
+    /* Lighter than the feed's #151413, darker than --card, so the rail lifts
        off the conversation while its --card hover/detail washes still lift
        off the rail. */
-    --sidebar-bg: #14161b;
+    --sidebar-bg: #191816;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
        nothing against the dark feed, so the rail's lift needs a heavier black
        to still register. */
@@ -502,7 +502,7 @@
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
     --thinking: #fb923c;
-    --tool-command: #9ca3af;
+    --tool-command: #a8a29e;
     --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -512,7 +512,7 @@
     --info-tasks: #fda4af;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    --composer-bg: #0c0e12;
+    --composer-bg: #0f0e0d;
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg
@@ -530,8 +530,8 @@
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #60a5fa;
     /* A moderate grey a little lighter than the dark --assistant (the dark
-       --panel-bg, #14171c). */
-    --selected-bubble-bg: #2c3039;
+       --panel-bg, #191816). */
+    --selected-bubble-bg: #33312d;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
@@ -617,11 +617,11 @@
 }
 @media (prefers-color-scheme: dark) {
   :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
-    background-color: rgb(86, 86, 86);
+    background-color: #57534e;
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
   :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
-    background-color: rgb(58, 58, 58);
+    background-color: #3b3835;
   }
 }
 
@@ -3400,7 +3400,7 @@ html[data-page-unshown] *::after {
     --hl-keyword: #c084fc;
     --hl-string: #4ade80;
     --hl-number: #fbbf24;
-    --hl-comment: #8b929e;
+    --hl-comment: #969087;
     --hl-title: #60a5fa;
     --hl-attr: #22d3ee;
     --hl-meta: #fbbf24;
