@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 /** The one reader of the selection's text, and the proof every reader uses it. */
 import { createControl, type Control } from "../src/control.js";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { installSelectionClickGuard, selectedText, type SelectionSource } from "../src/selection.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
-import { codeOf } from "./source-text.js";
-import { filesUnder } from "./files-under.js";
+import { codeUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "../src");
@@ -65,11 +63,11 @@ describe("selectedText", () => {
 
   it("is the one reader of a selection's text in src", () => {
     // Arrange
-    const readers = filesUnder(SRC).filter((file) => !file.endsWith(`${path.sep}selection.ts`));
+    const readers = [...codeUnder(SRC)].filter(([file]) => !`${path.sep}${file}`.endsWith(`${path.sep}selection.ts`));
     // Act
     const handRolled = readers
-      .filter((file) => /getSelection\(\)\??\.toString\(/.test(codeOf(readFileSync(file, "utf8"))))
-      .map((file) => path.relative(SRC, file));
+      .filter(([, code]) => /getSelection\(\)\??\.toString\(/.test(code))
+      .map(([file]) => file);
     // Assert
     expect(handRolled).toEqual([]);
   });

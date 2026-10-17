@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createConnectHookElement } from "../src/connect-hook.js";
-import { codeOf } from "./source-text.js";
-import { filesUnder } from "./files-under.js";
+import { codeUnder } from "./files-under.js";
 
 const SRC = join(process.cwd(), "src");
 
@@ -58,9 +56,7 @@ describe("createConnectHookElement", () => {
 });
 
 describe("every element that waits to join the document is a connect-hook element", () => {
-  const sources = new Map(
-    filesUnder(SRC).map((path) => [relative(SRC, path), codeOf(readFileSync(path, "utf8"))]),
-  );
+  const sources = codeUnder(SRC);
 
   it("defines a custom element nowhere but connect-hook.ts", () => {
     const defining = [...sources].filter(([, code]) => /customElements\.define\(/.test(code)).map(([p]) => p);

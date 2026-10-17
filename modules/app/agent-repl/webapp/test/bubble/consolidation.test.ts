@@ -9,22 +9,15 @@
  * it builds a spec, calls `drawBubble`, and hands its prose to the body as a
  * markdown slot rather than rendering markdown itself.
  */
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { codeOf } from "../source-text.js";
-import { filesUnder } from "../files-under.js";
+import { codeUnder } from "../files-under.js";
 
 const SRC = join(process.cwd(), "src");
 
 
 /** Every source, keyed by its path under src/, comments stripped. */
-const SOURCES: ReadonlyMap<string, string> = new Map(
-  filesUnder(SRC).map((path) => [
-    relative(SRC, path),
-    codeOf(readFileSync(path, "utf8")),
-  ]),
-);
+const SOURCES: ReadonlyMap<string, string> = codeUnder(SRC);
 
 /** The sources whose code matches PATTERN. */
 function sourcesMatching(pattern: RegExp): string[] {

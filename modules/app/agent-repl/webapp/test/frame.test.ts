@@ -1,13 +1,11 @@
 // The one way a page module waits for the next animation frame. See
 // src/frame.ts.
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { nextFrame } from "../src/frame.js";
-import { codeOf } from "./source-text.js";
-import { filesUnder } from "./files-under.js";
+import { codeUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "../src");
@@ -81,10 +79,9 @@ describe("who waits for a frame", () => {
     const ownView = new Set(["frame.ts", "type-out.ts", path.join("bubble", "body.ts"), "busy-probe.ts"]);
 
     // Act
-    const rolled = filesUnder(SRC)
-      .filter((file) => !ownView.has(path.relative(SRC, file)))
-      .filter((file) => /requestAnimationFrame/.test(codeOf(readFileSync(file, "utf8"))))
-      .map((file) => path.relative(SRC, file));
+    const rolled = [...codeUnder(SRC)]
+      .filter(([file, code]) => !ownView.has(file) && /requestAnimationFrame/.test(code))
+      .map(([file]) => file);
 
     // Assert
     expect(rolled).toEqual([]);

@@ -18,8 +18,7 @@ import {
   scrollbarWidthPx,
 } from "../src/dom.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
-import { codeOf } from "./source-text.js";
-import { filesUnder } from "./files-under.js";
+import { codeUnder, filesUnder } from "./files-under.js";
 
 describe("scrollbarWidthPx", () => {
   it("answers a classic bar's width", () => {
@@ -37,12 +36,7 @@ describe("scrollbarWidthPx", () => {
   it("is the one formula: every scrollbar measurement calls it, and none rolls its own", () => {
     // Arrange — every source under src/, comments stripped.
     const src = join(process.cwd(), "src");
-    const code = new Map(
-      filesUnder(src).map((path) => [
-        relative(src, path),
-        codeOf(readFileSync(path, "utf8")),
-      ]),
-    );
+    const code = codeUnder(src);
     // Act
     const callers = [...code].filter(([, text]) => /\bscrollbarWidthPx\(/.test(text)).map(([p]) => p).sort();
     const rolled = [...code].filter(([, text]) => /offsetWidth\s*-[^;]*clientWidth/.test(text)).map(([p]) => p);
@@ -358,9 +352,7 @@ describe("SVG_NS", () => {
     // Arrange — every source under src/, comments stripped.
     const src = join(process.cwd(), "src");
     // Act
-    const spelled = filesUnder(src)
-      .filter((path) => codeOf(readFileSync(path, "utf8")).includes("www.w3.org/2000/svg"))
-      .map((path) => relative(src, path));
+    const spelled = [...codeUnder(src)].filter(([, code]) => code.includes("www.w3.org/2000/svg")).map(([path]) => path);
     // Assert
     expect(spelled).toEqual(["dom.ts"]);
   });
@@ -461,10 +453,9 @@ describe("nodeLabel", () => {
 
     // Act
     const src = join(process.cwd(), "src");
-    const copies = filesUnder(src)
-      .filter((file) => relative(src, file) !== "dom.ts")
-      .filter((file) => spelling.test(codeOf(readFileSync(file, "utf8"))))
-      .map((file) => relative(src, file));
+    const copies = [...codeUnder(src)]
+      .filter(([file, code]) => file !== "dom.ts" && spelling.test(code))
+      .map(([file]) => file);
 
     // Assert
     expect(copies).toEqual([]);
@@ -608,7 +599,7 @@ describe("querySelectorAll", () => {
   it("is the one way the webapp queries: no source calls querySelectorAll, whose answer WebKit caches", () => {
     // Arrange — every source under src/, comments stripped.
     const src = join(process.cwd(), "src");
-    const code = filesUnder(src).map((path) => [relative(src, path), codeOf(readFileSync(path, "utf8"))] as const);
+    const code = [...codeUnder(src)];
     // Act
     const direct = code.filter(([, text]) => /\bquerySelectorAll\b/.test(text)).map(([path]) => path);
     // Assert
@@ -793,7 +784,7 @@ describe("MutationObserver", () => {
   it("is built only by pageMutationObserver: no source constructs one a page would carry into teardown", () => {
     // Arrange — every source under src/, comments stripped.
     const src = join(process.cwd(), "src");
-    const code = filesUnder(src).map((path) => [relative(src, path), codeOf(readFileSync(path, "utf8"))] as const);
+    const code = [...codeUnder(src)];
     // Act
     const builders = code.filter(([, text]) => /\bnew\s+(?:[\w$]+\.)*MutationObserver\b/.test(text)).map(([path]) => path);
     // Assert

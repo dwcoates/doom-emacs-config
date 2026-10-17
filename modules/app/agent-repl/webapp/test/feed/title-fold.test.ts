@@ -24,9 +24,8 @@ import { stopTicking } from "../../src/feed/ticking.js";
 import { fireResize } from "../resize-observer.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { measureTitle } from "./title-measure.js";
-import { codeOf } from "../source-text.js";
 import { pagedRowContext } from "./harness.js";
-import { filesUnder } from "../files-under.js";
+import { codeUnder, filesUnder } from "../files-under.js";
 
 /** A connected `.tool-card.tool-fold` holding one card-owned title. */
 function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLElement } {
@@ -376,10 +375,9 @@ describe("every title site shares the one fold", () => {
     // and the toggle's list means a site marking a title without the measurer.
     // Comments are prose about the fold, so they are read past.
     const owners = new Set(["feed/bubble-more.ts", "feed/title-fold.ts", "expand.ts"]);
-    const marking = filesUnder(src)
-      .map((path) => relative(src, path))
-      .filter((path) => !owners.has(path))
-      .filter((path) => /["'`.]title-fold/.test(codeOf(readFileSync(join(src, path), "utf8"))));
+    const marking = [...codeUnder(src)]
+      .filter(([path, code]) => !owners.has(path) && /["'`.]title-fold/.test(code))
+      .map(([path]) => path);
 
     // Assert
     expect(marking).toEqual([]);
