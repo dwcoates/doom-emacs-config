@@ -282,7 +282,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Hidden:         r.hiddenSection(hidden, rc, log),
 		Open:           r.openSection(),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
-		TabBar:         r.tabBar(),
+		TabBar:         r.tabBar(log),
 	}
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur

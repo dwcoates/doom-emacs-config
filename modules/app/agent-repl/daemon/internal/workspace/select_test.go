@@ -1496,3 +1496,24 @@ func TestAFailedCurrentReadFailsTheLandingLoudly(t *testing.T) {
 		t.Fatalf("the failed read was not recorded at error: err=%v records=%+v", err, f.log.logger.Records())
 	}
 }
+func TestHidingLandsOnTheNeighbourTheUserSawBeforeTheHide(t *testing.T) {
+	// Arrange: w2 is current between w1 and w3; once hidden, its tab follows
+	// the drawn ones, but the landing is read off the bar as it stood.
+	f := newFixture(t)
+	for i, id := range []ids.WorkspaceID{"w1", "w2", "w3"} {
+		ws := f.workspace(id, t.TempDir())
+		ws.Place = int64(i + 1)
+		f.db.with(ws)
+	}
+	f.db.current = &[]ids.WorkspaceID{"w2"}[0]
+
+	// Act.
+	if err := f.verbs.SetHidden(context.Background(), "w2", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert.
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1, the left neighbour the user saw", f.db.current)
+	}
+}

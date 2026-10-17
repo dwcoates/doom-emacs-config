@@ -72,6 +72,22 @@ func nest(in []wsm.Workspace, log dlog.Logger) forest {
 	return out
 }
 
+// walk visits every workspace of the forest depth-first in render order: each
+// root, then its children's subtrees in roster order, before the next root.
+// It is the order the sidebar draws the rows in, and the tab bar's.
+func (f forest) walk(visit func(wsm.Workspace)) {
+	var descend func(ws wsm.Workspace)
+	descend = func(ws wsm.Workspace) {
+		visit(ws)
+		for _, child := range f.children[ws.ID] {
+			descend(child)
+		}
+	}
+	for _, root := range f.roots {
+		descend(root)
+	}
+}
+
 // recordedParent spells a workspace's recorded parent for the record, empty
 // when it has none.
 func recordedParent(ws wsm.Workspace) string {

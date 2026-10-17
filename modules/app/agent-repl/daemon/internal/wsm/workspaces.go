@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, subsection_id, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -255,18 +255,20 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
-		// A CHILD LANDS IN ITS PARENT'S SUBSECTION, so it draws nested under
-		// the parent rather than alone among the unsectioned rows.
-		if out.Subsection, err = parentSubsection(ctx, tx, out.Parent, out.Repo); err != nil {
-			return err
-		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, subsection_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, nullableSubsection(out.Subsection))
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place)
 		if err != nil {
 			return err
 		}
+		// A CHILD SITS WHEREVER ITS PARENT DOES (arrange.go): the record
+		// answered reads its subsection the way every read does.
+		var sub sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?`, out.ID).Scan(&sub); err != nil {
+			return err
+		}
+		out.Subsection = nullSubsection(sub)
 		created = true
 		return nil
 	})

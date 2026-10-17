@@ -291,7 +291,10 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	if !ok {
 		return fmt.Errorf("land after hiding %q: the registry could not be read", hidden)
 	}
-	target, found := hideLandingTarget(sidebar.Tabs(reg), hidden)
+	// THE NEIGHBOUR IS THE ONE THE USER SAW: a hidden workspace's tab follows
+	// its run's drawn tabs, so its neighbours are read off the bar as it stood
+	// with the workspace still shown.
+	target, found := hideLandingTarget(sidebar.Tabs(asShown(reg, hidden), log), hidden)
 	if !found {
 		log.Info(opSetHidden, "the tab bar draws no other workspace beside the hidden one; the selection stays", nil)
 		return nil
@@ -314,6 +317,20 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	targetLog.Info(opSetHidden, "landed the user on the hidden workspace's neighbour in the tab bar",
 		dlog.Context{"place": target.Place})
 	return v.reviveSelected(ctx, targetLog, target.ID)
+}
+
+// asShown answers REG with workspace WS not hidden, for the bar as it stood
+// before WS was hidden. It copies the workspaces: the slice is the
+// registry's.
+func asShown(reg sidebar.Registry, ws ids.WorkspaceID) sidebar.Registry {
+	reg.Workspaces = slices.Clone(reg.Workspaces)
+	for i := range reg.Workspaces {
+		if reg.Workspaces[i].ID == ws {
+			reg.Workspaces[i].Hidden = false
+			reg.Workspaces[i].HiddenAt = nil
+		}
+	}
+	return reg
 }
 
 // hideLandingTarget picks where hiding HIDDEN lands the user among TABS, the

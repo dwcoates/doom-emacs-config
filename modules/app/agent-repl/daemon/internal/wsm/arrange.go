@@ -18,13 +18,23 @@ import (
 //   - the REPOSITORIES' order, each row's `place` (unique, at least 1);
 //   - each repository's SUBSECTIONS, in the subsections table, each row's
 //     `place` unique within its repository;
-//   - which subsection a WORKSPACE sits in (`subsection_id`, NULL for none),
-//     its place among the others there being its registry place (place.go).
+//   - which subsection a ROOT workspace sits in (`subsection_id`, NULL for
+//     none), its place among the others there being its registry place
+//     (place.go).
+//
+// A FAMILY NEVER SPLITS ACROSS SUBSECTIONS (owner ruling, 2026-10-14): a
+// workspace with a recorded parent sits wherever its parent does, at every
+// depth. That is held by construction, not by every writer remembering to
+// move a family: only a root STORES a subsection (the
+// workspaces_child_stores_no_subsection triggers refuse a child that stores
+// one), and every read derives a workspace's subsection from its root
+// (rootSubsectionColumn). Moving a root moves its whole family; a child alone
+// cannot be moved to a subsection at all (ErrHasParent).
 //
 // A WORKSPACE SITS ONLY IN A SUBSECTION OF ITS OWN REPOSITORY. The
 // workspaces_subsection_same_repo triggers make SQLite refuse any write that
 // would say otherwise, so the roster never has to decide what such a row
-// means. Deleting a subsection returns its workspaces to none (ON DELETE SET
+// means. Deleting a subsection returns its families to none (ON DELETE SET
 // NULL); a repository's subsections go with the repository (ON DELETE
 // CASCADE).
 
@@ -69,7 +79,30 @@ WHEN NEW.subsection_id IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'wsm: a workspace sits only in a subsection of its own repository');
 END;
+CREATE TRIGGER workspaces_child_stores_no_subsection_insert BEFORE INSERT ON workspaces
+WHEN NEW.parent_id IS NOT NULL AND NEW.subsection_id IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'wsm: a child workspace sits wherever its parent does and stores no subsection');
+END;
+CREATE TRIGGER workspaces_child_stores_no_subsection_update BEFORE UPDATE OF parent_id, subsection_id ON workspaces
+WHEN NEW.parent_id IS NOT NULL AND NEW.subsection_id IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'wsm: a child workspace sits wherever its parent does and stores no subsection');
+END;
 `
+
+// rootSubsectionColumn is THE ONE READ of a workspace's subsection, as a
+// column of a statement over `workspaces`: the subsection its ROOT stores,
+// found by walking the recorded parents up from the row. A child's own
+// column is always NULL (the child triggers), so this is where it learns
+// where its family sits. A parent chain that cycles reaches no root and reads
+// as none; ordinary creation cannot make one. UNION, not UNION ALL, so a
+// cycle ends the walk rather than looping.
+const rootSubsectionColumn = `(WITH RECURSIVE up(id, parent_id, subsection_id) AS (
+  SELECT own.id, own.parent_id, own.subsection_id FROM workspaces AS own WHERE own.id = workspaces.id
+  UNION
+  SELECT anc.id, anc.parent_id, anc.subsection_id FROM workspaces AS anc JOIN up ON anc.id = up.parent_id
+) SELECT subsection_id FROM up WHERE parent_id IS NULL)`
 
 // ErrUnknownSubsection is a subsection id no subsection carries. It wraps
 // ErrNotFound, so a caller asking only "was it there" still reads it.
@@ -102,6 +135,10 @@ var ErrOtherRepository = errors.New("wsm: the arrangement relates two repositori
 // sit in the destination (or that moves with it). Nothing is written.
 var ErrAnchorElsewhere = errors.New("wsm: the workspace to place before is not in the destination")
 
+// ErrHasParent refuses placing a workspace that has a recorded parent: it
+// sits wherever its parent does, and moves only with it. Nothing is written.
+var ErrHasParent = errors.New("wsm: the workspace has a parent and moves only with it")
+
 // ErrBlankSubsectionName refuses a subsection name that is empty or only
 // whitespace. Nothing is written.
 var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
@@ -110,7 +147,8 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // answers rather than the store failing: the verb turns each into the rpc's
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
-	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName)
+	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
+		errors.Is(err, ErrHasParent)
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.
@@ -188,11 +226,11 @@ func (s *store) DeleteSubsection(ctx context.Context, id SubsectionID) error {
 		if err != nil {
 			return err
 		}
-		members, err := bucketMembers(ctx, tx, sub.Repo, &id)
+		members, err := bucketRoots(ctx, tx, sub.Repo, &id)
 		if err != nil {
 			return err
 		}
-		unsectioned, err := bucketMembers(ctx, tx, sub.Repo, nil)
+		unsectioned, err := bucketRoots(ctx, tx, sub.Repo, nil)
 		if err != nil {
 			return err
 		}
@@ -269,26 +307,30 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 	})
 }
 
-// PlaceWorkspace puts workspace WS, WITH ITS NESTED FAMILY, into subsection
-// INTO (nil: none) of its own repository, just before workspace BEFORE (nil:
-// after every workspace already there).
+// PlaceWorkspace puts ROOT workspace WS, and so its whole family, into
+// subsection INTO (nil: none) of its own repository, just before root
+// workspace BEFORE (nil: after every root already there).
 //
-// The family is every descendant (by recorded parent) that sits where WS
-// sits: the sidebar draws them as one block under WS, so they move as one.
-// They keep their order among themselves.
+// Only WS's own place moves: its descendants are drawn, and walked by the tab
+// bar, under it whatever their places, which order them only among their own
+// siblings.
 //
-// Refusals, each writing nothing: an unknown workspace is ErrNotFound, an
-// unknown subsection ErrUnknownSubsection, a subsection of another repository
-// ErrOtherRepository, and a BEFORE that is not in the destination (or is in
-// the family) ErrAnchorElsewhere.
+// Refusals, each writing nothing: an unknown workspace is ErrNotFound, one
+// with a recorded parent ErrHasParent, an unknown subsection
+// ErrUnknownSubsection, a subsection of another repository
+// ErrOtherRepository, and a BEFORE that is not a root in the destination
+// ErrAnchorElsewhere.
 func (s *store) PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) error {
 	const op = "daemon.wsm.place_workspace"
 	fields := dlog.Context{"workspace": string(ws), "into": ids.Optional(into), "before": ids.Optional(before)}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var repo RepoID
-		var from sql.NullString
-		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, subsection_id", &repo, &from); err != nil {
+		var parent sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, parent_id", &repo, &parent); err != nil {
 			return err
+		}
+		if parent.Valid {
+			return ErrHasParent
 		}
 		if into != nil {
 			sub, err := subsectionRow(ctx, tx, *into)
@@ -299,54 +341,30 @@ func (s *store) PlaceWorkspace(ctx context.Context, ws WorkspaceID, into *Subsec
 				return ErrOtherRepository
 			}
 		}
-		family, err := familyInBucket(ctx, tx, ws, repo, nullSubsection(from))
-		if err != nil {
-			return err
-		}
 		order, err := placeOrder(ctx, tx)
 		if err != nil {
 			return err
 		}
-		destination, err := bucketMembers(ctx, tx, repo, into)
+		destination, err := bucketRoots(ctx, tx, repo, into)
 		if err != nil {
 			return err
 		}
-		destination = slices.DeleteFunc(destination, func(id WorkspaceID) bool { return slices.Contains(family, id) })
+		destination = slices.DeleteFunc(destination, func(id WorkspaceID) bool { return id == ws })
+		moved := []WorkspaceID{ws}
 		var placed []WorkspaceID
 		if before != nil {
 			if !slices.Contains(destination, *before) {
 				return ErrAnchorElsewhere
 			}
-			placed = insertBefore(order, family, *before)
+			placed = insertBefore(order, moved, *before)
 		} else {
-			placed = insertAfterBucket(order, family, destination)
+			placed = insertAfterBucket(order, moved, destination)
 		}
-		fields["family"] = len(family)
-		for _, member := range family {
-			if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, nullableSubsection(into), member); err != nil {
-				return err
-			}
+		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, nullableSubsection(into), ws); err != nil {
+			return err
 		}
 		return rewritePlaces(ctx, tx, placed)
 	})
-}
-
-// parentSubsection answers the subsection PARENT (nil: none) sits in when it
-// is a workspace of REPO, and nil otherwise: the subsection a new child of
-// PARENT lands in.
-func parentSubsection(ctx context.Context, tx *sql.Tx, parent *WorkspaceID, repo RepoID) (*SubsectionID, error) {
-	if parent == nil {
-		return nil, nil
-	}
-	var sub sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT subsection_id FROM workspaces WHERE id = ? AND repo_id = ?`, *parent, repo).Scan(&sub)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return nullSubsection(sub), nil
 }
 
 // requireRepository refuses an id no repository carries with
@@ -390,24 +408,12 @@ func placeOrder(ctx context.Context, tx *sql.Tx) ([]WorkspaceID, error) {
 	return idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces ORDER BY place`)
 }
 
-// bucketMembers answers the workspaces of REPO sitting in subsection SUB
-// (nil: in none), in registry order.
-func bucketMembers(ctx context.Context, tx *sql.Tx, repo RepoID, sub *SubsectionID) ([]WorkspaceID, error) {
+// bucketRoots answers the ROOT workspaces of REPO stored in subsection SUB
+// (nil: in none), in registry order: the rows a subsection's list is made of
+// (a child sits wherever its root does, rootSubsectionColumn).
+func bucketRoots(ctx context.Context, tx *sql.Tx, repo RepoID, sub *SubsectionID) ([]WorkspaceID, error) {
 	return idsByPlace[WorkspaceID](ctx, tx,
-		`SELECT id FROM workspaces WHERE repo_id = ? AND subsection_id IS ? ORDER BY place`, repo, nullableSubsection(sub))
-}
-
-// familyInBucket answers WS and every descendant of it (by recorded parent)
-// sitting in REPO's subsection SUB (nil: none), in registry order.
-func familyInBucket(ctx context.Context, tx *sql.Tx, ws WorkspaceID, repo RepoID, sub *SubsectionID) ([]WorkspaceID, error) {
-	return idsByPlace[WorkspaceID](ctx, tx, `
-WITH RECURSIVE family(id) AS (
-  SELECT ?
-  UNION
-  SELECT w.id FROM workspaces w JOIN family f ON w.parent_id = f.id
-   WHERE w.repo_id = ? AND w.subsection_id IS ?
-)
-SELECT w.id FROM workspaces w JOIN family f ON w.id = f.id ORDER BY w.place`, ws, repo, nullableSubsection(sub))
+		`SELECT id FROM workspaces WHERE repo_id = ? AND parent_id IS NULL AND subsection_id IS ? ORDER BY place`, repo, nullableSubsection(sub))
 }
 
 // idsByPlace runs QUERY, which selects one id column, and answers the ids in

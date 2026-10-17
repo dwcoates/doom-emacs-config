@@ -89,11 +89,10 @@ type WorkspaceRoster struct {
 	// sections are drawn in, under one "Open" header, above the hidden
 	// section. Its count is RosterRepositoryView.open_count. Always set.
 	Open *RosterOpenSection `protobuf:"bytes,13,opt,name=open,proto3" json:"open,omitempty"`
-	// THE EDITOR'S TAB BAR, in registry order. The registry holds one order
-	// of every workspace; this is that order restricted to open workspaces,
-	// and it is independent of the repository sections above, so repositories
-	// interleave and a child need not follow its parent. Clients draw it as
-	// sent and never derive a tab order from the sections. Always set.
+	// THE EDITOR'S TAB BAR, in the repository grouping's order
+	// (RosterTabBar): repository by repository, subsection by subsection,
+	// each family depth-first. Clients draw it as sent and never derive a tab
+	// order from the sections. Always set.
 	TabBar *RosterTabBar `protobuf:"bytes,10,opt,name=tab_bar,json=tabBar,proto3" json:"tab_bar,omitempty"`
 	// THE ROSTER'S REVISION: the daemon raises it for every roster it
 	// resolves, so of two rosters (or a roster and an OpenTabs answer's row,
@@ -191,7 +190,13 @@ func (x *WorkspaceRoster) GetCurrent() *RosterCurrentWorkspace {
 // has no tab and is absent. THE ORDER IS THE REPOSITORY GROUPING'S
 // ARRANGEMENT (agentrepl.v1.ArrangeSidebar): repository by repository in the
 // grouping's order, and inside one, its unsectioned workspaces, then each
-// subsection's in turn. Withheld tabs stay in the list so a client
+// subsection's in turn. INSIDE EACH OF THOSE IT WALKS THE SIDEBAR'S OWN
+// FAMILY TREE, depth-first: a child always sits right of its parent, its
+// siblings in the sidebar's order, so stepping along the bar never skips a
+// row the sidebar draws between. A closed workspace has no tab and its live
+// descendants take its place, as the sidebar hoists them. The run's
+// workspaces the sidebar draws elsewhere (hidden, or merged and still open)
+// follow its drawn ones. Withheld tabs stay in the list so a client
 // cycling from a withheld current workspace still knows its neighbours.
 type RosterTabBar struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`

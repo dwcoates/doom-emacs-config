@@ -66,6 +66,9 @@ const (
 	// ArmAnchorElsewhere is a workspace placed before one that does not sit
 	// in the destination (ArrangeSidebarError.anchor_elsewhere).
 	ArmAnchorElsewhere = "anchor_elsewhere"
+	// ArmHasParent is a workspace with a recorded parent placed on its own
+	// (ArrangeSidebarError.has_parent): it sits wherever its parent does.
+	ArmHasParent = "has_parent"
 	// ArmNotInARepository is a RegisterRepository whose path is readable but
 	// lies inside no git repository with a main worktree. It is DISTINCT from
 	// ArmNotAWorktree, which is about the announced directory being a worktree

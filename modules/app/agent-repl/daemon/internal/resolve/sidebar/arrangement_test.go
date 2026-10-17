@@ -3,6 +3,8 @@ package sidebar_test
 import (
 	"testing"
 
+	"agentrepl/protohelpers/rosterwalk"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -115,7 +117,7 @@ func TestTheTabBarPutsASubsectionsWorkspacesAfterTheUnsectionedOnes(t *testing.T
 	reg := arrangedRegistry()
 
 	// Act
-	got := sidebar.Tabs(reg)
+	got := sidebar.Tabs(reg, dlog.NewTestLogger())
 
 	// Assert
 	var ids []string
@@ -134,7 +136,7 @@ func TestTheTabBarWalksSubsectionsInTheirPlace(t *testing.T) {
 	reg.Subsections = []wsm.Subsection{a, b}
 
 	// Act
-	got := sidebar.Tabs(reg)
+	got := sidebar.Tabs(reg, dlog.NewTestLogger())
 
 	// Assert
 	if len(got) != 2 || got[0].Workspace.ID != "w2" || got[1].Workspace.ID != "w1" {
@@ -213,5 +215,80 @@ func TestSetRegistryRefusesAnArrangementItCannotDraw(t *testing.T) {
 			// Act
 			r.SetRegistry(tt.reg())
 		})
+	}
+}
+
+func TestTheTabBarKeepsAFamilyContiguous(t *testing.T) {
+	// Arrange: the parent's sibling sits between its children in the registry.
+	parent := placed(workspace("w-p", "parent"), 1)
+	sibling := placed(workspace("w-s", "sibling"), 2)
+	first := placed(workspace("w-k1", "first"), 3)
+	first.Parent = &parent.ID
+	grandchild := placed(workspace("w-g", "grand"), 4)
+	grandchild.Parent = &first.ID
+	second := placed(workspace("w-k2", "second"), 5)
+	second.Parent = &parent.ID
+
+	// Act
+	got := sidebar.Tabs(registry(second, sibling, grandchild, first, parent), dlog.NewTestLogger())
+
+	// Assert
+	var tabs []string
+	for _, tab := range got {
+		tabs = append(tabs, string(tab.Workspace.ID))
+	}
+	if !equal(tabs, []string{"w-p", "w-k1", "w-g", "w-k2", "w-s"}) {
+		t.Fatalf("tabs = %v, want the family depth-first, then the sibling", tabs)
+	}
+}
+
+func TestTheTabBarPutsAClosedParentsChildrenInItsPlace(t *testing.T) {
+	// Arrange: the sidebar hoists a closed parent's live child into its place.
+	parent := placed(workspace("w-p", "parent"), 1)
+	parent.Closed = true
+	sibling := placed(workspace("w-s", "sibling"), 2)
+	child := placed(workspace("w-k", "child"), 3)
+	child.Parent = &parent.ID
+
+	// Act
+	got := sidebar.Tabs(registry(parent, sibling, child), dlog.NewTestLogger())
+
+	// Assert
+	if len(got) != 2 || got[0].Workspace.ID != "w-k" || got[1].Workspace.ID != "w-s" {
+		t.Fatalf("tabs = %+v, want the hoisted child before the sibling", got)
+	}
+}
+
+func TestTheTabBarMatchesTheSidebarsRowOrder(t *testing.T) {
+	// Arrange: a family split across the registry, in a subsection too.
+	later := subsection("sub-later", "later", 1)
+	parent := placed(workspace("w-p", "parent"), 4)
+	child := placed(workspace("w-k", "child"), 1)
+	child.Parent = &parent.ID
+	other := placed(workspace("w-o", "other"), 2)
+	moved := in(placed(workspace("w-m", "moved"), 3), later)
+	reg := registry(parent, child, other, moved)
+	reg.Subsections = []wsm.Subsection{later}
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	roster := latest(t, r)
+	var rows []string
+	for _, section := range roster.GetRepository().GetSections() {
+		for _, region := range rosterwalk.RepoSectionRegions(section) {
+			for _, row := range rosterwalk.FlattenRows(region.GetRows()) {
+				rows = append(rows, row.GetWorkspace().GetWorkspace().GetId())
+			}
+		}
+	}
+	var tabs []string
+	for _, tab := range roster.GetTabBar().GetTabs() {
+		tabs = append(tabs, tab.GetWorkspace().GetId())
+	}
+	if !equal(tabs, rows) {
+		t.Fatalf("tab bar = %v, sidebar rows = %v; want the same order", tabs, rows)
 	}
 }

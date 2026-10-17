@@ -631,22 +631,92 @@ func TestPlaceWorkspaceMovesItsNestedFamilyWithIt(t *testing.T) {
 	}
 }
 
-func TestPlaceWorkspaceLeavesAFamilyMemberInAnotherSubsectionWhereItIs(t *testing.T) {
-	// Arrange
+func TestPlaceWorkspaceRefusesAChild(t *testing.T) {
+	// Arrange -- a child sits wherever its parent does (owner ruling, 2026-10-14).
+	s, log := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	child := registerChild(t, s, repoDir, "child", parent.ID)
+	later := mustSubsection(t, s, parent.Repo, "later")
+	order := orderedNames(t, s)
+
+	// Act
+	err := s.PlaceWorkspace(context.Background(), child.ID, &later.ID, nil)
+
+	// Assert
+	if !errors.Is(err, ErrHasParent) {
+		t.Fatalf("PlaceWorkspace = %v, want ErrHasParent", err)
+	}
+	if got := subsectionOf(t, s, child.ID); got != nil {
+		t.Fatalf("the refused child moved into %q", *got)
+	}
+	if got := orderedNames(t, s); !slices.Equal(got, order) {
+		t.Fatalf("place order after a refusal = %v, want %v", got, order)
+	}
+	if !hasOperation(log, "daemon.wsm.place_workspace") {
+		t.Fatalf("no daemon.wsm.place_workspace record: %v", log.Records())
+	}
+}
+
+func TestAChildCannotStoreASubsection(t *testing.T) {
+	// Arrange -- a write past every verb, straight at SQLite.
 	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
 	child := registerChild(t, s, repoDir, "child", parent.ID)
-	aside := mustSubsection(t, s, parent.Repo, "aside")
 	later := mustSubsection(t, s, parent.Repo, "later")
-	mustPlace(t, s, child.ID, &aside.ID, nil)
 
 	// Act
-	mustPlace(t, s, parent.ID, &later.ID, nil)
+	_, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, later.ID, child.ID)
 
 	// Assert
-	if got := subsectionOf(t, s, child.ID); !sameSubsection(got, &aside.ID) {
-		t.Fatalf("the child sits in %v, want %q", got, aside.ID)
+	if err == nil {
+		t.Fatalf("SQLite let a child store a subsection apart from its parent")
+	}
+}
+
+func TestSetParentPutsTheWorkspaceWhereItsNewParentSits(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := mkdir(t, filepath.Join(canonicalTemp(t), "repo"))
+	parent := registerInRepo(t, s, repoDir, "parent", true)
+	ws := registerInRepo(t, s, repoDir, "ws", true)
+	later := mustSubsection(t, s, parent.Repo, "later")
+	aside := mustSubsection(t, s, parent.Repo, "aside")
+	mustPlace(t, s, parent.ID, &later.ID, nil)
+	mustPlace(t, s, ws.ID, &aside.ID, nil)
+
+	// Act
+	if _, err := s.SetParent(context.Background(), ws.ID, &parent.ID); err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+
+	// Assert
+	if got := subsectionOf(t, s, ws.ID); !sameSubsection(got, &later.ID) {
+		t.Fatalf("subsection = %v, want the parent's %q", got, later.ID)
+	}
+}
+
+func TestSetParentToNoneLeavesTheWorkspaceWhereItSat(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := mkdir(t, filepath.Join(canonicalTemp(t), "repo"))
+	parent := registerInRepo(t, s, repoDir, "parent", true)
+	ws := registerInRepo(t, s, repoDir, "ws", true)
+	later := mustSubsection(t, s, parent.Repo, "later")
+	mustPlace(t, s, parent.ID, &later.ID, nil)
+	if _, err := s.SetParent(context.Background(), ws.ID, &parent.ID); err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+
+	// Act
+	if _, err := s.SetParent(context.Background(), ws.ID, nil); err != nil {
+		t.Fatalf("SetParent(nil): %v", err)
+	}
+
+	// Assert
+	if got := subsectionOf(t, s, ws.ID); !sameSubsection(got, &later.ID) {
+		t.Fatalf("subsection = %v, want the one it sat in, %q", got, later.ID)
 	}
 }
 
@@ -891,5 +961,32 @@ func TestAnUnknownSubsectionIsNamedByItsError(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("RenameSubsection = %v, want it to be ErrNotFound too", err)
+	}
+}
+
+func TestSwapPlacesWithAChildExchangesPlacesAlone(t *testing.T) {
+	// Arrange -- a child stores no subsection, so the swap writes none.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	child := registerChild(t, s, repoDir, "child", parent.ID)
+	root := registerIn(t, s, repoDir, "root", nil)
+	later := mustSubsection(t, s, root.Repo, "later")
+	mustPlace(t, s, root.ID, &later.ID, nil)
+	before := placesByName(t, s)
+
+	// Act
+	err := s.SwapPlaces(context.Background(), child.ID, root.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SwapPlaces: %v", err)
+	}
+	got := placesByName(t, s)
+	if got["child"] != before["root"] || got["root"] != before["child"] {
+		t.Fatalf("places = %v, want child and root exchanged from %v", got, before)
+	}
+	if sub := subsectionOf(t, s, root.ID); !sameSubsection(sub, &later.ID) {
+		t.Fatalf("root's subsection = %v, want it kept as %q", sub, later.ID)
 	}
 }

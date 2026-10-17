@@ -193,6 +193,7 @@ func TestArrangeSidebarMapsAVerbRefusalOntoItsArm(t *testing.T) {
 		{arm: workspace.ArmBlankName, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetBlankName() != nil }},
 		{arm: workspace.ArmOtherRepository, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetOtherRepository() != nil }},
 		{arm: workspace.ArmAnchorElsewhere, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetAnchorElsewhere() != nil }},
+		{arm: workspace.ArmHasParent, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetHasParent() != nil }},
 		{arm: workspace.ArmTransferringAway, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetTransferringAway() != nil }},
 		{arm: workspace.ArmNotYetAdopted, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotYetAdopted() != nil }},
 	}

@@ -7,6 +7,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -407,7 +408,7 @@ func TestTheTabBarKeepsEachRepositorysWorkspacesTogether(t *testing.T) {
 	}
 }
 
-func TestTheTabBarPutsAChildWhereTheRegistryDoes(t *testing.T) {
+func TestTheTabBarPutsAChildRightOfItsParent(t *testing.T) {
 	// Arrange: a child placed after its parent's sibling.
 	r, _ := newResolver(t)
 	parent := placed(workspace("w-p", "parent"), 1)
@@ -418,8 +419,8 @@ func TestTheTabBarPutsAChildWhereTheRegistryDoes(t *testing.T) {
 	// Act.
 	r.SetRegistry(registry(parent, child, sibling))
 
-	// Assert: the sidebar nests the child, the tab bar does not.
-	want := []string{"w-p:drawn", "w-s:drawn", "w-k:drawn"}
+	// Assert: the tab bar walks the family as the sidebar draws it.
+	want := []string{"w-p:drawn", "w-k:drawn", "w-s:drawn"}
 	if got := tabIDsOf(latest(t, r)); !equal(got, want) {
 		t.Fatalf("tab bar = %v, want %v", got, want)
 	}
@@ -523,13 +524,13 @@ func TestTabs(t *testing.T) {
 	reg := tabsRegistry()
 
 	// Act
-	got := sidebar.Tabs(reg)
+	got := sidebar.Tabs(reg, dlog.NewTestLogger())
 
-	// Assert: repository by repository, registry order inside each; closed
-	// and hidden-merge workspaces have no tab.
+	// Assert: repository by repository, the drawn workspaces before the
+	// hidden ones inside each; closed and hidden-merge workspaces have no tab.
 	want := []sidebar.Tab{
-		{Workspace: reg.Workspaces[4], Withheld: wsm.WithheldHidden},
 		{Workspace: reg.Workspaces[0], Withheld: wsm.Drawn},
+		{Workspace: reg.Workspaces[4], Withheld: wsm.WithheldHidden},
 		{Workspace: reg.Workspaces[1], Withheld: wsm.WithheldCollapsed},
 	}
 	if len(got) != len(want) {
@@ -547,7 +548,7 @@ func TestTheTabBarIsDrawnFromTabs(t *testing.T) {
 	r, _ := newResolver(t)
 	reg := tabsRegistry()
 	var want []string
-	for _, tab := range sidebar.Tabs(reg) {
+	for _, tab := range sidebar.Tabs(reg, dlog.NewTestLogger()) {
 		want = append(want, string(tab.Workspace.ID)+":"+tab.Withheld.String())
 	}
 

@@ -97,12 +97,13 @@ message ArrangeMoveRepository {
   }
 }
 
-// Put one workspace into a subsection of its own repository, or into none,
-// at a place among the workspaces already there.
+// Put one ROOT workspace (one with no recorded parent) into a subsection of
+// its own repository, or into none, at a place among the roots already there.
 //
-// A WORKSPACE MOVES WITH ITS NESTED FAMILY. Its descendants that sit where it
-// sat (same repository, same subsection or none) move into the destination
-// with it, because the sidebar draws them as one block under it.
+// A FAMILY NEVER SPLITS ACROSS SUBSECTIONS (owner ruling, 2026-10-14): every
+// descendant sits wherever its root does, at every depth, so placing a root
+// moves its whole family, and a workspace with a parent cannot be placed on
+// its own (the has_parent arm).
 message ArrangePlaceWorkspace {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHERE IT GOES. THE ARM IS THE DESTINATION; unset is malformed.
@@ -114,7 +115,7 @@ message ArrangePlaceWorkspace {
   }
   // WHERE AMONG THEM. THE ARM IS THE PLACE; unset is malformed.
   oneof at {
-    // Just before this workspace, which must already sit in the
+    // Just before this root workspace, which must already sit in the
     // destination. Naming the moved workspace itself is malformed.
     workspace.v1.WorkspaceRef before = 4;
     // After every workspace already in the destination.
@@ -174,9 +175,12 @@ message ArrangeSidebarError {
     // placed before another repository's subsection, or a workspace put into
     // another repository's subsection.
     ArrangeSidebarOtherRepository other_repository = 8;
-    // A workspace was placed before a workspace that does not sit in the
+    // A workspace was placed before one that is not a root of the
     // destination (it moved since the roster the client drew from).
     ArrangeSidebarAnchorElsewhere anchor_elsewhere = 9;
+    // A workspace with a recorded parent was placed on its own: it sits
+    // wherever its parent does, and moves only with it.
+    ArrangeSidebarHasParent has_parent = 10;
   }
 }
 message ArrangeSidebarUnknownRepository {}
@@ -199,3 +203,5 @@ message ArrangeSidebarBlankName {}
 message ArrangeSidebarOtherRepository {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message ArrangeSidebarAnchorElsewhere {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarHasParent {}

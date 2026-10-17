@@ -243,8 +243,16 @@ func readTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID) (storedTarget, 
 
 // writeTarget writes both stored target facts. Each statement must touch
 // exactly one row: the caller read both rows inside this transaction.
+//
+// THE FAMILY'S SUBSECTION FOLLOWS THE PARENT (arrange.go): a workspace given a
+// parent stops storing a subsection and sits wherever the parent does; one
+// left with no parent stores the subsection it sat in until now, so it stays
+// where it was drawn. Both in the same statement as the parent, evaluated
+// against the row as it stood.
 func writeTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID, targetDir string) error {
-	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET parent_id = ? WHERE id = ?`, nullWorkspace(parent), id)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE workspaces SET parent_id = ?, subsection_id = CASE WHEN ? IS NULL THEN `+rootSubsectionColumn+` ELSE NULL END WHERE id = ?`,
+		nullWorkspace(parent), nullWorkspace(parent), id)
 	if err != nil {
 		return err
 	}

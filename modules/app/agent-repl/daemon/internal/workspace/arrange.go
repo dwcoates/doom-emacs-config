@@ -126,6 +126,8 @@ func arrangementRefusal(log dlog.Logger, err error) *Refusal {
 		return refuse(log, arrangeRPC, ArmOtherRepository, err.Error(), false)
 	case errors.Is(err, wsm.ErrAnchorElsewhere):
 		return refuse(log, arrangeRPC, ArmAnchorElsewhere, err.Error(), false)
+	case errors.Is(err, wsm.ErrHasParent):
+		return refuse(log, arrangeRPC, ArmHasParent, err.Error(), false)
 	default:
 		return nil
 	}
