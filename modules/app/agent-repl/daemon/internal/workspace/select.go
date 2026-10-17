@@ -254,6 +254,19 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	if err != nil {
 		return err
 	}
+	if err := v.recordHidden(ctx, log, ws, hidden); err != nil {
+		return err
+	}
+	if !hidden {
+		return nil
+	}
+	return v.landAfterHiding(ctx, log, ws)
+}
+
+// recordHidden is THE ONE WRITE of a workspace's hidden flag: the row, the
+// roster push, and the cache keeper's visibility edge. SetHidden and an
+// answered cold gate (AnswerColdGate) both reach it.
+func (v *verbs) recordHidden(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, hidden bool) error {
 	if err := v.deps.DB.SetHidden(ctx, ws, hidden, v.now()); err != nil {
 		log.Error(opSetHidden, "could not record whether the workspace is hidden", dlog.Context{"hidden": hidden, "cause": err.Error()})
 		return fmt.Errorf("set hidden on %q: %w", ws, err)
@@ -263,10 +276,7 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	// THE ROW IS WRITTEN BEFORE THE EDGE IS QUEUED, which is what lets the
 	// keeper's reconcile catch a hide that races a session coming up.
 	v.deps.CacheLapses.VisibilityChanged(ws)
-	if !hidden {
-		return nil
-	}
-	return v.landAfterHiding(ctx, log, ws)
+	return nil
 }
 
 // landAfterHiding moves the user, when they stand on the workspace just
