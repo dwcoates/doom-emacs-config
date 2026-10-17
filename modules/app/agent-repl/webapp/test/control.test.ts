@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl, setControlsDisabled } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf, withoutBlockComments } from "./source-text.js";
-import { filesUnder } from "./files-under.js";
+import { codeUnder, filesUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "../src");
@@ -288,11 +288,11 @@ describe("the one control", () => {
 
   it("is the only way src gives an element the button role", () => {
     // Arrange
-    const files = filesUnder(SRC, [".ts"]).filter((file) => !file.endsWith(`${path.sep}control.ts`));
+    const files = [...codeUnder(SRC)].filter(([file]) => !`${path.sep}${file}`.endsWith(`${path.sep}control.ts`));
     // Act
     const handRolled = files
-      .filter((file) => /setAttribute\(\s*["'`]role["'`]\s*,\s*["'`]button["'`]\s*\)/.test(codeOf(readFileSync(file, "utf8"))))
-      .map((file) => path.relative(SRC, file));
+      .filter(([, code]) => /setAttribute\(\s*["'`]role["'`]\s*,\s*["'`]button["'`]\s*\)/.test(code))
+      .map(([file]) => file);
     // Assert
     expect(handRolled).toEqual([]);
   });

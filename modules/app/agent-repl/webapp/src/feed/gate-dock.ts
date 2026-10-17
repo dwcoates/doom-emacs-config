@@ -27,7 +27,7 @@
  * Only a ROOT-feed gate docks: a sub-feed's rows belong to their bubble.
  */
 import { log } from "../log.js";
-import { queryAll } from "../dom.js";
+import { pageMutationObserver, queryAll } from "../dom.js";
 
 /** The class the docked card wears. */
 export const DOCKED_CARD_CLASS = "cold-gate-docked";
@@ -167,7 +167,7 @@ export function installGateDock(feed: HTMLElement, dock: HTMLElement): GateDock 
     if (docked.card.getAttribute("data-state") !== "standing") undock("resolved", true);
   };
 
-  const mutations = new MutationObserver(sync);
+  const mutations = pageMutationObserver(feed.ownerDocument, sync);
   const watch = {
     subtree: true,
     childList: true,

@@ -33,7 +33,7 @@
  * no implicit writer at all. `test/scroll.test.ts` scans every other source
  * module and fails on any scroll write found outside this one.
  */
-import { ancestorMatching, nodeLabel } from "./dom.js";
+import { ancestorMatching, nodeLabel, pageMutationObserver } from "./dom.js";
 import { log } from "./log.js";
 import { nextFrame } from "./frame.js";
 
@@ -1251,9 +1251,9 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
       observer.unobserve(child);
     }
   };
-  const children = new MutationObserver(watchChildren);
+  const children = pageMutationObserver(box.ownerDocument, watchChildren);
   const witness = new MoveWitness(() => performance.now(), nextFrame);
-  const content = new MutationObserver((records) => witness.mutated(records.map((r) => r.target)));
+  const content = pageMutationObserver(box.ownerDocument, (records) => witness.mutated(records.map((r) => r.target)));
   content.observe(box, { subtree: true, childList: true, characterData: true, attributes: true });
   tail.witnessMoves(() => witness.report());
   tail.observe(

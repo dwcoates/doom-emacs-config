@@ -21,6 +21,7 @@ import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
+import { pageMutationObserver } from "../dom.js";
 
 /** What the link needs from its environment, injectable for tests. */
 export interface EmbedEnv {
@@ -210,7 +211,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         });
   gateWatch?.observe(gateDock as Element);
 
-  const drawnWatch = new MutationObserver(reportDrawn);
+  const drawnWatch = pageMutationObserver(doc, reportDrawn);
   drawnWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [CONVERSATION_DRAWN_ATTRIBUTE] });
 
   win.addEventListener("message", onMessage);

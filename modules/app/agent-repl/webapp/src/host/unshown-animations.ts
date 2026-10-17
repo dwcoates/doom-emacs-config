@@ -32,6 +32,7 @@
 import { log } from "../log.js";
 import type { Presence } from "../presence.js";
 import { nextFrame } from "../frame.js";
+import { pageMutationObserver } from "../dom.js";
 
 /** The root attribute the stylesheet pauses every animation under. */
 export const PAGE_UNSHOWN_ATTRIBUTE = "data-page-unshown";
@@ -57,15 +58,14 @@ export interface UnshownAnimationsEnv {
 
 /** The live page's environment. */
 export function liveUnshownAnimationsEnv(doc: Document, presence: Presence): UnshownAnimationsEnv {
-  const win = doc.defaultView;
-  if (win === null) throw new Error("unshown-animations: the document has no window");
+  if (doc.defaultView === null) throw new Error("unshown-animations: the document has no window");
   return {
     doc,
     presence,
     now: () => Number(doc.timeline.currentTime),
     animations: () => doc.getAnimations(),
     observe: (fn) => {
-      const observer = new win.MutationObserver(fn);
+      const observer = pageMutationObserver(doc, fn);
       observer.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
       return () => observer.disconnect();
     },

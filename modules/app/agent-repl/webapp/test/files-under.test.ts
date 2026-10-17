@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { filesUnder } from "./files-under.js";
+import { codeUnder, filesUnder } from "./files-under.js";
+import { codeOf } from "./source-text.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -48,7 +49,47 @@ describe("filesUnder", () => {
   });
 });
 
+describe("codeUnder", () => {
+  let root = "";
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "code-under-"));
+    mkdirSync(join(root, "b"), { recursive: true });
+    writeFileSync(join(root, "a.ts"), "/* a block */\n// a line\nconst a = 1; // kept\n");
+    writeFileSync(join(root, "b", "c.ts"), "export const c = 2;\n");
+    writeFileSync(join(root, "b", "d.css"), "/* not a source */");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("keys every .ts file by its path under the directory, in walk order", () => {
+    expect([...codeUnder(root).keys()]).toEqual(["a.ts", join("b", "c.ts")]);
+  });
+
+  it("answers each file as code, its comments stripped as codeOf strips them", () => {
+    expect(codeUnder(root).get("a.ts")).toBe(codeOf(readFileSync(join(root, "a.ts"), "utf8")));
+  });
+
+  it("throws when the directory does not exist", () => {
+    expect(() => codeUnder(join(root, "missing"))).toThrow(/ENOENT/);
+  });
+});
+
 describe("the call sites", () => {
+  it("read a directory's sources as code only through codeUnder", () => {
+    // Arrange: the shape codeUnder replaced, one walk chained to comment-stripped reads.
+    const owners = new Set([join(here, "files-under.ts"), fileURLToPath(import.meta.url)]);
+    const handRolled = /filesUnder\([^;]*?codeOf\(readFileSync\(/;
+    // Act
+    const rolled = filesUnder(here)
+      .filter((file) => !owners.has(file) && handRolled.test(readFileSync(file, "utf8")))
+      .map((file) => relative(here, file));
+    // Assert
+    expect(rolled).toEqual([]);
+  });
+
   it("walk a directory recursively only through filesUnder", () => {
     // Arrange: a recursive walk is a directory read that also descends.
     const owners = new Set([join(here, "files-under.ts"), fileURLToPath(import.meta.url)]);

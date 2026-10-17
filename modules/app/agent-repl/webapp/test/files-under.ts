@@ -5,8 +5,9 @@
  * scans. It reads synchronously: a scan awaiting each of some two hundred
  * reads in turn outran the suite's timeout on a busy merge gate.
  */
-import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { codeOf } from "./source-text.js";
 
 /**
  * Every file under DIR whose path ends with one of SUFFIXES, recursively, as
@@ -19,4 +20,13 @@ export function filesUnder(dir: string, suffixes: readonly string[] = [".ts"]): 
     if (statSync(full).isDirectory()) return filesUnder(full, suffixes);
     return suffixes.some((suffix) => full.endsWith(suffix)) ? [full] : [];
   });
+}
+
+/**
+ * Every .ts file under DIR as code, keyed by its path under DIR, comments
+ * stripped (`codeOf`): what a scan reads when it asks which sources CALL
+ * something, as opposed to which merely mention it.
+ */
+export function codeUnder(dir: string): ReadonlyMap<string, string> {
+  return new Map(filesUnder(dir).map((path) => [relative(dir, path), codeOf(readFileSync(path, "utf8"))]));
 }

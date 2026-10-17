@@ -36,7 +36,7 @@
  */
 import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { EXPANDED_CLASS } from "../expand.js";
-import { pageResizeObserver } from "../dom.js";
+import { pageMutationObserver, pageResizeObserver } from "../dom.js";
 import { log } from "../log.js";
 import { applyCollapsedWidth, clearCollapsedWidth, collapsedWidthOf } from "./collapsed-width.js";
 import { applyEllipsisTrim, clearEllipsisTrim } from "./ellipsis-trim.js";
@@ -321,10 +321,10 @@ export function installHasMore(
     const clamp = kindOf(scroll)?.clamp(scroll) ?? null;
     if (clamp !== null && records.some((record) => clamp.contains(record.target))) refresh(scroll);
   };
-  const children = typeof view.MutationObserver === "function" ? new view.MutationObserver(mutated) : null;
-  children?.observe(scroll, { childList: true, subtree: true, characterData: true });
+  const children = pageMutationObserver(scroll.ownerDocument, mutated);
+  children.observe(scroll, { childList: true, subtree: true, characterData: true });
   onDiscard(scroll, () => {
     observer.disconnect();
-    children?.disconnect();
+    children.disconnect();
   });
 }
