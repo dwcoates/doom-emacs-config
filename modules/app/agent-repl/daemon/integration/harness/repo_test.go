@@ -74,3 +74,22 @@ func TestConcurrentMintsNeverShareARepositoryName(t *testing.T) {
 		t.Fatalf("minted %d names, want %d", len(seen), n)
 	}
 }
+
+func TestAddBranchAtTipCutsABranchAtTheDefaultHeadCheckedOutNowhere(t *testing.T) {
+	// Arrange
+	repo := NewRepo(t)
+
+	// Act
+	repo.AddBranchAtTip("at-tip")
+
+	// Assert
+	if got, want := repo.BranchHead("at-tip"), repo.BranchHead(DefaultBranch); got != want {
+		t.Fatalf("at-tip head = %s, want the default branch's %s", got, want)
+	}
+	if !repo.HasBranch("at-tip") {
+		t.Fatalf("Branches() = %v, want at-tip among them", repo.Branches())
+	}
+	if got := len(repo.Worktrees()); got != 1 {
+		t.Fatalf("Worktrees() = %d, want the main worktree alone: the branch is checked out nowhere", got)
+	}
+}
