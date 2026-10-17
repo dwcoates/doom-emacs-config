@@ -129,7 +129,7 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":      {usage: "create -repository here|DIR -topology primary|child [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-before-merge TEXT] [-after-merge TEXT] [-as-user]", run: workspaceCreate},
+		"create":      {usage: "create -repository here|DIR -topology primary|child [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-before-merge TEXT] [-after-merge TEXT] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-before-merge TEXT] [-after-merge TEXT] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
 		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-as-user]", run: workspaceSet},
@@ -433,6 +433,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	prompt := fs.String("prompt", "", "the first prompt")
 	name := fs.String("name", "", "the workspace's name; unset derives it from the prompt")
 	model := fs.String("model", "", "the session's model; unset is the daemon's")
+	priority := fs.String("priority", "", "p05, p1, p2 or p3; unset is unprioritized")
 	before := fs.String("before-merge", "", "the action run before the workspace's merge")
 	after := fs.String("after-merge", "", "the action run after the workspace's merge")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
@@ -497,6 +498,13 @@ func workspaceCreate(c *cliCall, args []string) int {
 	}
 	if *model != "" {
 		req.Model = model
+	}
+	if *priority != "" {
+		level, err := priorityOf(*priority)
+		if err != nil || level == nil {
+			return c.usageFailed("-priority is p05, p1, p2 or p3, not %q", *priority)
+		}
+		req.Priority = level
 	}
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)

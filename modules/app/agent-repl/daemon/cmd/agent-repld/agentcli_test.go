@@ -181,6 +181,38 @@ func TestCreateSendsEveryChoiceItNames(t *testing.T) {
 	}
 }
 
+func TestCreateSendsAPriorityItNames(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh", "-priority", "p1")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if req := only[*agentreplv1.CreateWorkspaceRequest](t, f); req.GetPriority().GetP1() == nil {
+		t.Fatalf("priority = %v, want p1", req.GetPriority())
+	}
+}
+
+func TestCreateSendsNoPriorityItWasNotGiven(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if req := only[*agentreplv1.CreateWorkspaceRequest](t, f); req.Priority != nil {
+		t.Fatalf("priority = %v, want unset", req.GetPriority())
+	}
+}
+
 func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 	tests := []struct {
 		name string
@@ -190,6 +222,8 @@ func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 		{name: "no context", args: []string{"-repository", "here", "-topology", "primary"}},
 		{name: "a child with no owner", args: []string{"-repository", "here", "-topology", "child", "-context", "fresh"}},
 		{name: "a one-shot with no prompt", args: []string{"-repository", "here", "-topology", "primary", "-context", "fresh", "-one-shot"}},
+		{name: "an unknown priority", args: []string{"-repository", "here", "-topology", "primary", "-context", "fresh", "-priority", "urgent"}},
+		{name: "a cleared priority, which a create has none to clear", args: []string{"-repository", "here", "-topology", "primary", "-context", "fresh", "-priority", "none"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
