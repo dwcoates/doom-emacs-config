@@ -96,6 +96,6 @@ Each item is checked off as it lands, with its commit.
 
 ## Verification
 
-- [ ] V1 Full unit + integration suites of daemon, lisp, webapp, shim.
-- [ ] V2 e2e suite (systemic change).
+- [x] V1 Full unit + integration suites of daemon, lisp, webapp, shim.
+- [x] V2 e2e suite (systemic change).
 - [ ] V3 Land through the merge queue.
