@@ -28,13 +28,13 @@ package workspacenotice
 
 import (
 	"context"
-	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
@@ -112,76 +112,25 @@ type Deps struct {
 // Service is the notifier.
 type Service struct {
 	deps Deps
-
-	mu      sync.Mutex
-	pending []Event
-	stopped bool
-	wake    chan struct{}
+	loop *noticeloop.Loop[Event]
 }
 
 // New builds the service.
 func New(deps Deps) *Service {
-	return &Service{deps: deps, wake: make(chan struct{}, 1)}
+	s := &Service{deps: deps}
+	s.loop = noticeloop.New(func(event Event) {
+		deps.Log.Global().Info(op, "a derived workspace's event came after the notifier stopped, as the daemon stood down; its sources are not told", eventFields(event))
+	})
+	return s
 }
 
 // Report appends EVENT for the loop and never blocks.
-func (s *Service) Report(event Event) {
-	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		s.deps.Log.Global().Info(op, "a derived workspace's event came after the notifier stopped, as the daemon stood down; its sources are not told", eventFields(event))
-		return
-	}
-	s.pending = append(s.pending, event)
-	s.mu.Unlock()
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
-}
+func (s *Service) Report(event Event) { s.loop.Report(event) }
 
 // Run delivers every reported event, in order, until ctx ends, then delivers
 // every event still pending before it returns.
 func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {
-	deliveries := context.WithoutCancel(ctx)
-	for {
-		for _, event := range s.take() {
-			s.deliver(deliveries, prompts, event)
-		}
-		select {
-		case <-ctx.Done():
-			s.finish(deliveries, prompts)
-			return
-		case <-s.wake:
-		}
-	}
-}
-
-func (s *Service) take() []Event {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	batch := s.pending
-	s.pending = nil
-	return batch
-}
-
-// finish delivers everything still pending and marks the service stopped
-// under the same lock that finds nothing pending.
-func (s *Service) finish(ctx context.Context, prompts prompthandler.Submitter) {
-	for {
-		s.mu.Lock()
-		if len(s.pending) == 0 {
-			s.stopped = true
-			s.mu.Unlock()
-			return
-		}
-		batch := s.pending
-		s.pending = nil
-		s.mu.Unlock()
-		for _, event := range batch {
-			s.deliver(ctx, prompts, event)
-		}
-	}
+	s.loop.Run(ctx, func(ctx context.Context, event Event) { s.deliver(ctx, prompts, event) })
 }
 
 // Recipient is one source an event is told to.
