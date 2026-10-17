@@ -245,3 +245,34 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
 - **Creation contract approved (owner, 2026-10-11):** the owner reviewed the
   `fork_source` field and the three new error arms as landed and approved
   them unchanged, settling the "shape chosen by the implementer" flag above.
+
+## `SPC TAB p` is a swap again (owner, 2026-10-17)
+
+- **Ruling:** `SPC TAB p` swaps the current workspace with the workspace on
+  the pressed tab, instead of moving the current workspace there. This
+  supersedes "`SPC TAB p` is a move" above. On `| A | B | C | D |`, A to tab
+  3 gives `| C | B | A | D |`: A and C exchange places and B stays put.
+- **Unchanged:** any two workspaces can swap, across repositories and parents;
+  the digit still counts drawn tabs, 0 naming slot 10; the sidebar and tab bar
+  stay views of the one registry order.
+
+### SwapWorkspaces replaces MoveWorkspace (2026-10-17)
+
+- **What:** `agentrepl.v1.SwapWorkspaces` (`endpoint_swap_workspaces.proto`)
+  replaces `MoveWorkspace` and its file. The request keeps the same two
+  roster-served refs, and the error arms are unchanged
+  (`unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`,
+  `not_yet_adopted`).
+- **Why a rename, not a reinterpretation of MoveWorkspace:** the name is a
+  premise every reader reasons from, and a `MoveWorkspace` that swaps would
+  mislead the next change to the ordering. `SPC TAB p` was its only caller, so
+  nothing keeps a move rpc alive.
+- **Sweep:** `MoveWorkspace*` messages and `endpoint_move_workspace.proto`
+  were removed. Nothing else became obsolete.
+- **Consequences:** `wsm.SwapPlaces` replaces `MovePlace`. It parks the mover
+  on the parking slot and exchanges the two places in one transaction, so no
+  other row's place is written. The workspace verb, server handler, elisp
+  codec, verb (`agent-repl-verb-swap`) and command
+  (`agent-repl-workspace-swap`) are renamed the same way. Log operations
+  become `daemon.wsm.swap_places`, `daemon.workspace.swap` and
+  `elisp.commands.swap*`.

@@ -60,7 +60,7 @@ import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
 import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
 import "agentrepl/v1/endpoint_set_workspace_parent.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
-import "agentrepl/v1/endpoint_move_workspace.proto";
+import "agentrepl/v1/endpoint_swap_workspaces.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_edit_held_prompt.proto";
@@ -228,9 +228,9 @@ service AgentRepl {
   // same repository, or top-level. Its session is told in the same operation.
   // See endpoint_set_workspace_parent.proto.
   rpc SetWorkspaceParent(SetWorkspaceParentRequest) returns (SetWorkspaceParentResponse);
-  // Move one workspace onto another's place in the registry order. See
-  // endpoint_move_workspace.proto.
-  rpc MoveWorkspace(MoveWorkspaceRequest) returns (MoveWorkspaceResponse);
+  // Exchange two workspaces' places in the registry order. See
+  // endpoint_swap_workspaces.proto.
+  rpc SwapWorkspaces(SwapWorkspacesRequest) returns (SwapWorkspacesResponse);
   rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
   // Change one piece of the sidebar's view state (a fold, the grouping),
   // pushed to every page on the roster stream. See
