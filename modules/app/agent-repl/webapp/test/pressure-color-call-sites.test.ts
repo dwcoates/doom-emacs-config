@@ -44,7 +44,7 @@ describe("the pressure color's call sites", () => {
     },
   );
 
-  it.each(["src/footer/activity.ts", "src/feed/asks/cold-gate.ts"])(
+  it.each(["src/footer/parts.ts", "src/feed/asks/cold-gate.ts"])(
     "%s colors the cold gate's figure through coldGateFigureColor and interpolates nothing itself",
     (file) => {
       // Arrange
@@ -56,6 +56,13 @@ describe("the pressure color's call sites", () => {
       ]);
     },
   );
+
+  it("src/footer/activity.ts draws every cold-gate figure through the shared figured line", () => {
+    // Arrange
+    const source = readFileSync(path.join(here, "..", "src/footer/activity.ts"), "utf8");
+    // Act / Assert
+    expect([source.includes("coldGateFiguredLine("), source.includes("coldGateFigureColor(")]).toEqual([true, false]);
+  });
 
   it("paints the footer's 42% and the topbar's 42%-full window alike", () => {
     // Arrange

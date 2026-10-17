@@ -114,8 +114,8 @@ import {
 import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
-import { grabber, statusWords, textLine } from "./parts.js";
-import { coldGateFigureColor, pressurePercentColor } from "../pressure-color.js";
+import { coldGateFiguredLine, grabber, statusWords, textLine } from "./parts.js";
+import { pressurePercentColor } from "../pressure-color.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { activityDatumClass } from "./tones.js";
 import { pluralNoun } from "../count-noun.js";
@@ -978,20 +978,7 @@ export function drawFooterStatusActivityBlockedOnUser(
 export function drawFooterStatusActivityColdGateCost(
   u: FooterStatusActivityColdGateCost,
 ): HTMLElement {
-  const path = "FooterStatusActivityColdGateCost";
-  const figure = requireMessage(u.figure, `${path}.figure`);
-  if (u.lead + figure.text + u.tail !== u.text) {
-    throw new MalformedView(path, `its parts ${JSON.stringify([u.lead, figure.text, u.tail])} do not make its text ${JSON.stringify(u.text)}`);
-  }
-  const line = document.createElement("span");
-  line.className = "footer-activity-cold-gate-cost";
-  const number = document.createElement("span");
-  number.className = "footer-cold-gate-figure";
-  number.textContent = figure.text;
-  // INLINE: the figure's color IS its reading (as the context chip's).
-  number.style.color = coldGateFigureColor(figure.windowFill, `${path}.figure.window_fill`);
-  line.append(document.createTextNode(u.lead), number, document.createTextNode(u.tail));
-  return line;
+  return coldGateFiguredLine("footer-activity-cold-gate-cost", u.text, u, "FooterStatusActivityColdGateCost");
 }
 
 /** The interrupting line, verbatim. */
