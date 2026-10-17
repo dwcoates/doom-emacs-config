@@ -107,7 +107,7 @@ type MergeQueueSubscription struct {
 // ErrSubscriberClosed is a subscription refused because its subscriber is
 // closed: a close is what ends a subscription, so one taken while closed
 // would never end.
-var ErrSubscriberClosed = errors.New("wsm: a closed workspace cannot subscribe to a merge queue")
+var ErrSubscriberClosed = errors.New("wsm: a closed workspace cannot subscribe")
 
 // SubscribeMergeQueue records SUB, replacing the detail of the subscription
 // its subscriber already holds in the same scope, and answers whether it

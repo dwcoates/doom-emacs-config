@@ -504,6 +504,15 @@ type DB interface {
 	UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error)
 	// MergeQueueSubscriptions loads every merge queue subscription.
 	MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error)
+	// SubscribeWorkspace records a workspace subscription, replacing the
+	// events of one its subscriber holds to the same workspace, and answers
+	// whether it replaced one (workspacesubscriptions.go).
+	SubscribeWorkspace(ctx context.Context, sub WorkspaceSubscription) (bool, error)
+	// UnsubscribeWorkspace ends a subscriber's subscription to a workspace,
+	// answering whether one stood.
+	UnsubscribeWorkspace(ctx context.Context, subscriber, followed WorkspaceID) (bool, error)
+	// WorkspaceSubscribers loads every subscription following a workspace.
+	WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error)
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

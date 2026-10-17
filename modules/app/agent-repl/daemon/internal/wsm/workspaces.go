@@ -605,6 +605,7 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 	var (
 		released      sql.NullString
 		subscriptions int64
+		followings    int64
 	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var closed bool
@@ -633,10 +634,15 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
 			return err
 		}
-		// A CLOSE ENDS THE WORKSPACE'S MERGE QUEUE SUBSCRIPTIONS in the same
-		// transaction, so no close path can leave one standing
-		// (mergesubscriptions.go).
+		// A CLOSE ENDS THE WORKSPACE'S SUBSCRIPTIONS -- to merge queues and
+		// to other workspaces -- in the same transaction, so no close path can
+		// leave one standing (mergesubscriptions.go,
+		// workspacesubscriptions.go).
 		subscriptions, err = endSubscriptionsInTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		followings, err = endWorkspaceSubscriptionsInTx(ctx, tx, id)
 		return err
 	})
 	if err != nil {
@@ -649,6 +655,10 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 	if subscriptions > 0 {
 		s.log.Info(op, "the close ended the workspace's merge queue subscriptions",
 			dlog.Context{"workspace": string(id), "subscriptions": subscriptions})
+	}
+	if followings > 0 {
+		s.log.Info(op, "the close ended the workspace's subscriptions to other workspaces",
+			dlog.Context{"workspace": string(id), "subscriptions": followings})
 	}
 	return nil
 }
