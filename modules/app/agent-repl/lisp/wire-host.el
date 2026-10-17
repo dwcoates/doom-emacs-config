@@ -683,6 +683,128 @@ required: the daemon relays a target it validated."
            :branch (agent-repl-wire--decode-string "OpenInEditorCommitLog" 'branch object)
            :commit (agent-repl-wire--decode-string "OpenInEditorCommitLog" 'commit object)))))
 
+;;;; ---- Editor evaluation: the `evaluate' push and its answer ----
+;;
+;; editor_evaluation.proto.  The daemon pushes an agent's elisp on the host
+;; stream with a token; the editor evaluates it in its one handler
+;; (evaluate.el) and answers AnswerEditorEvaluation with the token, unchanged.
+
+(defun agent-repl-wire-decode-editor-evaluation-token (value)
+  "Decode VALUE as `EditorEvaluationToken', a plist (:value STRING).
+The token is opaque to the editor, which only echoes it back."
+  (let ((object (agent-repl-wire--object "EditorEvaluationToken" value)))
+    (agent-repl-wire--check-keys "EditorEvaluationToken" object '(value))
+    (agent-repl-wire--decoded
+     "EditorEvaluationToken"
+     (list :value (agent-repl-wire--decode-string "EditorEvaluationToken" 'value object)))))
+
+(defun agent-repl-wire-encode-editor-evaluation-token (value)
+  "Encode the `EditorEvaluationToken' plist VALUE (:value STRING)."
+  (list (cons 'value (agent-repl-wire--encode-string
+                      "EditorEvaluationToken" 'value (plist-get value :value)))))
+
+(defun agent-repl-wire-decode-host-evaluate (value)
+  "Decode VALUE as `HostEvaluate', a plist (:token TOKEN :text TEXT).
+The token is REQUIRED: an evaluation that cannot be answered is a breach."
+  (let ((object (agent-repl-wire--object "HostEvaluate" value)))
+    (agent-repl-wire--check-keys "HostEvaluate" object '(token text))
+    (agent-repl-wire--decoded
+     "HostEvaluate"
+     (list :token (agent-repl-wire--decode-message
+                   "HostEvaluate" 'token object
+                   #'agent-repl-wire-decode-editor-evaluation-token)
+           :text (agent-repl-wire--decode-string "HostEvaluate" 'text object)))))
+
+(defun agent-repl-wire-encode-editor-evaluation-value (value)
+  "Encode the `EditorEvaluationValue' plist VALUE (:printed P :readable B).
+An unreadable value omits `readable', its proto3 default."
+  (append
+   (list (cons 'printed (agent-repl-wire--encode-string
+                         "EditorEvaluationValue" 'printed (plist-get value :printed))))
+   (when (plist-get value :readable)
+     (list (cons 'readable t)))))
+
+(defun agent-repl-wire-encode-editor-evaluation-read-error (value)
+  "Encode the `EditorEvaluationReadError' plist VALUE (:message M)."
+  (list (cons 'message (agent-repl-wire--encode-string
+                        "EditorEvaluationReadError" 'message (plist-get value :message)))))
+
+(defun agent-repl-wire-encode-editor-evaluation-eval-error (value)
+  "Encode the `EditorEvaluationEvalError' plist VALUE.
+VALUE is (:error-symbol S :data-printed D :message M), each a string."
+  (let ((message "EditorEvaluationEvalError"))
+    (list (cons 'errorSymbol (agent-repl-wire--encode-string
+                              message 'errorSymbol (plist-get value :error-symbol)))
+          (cons 'dataPrinted (agent-repl-wire--encode-string
+                              message 'dataPrinted (plist-get value :data-printed)))
+          (cons 'message (agent-repl-wire--encode-string
+                          message 'message (plist-get value :message))))))
+
+(defun agent-repl-wire-encode-editor-evaluation-outcome (value)
+  "Encode the `EditorEvaluationOutcome' plist VALUE.
+VALUE is (:outcome ONEOF :messages LINES).
+ONEOF's arm is `:value', `:read-error' or `:eval-error'; it is required.
+LINES are the `*Messages*' lines the evaluation added, oldest first."
+  (let ((message "EditorEvaluationOutcome")
+        (lines (plist-get value :messages)))
+    (append
+     (agent-repl-wire--encode-oneof
+      message 'outcome (plist-get value :outcome)
+      '((:value value agent-repl-wire-encode-editor-evaluation-value)
+        (:read-error readError agent-repl-wire-encode-editor-evaluation-read-error)
+        (:eval-error evalError agent-repl-wire-encode-editor-evaluation-eval-error)))
+     (when lines
+       (list (cons 'messages
+                   (agent-repl-wire--encode-repeated
+                    message 'messages lines
+                    (lambda (line) (agent-repl-wire--encode-string message 'messages line)))))))))
+
+;;;; ---- AnswerEditorEvaluation ----
+
+(defun agent-repl-wire-encode-answer-editor-evaluation-request (value)
+  "Encode the AnswerEditorEvaluationRequest plist VALUE.
+VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
+  (let ((message "AnswerEditorEvaluationRequest"))
+    (dolist (field '((:workspace . workspace) (:token . token) (:outcome . outcome)))
+      (unless (plist-get value (car field))
+        (agent-repl-wire--fail message (cdr field) "required message field is absent")))
+    (agent-repl-wire--encoded
+     message
+     (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+           (cons 'token (agent-repl-wire-encode-editor-evaluation-token (plist-get value :token)))
+           (cons 'outcome (agent-repl-wire-encode-editor-evaluation-outcome
+                           (plist-get value :outcome)))))))
+
+(defun agent-repl-wire-decode-answer-editor-evaluation-success (value)
+  "Decode VALUE as the empty `AnswerEditorEvaluationSuccess'."
+  (agent-repl-wire--decode-empty "AnswerEditorEvaluationSuccess" value))
+
+(defun agent-repl-wire-decode-answer-editor-evaluation-unknown-token (value)
+  "Decode VALUE as the empty `AnswerEditorEvaluationUnknownToken'."
+  (agent-repl-wire--decode-empty "AnswerEditorEvaluationUnknownToken" value))
+
+(defun agent-repl-wire-decode-answer-editor-evaluation-error (value)
+  "Decode VALUE as `AnswerEditorEvaluationError', a plist (:cause ONEOF)."
+  (let ((object (agent-repl-wire--object "AnswerEditorEvaluationError" value)))
+    (agent-repl-wire--check-keys "AnswerEditorEvaluationError" object '(unknownToken))
+    (agent-repl-wire--decoded
+     "AnswerEditorEvaluationError"
+     (list :cause (agent-repl-wire--decode-oneof
+                   "AnswerEditorEvaluationError" 'cause object
+                   '((unknownToken :unknown-token
+                                   agent-repl-wire-decode-answer-editor-evaluation-unknown-token)))))))
+
+(defun agent-repl-wire-decode-answer-editor-evaluation-response (value)
+  "Decode VALUE as `AnswerEditorEvaluationResponse'.  THE ARM IS THE OUTCOME."
+  (let ((object (agent-repl-wire--object "AnswerEditorEvaluationResponse" value)))
+    (agent-repl-wire--check-keys "AnswerEditorEvaluationResponse" object '(success error))
+    (agent-repl-wire--decoded
+     "AnswerEditorEvaluationResponse"
+     (agent-repl-wire--decode-oneof
+      "AnswerEditorEvaluationResponse" 'result object
+      '((success :success agent-repl-wire-decode-answer-editor-evaluation-success)
+        (error :error agent-repl-wire-decode-answer-editor-evaluation-error))))))
+
 ;;;; ---- WatchHostWorkspace ----
 
 (defun agent-repl-wire-encode-watch-host-workspace-request-workspace (value)
@@ -728,6 +850,10 @@ required: the daemon relays a target it validated."
   "Decode the `open_commit_log' push arm VALUE."
   (agent-repl-wire-decode-open-in-editor-commit-log value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-evaluate (value)
+  "Decode the `evaluate' push arm VALUE as its `(:token :text)' plist."
+  (agent-repl-wire-decode-host-evaluate value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-ending (value)
   "Decode the `ending' push arm VALUE."
   (agent-repl-wire-decode-daemon-stream-ending value))
@@ -748,14 +874,15 @@ required: the daemon relays a target it validated."
      (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
      (notificationClicked :notification-clicked
                           agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
-     (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection))))
+     (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection)
+     (evaluate :evaluate agent-repl-wire-decode-watch-host-workspace-response-evaluate))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection))
+     '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

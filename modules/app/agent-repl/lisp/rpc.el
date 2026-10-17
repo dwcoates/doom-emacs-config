@@ -66,6 +66,8 @@
 (declare-function agent-repl-wire-encode-watch-host-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-watch-host-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-daemon-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-answer-editor-evaluation-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-answer-editor-evaluation-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-editor-focus-request "wire-host" (request))
 (declare-function agent-repl-wire-encode-report-latencies-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-report-latencies-response "wire-verbs" (alist))
@@ -283,6 +285,14 @@ reconciles to the same ref and answers one success.")
 The daemon stamps `current', records last-selected and clears the
 workspace's attention marker; the roster stream reflects it.  Idempotent —
 re-selecting the current workspace succeeds.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-answer-editor-evaluation
+  "AnswerEditorEvaluation"
+  agent-repl-wire-encode-answer-editor-evaluation-request
+  agent-repl-wire-decode-answer-editor-evaluation-response
+  "Answer an evaluation the daemon pushed on the host stream, by its token.
+A late answer still succeeds: whether a caller still waited is the
+daemon\='s to know.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-report-editor-focus
   "ReportEditorFocus"

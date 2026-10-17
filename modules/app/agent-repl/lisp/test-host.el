@@ -77,6 +77,9 @@
 (defvar agent-repl-test-host--adopt-answer nil
   "What the stubbed AdoptHostWorkspace answers; see the harness.")
 
+(defvar agent-repl-test-host--evaluation-answer nil
+  "What the stubbed AnswerEditorEvaluation answers; see the harness.")
+
 (defvar agent-repl-test-host--select-answer nil
   "What the stubbed SelectWorkspace answers; see the harness.")
 
@@ -224,6 +227,8 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--unloading-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
+          (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--evaluation-answer
           (list :response (list :arm :success :value nil))))
      (cl-letf (((symbol-function 'agent-repl-link-up-p)
                 (lambda () agent-repl-test-host--link-up))
@@ -256,6 +261,12 @@ unary rpc can produce, which the contract never collapses into one."
                   (push (list "AdoptHostWorkspace" conn request) agent-repl-test-host--calls)
                   (push :adopt agent-repl-test-host--walk)
                   (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-answer-editor-evaluation)
+                (lambda (conn request &rest keys)
+                  (push (list "AnswerEditorEvaluation" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--evaluation-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-watch-host-workspace)
@@ -2450,6 +2461,139 @@ would adopt onto a connection the link has let go of."
         ;; Assert
         (should (equal opened '("ws-1" "/repo" "master" "abc123")))
         (should (agent-repl-test-host--logged-p :info "elisp.host.open-commit-log"))))))
+
+;;;; ---- The evaluation push ----
+
+(defun agent-repl-test-host--evaluation-call ()
+  "Answer the request of the one AnswerEditorEvaluation call made."
+  (let ((calls (cl-remove-if-not (lambda (call) (equal (car call) "AnswerEditorEvaluation"))
+                                 agent-repl-test-host--calls)))
+    (should (= (length calls) 1))
+    (nth 2 (car calls))))
+
+(defun agent-repl-test-host--evaluate (ws text)
+  "Push an evaluation of TEXT to WS's host stream with the token `t-1'."
+  (agent-repl-test-host--push
+   ws (list :arm :evaluate :value (list :token '(:value "t-1") :text text))))
+
+(ert-deftest agent-repl-test-host-evaluate-answers-with-the-token-and-the-outcome ()
+  "An evaluation push is answered on WS's connection with its token unchanged."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--evaluate "ws-1" "(+ 1 2)")
+    ;; Assert
+    (let ((request (agent-repl-test-host--evaluation-call)))
+      (should (equal (plist-get request :workspace) (agent-repl-test-host--ref)))
+      (should (equal (plist-get request :token) '(:value "t-1")))
+      (should (equal (plist-get (plist-get request :outcome) :outcome)
+                     '(:arm :value :value (:printed "3" :readable t)))))))
+
+(ert-deftest agent-repl-test-host-evaluate-answers-on-the-workspaces-connection ()
+  "The answer goes to the daemon whose stream pushed the evaluation."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9007")))
+      (agent-repl-test-host--subscribe "ws-1" conn)
+      ;; Act
+      (agent-repl-test-host--evaluate "ws-1" "1")
+      ;; Assert
+      (should (eq (nth 1 (car (cl-remove-if-not
+                               (lambda (call) (equal (car call) "AnswerEditorEvaluation"))
+                               agent-repl-test-host--calls)))
+                  conn)))))
+
+(ert-deftest agent-repl-test-host-evaluate-runs-in-the-composer ()
+  "A live composer is the buffer current while the text is evaluated."
+  (agent-repl-test-host--with-harness
+    (with-temp-buffer
+      (rename-buffer "agent-repl-test-host-composer" t)
+      (let ((composer (current-buffer)))
+        (with-temp-buffer
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) composer))))
+            ;; Arrange
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--evaluate "ws-1" "(buffer-name)")
+            ;; Assert
+            (should (equal (plist-get (plist-get (plist-get (plist-get (agent-repl-test-host--evaluation-call)
+                                                                       :outcome)
+                                                            :outcome)
+                                                 :value)
+                                      :printed)
+                           (prin1-to-string (buffer-name composer))))
+            (should (agent-repl-test-host--logged-p
+                     :info "composer=t outcome=:value"))))))))
+
+(ert-deftest agent-repl-test-host-evaluate-without-a-composer-says-so ()
+  "A workspace with no live composer evaluates in the current buffer, recorded."
+  (agent-repl-test-host--with-harness
+    (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil)))
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--evaluate "ws-1" "1")
+      ;; Assert
+      (agent-repl-test-host--evaluation-call)
+      (should (agent-repl-test-host--logged-p
+               :info "composer=nil outcome=:value")))))
+
+(ert-deftest agent-repl-test-host-evaluate-answers-a-read-error ()
+  "Text that does not read is answered, never dropped."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--evaluate "ws-1" "(+ 1")
+    ;; Assert
+    (should (eq (plist-get (plist-get (plist-get (agent-repl-test-host--evaluation-call) :outcome)
+                                      :outcome)
+                           :arm)
+                :read-error))))
+
+(ert-deftest agent-repl-test-host-evaluate-refused-answer-is-an-error ()
+  "A refused answer is recorded at ERROR with the token and the cause."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--evaluation-answer
+          (list :response (list :arm :error
+                                :value (list :cause (list :arm :unknown-token :value nil)))))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--evaluate "ws-1" "1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :error "elisp.host.evaluation-answer-refused ws=ws-1 token=t-1 cause=:unknown-token"))))
+
+(ert-deftest agent-repl-test-host-evaluate-failed-answer-is-an-error ()
+  "An answer the transport could not deliver is recorded at ERROR."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--evaluation-answer
+          (list :failure (list :detail "connection refused")))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--evaluate "ws-1" "1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :error "elisp.host.evaluation-answer-failed ws=ws-1 token=t-1"))))
+
+(ert-deftest agent-repl-test-host-evaluate-without-a-connection-signals ()
+  "A push on a stream whose workspace has no connection is a broken invariant."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--fatal)
+               (lambda (_ws fmt &rest args) (error (apply #'format fmt args)))))
+      ;; Act / Assert
+      (should (string-match-p
+               "elisp.host.evaluate-no-connection ws=ws-1 token=t-1"
+               (cadr (should-error (agent-repl-test-host--evaluate "ws-1" "1")))))
+      (should-not (cl-find "AnswerEditorEvaluation" agent-repl-test-host--calls
+                           :key #'car :test #'equal)))))
 
 (ert-deftest agent-repl-test-host-unknown-push-arm-is-an-error ()
   "An arm nobody knows is a contract breach, never a silent drop."
