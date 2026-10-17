@@ -17,8 +17,14 @@
  * element's animation to the elapsed time, so a redraw continues the blink
  * rather than restarting it. Once the blink has run its length the entry is dropped.
  *
- * THE LENGTH LIVES HERE, ONCE: each blinking row is handed it as
- * `--selection-blink-duration`, which the stylesheet's animation reads.
+ * THE NUMBER FADES WITH IT (owner request, 2026-10-17): the row's tab number
+ * fades quickly into white and, a second later, back to its own grey. The fade
+ * is a second animation of the same click, on the same clock: it runs longer
+ * than the wash, so a row redrawn after the wash has ended still joins the
+ * fade, and the click is forgotten only once both have run their lengths.
+ *
+ * EACH LENGTH LIVES HERE, ONCE: a row is handed each animation's length in
+ * its duration property, which the stylesheet's animation reads.
  */
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
@@ -34,6 +40,49 @@ export const SELECTION_BLINK_DURATION_PROPERTY = "--selection-blink-duration";
 
 /** The custom property a blinking row is handed its animation's delay in: minus the time already blinked. */
 export const SELECTION_BLINK_DELAY_PROPERTY = "--selection-blink-delay";
+
+/** How long the tab number's fade runs, in milliseconds: a quick rise to white, a second held, then the fall back. */
+export const SELECTION_NUMBER_FADE_MS = 1600;
+
+/** The class a row whose tab number is fading carries. */
+export const SELECTION_NUMBER_FADE_CLASS = "selection-number-fade";
+
+/** The custom property a row is handed the number fade's length in. */
+export const SELECTION_NUMBER_FADE_DURATION_PROPERTY = "--selection-number-fade-duration";
+
+/** The custom property a row is handed the number fade's delay in: minus the time already faded. */
+export const SELECTION_NUMBER_FADE_DELAY_PROPERTY = "--selection-number-fade-delay";
+
+/** One animation a selection runs on the clicked row, seeked by the rail's clock. */
+export interface SelectionAnimation {
+  /** The class the row carries while the animation runs. */
+  className: string;
+  /** The custom property the row is handed the animation's length in. */
+  durationProperty: string;
+  /** The custom property the row is handed minus the time already run in. */
+  delayProperty: string;
+  /** How long the animation runs, in milliseconds. */
+  ms: number;
+}
+
+/** Every animation one selection runs: the row's wash, then the number's fade. */
+export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [
+  {
+    className: SELECTION_BLINK_CLASS,
+    durationProperty: SELECTION_BLINK_DURATION_PROPERTY,
+    delayProperty: SELECTION_BLINK_DELAY_PROPERTY,
+    ms: SELECTION_BLINK_MS,
+  },
+  {
+    className: SELECTION_NUMBER_FADE_CLASS,
+    durationProperty: SELECTION_NUMBER_FADE_DURATION_PROPERTY,
+    delayProperty: SELECTION_NUMBER_FADE_DELAY_PROPERTY,
+    ms: SELECTION_NUMBER_FADE_MS,
+  },
+];
+
+/** How long a selection is remembered: until its longest animation has run. */
+const SELECTION_REMEMBERED_MS = Math.max(...SELECTION_ANIMATIONS.map((animation) => animation.ms));
 
 /** The rail's selection blinks. */
 export interface SelectionBlink {
@@ -55,23 +104,26 @@ export function createSelectionBlink(root: ParentNode, now: () => number = () =>
     const start = started.get(id);
     if (start === undefined) return null;
     const elapsed = now() - start;
-    if (elapsed < SELECTION_BLINK_MS) return elapsed;
+    if (elapsed < SELECTION_REMEMBERED_MS) return elapsed;
     started.delete(id);
     return null;
   };
 
-  /** Seek ROW's blink to ELAPSED, restarting its animation. */
+  /** Seek each of ROW's animations still running at ELAPSED to it, restarting them. */
   const paint = (row: HTMLElement, elapsed: number): void => {
-    row.style.setProperty(SELECTION_BLINK_DURATION_PROPERTY, `${SELECTION_BLINK_MS}ms`);
-    row.style.setProperty(SELECTION_BLINK_DELAY_PROPERTY, `${-elapsed}ms`);
-    // A row already blinking only restarts its animation if the style is
+    const running = SELECTION_ANIMATIONS.filter((animation) => elapsed < animation.ms);
+    for (const animation of running) {
+      row.style.setProperty(animation.durationProperty, `${animation.ms}ms`);
+      row.style.setProperty(animation.delayProperty, `${-elapsed}ms`);
+    }
+    // A row already animating only restarts its animation if the style is
     // flushed between the class leaving and coming back. A freshly drawn row
     // carries no class, so a draw never pays for the flush.
-    if (row.classList.contains(SELECTION_BLINK_CLASS)) {
-      row.classList.remove(SELECTION_BLINK_CLASS);
+    if (running.some((animation) => row.classList.contains(animation.className))) {
+      for (const animation of running) row.classList.remove(animation.className);
       void row.offsetWidth;
     }
-    row.classList.add(SELECTION_BLINK_CLASS);
+    for (const animation of running) row.classList.add(animation.className);
   };
 
   return {
