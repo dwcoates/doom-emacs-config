@@ -4815,6 +4815,97 @@ describe("the load-more control's outline", () => {
 });
 
 /**
+ * THE ARC SPINNER'S SHAPE (styles.css): one rule draws every spinner's ring
+ * from the `--arc-color` each spinner names, so the spinners cannot drift
+ * apart in shape.
+ */
+describe("the arc spinner's shape", () => {
+  const ARC_SPINNERS = [".thinking-spinner", ".tool-spinner", ".feed-load-more-spinner"];
+  const shared = (): CssRule | undefined =>
+    rulesOf(stylesheet).find((rule) => ARC_SPINNERS.every((selector) => rule.selectors.includes(selector)));
+
+  it("rings each spinner in its token at a quarter strength", () => {
+    expect(shared()?.declarations).toMatch(
+      /(?:^|;)\s*border:\s*2px solid color-mix\(in srgb, var\(--arc-color\) 25%, transparent\)/,
+    );
+  });
+
+  it("draws the top arc in the full token", () => {
+    expect(shared()?.declarations).toMatch(/(?:^|;)\s*border-top-color:\s*var\(--arc-color\)/);
+  });
+
+  it("rounds the ring", () => {
+    expect(shared()?.declarations).toMatch(/(?:^|;)\s*border-radius:\s*50%/);
+  });
+
+  it.each([
+    [".thinking-spinner", "var(--thinking)"],
+    [".tool-spinner", "var(--thinking)"],
+    [".feed-load-more-spinner", "var(--muted)"],
+  ])("has %s name its token as %s", (selector, token) => {
+    const own = rulesOf(stylesheet).filter((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector);
+    expect(own.map((rule) => rule.declarations).join(";")).toContain(`--arc-color: ${token}`);
+  });
+
+  it("leaves no spinner drawing its own ring", () => {
+    const ringed = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((selector) => /spinner/.test(selector)) &&
+        !ARC_SPINNERS.every((selector) => rule.selectors.includes(selector)) &&
+        /(?:^|;)\s*border(?:-top-color)?\s*:/.test(rule.declarations),
+    );
+    expect(ringed.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+/**
+ * THE LOAD-MORE CONTROL WHILE ITS PAGE LOADS (feed/walk-control.ts): the pill
+ * gives way to a spinner in the control's own muted token, spun by the
+ * thinking spinner's keyframes.
+ */
+describe("the load-more control's loading face", () => {
+  /** Every rule naming SELECTOR, joined: the base rule follows the reduced-motion block. */
+  const everyDeclarationOf = (selector: string): string =>
+    rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => rule.declarations)
+      .join(";");
+
+  it("drops the pill's outline while loading", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more[data-loading]") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*border-color:\s*transparent/);
+  });
+
+  it("draws the spinner in the control's muted token", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*--arc-color:\s*var\(--muted\)/);
+  });
+
+  it("spins the spinner", () => {
+    // Arrange / Act
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*animation:\s*thinking-spin\b/);
+  });
+
+  it("slows the spinner under reduced motion", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+
+    // Assert
+    expect(reduced).toMatch(/\.feed-load-more-spinner\s*\{\s*animation-duration:\s*1\.4s;/);
+  });
+});
+
+/**
  * THE CLASSIC DIFF (owner request, 2026-10-08): an added line on a green
  * background and a removed one on a red, each a block of its own, in theme
  * tokens both themes define.

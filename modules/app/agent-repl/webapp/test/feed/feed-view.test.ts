@@ -65,6 +65,8 @@ import {
   PROMPT_WAVE_WORKING,
 } from "../../src/breathing.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { fireIntersection } from "../intersection-observer.js";
+import { FEED_LOAD_MORE_LABEL, WALK_LOADING_ATTRIBUTE, WALK_SPINNER_CLASS } from "../../src/feed/walk-control.js";
 import {
   orderFor,
   withOrder,
@@ -3176,6 +3178,213 @@ describe("createFeedController: the walk's refusal does not accumulate", () => {
     await settle();
     // Assert: one refusal stands, not two.
     expect(host.querySelectorAll(".refusal")).toHaveLength(1);
+  });
+});
+
+// THE WALK CONTROL LOADS ITS PAGE ON SIGHT, AND SPINS WHILE IT LOADS
+// (walk-control.ts): scrolling "load previous page" into view asks for the page,
+// and the pill gives way to a spinner until the page lands.
+describe("createFeedController: the walk control on sight", () => {
+  /** An older page the test answers when it chooses. */
+  function heldPage() {
+    let answer: (rows: readonly FeedRow[]) => void = () => undefined;
+    const h = harness({
+      getFeedPage: () =>
+        new Promise((resolve) => {
+          answer = (rows) =>
+            resolve(create(GetFeedPageResponseSchema, { result: { case: "success", value: page(rows, { hasMore: true }) } }));
+        }),
+    });
+    return { h, answer: (rows: readonly FeedRow[]) => answer(rows) };
+  }
+
+  /** The feed's control, which the page in each case offers. */
+  const controlOf = (host: HTMLElement): HTMLElement & { disabled: boolean } => {
+    const control = host.querySelector<HTMLElement & { disabled: boolean }>("[data-load-more]");
+    if (control === null) throw new Error("the feed offers no walk control");
+    return control;
+  };
+
+  it("asks for the older page when the control comes into view", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, { result: { case: "success", value: page([withOrder(responseRow("older"), "a")]) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+
+    // Act
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Assert
+    expect({ asks: h.calls.getFeedPage.map((a) => a.page.case), drawn: drawnIds(host) }).toEqual({
+      asks: ["olderThan"],
+      drawn: ["older", "a"],
+    });
+  });
+
+  it("asks for nothing when the control leaves the view", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+
+    // Act
+    fireIntersection(controlOf(host), false);
+    await settle();
+    answer([]);
+
+    // Assert
+    expect(h.calls.getFeedPage).toEqual([]);
+  });
+
+  it("shows a spinner in place of the label while the page loads", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+
+    // Act
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Assert
+    const control = controlOf(host);
+    expect({
+      loading: control.hasAttribute(WALK_LOADING_ATTRIBUTE),
+      spinner: control.querySelector(`.${WALK_SPINNER_CLASS}`) !== null,
+      text: control.textContent,
+      disabled: control.disabled,
+    }).toEqual({ loading: true, spinner: true, text: "", disabled: true });
+    answer([]);
+    await settle();
+  });
+
+  it("asks once for a control sighted again while its page loads", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Act
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage).toHaveLength(1);
+    answer([]);
+    await settle();
+  });
+
+  it("restores the label once the page lands", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Act
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+
+    // Assert
+    const control = controlOf(host);
+    expect({ loading: control.hasAttribute(WALK_LOADING_ATTRIBUTE), text: control.textContent, disabled: control.disabled }).toEqual({
+      loading: false,
+      text: FEED_LOAD_MORE_LABEL,
+      disabled: false,
+    });
+  });
+
+  it("restores the label when the page is refused", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+
+    // Act
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Assert
+    expect({ text: controlOf(host).textContent, refusal: host.querySelector(".refusal")?.getAttribute("data-arm") }).toEqual({
+      text: FEED_LOAD_MORE_LABEL,
+      refusal: "error",
+    });
+  });
+
+  it("re-asks the observer where the control is once a page lands", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const control = controlOf(host);
+    fireIntersection(control, true);
+    await settle();
+    const observe = vi.spyOn(globalThis.IntersectionObserver.prototype, "observe");
+
+    // Act
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+
+    // Assert
+    expect(observe.mock.calls.filter(([el]) => el === control)).toHaveLength(1);
+    observe.mockRestore();
+  });
+
+  it("does not re-ask the observer after a refused page, so a refusing daemon is not asked in a loop", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const control = controlOf(host);
+    const observe = vi.spyOn(globalThis.IntersectionObserver.prototype, "observe");
+
+    // Act
+    fireIntersection(control, true);
+    await settle();
+
+    // Assert
+    expect(observe.mock.calls.filter(([el]) => el === control)).toEqual([]);
+    observe.mockRestore();
+  });
+
+  it("re-asks the observer once a compaction's re-anchor lands", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, { result: { case: "success", value: page([separationRow("cut")], { hasMore: true }) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const control = controlOf(host);
+    const observe = vi.spyOn(globalThis.IntersectionObserver.prototype, "observe");
+
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+
+    // Assert
+    expect(observe.mock.calls.filter(([el]) => el === control)).toHaveLength(1);
+    observe.mockRestore();
+  });
+
+  it("stops watching the control once the feed disposes", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const control = controlOf(host);
+
+    // Act
+    controller.dispose();
+
+    // Assert
+    expect(() => fireIntersection(control, true)).toThrow(/no IntersectionObserver/);
   });
 });
 
