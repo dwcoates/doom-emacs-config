@@ -14,6 +14,7 @@ import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 import type { RowReveal } from "./reveal.js";
+import type { SelectionBlink } from "./selection-blink.js";
 import type { DrawnView, SidebarView } from "./view.js";
 
 /** The one thing a drawn row asks of the attention registry. */
@@ -62,6 +63,8 @@ export interface RailContext {
   attention: AttentionMarks;
   /** Draws a row the first time it comes into view (`reveal.ts`). */
   reveal: RowReveal;
+  /** The blink a row selected from the rail runs, across redraws (`selection-blink.ts`). */
+  selectionBlink: SelectionBlink;
 }
 
 /** What one drawn section of the rail is handed: the rail's context, bound to the section's scope. */

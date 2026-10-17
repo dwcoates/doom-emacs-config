@@ -1115,12 +1115,28 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 
 /* The workspace Emacs is currently showing. The accent gutter bar is the
    ONLY selection mark (owner ruling, 2026-10-11): no row tint, no bolder
-   name. */
+   name. The bar is the accent a step brighter (owner request, 2026-10-17),
+   mixed from it so the two never drift. */
+#ws-sidebar { --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white); }
 #ws-sidebar .ws.current > .row {
-  border-left: var(--row-gutter-w) solid var(--accent);
+  border-left: var(--row-gutter-w) solid var(--row-current-gutter);
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
+/* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): two soft,
+   slow swells of an accent wash over the row line, on every click, the
+   current workspace's included. The class and the blink's length are set by
+   src/sidebar/selection-blink.ts, which also seeks a redrawn row into the
+   blink already running (a negative --selection-blink-delay), so a roster
+   push mid-blink never restarts it. The blink runs
+   once: it is no loop, so the rail's wall-clock seek leaves it alone. */
+#ws-sidebar .ws.selection-blink > .row {
+  animation: ws-selection-blink var(--selection-blink-duration) ease-in-out var(--selection-blink-delay) 1;
+}
+@keyframes ws-selection-blink {
+  0%, 50%, 100% { background-color: transparent; }
+  25%, 75% { background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+}
 
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)
    workspace, and a hidden one (owner request, 2026-10-13: a Hidden row reads
@@ -3586,6 +3602,10 @@ html[data-page-unshown] *::after {
   /* The search bar opens at once rather than sliding. */
   #ws-sidebar .sb-search {
     transition: none;
+  }
+  /* A selected row does not blink: the brighter bar already says which. */
+  #ws-sidebar .ws.selection-blink > .row {
+    animation: none;
   }
   .thinking-spinner {
     animation-duration: 1.4s;

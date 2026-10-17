@@ -51,6 +51,7 @@ import {
   startOfTomorrow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
+import { SELECTION_BLINK_CLASS, createSelectionBlink } from "../../src/sidebar/selection-blink.js";
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 
@@ -252,11 +253,11 @@ describe("the highlight and the receded styling", () => {
       .filter((rule) => rule.selectors.some((sel) => sel.includes(".ws.current")))
       .map((rule) => rule.declarations);
 
-  it("marks the current row with the accent gutter bar", () => {
+  it("marks the current row with the brighter accent gutter bar", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
-    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--accent\)/.test(d))).toBe(true);
+    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--row-current-gutter\)/.test(d))).toBe(true);
   });
 
   it.each([
@@ -1082,6 +1083,66 @@ describe("the row click", () => {
     expect(drawn.querySelector(":scope > .sb-refusal")?.getAttribute("data-arm")).toBe(
       "notYetAdopted",
     );
+  });
+});
+
+describe("the selection blink", () => {
+  /** A rail context whose selection blink reads CLOCK, with every drawn row under the document. */
+  const blinkContext = (clock: () => number) => {
+    const sc = sidebarContext(appContext({ selectWorkspace: () => SELECT_OK }));
+    return { ...sc, selectionBlink: createSelectionBlink(document, clock) };
+  };
+
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it.each([
+    { what: "another workspace's row", current: false },
+    { what: "the current workspace's row", current: true },
+  ])("blinks $what when it is clicked", async ({ current }) => {
+    // Arrange
+    const sc = blinkContext(() => NOW);
+    const drawn = drawRosterRow(row({ id: "ws-1", current }), sc, "R");
+    document.body.appendChild(drawn);
+
+    // Act
+    await click(drawn.querySelector("[data-select]") as Element);
+
+    // Assert
+    expect(drawn.classList.contains(SELECTION_BLINK_CLASS)).toBe(true);
+  });
+
+  it("does not blink a row still opening", async () => {
+    // Arrange
+    const sc = blinkContext(() => NOW);
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "inactive", value: {} }, opening: true }), sc, "R");
+    document.body.appendChild(drawn);
+
+    // Act
+    await click(drawn.querySelector(".row") as Element);
+
+    // Assert
+    expect(drawn.classList.contains(SELECTION_BLINK_CLASS)).toBe(false);
+  });
+
+  it("draws a row redrawn mid-blink into the blink", async () => {
+    // Arrange
+    let clock = NOW;
+    const sc = blinkContext(() => clock);
+    const before = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    document.body.appendChild(before);
+    await click(before.querySelector("[data-select]") as Element);
+    clock += 500;
+
+    // Act
+    const after = drawRosterRow(row({ id: "ws-1", current: true }), sc, "R");
+
+    // Assert
+    expect([after.classList.contains(SELECTION_BLINK_CLASS), after.style.getPropertyValue("--selection-blink-delay")]).toEqual([
+      true,
+      "-500ms",
+    ]);
   });
 });
 
