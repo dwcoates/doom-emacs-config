@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"agentrepl/testrun/internal/command"
+	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/roster"
@@ -109,8 +110,10 @@ func vitestIntegrationBuild(s roster.Suite, dir string) (run.Spec, bool) {
 
 // vitestIntegrationSplit is the suite's integration files, run under its
 // integration config one worker at a time, exactly as the unit files are. The
-// typecheck already covers the package, and coverage is the unit pass's
-// question, so neither is repeated here.
+// typecheck already covers the package, so it is not repeated here. A
+// coverage run has each chunk write istanbul JSON of the files it loaded
+// (cover.VitestIntegrationCoverage), which the baseline merges into the suite's
+// unit coverage.
 func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string) (Split, error) {
 	group := s.Name + "[integration]"
 	work := filepath.Join(l.Work, "vitest", s.Name+"-integration")
@@ -124,6 +127,17 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 			"npx", "vitest", "run", "--config", s.IntegrationConfig,
 			"--maxWorkers=1", "--minWorkers=1",
 			"--reporter=default", "--reporter=" + reporter,
+		}
+		if l.Coverage {
+			argv = append(argv,
+				// --isolate as `npm run coverage` passes it: istanbul resets a
+				// module's counters after each file, and un-isolated a module
+				// shared across files reports nothing for the later ones
+				// (webapp/vitest.config.ts's coverage note).
+				"--isolate",
+				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json", "--coverage.all=false",
+				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
+			)
 		}
 		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
@@ -179,7 +193,7 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	if l.Coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
 			"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",
-			"--coverage.reportsDirectory=" + filepath.Join(work, "coverage"),
+			"--coverage.reportsDirectory=" + filepath.Dir(cover.VitestCoverage(l.Work, s.Name)),
 		})
 		merge.Deps = []string{s.Name}
 		atomic = append(atomic, merge)

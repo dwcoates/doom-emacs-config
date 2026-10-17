@@ -175,10 +175,17 @@ only. This tool proves the rest, the rows whose evidence is weaker.
    - Every put-back is named in the report with the mutant that needs it.
      The proven set lands as its own merge, and the put-backs stay.
 2. **The sidecar's rows**, once its audit sends them, the same way.
-3. **The shim and webapp sets, with the vitest adapter.** Their baselines
-   in `testrun/coverage-baseline.json` stay provisional until the adapter
-   re-measures each package all-tier. No shim or webapp case is removed
-   before then.
+3. **The shim and webapp sets, with the vitest adapter.**
+   - The webapp's baseline is real as of 2026-10-17: 85.17% of 15658
+     statements at `2901562592`, against 52.47% for the unit tier alone.
+     - A coverage run merges, by statement, the unit report with every
+       integration chunk's report and the e2e webapp layer driver's.
+     - Both of those tiers run isolated during coverage runs, since
+       istanbul's per-file counter reset loses a shared module's hits
+       without isolation.
+   - The shim's baseline (96.89%, unit and integration) stays provisional.
+     Its spawned bundle's reach under the e2e suite is not merged yet, so
+     no shim case is removed against it.
 4. **ERT**, after vitest: an in-process mutator that re-evaluates a
    mutated defun, since Emacs Lisp has no compile step to overlay.
 5. **The 45 `TestEmacs*` e2e rows**, last. They need a Docker sandbox to run

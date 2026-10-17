@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"reflect"
 	"strings"
 	"time"
 
@@ -27,9 +29,9 @@ type BaselineInput struct {
 	CoverRoot string
 	// GoSystems maps each Go coverage system's module path to its suite.
 	GoSystems map[string]string
-	// Vitest maps a vitest coverage system's name to its merged istanbul
-	// coverage-final.json.
-	Vitest map[string]string
+	// Vitest maps a vitest coverage system's name to its istanbul reports,
+	// every tier's (istanbulStatements).
+	Vitest map[string]VitestReports
 	Commit string
 	Now    time.Time
 }
@@ -55,10 +57,10 @@ func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error)
 	if out.Systems, err = goSystems(string(text), in.GoSystems); err != nil {
 		return nil, err
 	}
-	for name, path := range in.Vitest {
-		c, err := istanbulStatements(path)
+	for name, r := range in.Vitest {
+		c, err := istanbulStatements(r)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("cover: %s: %w", name, err)
 		}
 		out.Systems[name] = c
 	}
@@ -114,32 +116,105 @@ func baselineOf(hit, total int, tiers string) redundancy.SystemBaseline {
 	return redundancy.SystemBaseline{Percent: pct, Statements: total, Floor: max(0, pct-redundancy.TotalBudget), Tiers: tiers}
 }
 
-// istanbulStatements reads a merged istanbul coverage-final.json's
-// statements.
-func istanbulStatements(path string) (redundancy.SystemBaseline, error) {
+// VitestReports are one vitest system's istanbul reports.
+type VitestReports struct {
+	// Unit is the unit pass's merged report. Its files and statements are the
+	// system: its config's all:true pass over its coverage include.
+	Unit string
+	// Tiers are every other tier's reports, by the tier's name ("integration",
+	// "e2e webapp layer"); their hits count only in Unit's statements.
+	Tiers map[string][]string
+	// Missing, when set, names a tier the run should have measured and did
+	// not: the system's line is then provisional, with this as the reason.
+	Missing string
+}
+
+// istanbulReport is the part of a coverage-final.json the merge reads, per
+// file: each statement's hit count and where it is.
+type istanbulReport map[string]struct {
+	S            map[string]int `json:"s"`
+	StatementMap map[string]struct {
+		Start, End struct{ Line, Column int }
+	} `json:"statementMap"`
+}
+
+func readIstanbul(path string) (istanbulReport, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return redundancy.SystemBaseline{}, fmt.Errorf("cover: read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	var files map[string]struct {
-		S map[string]int `json:"s"`
+	var r istanbulReport
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
-	if err := json.Unmarshal(b, &files); err != nil {
-		return redundancy.SystemBaseline{}, fmt.Errorf("cover: decode %s: %w", path, err)
+	return r, nil
+}
+
+// istanbulStatements merges a vitest system's reports into its statement
+// coverage: a statement of the unit report is covered when any tier's report
+// counts it. Every tier instruments the same file with the same istanbul, so
+// its statement map must be the unit report's: one that is not would count
+// hits against the wrong statements, and is refused.
+func istanbulStatements(r VitestReports) (redundancy.SystemBaseline, error) {
+	unit, err := readIstanbul(r.Unit)
+	if err != nil {
+		return redundancy.SystemBaseline{}, err
 	}
-	total, covered := 0, 0
-	for _, f := range files {
-		for _, n := range f.S {
+	covered := map[string]map[string]bool{}
+	total := 0
+	for file, f := range unit {
+		covered[file] = map[string]bool{}
+		for id, n := range f.S {
 			total++
 			if n > 0 {
-				covered++
+				covered[file][id] = true
 			}
 		}
 	}
 	if total == 0 {
-		return redundancy.SystemBaseline{}, fmt.Errorf("cover: %s holds no statements", path)
+		return redundancy.SystemBaseline{}, fmt.Errorf("%s holds no statements", r.Unit)
 	}
-	return baselineOf(covered, total, "vitest: the files its --coverage run measures"), nil
+	tiers := []string{"unit"}
+	names := make([]string, 0, len(r.Tiers))
+	for name := range r.Tiers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if len(r.Tiers[name]) == 0 {
+			continue
+		}
+		tiers = append(tiers, name)
+		for _, path := range r.Tiers[name] {
+			rep, err := readIstanbul(path)
+			if err != nil {
+				return redundancy.SystemBaseline{}, err
+			}
+			for file, f := range rep {
+				u, ok := unit[file]
+				if !ok {
+					continue // a file outside the unit config's coverage include
+				}
+				if !reflect.DeepEqual(f.StatementMap, u.StatementMap) {
+					return redundancy.SystemBaseline{}, fmt.Errorf("%s's statements of %s are not %s's: the tiers instrumented it differently", path, file, r.Unit)
+				}
+				for id, n := range f.S {
+					if n > 0 {
+						covered[file][id] = true
+					}
+				}
+			}
+		}
+	}
+	hit := 0
+	for _, ids := range covered {
+		hit += len(ids)
+	}
+	b := baselineOf(hit, total, "vitest: "+strings.Join(tiers, ", ")+", merged by statement")
+	if r.Missing != "" {
+		b.Provisional, b.Reason = true, r.Missing
+	}
+	return b, nil
 }
 
 // BaselineArgs are `testrun coverage-baseline`'s arguments.
@@ -175,11 +250,87 @@ func VitestCoverage(work, suite string) string {
 	return filepath.Join(work, "vitest", suite, "coverage", "coverage-final.json")
 }
 
+// VitestIntegrationCoverage is the directory under which each of a vitest
+// suite's integration chunks writes its istanbul report in a coverage run,
+// one subdirectory per chunk (suites.vitestIntegrationSplit).
+func VitestIntegrationCoverage(work, suite string) string {
+	return filepath.Join(work, "vitest", suite+"-integration", "coverage")
+}
+
+// WebappLayerDir is the directory, anywhere under a coverage run's cover
+// root, whose driver-* subdirectories hold the e2e webapp layer's istanbul
+// reports (e2e/coverage_test.go's webappLayerCoverageEnv).
+const WebappLayerDir = "webapp-layer"
+
+// unmergedReach names, per vitest system, a reach no coverage run merges yet:
+// the system's line stays provisional with it as the reason.
+var unmergedReach = map[string]string{
+	"shim": "the shim's e2e reach (its bundle, spawned by the e2e suite) is not merged",
+}
+
+// vitestReports finds every tier's istanbul reports of one vitest system in
+// a finished coverage run's work directory.
+func vitestReports(work, coverRoot, name string) (VitestReports, error) {
+	r := VitestReports{Unit: VitestCoverage(work, name), Tiers: map[string][]string{}}
+	integ, err := filepath.Glob(filepath.Join(VitestIntegrationCoverage(work, name), "*", "coverage-final.json"))
+	if err != nil {
+		return VitestReports{}, fmt.Errorf("cover: find %s's integration reports: %w", name, err)
+	}
+	sort.Strings(integ)
+	r.Tiers["integration"] = integ
+	var missing []string
+	if len(integ) == 0 {
+		missing = append(missing, "the run wrote no integration coverage")
+	}
+	if name == "webapp" {
+		layer, err := webappLayerReports(coverRoot)
+		if err != nil {
+			return VitestReports{}, err
+		}
+		r.Tiers["e2e webapp layer"] = layer
+		if len(layer) == 0 {
+			missing = append(missing, "the run measured no e2e webapp layer (run the e2e suite in the same coverage run)")
+		}
+	}
+	if why, ok := unmergedReach[name]; ok {
+		missing = append(missing, why)
+	}
+	r.Missing = strings.Join(missing, "; ")
+	return r, nil
+}
+
+// webappLayerReports is every run-*.json under every WebappLayerDir/driver-*
+// directory beneath root.
+func webappLayerReports(root string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Base(filepath.Dir(filepath.Dir(path))) != WebappLayerDir {
+			return nil
+		}
+		if m, _ := filepath.Match("run-*.json", d.Name()); m && strings.HasPrefix(filepath.Base(filepath.Dir(path)), "driver-") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cover: find the webapp layer's reports under %s: %w", root, err)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // RunBaseline merges a finished coverage run into a baseline file at a.Out.
 func RunBaseline(goTool Runner, a BaselineArgs, goSystems map[string]string, vitest []string, now time.Time) (*redundancy.BaselineFile, error) {
-	in := BaselineInput{CoverRoot: filepath.Join(a.Work, "cover"), GoSystems: goSystems, Vitest: map[string]string{}, Commit: a.Commit, Now: now}
+	in := BaselineInput{CoverRoot: filepath.Join(a.Work, "cover"), GoSystems: goSystems, Vitest: map[string]VitestReports{}, Commit: a.Commit, Now: now}
 	for _, name := range vitest {
-		in.Vitest[name] = VitestCoverage(a.Work, name)
+		r, err := vitestReports(a.Work, in.CoverRoot, name)
+		if err != nil {
+			return nil, err
+		}
+		in.Vitest[name] = r
 	}
 	f, err := Baseline(goTool, in)
 	if err != nil {

@@ -149,12 +149,16 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 	bg := filepath.Join(filepath.Dir(webappDir), "bin", "background.sh")
 	cmd := exec.Command(bg, "node", filepath.Join("test", "webapp-layer", "layer-server.mjs"))
 	cmd.Dir = webappDir
-	cmd.Env = append(os.Environ(),
+	covEnv, err := webappLayerCoverageEnv(harness.CoverageRoot())
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = append(append(os.Environ(),
 		"AGENT_REPL_WEBAPP_LAYER=1",
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"CI=1",
 		"TMPDIR="+tmp,
-	)
+	), covEnv...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

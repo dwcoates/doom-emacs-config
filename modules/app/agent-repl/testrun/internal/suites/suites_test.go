@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
@@ -1183,6 +1184,46 @@ func TestVitestIntegrationSplitRunsUnderItsConfig(t *testing.T) {
 	}
 }
 
+func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
+	tests := []struct {
+		name     string
+		coverage bool
+		want     []string
+	}{
+		{name: "a coverage run", coverage: true, want: []string{
+			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json --coverage.all=false",
+			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]#00",
+		}},
+		{name: "an ordinary run", coverage: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir, work := t.TempDir(), t.TempDir()
+			l := Layout{Module: dir, Work: work, Coverage: tt.coverage}
+			s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
+			split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+
+			// Assert
+			argv := strings.ReplaceAll(strings.Join(chunk.Argv, " "), work, "WORK")
+			for _, w := range tt.want {
+				if !strings.Contains(argv, w) {
+					t.Errorf("argv %q lacks %q", argv, w)
+				}
+			}
+			if !tt.coverage && (strings.Contains(argv, "--coverage") || strings.Contains(argv, "--isolate")) {
+				t.Errorf("an ordinary run's argv %q collects coverage", argv)
+			}
+		})
+	}
+}
+
 func TestTheRosterRunsEveryIntegrationSuite(t *testing.T) {
 	// The integration suites used to live outside the roster (`make
 	// integration`, `npm run test:integration`), so a full run never ran them.
@@ -1250,4 +1291,31 @@ func TestTheRosterRunsTheRepositoryHarnesses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The coverage run's merge unit writes the unit report where the baseline
+// reads it (cover.VitestCoverage).
+func TestTheVitestMergeUnitWritesWhereTheBaselineReads(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir(), Coverage: true}
+	s := roster.Suite{Name: "webapp"}
+
+	// Act
+	u, err := vitestUnitsForFiles(l, s, dir, []string{"test/a.test.ts"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "--coverage.reportsDirectory=" + filepath.Dir(cover.VitestCoverage(l.Work, "webapp"))
+	for _, a := range u.Atomic {
+		if a.ID == "webapp:coverage" {
+			if !slices.Contains(a.Argv, want) {
+				t.Fatalf("merge argv %v lacks %s", a.Argv, want)
+			}
+			return
+		}
+	}
+	t.Fatal("no webapp:coverage unit")
 }
