@@ -772,6 +772,25 @@ func (f *Fleet) remediateColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 	}
 }
 
+// StandingColdGate answers the cold facts the shim stated for a STANDING cold
+// gate: the session is parked on the user's choice, so its conversation is
+// already cold (cachelapse.Keeper records the gate's lapse on a hidden or
+// closed row). A gate an answer has taken is not standing: its remediation is
+// bringing the session back warm.
+func (f *Fleet) StandingColdGate(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	held, ok := f.coldGates[ws]
+	if !ok || held.answering {
+		return nil, false
+	}
+	cold, ok := f.lastCold[ws]
+	if !ok {
+		panic(fmt.Sprintf("workspace: the standing cold gate of %s has no cold facts; raiseColdGate records both under one lock", ws))
+	}
+	return cold, true
+}
+
 // ReraiseColdGate stands the gate for VENDORSESSIONID again from the cold facts
 // the shim stated when it was first raised, answering false when those facts
 // are gone (the session was stopped or reaped since). It is how an answered

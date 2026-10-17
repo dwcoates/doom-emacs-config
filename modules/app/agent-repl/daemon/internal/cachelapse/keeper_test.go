@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -131,8 +132,10 @@ type harness struct {
 	shim   *fakeShim
 	// shims, when set, is the shim serving each workspace; a workspace absent
 	// from it is served by none.
-	shims      map[ids.WorkspaceID]*fakeShim
-	serving    bool
+	shims   map[ids.WorkspaceID]*fakeShim
+	serving bool
+	// gate, when set, is the cold facts of the workspace's standing cold gate.
+	gate       *conversationv1.SessionCold
 	standDowns *fakeStandDowns
 	publishes  int
 	clock      *clocktest.Scripted
@@ -181,6 +184,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 			}
 			return h.shim, true
 		},
+		ColdGate: func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
+			return h.gate, h.gate != nil
+		},
 		StandDowns:      h.standDowns,
 		PublishRegistry: func(context.Context) error { h.publishes++; return nil },
 		Clock:           h.clock,
@@ -222,6 +228,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		return Deps{
 			DB:              &fakeDB{},
 			Shim:            func(ids.WorkspaceID) (Keepalives, bool) { return nil, false },
+			ColdGate:        func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return nil, false },
 			StandDowns:      &fakeStandDowns{},
 			PublishRegistry: func(context.Context) error { return nil },
 			Clock:           clocktest.New(now),
@@ -234,6 +241,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	}{
 		{name: "state client", strip: func(d *Deps) { d.DB = nil }},
 		{name: "shim fleet", strip: func(d *Deps) { d.Shim = nil }},
+		{name: "standing cold gates", strip: func(d *Deps) { d.ColdGate = nil }},
 		{name: "stand-downs", strip: func(d *Deps) { d.StandDowns = nil }},
 		{name: "republish", strip: func(d *Deps) { d.PublishRegistry = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
@@ -300,7 +308,7 @@ func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	if _, armed := h.keeper.deadlines[theWorkspace]; armed || h.publishes != 0 {
 		t.Fatalf("armed %v with %d publishes, want no deadline and no publish", armed, h.publishes)
 	}
-	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a projected cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped"}) {
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped"}) {
 		t.Fatalf("no record of the dropped projection: %v", h.log.Records())
 	}
 }
@@ -694,5 +702,249 @@ func TestAnOperationTheDaemonsExitCancelsIsRecordedAsLeaving(t *testing.T) {
 				t.Fatalf("records = %+v, want the leaving at INFO and no ERROR", h.log.Records())
 			}
 		})
+	}
+}
+
+// coldLapsed is a standing gate's cold facts: the cache's lifetime passed
+// after the last request.
+func coldLapsed() *conversationv1.SessionCold {
+	return &conversationv1.SessionCold{
+		ContextTokens:   139_359,
+		LastRequestAtMs: now.Add(-2 * time.Hour).UnixMilli(),
+		Reason:          &conversationv1.SessionCold_Lapsed{Lapsed: &conversationv1.SessionColdLapsed{CacheTtlMs: time.Hour.Milliseconds()}},
+	}
+}
+
+// coldModelSwitch is a standing gate's cold facts for a model switch.
+func coldModelSwitch() *conversationv1.SessionCold {
+	return &conversationv1.SessionCold{
+		ContextTokens:   139_359,
+		LastRequestAtMs: now.Add(-2 * time.Hour).UnixMilli(),
+		Reason:          &conversationv1.SessionCold_ModelSwitch{ModelSwitch: &conversationv1.SessionColdModelSwitch{}},
+	}
+}
+
+func TestGateLapseIsWhenTheConversationWentCold(t *testing.T) {
+	tests := []struct {
+		name string
+		cold *conversationv1.SessionCold
+		want time.Time
+	}{
+		{name: "a lapsed cache lapses a lifetime after the last request", cold: coldLapsed(), want: now.Add(-time.Hour)},
+		{name: "a model switch is cold from the last request", cold: coldModelSwitch(), want: now.Add(-2 * time.Hour)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := gateLapse(tt.cold)
+
+			// Assert
+			if !got.LapsesAt.Equal(tt.want) || got.GatedTokens == nil || *got.GatedTokens != 139_359 {
+				t.Fatalf("gateLapse = %+v, want lapsing at %v gated at 139359", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGateLapsePanicsOnAGateOverNoContext(t *testing.T) {
+	// Arrange
+	cold := coldLapsed()
+	cold.ContextTokens = 0
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a gate over no context did not panic")
+		}
+	}()
+
+	// Act
+	gateLapse(cold)
+}
+
+func TestSameLapse(t *testing.T) {
+	tokens, other := uint64(1), uint64(2)
+	tests := []struct {
+		name string
+		a, b wsm.CacheLapse
+		want bool
+	}{
+		{name: "the same gated lapse", a: wsm.CacheLapse{LapsesAt: lapseAt, GatedTokens: &tokens}, b: wsm.CacheLapse{LapsesAt: lapseAt, GatedTokens: &tokens}, want: true},
+		{name: "the same ungated lapse", a: wsm.CacheLapse{LapsesAt: lapseAt}, b: wsm.CacheLapse{LapsesAt: lapseAt}, want: true},
+		{name: "another instant", a: wsm.CacheLapse{LapsesAt: lapseAt}, b: wsm.CacheLapse{LapsesAt: now}, want: false},
+		{name: "gated against ungated", a: wsm.CacheLapse{LapsesAt: lapseAt, GatedTokens: &tokens}, b: wsm.CacheLapse{LapsesAt: lapseAt}, want: false},
+		{name: "another gated context", a: wsm.CacheLapse{LapsesAt: lapseAt, GatedTokens: &tokens}, b: wsm.CacheLapse{LapsesAt: lapseAt, GatedTokens: &other}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := sameLapse(tt.a, tt.b)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("sameLapse = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReconcileRecordsAStandingColdGatesLapse(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  func() wsm.Workspace
+	}{
+		{name: "a hidden workspace", rec: hidden},
+		{name: "a closed workspace", rec: closed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tt.rec())
+			h.gate = coldLapsed()
+
+			// Act
+			h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+			// Assert
+			got := h.db.records[theWorkspace].CacheLapse
+			want := now.Add(-time.Hour)
+			if got == nil || !got.LapsesAt.Equal(want) || got.GatedTokens == nil || *got.GatedTokens != 139_359 {
+				t.Fatalf("CacheLapse = %+v, want the gate's lapse at %v gated at 139359", got, want)
+			}
+			if !h.keeper.deadlines[theWorkspace].Equal(want) || h.publishes != 1 {
+				t.Fatalf("deadline %v with %d publishes, want %v and one publish", h.keeper.deadlines[theWorkspace], h.publishes, want)
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "recorded the workspace's cache lapse"})
+			if !ok || rec.Context["source"] != "the standing cold gate" || rec.Context["gated_tokens"] != uint64(139_359) {
+				t.Fatalf("record = %+v, %v; want one naming the gate as its source and its context", rec, ok)
+			}
+		})
+	}
+}
+
+func TestReconcileLeavesAStandingColdGateOfAWorkspaceNotLeftToLapse(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  func() wsm.Workspace
+	}{
+		{name: "a visible workspace", rec: visible},
+		{name: "the selected hidden workspace", rec: selectedHidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tt.rec())
+			h.gate = coldLapsed()
+
+			// Act
+			h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+			// Assert
+			if len(h.db.setLapses) != 0 || h.publishes != 0 {
+				t.Fatalf("wrote %v with %d publishes, want nothing written", h.db.setLapses, h.publishes)
+			}
+			if _, armed := h.keeper.deadlines[theWorkspace]; armed {
+				t.Fatal("a workspace not left to lapse armed its gate's lapse")
+			}
+		})
+	}
+}
+
+func TestReconcileDoesNotRewriteTheGatesLapseItRecorded(t *testing.T) {
+	// Arrange
+	rec := hidden()
+	lapse := gateLapse(coldLapsed())
+	rec.CacheLapse = &lapse
+	h := newHarness(t, rec)
+	h.gate = coldLapsed()
+
+	// Act
+	h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if len(h.db.setLapses) != 0 || h.publishes != 0 {
+		t.Fatalf("wrote %v with %d publishes, want the recorded lapse left alone", h.db.setLapses, h.publishes)
+	}
+}
+
+func TestReconcileReplacesAProjectionWithTheStandingGatesLapse(t *testing.T) {
+	// Arrange
+	rec := hidden()
+	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+	h := newHarness(t, rec)
+	h.gate = coldLapsed()
+
+	// Act
+	h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+	// Assert
+	got := h.db.records[theWorkspace].CacheLapse
+	if got == nil || !sameLapse(*got, gateLapse(coldLapsed())) {
+		t.Fatalf("CacheLapse = %+v, want the gate's lapse", got)
+	}
+}
+
+func TestReconcileLogsAGateLapseThatCannotBeRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t, hidden())
+	h.gate = coldLapsed()
+	h.db.setErr = errors.New("disk full")
+
+	// Act
+	h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+	// Assert
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opProjection})
+	if !ok || rec.Context["cause"] != "disk full" || rec.Context["source"] != "the standing cold gate" || rec.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("error record = %+v, %v; want one naming the cause, the gate and the workspace", rec, ok)
+	}
+	if _, armed := h.keeper.deadlines[theWorkspace]; armed || h.publishes != 0 {
+		t.Fatalf("armed %v with %d publishes, want nothing armed", armed, h.publishes)
+	}
+}
+
+func TestRunStandsDownAHiddenWorkspaceWhoseSessionParkedAtItsGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t, hidden())
+	h.serving = false
+	h.gate = coldLapsed()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- h.keeper.Run(ctx) }()
+
+	// Act
+	h.keeper.ColdGateRaised(theWorkspace)
+	if waited := <-h.clock.Asked; waited != 0 {
+		t.Fatalf("the keeper waited %v, want the gate's lapse due at once", waited)
+	}
+	h.clock.Fire <- now
+
+	// Assert
+	if got := <-h.standDowns.stood; got != theWorkspace {
+		t.Fatalf("stood down %q, want %q", got, theWorkspace)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v, want nil", err)
+	}
+}
+
+// TestLapseWritesHaveOneHome fails when a source file in this package writes
+// a cache lapse other than through Keeper.store.
+func TestLapseWritesHaveOneHome(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+
+	// Act
+	var sites []string
+	for _, file := range files {
+		for range strings.Count(string(file.Source), ".SetCacheLapse(ctx") {
+			sites = append(sites, file.Name)
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "keeper.go" {
+		t.Fatalf("a cache lapse is written at %v, want only Keeper.store in keeper.go", sites)
 	}
 }

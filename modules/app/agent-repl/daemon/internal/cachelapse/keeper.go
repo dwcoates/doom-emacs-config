@@ -98,7 +98,12 @@ type Deps struct {
 	DB DB
 	// Shim answers the cadence of the shim serving WS, false when this daemon
 	// serves no session for it.
-	Shim       func(ws ids.WorkspaceID) (Keepalives, bool)
+	Shim func(ws ids.WorkspaceID) (Keepalives, bool)
+	// ColdGate answers the cold facts of WS's STANDING cold gate, false when
+	// none stands (workspace.Fleet.StandingColdGate). A session parked at the
+	// gate holds no cadence to project a lapse from, and its conversation is
+	// already cold, so the gate's facts are its lapse (gateLapse).
+	ColdGate   func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
 	StandDowns StandDowns
 	// PublishRegistry republishes the roster's durable half, which is where
 	// a recorded projection and a lapse reach the hidden section.
@@ -137,6 +142,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs a state client")
 	case deps.Shim == nil:
 		return nil, errors.New("cachelapse: the keeper needs the shim fleet")
+	case deps.ColdGate == nil:
+		return nil, errors.New("cachelapse: the keeper needs the standing cold gates")
 	case deps.StandDowns == nil:
 		return nil, errors.New("cachelapse: the keeper needs the withheld stand-downs")
 	case deps.PublishRegistry == nil:
@@ -165,6 +172,12 @@ func (k *Keeper) VisibilityChanged(ws ids.WorkspaceID) {
 // is reconciled. It never blocks.
 func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "the workspace was closed or reopened"})
+}
+
+// ColdGateRaised is WS's session parking at its cold gate: a hidden or closed
+// workspace takes the gate's lapse. It never blocks.
+func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
 }
 
 // SessionUp is a session coming up on WS: its cadence is reconciled. It never
@@ -262,29 +275,40 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 func (k *Keeper) record(ctx context.Context, ws ids.WorkspaceID, stated *conversationv1.SessionCacheLapse) {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
 	lapse := lapseOf(stated)
-	fields := lapseFields(lapse)
 	if stated.GetAfterLapse() == nil {
 		// A VERDICT THIS SCHEMA REVISION DOES NOT NAME is read as no gate:
 		// the row is not struck through, and showing the workspace again
 		// raises whatever gate the shim then judges.
-		log.Info(opProjection, "the projected lapse states a verdict this daemon does not name; it is read as ungated", fields)
+		log.Info(opProjection, "the projected lapse states a verdict this daemon does not name; it is read as ungated", lapseFields(lapse))
 	}
+	k.store(ctx, log, ws, lapse, "the shim's projected cache lapse")
+}
+
+// store records LAPSE on a hidden or closed workspace's row and arms it,
+// answering whether it was recorded. A workspace shown or reopened meanwhile
+// takes none: the store refuses it in the statement that reads the visibility
+// and the close. It is THE ONE write of a lapse in this package
+// (TestLapseWritesHaveOneHome), whether the shim projected it or a standing
+// cold gate stated it.
+func (k *Keeper) store(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, lapse wsm.CacheLapse, what string) bool {
+	fields := dlog.Merge(lapseFields(lapse), dlog.Context{"source": what})
 	recorded, err := k.deps.DB.SetCacheLapse(ctx, ws, lapse)
 	if err != nil {
-		if leaving(ctx, log, opProjection, "recording the projected cache lapse", err) {
-			return
+		if leaving(ctx, log, opProjection, "recording the cache lapse", err) {
+			return false
 		}
-		log.Error(opProjection, "could not record the workspace's projected cache lapse", dlog.WithCause(fields, err))
-		return
+		log.Error(opProjection, "could not record the workspace's cache lapse", dlog.WithCause(fields, err))
+		return false
 	}
 	if !recorded {
-		log.Info(opProjection, "a projected cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped", fields)
+		log.Info(opProjection, "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped", fields)
 		delete(k.deadlines, ws)
-		return
+		return false
 	}
 	k.deadlines[ws] = lapse.LapsesAt
-	log.Info(opProjection, "recorded the workspace's projected cache lapse", fields)
+	log.Info(opProjection, "recorded the workspace's cache lapse", fields)
 	k.publish(ctx, log, opProjection)
+	return true
 }
 
 // cadence is the keep-alive cadence a workspace's row asks of its shim.
@@ -344,6 +368,17 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 	}
 	if !record.LetsCacheLapse() {
 		delete(k.deadlines, ws)
+	}
+	// A WORKSPACE PARKED AT ITS COLD GATE IS ALREADY COLD: its column reads
+	// "cold cache" at once and its row keeps the gate, rather than counting
+	// up from the hide for a lapse no shim will ever project (owner request,
+	// 2026-10-17). The lapse comes due at once, so the parked session is
+	// stood down as any lapsed one is, and showing it again raises the gate.
+	if cold, gated := k.deps.ColdGate(ws); gated && record.LetsCacheLapse() {
+		lapse := gateLapse(cold)
+		if record.CacheLapse == nil || !sameLapse(*record.CacheLapse, lapse) {
+			k.store(ctx, log, ws, lapse, "the standing cold gate")
+		}
 	}
 	want := cadenceFor(record)
 	fields := dlog.Context{"cadence": string(want), "hidden": record.InHiddenSection(), "selected": record.Current, "closed": record.Closed}
@@ -483,6 +518,32 @@ func lapseOf(stated *conversationv1.SessionCacheLapse) wsm.CacheLapse {
 		lapse.GatedTokens = &tokens
 	}
 	return lapse
+}
+
+// gateLapse is the lapse a standing cold gate states: the conversation went
+// cold when its cache's lifetime passed after the last request, or at the
+// last request itself when the gate is a model switch (a cache is per model,
+// so the requested model's never held it). A gate always asks, so the verdict
+// is gated at the context the resume re-reads; a gate raised over no context
+// is a broken shim.
+func gateLapse(cold *conversationv1.SessionCold) wsm.CacheLapse {
+	tokens := cold.GetContextTokens()
+	if tokens == 0 {
+		panic("cachelapse: a cold gate stands over no context; the shim's cold gate asks only above its floor")
+	}
+	at := cold.GetLastRequestAtMs()
+	if lapsed := cold.GetLapsed(); lapsed != nil {
+		at += lapsed.GetCacheTtlMs()
+	}
+	return wsm.CacheLapse{LapsesAt: time.UnixMilli(at).UTC(), GatedTokens: &tokens}
+}
+
+// sameLapse reports whether A and B record the same lapse.
+func sameLapse(a, b wsm.CacheLapse) bool {
+	if !a.LapsesAt.Equal(b.LapsesAt) || (a.GatedTokens == nil) != (b.GatedTokens == nil) {
+		return false
+	}
+	return a.GatedTokens == nil || *a.GatedTokens == *b.GatedTokens
 }
 
 func lapseFields(lapse wsm.CacheLapse) dlog.Context {
