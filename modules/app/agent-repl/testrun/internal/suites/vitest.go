@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"agentrepl/testrun/internal/command"
+	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/roster"
@@ -111,7 +112,7 @@ func vitestIntegrationBuild(s roster.Suite, dir string) (run.Spec, bool) {
 // integration config one worker at a time, exactly as the unit files are. The
 // typecheck already covers the package, so it is not repeated here. A
 // coverage run has each chunk write istanbul JSON of the files it loaded
-// (VitestIntegrationCoverage), which the baseline merges into the suite's
+// (cover.VitestIntegrationCoverage), which the baseline merges into the suite's
 // unit coverage.
 func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string) (Split, error) {
 	group := s.Name + "[integration]"
@@ -135,7 +136,7 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 				// (webapp/vitest.config.ts's coverage note).
 				"--isolate",
 				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json", "--coverage.all=false",
-				"--coverage.reportsDirectory="+filepath.Join(VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
+				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
 			)
 		}
 		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
@@ -201,13 +202,6 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 		Atomic: atomic,
 		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Chunk: chunk}},
 	}, nil
-}
-
-// VitestIntegrationCoverage is the directory under which each of a vitest
-// suite's integration chunks writes its istanbul report in a coverage run,
-// one subdirectory per chunk.
-func VitestIntegrationCoverage(work, suite string) string {
-	return filepath.Join(work, "vitest", suite+"-integration", "coverage")
 }
 
 // VitestItemsEnv names the file testrun/vitest/items-reporter.mjs writes.
