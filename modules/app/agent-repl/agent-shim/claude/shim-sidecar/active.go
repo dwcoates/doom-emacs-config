@@ -184,8 +184,11 @@ func (s *sidecar) applyActive(now time.Time, recordsMoved bool) {
 		delete(s.draining, original)
 	}
 	s.active = next
+	// AFTER THE ACTIVE SET IS SETTLED, so a backfill never re-enters a
+	// conversation a live shim already holds (backfill.go).
+	backfilled := s.consumeBackfillRequests()
 	admitted := 0
-	if refreshed || started > 0 || ended > 0 {
+	if refreshed || started > 0 || ended > 0 || backfilled > 0 {
 		var ok bool
 		admitted, ok = s.admitDormant(now)
 		if !ok {

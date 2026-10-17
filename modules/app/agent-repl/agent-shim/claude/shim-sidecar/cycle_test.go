@@ -3089,3 +3089,17 @@ func TestACursorFromANewerConversionIsStated(t *testing.T) {
 	// Assert.
 	h.requireOnce(t, "conversion-heal", "info")
 }
+
+func TestAPassWhoseRosterOutnumbersTheWatchersEnrollsWithoutPanicking(t *testing.T) {
+	// Arrange: a pass that enrolled two files, both since dropped as drained.
+	h := newHarness(t, &fakeStore{})
+	h.sc.pass = &pollPass{seen: map[string]bool{"/gone/a.jsonl": true, "/gone/b.jsonl": true}}
+
+	// Act.
+	h.sc.enrollWatchers()
+
+	// Assert.
+	if got := len(h.sc.pass.pending); got != 0 {
+		t.Fatalf("pending = %d, want none", got)
+	}
+}

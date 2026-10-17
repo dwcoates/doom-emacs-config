@@ -198,6 +198,9 @@ type sidecar struct {
 	// the LOST policy's bounds, or a full scan not yet completed since the end
 	// that could still discover one (active.go's dropDrained).
 	draining map[string]drainingConversation
+	// backfillFailure is the last error the backfill request directory could
+	// not be read with, so a repeat is stated once (backfill.go).
+	backfillFailure string
 	// fullScans counts the full rescans whose discovery pass completed, so a
 	// draining conversation can tell whether every file it owned when it ended
 	// has since been enumerated.
@@ -1766,7 +1769,10 @@ func (s *sidecar) enrollWatchers() {
 	if s.pass == nil {
 		s.pass = &pollPass{seen: make(map[string]bool, len(s.watchers))}
 	}
-	fresh := make([]string, 0, len(s.watchers)-len(s.pass.seen))
+	// THE ROSTER CAN OUTNUMBER THE WATCHERS: a file dropped as drained mid-pass
+	// stays in `seen`, so the capacity hint is floored at zero (a negative one
+	// panicked the sidecar during the 2026-10-17 backfill).
+	fresh := make([]string, 0, max(0, len(s.watchers)-len(s.pass.seen)))
 	for path := range s.watchers {
 		if s.pass.seen[path] {
 			continue

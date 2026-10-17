@@ -385,6 +385,20 @@ offset, so a restart re-reads it too.
   and each of those loses or duplicates records.
 - DEFERRING IS NOT SKIPPING, and the bound is what keeps that true.
 
+## Backfill requests
+
+`backfill.go`. Only an active workspace's files are watched (`active.go`), so
+a conversation whose shim has not started a session is never read, which
+leaves it empty after the store loses its rows. To read such conversations
+once, drop a file into `<state dir>/sidecar-backfill/` that names one vendor
+session id per line. Write it under a `.tmp` name and rename it into place.
+
+- Each named conversation that is not already active is entered as DRAINING.
+  Its dormant files are admitted, read from the store's cursor, and dropped
+  back to dormant by the ordinary drain bounds. There is no second read path.
+- An applied request is removed. A request that cannot be read or parsed is
+  renamed `.rejected` and recorded once at ERROR.
+
 ## Discovery
 
 `internal/discover`. BOTH account config roots are discovery roots
