@@ -22,6 +22,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedPlan, EDIT_PLAN_TEXT, PLAN_STATE_ARMS } from "../../../src/feed/cards/plan.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
+import { servedProse } from "../../prose.js";
 
 /**
  * The oneof as an INIT shape rather than a built message: the fixtures below
@@ -79,7 +80,7 @@ function plan(state: InitOfFeedPlan): FeedPlan {
 function planned(markdown: string, path?: string): InitOfFeedPlan {
   return {
     case: "planned",
-    value: { prose: { markdown }, edit: path === undefined ? undefined : { path } },
+    value: { prose: { prose: servedProse(markdown) }, edit: path === undefined ? undefined : { path } },
   };
 }
 

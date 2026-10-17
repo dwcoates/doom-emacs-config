@@ -36,6 +36,7 @@ import { stopTicking } from "../../src/feed/ticking.js";
 import { COLLAPSED_FIT_CLASS, COLLAPSED_WIDTH_PROPERTY, collapsedWidthOf } from "../../src/feed/collapsed-width.js";
 import { fireResize } from "../resize-observer.js";
 import { ELLIPSIS_TRIM_PROPERTY, ELLIPSIS_TRIM_SLACK } from "../../src/feed/ellipsis-trim.js";
+import { plainProse } from "../prose.js";
 
 /** Pixels per rendered line in these fixtures. */
 const LINE_PX = 20;
@@ -171,7 +172,7 @@ describe("hidesContentBeyondCap: the body's lines against the collapsed cap", ()
   it("finds nothing hidden beside a reply's quote when the words fit the cap", () => {
     // Arrange — one line of words, and the quote the collapsed bubble does not draw.
     const box = bubbleBox({ lines: 1 });
-    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", "the quote"));
+    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", plainProse("the quote")));
 
     // Act / Assert
     expect(hidesContentBeyondCap(box)).toBe(false);
@@ -180,7 +181,7 @@ describe("hidesContentBeyondCap: the body's lines against the collapsed cap", ()
   it("finds content hidden beside a reply's quote when the words overrun the cap", () => {
     // Arrange — words past the cap, and the quote beside them.
     const box = bubbleBox({ lines: CAP_LINES + 5 });
-    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", "the quote"));
+    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", plainProse("the quote")));
 
     // Act / Assert
     expect(hidesContentBeyondCap(box)).toBe(true);

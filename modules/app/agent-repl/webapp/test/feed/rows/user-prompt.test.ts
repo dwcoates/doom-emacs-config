@@ -24,6 +24,7 @@ import { boundCopyText } from "../../../src/copy-control.js";
 import { SELECTED_ENTRY_CLASS } from "../../../src/feed/selected-entry.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
+import { servedProse } from "../../prose.js";
 
 /** A prompt with the given blocks. */
 function prompt(
@@ -44,7 +45,7 @@ function prompt(
 
 /** A prompt of one text block naming COMMANDS as known. */
 function said(text: string, commands: string[]) {
-  return prompt([{ block: { case: "text", value: { text } } }], "You", false, commands);
+  return prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }], "You", false, commands);
 }
 
 describe("drawFeedUserPrompt: the known commands", () => {
@@ -100,12 +101,12 @@ describe("drawFeedUserPrompt: the known commands", () => {
 
 describe("drawFeedUserPrompt: the bubble", () => {
   it("wears the one bubble's classes and the prompt hook the feed finds it by", () => {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
     expect(el.className).toBe("bubble md user");
   });
 
   it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
     expect(el.getAttribute("style")).toMatch(/animation-delay:-\d+ms/);
   });
 
@@ -130,7 +131,7 @@ describe("drawFeedUserPrompt: the bubble", () => {
   });
 
   it("puts the blocks in the capped body, which the stylesheet already caps", () => {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
     expect(el.querySelector(".bubble-body")).not.toBeNull();
   });
 });
@@ -139,7 +140,7 @@ describe("drawFeedUserPrompt: the body", () => {
   it("draws every block, in the composed order", () => {
     const el = drawFeedUserPrompt(
       prompt([
-        { block: { case: "text", value: { text: "one" } } },
+        { block: { case: "text", value: { prose: servedProse("one") } } },
         { block: { case: "image", value: { src: "/s.png", alt: "shot" } } },
       ]),
     );
@@ -201,7 +202,7 @@ describe("drawFeedUserPrompt: the record of the row", () => {
     // ARRANGE
     const capture = captureLogRecords();
     // ACT
-    drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-user-prompt");
     expect(record.level.case).toBe("info");
@@ -229,7 +230,7 @@ describe("drawFeedUserPrompt: its spec", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const uninstall = installClickExpand(host, () => "");
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "go" } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("go") } } }]));
     host.append(el);
     const box = el.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
     // Act
@@ -246,7 +247,7 @@ describe("drawFeedUserPrompt: the whole prompt, folded or open", () => {
   function withTallPrompt(check: (box: HTMLElement) => void): void {
     const restore = installStylesheet();
     const text = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n\n");
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }]));
     document.body.append(el);
     try {
       check(el.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`) as HTMLElement);
@@ -275,7 +276,7 @@ describe("drawFeedUserPrompt: a tree the person typed", () => {
 
   /** A prompt of one text block holding TEXT, attached under its own column. */
   function mounted(text: string): HTMLElement {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }]));
     const column = document.createElement("div");
     column.append(el);
     document.body.append(column);
@@ -302,10 +303,10 @@ describe("drawFeedUserPrompt: a tree the person typed", () => {
 describe("drawFeedUserPrompt: a re-push", () => {
   it("updates the previous draw in place, keeping its scroll box", () => {
     // Arrange
-    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
     const box = first.querySelector(".bubble-scroll");
     // Act
-    const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]), first);
+    const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), first);
     // Assert
     expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
   });
@@ -316,7 +317,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
   const reply = () =>
     prompt([
       { block: { case: "quote", value: { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" } } },
-      { block: { case: "text", value: { text: "and its population?" } } },
+      { block: { case: "text", value: { prose: servedProse("and its population?") } } },
     ]);
 
   it("draws the quote in the body, ahead of the words", () => {
@@ -378,7 +379,7 @@ describe("drawFeedUserPrompt: the copy control", () => {
 
   it("floats in the scroll box ahead of the body, as the bubble's corner", () => {
     // Act
-    const { control } = copyControlOf([{ block: { case: "text", value: { text: "hi" } } }]);
+    const { control } = copyControlOf([{ block: { case: "text", value: { prose: servedProse("hi") } } }]);
     // Assert
     expect([control.parentElement?.classList.contains("bubble-box"), control.nextElementSibling?.className]).toEqual([
       true,
@@ -390,7 +391,7 @@ describe("drawFeedUserPrompt: the copy control", () => {
     // Act
     const { control } = copyControlOf([
       { block: { case: "quote", value: { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" } } },
-      { block: { case: "text", value: { text: "and *Rome*?" } } },
+      { block: { case: "text", value: { prose: servedProse("and *Rome*?") } } },
     ]);
     // Assert
     expect(boundCopyText(control).text).toBe("⟢ Replying:\n\nParis.\n\n⟢ My message:\n\nand *Rome*?");
@@ -398,9 +399,9 @@ describe("drawFeedUserPrompt: the copy control", () => {
 
   it("copies what the latest push says, after a redraw in place", () => {
     // Arrange
-    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "old" } } }]));
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("old") } } }]));
     // Act
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "new" } } }]), first);
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("new") } } }]), first);
     // Assert
     const controls = el.querySelectorAll(`.${PROMPT_COPY_CLASS}`);
     expect([controls.length, boundCopyText(controls[0]).text]).toEqual([1, "new"]);
@@ -408,7 +409,7 @@ describe("drawFeedUserPrompt: the copy control", () => {
 
   it("adds no text to the bubble", () => {
     // Act
-    const { el, control } = copyControlOf([{ block: { case: "text", value: { text: "just this" } } }]);
+    const { el, control } = copyControlOf([{ block: { case: "text", value: { prose: servedProse("just this") } } }]);
     const withControl = el.textContent;
     // Assert
     control.remove();
@@ -421,7 +422,7 @@ describe("drawFeedUserPrompt: the copy control", () => {
   ])("is %s", (_name, selected, display) => {
     // Arrange
     const restore = installStylesheet();
-    const { el, control } = copyControlOf([{ block: { case: "text", value: { text: "hi" } } }]);
+    const { el, control } = copyControlOf([{ block: { case: "text", value: { prose: servedProse("hi") } } }]);
     el.classList.toggle(SELECTED_ENTRY_CLASS, selected);
     document.body.append(el);
     try {

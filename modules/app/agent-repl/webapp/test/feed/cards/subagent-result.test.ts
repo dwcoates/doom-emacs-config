@@ -22,6 +22,7 @@ import {
   drawFeedSubagentResult,
 } from "../../../src/feed/cards/subagent-result.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
+import { plainProse, servedProse } from "../../prose.js";
 
 type InitOfState = MessageInitShape<typeof FeedSubagentResultSchema>["state"];
 
@@ -46,7 +47,7 @@ function rc(): RowContext {
 
 /** A result carrying REPORT in STATE. */
 function result(state: InitOfState, report = "the report"): FeedSubagentResult {
-  return create(FeedSubagentResultSchema, { report: { text: report }, state });
+  return create(FeedSubagentResultSchema, { report: { prose: servedProse(report) }, state });
 }
 
 const DELIVERED: InitOfState = { case: "delivered", value: {} };
@@ -105,7 +106,7 @@ describe("drawFeedSubagentResult: its spec", () => {
 
 describe("drawFeedSubagentResult malformed input", () => {
   it("refuses a result whose state is unset", () => {
-    expect(() => drawFeedSubagentResult(create(FeedSubagentResultSchema, { report: { text: "r" } }), rc())).toThrow(
+    expect(() => drawFeedSubagentResult(create(FeedSubagentResultSchema, { report: { prose: plainProse("r") } }), rc())).toThrow(
       MalformedView,
     );
   });

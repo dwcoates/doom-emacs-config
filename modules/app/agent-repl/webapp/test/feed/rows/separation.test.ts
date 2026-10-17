@@ -19,6 +19,7 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
+import { plainProse, servedProse } from "../../prose.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -53,7 +54,7 @@ const ARMS: ReadonlyArray<[string, SeparationInit["kind"]]> = [
     "compacted",
     {
       case: "compacted",
-      value: { summary: { markdown: "we did things" } },
+      value: { summary: { prose: plainProse("we did things") } },
     },
   ],
   ["worktreeEntered", { case: "worktreeEntered", value: { path: { text: "/w/tree" } } }],
@@ -224,7 +225,7 @@ describe("drawFeedSessionSeparation: the compaction", () => {
     const el = drawFeedSessionSeparation(
       separation({
         case: "compacted",
-        value: { summary: { markdown: "**done**" } },
+        value: { summary: { prose: plainProse("**done**") } },
       }),
       ctxFor(),
     );
@@ -236,7 +237,7 @@ describe("drawFeedSessionSeparation: the compaction", () => {
       separation({
         case: "compacted",
         value: {
-          summary: { markdown: "s" },
+          summary: { prose: plainProse("s") },
           coldRead: { evidence: { uncachedInputTokens: 180000n } },
         },
       }),
@@ -393,7 +394,7 @@ describe("drawFeedSessionSeparation: the summary is a response bubble", () => {
   /** A compacted divider of SUMMARY. */
   function compacted(summary: string): HTMLElement {
     return drawFeedSessionSeparation(
-      separation({ case: "compacted", value: { summary: { markdown: summary } } }),
+      separation({ case: "compacted", value: { summary: { prose: servedProse(summary) } } }),
       ctxFor(),
     );
   }
@@ -423,7 +424,7 @@ describe("drawFeedSessionSeparation: a tree in the summary", () => {
   /** A compacted divider of SUMMARY, attached. */
   function mounted(summary: string): HTMLElement {
     const el = drawFeedSessionSeparation(
-      separation({ case: "compacted", value: { summary: { markdown: summary } } }),
+      separation({ case: "compacted", value: { summary: { prose: servedProse(summary) } } }),
       ctxFor(),
     );
     document.body.append(el);

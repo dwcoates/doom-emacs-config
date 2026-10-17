@@ -14,8 +14,11 @@
  */
 import { createConnectHookElement, type ConnectHookElement } from "../connect-hook.js";
 import { log } from "../log.js";
-import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
-import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
+import { requireMessage } from "../rpc/strict.js";
+import { create } from "@bufbuild/protobuf";
+import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import { inline, renderMarkdown } from "../markdown.js";
+import { renderTreeHtml, type TreeCols, type TreeIssue } from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
@@ -26,31 +29,62 @@ const logTreeIssue: TreeIssue = (message, context) => {
 };
 
 /**
- * Markdown → HTML, with the metaprompt TLDR tree WRAPPED to the measured COLS.
+ * Served prose → HTML: each plain block as markdown, each tree WRAPPED to the
+ * measured COLS.
  *
- * The tree arrives unwrapped, one physical line per branch; the wrapper
- * (metaprompt-tree.ts, a port of the daemon's former treefmt) breaks every branch too
- * wide for COLS onto continuation lines under its own text column, so the tree
- * fills the bubble and re-flows when the bubble's width changes. Stray prose
- * around the tree keeps the markdown path — which itself wraps a fenced tree to
- * the same COLS — so a model that wrapped the tree in a sentence still reads
- * correctly. COLS is asked for only when a tree is actually drawn.
+ * The daemon serves every drawn text parsed (prose.proto): runs of plain
+ * markdown and the trees between them, each tree a graph. The wrapper
+ * (metaprompt-tree.ts) draws a tree's rails from its graph and breaks every
+ * branch too wide for COLS onto continuation lines under its own text column,
+ * so the tree fills the bubble and re-flows when the bubble's width changes.
+ * COLS is asked for only when a tree is actually drawn.
  */
-export function proseHtml(markdown: string, cols: TreeCols): string {
-  const region = findTreeRegion(markdown);
-  if (region === null) return renderMarkdown(markdown, cols);
-  const before = region.before.trim() === "" ? "" : renderMarkdown(region.before, cols);
-  const after = region.after.trim() === "" ? "" : renderMarkdown(region.after, cols);
-  return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline, cols(), logTreeIssue)}</div>${after}`;
+export function proseHtml(prose: ParsedProse, cols: TreeCols): string {
+  return prose.blocks
+    .map((block) => {
+      switch (block.block.case) {
+        case "plain":
+          return renderMarkdown(block.block.value.markdown);
+        case "tree":
+          return `<div class="mp-tree">${renderTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
+        default:
+          return invariant("a prose block has no arm", { case: String(block.block.case) });
+      }
+    })
+    .join("");
+}
+
+/** PROSE's text as the daemon served it: the source its blocks were parsed from. */
+export function proseSource(prose: ParsedProse): string {
+  return requireMessage(prose.source, "ParsedProse.source").markdown;
+}
+
+/** How many characters PROSE's text holds, for the records that draw it. */
+export function proseCharacters(prose: ParsedProse): number {
+  return proseSource(prose).length;
 }
 
 /**
- * Whether drawing MARKDOWN needs a measured column budget: it holds a tree,
- * bare or fenced. Prose that holds none draws the same at every width, so it
- * can be drawn before the body has a containing block.
+ * MARKDOWN no daemon parsed, as one plain block: the drawing of text the page
+ * holds while no daemon is in reach (an editor ingress entry), so a tree in it
+ * is drawn as the markdown it was typed as. Never a stand-in for a parse the
+ * daemon could have served.
  */
-export function proseNeedsWidth(markdown: string): boolean {
-  return findTreeRegion(markdown) !== null || hasFencedTree(markdown);
+export function unparsedProse(markdown: string): ParsedProse {
+  const run = markdown.endsWith("\n") ? markdown.slice(0, -1) : markdown;
+  return create(ParsedProseSchema, {
+    blocks: run.trim() === "" ? [] : [{ block: { case: "plain", value: { markdown: run } } }],
+    source: { markdown },
+  });
+}
+
+/**
+ * Whether drawing PROSE needs a measured column budget: it holds a tree.
+ * Prose that holds none draws the same at every width, so it can be drawn
+ * before the body has a containing block.
+ */
+export function proseNeedsWidth(prose: ParsedProse): boolean {
+  return prose.blocks.some((block) => block.block.case === "tree");
 }
 
 /** The operation every unmeasurable-width violation is recorded under. */
@@ -256,7 +290,7 @@ interface Painter {
 const painters = new WeakMap<Element, Painter>();
 
 /** Every markdown slot's source, held beside the element it paints. */
-const slotSources = new WeakMap<Element, string>();
+const slotSources = new WeakMap<Element, ParsedProse>();
 
 /**
  * What a slot's kind adds to its rendered markdown before it is placed: a
@@ -285,11 +319,11 @@ export function createBubbleBody(): BubbleBody {
  * bubble's own cap. A slot is an ordinary element (CLASSNAME is the kind's), so
  * a kind can nest it in whatever structure it draws around its prose.
  */
-export function markdownSlot(className: string, markdown: string, mark?: SlotMark): HTMLElement {
+export function markdownSlot(className: string, prose: ParsedProse, mark?: SlotMark): HTMLElement {
   const slot = document.createElement("div");
   slot.className = className;
   slot.setAttribute(MARKDOWN_SLOT_ATTRIBUTE, "");
-  slotSources.set(slot, markdown);
+  slotSources.set(slot, prose);
   if (mark !== undefined) slotMarks.set(slot, mark);
   return slot;
 }
@@ -403,7 +437,7 @@ export function whenSlotPainted(slot: HTMLElement, fn: () => void): void {
 }
 
 /** The source SLOT paints, which every slot has from its making. */
-function sourceOf(slot: Element): string {
+function sourceOf(slot: Element): ParsedProse {
   const source = slotSources.get(slot);
   if (source === undefined) {
     invariant("a markdown slot carries no source", { slot: slot.className });

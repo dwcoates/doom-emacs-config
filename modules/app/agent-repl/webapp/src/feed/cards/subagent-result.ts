@@ -10,7 +10,7 @@
  * vendor's reason verbatim when it stated one. No new look: the bubble is the
  * response's, and the reason line is the muted token.
  */
-import { markdownSlot } from "../../bubble/body.js";
+import { markdownSlot, proseCharacters } from "../../bubble/body.js";
 import { BUBBLE_UNCAPPED, drawBubble } from "../../bubble/draw.js";
 import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -55,10 +55,10 @@ export function drawFeedSubagentResult(u: FeedSubagentResult, rc: RowContext): H
       return unreachableArm(`${PATH}.state`, other.case);
     }
   }
-  const report = requireMessage(u.report, `${PATH}.report`).text;
+  const report = requireMessage(requireMessage(u.report, `${PATH}.report`).prose, `${PATH}.report.prose`);
   log.info("drawing a subagent's returned result", {
     operation: "feed.cards.subagent-result",
-    context: { row: rc.row.id?.value ?? "unset", state: state.case, characters: report.length },
+    context: { row: rc.row.id?.value ?? "unset", state: state.case, characters: proseCharacters(report) },
   });
   return drawBubble(
     {

@@ -2,7 +2,10 @@
 // A prompt waiting in the held-prompt ingress, drawn as a parked card.
 // See src/held/ingress-prompt.ts.
 import { describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
+import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
@@ -27,6 +30,7 @@ import { oneofArms } from "../arms.js";
 import { editorIngressEntry } from "../feed/harness.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { testHeldContext } from "./held-context.js";
+import { plainProse } from "../prose.js";
 
 const NOW = 1_700_000_060_000;
 const ticker: Ticker = { now: () => NOW, subscribe: () => () => undefined };
@@ -46,7 +50,7 @@ const heldContext = () =>
 function ingress(arm: string, label = "waiting", detail?: string): HeldIngressPrompt {
   return create(HeldIngressPromptSchema, {
     said: { content: { blocks: [{ block: { case: "text", value: { text: "what's dmitry's comment" } } }] } },
-    body: { blocks: [{ block: { case: "text", value: { text: "what's dmitry's comment" } } }] },
+    body: { blocks: [{ block: { case: "text", value: { prose: plainProse("what's dmitry's comment") } } }] },
     queuedAt: { atMs: BigInt(NOW - 60_000) },
     badge: create(HeldIngressPromptBadgeSchema, {
       label,
@@ -129,6 +133,77 @@ describe("drawEditorIngressEntry", () => {
   });
 });
 
+describe("an ingress entry's words, drawn unparsed", () => {
+  /** An editor entry saying BLOCKS. */
+  const saying = (blocks: MessageInitShape<typeof UserSaidSchema>["content"]): HTMLElement =>
+    drawEditorIngressEntry({ key: "k", queuedAtMs: 0, said: create(UserSaidSchema, { content: blocks }) }, heldContext());
+
+  it("draws a text block as a markdown slot", () => {
+    // Act
+    const card = saying({ blocks: [{ block: { case: "text", value: { text: "**bold**" } } }] });
+    // Assert
+    expect(card.querySelector(".queued-text")).not.toBeNull();
+  });
+
+  it("draws a tree typed in it as the markdown it was typed as, never as a tree", () => {
+    // Arrange — no daemon has parsed it.
+    const tree = "1 🔧 Fixed it\n└── 1.1 x";
+    // Act
+    const card = saying({ blocks: [{ block: { case: "text", value: { text: tree } } }] });
+    // Assert
+    expect(card.querySelector(".mp-tree")).toBeNull();
+  });
+
+  it("draws a reply's quote as an expand-only slot", () => {
+    // Act
+    const card = saying({ blocks: [{ block: { case: "quote", value: { text: "the quote" } } }] });
+    // Assert
+    expect(card.querySelector(`.queued-quote.${BUBBLE_QUOTE_CLASS}`)).not.toBeNull();
+  });
+
+  it("draws a url image as the picture", () => {
+    // Act
+    const card = saying({
+      blocks: [{ block: { case: "image", value: { mediaType: "image/png", location: { case: "url", value: { url: "https://x/a.png" } } } } }],
+    });
+    // Assert
+    expect(card.querySelector<HTMLImageElement>("img.queued-image")?.src).toBe("https://x/a.png");
+  });
+
+  it("names a host-path image rather than drawing a broken picture", () => {
+    // Act
+    const card = saying({
+      blocks: [{ block: { case: "image", value: { mediaType: "image/png", location: { case: "path", value: { path: "/h/a.png" } } } } }],
+    });
+    // Assert
+    expect(card.querySelector(".queued-image-path")?.textContent).toBe("/h/a.png");
+  });
+
+  it("draws nothing for an unmodeled block, recording its kind through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    const card = saying({ blocks: [{ block: { case: "unsupported", value: { kind: "video" } } }] });
+    // Assert
+    const record = await forwardedRecord(capture, "held.held-prompt.unsupported-block");
+    expect([card.querySelector(".queued-text, img, .queued-image-path"), record.level.case, record.context]).toEqual([
+      null,
+      "warn",
+      expect.objectContaining({ kind: "video" }),
+    ]);
+  });
+
+  it("refuses a block whose oneof is unset", () => {
+    // Act + Assert
+    expect(() => saying({ blocks: [{}] })).toThrow(MalformedView);
+  });
+
+  it("refuses an image whose location is unset", () => {
+    // Act + Assert
+    expect(() => saying({ blocks: [{ block: { case: "image", value: { mediaType: "image/png" } } }] })).toThrow(MalformedView);
+  });
+});
+
 describe("the queued age every held card shares", () => {
   it("draws a held prompt's age and an ingress card's as the one element", () => {
     // Arrange
@@ -136,7 +211,7 @@ describe("the queued age every held card shares", () => {
       create(HeldPromptSchema, {
         turn: { value: "t1" },
         said: { content: { blocks: [{ block: { case: "text", value: { text: "x" } } }] } },
-        body: { blocks: [{ block: { case: "text", value: { text: "x" } } }] },
+        body: { blocks: [{ block: { case: "text", value: { prose: plainProse("x") } } }] },
         queuedAt: { atMs: BigInt(NOW - 60_000) },
         classification: { case: "classifying", value: {} },
         badge: { label: "classifying", standsFor: { case: "classifying", value: {} } },
@@ -158,7 +233,7 @@ describe("the badge every held card shares", () => {
       create(HeldPromptSchema, {
         turn: { value: "t1" },
         said: { content: { blocks: [{ block: { case: "text", value: { text: "x" } } }] } },
-        body: { blocks: [{ block: { case: "text", value: { text: "x" } } }] },
+        body: { blocks: [{ block: { case: "text", value: { prose: plainProse("x") } } }] },
         queuedAt: { atMs: 0n },
         classification: { case: "classifying", value: {} },
         badge: { label: "classifying", standsFor: { case: "classifying", value: {} } },

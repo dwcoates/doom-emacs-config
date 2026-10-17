@@ -29,6 +29,8 @@ import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../../../src/bubble/collapsed-thumbnail.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
+import { plainProse } from "../../prose.js";
+import { servedProse } from "../../prose.js";
 
 /** Paint BLOCK through the one bubble body, as a prompt bubble does. */
 function painted(block: HTMLElement): HTMLElement {
@@ -38,23 +40,23 @@ function painted(block: HTMLElement): HTMLElement {
 
 describe("drawFeedTextBlock", () => {
   it("is a markdown slot, so the bubble's body pipeline paints it", () => {
-    const el = drawFeedTextBlock(create(FeedTextBlockSchema, { text: "**bold**" }));
+    const el = drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("**bold**") }));
     expect(el.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)).toBe(true);
   });
 
   it("renders the text as markdown, which is what the schema says it is", () => {
-    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "**bold**" })));
+    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("**bold**") })));
     expect(el.querySelector("strong")?.textContent).toBe("bold");
   });
 
   it("draws a typed newline as a line break inside one paragraph, spaced as a response's lines are", () => {
-    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "one\ntwo" })));
+    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("one\ntwo") })));
     expect(el.querySelectorAll("p").length).toBe(1);
     expect(el.querySelector("p br")).not.toBeNull();
   });
 
   it("draws an empty block as an empty body rather than refusing", () => {
-    expect(painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "" }))).textContent).toBe("");
+    expect(painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("") }))).textContent).toBe("");
   });
 });
 
@@ -201,7 +203,7 @@ describe("drawFeedUnsupportedBlock", () => {
 describe("drawPromptBlockArm", () => {
   it("draws the text arm", () => {
     const el = drawPromptBlockArm(
-      { case: "text", value: create(FeedTextBlockSchema, { text: "hi" }) },
+      { case: "text", value: create(FeedTextBlockSchema, { prose: plainProse("hi") }) },
       "p",
     );
     expect(el.className).toContain("prompt-block-text");
@@ -295,7 +297,7 @@ describe("the records of the drawn blocks", () => {
     // ARRANGE
     const capture = captureLogRecords();
     // ACT
-    drawFeedTextBlock(create(FeedTextBlockSchema, { text: "hi" }));
+    drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("hi") }));
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-text-block");
     expect(record.level.case).toBe("info");
@@ -315,7 +317,7 @@ describe("the records of the drawn blocks", () => {
 describe("promptBlockCopyText", () => {
   it("copies a text block as the markdown the person wrote", () => {
     // Act / Assert
-    expect(promptBlockCopyText({ case: "text", value: create(FeedTextBlockSchema, { text: "**fix** `a.ts`" }) }, "b")).toBe(
+    expect(promptBlockCopyText({ case: "text", value: create(FeedTextBlockSchema, { prose: servedProse("**fix** `a.ts`") }) }, "b")).toBe(
       "**fix** `a.ts`",
     );
   });
@@ -376,7 +378,7 @@ describe("drawPromptCopyControl", () => {
     // Arrange
     const blocks = [
       { block: { case: "quote" as const, value: create(FeedQuoteBlockSchema, { heading: "H", quoted: "Q", closing: "C" }) } },
-      { block: { case: "text" as const, value: create(FeedTextBlockSchema, { text: "my words" }) } },
+      { block: { case: "text" as const, value: create(FeedTextBlockSchema, { prose: servedProse("my words") }) } },
     ];
     // Act
     const control = drawPromptCopyControl(blocks, "p");

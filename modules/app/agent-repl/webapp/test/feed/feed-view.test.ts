@@ -85,6 +85,7 @@ import { codeOf } from "../source-text.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { selectable } from "../selectable.js";
 import { sentTo } from "./addresses.js";
+import { plainProse } from "../prose.js";
 
 /** A scroll box's rect, for fixtures whose box is never measured for a collapse. */
 const boxRect = (): DOMRect => ({ top: 0 }) as DOMRect;
@@ -2118,7 +2119,7 @@ describe("createFeedController: a landed thinking row", () => {
               thinking: true,
               result: {
                 case: landed ? "success" : "update",
-                value: { prose: { markdown: "weighing" } },
+                value: { prose: { prose: plainProse("weighing") } },
               },
             },
           },
@@ -2793,7 +2794,7 @@ describe("createFeedController: every row arm reaches its own drawing", () => {
         value: {
           address: sentTo("Explore"),
           body: {
-            blocks: [{ block: { case: "text", value: { text: "go" } } }],
+            blocks: [{ block: { case: "text", value: { prose: plainProse("go") } } }],
           },
         },
       },

@@ -101,6 +101,7 @@ import { enduringLine } from "../footer/enduring-line.js";
 import { hiddenRow, numberTabs, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
 import { sentTo } from "../feed/addresses.js";
 import { drawnBodyOf } from "../held/drawn-body.js";
+import { plainProse, servedProse } from "../prose.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -212,7 +213,7 @@ export const userPromptRow = (text = "do the thing", overrides?: Partial<RowInit
         author: { label: "you" },
         result: {
           case: "success",
-          value: { body: { blocks: [{ block: { case: "text", value: { text } } }] } },
+          value: { body: { blocks: [{ block: { case: "text", value: { prose: servedProse(text) } } }] } },
         },
       },
     },
@@ -225,7 +226,7 @@ export const agentPromptRow = (text = "please review", overrides?: Partial<RowIn
       case: "agentPrompt",
       value: {
         address: sentTo("reviewer"),
-        body: { blocks: [{ block: { case: "text", value: { text } } }] },
+        body: { blocks: [{ block: { case: "text", value: { prose: servedProse(text) } } }] },
       },
     },
     overrides,
@@ -250,7 +251,7 @@ export const responseUnit = (
   case: "response",
   value: {
     usage: { text: usageText, heat: { position: 0.5 } },
-    result: { case: state, value: { prose: { markdown } } },
+    result: { case: state, value: { prose: { prose: servedProse(markdown) } } },
     notice: notice === undefined ? undefined : { marker: { label: { text: notice }, family: { case: "neutral", value: {} } } },
   },
 });
@@ -536,7 +537,7 @@ export const planUnit = (state: PlanState): ActivityUnit => ({
   value: {
     state:
       state === "planned"
-        ? { case: "planned", value: { prose: { markdown: "1. do it" }, edit: { path: PLAN_EDIT_PATH } } }
+        ? { case: "planned", value: { prose: { prose: plainProse("1. do it") }, edit: { path: PLAN_EDIT_PATH } } }
         : state === "failed"
           ? {
               case: "failed",
@@ -566,7 +567,7 @@ export const subagentResultUnit = (
 ): ActivityUnit => ({
   case: "subagentResult",
   value: {
-    report: { text: "**all four items done**" },
+    report: { prose: plainProse("**all four items done**") },
     state:
       state === "undelivered"
         ? { case: "undelivered", value: { reason: { text: "the parent is gone" } } }
@@ -680,7 +681,7 @@ export const peerMessageRow = (
   overrides?: Partial<RowInit>,
 ): FeedRow =>
   feedRow(
-    { case: "peerMessage", value: { from: { name: { text: "review-bot" }, sender: { case: "workspace", value: {} } }, body: "the sweep found nothing" } },
+    { case: "peerMessage", value: { from: { name: { text: "review-bot" }, sender: { case: "workspace", value: {} } }, prose: servedProse("the sweep found nothing") } },
     overrides,
   );
 
@@ -1136,7 +1137,7 @@ const separationKind = (arm: SeparationArm): SeparationKind => {
       return {
         case: "compacted",
         value: {
-          summary: { markdown: "the session so far" },
+          summary: { prose: plainProse("the session so far") },
           coldRead: { evidence: { uncachedInputTokens: 40_000n } },
         },
       };

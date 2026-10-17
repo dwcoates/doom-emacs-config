@@ -449,7 +449,7 @@ describe("the feed universe", () => {
     const prompt = rows[0]?.row.case === "userPrompt" ? rows[0].row.value : undefined;
     const body = prompt?.result.case === "success" ? prompt.result.value.body : undefined;
     const block = body?.blocks[0]?.block;
-    expect(block?.case === "text" ? block.value.text : undefined).toBe("older");
+    expect(block?.case === "text" ? block.value.prose?.source?.markdown : undefined).toBe("older");
   });
 });
 

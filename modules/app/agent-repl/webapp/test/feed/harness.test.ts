@@ -135,7 +135,7 @@ describe("settledResponseRow", () => {
     // Assert
     const unit = row.row.case === "activity" ? row.row.value.unit : undefined;
     const result = unit?.case === "response" ? unit.value.result : undefined;
-    expect([row.id?.value, result?.case, result?.case === "success" ? result.value.prose?.markdown : undefined]).toEqual([
+    expect([row.id?.value, result?.case, result?.case === "success" ? result.value.prose?.prose?.source?.markdown : undefined]).toEqual([
       "k1",
       "success",
       "words",

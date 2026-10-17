@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { UserSaid } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { userSaid } from "../integration/fixtures";
 import { drawnBodyOf, servedSrcOf } from "./drawn-body";
+import { plainProse } from "../prose";
 
 const saidOf = (blocks: object[]): UserSaid => ({ content: { blocks: blocks.map((block) => ({ block })) } }) as unknown as UserSaid;
 
 describe("drawnBodyOf", () => {
   it.each([
     { name: "no said draws no blocks", said: undefined, want: [] },
-    { name: "a text block draws its words", said: userSaid("fix it"), want: [{ case: "text", value: { text: "fix it" } }] },
+    { name: "a text block draws its words", said: userSaid("fix it"), want: [{ case: "text", value: { prose: plainProse("fix it") } }] },
     {
       name: "an image by path draws the served source and the file's name",
       said: saidOf([{ case: "image", value: { location: { case: "path", value: { path: "/w/.agent-repl/clip-ab.png" } } } }]),

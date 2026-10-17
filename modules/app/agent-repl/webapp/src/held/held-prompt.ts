@@ -109,7 +109,7 @@ import {
 import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
-import { markdownSlot } from "../bubble/body.js";
+import { markdownSlot, unparsedProse } from "../bubble/body.js";
 import { quoteSlot } from "../bubble/quote.js";
 import { expandedOnly } from "../bubble/expanded-only.js";
 import {
@@ -1347,9 +1347,13 @@ function reasonBadge(text: string, className: string): HTMLElement {
 }
 
 /**
- * What the user said: the bubble's content, block by block — a text block as a
- * markdown slot the one body pipeline paints, an image by reference, and
- * nothing where the schema says a block draws nothing.
+ * What the user said, drawn from the record itself: the bubble's content,
+ * block by block — a text block as a markdown slot the one body pipeline
+ * paints, an image by reference, and nothing where the schema says a block
+ * draws nothing. Only an editor's own ingress entry is drawn this way: no
+ * daemon has accepted it, so none has parsed it, and its words are drawn as
+ * the markdown they were typed as (`unparsedProse`). Everything a daemon
+ * holds arrives drawn (frontend.v1.FeedUserPromptBody).
  */
 export function drawUserSaid(u: UserSaid, path: string): HTMLElement[] {
   const content = requireMessage(u.content, `${path}.content`);
@@ -1393,7 +1397,7 @@ export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
     operation: "held.held-prompt.text-block",
     context: { path, length: u.text.length },
   });
-  return markdownSlot("queued-text", u.text);
+  return markdownSlot("queued-text", unparsedProse(u.text));
 }
 
 /**
@@ -1405,7 +1409,7 @@ export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
     operation: "held.held-prompt.quote-block",
     context: { path, length: u.text.length },
   });
-  return quoteSlot("queued-quote", u.text);
+  return quoteSlot("queued-quote", unparsedProse(u.text));
 }
 
 /**

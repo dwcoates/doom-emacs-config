@@ -9,12 +9,19 @@
  */
 import type { ClientLogRecord } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import type { ClientLogLevel } from "../src/log.js";
-import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../src/log.js";
+import * as logModule from "../src/log.js";
 
 export interface LogCapture {
-  logger: ForwardingLogger;
+  logger: logModule.ForwardingLogger;
   sent: ClientLogRecord[];
 }
+
+/**
+ * The log module a capture installs into. It is this file's own by default; a
+ * test that imports a FRESH module graph (`vi.resetModules`) hands in the
+ * fresh `log` module, which is the one the fresh graph logs through.
+ */
+export type LogModule = typeof logModule;
 
 /**
  * Replace the suite's discarding logger with one whose records the test reads.
@@ -26,8 +33,11 @@ export interface LogCapture {
  * passes "debug", the level a page booted with `log_level=debug` carries — a
  * capture that admitted every level by default would report a debug record as
  * forwarded on a deployment that drops it.
+ *
+ * LOGGING is the log module to install into (see `LogModule`).
  */
-export function captureLogRecords(minimum: ClientLogLevel = "info"): LogCapture {
+export function captureLogRecords(minimum: ClientLogLevel = "info", logging: LogModule = logModule): LogCapture {
+  const { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } = logging;
   const sent: ClientLogRecord[] = [];
   const logger = new ForwardingLogger(
     async (record) => {
@@ -44,18 +54,25 @@ export function captureLogRecords(minimum: ClientLogLevel = "info"): LogCapture 
   return { logger, sent };
 }
 
-/**
- * The one forwarded record for OPERATION. Absence throws rather than reading
- * as an absent level: "the record never went" and "the record went at the
- * wrong level" are different facts and only one of them is under test.
- */
-export async function forwardedRecord(
-  capture: LogCapture,
-  operation: string,
-): Promise<ClientLogRecord> {
+/** Every record CAPTURE forwarded: the throttle's window released, the sink's promises settled. */
+export async function forwardedRecords(capture: LogCapture): Promise<ClientLogRecord[]> {
   capture.logger.flush();
   await Promise.resolve();
-  const found = capture.sent.find((record) => record.operation === operation);
+  return capture.sent;
+}
+
+/**
+ * The one record for OPERATION among RECORDS. Absence throws rather than
+ * reading as an absent field: "the record never went" and "the record went
+ * without it" are different facts and only one of them is under test.
+ */
+export function recordFor(records: readonly ClientLogRecord[], operation: string): ClientLogRecord {
+  const found = records.find((record) => record.operation === operation);
   if (found === undefined) throw new Error(`no forwarded record for ${operation}`);
   return found;
+}
+
+/** The one forwarded record for OPERATION (`forwardedRecords`, `recordFor`). */
+export async function forwardedRecord(capture: LogCapture, operation: string): Promise<ClientLogRecord> {
+  return recordFor(await forwardedRecords(capture), operation);
 }

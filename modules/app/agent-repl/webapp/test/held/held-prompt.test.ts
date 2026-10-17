@@ -90,6 +90,7 @@ import { installClickExpand } from "../../src/expand.js";
 import { HAS_MORE_CLASS, refreshHasMore } from "../../src/feed/bubble-more.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { selectorOf } from "../stylesheet.js";
+import { servedProse } from "../prose.js";
 import { codeOf } from "../source-text.js";
 import heldPromptSource from "../../src/held/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -179,6 +180,7 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
         blocks: [{ block: { case: "text", value: { text: "fix the test" } } }],
       },
     },
+    body: overrides.body,
     classification: overrides.classification ?? {
       case: "classifying",
       value: {},
@@ -897,6 +899,12 @@ describe("the drawn body", () => {
             ],
           },
         },
+        body: {
+          blocks: [
+            { block: { case: "quote", value: { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" } } },
+            { block: { case: "text", value: { prose: servedProse("and its population?") } } },
+          ],
+        },
       }),
       tc,
     );
@@ -1030,6 +1038,13 @@ describe("the drawn body", () => {
             ],
           },
         },
+        body: {
+          blocks: [
+            { block: { case: "text", value: { prose: servedProse("one") } } },
+            { block: { case: "image", value: { src: "https://example.test/a.png", alt: "" } } },
+            { block: { case: "text", value: { prose: servedProse("two") } } },
+          ],
+        },
       }),
       tc,
     );
@@ -1046,11 +1061,11 @@ describe("the drawn body", () => {
     expect(seen).toEqual(["one\ntwo"]);
   });
 
-  it("refuses a said with no content", () => {
+  it("refuses a prompt the daemon served no drawn body for", () => {
     const { tc } = trayContext();
     const prompt = create(HeldPromptSchema, {
       turn: { value: "t" },
-      said: {},
+      said: { content: { blocks: [] } },
       queuedAt: { atMs: BigInt(NOW) },
       classification: { case: "classifying", value: {} },
     });
@@ -1060,6 +1075,12 @@ describe("the drawn body", () => {
   it("refuses a drawn block whose oneof is unset", () => {
     const { tc } = trayContext();
     const prompt = heldPrompt({ body: { blocks: [{}] } });
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("refuses a drawn text block with no prose", () => {
+    const { tc } = trayContext();
+    const prompt = heldPrompt({ body: { blocks: [{ block: { case: "text", value: {} } }] } });
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
 });

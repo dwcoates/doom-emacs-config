@@ -1,5 +1,5 @@
 /**
- * Metaprompt TLDR-tree detection and wrapping.
+ * Metaprompt TLDR-tree wrapping.
  *
  * The metaprompt renders final responses as a numbered Unicode tree
  * (├──/└──/│ connectors plus dotted labels like `2.1`, root nodes
@@ -8,14 +8,20 @@
  * continuation lines, so no line exceeds the width the bubble can show and the
  * tree fills its bubble and re-flows on resize.
  *
- * THE WRAP ENGINE IS A ONE-TO-ONE PORT of the owner's format_trees.py, by way
- * of the daemon's former Go port of it (`treefmt`, since deleted): the same
- * parser, the same packer, the same width model, the same idempotence, the
- * same error surface. The wrapping used to run in the daemon at a fixed 105
- * columns; it runs HERE now, at the live width the bubble measures, because
- * the daemon cannot know how many characters fit a given pixel width and so
- * cannot re-flow on resize. This is the only implementation. Each ported
- * function carries its Go/Python name so it can be read beside the original.
+ * THIS MODULE WRAPS; IT DOES NOT PARSE. Every tree reaches it already parsed
+ * by the daemon, as a frontend.v1.ProseTree: a flat list of nodes, each naming
+ * its parent, with its label, its text and any code under it. This module lays
+ * that graph out as rows (layoutTree), synthesizing each row's rails from the
+ * node's ancestors, and what is left here is the width model and the wrapper.
+ *
+ * THE WRAP ENGINE IS A ONE-TO-ONE PORT of the daemon's former wrapper
+ * (`treefmt`, since deleted): the same packer, the same width model, the same
+ * idempotence, the same error surface (its parser is now the daemon's). The
+ * wrapping used to run in the daemon at a fixed 105 columns; it runs HERE now,
+ * at the live width the bubble measures, because the daemon cannot know how
+ * many characters fit a given pixel width and so cannot re-flow on resize.
+ * This is the only implementation. Each ported function carries the name it
+ * had there.
  *
  * A wrapped branch's continuation lines
  *
@@ -51,6 +57,7 @@
 import { codeBlockHtml } from "./code-block.js";
 import { escapeHtml } from "./highlight.js";
 import { log } from "./log.js";
+import type { ProseTree, ProseTreeCode } from "../../proto/gen/ts/frontend/v1/prose_pb";
 
 /**
  * The class of the inline box every double-width character of a tree line is
@@ -59,265 +66,9 @@ import { log } from "./log.js";
  */
 export const WIDE_CHAR_CLASS = "mp-wide";
 
-// ---------------------------------------------------------------------------
-// Cheap line classification (detection only)
-// ---------------------------------------------------------------------------
-//
-// Classifying tree lines runs on every assistant render (and drives the
-// tree-bounds scan below), so these helpers walk code points directly rather
-// than lean on Unicode regex: a connector is a leading │/space run then
-// ├──/└──, a root is a column-0 dotted label followed by a space and an emoji,
-// and the header is the mandated `Response (…)` opener.
-
-const CH_SPACE = 0x20;
-const CH_TAB = 0x09;
-const CH_BAR = 0x2502; // │
-const CH_TEE = 0x251c; // ├
-const CH_ELL = 0x2514; // └
-const CH_HORIZ = 0x2500; // ─
-const CH_DOT = 0x2e; // .
-const CH_ZERO = 0x30;
-const CH_NINE = 0x39;
+// The two characters the inline-code scanner (scanCode) reads.
 const CH_BACKTICK = 0x60;
 const CH_BACKSLASH = 0x5c;
-// Floor of the Unicode symbol/arrow/emoji range. Every metaprompt root emoji
-// sits at or above it (✅ U+2705, ✏️ U+270F, 🔧/👀 as surrogate pairs from
-// U+D83D…), while ASCII prose after a bare number (e.g. `1 first point`)
-// stays below it and so is never mistaken for a root.
-const EMOJI_FLOOR = 0x2190;
-
-const HEADER_PREFIX = "Response (";
-
-/** Minimum fraction of non-blank lines that must look tree-shaped. */
-const TREE_LINE_RATIO = 0.6;
-
-function isDigit(code: number): boolean {
-  return code >= CH_ZERO && code <= CH_NINE;
-}
-
-/** A child branch line: a leading │/space run, then `├──` or `└──`. */
-function isConnectorLine(line: string): boolean {
-  let i = 0;
-  const n = line.length;
-  while (i < n) {
-    const c = line.charCodeAt(i);
-    if (c === CH_SPACE || c === CH_BAR) i++;
-    else break;
-  }
-  const c = line.charCodeAt(i);
-  if (c !== CH_TEE && c !== CH_ELL) return false;
-  return line.charCodeAt(i + 1) === CH_HORIZ && line.charCodeAt(i + 2) === CH_HORIZ;
-}
-
-/**
- * Consume a column-0 dotted label (`1`, `2.1`, `3.4.5`) and return the index
- * just past it, or -1 when the line does not open on a dotted label. A dot is
- * consumed only when a digit follows it, so a trailing dot ends the label.
- */
-function dottedLabelEnd(line: string): number {
-  if (!isDigit(line.charCodeAt(0))) return -1;
-  let i = 1;
-  const n = line.length;
-  while (i < n) {
-    const c = line.charCodeAt(i);
-    if (isDigit(c)) {
-      i++;
-      continue;
-    }
-    if (c === CH_DOT && isDigit(line.charCodeAt(i + 1))) {
-      i += 2;
-      continue;
-    }
-    break;
-  }
-  return i;
-}
-
-/** A dotted label followed by whitespace, emoji not required. */
-function isDottedLabelLine(line: string): boolean {
-  const end = dottedLabelEnd(line);
-  if (end < 0) return false;
-  const c = line.charCodeAt(end);
-  return c === CH_SPACE || c === CH_TAB;
-}
-
-/** A root branch line: a dotted label, one space, then an emoji root marker. */
-function isEmojiRootLine(line: string): boolean {
-  const end = dottedLabelEnd(line);
-  if (end < 0) return false;
-  if (line.charCodeAt(end) !== CH_SPACE) return false;
-  return line.charCodeAt(end + 1) >= EMOJI_FLOOR;
-}
-
-/** The mandated `Response (…)` opener that heads every metaprompt response. */
-function isHeaderLine(line: string): boolean {
-  return line.startsWith(HEADER_PREFIX);
-}
-
-/**
- * A ``` code-fence delimiter, after any leading rail (fenceIndent). A fence the
- * model drew behind its branch's `│` rail is still a fence: read as a plain
- * line it is neither tree-core nor a delimiter, so it ENDED the tree region and
- * every later branch spilled onto the markdown path (2026-09-30).
- */
-function isFenceDelimiter(line: string): boolean {
-  const i = fenceIndent(line);
-  return (
-    line.charCodeAt(i) === CH_BACKTICK &&
-    line.charCodeAt(i + 1) === CH_BACKTICK &&
-    line.charCodeAt(i + 2) === CH_BACKTICK
-  );
-}
-
-/**
- * The width of LINE's leading rail: spaces and `│` connectors. A fence body
- * is dedented by its opening delimiter's rail, so code drawn beneath a branch
- * with or without the tree's vertical rules reads as the same plain block.
- */
-function fenceIndent(line: string): number {
-  let i = 0;
-  for (;;) {
-    const c = line.charCodeAt(i);
-    if (c !== CH_SPACE && c !== CH_BAR) return i;
-    i++;
-  }
-}
-
-/**
- * Whether TEXT reads as a metaprompt TLDR tree: at least two non-blank lines,
- * most of them tree-shaped (connector or dotted-label start), anchored by
- * either a connector line or an emoji-prefixed root — the two shapes ordinary
- * prose and markdown lists never produce.
- */
-export function isMetapromptTree(text: string): boolean {
-  const lines = text.split("\n").filter((l) => l.trim() !== "");
-  if (lines.length < 2) return false;
-  let treeish = 0;
-  let anchored = false;
-  for (const line of lines) {
-    const connector = isConnectorLine(line);
-    const emojiRoot = isEmojiRootLine(line);
-    if (connector || emojiRoot || isDottedLabelLine(line)) treeish++;
-    if (connector || emojiRoot) anchored = true;
-  }
-  return anchored && treeish / lines.length >= TREE_LINE_RATIO;
-}
-
-/** The line bounds of a metaprompt tree carved out of a text segment. */
-export interface TreeRegion {
-  /** Lines before the tree, kept on the markdown path (may be empty). */
-  before: string;
-  /** The tree block itself, wrapped and rendered as tree lines. */
-  tree: string;
-  /** Lines after the tree, kept on the markdown path (may be empty). */
-  after: string;
-}
-
-/**
- * Locate the metaprompt tree's line bounds inside TEXT and split it into the
- * prose BEFORE the tree, the TREE block, and the prose AFTER it. This lets a
- * tree survive stray prefix/postfix lines (or a stray fenced block) the model
- * emits around it despite the format: only the tree region is wrapped as tree
- * lines, and the surrounding lines stay on the markdown path. Returns null when
- * TEXT carries no tree, i.e. fewer than two connector/root lines outside any
- * fence. Fence-aware: lines inside a ``` fence are never tree lines, so a
- * fenced tree is left for the markdown fence handler.
- */
-export function findTreeRegion(text: string): TreeRegion | null {
-  const lines = text.split("\n");
-  const n = lines.length;
-  // core[i]: a connector/root line outside any fence. head[i]: the header.
-  const core: boolean[] = new Array<boolean>(n).fill(false);
-  const head: boolean[] = new Array<boolean>(n).fill(false);
-  let inFence = false;
-  for (let i = 0; i < n; i++) {
-    const line = lines[i];
-    if (isFenceDelimiter(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    if (isConnectorLine(line) || isEmojiRootLine(line)) core[i] = true;
-    else if (isHeaderLine(line)) head[i] = true;
-  }
-  // The first tree-core line anchors the region.
-  let start = -1;
-  for (let i = 0; i < n; i++) {
-    if (core[i]) {
-      start = i;
-      break;
-    }
-  }
-  if (start === -1) return null;
-  // Extend across interior blanks; the first non-blank, non-core line ends the
-  // region — EXCEPT an interior fenced block, which the metaprompt allows
-  // attached beneath a branch. A fence delimiter is not itself a tree-core line,
-  // so a fenced code block nested under a branch (and every branch after it) must
-  // be spanned rather than treated as a hard boundary. The region absorbs such a
-  // block and RESUMES tree detection past its close. A fence still ends the
-  // region when it is NOT followed by more tree-core lines: a genuinely trailing
-  // fenced block after the tree stays in `after`. `end` tracks the last line kept.
-  let end = start;
-  let coreCount = 0;
-  let i = start;
-  while (i < n) {
-    if (core[i]) {
-      end = i;
-      coreCount++;
-      i++;
-      continue;
-    }
-    if (lines[i].trim() === "") {
-      i++;
-      continue;
-    }
-    if (isFenceDelimiter(lines[i])) {
-      // Find the matching close (or the end of text for an unterminated fence).
-      let close = i + 1;
-      while (close < n && !isFenceDelimiter(lines[close])) close++;
-      // Peek past the close for the next non-blank line: only a tree-core line
-      // there makes this an INTERIOR block worth spanning.
-      let peek = close + 1;
-      while (peek < n && lines[peek].trim() === "") peek++;
-      if (close < n && peek < n && core[peek]) {
-        end = close;
-        i = close + 1;
-        continue;
-      }
-      // Trailing or unterminated fenced block: it is `after`, not the tree.
-      break;
-    }
-    break;
-  }
-  // A lone stray connector buried in prose is not a tree.
-  if (coreCount < 2) return null;
-  // Pull a directly-preceding `Response (…)` header (across blanks) into the
-  // region so it renders inside the tree block.
-  let top = start;
-  for (let i = start - 1; i >= 0; i--) {
-    if (lines[i].trim() === "") continue;
-    if (head[i]) top = i;
-    break;
-  }
-  return {
-    before: lines.slice(0, top).join("\n"),
-    tree: lines.slice(top, end + 1).join("\n"),
-    after: lines.slice(end + 1).join("\n"),
-  };
-}
-
-/**
- * Whether TEXT opens on the mandated `Response (…)` header, marking it as an
- * intended metaprompt response. Used to flag a postprocessing misfire: a
- * header-led segment that yielded no tree region (see findTreeRegion).
- */
-export function looksLikeIntendedTree(text: string): boolean {
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    return isHeaderLine(line);
-  }
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // Rendered width (treefmt: StripTags / charWidth / textWidth / VisibleWidth)
@@ -677,7 +428,7 @@ function tokenizeWith(raw: string, honorCode: boolean): { atoms: Atom[]; balance
 }
 
 // ---------------------------------------------------------------------------
-// Branch parsing (treefmt: Branch / parse_prefix / match_label / parse_branch)
+// Branch shape (treefmt: Branch / continuation_prefix / text_column)
 // ---------------------------------------------------------------------------
 
 const SEGMENT_WIDTH = 4;
@@ -688,34 +439,14 @@ const SEGMENT_WIDTH = 4;
 // means it does not, so the column goes blank.
 const SEGMENT_CONTINUATIONS: Readonly<Record<string, string>> = {
   "│   ": "│   ",
-  "|   ": "|   ",
   "    ": "    ",
   "├── ": "│   ",
   "└── ": "    ",
-  "|-- ": "|   ",
-  "+-- ": "|   ",
-  "`-- ": "    ",
 };
 
-// connector_segments: the segments that terminate a prefix. A branch has
-// exactly one connector, and it is the last segment before the label.
-const CONNECTOR_SEGMENTS = new Set([
-  "├── ",
-  "└── ",
-  "|-- ",
-  "+-- ",
-  "`-- ",
-]);
-
+/** One drawn branch head: the rails and connector drawn from the graph, the
+ * node's label with its trailing space, and its text. */
 interface Branch {
-  /**
-   * Leading whitespace before the aligned tree prefix. The daemon formatter's
-   * output is 4-column-aligned, but the model sometimes emits a stray leading
-   * space (or a non-4-aligned run) before a connector; that indent is preserved
-   * verbatim so the branch and its wrapped continuation hang together, rather
-   * than desyncing segment alignment and forcing the line to render raw.
-   */
-  indent: string;
   prefix: string;
   label: string;
   body: string;
@@ -740,7 +471,7 @@ function continuationPrefix(b: Branch): string {
 
 /** Branch.text_column: the column at which the branch text starts. */
 function textColumn(b: Branch): number {
-  return visibleWidth(b.indent) + visibleWidth(b.prefix) + visibleWidth(b.label);
+  return visibleWidth(b.prefix) + visibleWidth(b.label);
 }
 
 /**
@@ -754,117 +485,7 @@ function continuationIndent(b: Branch, hasChildren: boolean): string {
     hasChildren && labelWidth > 0
       ? "│" + " ".repeat(labelWidth - 1)
       : " ".repeat(labelWidth);
-  return b.indent + continuationPrefix(b) + padding;
-}
-
-/** Branch.is_parent_of: whether OTHER is a direct child of B. The leading
- * indent is part of the structure a child inherits, so it is compared too. */
-function isParentOf(b: Branch, other: Branch): boolean {
-  const cont = b.indent + continuationPrefix(b);
-  const otherFull = other.indent + other.prefix;
-  return (
-    otherFull.startsWith(cont) &&
-    [...otherFull].length === [...cont].length + SEGMENT_WIDTH
-  );
-}
-
-/** aligned_prefix: walk LINE's 4-column tree segments from the start, stopping
- * at the connector. This is the daemon formatter's exact prefix model, which
- * assumes the prefix begins at column 0. */
-function alignedPrefix(line: string): { prefix: string; remainder: string } {
-  const cps = [...line];
-  let position = 0;
-  let collected = "";
-  for (;;) {
-    const segment = cps.slice(position, position + SEGMENT_WIDTH).join("");
-    if (!(segment in SEGMENT_CONTINUATIONS)) break;
-    collected += segment;
-    position += SEGMENT_WIDTH;
-    if (CONNECTOR_SEGMENTS.has(segment)) break;
-  }
-  return { prefix: collected, remainder: cps.slice(position).join("") };
-}
-
-/** Whether CODE is a space or tab, the only leading indent the peeler steps
- * over. */
-function isIndentCp(code: number): boolean {
-  return code === CH_SPACE || code === CH_TAB;
-}
-
-/**
- * parse_prefix: split LINE into an optional leading INDENT, its aligned tree
- * PREFIX, and the REMAINDER after it.
- *
- * REGRESSION WATCH (leading whitespace before a connector must NOT force raw):
- * a stray non-4-aligned leading space before a connector desyncs the aligned
- * segment walk, so a branch like ` └── 1.1 …` would otherwise parse to an empty
- * prefix and, lacking a label at its head, render raw and overflow the bubble.
- * The peeler steps over the MINIMAL leading-whitespace run that lets the aligned
- * walk find a connector-terminated prefix or a labelled remainder, so a genuine
- * 4-aligned space segment (`    ├── …`) is still consumed as a segment and only
- * the stray excess becomes indent. When no branch shape is found at any offset,
- * it falls back to the aligned walk at column 0 (so continuations and genuine
- * prose behave exactly as before).
- */
-function parsePrefix(line: string): { indent: string; prefix: string; remainder: string } {
-  const cps = [...line];
-  for (let skip = 0; skip <= cps.length; skip++) {
-    if (skip > 0 && !isIndentCp(cps[skip - 1].charCodeAt(0))) break;
-    const { prefix, remainder } = alignedPrefix(cps.slice(skip).join(""));
-    const segs = segments(prefix);
-    const hasConnector = prefix !== "" && CONNECTOR_SEGMENTS.has(segs[segs.length - 1]);
-    if (hasConnector || matchLabel(remainder)) {
-      return { indent: cps.slice(0, skip).join(""), prefix, remainder };
-    }
-  }
-  const { prefix, remainder } = alignedPrefix(line);
-  return { indent: "", prefix, remainder };
-}
-
-const LABEL_RE = /^(\d+(?:\.\d+)*\.?\s+)/;
-
-/** match_label: LABEL_RE — the label (digits, dots, trailing whitespace). */
-function matchLabel(s: string): { label: string; end: number } | null {
-  const m = LABEL_RE.exec(s);
-  if (!m) return null;
-  return { label: m[1], end: m[1].length };
-}
-
-/** parse_branch: parse LINE as a branch head, or return null. */
-function parseBranch(line: string): Branch | null {
-  if (line.trim() === "") return null;
-  const { indent, prefix, remainder } = parsePrefix(line);
-  const segs = segments(prefix);
-  const hasConnector = prefix !== "" && CONNECTOR_SEGMENTS.has(segs[segs.length - 1]);
-  const matched = matchLabel(remainder);
-  if (!matched) {
-    // A branch with no label is still a branch when it carries a connector.
-    if (!hasConnector) return null;
-    return { indent, prefix, label: "", body: remainder.trim() };
-  }
-  return { indent, prefix, label: matched.label, body: remainder.slice(matched.end).trim() };
-}
-
-/**
- * parse_continuation: the (text column, text) of LINE if it can be a wrapped
- * remainder. A continuation carries no connector and no label: it is vertical
- * rules and blanks, then alignment padding, then text.
- */
-function parseContinuation(line: string): { column: number; text: string } | null {
-  if (line.trim() === "") return null;
-  const { indent, prefix, remainder } = parsePrefix(line);
-  if (prefix !== "") {
-    const segs = segments(prefix);
-    if (CONNECTOR_SEGMENTS.has(segs[segs.length - 1])) return null;
-  }
-  // The padding region may carry the branch's held-open child connector, so a
-  // leading vertical rule counts as padding rather than as text.
-  const stripped = remainder.replace(/^[ │|]+/, "");
-  const padding = [...remainder].length - [...stripped].length;
-  const text = stripped;
-  if (text === "") return null;
-  if (matchLabel(text)) return null;
-  return { column: visibleWidth(indent) + visibleWidth(prefix) + padding, text: text.replace(/\s+$/u, "") };
+  return continuationPrefix(b) + padding;
 }
 
 // ---------------------------------------------------------------------------
@@ -979,7 +600,7 @@ function scanCode(raw: string, state: CodeState): CodeState {
  * own backticks are already measured), so a line reserves room for its closing
  * backticks (`closeW`) and its leading reopen backticks (`reopenW`) and never
  * itself overflows. Triple-backtick FENCED blocks are handled opaquely elsewhere
- * (splitTreeSegments / renderFenceBlock) and never reach here.
+ * (the daemon serves each as a node's code, drawn by renderFenceBlock) and never reach here.
  */
 function pack(pieces: Piece[], width: number, markdown: boolean): { lines: string[]; overflows: string[] } {
   const lines: string[] = [];
@@ -1068,7 +689,7 @@ function wrapBranch(
   const packed = pack(toPieces(tokenize(body, markdown), field), field, markdown);
   const indent = continuationIndent(branch, hasChildren);
   const lines: RenderLine[] = [
-    { prefix: branch.indent + branch.prefix + branch.label, body: packed.lines[0], raw: false },
+    { prefix: branch.prefix + branch.label, body: packed.lines[0], raw: false },
   ];
   for (let i = 1; i < packed.lines.length; i++) {
     lines.push({ prefix: indent, body: packed.lines[i], raw: false });
@@ -1077,41 +698,91 @@ function wrapBranch(
 }
 
 // ---------------------------------------------------------------------------
-// Block formatting (treefmt: Entry / join_wrapped / format_block)
+// Layout: the graph as drawn rows (the rails are drawn here, never served)
 // ---------------------------------------------------------------------------
 
-interface Entry {
-  branch: Branch | null;
-  raw: string;
-}
+/** One drawn row of a tree: a node's head, a passthrough line, or a code block. */
+export type TreeRow =
+  | { kind: "branch"; branch: Branch; hasChildren: boolean }
+  | { kind: "raw"; text: string }
+  | { kind: "code"; code: ProseTreeCode };
 
-/** join_wrapped: collapse already-wrapped branches back into one entry each. */
-function joinWrapped(lines: string[]): Entry[] {
-  const entries: Entry[] = [];
-  for (const line of lines) {
-    const branch = parseBranch(line);
-    if (branch) {
-      entries.push({ branch, raw: line });
-      continue;
-    }
-    const cont = parseContinuation(line);
-    const last = entries[entries.length - 1];
-    if (cont && last && last.branch) {
-      if (cont.column === textColumn(last.branch)) {
-        last.branch.body = (last.branch.body + " " + cont.text).trim();
-        continue;
-      }
-    }
-    entries.push({ branch: null, raw: line });
-  }
-  return entries;
+/** A tree the daemon served that breaks the guarantees ProseTree documents. */
+function malformedTree(message: string, context: Record<string, unknown>): never {
+  log.error(`a served tree is malformed: ${message}`, { operation: "metaprompt-tree.malformed", context });
+  throw new Error(`metaprompt tree: ${message}`);
 }
 
 /**
- * format_block: wrap every branch in one block's lines. Throws
- * TreeOverflowError when a branch's prefix alone exceeds WIDTH — the one
- * condition the formatter refuses. Returns the rendered lines plus every word
- * that could not be made to fit (served wider, never truncated).
+ * layout: TREE as the rows it draws, in reading order. A node's rails are drawn
+ * from the graph — each ancestor below the root contributes `│   ` while it
+ * still has a sibling below and four spaces once it is the last, and the node's
+ * own connector is `├── `, or `└── ` for a last child — so a malformed rail the
+ * model wrote is never drawn. Roots are drawn with their marker before their
+ * text, a blank line between roots, and the header above the first.
+ */
+export function layoutTree(tree: ProseTree): TreeRow[] {
+  const nodes = tree.nodes;
+  const parent: (number | null)[] = [];
+  const children: number[][] = nodes.map(() => []);
+  nodes.forEach((n, i) => {
+    if (n.id?.index !== i) malformedTree("a node's id is not its index", { index: i, id: n.id?.index });
+    if (n.label === undefined || n.text === undefined) malformedTree("a node lacks its label or text", { index: i });
+    switch (n.place.case) {
+      case "root":
+        parent.push(null);
+        return;
+      case "branch": {
+        const of = n.place.value.parent?.index;
+        if (of === undefined || of >= i) malformedTree("a branch names no earlier parent", { index: i, parent: of });
+        parent.push(of);
+        children[of].push(i);
+        return;
+      }
+      default:
+        malformedTree("a node has no place", { index: i });
+    }
+  });
+  const isLast = (i: number): boolean => {
+    const of = parent[i];
+    if (of === null) return true;
+    const siblings = children[of];
+    return siblings[siblings.length - 1] === i;
+  };
+
+  const rows: TreeRow[] = [];
+  if (tree.header !== undefined) rows.push({ kind: "raw", text: tree.header.text }, { kind: "raw", text: "" });
+  let roots = 0;
+  nodes.forEach((n, i) => {
+    let prefix = "";
+    let body = n.text?.markdown ?? "";
+    if (n.place.case === "root") {
+      if (roots > 0) rows.push({ kind: "raw", text: "" });
+      roots++;
+      const marker = n.place.value.marker?.text;
+      if (marker !== undefined) body = body === "" ? marker : `${marker} ${body}`;
+    } else {
+      const chain: number[] = [];
+      for (let a = parent[i]; a !== null; a = parent[a]) chain.unshift(a);
+      for (const a of chain.slice(1)) prefix += isLast(a) ? "    " : "│   ";
+      prefix += isLast(i) ? "└── " : "├── ";
+    }
+    rows.push({
+      kind: "branch",
+      branch: { prefix, label: `${n.label?.text ?? ""} `, body },
+      hasChildren: children[i].length > 0,
+    });
+    for (const code of n.code) rows.push({ kind: "code", code });
+  });
+  return rows;
+}
+
+/**
+ * format_block: wrap every branch row of TREE. Throws TreeOverflowError when a
+ * branch's prefix alone exceeds WIDTH — the one condition the formatter
+ * refuses. Returns the drawn lines (code blocks are not lines, and are left
+ * out) plus every word that could not be made to fit (served wider, never
+ * truncated).
  *
  * WITHOUT INLINE, every body is the RAW MARKDOWN it arrived as, wrapped with its
  * backtick spans balanced, which is the daemon formatter's own output. WITH
@@ -1121,23 +792,19 @@ function joinWrapped(lines: string[]): Entry[] {
  * or a bold phrase is an element no wrap can cut into broken markdown.
  */
 export function formatTree(
-  lines: string[],
+  tree: ProseTree,
   width: number,
   inline?: InlineMarkup,
 ): { lines: RenderLine[]; overflows: string[] } {
-  const entries = joinWrapped(lines);
   const out: RenderLine[] = [];
   const overflows: string[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (!entry.branch) {
-      out.push({ prefix: "", body: inline === undefined ? entry.raw : inline(escapeHtml(entry.raw)), raw: true });
+  for (const row of layoutTree(tree)) {
+    if (row.kind === "code") continue;
+    if (row.kind === "raw") {
+      out.push({ prefix: "", body: inline === undefined ? row.text : inline(escapeHtml(row.text)), raw: true });
       continue;
     }
-    let hasChildren = false;
-    const next = entries[i + 1];
-    if (next && next.branch) hasChildren = isParentOf(entry.branch, next.branch);
-    const wrapped = wrapBranch(entry.branch, width, hasChildren, inline);
+    const wrapped = wrapBranch(row.branch, width, row.hasChildren, inline);
     out.push(...wrapped.lines);
     overflows.push(...wrapped.overflows);
   }
@@ -1155,19 +822,26 @@ export type InlineMarkup = (escaped: string) => string;
 export type TreeIssue = (message: string, context: Record<string, unknown>) => void;
 
 /**
- * Render TEXT as wrapped tree lines at WIDTH columns. Each output line is an
- * `.mp-line` div carrying its structural prefix verbatim and its branch body
- * with INLINE markdown applied (markdown.ts's inline pass, injected rather than
- * imported so this module never depends back on markdown.ts). INLINE runs
- * BEFORE the wrap (`formatTree`), so the width a line is wrapped to is the
- * width it draws.
+ * The column budget a tree wraps to, measured from the bubble only when a tree
+ * is actually drawn (bubble/body.ts `measureTreeCols`). There is no default.
+ */
+export type TreeCols = () => number;
+
+/**
+ * Render TREE (served as a graph, frontend.v1.ProseTree) as wrapped tree lines
+ * at WIDTH columns. Each output line is an `.mp-line` div carrying its
+ * structural prefix verbatim and its branch body with INLINE markdown applied
+ * (markdown.ts's inline pass, injected rather than imported so this module
+ * never depends back on markdown.ts). INLINE runs BEFORE the wrap, so the
+ * width a line is wrapped to is the width it draws. A node's code blocks are
+ * drawn beneath its head, opaque.
  *
  * When a branch's prefix alone exceeds WIDTH the wrapper refuses (the tree is
  * too deep for the width); the issue is surfaced through ONISSUE and the tree is
  * rendered unwrapped rather than not at all, so the reader still sees it.
  */
 export function renderTreeHtml(
-  text: string,
+  tree: ProseTree,
   inline: InlineMarkup,
   width: number,
   onIssue?: TreeIssue,
@@ -1179,122 +853,58 @@ export function renderTreeHtml(
     });
     throw new RangeError(`metaprompt tree: column budget must be a positive integer, got ${String(width)}`);
   }
-  const cols = width;
-  const segments = splitTreeSegments(text.split("\n"));
+  const rows = layoutTree(tree);
   const parts: string[] = [];
   let overflowCount = 0;
-  for (const segment of segments) {
-    if (segment.kind === "fence") {
-      // An interior fenced block is opaque: verbatim, escaped, NOT run through
-      // the inline pass or the tree wrapper — no rails, no hanging indent.
-      parts.push(renderFenceBlock(segment));
+  let unwrapped = false;
+  for (const row of rows) {
+    if (row.kind === "code") {
+      parts.push(renderFenceBlock(row.code));
       continue;
     }
-    let rendered: RenderLine[];
+    if (row.kind === "raw") {
+      parts.push(renderLine({ prefix: "", body: inline(escapeHtml(row.text)), raw: true }));
+      continue;
+    }
+    let lines: RenderLine[];
     try {
-      const formatted = formatTree(segment.lines, cols, inline);
-      rendered = formatted.lines;
-      overflowCount += formatted.overflows.length;
+      if (unwrapped) throw new TreeOverflowError("an earlier branch could not be wrapped");
+      const wrapped = wrapBranch(row.branch, width, row.hasChildren, inline);
+      lines = wrapped.lines;
+      overflowCount += wrapped.overflows.length;
     } catch (err) {
       if (!(err instanceof TreeOverflowError)) throw err;
-      if (onIssue) {
+      if (!unwrapped && onIssue) {
         onIssue("a metaprompt tree could not be wrapped to the column limit and is rendered as it arrived", {
           operation: "feed.cards.response.tree-unwrappable",
-          width: cols,
+          width,
           error: err.message,
         });
       }
-      rendered = segment.lines.map((line) => ({ prefix: "", body: inline(escapeHtml(line)), raw: true }));
+      unwrapped = true;
+      lines = [{ prefix: row.branch.prefix + row.branch.label, body: inline(escapeHtml(row.branch.body)), raw: false }];
     }
-    parts.push(rendered.map(renderLine).join(""));
+    parts.push(lines.map(renderLine).join(""));
   }
   if (onIssue && overflowCount > 0) {
     onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
       operation: "feed.cards.response.tree-overflow",
-      width: cols,
+      width,
       overflows: overflowCount,
     });
   }
   return parts.join("");
 }
 
-/** A run of tree lines, wrapped and rendered as tree lines. */
-interface TreeLineSegment {
-  kind: "tree";
-  lines: string[];
-}
-
-/** An interior fenced code block, rendered opaquely as a code block. */
-interface FenceSegment {
-  kind: "fence";
-  /** The language tag after the opening ``` (may be ""). */
-  lang: string;
-  /** The dedented code lines between the fence delimiters. */
-  code: string[];
-}
-
-type TreeSegment = TreeLineSegment | FenceSegment;
-
 /**
- * Split a tree region's lines into runs of tree lines and interior fenced
- * blocks, in order. The fence delimiters themselves are consumed; a fence's
- * body is dedented by the opening delimiter's own indentation so the code reads
- * as a plain block rather than carrying the branch's tree nesting. An
- * unterminated fence takes every remaining line as its body.
+ * Render a code block drawn beneath a node as an opaque code block: the body
+ * escaped (or syntax-highlighted for a known language, which also escapes),
+ * never run through the markdown/inline pass, so tokens like `__name__` and
+ * `->` stay literal. It is the one code block (code-block.ts) a markdown fence
+ * renders as.
  */
-function splitTreeSegments(lines: string[]): TreeSegment[] {
-  const segments: TreeSegment[] = [];
-  let treeLines: string[] = [];
-  const flushTree = (): void => {
-    if (treeLines.length > 0) {
-      segments.push({ kind: "tree", lines: treeLines });
-      treeLines = [];
-    }
-  };
-  let i = 0;
-  const n = lines.length;
-  while (i < n) {
-    if (isFenceDelimiter(lines[i])) {
-      flushTree();
-      const indent = fenceIndent(lines[i]);
-      const lang = fenceLanguage(lines[i]);
-      const code: string[] = [];
-      let j = i + 1;
-      while (j < n && !isFenceDelimiter(lines[j])) {
-        code.push(dedent(lines[j], indent));
-        j++;
-      }
-      segments.push({ kind: "fence", lang, code });
-      // Skip the closing delimiter too, when there is one.
-      i = j < n ? j + 1 : j;
-      continue;
-    }
-    treeLines.push(lines[i]);
-    i++;
-  }
-  flushTree();
-  return segments;
-}
-
-/** The language tag following the ``` of a fence delimiter, or "". */
-function fenceLanguage(line: string): string {
-  const rest = line.slice(fenceIndent(line) + 3);
-  return rest.trim().split(/\s+/)[0] ?? "";
-}
-
-/** Strip up to WIDTH leading rail characters (spaces and `│`) from LINE. */
-function dedent(line: string, width: number): string {
-  return line.slice(Math.min(width, fenceIndent(line)));
-}
-
-/**
- * Render an interior fenced block as an opaque code block: the body escaped (or
- * syntax-highlighted for a known language, which also escapes), never run
- * through the markdown/inline pass, so tokens like `__name__` and `->` stay
- * literal. It is the one code block (code-block.ts) a markdown fence renders as.
- */
-function renderFenceBlock(segment: FenceSegment): string {
-  return codeBlockHtml(segment.code.join("\n"), segment.lang);
+function renderFenceBlock(code: ProseTreeCode): string {
+  return codeBlockHtml(code.body, code.language ?? "");
 }
 
 function renderLine(l: RenderLine): string {

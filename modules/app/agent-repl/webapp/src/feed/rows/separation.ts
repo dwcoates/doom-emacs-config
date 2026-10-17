@@ -214,7 +214,7 @@ export function drawFeedContextCutCompacted(compacted: FeedContextCutCompacted):
     role: "response",
     variant: "compaction",
     hooks: ["assistant", "compact-summary", "sep-summary"],
-    content: [markdownSlot("compact-summary-prose", summary.markdown)],
+    content: [markdownSlot("compact-summary-prose", requireMessage(summary.prose, "FeedContextCutSummary.prose"))],
     capLines: "feed",
   }).bubble;
 

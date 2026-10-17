@@ -39,6 +39,7 @@ import { defaultBubbleBody } from "../../src/feed/renderers.js";
 import { feedId, harness, rowContext, stubRenderers, subagentRow } from "./harness.js";
 import { orderFor } from "../feed-order.js";
 import { sentTo } from "./addresses.js";
+import { servedProse } from "../prose.js";
 
 /** A row context on ROW, with no verb of its own scripted. */
 function rc(id: string) {
@@ -74,7 +75,7 @@ const KINDS: readonly Kind[] = [
       drawFeedAgentPrompt(
         create(FeedAgentPromptSchema, {
           address: sentTo("Explore"),
-          body: { blocks: [{ block: { case: "text", value: { text: "go" } } }] },
+          body: { blocks: [{ block: { case: "text", value: { prose: servedProse("go") } } }] },
         }),
       ),
     meta: ".prompt-address",

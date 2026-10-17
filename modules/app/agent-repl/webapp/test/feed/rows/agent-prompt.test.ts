@@ -26,6 +26,7 @@ import {
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
+import { servedProse } from "../../prose.js";
 
 function agentPrompt(address = sentTo("vetter"), blocks: unknown[] = [], working = false, awaitingUser = false) {
   return create(FeedAgentPromptSchema, {
@@ -76,7 +77,7 @@ describe("drawFeedAgentPrompt", () => {
 
   it("draws the shared block vocabulary in the capped body", () => {
     const el = drawFeedAgentPrompt(
-      agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { text: "go" } } }]),
+      agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { prose: servedProse("go") } } }]),
     );
     expect(el.querySelector(".bubble-body")?.children).toHaveLength(1);
   });
@@ -228,8 +229,8 @@ describe("drawFeedAgentPrompt: the copy control", () => {
     // Act
     const el = drawFeedAgentPrompt(
       agentPrompt(sentTo("vetter"), [
-        { block: { case: "text", value: { text: "first" } } },
-        { block: { case: "text", value: { text: "second" } } },
+        { block: { case: "text", value: { prose: servedProse("first") } } },
+        { block: { case: "text", value: { prose: servedProse("second") } } },
       ]),
     );
     // Assert
@@ -239,7 +240,7 @@ describe("drawFeedAgentPrompt: the copy control", () => {
 
   it("leaves the address out of what it copies", () => {
     // Act
-    const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { text: "go" } } }]));
+    const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { prose: servedProse("go") } } }]));
     // Assert
     const control = el.querySelector(`.${PROMPT_COPY_CLASS}`);
     expect(control === null ? null : boundCopyText(control).text).toBe("go");
