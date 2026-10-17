@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -90,7 +91,26 @@ esac
 	if err := os.Symlink(fakeGitScript(t), filepath.Join(bin, "git")); err != nil {
 		t.Fatalf("link the fake git: %v", err)
 	}
+	// The host's free disk is an external dependency like the runtime: the
+	// preflight's `df -Pk` reads this fake, which reports plenty of room
+	// unless the test set the free kilobytes itself (setFreeKB).
+	df := `#!/usr/bin/env bash
+free=$(cat "` + f.dir + `/free-kb" 2>/dev/null || echo 104857600)
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf 'fake 209715200 0 %s 1%% /\n' "$free"
+`
+	if err := os.WriteFile(filepath.Join(bin, "df"), []byte(df), 0o755); err != nil {
+		t.Fatalf("write fake df: %v", err)
+	}
 	return f
+}
+
+// setFreeKB makes the fake df report KB kilobytes available.
+func (f *fakeDocker) setFreeKB(t *testing.T, kb int) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.dir, "free-kb"), []byte(strconv.Itoa(kb)+"\n"), 0o644); err != nil {
+		t.Fatalf("write free-kb: %v", err)
+	}
 }
 
 // imageMissing makes every existence probe answer that no image is tagged.
@@ -670,6 +690,47 @@ func TestSandboxPreflightNamesTheStampImageWhenItIsNotBuilt(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "'"+image+"' is not built") {
 		t.Fatalf("preflight did not name %s:\n%s", image, out)
+	}
+}
+
+// TestSandboxPreflightReadsFreeDiskFromDf: the preflight's disk gate
+// answers from the free space df reports, declining below the floor and
+// passing at it.
+func TestSandboxPreflightReadsFreeDiskFromDf(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		freeGiB  int
+		wantExit int
+		wantOut  string
+	}{
+		{"declines below the floor", 11, 13, "11GiB free"},
+		{"passes at the floor", 12, 0, "READY"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange.
+			f := newFakeDocker(t)
+			f.setFreeKB(t, tt.freeGiB*1024*1024)
+			cmd := exec.Command("bash", sandboxScript(t), "preflight")
+			cmd.Env = sandboxEnv(f, filepath.Join(t.TempDir(), "build.lock"))
+
+			// Act.
+			out, err := cmd.CombinedOutput()
+
+			// Assert.
+			code := 0
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				code = exit.ExitCode()
+			} else if err != nil {
+				t.Fatalf("preflight = %v\n%s", err, out)
+			}
+			if code != tt.wantExit || !strings.Contains(string(out), tt.wantOut) {
+				t.Fatalf("preflight exit %d, want %d naming %q:\n%s", code, tt.wantExit, tt.wantOut, out)
+			}
+		})
 	}
 }
 
