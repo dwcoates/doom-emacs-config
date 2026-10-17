@@ -772,6 +772,8 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	// stream or is retired here.
 	if host && delta < 0 && !hostLive {
 		s.deps.Queue.EditorGone(ws)
+		// The editor's evaluations are answered by nobody now.
+		s.evals.editorGone(ws)
 	}
 
 	// INFO, NOT DEBUG: the participant set is what a handover's adoption

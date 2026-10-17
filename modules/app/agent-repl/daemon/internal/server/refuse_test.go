@@ -199,16 +199,16 @@ func TestUnlandedArmUsesNotFoundForAnUnknownID(t *testing.T) {
 }
 
 // TestAsRefusalCarriesTheVerbsArmFields pins that an arm's OWN evidence
-// survives the normalization: base_ref_unresolved spells `ref`, and a client
-// reading the arm must get the ref rather than an empty string beside prose.
+// survives the normalization: name_reserved spells `branch`, and a client
+// reading the arm must get the branch rather than an empty string beside prose.
 func TestAsRefusalCarriesTheVerbsArmFields(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	surface := h.Server.(*server)
 	err := &workspace.Refusal{
-		Arm:    workspace.ArmBaseRefUnresolved,
-		Reason: "the base ref does not resolve",
-		Fields: map[string]any{"ref": "origin/nope"},
+		Arm:    workspace.ArmNameReserved,
+		Reason: "the name is reserved",
+		Fields: map[string]any{"branch": "agent/reserved"},
 	}
 
 	// Act.
@@ -218,8 +218,8 @@ func TestAsRefusalCarriesTheVerbsArmFields(t *testing.T) {
 	if !ok {
 		t.Fatal("the workspace refusal was not normalized")
 	}
-	if got.Fields["ref"] != "origin/nope" {
-		t.Fatalf("Fields = %v, want the arm's ref value", got.Fields)
+	if got.Fields["branch"] != "agent/reserved" {
+		t.Fatalf("Fields = %v, want the arm's branch value", got.Fields)
 	}
 }
 
@@ -229,8 +229,8 @@ func TestAsRefusalDoesNotMutateTheVerbsFieldMap(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	surface := h.Server.(*server)
-	fields := map[string]any{"ref": "origin/nope"}
-	err := &workspace.Refusal{Arm: workspace.ArmBaseRefUnresolved, Reason: "nope", Fields: fields}
+	fields := map[string]any{"branch": "agent/reserved"}
+	err := &workspace.Refusal{Arm: workspace.ArmNameReserved, Reason: "nope", Fields: fields}
 
 	// Act.
 	if _, ok := surface.asRefusal(err); !ok {
@@ -243,21 +243,21 @@ func TestAsRefusalDoesNotMutateTheVerbsFieldMap(t *testing.T) {
 	}
 }
 
-// TestSetArmFillsTheBaseRefUnresolvedRef pins the whole path end to end: the
-// arm the wire carries names the ref.
-func TestSetArmFillsTheBaseRefUnresolvedRef(t *testing.T) {
+// TestSetArmFillsTheNameReservedBranch pins the whole path end to end: the
+// arm the wire carries names the branch.
+func TestSetArmFillsTheNameReservedBranch(t *testing.T) {
 	// Arrange.
 	resp := &agentreplv1.CreateWorkspaceResponse{}
 
 	// Act.
-	ok := setResponseError(resp, workspace.ArmBaseRefUnresolved, map[string]any{"ref": "origin/nope"})
+	ok := setResponseError(resp, workspace.ArmNameReserved, map[string]any{"branch": "agent/reserved"})
 
 	// Assert.
 	if !ok {
-		t.Fatal("setResponseError refused the landed base_ref_unresolved arm")
+		t.Fatal("setResponseError refused the landed name_reserved arm")
 	}
-	if got := resp.GetError().GetBaseRefUnresolved().GetRef(); got != "origin/nope" {
-		t.Fatalf("base_ref_unresolved.ref = %q, want origin/nope", got)
+	if got := resp.GetError().GetNameReserved().GetBranch(); got != "agent/reserved" {
+		t.Fatalf("name_reserved.branch = %q, want agent/reserved", got)
 	}
 }
 
@@ -269,13 +269,13 @@ func TestAsRefusalUnwrapsAWrappedWorkspaceRefusal(t *testing.T) {
 	h := newHarness(t)
 	surface := h.Server.(*server)
 	err := fmt.Errorf("CreateWorkspace: %w",
-		&workspace.Refusal{Arm: workspace.ArmBaseRefUnresolved, Reason: "the base ref does not resolve"})
+		&workspace.Refusal{Arm: workspace.ArmNameReserved, Reason: "the name is reserved"})
 
 	// Act.
 	got, ok := surface.asRefusal(err)
 
 	// Assert.
-	if !ok || got.Arm != workspace.ArmBaseRefUnresolved {
+	if !ok || got.Arm != workspace.ArmNameReserved {
 		t.Fatalf("asRefusal = %+v, %t, want the wrapped arm", got, ok)
 	}
 }

@@ -38,6 +38,9 @@ func (s *server) SubmitPrompt(
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, submitRefusal(*r)))
 	}
+	if command, refused := agentSlashCommand(req.Msg.GetOrigin(), req.Msg.GetSaid()); refused {
+		return answer(resp, s.refuseAgentSlashCommand(subject.Log, rpc, resp, command))
+	}
 
 	// The FeedId is decoded HERE, before the handler is called: a value that
 	// does not decode never becomes a handler call, which is why the prompt

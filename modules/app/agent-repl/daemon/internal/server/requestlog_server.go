@@ -772,3 +772,17 @@ func (s *requestLoggingServer) UpdateRollouts(
 ) (*connect.Response[agentreplv1.UpdateRolloutsResponse], error) {
 	return serveUnary(s, ctx, "UpdateRollouts", req, s.server.UpdateRollouts)
 }
+
+func (s *requestLoggingServer) SetWorkspaceOneShot(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceOneShotRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceOneShotResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspaceOneShot", req, s.server.SetWorkspaceOneShot)
+}
+
+func (s *requestLoggingServer) SetWorkspaceCorrespondence(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceCorrespondenceRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceCorrespondenceResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspaceCorrespondence", req, s.server.SetWorkspaceCorrespondence)
+}

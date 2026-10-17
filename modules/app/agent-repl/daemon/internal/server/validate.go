@@ -1120,6 +1120,93 @@ func validateUnsubscribeMergeQueueRequest(req *agentreplv1.UnsubscribeMergeQueue
 	return nil
 }
 
+// validateSubscribeWorkspaceRequest is SubscribeWorkspaceRequest's base
+// function.
+func validateSubscribeWorkspaceRequest(req *agentreplv1.SubscribeWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("subscriber", req.GetSubscriber()); err != nil {
+		return err
+	}
+	if err := validateWorkspaceRef("followed", req.GetFollowed()); err != nil {
+		return err
+	}
+	if len(req.GetEvents()) == 0 {
+		return invalid("events", "a subscription names at least one event")
+	}
+	for _, e := range req.GetEvents() {
+		if e == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED {
+			return invalid("events", "an unspecified event is no event")
+		}
+		if _, declared := agentreplv1.WorkspaceNoticeEvent_name[int32(e)]; !declared {
+			return invalid("events", fmt.Sprintf("event %d is not declared", e))
+		}
+	}
+	return nil
+}
+
+// validateUnsubscribeWorkspaceRequest is UnsubscribeWorkspaceRequest's base
+// function.
+func validateUnsubscribeWorkspaceRequest(req *agentreplv1.UnsubscribeWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("subscriber", req.GetSubscriber()); err != nil {
+		return err
+	}
+	return validateWorkspaceRef("followed", req.GetFollowed())
+}
+
+// validateCompactWorkspaceRequest is CompactWorkspaceRequest's base function.
+func validateCompactWorkspaceRequest(req *agentreplv1.CompactWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateWorkspaceRequester("requester", req.GetRequester()); err != nil {
+		return err
+	}
+	if req.Instructions != nil && strings.TrimSpace(req.GetInstructions().GetText()) == "" {
+		return invalid("instructions.text", "instructions say what the summary keeps")
+	}
+	return nil
+}
+
+// validateEvaluateInEditorRequest is EvaluateInEditorRequest's base function.
+func validateEvaluateInEditorRequest(req *agentreplv1.EvaluateInEditorRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.GetText()) == "" {
+		return invalid("text", "an evaluation names the elisp to evaluate")
+	}
+	return nil
+}
+
+// validateAnswerEditorEvaluationRequest is AnswerEditorEvaluationRequest's
+// base function.
+func validateAnswerEditorEvaluationRequest(req *agentreplv1.AnswerEditorEvaluationRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetToken().GetValue() == "" {
+		return invalid("token", "an answer echoes the evaluation's token")
+	}
+	if req.GetOutcome().GetOutcome() == nil {
+		return invalid("outcome", "an outcome arm (value, read_error or eval_error) is required")
+	}
+	return nil
+}
+
+// validateSetWorkspaceCorrespondenceRequest is
+// SetWorkspaceCorrespondenceRequest's base function.
+func validateSetWorkspaceCorrespondenceRequest(req *agentreplv1.SetWorkspaceCorrespondenceRequest) *connect.Error {
+	if err := validateWorkspaceRequester("requester", req.GetRequester()); err != nil {
+		return err
+	}
+	switch mark := req.GetMark().(type) {
+	case *agentreplv1.SetWorkspaceCorrespondenceRequest_Awaiting:
+		return validateWorkspaceRef("awaiting.awaited", mark.Awaiting.GetAwaited())
+	case *agentreplv1.SetWorkspaceCorrespondenceRequest_Clear:
+		return nil
+	}
+	return invalid("mark", "a mark arm (awaiting or clear) is required")
+}
+
 // validateUpdateRolloutsRequest is UpdateRolloutsRequest's base function.
 func validateUpdateRolloutsRequest(req *agentreplv1.UpdateRolloutsRequest) *connect.Error {
 	if req.GetAction() == nil {

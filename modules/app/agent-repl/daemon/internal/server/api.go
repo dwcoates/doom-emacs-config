@@ -319,6 +319,12 @@ type server struct {
 	// (participantHops). Scoped to the host stream: the last host close
 	// forgets it.
 	webSeen map[ids.WorkspaceID]bool
+	// evals correlates the evaluations pushed to editors with their answers
+	// (evaluate.go).
+	evals *editorEvals
+	// evalDeadline is how long EvaluateInEditor waits for its answer
+	// (evaluationDeadline).
+	evalDeadline time.Duration
 	// daemonWatchers are the live WatchDaemon streams whose subscription
 	// already exists. The stand-down announcement is flushed onto every one of
 	// them BEFORE the orderly exit cancels serving, so a client learns the
@@ -512,6 +518,8 @@ func New(deps Deps) (Server, error) {
 		daemonWatchers:      make(map[*daemonWatcher]struct{}),
 		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
 		hostHeld:            make(map[ids.WorkspaceID]int),
+		evals:               newEditorEvals("eval-" + string(deps.Instance)),
+		evalDeadline:        evaluationDeadline,
 		webHeld:             make(map[ids.WorkspaceID]int),
 		webSeen:             make(map[ids.WorkspaceID]bool),
 		watchTokens:         make(map[string]tokenTarget),

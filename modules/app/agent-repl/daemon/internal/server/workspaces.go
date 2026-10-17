@@ -509,20 +509,38 @@ func (s *server) CloseWorkspace(
 	req *connect.Request[agentreplv1.CloseWorkspaceRequest],
 ) (*connect.Response[agentreplv1.CloseWorkspaceResponse], error) {
 	const rpc = "CloseWorkspace"
+	if err := validateWorkspaceRequester("requester", req.Msg.GetRequester()); err != nil {
+		return nil, err
+	}
 	resp := &agentreplv1.CloseWorkspaceResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Close(ctx, subject.Record.ID, wsm.CloseByUser); err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	ws := subject.Record.ID
+	success := &agentreplv1.CloseWorkspaceSuccess{Outcome: &agentreplv1.CloseWorkspaceSuccess_Closed{Closed: &agentreplv1.CloseWorkspaceSuccessClosed{}}}
+	switch by, asker := askerOf(req.Msg.GetRequester()); {
+	case by == merge.RequestedByUser:
+		if err := s.deps.Verbs.Close(ctx, ws, wsm.CloseByUser); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+	case asker == ws:
+		later, err := s.deps.Verbs.CloseSelf(ctx, ws)
+		if err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+		if later {
+			success.Outcome = &agentreplv1.CloseWorkspaceSuccess_ClosesWhenTurnEnds{ClosesWhenTurnEnds: &agentreplv1.CloseWorkspaceSuccessClosesWhenTurnEnds{}}
+		}
+	default:
+		if err := s.deps.Verbs.Close(ctx, ws, wsm.CloseByAgent); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
 	}
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
-	s.PublishHostWorkspace(ctx, subject.Record.ID)
-	resp.Result = &agentreplv1.CloseWorkspaceResponse_Success{
-		Success: &agentreplv1.CloseWorkspaceSuccess{},
-	}
+	s.PublishHostWorkspace(ctx, ws)
+	resp.Result = &agentreplv1.CloseWorkspaceResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 
@@ -1040,6 +1058,36 @@ func (s *server) resolveNaming(
 	rename map[string]string,
 ) (resolved, *connect.Error, bool) {
 	subject, r, err := s.resolveRef(ctx, rpc, ref)
+	return s.answerResolution(rpc, resp, ref, rename, subject, r, err)
+}
+
+// resolveRegisteredNaming is resolveNaming for a ref resolved against the
+// registry alone (resolveRegistered): a workspace named as what is read or
+// followed, whichever daemon serves it.
+func (s *server) resolveRegisteredNaming(
+	ctx context.Context,
+	rpc string,
+	resp proto.Message,
+	ref *workspacev1.WorkspaceRef,
+	rename map[string]string,
+) (resolved, *connect.Error, bool) {
+	subject, r, err := s.resolveRegistered(ctx, rpc, ref)
+	return s.answerResolution(rpc, resp, ref, rename, subject, r, err)
+}
+
+// answerResolution is the one answer of a ref's resolution for resolveNaming
+// and resolveRegisteredNaming: the subject, or the refusal encoded onto RESP
+// with the refused ref on the arm's `workspace` field and the arm renamed
+// through RENAME.
+func (s *server) answerResolution(
+	rpc string,
+	resp proto.Message,
+	ref *workspacev1.WorkspaceRef,
+	rename map[string]string,
+	subject resolved,
+	r *refusal,
+	err error,
+) (resolved, *connect.Error, bool) {
 	if err != nil {
 		return resolved{}, failResolution(s.log, rpc, err), true
 	}

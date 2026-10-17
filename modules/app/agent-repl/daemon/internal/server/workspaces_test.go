@@ -134,7 +134,7 @@ func TestCloseWorkspaceMapsTheBlockedArm(t *testing.T) {
 
 	// Act.
 	resp, err := h.Client.CloseWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref()}))
+		connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref(), Requester: userRequester()}))
 
 	// Assert.
 	if err != nil {
@@ -153,7 +153,7 @@ func TestCloseWorkspaceIsTheUsersClose(t *testing.T) {
 
 	// Act.
 	resp, err := h.Client.CloseWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref()}))
+		connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref(), Requester: userRequester()}))
 
 	// Assert.
 	if err != nil {
@@ -175,12 +175,7 @@ func TestCreateWorkspaceRefusesAnUnknownRepository(t *testing.T) {
 
 	// Act.
 	resp, err := h.Client.CreateWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-			Repository: &workspacev1.RepositoryRef{Id: "repo-nope"},
-			Form: &agentreplv1.CreateWorkspaceRequest_Standard{
-				Standard: &agentreplv1.CreateWorkspaceStandard{},
-			},
-		}))
+		connect.NewRequest(standardCreate(&workspacev1.RepositoryRef{Id: "repo-nope"}, "")))
 
 	// Assert.
 	if err != nil {
@@ -340,8 +335,10 @@ func standardCreate(repoRef *workspacev1.RepositoryRef, opID string) *agentreplv
 	req := &agentreplv1.CreateWorkspaceRequest{
 		Repository: repoRef,
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{
-			Standard: &agentreplv1.CreateWorkspaceStandard{},
+			Standard: &agentreplv1.CreateWorkspaceStandard{Topology: primaryTopology()},
 		},
+		Requester:     userRequester(),
+		ContextOrigin: freshContext(),
 	}
 	if opID != "" {
 		req.OpId = &opID
@@ -901,7 +898,7 @@ func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
 			name:  "CloseWorkspace has_open_children",
 			setUp: func(h *harness) { h.Verbs.closeErr = fmt.Errorf("close: %w", familyChildren) },
 			call: func(h *harness) (bool, error) {
-				resp, err := h.Client.CloseWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref()}))
+				resp, err := h.Client.CloseWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref(), Requester: userRequester()}))
 				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
 			},
 		},
@@ -1304,15 +1301,12 @@ func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-// oneShotRequest is the requester's own branch merged as a one-shot.
+// oneShotRequest is the workspace's own branch merged as a one-shot, asked by
+// the user, at the back of the queue.
 func oneShotRequest() *agentreplv1.MergeWorkspaceRequest {
-	return &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{
-		OneShot: &agentreplv1.MergeWorkspaceOneShot{Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}}
-}
-
-// asyncRequest is an async merge of the request ASYNC says.
-func asyncRequest(async *agentreplv1.MergeWorkspaceAsync) *agentreplv1.MergeWorkspaceRequest {
-	return &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: async}}
+	return &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement(),
+		Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
+			Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}}
 }
 
 func strPtr(s string) *string { return &s }
@@ -1351,35 +1345,25 @@ func TestMergeWorkspaceAsksAsTheUser(t *testing.T) {
 	}
 }
 
-func TestMergeWorkspaceMapsEachModeArm(t *testing.T) {
+func TestMergeWorkspaceMapsTheRequest(t *testing.T) {
+	front := oneShotRequest()
+	front.Placement = frontPlacement()
+	upstream := oneShotRequest()
+	upstream.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
+		Landing: &agentreplv1.MergeWorkspaceOneShot_MergedUpstream{MergedUpstream: &agentreplv1.MergeWorkspaceOneShotMergedUpstream{}}}}
+	asked := oneShotRequest()
+	asked.Requester = workspaceRequester(ref())
 	tests := []struct {
-		name string
-		req  *agentreplv1.MergeWorkspaceRequest
-		want wsm.MergeSource
-		// detached is the request's async run, nil for a one-shot.
-		detached *merge.DetachedRun
+		name      string
+		req       *agentreplv1.MergeWorkspaceRequest
+		want      wsm.MergeSource
+		wantBy    merge.Requester
+		wantAsker ids.WorkspaceID
 	}{
-		{name: "a one-shot", req: oneShotRequest(), want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-		{name: "a one-shot already merged upstream", req: &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{
-			OneShot: &agentreplv1.MergeWorkspaceOneShot{Landing: &agentreplv1.MergeWorkspaceOneShot_MergedUpstream{MergedUpstream: &agentreplv1.MergeWorkspaceOneShotMergedUpstream{}}}}},
-			want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
-		{name: "an async merge", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: " agent-1/fix "}),
-			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
-		{name: "an async merge with an instruction", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix", Instruction: strPtr(" the fix ")}),
-			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
-		{name: "an async merge compacting after", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix", CompactAfter: true}),
-			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
-		{name: "an async merge with its own merge actions", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix",
-			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the linters"), PostprocessingPrompt: said("post the summary")}}),
-			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix",
-				Actions: wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}}},
-		{name: "an async merge with a before action alone", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix",
-			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the linters")}}),
-			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix",
-				Actions: wsm.MergeActions{Before: []string{"run the linters"}}}},
-		{name: "an async one-shot cleaning up", req: asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix",
-			OneShot: &agentreplv1.MergeWorkspaceAsyncOneShot{Workspace: ref()}, CleanupWorktree: true}),
-			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}, detached: &merge.DetachedRun{Name: "reconnect-fix", CloseOnLanding: testWorkspaceID, CleanupWorktree: true}},
+		{name: "its own branch, asked by the user", req: oneShotRequest(), want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, wantBy: merge.RequestedByUser},
+		{name: "already merged upstream", req: upstream, want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, wantBy: merge.RequestedByUser},
+		{name: "at the front", req: front, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}, wantBy: merge.RequestedByUser},
+		{name: "asked by a workspace's agent", req: asked, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, wantBy: merge.RequestedByAgent, wantAsker: testWorkspaceID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1395,23 +1379,55 @@ func TestMergeWorkspaceMapsEachModeArm(t *testing.T) {
 			if len(h.Merge.requests) != 1 || !reflect.DeepEqual(h.Merge.requests[0].Source, tt.want) {
 				t.Fatalf("requests = %+v, want source %+v", h.Merge.requests, tt.want)
 			}
-			got := h.Merge.requests[0].Detached
-			if (got == nil) != (tt.detached == nil) || (got != nil && !reflect.DeepEqual(*got, *tt.detached)) {
-				t.Fatalf("async run = %+v, want %+v", got, tt.detached)
+			got := h.Merge.requests[0]
+			if got.By != tt.wantBy || got.Asker != tt.wantAsker || got.Detached != nil {
+				t.Fatalf("request = %+v, want asked by %v (%q) in place", got, tt.wantBy, tt.wantAsker)
 			}
 		})
 	}
 }
 
-func TestMergeWorkspaceRefusesAMalformedAsyncMergeAsInvalid(t *testing.T) {
+func TestMergeWorkspaceAnswersWhoMayLandIt(t *testing.T) {
 	tests := []struct {
-		name  string
-		async *agentreplv1.MergeWorkspaceAsync
+		name string
+		arm  string
+		got  func(*agentreplv1.MergeWorkspaceError) bool
 	}{
-		{name: "no name", async: &agentreplv1.MergeWorkspaceAsync{Branch: "agent-1/fix"}},
-		{name: "no branch", async: &agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix"}},
-		{name: "a blank instruction", async: &agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix", Instruction: strPtr(" ")}},
-		{name: "a one-shot naming no workspace", async: &agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix", OneShot: &agentreplv1.MergeWorkspaceAsyncOneShot{}}},
+		{name: "a child its owner lands", arm: merge.ArmOwnerLands, got: func(e *agentreplv1.MergeWorkspaceError) bool {
+			return e.GetOwnerLands().GetOwner().GetId() == "ws-owner"
+		}},
+		{name: "a stranger", arm: merge.ArmRequesterMayNotLand, got: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetRequesterMayNotLand() != nil }},
+		{name: "a detached head", arm: merge.ArmNoBranchCheckedOut, got: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetNoBranchCheckedOut().GetDir() == "/wt" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Merge.enqueueErr = &merge.RefusalError{Arm: tt.arm, Reason: "refused", Fields: map[string]any{
+				"owner": &workspacev1.WorkspaceRef{Id: "ws-owner"}, "dir": "/wt"}}
+
+			// Act.
+			resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(oneShotRequest()))
+
+			// Assert.
+			if err != nil || !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("MergeWorkspace = %v, %v; want the %s arm", resp, err, tt.arm)
+			}
+		})
+	}
+}
+
+func TestMergeWorkspaceRefusesARequestMissingAChoiceAsInvalid(t *testing.T) {
+	noRequester := oneShotRequest()
+	noRequester.Requester = nil
+	noPlacement := oneShotRequest()
+	noPlacement.Placement = nil
+	tests := []struct {
+		name string
+		req  *agentreplv1.MergeWorkspaceRequest
+	}{
+		{name: "no requester", req: noRequester},
+		{name: "no placement", req: noPlacement},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1419,66 +1435,13 @@ func TestMergeWorkspaceRefusesAMalformedAsyncMergeAsInvalid(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(asyncRequest(tt.async)))
+			_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(tt.req))
 
 			// Assert.
-			if connect.CodeOf(err) != connect.CodeInvalidArgument {
-				t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
-			}
-			if len(h.Merge.requests) != 0 {
-				t.Fatalf("requests = %+v, want none", h.Merge.requests)
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Merge.requests) != 0 {
+				t.Fatalf("MergeWorkspace = %v, requests %+v; want invalid_argument and none", err, h.Merge.requests)
 			}
 		})
-	}
-}
-
-func TestMergeWorkspaceRefusesAnAsyncOneShotNamingNoRegisteredWorkspace(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(asyncRequest(&agentreplv1.MergeWorkspaceAsync{
-		Name: "reconnect-fix", Branch: "agent-1/fix",
-		OneShot: &agentreplv1.MergeWorkspaceAsyncOneShot{Workspace: &workspacev1.WorkspaceRef{Id: "no-such-ws", Dir: "/nowhere"}}})))
-
-	// Assert.
-	if err != nil || resp.Msg.GetError().GetUnknownOneShotWorkspace() == nil {
-		t.Fatalf("MergeWorkspace = (%v, %v), want unknown_one_shot_workspace", resp.Msg.GetResult(), err)
-	}
-	if len(h.Merge.requests) != 0 {
-		t.Fatalf("requests = %+v, want none", h.Merge.requests)
-	}
-}
-
-func TestMergeWorkspaceAnswersTheBranchCheckedOutInTheRequester(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmBranchCheckedOutInRequester, Workspace: testWorkspaceID, Reason: "checked out"}
-
-	// Act.
-	resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "mine"})))
-
-	// Assert.
-	if err != nil || resp.Msg.GetError().GetBranchCheckedOutInRequester() == nil {
-		t.Fatalf("MergeWorkspace = (%v, %v), want branch_checked_out_in_requester", resp.Msg.GetResult(), err)
-	}
-}
-
-func TestMergeWorkspaceAnswersATakenNameWithTheBranch(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmNameTaken, Workspace: testWorkspaceID, Reason: "taken",
-		Fields: map[string]any{"branch": "ABC/reconnect-fix"}}
-
-	// Act.
-	resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(asyncRequest(&agentreplv1.MergeWorkspaceAsync{Name: "reconnect-fix", Branch: "agent-1/fix"})))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("MergeWorkspace: %v", err)
-	}
-	if got := resp.Msg.GetError().GetNameTaken().GetBranch(); got != "ABC/reconnect-fix" {
-		t.Fatalf("result = %v, want name_taken naming the branch", resp.Msg.GetResult())
 	}
 }
 
@@ -1488,7 +1451,7 @@ func TestMergeWorkspaceRefusesARequestWithNoModeAsInvalid(t *testing.T) {
 
 	// Act.
 	_, err := h.Client.MergeWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()}))
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement()}))
 
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
@@ -1502,7 +1465,8 @@ func TestMergeWorkspaceRefusesARequestWithNoModeAsInvalid(t *testing.T) {
 func TestMergeWorkspaceRefusesAOneShotWithNoLandingAsInvalid(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	req := &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}}
+	req := &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement(),
+		Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}}
 
 	// Act.
 	_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(req))
@@ -1677,10 +1641,7 @@ var repositoryRPCs = []struct {
 	call func(*harness, *workspacev1.RepositoryRef) (bool, error)
 }{
 	{"CreateWorkspace", func(h *harness, ref *workspacev1.RepositoryRef) (bool, error) {
-		resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-			Repository: ref,
-			Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-		}))
+		resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(ref, "")))
 		return err == nil && resp.Msg.GetError().GetUnknownRepository() != nil, err
 	}},
 	{"FoldRepository", func(h *harness, ref *workspacev1.RepositoryRef) (bool, error) {
@@ -1948,63 +1909,20 @@ func TestMoveWorkspaceFailsAVerbError(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceMapsAForkSourceToAForkIntoThePrimaryBranch(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	repoRef := registeredRepoRef(h)
-	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
-	req := standardCreate(repoRef, "")
-	req.ForkSource = &agentreplv1.CreateWorkspaceForkSource{Workspace: ref()}
-
-	// Act.
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
-	}
-	spec := h.Verbs.createSpecs[0]
-	if spec.Parent != nil || !spec.ForkIntoPrimary || spec.ForkFrom == nil || *spec.ForkFrom != testWorkspaceID {
-		t.Fatalf("spec = parent %v, fork into primary %v, fork from %v; want no parent and a fork from %s",
-			spec.Parent, spec.ForkIntoPrimary, spec.ForkFrom, testWorkspaceID)
-	}
-}
-
-func TestCreateWorkspaceNamesAnUnknownForkSource(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	repoRef := registeredRepoRef(h)
-	req := standardCreate(repoRef, "")
-	req.ForkSource = &agentreplv1.CreateWorkspaceForkSource{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}}
-
-	// Act.
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	got := resp.Msg.GetError().GetUnknownForkSource()
-	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
-		t.Fatalf("result = %v, want unknown_fork_source naming ws-nope", resp.Msg.GetResult())
-	}
-	if len(h.Verbs.createSpecs) != 0 {
-		t.Fatalf("Create ran %d times, want none", len(h.Verbs.createSpecs))
-	}
-}
-
 // ---- CreateWorkspace: a one-shot's context workspace -------------------------
 
 // oneShotCreate builds a one-shot create request for repoRef naming the
 // context workspace about, when it is non-nil.
 func oneShotCreate(repoRef *workspacev1.RepositoryRef, about *workspacev1.WorkspaceRef) *agentreplv1.CreateWorkspaceRequest {
-	oneShot := &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("fix the feed")}
+	oneShot := &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("fix the feed"), Topology: primaryTopology()}
 	if about != nil {
 		oneShot.Context = &agentreplv1.CreateWorkspaceOneShotContext{Workspace: about}
 	}
 	return &agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
-		Form:       &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: oneShot},
+		Repository:    repoRef,
+		Form:          &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: oneShot},
+		Requester:     userRequester(),
+		ContextOrigin: freshContext(),
 	}
 }
 
@@ -2061,26 +1979,6 @@ func TestCreateWorkspaceNamesAnUnknownContextWorkspace(t *testing.T) {
 	}
 	if len(h.Verbs.createSpecs) != 0 {
 		t.Fatalf("Create ran %d times, want none", len(h.Verbs.createSpecs))
-	}
-}
-
-func TestCreateWorkspaceAnswersTheBaseRefOffPrimaryBranchArm(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	repoRef := registeredRepoRef(h)
-	h.Verbs.createErr = &workspace.Refusal{Arm: workspace.ArmBaseRefOffPrimaryBranch, Reason: "off",
-		Fields: map[string]any{"ref": "feature-tip", "primary_branch": "main"}}
-
-	// Act.
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "")))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	got := resp.Msg.GetError().GetBaseRefOffPrimaryBranch()
-	if got.GetRef() != "feature-tip" || got.GetPrimaryBranch() != "main" {
-		t.Fatalf("result = %v, want base_ref_off_primary_branch naming the ref and the branch", resp.Msg.GetResult())
 	}
 }
 

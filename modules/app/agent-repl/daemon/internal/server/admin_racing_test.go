@@ -37,8 +37,6 @@ func TestEveryDaemonWideSwitchArmReachesItsOwnVerb(t *testing.T) {
 		action string
 		want   [4]int
 	}{
-		{name: "hold_rollouts", req: rolloutHoldRequest(false), action: "hold_rollouts", want: [4]int{1, 0, 0, 0}},
-		{name: "release_rollouts", req: rolloutHoldRequest(true), action: "release_rollouts", want: [4]int{0, 1, 0, 0}},
 		{name: "disable_racing", req: racingRequest(false), action: "disable_racing", want: [4]int{0, 0, 1, 0}},
 		{name: "enable_racing", req: racingRequest(true), action: "enable_racing", want: [4]int{0, 0, 0, 1}},
 	}
