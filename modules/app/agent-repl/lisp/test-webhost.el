@@ -405,6 +405,11 @@ so stubbing the accessor would not reach the code under test."
              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (id) (substring id 3))))
      ,@body))
 
+(defun agent-repl-test-wh--load (status)
+  "Deliver the host's `load-changed' at STATUS, the stage riding the event."
+  (let ((last-input-event (list 'xwidget-event 'host-xwidget 'load-changed status)))
+    (agent-repl--webhost-on-load 'load-changed)))
+
 (ert-deftest agent-repl-test-wh-a-load-replays-every-page ()
   "A loaded host starts empty, so every page is handed to it again, in time."
   ;; Arrange
@@ -413,7 +418,7 @@ so stubbing the accessor would not reach the code under test."
     (agent-repl-webhost-ensure-page "beta")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed "load-committed")
+    (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
 
@@ -426,7 +431,7 @@ so stubbing the accessor would not reach the code under test."
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed "load-committed")
+    (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (equal (agent-repl-test-wh--sent "ensure")
                    (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/")
@@ -448,7 +453,7 @@ The current tab's page, not shown here, is the nearest of all."
     (setq agent-repl-test-wh--calls nil)
     (agent-repl-test-wh--with-order '("a" "b" "c" "d" "e") "c"
       ;; Act
-      (agent-repl--webhost-on-load 'load-changed "load-committed"))
+      (agent-repl-test-wh--load "load-committed"))
     ;; Assert
     (should (equal (agent-repl-test-wh--ensured-lanes)
                    '(("c" . "after") ("d" . "after") ("e" . "after") ("b" . "before") ("a" . "before"))))))
@@ -511,7 +516,7 @@ The current tab's page, not shown here, is the nearest of all."
       (cl-letf (((symbol-function 'agent-repl--info)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
         ;; Act
-        (agent-repl--webhost-on-load 'load-changed "load-committed"))
+        (agent-repl-test-wh--load "load-committed"))
       ;; Assert
       (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-in-turn after=1 before=0" text)) logged)))))
 
@@ -523,7 +528,7 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-show "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed "load-committed")
+    (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
@@ -551,14 +556,14 @@ The current tab's page, not shown here, is the nearest of all."
     (let ((agent-repl--webhost-log-level nil))
       (agent-repl-webhost-set-log-level 'debug (round (* 1000 (+ (float-time) 60))))
       (setq agent-repl-test-wh--calls nil)
-      (agent-repl--webhost-on-load 'load-changed "load-committed")
+      (agent-repl-test-wh--load "load-committed")
       (should (= 1 (length (agent-repl-test-wh--sent "setLogLevel")))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-no-ended-log-level-window ()
   "A window that has ended is not handed to a host that loads after it."
   (agent-repl-test-wh--with-host
     (let ((agent-repl--webhost-log-level (cons 'debug (round (* 1000 (- (float-time) 1))))))
-      (agent-repl--webhost-on-load 'load-changed "load-committed")
+      (agent-repl-test-wh--load "load-committed")
       (should (null (agent-repl-test-wh--sent "setLogLevel"))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-each-pages-state ()
@@ -570,7 +575,7 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-set-gate-dock "alpha" 90 "#101010")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'load-changed "load-committed")
+    (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))
@@ -584,7 +589,7 @@ The current tab's page, not shown here, is the nearest of all."
       (agent-repl-webhost-ensure-page "alpha")
       (setq agent-repl-test-wh--calls nil)
       ;; Act
-      (agent-repl--webhost-on-load 'load-changed (car case))
+      (agent-repl-test-wh--load (car case))
       ;; Assert
       (should (= (cdr case) (length (agent-repl-test-wh--sent "ensure")))))))
 
@@ -595,9 +600,17 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-ensure-page "alpha")
     (setq agent-repl-test-wh--calls nil)
     ;; Act
-    (agent-repl--webhost-on-load 'decide-policy nil)
+    (let ((last-input-event '(xwidget-event host-xwidget decide-policy)))
+      (agent-repl--webhost-on-load 'decide-policy))
     ;; Assert
     (should (null agent-repl-test-wh--calls))))
+
+(ert-deftest agent-repl-test-wh-the-load-handler-takes-the-one-argument-live-hosts-pass ()
+  "A host's installed callback outlives a hot reload and calls the handler with one argument."
+  ;; Act
+  (let ((arity (func-arity #'agent-repl--webhost-on-load)))
+    ;; Assert
+    (should (equal arity '(1 . 1)))))
 
 (ert-deftest agent-repl-test-wh-the-load-watch-keeps-the-prior-handler ()
   "The xwidget's own handler still gets every event."
