@@ -1895,7 +1895,7 @@ describe("the open rows' tab numbers", () => {
 
 describe("the tab number's stylesheet", () => {
   it.each([
-    ["color", "color-mix(in srgb, var(--muted) 85%, black)"],
+    ["color", "color-mix(in srgb, var(--muted) 75%, black)"],
     ["font-size", "0.62rem"],
     ["margin-left", "-0.4rem"],
     ["margin-right", "0.1rem"],
