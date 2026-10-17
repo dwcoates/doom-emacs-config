@@ -285,13 +285,15 @@ type historyForwarder struct {
 	mu    sync.RWMutex
 	fleet feed.HistorySource
 	peers feed.PeerDeliverySource
+	tasks feed.VendorTaskSource
 }
 
-// historyAndPeers is what the fleet serves the feed: its history and the ends
-// of its cross-session messages.
+// historyAndPeers is what the fleet serves the feed: its history, the ends of
+// its cross-session messages, and the agents its task ids name.
 type historyAndPeers interface {
 	feed.HistorySource
 	feed.PeerDeliverySource
+	feed.VendorTaskSource
 }
 
 // bind installs the fleet.
@@ -300,6 +302,20 @@ func (h *historyForwarder) bind(fleet historyAndPeers) {
 	defer h.mu.Unlock()
 	h.fleet = fleet
 	h.peers = fleet
+	h.tasks = fleet
+}
+
+// ResolveVendorTask asks through the fleet which agent of a session one vendor
+// task id names. A lookup before the fleet exists is a boot-order defect and
+// fails loudly.
+func (h *historyForwarder) ResolveVendorTask(ctx context.Context, ws ids.WorkspaceID, session, vendorTaskID string) (feed.VendorTaskAgent, error) {
+	h.mu.RLock()
+	fleet := h.tasks
+	h.mu.RUnlock()
+	if fleet == nil {
+		return feed.VendorTaskAgent{}, errors.New("agent-repld: a vendor task was resolved before the session fleet was built")
+	}
+	return fleet.ResolveVendorTask(ctx, ws, session, vendorTaskID)
 }
 
 // ReadHistory reads through the fleet. A read before the fleet exists is a

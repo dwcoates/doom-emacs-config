@@ -1735,6 +1735,11 @@ func (c *client) ResolvePeerDelivery(ctx context.Context, req *shimv1.ResolvePee
 	return unary(ctx, c, "resolve_peer_delivery", req, validateResolvePeerDeliveryRequest, c.rpc.ResolvePeerDelivery)
 }
 
+// ResolveVendorTask asks which agent of a session one vendor task id names.
+func (c *client) ResolveVendorTask(ctx context.Context, req *shimv1.ResolveVendorTaskRequest) (*shimv1.ResolveVendorTaskResponse, error) {
+	return unary(ctx, c, "resolve_vendor_task", req, validateResolveVendorTaskRequest, c.rpc.ResolveVendorTask)
+}
+
 // ReadTranscripts lists the conversations filed under the shim's directory.
 func (c *client) ReadTranscripts(ctx context.Context, req *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error) {
 	return unary(ctx, c, "read_transcripts", req, validateReadTranscriptsRequest, c.rpc.ReadTranscripts)

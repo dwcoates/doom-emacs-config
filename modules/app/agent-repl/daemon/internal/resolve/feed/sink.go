@@ -400,6 +400,9 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 	// known to be this workspace, so every row waiting to name it is drawn
 	// again.
 	r.redrawDeliveriesOfSession(s.mainAgent)
+	// A MESSAGE FROM AN AGENT OF THIS SESSION drawn before the main agent was
+	// named could not be looked up within its lineage; it is now.
+	r.redrawUnaskedVendorTasks(s)
 }
 
 // OnDetachedWork draws the bubble of work that left the stream.

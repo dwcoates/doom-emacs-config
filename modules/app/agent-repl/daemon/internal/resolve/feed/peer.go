@@ -56,8 +56,16 @@ func (r *resolver) drawPeerMessage(s *wsState, peer *conversationv1.PeerMessage)
 	if id := peer.GetInterSession().GetDeliveryId().GetValue(); id != "" {
 		r.noteDeliveryEnd(id, deliveryRecipient, s.id, peer.GetId())
 	}
+	// A MESSAGE FROM AN AGENT OF THIS SESSION is headed by that agent
+	// (vendortask.go); any other by the session that sent it.
+	var from *frontendv1.FeedPeerMessageFrom
+	if in := peer.GetInSession(); in != nil {
+		from = r.peerFromAgent(s, peer.GetId(), in)
+	} else {
+		from = r.peerFrom(s.id, peer.GetInterSession())
+	}
 	row.Row = &frontendv1.FeedRow_PeerMessage{PeerMessage: &frontendv1.FeedPeerMessage{
-		From: r.peerFrom(s.id, peer.GetInterSession()),
+		From: from,
 		Body: peer.GetBody(),
 	}}
 	log.Debug("daemon.feed.peer_message",
@@ -74,10 +82,14 @@ func handbackLabel(sender string) string {
 
 // peerKindName names the kind a bubble-drawn peer message stated, for the log.
 func peerKindName(peer *conversationv1.PeerMessage) string {
-	if peer.GetInterSession() != nil {
+	switch {
+	case peer.GetInterSession() != nil:
 		return "inter_session"
+	case peer.GetInSession() != nil:
+		return "in_session"
+	default:
+		return "unset"
 	}
-	return "unset"
 }
 
 // peerLabel composes the collapsed bubble's label from the sender id/name. The

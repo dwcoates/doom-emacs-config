@@ -400,6 +400,11 @@ func (f *fakeShim) ResolvePeerDelivery(_ context.Context, _ *connect.Request[shi
 	return connect.NewResponse(&shimv1.ResolvePeerDeliveryResponse{}), nil
 }
 
+func (f *fakeShim) ResolveVendorTask(_ context.Context, _ *connect.Request[shimv1.ResolveVendorTaskRequest]) (*connect.Response[shimv1.ResolveVendorTaskResponse], error) {
+	f.record("ResolveVendorTask")
+	return connect.NewResponse(&shimv1.ResolveVendorTaskResponse{}), nil
+}
+
 func (f *fakeShim) GatherTitleDigest(_ context.Context, _ *connect.Request[shimv1.GatherTitleDigestRequest]) (*connect.Response[shimv1.GatherTitleDigestResponse], error) {
 	f.record("GatherTitleDigest")
 	return connect.NewResponse(&shimv1.GatherTitleDigestResponse{}), nil

@@ -160,6 +160,8 @@ type harness struct {
 	nameErr error
 	// peerSource is the fake store behind Deps.PeerDeliveries.
 	peerSource *fakePeerDeliveries
+	// taskSource is the fake store behind Deps.VendorTasks.
+	taskSource *fakeVendorTasks
 	// spawned is the work the resolver started off its lock (Deps.Go), run
 	// only when the test chooses (runSpawned).
 	spawned []func()
@@ -221,7 +223,7 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 		t: t, log: log, painter: painter, nowMs: 1_700_000_000_000,
 		faults: &fakeFaults{}, clock: &fakeStallClock{}, warnings: &fakeWarnings{},
 		boards: newFakeChessBoards(), catalogs: commandcatalog.New(),
-		names: map[ids.WorkspaceID]string{}, peerSource: &fakePeerDeliveries{},
+		names: map[ids.WorkspaceID]string{}, peerSource: &fakePeerDeliveries{}, taskSource: &fakeVendorTasks{},
 	}
 
 	resolver, err := newResolver(Deps{
@@ -282,6 +284,7 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 			return h.names[ws], nil
 		},
 		PeerDeliveries: h.peerSource,
+		VendorTasks:    h.taskSource,
 		Go:             func(f func()) { h.spawned = append(h.spawned, f) },
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})

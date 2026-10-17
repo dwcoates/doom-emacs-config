@@ -302,6 +302,27 @@ func TestValidateResolvePeerDeliveryRequest(t *testing.T) {
 	}
 }
 
+// TestValidateResolveVendorTaskRequest covers the task lookup's illegal shapes.
+func TestValidateResolveVendorTaskRequest(t *testing.T) {
+	tests := []struct {
+		name  string
+		req   *shimv1.ResolveVendorTaskRequest
+		field string
+	}{
+		{name: "no session", req: &shimv1.ResolveVendorTaskRequest{VendorTaskId: "a47cd"}, field: "ResolveVendorTaskRequest.session"},
+		{name: "no task id", req: &shimv1.ResolveVendorTaskRequest{Session: &conversationv1.AgentId{Value: "agent-main"}}, field: "ResolveVendorTaskRequest.vendor_task_id"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateResolveVendorTaskRequest(tc.req)
+
+			// Assert.
+			assertInvalidField(t, err, tc.field)
+		})
+	}
+}
+
 // TestValidateResolvePeerDeliveryRequestAcceptsADeliveryID pins the legal shape.
 func TestValidateResolvePeerDeliveryRequestAcceptsADeliveryID(t *testing.T) {
 	// Arrange.

@@ -508,6 +508,22 @@ func validateResolvePeerDeliveryRequest(req *shimv1.ResolvePeerDeliveryRequest) 
 	return nil
 }
 
+// validateResolveVendorTaskRequest is ResolveVendorTaskRequest's base function:
+// a session's main agent and one task id, neither empty.
+func validateResolveVendorTaskRequest(req *shimv1.ResolveVendorTaskRequest) error {
+	const m = "ResolveVendorTaskRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if err := validateAgentID(m+".session", req.GetSession()); err != nil {
+		return err
+	}
+	if req.GetVendorTaskId() == "" {
+		return invalid(m, m+".vendor_task_id", "vendor task id is empty")
+	}
+	return nil
+}
+
 // validateGatherTitleDigestRequest is GatherTitleDigestRequest's base function.
 // The message carries no fields (the shim resolves its own transcript), so the
 // only illegal shape is a nil request.

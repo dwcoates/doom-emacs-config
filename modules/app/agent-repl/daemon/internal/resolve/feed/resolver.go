@@ -223,6 +223,10 @@ type wsState struct {
 	// so its bubble can be drawn again when the workspace that sent it becomes
 	// known (peerdelivery.go).
 	peerMessages map[string]*conversationv1.PeerMessage
+	// vendorTasks is every sender task id a message from an agent of this
+	// session named, what the record answered for it, and the bubbles waiting
+	// on it (vendortask.go).
+	vendorTasks map[string]*vendorTask
 	// standing holds each permission row's offered standing token, DAEMON-SIDE.
 	standing map[string]*conversationv1.AgentPermissionStanding
 	// permissionRows maps a permission ask id to the row it drew, so a
@@ -714,6 +718,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		announcedAgents:      map[string]*conversationv1.AgentId{},
 		subagents:            map[string]*subagentState{},
 		peerMessages:         map[string]*conversationv1.PeerMessage{},
+		vendorTasks:          map[string]*vendorTask{},
 		standing:             map[string]*conversationv1.AgentPermissionStanding{},
 		permissionRows:       map[string]*permissionState{},
 		questionAsks:         map[string]*questionState{},

@@ -68,6 +68,17 @@ func fromLine(from *frontendv1.FeedPeerMessageFrom) string {
 		return "← unresolved " + from.GetName().GetText()
 	case *frontendv1.FeedPeerMessageFrom_Unnamed:
 		return "← unnamed " + from.GetName().GetText()
+	case *frontendv1.FeedPeerMessageFrom_Agent:
+		switch agent := from.GetAgent(); {
+		case agent.GetNamed() != nil:
+			return "← agent named " + from.GetName().GetText()
+		case agent.GetIdentified() != nil:
+			return "← agent identified " + from.GetName().GetText()
+		case agent.GetUnresolved() != nil:
+			return "← agent unresolved " + from.GetName().GetText()
+		default:
+			return "← agent with no identity arm"
+		}
 	default:
 		return "no sender arm"
 	}

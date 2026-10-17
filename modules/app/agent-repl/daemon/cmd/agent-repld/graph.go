@@ -530,6 +530,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A CROSS-SESSION MESSAGE'S OTHER END is read through the same fleet,
 		// and named by the workspace's own display name.
 		PeerDeliveries: history,
+		VendorTasks:    history,
 		WorkspaceName: func(id ids.WorkspaceID) (string, error) {
 			ws, err := p.DB.Workspace(context.Background(), id)
 			return ws.Name, err

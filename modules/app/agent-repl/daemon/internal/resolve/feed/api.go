@@ -504,6 +504,12 @@ type Deps struct {
 	// test that is not about the store's answer wants. Production always wires
 	// it.
 	PeerDeliveries PeerDeliverySource
+	// VendorTasks answers, through a workspace's shim, which agent of its
+	// session a vendor task id names (vendortask.go). nil asks nothing: a
+	// message from an agent of the session keeps its sender's task id, which
+	// is what a test that is not about the record's answer wants. Production
+	// always wires it.
+	VendorTasks VendorTaskSource
 	// WorkspaceName answers a workspace's display name, the one the sidebar
 	// draws, for the header of a cross-session message whose other end is that
 	// workspace. nil names no workspace, which draws every other end
