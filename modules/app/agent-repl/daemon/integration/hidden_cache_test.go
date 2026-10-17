@@ -180,7 +180,7 @@ func closedAndLastRound(t *testing.T) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
-	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace = error %v", err)
 	}
 	lastRound := &shimv1.SetKeepaliveRequest{}
