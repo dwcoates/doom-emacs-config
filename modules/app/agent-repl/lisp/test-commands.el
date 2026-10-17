@@ -1663,6 +1663,21 @@ and `--switched' to the workspace whose switch was requested of the daemon."
   (should (equal (agent-repl--switch-state-label '(:section :repository :state :not-here)) "not open here"))
   (should (equal (agent-repl--switch-state-label '(:section nil :state :open)) "")))
 
+(ert-deftest agent-repl-test-commands-switch-state-label-merged-is-the-merge-purple ()
+  "The merged label is drawn in the merge purple every surface shares."
+  ;; Arrange / Act
+  (let ((label (agent-repl--switch-state-label '(:section :merged :state :closed))))
+    ;; Assert
+    (should (equal (get-text-property 0 'face label)
+                   (list :foreground agent-repl--color-merging-purple)))))
+
+(ert-deftest agent-repl-test-commands-switch-state-label-others-take-no-face ()
+  "Every label but merged is plain text."
+  (dolist (entry '((:section :hidden :state :open)
+                   (:section :repository :state :closed)
+                   (:section :repository :state :not-here)))
+    (should-not (text-properties-at 0 (agent-repl--switch-state-label entry)))))
+
 (ert-deftest agent-repl-test-commands-switch-turn-age-reads-the-durable-instant ()
   "The age column is how long ago the last turn ended, in the shared format."
   ;; Arrange
@@ -1706,6 +1721,21 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (equal (get-text-property 0 'display (nth 2 line))
                      `(space :align-to ,(+ 4 (string-width "a-longer-name")))))
       (should (string-match-p "2m ago" (nth 2 line))))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-keeps-the-merged-purple ()
+  "A merged row's state column keeps its purple over the annotation face."
+  ;; Arrange
+  (let* ((alist (list (cons "m" (list :row nil :section :merged :state :closed))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let* ((columns (nth 2 (car (funcall affix '("m")))))
+           (at (string-match "merged" columns)))
+      ;; Assert
+      (should (equal (get-text-property at 'face columns)
+                     (list (list :foreground agent-repl--color-merging-purple)
+                           'completions-annotations)))
+      (should (eq (get-text-property (string-match "no turn yet" columns) 'face columns)
+                  'completions-annotations)))))
 
 (ert-deftest agent-repl-test-commands-switch-table-states-its-columns ()
   "The completion table states the affixation function and completes names."

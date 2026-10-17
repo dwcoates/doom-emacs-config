@@ -44,6 +44,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(defvar agent-repl--color-merging-purple)
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
@@ -707,7 +708,8 @@ revival, which picking an open one does not.  The user is owed that
 difference before they press RET, and text is the whole of how it is
 said: no face, no styling, nothing the column could disagree with when
 the row's real state changes underneath it.  A hidden or merged row says
-so in its place instead (`agent-repl--switch-state-label').")
+so in its place instead (`agent-repl--switch-state-label'), and the word
+\"merged\" takes the merge purple every other surface paints a merge in.")
 
 (defconst agent-repl--switch-recent-limit 25
   "How many workspaces of each RECENT kind `SPC p p' offers.
@@ -926,10 +928,13 @@ carries yet has no status to show, and draws the default glyph, grey."
 (defun agent-repl--switch-state-label (entry)
   "Return the state column's word for ENTRY.
 Where the workspace sits outranks how it would open: a hidden or merged
-workspace says so, and every other says `agent-repl--switch-state-labels'."
+workspace says so, and every other says `agent-repl--switch-state-labels'.
+\"merged\" is drawn in `agent-repl--color-merging-purple', the one color
+every surface paints a merge in."
   (pcase (plist-get entry :section)
     (:hidden "hidden")
-    (:merged "merged")
+    (:merged (propertize "merged" 'face
+                         (list :foreground agent-repl--color-merging-purple)))
     (_ (alist-get (plist-get entry :state) agent-repl--switch-state-labels ""))))
 
 (defun agent-repl--switch-turn-age (entry now-ms)
@@ -953,7 +958,9 @@ Empty when the daemon states no count; zero is a real count and says so."
 ALIST is `agent-repl--switch-display-alist''s.  Each line is its status
 mark, the name, and three columns aligned past the longest name: the
 state, how long ago its last turn ended, and how many commits its branch
-holds past its merge-base."
+holds past its merge-base.  The columns take `completions-annotations'
+beneath any face a column states itself, so the merged label keeps its
+purple (`agent-repl--switch-state-label')."
   (let ((column (+ 4 (apply #'max 0 (mapcar (lambda (cell) (string-width (car cell)))
                                             alist)))))
     (lambda (candidates)
@@ -963,12 +970,13 @@ holds past its merge-base."
            (list candidate
                  (concat (agent-repl--switch-mark entry) " ")
                  (concat (propertize " " 'display `(space :align-to ,column))
-                         (propertize
-                          (format "%-14s %-12s %s"
-                                  (agent-repl--switch-state-label entry)
-                                  (agent-repl--switch-turn-age entry now-ms)
-                                  (agent-repl--switch-commits entry))
-                          'face 'completions-annotations)))))
+                         (let ((columns (format "%-14s %-12s %s"
+                                                (agent-repl--switch-state-label entry)
+                                                (agent-repl--switch-turn-age entry now-ms)
+                                                (agent-repl--switch-commits entry))))
+                           (add-face-text-property 0 (length columns)
+                                                   'completions-annotations t columns)
+                           columns)))))
        candidates))))
 
 (defun agent-repl--switch-table (alist now-ms)
