@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -26,15 +25,9 @@ type vendorTaskResolver interface {
 // names. A workspace with no shim answers feed.ErrNoHistorySource, exactly as a
 // history read does.
 func (f *Fleet) ResolveVendorTask(ctx context.Context, ws ids.WorkspaceID, session, vendorTaskID string) (feed.VendorTaskAgent, error) {
-	client, ok := f.Client(ws)
-	if !ok {
-		return feed.VendorTaskAgent{}, feed.ErrNoHistorySource
-	}
-	agent, err := resolveVendorTask(ctx, client, session, vendorTaskID)
-	if errors.Is(err, shimclient.ErrStandDownOrdered) {
-		return feed.VendorTaskAgent{}, f.readEndedInStandDown(ws, err)
-	}
-	return agent, err
+	return throughShim(f, ws, func(client shimclient.Client) (feed.VendorTaskAgent, error) {
+		return resolveVendorTask(ctx, client, session, vendorTaskID)
+	})
 }
 
 // resolveVendorTask makes the one ResolveVendorTask call and unwraps its

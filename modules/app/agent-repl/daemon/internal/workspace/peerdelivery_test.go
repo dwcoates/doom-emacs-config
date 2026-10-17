@@ -3,12 +3,15 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/shimclient"
 )
 
 // fakePeerDeliveryResolver answers one scripted ResolvePeerDelivery and records
@@ -163,5 +166,82 @@ func TestFleetResolvePeerDeliveryWithNoShimHasNoSource(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, feed.ErrNoHistorySource) {
 		t.Fatalf("err = %v, want ErrNoHistorySource", err)
+	}
+}
+
+func TestThroughShimAnswersWhatTheReadAnswered(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+
+	// Act.
+	got, err := throughShim(f.fleet, ws, func(shimclient.Client) (string, error) { return "answer", nil })
+
+	// Assert.
+	if err != nil || got != "answer" {
+		t.Fatalf("throughShim = %q, %v; want the read's answer", got, err)
+	}
+}
+
+func TestThroughShimCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+
+	// Act.
+	_, err := throughShim(f.fleet, ws, func(shimclient.Client) (string, error) { return "", standDownErr })
+
+	// Assert.
+	if !errors.Is(err, feed.ErrNoHistorySource) || !errors.Is(err, shimclient.ErrStandDownOrdered) {
+		t.Fatalf("err = %v, want ErrNoHistorySource carrying the stand-down", err)
+	}
+}
+
+func TestThroughShimOfAnyOtherFailureStaysAFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+	cause := errors.New("connection refused")
+
+	// Act.
+	_, err := throughShim(f.fleet, ws, func(shimclient.Client) (string, error) { return "", cause })
+
+	// Assert.
+	if !errors.Is(err, cause) || errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("err = %v, want the failure itself", err)
+	}
+}
+
+func TestThroughShimWithNoShimAsksNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	asked := false
+
+	// Act.
+	_, err := throughShim(f.fleet, ws.ID, func(shimclient.Client) (string, error) { asked = true; return "", nil })
+
+	// Assert.
+	if asked || !errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("asked = %t, err = %v; want no read and no source", asked, err)
+	}
+}
+
+func TestEveryFeedLookupThroughAShimSharesThroughShim(t *testing.T) {
+	// Arrange: the lookups the feed asks a workspace's shim for.
+	files := []string{"peerdelivery.go", "vendortask.go"}
+
+	// Act, Assert.
+	for _, name := range files {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if !strings.Contains(string(source), "return throughShim(f, ws,") {
+			t.Errorf("%s does not ask through throughShim", name)
+		}
+		if strings.Count(string(source), "f.Client(ws)") > 0 && name != "peerdelivery.go" {
+			t.Errorf("%s reaches the shim client by hand", name)
+		}
 	}
 }

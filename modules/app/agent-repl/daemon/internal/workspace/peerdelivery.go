@@ -28,15 +28,26 @@ type peerDeliveryResolver interface {
 // DELIVERYID. A workspace with no shim answers feed.ErrNoHistorySource, exactly
 // as a history read does.
 func (f *Fleet) ResolvePeerDelivery(ctx context.Context, ws ids.WorkspaceID, deliveryID string) (feed.PeerDeliveryEnds, error) {
+	return throughShim(f, ws, func(client shimclient.Client) (feed.PeerDeliveryEnds, error) {
+		return resolvePeerDelivery(ctx, client, deliveryID)
+	})
+}
+
+// throughShim runs READ against WS's shim: the one shape of every store-backed
+// lookup the feed asks through a workspace. A workspace with no shim answers
+// feed.ErrNoHistorySource, and a read a stand-down this daemon ordered cut
+// short answers the same, recorded at INFO, exactly as a history read does.
+func throughShim[T any](f *Fleet, ws ids.WorkspaceID, read func(shimclient.Client) (T, error)) (T, error) {
+	var none T
 	client, ok := f.Client(ws)
 	if !ok {
-		return feed.PeerDeliveryEnds{}, feed.ErrNoHistorySource
+		return none, feed.ErrNoHistorySource
 	}
-	ends, err := resolvePeerDelivery(ctx, client, deliveryID)
+	answer, err := read(client)
 	if errors.Is(err, shimclient.ErrStandDownOrdered) {
-		return feed.PeerDeliveryEnds{}, f.readEndedInStandDown(ws, err)
+		return none, f.readEndedInStandDown(ws, err)
 	}
-	return ends, err
+	return answer, err
 }
 
 // resolvePeerDelivery makes the one ResolvePeerDelivery call and unwraps its
