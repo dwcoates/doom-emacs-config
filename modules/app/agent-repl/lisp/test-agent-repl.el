@@ -44,6 +44,7 @@
   (load (expand-file-name "test-declarations.el" dir) nil t)
   (load (expand-file-name "test-elisp-build.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
+  (load (expand-file-name "test-evaluate.el" dir) nil t)
   (load (expand-file-name "test-find-file-workspace.el" dir) nil t)
   (load (expand-file-name "test-frontend.el" dir) nil t)
   (load (expand-file-name "test-frontends.el" dir) nil t)
