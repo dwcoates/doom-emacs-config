@@ -64,6 +64,16 @@ import (
 // the same shape of work as every other awaited daemon answer here.
 const emacsVerbBound = DefaultTimeout
 
+// emacsTabOpenBound bounds a workspace's FIRST open being answered: the
+// daemon answers a tab open only once the workspace's shim has spawned and its
+// webapp page has drawn (open-tabs.el), so the wait spans a node-shim spawn and
+// a WebKit page boot, not one verb's round trip. Measured 2026-10-17: alone
+// 0.47-0.9s; inside the merge gate, which runs e2e-emacs beside the ERT suite,
+// 0.77-2.77s over eleven awaits, and one at 5.25s whose page sat behind a
+// logged 1038ms web-process main-thread stall. It is just over twice the
+// gate's ordinary worst.
+const emacsTabOpenBound = 6 * time.Second
+
 // emacsTurnBound bounds a fake-SDK turn reaching a given roster arm. The fake
 // vendor answers without network or model latency, so this is the daemon and
 // shim plumbing plus one roster push, not a model call.
@@ -127,7 +137,7 @@ func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture 
 
 	f := &emacsWorkspaceFixture{World: w, Emacs: e, Repo: repo, Name: name}
 	f.RefID = f.awaitRefID()
-	awaitTabsOpen(e, emacsVerbBound, []string{name})
+	awaitTabsOpen(e, []string{name})
 	return f
 }
 
@@ -139,9 +149,9 @@ const emacsTabOrderForm = `(mapcar (lambda (n) (format "%s" n)) agent-repl-roste
 // held out of the order until the daemon answers its `OpenTabs' open
 // (open-tabs.el), so a scenario that reads the order before that reads a
 // workspace that is registered but not yet open.
-func awaitTabsOpen(e *Emacs, bound time.Duration, names []string) []string {
+func awaitTabsOpen(e *Emacs, names []string) []string {
 	e.t.Helper()
-	return decodeStrings(e.AwaitEvalFor(bound, fmt.Sprintf("the tabs %q to be answered open", names),
+	return decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, fmt.Sprintf("the tabs %q to be answered open", names),
 		emacsTabOrderForm,
 		func(raw json.RawMessage) bool {
 			order := decodeStrings(raw)
@@ -370,7 +380,7 @@ func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 
 	// The created workspace's tab joins the order once the daemon answers its
 	// open (open-tabs.el), which follows its row.
-	order := decodeStrings(e.AwaitEvalFor(emacsVerbBound, "the created workspace's tab to be answered open",
+	order := decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, "the created workspace's tab to be answered open",
 		emacsTabOrderForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before }))
 
