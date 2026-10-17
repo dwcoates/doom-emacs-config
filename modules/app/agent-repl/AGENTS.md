@@ -1141,6 +1141,9 @@ operation writes a command file; that ingress is retired.
   (`~/.claude/skills/<skill>/agent-repld`). The installed skill links into
   the main checkout, so a call always runs the main checkout's build of the
   daemon. The daemon's briefs (`prompts/`) name commands the same way.
+- **A workspace that asked another for an update once a condition is met is
+  sent that update when the condition is met, without asking the user.** The
+  asking workspace's request is the authorization (`/agent-repl-workspaces`).
 - **`daemon/cmd/agent-repld/skillsurface_test.go` keeps the surface whole**:
   every command a skill or a brief names exists, every agent command is
   reachable from a skill, and every skill that calls the CLI carries the

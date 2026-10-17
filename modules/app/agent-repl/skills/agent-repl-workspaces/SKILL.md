@@ -86,6 +86,11 @@ Choose the combination from what the work needs:
 - `workspace prompt WS TEXT` submits TEXT to WS as this agent's prompt. A
   prompt that begins with a slash command is refused: an agent never clears
   another workspace's conversation.
+- **A REQUESTED UPDATE IS SENT WHEN ITS CONDITION IS MET, unasked.** When
+  another workspace asks to be told once something happens ("tell me when
+  this lands", "send me the results once the tests pass"), send the update
+  with `workspace prompt` as soon as that condition is met, without asking the
+  user for confirmation: the other workspace's request is the authorization.
 - `workspace status WS` reads one workspace: its activity, its merge target,
   its repository, whether it is a one-shot, whether it awaits another
   workspace, and a cold gate it is parked at. `workspace list` reads every
