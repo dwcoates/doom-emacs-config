@@ -19,6 +19,8 @@ import { bootPage, pageAssets } from "./boot-page";
 
 /** How much shorter the answered card redraws. */
 const SHRINK_PX = 300;
+/** How much shorter a swapped card lays out for one layout, as a merge tab swap did (2026-10-17). */
+const SWAP_DIP_PX = 217;
 /** Painted frames measured after each change: a correction settles well inside it. */
 const FRAMES = 6;
 /** A painted deviation at or under this is subpixel rounding, not a jump. */
@@ -42,6 +44,8 @@ describe("a click in the feed holds its view, in WebKit", () => {
   let unclicked: number;
   let clicked: number;
   let clickedRecords: string[];
+  let swapped: number;
+  let swappedRecords: string[];
   let docked: number;
   let dockedRecords: string[];
 
@@ -59,6 +63,12 @@ describe("a click in the feed holds its view, in WebKit", () => {
       [SHRINK_PX, FRAMES] as const,
     );
     clickedRecords = await recordsOf(answered);
+    const swapping = await freshPage();
+    swapped = await swapping.evaluate(
+      ([px, frames]) => window.clickHold.swapTailCard(px, frames),
+      [SWAP_DIP_PX, FRAMES] as const,
+    );
+    swappedRecords = await recordsOf(swapping);
     const gate = await freshPage();
     docked = await gate.evaluate((frames) => window.clickHold.answerDockedGate(frames), FRAMES);
     dockedRecords = await recordsOf(gate);
@@ -80,13 +90,21 @@ describe("a click in the feed holds its view, in WebKit", () => {
     expect(docked).toBeLessThanOrEqual(TOLERANCE_PX);
   });
 
-  it("owes the docked gate's stillness to the floor undoing the box's clamp", () => {
-    // A still pass with no restore would mean the dock's height never reached
+  it("holds the clicked tail card still through a redraw that dips shorter for one layout", () => {
+    expect(swapped).toBeLessThanOrEqual(TOLERANCE_PX);
+  });
+
+  it("owes the docked gate's stillness to the floor, not to an unchanged box", () => {
+    // A still pass with no resize would mean the dock's height never reached
     // the feed's box: a vacuous pass.
-    expect(dockedRecords).toContain("info scroll.click-floor-restored");
+    expect(dockedRecords).toContain("info scroll.box-resized");
+  });
+
+  it("never takes a held view to a new position, so no clamp reached it", () => {
+    expect([...clickedRecords, ...swappedRecords, ...dockedRecords].filter((r) => r.endsWith("scroll.click-hold-moved"))).toEqual([]);
   });
 
   it("writes no error through any answer", () => {
-    expect([...clickedRecords, ...dockedRecords].filter((r) => r.startsWith("error "))).toEqual([]);
+    expect([...clickedRecords, ...swappedRecords, ...dockedRecords].filter((r) => r.startsWith("error "))).toEqual([]);
   });
 });
