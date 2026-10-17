@@ -115,6 +115,13 @@ describe("jumpToWorkspace", () => {
     expect(host.querySelectorAll(".merge-test-refusal")).toHaveLength(1);
   });
 
+  it("records a transport failure at ERROR under the site's operation", async () => {
+    const capture = captureLogRecords();
+    await jump(new ConnectError("socket is gone", Code.Unavailable));
+    const record = await forwardedRecord(capture, "merge.test-jump-failed");
+    expect(record.level.case).toBe("error");
+  });
+
   it("is the one SelectWorkspace call site in the merge bubble", () => {
     for (const file of ["queue.ts", "merge.ts", "merge-body.ts", "workspace-switch.ts"]) {
       const source = codeOf(readFileSync(join(process.cwd(), "src/feed/merge", file), "utf8"));

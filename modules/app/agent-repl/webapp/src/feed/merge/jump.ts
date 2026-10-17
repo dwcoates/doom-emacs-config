@@ -62,8 +62,7 @@ export async function jumpToWorkspace(
       SelectWorkspaceResponseSchema,
     );
   } catch (err) {
-    if (isMalformedView(err)) throw err;
-    host.append(drawRefusal(site, "transport", "the daemon could not be reached"));
+    refuseTransport(host, site, "SelectWorkspace", workspace, err);
     return;
   }
   const result = requireCase(response.result, "SelectWorkspaceResponse.result");
@@ -84,16 +83,41 @@ export async function jumpToWorkspace(
       }
       const sentence =
         crossCuttingSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
-      log.warn(`SelectWorkspace was refused: ${sentence}`, {
-        operation: `${site.operation}-refused`,
-        context: { arm: cause.case, workspace: workspace.id },
-      });
-      host.append(drawRefusal(site, cause.case, sentence));
+      refuse(host, site, "SelectWorkspace", workspace, cause.case, sentence);
       return;
     }
     default:
       return unreachableArm("SelectWorkspaceResponse.result", armName(result));
   }
+}
+
+/** Record RPC's refusal of WORKSPACE under SITE, and draw it inside HOST. */
+function refuse(
+  host: HTMLElement,
+  site: JumpSite,
+  rpc: string,
+  workspace: WorkspaceRef,
+  arm: string,
+  sentence: string,
+): void {
+  log.warn(`${rpc} was refused: ${sentence}`, {
+    operation: `${site.operation}-refused`,
+    context: { rpc, arm, workspace: workspace.id },
+  });
+  host.append(drawRefusal(site, arm, sentence));
+}
+
+/**
+ * Record RPC's transport failure under SITE and draw it inside HOST. A
+ * malformed answer is not one, and travels up.
+ */
+function refuseTransport(host: HTMLElement, site: JumpSite, rpc: string, workspace: WorkspaceRef, err: unknown): void {
+  if (isMalformedView(err)) throw err;
+  log.error(`${rpc} failed at the transport: ${String(err)}`, {
+    operation: `${site.operation}-failed`,
+    context: { rpc, workspace: workspace.id, cause: err },
+  });
+  host.append(drawRefusal(site, "transport", "the daemon could not be reached"));
 }
 
 /** The refusal, inside the element that made the call. */
