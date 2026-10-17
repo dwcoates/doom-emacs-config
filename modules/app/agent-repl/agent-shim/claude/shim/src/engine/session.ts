@@ -6955,30 +6955,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // again once the interrupt has answered, and this first one stands when
       // the interrupt never does.
       const snapshot = { stopping: live.all(), abandoned: false };
-      // THE VENDOR'S HALF IS BOUNDED, as one stage. A restart is asked for
-      // because something is stuck, and the vendor is the likeliest thing to be
-      // (2026-10-02: a vendor that never answered its first control request).
-      // Its interrupt and its per-task stops were awaited with no bound, so a
-      // forced `KillSession` on a stuck vendor never answered: the daemon
-      // escalated to the process kill, and the shell runs this teardown owed
-      // a terminal stayed open in the store, for the next shim to re-announce
-      // as live. The stops are asked AT ONCE, so one task the vendor cannot
-      // stop does not keep the others from being asked.
-      //
-      // THE OPEN TURN IS ENDED THE MOMENT THE INTERRUPT ANSWERS, in the same
-      // continuation, exactly as it was before this stage was bounded: the
-      // vendor's own `by_user` result for the interrupt follows it down the
-      // message loop, and a teardown that yielded first let that result end
-      // the turn as a user's stop instead of the host shutdown it is.
-      await withBudget(
-        stopVendorWork(active, snapshot, () => endTurnsForTeardown(reason)),
-        watcherConclusionBudgetMs,
-        "the vendor did not answer the teardown's interrupt and per-task stops within its budget; the stopped shell runs are closed and the stand-down goes on",
-      );
-      // A LATE INTERRUPT ASKS NOTHING MORE: the stand-down has moved on and
-      // the query is about to be closed under it.
-      snapshot.abandoned = true;
-      concludeStoppedRuns(snapshot.stopping);
+      // AN IDLE VENDOR IS ASKED NOTHING. With no turn open (a keep-alive
+      // included) and nothing live, there is nothing for an interrupt or a
+      // stop to end: closing the query below ends the vendor process whole.
+      // An idle vendor was asked anyway and often never answered (2026-10-17:
+      // 19 of 23 idle stand-downs spent the whole budget on it, at ERROR).
+      if (open === undefined && snapshot.stopping.length === 0) {
+        LOGGER.debug({ reason }, "nothing is in flight; the teardown asks the vendor to interrupt and stop nothing");
+      } else {
+        // THE VENDOR'S HALF IS BOUNDED, as one stage. A restart is asked for
+        // because something is stuck, and the vendor is the likeliest thing to be
+        // (2026-10-02: a vendor that never answered its first control request).
+        // Its interrupt and its per-task stops were awaited with no bound, so a
+        // forced `KillSession` on a stuck vendor never answered: the daemon
+        // escalated to the process kill, and the shell runs this teardown owed
+        // a terminal stayed open in the store, for the next shim to re-announce
+        // as live. The stops are asked AT ONCE, so one task the vendor cannot
+        // stop does not keep the others from being asked.
+        //
+        // THE OPEN TURN IS ENDED THE MOMENT THE INTERRUPT ANSWERS, in the same
+        // continuation, exactly as it was before this stage was bounded: the
+        // vendor's own `by_user` result for the interrupt follows it down the
+        // message loop, and a teardown that yielded first let that result end
+        // the turn as a user's stop instead of the host shutdown it is.
+        await withBudget(
+          stopVendorWork(active, snapshot, () => endTurnsForTeardown(reason)),
+          watcherConclusionBudgetMs,
+          "the vendor did not answer the teardown's interrupt and per-task stops within its budget; the stopped shell runs are closed and the stand-down goes on",
+        );
+        // A LATE INTERRUPT ASKS NOTHING MORE: the stand-down has moved on and
+        // the query is about to be closed under it.
+        snapshot.abandoned = true;
+        concludeStoppedRuns(snapshot.stopping);
+      }
     }
     // A no-op when the interrupt answered in time; otherwise the turn ends here.
     endTurnsForTeardown(reason);
