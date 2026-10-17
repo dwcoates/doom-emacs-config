@@ -75,7 +75,7 @@ func (f *fakeDB) SetCacheLapse(_ context.Context, id wsm.WorkspaceID, lapse wsm.
 	if !ok {
 		return false, wsm.ErrNotFound
 	}
-	if !rec.Hidden && !rec.Closed {
+	if !rec.LetsCacheLapse() {
 		return false, nil
 	}
 	f.setLapses = append(f.setLapses, lapse)
@@ -150,6 +150,13 @@ func visible() wsm.Workspace {
 
 func closed() wsm.Workspace {
 	return wsm.Workspace{ID: theWorkspace, Closed: true}
+}
+
+// selectedHidden is a hidden workspace the user is looking at.
+func selectedHidden() wsm.Workspace {
+	rec := hidden()
+	rec.Current = true
+	return rec
 }
 
 func newHarness(t *testing.T, rec wsm.Workspace) *harness {
@@ -298,6 +305,19 @@ func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	}
 }
 
+func TestRecordDropsAProjectionForTheSelectedHiddenWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t, selectedHidden())
+
+	// Act
+	h.keeper.record(context.Background(), theWorkspace, stated(lapseAt, nil))
+
+	// Assert
+	if _, armed := h.keeper.deadlines[theWorkspace]; armed {
+		t.Fatal("the selected hidden workspace armed a lapse")
+	}
+}
+
 func TestRecordLogsAWriteThatFails(t *testing.T) {
 	// Arrange
 	h := newHarness(t, hidden())
@@ -352,6 +372,7 @@ func TestReconcileSetsTheCadenceToMatchTheVisibility(t *testing.T) {
 		{name: "a closed workspace gets its last round", rec: closed(), want: "last_round"},
 		{name: "a closed hidden workspace holds", rec: closedHidden, want: "hold"},
 		{name: "a reopened workspace runs", rec: reopened, want: "run"},
+		{name: "a hidden workspace the user is looking at runs", rec: selectedHidden(), want: "run"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -492,6 +513,11 @@ func TestLapseDueLeavesAWorkspaceItShouldNotStandDown(t *testing.T) {
 		deadline time.Time
 	}{
 		{name: "shown or reopened again", rec: visible},
+		{name: "selected again", rec: func() wsm.Workspace {
+			rec := selectedHidden()
+			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+			return rec
+		}},
 		{name: "a lapse that moved later", rec: func() wsm.Workspace {
 			rec := hidden()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: later}

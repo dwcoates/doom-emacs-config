@@ -72,6 +72,9 @@ type Workspace struct {
 	// hidden section (agentrepl.v1.SetWorkspaceHidden): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
 	Hidden bool
+	// Current reports whether the workspace is the user's selection
+	// (SetCurrent): the one they are looking at. At most one workspace is.
+	Current bool
 	// Place is the workspace's position in the registry order, which the
 	// sidebar and the tab bar both follow. Unique, and at least 1.
 	Place int64

@@ -78,9 +78,12 @@ func decodeCacheLapse(ws Workspace, lapsesAt, gated sql.NullInt64) (*CacheLapse,
 
 // SetCacheLapse records a hidden or closed workspace's projected cache lapse,
 // replacing the one that stood. It answers whether it was recorded: a
-// workspace that is neither takes none, IN THE SAME STATEMENT that reads its
-// visibility and its close, so a projection that arrives after the user showed
-// or reopened the workspace can never land on it. An unknown workspace is refused (ErrNotFound).
+// workspace whose cache is not left to lapse (Workspace.LetsCacheLapse:
+// neither hidden nor closed, merged, or a hidden one the user is looking at)
+// takes none, IN THE SAME STATEMENT that reads its visibility, its selection
+// and its close, so a projection that arrives after the user showed, selected
+// or reopened the workspace can never land on it. An unknown workspace is
+// refused (ErrNotFound).
 func (s *store) SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLapse) (bool, error) {
 	var gated any
 	fields := dlog.Context{"workspace": string(id), "lapses_at": lapse.LapsesAt}
@@ -91,7 +94,7 @@ func (s *store) SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLa
 	recorded := false
 	err := s.write(ctx, "daemon.wsm.set_cache_lapse", fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE workspaces SET cache_lapses_at = ?, cache_lapse_gated_tokens = ? WHERE id = ? AND (hidden = 1 OR closed = 1)`,
+			`UPDATE workspaces SET cache_lapses_at = ?, cache_lapse_gated_tokens = ? WHERE id = ? AND ((hidden = 1 AND merged_at IS NULL AND is_current = 0) OR closed = 1)`,
 			nanos(lapse.LapsesAt), gated, id)
 		if err != nil {
 			return err

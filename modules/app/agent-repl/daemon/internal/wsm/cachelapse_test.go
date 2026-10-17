@@ -97,6 +97,88 @@ func TestSetCacheLapseOnAVisibleWorkspaceRecordsNothing(t *testing.T) {
 	}
 }
 
+func TestSetCacheLapseOnTheCurrentHiddenWorkspaceRecordsNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := hiddenWorkspace(t, s)
+	if err := s.SetCurrent(context.Background(), ws.ID, hiddenAtInstant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Act
+	recorded, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant})
+
+	// Assert
+	if err != nil || recorded {
+		t.Fatalf("SetCacheLapse = %v, %v; want not recorded and no error", recorded, err)
+	}
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil || got.CacheLapse != nil {
+		t.Fatalf("CacheLapse = %+v, %v; want none", got.CacheLapse, err)
+	}
+}
+
+func TestSetCurrentClearsTheCacheLapse(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := hiddenWorkspace(t, s)
+	if _, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil {
+		t.Fatalf("SetCacheLapse: %v", err)
+	}
+
+	// Act
+	if err := s.SetCurrent(context.Background(), ws.ID, hiddenAtInstant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil || got.CacheLapse != nil || !got.Current {
+		t.Fatalf("CacheLapse = %+v, Current = %v, %v; want none and current", got.CacheLapse, got.Current, err)
+	}
+}
+
+func TestSetCurrentKeepsAClosedWorkspacesLapse(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := closedWorkspace(t, s)
+	if _, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil {
+		t.Fatalf("SetCacheLapse: %v", err)
+	}
+
+	// Act
+	if err := s.SetCurrent(context.Background(), ws.ID, hiddenAtInstant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil || got.CacheLapse == nil {
+		t.Fatalf("CacheLapse = %+v, %v; want the recorded one", got.CacheLapse, err)
+	}
+}
+
+func TestSetCurrentLeavesTheDeselectedWorkspacesLapse(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	other := testWorkspace(t, s)
+	ws := hiddenWorkspace(t, s)
+	if _, err := s.SetCacheLapse(context.Background(), ws.ID, CacheLapse{LapsesAt: lapseInstant}); err != nil {
+		t.Fatalf("SetCacheLapse: %v", err)
+	}
+
+	// Act
+	if err := s.SetCurrent(context.Background(), other.ID, hiddenAtInstant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Assert
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil || got.CacheLapse == nil {
+		t.Fatalf("CacheLapse = %+v, %v; want the recorded one", got.CacheLapse, err)
+	}
+}
+
 func TestSetCacheLapseOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

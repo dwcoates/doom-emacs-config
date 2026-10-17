@@ -65,6 +65,40 @@ func TestSelectTellsTheRoster(t *testing.T) {
 	}
 }
 
+func TestSelectRaisesTheCacheKeepersVisibilityEdges(t *testing.T) {
+	tests := []struct {
+		name     string
+		previous string
+		want     []ids.WorkspaceID
+	}{
+		{name: "the first selection reconciles the selected workspace", want: []ids.WorkspaceID{"w2"}},
+		{name: "a switch reconciles the selected and the deselected workspace", previous: "w1", want: []ids.WorkspaceID{"w2", "w1"}},
+		{name: "a re-selection changes no visibility", previous: "w2", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.workspace("w2", t.TempDir())
+			if tt.previous != "" {
+				previous := ids.WorkspaceID(tt.previous)
+				f.db.current = &previous
+			}
+
+			// Act.
+			if err := f.verbs.Select(context.Background(), "w2"); err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+
+			// Assert.
+			if !slices.Equal(f.visibilityEdges, tt.want) {
+				t.Fatalf("visibility edges = %v, want %v", f.visibilityEdges, tt.want)
+			}
+		})
+	}
+}
+
 func TestSelectIsIdempotent(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

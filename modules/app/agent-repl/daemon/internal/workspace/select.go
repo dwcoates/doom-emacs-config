@@ -150,6 +150,14 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 	if !reselected {
 		v.deps.Host.ReturnFeedToTail(ws)
+		// THE SELECTION IS A VISIBILITY EDGE (wsm.Workspace.Runs): the
+		// workspace the user looks at runs even hidden, and the one they left
+		// is withheld again if it is. The row is written above, before either
+		// edge is queued, so the keeper reads the selection either way.
+		v.deps.CacheLapses.VisibilityChanged(ws)
+		if current != nil {
+			v.deps.CacheLapses.VisibilityChanged(*current)
+		}
 	}
 	return true, nil
 }

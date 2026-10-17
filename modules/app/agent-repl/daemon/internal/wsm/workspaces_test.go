@@ -846,6 +846,34 @@ func TestSetCurrentSelectsExactlyOneWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReadsWhetherItIsCurrent(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	first := testWorkspace(t, s)
+	second := testWorkspace(t, s)
+	if err := s.SetCurrent(context.Background(), first.ID, instant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Act
+	if err := s.SetCurrent(context.Background(), second.ID, instant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Assert
+	gotFirst, err := s.Workspace(context.Background(), first.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	gotSecond, err := s.Workspace(context.Background(), second.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if gotFirst.Current || !gotSecond.Current {
+		t.Fatalf("Current = %v, %v; want false, true", gotFirst.Current, gotSecond.Current)
+	}
+}
+
 func TestSetCurrentStampsLastSelected(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

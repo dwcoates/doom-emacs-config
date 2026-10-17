@@ -190,8 +190,9 @@ message OpenTabsOpened {
     // Its service-level start failed; show the tab, which draws the fault
     // ("<name>: session failed to start: <reason>.").
     OpenTabsOpenedFailed failed = 4;
-    // Hidden, or in a collapsed repository section: nothing was started, and
-    // its tab stays withheld until it is shown again.
+    // Hidden, or in a collapsed repository section, and not the workspace
+    // the user is looking at: nothing was started, and its tab stays withheld
+    // until it is shown again.
     OpenTabsOpenedHidden hidden = 5;
     // The daemon refused to open it; the editor shows no tab and records why.
     OpenTabsOpenedRefused refused = 6;
