@@ -858,6 +858,13 @@ export interface CacheAnchor {
  * nothing is known to be cached, so the lapse is the anchor itself. Running it
  * again schedules from the anchor exactly as a start does.
  *
+ * ONE LAST ROUND when the workspace is closed (shim.v1.SetKeepalive's
+ * `last_round`, 2026-10-17): the beat already scheduled from the anchor goes
+ * out, and then the cadence holds exactly as above, projecting the lapse the
+ * beat's own answer moves. A cache no beat can keep warm is held at once. The
+ * round is SPENT once: a later last round leaves the cadence held, and only
+ * {@link run} restarts the keep-alives.
+ *
  * SPARED while detached work is live (owner ruling, 2026-10-14): a beat owes
  * the yield obligation's rewind, the rewind replaces the vendor's query, and
  * that kills every background shell and agent the old process ran. So while
@@ -878,6 +885,10 @@ export class KeepaliveCadence {
   private handle: unknown;
   private paused = false;
   private held = false;
+  /** One more beat is owed before the cadence holds (the workspace was closed). */
+  private lastRoundOwed = false;
+  /** The last round's beat went out, or none could: a later last round is never granted. */
+  private lastRoundSpent = false;
   private anchor: CacheAnchor | undefined;
   /** The schedule last stated at INFO, so an unchanged reschedule is not restated. */
   private stated: string | undefined;
@@ -939,16 +950,36 @@ export class KeepaliveCadence {
    */
   hold(): void {
     this.held = true;
+    this.lastRoundOwed = false;
     LOGGER.info({ ...anchorContext(this.anchor) }, "keep-alives are held; the cache is left to lapse");
     this.arm("keep-alives were held");
   }
 
   /** The workspace is shown again: keep the cache warm, from the last request. */
   run(): void {
-    if (!this.held) return;
+    if (!this.held && !this.lastRoundOwed) return;
     this.held = false;
+    this.lastRoundOwed = false;
+    this.lastRoundSpent = false;
     LOGGER.info({ ...anchorContext(this.anchor) }, "keep-alives run again");
     this.arm("keep-alives run again");
+  }
+
+  /**
+   * The workspace was closed: send the one beat scheduled from the last
+   * request, then hold. A round already spent is not granted again; the
+   * cadence stays held and restates its lapse.
+   */
+  lastRound(): void {
+    if (this.lastRoundSpent) {
+      LOGGER.info({ ...anchorContext(this.anchor) }, "the last keep-alive round was already spent; keep-alives stay held");
+      this.arm("a last round was asked for after it was spent");
+      return;
+    }
+    this.held = false;
+    this.lastRoundOwed = true;
+    LOGGER.info({ ...anchorContext(this.anchor) }, "one more keep-alive round, then keep-alives are held");
+    this.arm("one more keep-alive round was asked for");
   }
 
   /**
@@ -1003,9 +1034,26 @@ export class KeepaliveCadence {
     }
     if (this.paused) return;
     if (this.spares(reason)) return;
-    if (!this.keepable(anchor, reason)) return;
+    if (!this.keepable(anchor, reason)) {
+      this.spendLastRound(anchor, "no beat can keep the cache warm");
+      return;
+    }
     const dueAtMs = anchor.atMs + this.intervalMs;
     this.schedule(dueAtMs, Math.max(0, dueAtMs - this.nowMs()), reason);
+  }
+
+  /**
+   * The last round is over (its beat went out, or none could): hold, and
+   * project the lapse. The beat's own answer, when it comes, re-anchors and
+   * projects again. No last round owed is no change.
+   */
+  private spendLastRound(anchor: CacheAnchor, why: string): void {
+    if (!this.lastRoundOwed) return;
+    this.lastRoundOwed = false;
+    this.lastRoundSpent = true;
+    this.held = true;
+    LOGGER.info({ ...anchorContext(anchor), why }, "the last keep-alive round is spent; keep-alives are held and the cache is left to lapse");
+    this.projectLapse(anchor);
   }
 
   /** States when the anchored cache lapses: a TTL after the anchor, or the anchor itself when no tier is stated. */
@@ -1088,8 +1136,15 @@ export class KeepaliveCadence {
     if (this.spares("the beat came due")) return;
     // THE CACHE IS RE-JUDGED AT THE BEAT: a timer that fires late (a sleeping
     // host) must not buy a cold read the schedule never meant to.
-    if (!this.keepable(anchor, "the beat came due")) return;
+    if (!this.keepable(anchor, "the beat came due")) {
+      this.spendLastRound(anchor, "no beat can keep the cache warm");
+      return;
+    }
     this.beat();
+    if (this.lastRoundOwed) {
+      this.spendLastRound(anchor, "the last round's beat came due");
+      return;
+    }
     // A BEAT THAT MAKES NO REQUEST (skipped, refused) must not end the cadence:
     // the next falls one interval on, and the keep-alive's own answer, when it
     // comes, re-anchors over it.

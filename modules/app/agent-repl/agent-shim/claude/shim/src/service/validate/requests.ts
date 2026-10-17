@@ -144,7 +144,7 @@ export function validateSendKeepaliveRequest(_request: shimv1.SendKeepaliveReque
   // No fields. Nothing to refuse.
 }
 
-/** `shim.v1.SetKeepaliveRequest` — hold or run, never neither. */
+/** `shim.v1.SetKeepaliveRequest` — hold, run or a last round, never none. */
 export function validateSetKeepaliveRequest(request: shimv1.SetKeepaliveRequest): void {
   try {
     if (request.cadence.case === undefined) throw unsetOneof("set_keepalive.cadence");

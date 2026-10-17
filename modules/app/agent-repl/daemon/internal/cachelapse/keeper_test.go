@@ -75,7 +75,7 @@ func (f *fakeDB) SetCacheLapse(_ context.Context, id wsm.WorkspaceID, lapse wsm.
 	if !ok {
 		return false, wsm.ErrNotFound
 	}
-	if !rec.Hidden {
+	if !rec.Hidden && !rec.Closed {
 		return false, nil
 	}
 	f.setLapses = append(f.setLapses, lapse)
@@ -98,6 +98,9 @@ type fakeShim struct {
 
 func (f *fakeShim) Hold(context.Context) error { return f.note("hold") }
 func (f *fakeShim) Run(context.Context) error  { return f.note("run") }
+func (f *fakeShim) LastRound(context.Context) error {
+	return f.note("last_round")
+}
 
 func (f *fakeShim) Beat(context.Context) (*shimv1.SendKeepaliveSuccess, error) {
 	f.mu.Lock()
@@ -143,6 +146,10 @@ func hidden() wsm.Workspace {
 
 func visible() wsm.Workspace {
 	return wsm.Workspace{ID: theWorkspace}
+}
+
+func closed() wsm.Workspace {
+	return wsm.Workspace{ID: theWorkspace, Closed: true}
 }
 
 func newHarness(t *testing.T, rec wsm.Workspace) *harness {
@@ -242,19 +249,22 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	}
 }
 
-func TestRecordStoresAHiddenWorkspacesProjection(t *testing.T) {
+func TestRecordStoresALapsingWorkspacesProjection(t *testing.T) {
 	tokens := uint64(120_000)
 	tests := []struct {
 		name  string
+		rec   func() wsm.Workspace
 		gated *uint64
 	}{
-		{name: "a gated lapse", gated: &tokens},
-		{name: "an ungated lapse", gated: nil},
+		{name: "a hidden workspace's gated lapse", rec: hidden, gated: &tokens},
+		{name: "a hidden workspace's ungated lapse", rec: hidden, gated: nil},
+		{name: "a closed workspace's gated lapse", rec: closed, gated: &tokens},
+		{name: "a closed workspace's ungated lapse", rec: closed, gated: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, hidden())
+			h := newHarness(t, tt.rec())
 
 			// Act
 			h.keeper.record(context.Background(), theWorkspace, stated(lapseAt, tt.gated))
@@ -283,7 +293,7 @@ func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	if _, armed := h.keeper.deadlines[theWorkspace]; armed || h.publishes != 0 {
 		t.Fatalf("armed %v with %d publishes, want no deadline and no publish", armed, h.publishes)
 	}
-	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a projected cache lapse arrived for a workspace that is not hidden; it is dropped"}) {
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a projected cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped"}) {
 		t.Fatalf("no record of the dropped projection: %v", h.log.Records())
 	}
 }
@@ -328,6 +338,9 @@ func TestReconcileSetsTheCadenceToMatchTheVisibility(t *testing.T) {
 	merged := hidden()
 	mergedAt := now
 	merged.MergedAt = &mergedAt
+	closedHidden := hidden()
+	closedHidden.Closed = true
+	reopened := visible()
 	tests := []struct {
 		name string
 		rec  wsm.Workspace
@@ -336,6 +349,9 @@ func TestReconcileSetsTheCadenceToMatchTheVisibility(t *testing.T) {
 		{name: "a hidden workspace holds", rec: hidden(), want: "hold"},
 		{name: "a visible workspace runs", rec: visible(), want: "run"},
 		{name: "a merged workspace runs", rec: merged, want: "run"},
+		{name: "a closed workspace gets its last round", rec: closed(), want: "last_round"},
+		{name: "a closed hidden workspace holds", rec: closedHidden, want: "hold"},
+		{name: "a reopened workspace runs", rec: reopened, want: "run"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -350,6 +366,20 @@ func TestReconcileSetsTheCadenceToMatchTheVisibility(t *testing.T) {
 				t.Fatalf("cadence = %v, want [%s]", h.shim.cadence, tt.want)
 			}
 		})
+	}
+}
+
+func TestReconcileOfAClosedWorkspaceKeepsItsLapse(t *testing.T) {
+	// Arrange
+	h := newHarness(t, closed())
+	h.keeper.deadlines[theWorkspace] = lapseAt
+
+	// Act
+	h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if _, armed := h.keeper.deadlines[theWorkspace]; !armed {
+		t.Fatal("a closed workspace's lapse was disarmed")
 	}
 }
 
@@ -389,6 +419,7 @@ func TestReconcileAnswersAShimFailure(t *testing.T) {
 	}{
 		{name: "a shim with no session yet", err: ErrNoSession, level: "debug"},
 		{name: "a shim that died under the call", err: fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrShimDied), level: "info"},
+		{name: "a shim this daemon was standing down", err: fmt.Errorf("%w: unavailable: use of closed network connection", shimclient.ErrStandDownOrdered), level: "info"},
 		{name: "a shim that cannot be reached", err: errors.New("connection refused"), level: "error"},
 	}
 	for _, tt := range tests {
@@ -424,20 +455,31 @@ func TestReconcileLogsAVisibilityThatCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestLapseDueStandsDownALapsedHiddenWorkspace(t *testing.T) {
-	// Arrange
-	rec := hidden()
-	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
-	h := newHarness(t, rec)
-	h.keeper.deadlines[theWorkspace] = lapseAt
-	h.clock.Set(lapseAt)
+func TestLapseDueStandsDownALapsedWorkspace(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  func() wsm.Workspace
+	}{
+		{name: "a hidden workspace", rec: hidden},
+		{name: "a closed workspace", rec: closed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			rec := tt.rec()
+			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+			h := newHarness(t, rec)
+			h.keeper.deadlines[theWorkspace] = lapseAt
+			h.clock.Set(lapseAt)
 
-	// Act
-	h.keeper.lapseDue(context.Background())
+			// Act
+			h.keeper.lapseDue(context.Background())
 
-	// Assert
-	if !h.stoodDown() || h.publishes != 1 {
-		t.Fatalf("stood down %v with %d publishes, want a stand-down and one publish", h.stoodDown(), h.publishes)
+			// Assert
+			if !h.stoodDown() || h.publishes != 1 {
+				t.Fatalf("stood down %v with %d publishes, want a stand-down and one publish", h.stoodDown(), h.publishes)
+			}
+		})
 	}
 }
 
@@ -449,7 +491,7 @@ func TestLapseDueLeavesAWorkspaceItShouldNotStandDown(t *testing.T) {
 		rearmed  bool
 		deadline time.Time
 	}{
-		{name: "shown again", rec: visible},
+		{name: "shown or reopened again", rec: visible},
 		{name: "a lapse that moved later", rec: func() wsm.Workspace {
 			rec := hidden()
 			rec.CacheLapse = &wsm.CacheLapse{LapsesAt: later}
@@ -547,6 +589,23 @@ func TestRunAppliesAQueuedEdge(t *testing.T) {
 	// Assert
 	if got := <-h.shim.set; got != "hold" {
 		t.Fatalf("cadence = %q, want hold", got)
+	}
+}
+
+func TestRunAppliesAQueuedClosure(t *testing.T) {
+	// Arrange
+	h := newHarness(t, closed())
+	h.shim.set = make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.keeper.Run(ctx) }()
+
+	// Act
+	h.keeper.ClosureChanged(theWorkspace)
+
+	// Assert
+	if got := <-h.shim.set; got != "last_round" {
+		t.Fatalf("cadence = %q, want last_round", got)
 	}
 }
 

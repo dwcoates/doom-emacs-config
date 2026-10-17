@@ -1,7 +1,12 @@
 // endpoint_close_workspace.proto — CloseWorkspace: the USER's close. SIDEBAR
 // section. Closing is a VIEW act: the workspace leaves the tab-bar and its
-// buffers close, but the daemon↔shim session is UNTOUCHED — keepalives and
-// everything else continue; the workspace is merely unviewed. The host
+// buffers close, but the daemon↔shim session STAYS UP; the workspace is
+// merely unviewed. Its keep-alives get ONE LAST ROUND
+// (shim.v1.SetKeepaliveLastRound, owner request 2026-10-17): the beat already
+// scheduled goes out, then the cache is left to lapse exactly as a hidden
+// workspace's is, and the session is stood down when it does, so reopening
+// the workspace after that meets the cold gate. Reopening it before keeps the
+// cache warm again. The host
 // command is a thin wrapper: send, await the ack, then tear the tab down —
 // every piece of real machinery is the daemon's.
 //

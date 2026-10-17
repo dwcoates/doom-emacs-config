@@ -13,7 +13,7 @@ import (
 )
 
 func TestShimCallFailedTriagesTheFailure(t *testing.T) {
-	words := shimFailure{doing: "doing the call", died: "the shim died", failed: "the call failed"}
+	words := shimFailure{doing: "doing the call", died: "the shim died", stoodDown: "the shim was being stood down", failed: "the call failed"}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	tests := []struct {
@@ -25,6 +25,8 @@ func TestShimCallFailedTriagesTheFailure(t *testing.T) {
 	}{
 		{name: "a shim that died under the call", ctx: context.Background(),
 			err: fmt.Errorf("%w: unexpected EOF", shimclient.ErrShimDied), level: "info", message: "the shim died"},
+		{name: "a shim this daemon was standing down", ctx: context.Background(),
+			err: fmt.Errorf("%w: use of closed network connection", shimclient.ErrStandDownOrdered), level: "info", message: "the shim was being stood down"},
 		{name: "a call the daemon's exit cancelled", ctx: cancelled,
 			err: context.Canceled, level: "info", message: "the daemon is leaving; doing the call ended with it"},
 		{name: "any other failure", ctx: context.Background(),

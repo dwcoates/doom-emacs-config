@@ -1123,6 +1123,220 @@ describe("the cadence held while the workspace is hidden", () => {
   });
 });
 
+describe("the cadence's last round, when the workspace is closed", () => {
+  it("keeps the beat scheduled from the anchor", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+
+    // Act
+    cadence.lastRound();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(47 * MINUTE);
+  });
+
+  it("projects nothing while the round's beat is owed", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+
+    // Act
+    cadence.lastRound();
+
+    // Assert
+    expect(lapses).toEqual([]);
+  });
+
+  it("sends the round's one beat when it comes due", () => {
+    // Arrange
+    const { cadence, scheduler, beats } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    expect(beats()).toBe(1);
+  });
+
+  it("schedules no further beat once the round's beat went out", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("projects the lapse once the round's beat went out", () => {
+    // Arrange
+    const { cadence, scheduler, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 120_000 }]);
+  });
+
+  it("re-projects the lapse from the round's beat's own answer, scheduling no beat", () => {
+    // Arrange
+    const { cadence, scheduler, clock, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+    clock.now = TURN_AT + 52 * MINUTE;
+    scheduler.fireTimeout();
+
+    // Act
+    cadence.noteRequest(CACHE_TTL_1H_MS, 121_000);
+
+    // Assert
+    expect({ lapse: lapses.at(-1), pending: scheduler.pendingTimeout() }).toEqual({
+      lapse: { lapsesAtMs: clock.now + CACHE_TTL_1H_MS, contextTokens: 121_000 },
+      pending: undefined,
+    });
+  });
+
+  it("holds at once, projecting the lapse, when the cache has already lapsed", () => {
+    // Arrange
+    const { cadence, scheduler, lapses } = cadenceAt(TURN_AT + 61 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+
+    // Act
+    cadence.lastRound();
+
+    // Assert
+    expect({ pending: scheduler.pendingTimeout(), lapses }).toEqual({
+      pending: undefined,
+      lapses: [{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 120_000 }],
+    });
+  });
+
+  it("holds at once, projecting the lapse, for a tier no beat can keep warm", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT + MINUTE);
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 9_000 }, "restart");
+
+    // Act
+    cadence.lastRound();
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT + CACHE_TTL_5M_MS, contextTokens: 9_000 }]);
+  });
+
+  it("holds when a beat that came due late finds the cache lapsed", () => {
+    // Arrange
+    const { cadence, scheduler, clock, beats, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+    clock.now = TURN_AT + 61 * MINUTE;
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    expect({ beats: beats(), lapses }).toEqual({
+      beats: 0,
+      lapses: [{ lapsesAtMs: TURN_AT + CACHE_TTL_1H_MS, contextTokens: 120_000 }],
+    });
+  });
+
+  it("grants no second round once the first is spent", () => {
+    // Arrange
+    const { cadence, scheduler, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+    scheduler.fireTimeout();
+
+    // Act
+    cadence.lastRound();
+
+    // Assert
+    expect({ pending: scheduler.pendingTimeout(), projections: lapses.length }).toEqual({ pending: undefined, projections: 2 });
+  });
+
+  it("runs again from the anchor after a spent round when asked to run", () => {
+    // Arrange
+    const { cadence, scheduler, clock } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+    clock.now = TURN_AT + 52 * MINUTE;
+    scheduler.fireTimeout();
+    cadence.noteRequest(CACHE_TTL_1H_MS, 121_000);
+
+    // Act
+    cadence.run();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("runs on, beating every interval, when asked to run while the round is owed", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+    cadence.run();
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("grants a round to a cadence held but never given one", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.hold();
+
+    // Act
+    cadence.lastRound();
+
+    // Assert
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(47 * MINUTE);
+  });
+
+  it("drops an owed round on a hold", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("records the spent round at INFO with why it ended", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(HELD_CACHE, "restart");
+    cadence.lastRound();
+    const before = logSinkMark();
+
+    // Act
+    scheduler.fireTimeout();
+
+    // Assert
+    const record = logRecordsSince(before).find(
+      (entry) => entry.message === "the last keep-alive round is spent; keep-alives are held and the cache is left to lapse",
+    );
+    expect([record?.level, record?.context.why]).toEqual(["info", "the last round's beat came due"]);
+  });
+});
+
 /**
  * REAL_SCHEDULER is the cadence's default (every unit test above injects
  * ManualScheduler instead), wired in production whenever `createEngine` is

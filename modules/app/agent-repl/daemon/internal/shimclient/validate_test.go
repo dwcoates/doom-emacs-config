@@ -398,6 +398,7 @@ func TestValidateSetKeepaliveRequest(t *testing.T) {
 		{"no cadence", &shimv1.SetKeepaliveRequest{}, "SetKeepaliveRequest.cadence"},
 		{"hold", &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Hold{Hold: &shimv1.SetKeepaliveHold{}}}, ""},
 		{"run", &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}}, ""},
+		{"last round", &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_LastRound{LastRound: &shimv1.SetKeepaliveLastRound{}}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

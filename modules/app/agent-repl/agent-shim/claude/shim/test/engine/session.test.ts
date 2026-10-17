@@ -5229,6 +5229,12 @@ describe("SetKeepalive", () => {
     });
   }
 
+  function lastRound(): shimv1.SetKeepaliveRequest {
+    return create(shimv1.SetKeepaliveRequestSchema, {
+      cadence: { case: "lastRound", value: create(shimv1.SetKeepaliveLastRoundSchema, {}) },
+    });
+  }
+
   /**
    * The arms a stream opened now is caught up on: everything queued before a
    * sentinel event pushed after the open, which reaches the stream last.
@@ -5321,6 +5327,44 @@ describe("SetKeepalive", () => {
 
     // Assert
     expect(await standingArms(h)).not.toContain("cacheLapse");
+  });
+
+  it("keeps the scheduled keep-alive on a last round", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const response = await h.engine.setKeepalive(lastRound());
+
+    // Assert
+    expect([response.result.case, h.scheduler.pendingTimeout() !== undefined]).toEqual(["success", true]);
+  });
+
+  it("withdraws the held lapse while a last round's beat is owed", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setKeepalive(hold());
+
+    // Act
+    await h.engine.setKeepalive(lastRound());
+
+    // Assert
+    expect(await standingArms(h)).not.toContain("cacheLapse");
+  });
+
+  it("states the projected lapse once the last round's beat went out", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setKeepalive(lastRound());
+
+    // Act
+    h.scheduler.fireTimeout();
+
+    // Assert
+    expect([h.scheduler.pendingTimeout(), await standingArms(h)]).toEqual([undefined, expect.arrayContaining(["cacheLapse"])]);
   });
 
   it("schedules no keep-alive for a session born held", async () => {

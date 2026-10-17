@@ -51,6 +51,18 @@ func (ws Workspace) InHiddenSection() bool {
 	return ws.Hidden && ws.MergedAt == nil
 }
 
+// LetsCacheLapse reports whether the workspace's prompt cache is left to lapse
+// (cachelapse.Keeper): its keep-alives are held, its projected lapse is kept on
+// its row, and its session is stood down when the lapse comes. A workspace in
+// the hidden section does (2026-10-13), and so does a CLOSED one, once its
+// one last keep-alive round is spent (owner request, 2026-10-17): closing
+// leaves its session up, so reopening it before the lapse finds the cache
+// warm, and reopening it after meets the cold gate like any lapsed
+// conversation.
+func (ws Workspace) LetsCacheLapse() bool {
+	return ws.InHiddenSection() || ws.Closed
+}
+
 // Runs reports whether the daemon runs the workspace's session (owner
 // principle, docs/protobuf-design/open-tabs.md: ONLY OPEN AND VISIBLE
 // WORKSPACES RUN). A workspace the user hid, or whose repository section is

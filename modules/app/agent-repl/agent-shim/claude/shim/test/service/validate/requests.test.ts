@@ -238,6 +238,7 @@ describe("validateSetKeepaliveRequest", () => {
   it.each([
     ["a hold", "hold", undefined],
     ["a run", "run", undefined],
+    ["a last round", "lastRound", undefined],
     ["no cadence", undefined, Code.InvalidArgument],
   ] as const)("answers %s", (_name, arm, code) => {
     // Arrange.
@@ -247,7 +248,9 @@ describe("validateSetKeepaliveRequest", () => {
           ? { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) }
           : arm === "run"
             ? { case: "run", value: create(shimv1.SetKeepaliveRunSchema, {}) }
-            : { case: undefined },
+            : arm === "lastRound"
+              ? { case: "lastRound", value: create(shimv1.SetKeepaliveLastRoundSchema, {}) }
+              : { case: undefined },
     });
 
     // Act, Assert.

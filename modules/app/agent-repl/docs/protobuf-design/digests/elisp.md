@@ -241,8 +241,9 @@ await the daemon's ack, then tear the tab down; every piece of real machinery
 is the daemon's:
 
 - `CloseWorkspace` (`SPC j x`) — the USER's close, a VIEW act: fast ack, tab
-  gone, the daemon↔shim session UNTOUCHED (keepalives continue; the workspace
-  is merely unviewed).
+  gone, the daemon↔shim session stays up (one last keep-alive round, then its
+  cache lapses and the session is stood down; the workspace is merely
+  unviewed).
   - It REQUIRES QUIET. A busy workspace REFUSES, and the refusal manifests in
     the FOOTER — status `closing`, sub-status `close blocked`, and the daemon's
     composed plain-English reasons as the activity line ("a turn is in flight;

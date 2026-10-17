@@ -3268,6 +3268,12 @@ func (a *shimAdapter) Run(ctx context.Context) error {
 	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}})
 }
 
+// LastRound lets the session's cadence send its one scheduled keep-alive,
+// then hold (cachelapse.Keepalives).
+func (a *shimAdapter) LastRound(ctx context.Context) error {
+	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_LastRound{LastRound: &shimv1.SetKeepaliveLastRound{}}})
+}
+
 // setKeepalive sends one SetKeepalive. The shim's one refusal, no session, is
 // cachelapse.ErrNoSession.
 func (a *shimAdapter) setKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) error {

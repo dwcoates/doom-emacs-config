@@ -14,6 +14,14 @@
 // A session can also be BORN held: StartSessionRequest.hold_keepalive, so a
 // hidden workspace's session started by anything (a rollout's restart, a
 // prompt) never sends a keep-alive between its start and a later hold.
+//
+// A CLOSED WORKSPACE GETS ONE MORE ROUND, THEN THE COLD GATE (owner request,
+// 2026-10-17). Closing a workspace leaves its session up, but it no longer
+// keeps the cache warm forever: the daemon asks for the LAST ROUND, so the
+// cadence sends the one beat it already had scheduled and then holds exactly
+// as a hidden workspace's does, stating the projected lapse. The daemon
+// stands the session down when that lapse comes, so reopening the workspace
+// afterwards meets the cold gate like any other lapsed conversation.
 
 syntax = "proto3";
 
@@ -28,6 +36,7 @@ message SetKeepaliveRequest {
   oneof cadence {
     SetKeepaliveHold hold = 1;
     SetKeepaliveRun run = 2;
+    SetKeepaliveLastRound last_round = 3;
   }
 }
 
@@ -38,6 +47,14 @@ message SetKeepaliveHold {}
 // Keep the cache warm again, scheduling from the last request. DELIBERATELY
 // EMPTY: the arm is the request.
 message SetKeepaliveRun {}
+
+// Send the ONE beat the cadence has scheduled from the last request, then hold
+// as SetKeepaliveHold does, stating the projected lapse. A cache no beat can
+// keep warm any more (lapsed, or bought at a tier no longer than the
+// interval) is held at once. A round already spent is never granted again:
+// asking for it once more leaves the cadence held, so only a run restarts the
+// keep-alives. DELIBERATELY EMPTY: the arm is the request.
+message SetKeepaliveLastRound {}
 
 // THE ARM IS THE OUTCOME.
 message SetKeepaliveResponse {

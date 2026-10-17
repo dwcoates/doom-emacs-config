@@ -83,7 +83,7 @@ func TestAWithheldStandDownRecordsItsOwnReason(t *testing.T) {
 	h.c.StandDownWithheld(ws)
 
 	// Assert
-	if term := h.terminal(t, ws); term == nil || !strings.Contains(term.Detail, "hidden or collapsed") {
+	if term := h.terminal(t, ws); term == nil || !strings.Contains(term.Detail, "hidden, collapsed or closed") {
 		t.Fatalf("terminal = %+v, want the withheld reason", term)
 	}
 }
@@ -124,6 +124,23 @@ func TestACollapsedWorkspaceIsStoodDown(t *testing.T) {
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 1 {
 		t.Fatalf("kills = %+v, want the collapsed workspace stood down", killed)
+	}
+}
+
+func TestAClosedWorkspaceIsStoodDown(t *testing.T) {
+	// Arrange: a closed workspace is drawn in no tab, whatever its visibility.
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	h.c.StandDownWithheld(ws)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].WS != ws || killed[0].Force {
+		t.Fatalf("kills = %+v, want the closed workspace stood down gracefully", killed)
 	}
 }
 
