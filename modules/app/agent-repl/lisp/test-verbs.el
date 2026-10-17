@@ -319,6 +319,10 @@ answers a bare success, which is what almost every verb's success is."
 
 ;;;; ---- Request shapes: one test per verb ----
 
+(defun agent-repl-test-verbs--topology (request)
+  "The topology REQUEST's creation form carries."
+  (plist-get (plist-get (plist-get request :form) :value) :topology))
+
 (ert-deftest agent-repl-verbs-close-echoes-the-ref ()
   "CloseWorkspace carries the daemon-minted ref verbatim."
   ;; Arrange / Act
@@ -326,7 +330,8 @@ answers a bare success, which is what almost every verb's success is."
     (agent-repl-verb-close "ws-one")
     ;; Assert
     (should (equal (agent-repl-test-verbs--request :close)
-                   (list :workspace (agent-repl-test-verbs--ref))))))
+                   (list :workspace (agent-repl-test-verbs--ref)
+                         :requester '(:arm :user))))))
 
 (ert-deftest agent-repl-verbs-kill-echoes-the-ref ()
   "KillWorkspace carries the ref, and a minted op id opting into the ack."
@@ -375,8 +380,8 @@ answers a bare success, which is what almost every verb's success is."
       (should (agent-repl-test-verbs--messaged-p "nuke refused: blocked")))))
 
 (ert-deftest agent-repl-verbs-merge-sends-a-one-shot-of-its-own-branch ()
-  "MergeWorkspace from Emacs is a ONE-SHOT of the workspace's own branch.
-The requesting workspace is the ref; the mode is `one_shot' with the
+  "MergeWorkspace from Emacs is the user's ONE-SHOT of the workspace's own
+branch at the back of the queue: the mode is `one_shot' with the
 `own_branch' landing, which closes the workspace once it lands."
   ;; Arrange
   (agent-repl-test-verbs--with nil
@@ -385,8 +390,10 @@ The requesting workspace is the ref; the mode is `one_shot' with the
     ;; Assert
     (should (equal (agent-repl-test-verbs--request :merge)
                    (list :workspace (agent-repl-test-verbs--ref)
+                         :requester '(:arm :user)
                          :mode '(:arm :one-shot
-                                 :value (:landing (:arm :own-branch :value nil))))))))
+                                 :value (:landing (:arm :own-branch :value nil)))
+                         :placement '(:arm :back))))))
 
 (ert-deftest agent-repl-verbs-open-echoes-the-given-ref ()
   "OpenWorkspace carries the closed row's own ref, not the current one's."
@@ -1581,11 +1588,11 @@ drawn beside it."
 refusal still reaches the generic reporting."
   (agent-repl-test-verbs--with
       '((:create . (:response (:arm :error
-                               :value (:cause (:arm :base-ref-unresolved
-                                               :value (:ref "origin/main")))))))
+                               :value (:cause (:arm :unknown-owner
+                                               :value (:owner (:id "gone" :dir "/w/gone"))))))))
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
     (should (agent-repl-test-verbs--messaged-p
-             "agent-repl: workspace creation FAILED: the daemon refused it: base-ref-unresolved"))))
+             "agent-repl: workspace creation FAILED: the daemon refused it: unknown-owner"))))
 
 (ert-deftest agent-repl-verbs-create-temporary-repository-names-the-folder ()
   "A create refused for a temporary repository names the folder and why."
@@ -1650,7 +1657,7 @@ stream is echoed as the create's failure, not left as a *Messages* warning."
   (agent-repl-test-verbs--with
       '((:create . (:response (:arm :accepted :value nil))))
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
-                            :parent (agent-repl-test-verbs--ref) :fork t)
+                            :owner (agent-repl-test-verbs--ref) :fork-of (agent-repl-test-verbs--ref))
     (agent-repl-mutation-progress-handle
      (list :op-id (plist-get (agent-repl-test-verbs--request :create) :op-id)
            :event (list :arm :create
@@ -1891,15 +1898,13 @@ skipped a section the bar walks fails here rather than passing silently."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
     (let ((request (agent-repl-test-verbs--request :create)))
-      (should-not (plist-get request :parent))
       (should-not (plist-get request :model))
       (should-not (plist-get request :priority))
       (should-not (plist-get request :allow-ungated)))))
 
-(ert-deftest agent-repl-verbs-create-command-sends-no-name-and-no-base-ref ()
-  "A DYNAMIC create asks for neither a name nor a base ref, and sends neither.
-The daemon mints the name, and an absent base ref IS the repo's main
-branch -- so a `read-string' here would be a question the ruling removed."
+(ert-deftest agent-repl-verbs-create-command-sends-no-name ()
+  "A DYNAMIC create asks for no name and sends none: the daemon mints it,
+so a `read-string' here would be a question the ruling removed."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
@@ -1909,41 +1914,44 @@ branch -- so a `read-string' here would be a question the ruling removed."
       (agent-repl-create-workspace)
       (let ((standard (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
                                  :value)))
-        (should-not (plist-get standard :name))
-        (should-not (plist-get standard :base-ref))))))
+        (should-not (plist-get standard :name))))))
 
-(ert-deftest agent-repl-verbs-fork-into-primary-sends-a-fork-source-and-no-parent ()
-  "`SPC TAB f\=' forks the conversation into a TOP-LEVEL workspace: the
-current workspace rides as the fork source, and no parent is sent."
+(ert-deftest agent-repl-verbs-fork-into-primary-forks-the-context-of-a-primary ()
+  "`SPC TAB f\=' forks the conversation into a PRIMARY workspace: the
+current workspace is the forked context, and the topology is primary."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
       (agent-repl-fork-workspace-into-primary)
       (let ((request (agent-repl-test-verbs--request :create)))
-        (should (equal (plist-get request :fork-source) (agent-repl-test-verbs--ref)))
-        (should-not (plist-get request :parent))))))
+        (should (equal (plist-get request :context-origin)
+                       (list :arm :fork :value (agent-repl-test-verbs--ref))))
+        (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))))))
 
-(ert-deftest agent-repl-verbs-create-command-sends-no-parent ()
-  "`SPC TAB n\=' is never a child: it sends no parent at all."
+(ert-deftest agent-repl-verbs-create-command-is-primary ()
+  "`SPC TAB n\=' is never a child: its topology is primary."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
               ((symbol-function 'read-string) (lambda (&rest _) "")))
       (agent-repl-create-workspace)
-      (should-not (plist-get (agent-repl-test-verbs--request :create) :parent)))))
+      (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
+                     '(:arm :primary))))))
 
-(ert-deftest agent-repl-verbs-fork-command-sets-fork-inside-the-parent ()
-  "A fork lives INSIDE the parent: a fork without a parent is unrepresentable."
+(ert-deftest agent-repl-verbs-fork-command-is-a-child-forked-from-its-owner ()
+  "`SPC TAB c\=' makes a child of the current workspace, forked from it."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
       (agent-repl-fork-workspace)
-      (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :parent)
-                             :fork)
-                  t)))))
+      (let ((request (agent-repl-test-verbs--request :create)))
+        (should (equal (agent-repl-test-verbs--topology request)
+                       (list :arm :child :value (list :owner (agent-repl-test-verbs--ref)))))
+        (should (equal (plist-get request :context-origin)
+                       (list :arm :fork :value (agent-repl-test-verbs--ref))))))))
 
 ;;;; ---- Create: the four modes and the questions each one asks ----
 
@@ -2133,14 +2141,15 @@ current workspace rides as the fork source, and no parent is sent."
       (agent-repl-fork-workspace-into-primary-static)
       ;; Assert.
       (let ((request (agent-repl-test-verbs--request :create)))
-        (should (equal (plist-get request :fork-source) (agent-repl-test-verbs--ref)))
-        (should-not (plist-get request :parent))
+        (should (equal (plist-get request :context-origin)
+                       (list :arm :fork :value (agent-repl-test-verbs--ref))))
+        (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
                        "named-one"))
         (should-not (plist-get (plist-get (plist-get request :form) :value) :initial-prompt))))))
 
-(ert-deftest agent-repl-verbs-static-create-sends-no-parent ()
-  "`SPC TAB N\=' is never a child: it sends no parent at all."
+(ert-deftest agent-repl-verbs-static-create-is-primary ()
+  "`SPC TAB N\=' is never a child: its topology is primary."
   ;; Arrange.
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
@@ -2149,12 +2158,13 @@ current workspace rides as the fork source, and no parent is sent."
       ;; Act.
       (agent-repl-create-workspace-static)
       ;; Assert.
-      (should-not (plist-get (agent-repl-test-verbs--request :create) :parent)))))
+      (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
+                     '(:arm :primary))))))
 
 ;;;; ---- Create: the named fork ----
 
-(ert-deftest agent-repl-verbs-named-fork-sends-the-name-inside-a-forking-parent ()
-  "`SPC TAB F\=' sends its name, the current workspace as parent, and the fork."
+(ert-deftest agent-repl-verbs-named-fork-sends-the-name-as-a-child-forked-from-its-owner ()
+  "`SPC TAB C\=' sends its name, the current workspace as owner, and the fork."
   ;; Arrange.
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
@@ -2163,12 +2173,13 @@ current workspace rides as the fork source, and no parent is sent."
       ;; Act.
       (agent-repl-fork-workspace-static)
       ;; Assert.
-      (let* ((request (agent-repl-test-verbs--request :create))
-             (parent (plist-get request :parent)))
+      (let ((request (agent-repl-test-verbs--request :create)))
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
                        "named-fork"))
-        (should (equal (plist-get parent :workspace) (agent-repl-test-verbs--ref)))
-        (should (eq (plist-get parent :fork) t))))))
+        (should (equal (agent-repl-test-verbs--topology request)
+                       (list :arm :child :value (list :owner (agent-repl-test-verbs--ref)))))
+        (should (equal (plist-get request :context-origin)
+                       (list :arm :fork :value (agent-repl-test-verbs--ref))))))))
 
 (ert-deftest agent-repl-verbs-named-fork-sends-no-initial-prompt ()
   "`SPC TAB F\=' asks no prompt and sends none: the fork comes up idle."
@@ -2421,8 +2432,8 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
           (should (equal (plist-get one-shot :context) (agent-repl-test-verbs--ref)))
           (should (plist-get one-shot :prompt)))))))
 
-(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-stays-top-level ()
-  "The context one-shot is no child and no fork: neither a parent nor a fork source rides."
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-stays-primary ()
+  "The context one-shot is no child and no fork: primary, with a fresh context."
   (let (prompts)
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-oneshot-reads prompts
@@ -2430,8 +2441,8 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
         (agent-repl-create-oneshot-for-current-workspace nil)
         ;; Assert.
         (let ((request (agent-repl-test-verbs--request :create)))
-          (should-not (plist-get request :parent))
-          (should-not (plist-get request :fork-source)))))))
+          (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))
+          (should (equal (plist-get request :context-origin) '(:arm :fresh))))))))
 
 (ert-deftest agent-repl-verbs-oneshot-for-current-workspace-prompt-names-the-workspace ()
   "The commission prompt names the workspace the commission is about."
@@ -3932,31 +3943,42 @@ pause sent."
     (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
       (should-not (plist-get (plist-get form :value) :merge-actions)))))
 
-(ert-deftest agent-repl-verbs-create-fork-without-a-parent-is-refused ()
-  "A fork without a parent is unrepresentable, so it is refused, not encoded."
-  (agent-repl-test-verbs--with nil
-    ;; Act / Assert
-    (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref)
-                                          :standard :fork t)
-                  :type 'user-error)))
-
-(ert-deftest agent-repl-verbs-create-fork-without-a-parent-sends-nothing ()
-  "The refusal is BEFORE the send: silently dropping the fork would create
-a plain workspace the caller never asked for."
-  (agent-repl-test-verbs--with nil
-    ;; Act
-    (ignore-errors
-      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :fork t))
-    ;; Assert
-    (should-not agent-repl-test-verbs--sent)))
-
-(ert-deftest agent-repl-verbs-create-fork-rides-inside-the-parent ()
-  "FORK lives INSIDE the parent: a fork without a parent is unrepresentable."
+(ert-deftest agent-repl-verbs-create-owner-makes-a-child ()
+  "An OWNER makes the create a child of it, inside the creation form."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
-                            :parent (agent-repl-test-verbs--ref) :fork t)
-    (should (equal (plist-get (agent-repl-test-verbs--request :create) :parent)
-                   (list :workspace (agent-repl-test-verbs--ref) :fork t)))))
+                            :owner (agent-repl-test-verbs--ref))
+    (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
+                   (list :arm :child :value (list :owner (agent-repl-test-verbs--ref)))))))
+
+(ert-deftest agent-repl-verbs-create-without-owner-is-primary ()
+  "No owner makes the create a PRIMARY workspace: the topology is stated."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot :prompt "go")
+    (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
+                   '(:arm :primary)))))
+
+(ert-deftest agent-repl-verbs-create-fork-of-forks-the-context ()
+  "FORK-OF names the workspace whose conversation the create copies."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :fork-of (agent-repl-test-verbs--ref))
+    (should (equal (plist-get (agent-repl-test-verbs--request :create) :context-origin)
+                   (list :arm :fork :value (agent-repl-test-verbs--ref))))))
+
+(ert-deftest agent-repl-verbs-create-without-fork-of-is-fresh ()
+  "No FORK-OF is a fresh context: the context origin is stated."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    (should (equal (plist-get (agent-repl-test-verbs--request :create) :context-origin)
+                   '(:arm :fresh)))))
+
+(ert-deftest agent-repl-verbs-create-is-asked-by-the-user ()
+  "Every editor create names the user as its requester."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    (should (equal (plist-get (agent-repl-test-verbs--request :create) :requester)
+                   '(:arm :user)))))
 
 (ert-deftest agent-repl-verbs-create-unknown-form-refuses ()
   "A form arm the verb does not know is refused before anything is sent."
@@ -4033,7 +4055,8 @@ persp-mode perspective such as \"main\" appears in the registry."
                  (lambda (_prompt) "ws-one")))
         (agent-repl-close-workspace))
       (should (equal (agent-repl-test-verbs--request :close)
-                     (list :workspace (agent-repl-test-verbs--ref)))))))
+                     (list :workspace (agent-repl-test-verbs--ref)
+                           :requester '(:arm :user)))))))
 
 (ert-deftest agent-repl-verbs-close-from-a-registered-workspace-acts-on-it ()
   "A registered current workspace is acted on directly, with no picker."
@@ -4395,7 +4418,7 @@ came back CLOSED left behind."
                                   (agent-repl-test-verbs--ref "child" "/tmp/child"))
       ;; Act.
       (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
-                              :parent (agent-repl-test-verbs--ref) :fork t)
+                              :owner (agent-repl-test-verbs--ref) :fork-of (agent-repl-test-verbs--ref))
       ;; Assert.
       (should (equal (agent-repl--panels-take-arrival-reason "child") "forked")))))
 

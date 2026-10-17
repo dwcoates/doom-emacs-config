@@ -580,7 +580,7 @@ front of it can still say why."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-verbs--send
      #'agent-repl-rpc-close-workspace (agent-repl-verbs--conn ws)
-     (list :workspace ref)
+     (list :workspace ref :requester (list :arm :user))
      :ws ws :op "close"
      :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws "close"))
      :on-error
@@ -727,10 +727,10 @@ nothing on the stream would ever retire the registration."
 (defun agent-repl-verb-merge (ws)
   "Enqueue a ONE-SHOT merge of WS's own branch, run in WS.
 Success means ENQUEUED.  The request's mode is `one_shot' with the
-`own_branch' landing: WS is both the requesting workspace the merge runs
-in and the workspace whose branch lands, and WS closes once its branch
-lands.  A failed merge never closes it, and its failure is handed back to
-WS\='s conversation.
+`own_branch' landing, asked by the user and joining the back of the
+queue: WS is the workspace the merge runs in and whose branch lands,
+and WS closes once its branch lands.  A failed merge never closes it,
+and its failure is handed back to WS\='s conversation.
 
 Emacs holds NO merge state whatsoever: the merge's whole life from the
 queue onward is WS's own feed merge bubble, footer and roster row."
@@ -739,8 +739,10 @@ queue onward is WS's own feed merge bubble, footer and roster row."
     (agent-repl-verbs--send
      #'agent-repl-rpc-merge-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref
+           :requester (list :arm :user)
            :mode (list :arm :one-shot
-                       :value (list :landing (list :arm :own-branch :value nil))))
+                       :value (list :landing (list :arm :own-branch :value nil)))
+           :placement (list :arm :back))
      :ws ws :op "merge"
      :on-success (lambda (_) (message "merge enqueued")))))
 
@@ -1067,10 +1069,10 @@ state."
    (lambda (value) (agent-repl-verbs--no-tab-to-take "move" ws target value))))
 
 (cl-defun agent-repl-verb-create (repository form
-                                             &key initial-prompt base-ref name
+                                             &key initial-prompt name
                                              merge-actions
                                              prompt context
-                                             parent fork fork-source model priority
+                                             owner fork-of model priority
                                              allow-ungated)
   "Create a workspace in REPOSITORY under FORM.
 FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
@@ -1078,11 +1080,11 @@ FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 it, because a caller at a keybinding writes facts, not nested oneofs.
 
   `:standard\' takes INITIAL-PROMPT (plain text, wrapped as `UserSaid\'),
-    BASE-REF, NAME and MERGE-ACTIONS; every one of them is optional, and
-    each absence is the statement the proto asks for -- an empty
-    workspace, the repo\'s default branch resolution, a daemon-minted
-    name, no configured merge actions.  MERGE-ACTIONS is spelled in plain
-    text too: `(:before-ws-merge TEXT :postprocessing-prompt TEXT)\',
+    NAME and MERGE-ACTIONS; every one of them is optional, and each
+    absence is the statement the proto asks for -- an empty workspace, a
+    daemon-minted name, no configured merge actions.  MERGE-ACTIONS is
+    spelled in plain text too:
+    `(:before-ws-merge TEXT :postprocessing-prompt TEXT)\',
     either half optional, each wrapped as a `UserSaid\' here.
   `:one-shot\' takes PROMPT (required -- a one-shot IS its prompt) and
     CONTEXT, the optional `WorkspaceRef\' of the workspace the commission
@@ -1091,17 +1093,16 @@ it, because a caller at a keybinding writes facts, not nested oneofs.
     repository\='s own directive, which the daemon appends to the
     commission and the agent carries out.
 
-PARENT is the parent\'s `WorkspaceRef\' and FORK the presence-only fork
-fact, which lives INSIDE the parent: a CHILD fork.  FORK-SOURCE is the
-`WorkspaceRef\' a fork INTO THE PRIMARY BRANCH copies the conversation of;
-it has no parent, so it never rides beside PARENT.  MODEL, PRIORITY (a
-bare level keyword) and
-ALLOW-UNGATED are the remaining creation facts and are omitted when nil.
-
-FORK WITHOUT PARENT IS REFUSED BEFORE THE SEND, with no rpc issued: the
-fork fact lives inside the parent by construction, so there is no request
-that carries it alone -- encoding one would silently drop the fork and
-create a plain workspace the caller never asked for.
+NOTHING IS IMPLIED: the request names its requester, its topology and
+its context origin, and this function spells each from what the user did.
+The requester is always the user, because every editor create is one.
+OWNER is the `WorkspaceRef\' a CHILD is cut from and lands into; without
+it the workspace is PRIMARY, cut from and landing on the primary branch.
+FORK-OF is the `WorkspaceRef\' whose conversation the new workspace
+copies; without it the context is fresh.  The editor makes a child only
+as a fork of its owner, which lands itself and so carries no owner
+notice.  MODEL, PRIORITY (a bare level keyword) and ALLOW-UNGATED are the
+remaining creation facts and are omitted when nil.
 
 CREATING A WORKSPACE NEVER MOVES THE USER (owner ruling, 2026-10-16).
 No creation -- dynamic, static, fork, one-shot or help -- selects what it
@@ -1110,10 +1111,6 @@ stand, and the new tab appearing on the bar is the whole of the news.
 
 Nothing else happens on success: THE DAEMON names and creates everything,
 and the new workspace\'s tab arrives through the roster push."
-  (when (and fork (null parent))
-    (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork-without-parent repository=%S form=%S"
-                       repository form)
-    (user-error "agent-repl: a fork needs a parent workspace"))
   ;; OPTION B.  The create is ACKED at once and worked in the daemon's
   ;; background, detached from this request so a client deadline can never kill
   ;; `git worktree add' mid-run.  Its staged progress and terminal outcome
@@ -1121,7 +1118,7 @@ and the new workspace\'s tab arrives through the roster push."
   ;; channel open before this workspace exists.  The callbacks that render them
   ;; are registered BEFORE the send, so a progress event never outruns them.
   (let ((op-id (agent-repl-mutation-progress-new-op-id))
-        (arrival-reason (if (or fork fork-source) "forked" "created"))
+        (arrival-reason (if fork-of "forked" "created"))
         ;; THE ACK AND THE PROGRESS STREAM ARE TWO CHANNELS, so the daemon's
         ;; first stage push can overtake the rpc's own ack.  Once anything
         ;; later in the sequence has been shown, the ack has nothing left to
@@ -1155,12 +1152,14 @@ and the new workspace\'s tab arrives through the roster push."
      op-id #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
      (list :repository repository
            :form (agent-repl-verbs--create-form
-                  form :initial-prompt initial-prompt :base-ref base-ref :name name
+                  form :initial-prompt initial-prompt :name name
                   :merge-actions merge-actions
-                  :prompt prompt :context context)
-           :parent (when parent
-                     (append (list :workspace parent) (when fork (list :fork fork))))
-           :fork-source fork-source
+                  :prompt prompt :context context
+                  :topology (agent-repl-verbs--topology owner))
+           :requester (list :arm :user)
+           :context-origin (if fork-of
+                               (list :arm :fork :value fork-of)
+                             (list :arm :fresh))
            :model model
            :priority (agent-repl-verbs--level-arm priority)
            :allow-ungated allow-ungated
@@ -1530,22 +1529,32 @@ pending ref is cleared before the landing runs or is withdrawn."
 (defvar agent-repl-roster-update-functions)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-verbs--pending-landing-fire)
 
-(cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
-                                              merge-actions prompt context)
+(defun agent-repl-verbs--topology (owner)
+  "Return the `WorkspaceTopology\' oneof for OWNER, a `WorkspaceRef\' or nil.
+An owner makes a CHILD of it, and no owner a PRIMARY workspace."
+  (if owner
+      (list :arm :child :value (list :owner owner))
+    (list :arm :primary)))
+
+(cl-defun agent-repl-verbs--create-form (form &key initial-prompt name
+                                              merge-actions prompt context
+                                              topology)
   "Return the creation-form oneof for the bare arm keyword FORM.
-The two forms take disjoint facts, so each arm reads only its own."
+The two forms take disjoint facts, so each arm reads only its own, and
+both carry TOPOLOGY."
   (pcase form
     (:standard
      (list :arm :standard
            :value (list :initial-prompt (and initial-prompt
                                              (agent-repl-verbs--said initial-prompt))
-                        :base-ref base-ref
                         :name name
-                        :merge-actions (agent-repl-verbs--merge-actions merge-actions))))
+                        :merge-actions (agent-repl-verbs--merge-actions merge-actions)
+                        :topology topology)))
     (:one-shot
      (list :arm :one-shot
            :value (list :prompt (and prompt (agent-repl-verbs--said prompt))
-                        :context context)))
+                        :context context
+                        :topology topology)))
     (_ (user-error "agent-repl: unknown creation form %S" form))))
 
 (defun agent-repl-verbs--merge-actions (actions)
@@ -2435,7 +2444,7 @@ MODE is `dynamic\=' -- a prompt, and the daemon mints the name -- or
 Without INTO-PRIMARY the fork is a CHILD: the current workspace is its
 parent, it is cut from the parent\='s tip and merges back into it.  With
 INTO-PRIMARY it is a TOP-LEVEL workspace cut from the primary branch that
-merges into it, carrying only the conversation (`fork_source\='); the
+merges into it, carrying only the conversation (`context_origin.fork\='); the
 daemon opens its first message with a note naming the workspace the
 conversation came from.
 
@@ -2468,8 +2477,8 @@ recorded before the abandonment propagates."
            repository :standard
            (append
             (if into-primary
-                (list :fork-source source)
-              (list :parent source :fork t))
+                (list :fork-of source)
+              (list :owner source :fork-of source))
             (if static
                 (list :name name)
               (list :initial-prompt

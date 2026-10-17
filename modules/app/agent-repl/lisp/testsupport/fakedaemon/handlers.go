@@ -485,3 +485,51 @@ func (s *fakeServer) ReportPageDrawn(ctx context.Context, req *connect.Request[v
 	return nil, connect.NewError(connect.CodeUnimplemented,
 		fmt.Errorf("fakedaemon mocks only Emacs's calls; ReportPageDrawn is a web page's"))
 }
+
+func (s *fakeServer) AnswerEditorEvaluation(ctx context.Context, req *connect.Request[v1.AnswerEditorEvaluationRequest]) (*connect.Response[v1.AnswerEditorEvaluationResponse], error) {
+	return handleUnary[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse](ctx, s, "AnswerEditorEvaluation", req.Msg)
+}
+
+func (s *fakeServer) CompactWorkspace(ctx context.Context, req *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error) {
+	return handleUnary[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse](ctx, s, "CompactWorkspace", req.Msg)
+}
+
+func (s *fakeServer) EvaluateInEditor(ctx context.Context, req *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
+	return handleUnary[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse](ctx, s, "EvaluateInEditor", req.Msg)
+}
+
+func (s *fakeServer) GetMergeQueueStatus(ctx context.Context, req *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
+	return handleUnary[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse](ctx, s, "GetMergeQueueStatus", req.Msg)
+}
+
+func (s *fakeServer) GetWorkspaceStatus(ctx context.Context, req *connect.Request[v1.GetWorkspaceStatusRequest]) (*connect.Response[v1.GetWorkspaceStatusResponse], error) {
+	return handleUnary[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse](ctx, s, "GetWorkspaceStatus", req.Msg)
+}
+
+func (s *fakeServer) SetWorkspaceCorrespondence(ctx context.Context, req *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error) {
+	return handleUnary[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse](ctx, s, "SetWorkspaceCorrespondence", req.Msg)
+}
+
+func (s *fakeServer) SetWorkspaceOneShot(ctx context.Context, req *connect.Request[v1.SetWorkspaceOneShotRequest]) (*connect.Response[v1.SetWorkspaceOneShotResponse], error) {
+	return handleUnary[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse](ctx, s, "SetWorkspaceOneShot", req.Msg)
+}
+
+func (s *fakeServer) SubscribeMergeQueue(ctx context.Context, req *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error) {
+	return handleUnary[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse](ctx, s, "SubscribeMergeQueue", req.Msg)
+}
+
+func (s *fakeServer) SubscribeWorkspace(ctx context.Context, req *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error) {
+	return handleUnary[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse](ctx, s, "SubscribeWorkspace", req.Msg)
+}
+
+func (s *fakeServer) UnsubscribeMergeQueue(ctx context.Context, req *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error) {
+	return handleUnary[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse](ctx, s, "UnsubscribeMergeQueue", req.Msg)
+}
+
+func (s *fakeServer) UnsubscribeWorkspace(ctx context.Context, req *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error) {
+	return handleUnary[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse](ctx, s, "UnsubscribeWorkspace", req.Msg)
+}
+
+func (s *fakeServer) UpdateRollouts(ctx context.Context, req *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error) {
+	return handleUnary[v1.UpdateRolloutsRequest, v1.UpdateRolloutsResponse](ctx, s, "UpdateRollouts", req.Msg)
+}

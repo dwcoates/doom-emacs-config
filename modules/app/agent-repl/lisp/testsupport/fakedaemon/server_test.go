@@ -461,12 +461,7 @@ func TestCreateWorkspaceMintsRefFromTheRepositoryDir(t *testing.T) {
 
 	// Act.
 	resp, err := client.CreateWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-			Repository: &workspacev1.RepositoryRef{Dir: "/tmp/repo/./one"},
-			Form: &agentreplv1.CreateWorkspaceRequest_Standard{
-				Standard: &agentreplv1.CreateWorkspaceStandard{},
-			},
-		}))
+		connect.NewRequest(userPrimaryCreate("/tmp/repo/./one")))
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -490,12 +485,7 @@ func TestCreateWorkspaceIdIsDistinctFromTheRegisteredIdForOneDir(t *testing.T) {
 
 	// Act.
 	created, err := client.CreateWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-			Repository: &workspacev1.RepositoryRef{Dir: "/tmp/repo/one"},
-			Form: &agentreplv1.CreateWorkspaceRequest_Standard{
-				Standard: &agentreplv1.CreateWorkspaceStandard{},
-			},
-		}))
+		connect.NewRequest(userPrimaryCreate("/tmp/repo/one")))
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -527,5 +517,26 @@ func TestDefaultListRollbackPromptsIsAnEmptySuccess(t *testing.T) {
 	// Assert.
 	if resp.Msg.GetSuccess() == nil || len(resp.Msg.GetSuccess().GetPrompts()) != 0 {
 		t.Fatalf("ListRollbackPrompts default is %v, want an empty success", resp.Msg)
+	}
+}
+
+// userPrimaryCreate is the user's fresh, primary standard create in the
+// repository at DIR: every fact the request requires, and nothing else.
+func userPrimaryCreate(dir string) *agentreplv1.CreateWorkspaceRequest {
+	return &agentreplv1.CreateWorkspaceRequest{
+		Repository: &workspacev1.RepositoryRef{Dir: dir},
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{
+			Standard: &agentreplv1.CreateWorkspaceStandard{
+				Topology: &agentreplv1.WorkspaceTopology{
+					Shape: &agentreplv1.WorkspaceTopology_Primary{Primary: &agentreplv1.WorkspaceTopologyPrimary{}},
+				},
+			},
+		},
+		Requester: &agentreplv1.WorkspaceRequester{
+			Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}},
+		},
+		ContextOrigin: &agentreplv1.WorkspaceContextOrigin{
+			Origin: &agentreplv1.WorkspaceContextOrigin_Fresh{Fresh: &agentreplv1.WorkspaceContextOriginFresh{}},
+		},
 	}
 }
