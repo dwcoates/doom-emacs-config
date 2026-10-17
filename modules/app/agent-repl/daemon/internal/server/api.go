@@ -596,19 +596,33 @@ func (s *server) pushOpenInEditor(ws ids.WorkspaceID, path string, line *uint32)
 	})
 }
 
-// ReloadWebapp pushes the reload_webapp arm onto the workspace's host stream.
-func (s *server) ReloadWebapp(ws ids.WorkspaceID) {
-	s.log.Debug("daemon.server.reload_webapp", "asked the host to reload the webview",
-		dlog.Context{"workspace": string(ws)})
-	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_ReloadWebapp{
-			ReloadWebapp: &agentreplv1.HostWorkspaceReloadWebapp{},
-		},
-	})
-}
+// ReloadWebapp pushes the reload_webapp arm onto the workspace's host stream,
+// naming no build: Emacs reloads this workspace's page alone.
+func (s *server) ReloadWebapp(ws ids.WorkspaceID) { s.pushReloadWebapp(ws, nil) }
 
 // PushReloadWebapp is the rollout's spelling of ReloadWebapp.
 func (s *server) PushReloadWebapp(ws ids.WorkspaceID) { s.ReloadWebapp(ws) }
+
+// PushReloadWebappBuild pushes the reload_webapp arm naming BUILD, the webapp
+// build a deploy brings: Emacs reloads its host onto it once, however many
+// workspaces the deploy tells.
+func (s *server) PushReloadWebappBuild(ws ids.WorkspaceID, build string) {
+	s.pushReloadWebapp(ws, &build)
+}
+
+// pushReloadWebapp emits the reload_webapp arm, naming BUILD when it is set.
+func (s *server) pushReloadWebapp(ws ids.WorkspaceID, build *string) {
+	fields := dlog.Context{"workspace": string(ws)}
+	if build != nil {
+		fields["webapp_build"] = *build
+	}
+	s.log.Debug("daemon.server.reload_webapp", "asked the host to reload the webview", fields)
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_ReloadWebapp{
+			ReloadWebapp: &agentreplv1.HostWorkspaceReloadWebapp{WebappBuild: build},
+		},
+	})
+}
 
 // NotificationClicked pushes notification_clicked onto the workspace's host
 // stream: the user clicked the workspace's desktop banner, and Emacs raises its

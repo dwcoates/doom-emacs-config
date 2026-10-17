@@ -137,6 +137,7 @@
 (declare-function agent-repl-webhost-buffer "webhost" ())
 (declare-function agent-repl-webhost-url "webhost" (conn))
 (declare-function agent-repl-webhost-reload "webhost" (conn))
+(declare-function agent-repl-webhost-reload-onto "webhost" (conn build))
 (declare-function agent-repl--ws-resolve-persp "workspace" (ws))
 (declare-function agent-repl--ws-add-buffer "workspace" (buffer persp &optional switch))
 
@@ -1254,7 +1255,7 @@ than no webview."
 The reaction to a workspace moving daemons (a handover re-points its
 page at the new address) and the interactive `SPC o l'.  The host
 re-points the page when its URL moved and reloads it in place otherwise
-\(`agent-repl-webhost-reload-page'); the slot is untouched.  A rollout's
+\(`agent-repl-webhost-reload-page'); the slot is untouched.  A deploy's
 `reload_webapp' push reloads the whole host instead
 \(`agent-repl-frontend-reload-webapp').
 
@@ -1274,13 +1275,17 @@ nothing to reload, and its next open mounts fresh."
       (prog1 (agent-repl-webhost-reload-page ws)
         (agent-repl--info ws "elisp.frontend.reload-webview: reloaded ws=%s" ws))))))
 
-(defun agent-repl-frontend-reload-webapp (ws)
-  "Bring every page onto the rebuilt webapp: the reaction to WS's `reload_webapp'.
-A rollout tells every stale workspace in one burst; the host reloads once
-for all of them (`agent-repl-webhost-reload'), which also brings the host
-page's own code onto the new build."
-  (agent-repl--info ws "elisp.frontend.reload-webapp ws=%s" ws)
-  (agent-repl-webhost-reload (agent-repl-host-conn ws)))
+(defun agent-repl-frontend-reload-webapp (ws build)
+  "React to WS's `reload_webapp', which names BUILD or nil.
+A deploy names the BUILD it brings, and tells every stale workspace in
+one burst; the host reloads once onto it for all of them
+\(`agent-repl-webhost-reload-onto'), which also brings the host page's own
+code onto it.  A push naming no build reloads WS's page alone, on the
+build it runs (a restart replaced its shim)."
+  (agent-repl--info ws "elisp.frontend.reload-webapp ws=%s build=%s" ws build)
+  (if build
+      (agent-repl-webhost-reload-onto (agent-repl-host-conn ws) build)
+    (agent-repl-frontend-reload-webview ws)))
 
 ;;;; ---- Rescuing a webview that navigated away --------------------------------
 

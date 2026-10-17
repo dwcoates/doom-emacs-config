@@ -648,8 +648,15 @@ element; the text itself may be empty (a prompt that is an image alone)."
   (agent-repl-wire--decode-empty "HostWorkspaceTransferred" value))
 
 (defun agent-repl-wire-decode-host-workspace-reload-webapp (value)
-  "Decode VALUE as the empty message `HostWorkspaceReloadWebapp'."
-  (agent-repl-wire--decode-empty "HostWorkspaceReloadWebapp" value))
+  "Decode VALUE as `HostWorkspaceReloadWebapp', a plist `(:webapp-build)'.
+`webapp_build' is OPTIONAL: unset means a reload of the workspace's page
+alone, on the build it runs."
+  (let ((object (agent-repl-wire--object "HostWorkspaceReloadWebapp" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceReloadWebapp" object '(webappBuild))
+    (agent-repl-wire--decoded
+     "HostWorkspaceReloadWebapp"
+     (list :webapp-build (agent-repl-wire--decode-optional-string
+                          "HostWorkspaceReloadWebapp" 'webappBuild object)))))
 
 (defun agent-repl-wire-decode-host-open-in-editor (value)
   "Decode VALUE as `HostOpenInEditor', a plist `(:path :line)'.

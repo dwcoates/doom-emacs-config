@@ -233,8 +233,8 @@ func (f *deployClientsForwarder) WebviewBuilds() map[ids.WorkspaceID][]string {
 	return nil
 }
 
-func (f *deployClientsForwarder) PushReloadWebapp(ws ids.WorkspaceID) {
+func (f *deployClientsForwarder) PushReloadWebappBuild(ws ids.WorkspaceID, build string) {
 	if target, ok := f.bound(); ok {
-		target.PushReloadWebapp(ws)
+		target.PushReloadWebappBuild(ws, build)
 	}
 }

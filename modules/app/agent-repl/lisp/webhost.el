@@ -93,6 +93,11 @@ milliseconds.  Replayed to a host that loads before the window ends.")
 (defvar agent-repl--webhost-reload-timer nil
   "The pending host reload of a rollout burst, or nil.")
 
+(defvar agent-repl--webhost-build nil
+  "The webapp build a deploy last reloaded the host onto, or nil.
+Nil too after any other reload, whose build nobody named
+\(`agent-repl-webhost-reload-onto').")
+
 (defvar agent-repl--webhost-url nil
   "The URL the host was last loaded at, which names the daemon it talks to.
 The host draws the sidebar over its own connection to that daemon, so when
@@ -435,13 +440,28 @@ and never piled up.  A switch to a page still waiting loads it at once."
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
 
 (defun agent-repl-webhost-reload (conn)
-  "Reload the host, and so every page, on CONN's daemon, once per burst.
-A rollout tells every workspace to reload in one burst of pushes; the host
-reloads once for all of them, on the next turn of the command loop, which
-also brings the host page's own code up to the new build."
+  "Reload the host, and so every page, on CONN's daemon, once per turn.
+Every page re-pointed in one turn of the command loop reloads the host
+once, on the next turn.  The build the host comes onto is nobody's to
+name, so the build a deploy brought is forgotten."
+  (setq agent-repl--webhost-build nil)
   (unless agent-repl--webhost-reload-timer
     (setq agent-repl--webhost-reload-timer
           (run-at-time 0 nil #'agent-repl--webhost-reload-now conn))))
+
+(defun agent-repl-webhost-reload-onto (conn build)
+  "Reload the host onto the webapp BUILD a deploy brings, on CONN's daemon.
+THE HOST RELOADS ONCE PER BUILD.  A deploy tells every workspace with a
+stale page, each on its own stream, so the pushes arrive over several
+turns of the command loop (eight in 100ms, 2026-10-17), and each reload
+replays every page.  The host's reload fetches the build the daemon
+serves, which is BUILD from the first push on, so a push naming the build
+the host was last reloaded onto is already met."
+  (if (equal build agent-repl--webhost-build)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-met build=%s" build)
+    (agent-repl-webhost-reload conn)
+    (setq agent-repl--webhost-build build)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build=%s" build)))
 
 (provide 'webhost)
 

@@ -273,6 +273,7 @@ type fakeClients struct {
 	elispRoot    string
 	elispBuild   string
 	webappPushes []ids.WorkspaceID
+	webappBuilds []string
 }
 
 func (c *fakeClients) EmacsBuilds() []EmacsClient {
@@ -299,10 +300,11 @@ func (c *fakeClients) WebviewBuilds() map[ids.WorkspaceID][]string {
 	return out
 }
 
-func (c *fakeClients) PushReloadWebapp(ws ids.WorkspaceID) {
+func (c *fakeClients) PushReloadWebappBuild(ws ids.WorkspaceID, build string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.webappPushes = append(c.webappPushes, ws)
+	c.webappBuilds = append(c.webappBuilds, build)
 }
 
 // fakeServices records the restarts.

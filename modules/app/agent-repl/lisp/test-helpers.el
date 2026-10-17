@@ -799,6 +799,7 @@ re-routes their frontend resolution instead."
          (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
          (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
          (agent-repl--webhost-reload-timer nil)
+         (agent-repl--webhost-build nil)
          (agent-repl--webhost-url nil)
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's

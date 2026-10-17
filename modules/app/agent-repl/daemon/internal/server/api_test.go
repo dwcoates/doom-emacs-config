@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -309,6 +310,46 @@ func TestAHostEventIsNotReplayedToALateHostStream(t *testing.T) {
 	// Assert.
 	if push.GetNotificationClicked() == nil {
 		t.Fatalf("first event = %v, want notification_clicked (reload_webapp is never replayed)", push)
+	}
+}
+
+// TestTheWebappReloadNamesItsBuildOnlyForADeploy pins the two shapes of the
+// reload_webapp arm: a deploy's names the build it brings, so Emacs reloads its
+// host once per build; a restart's names none, so Emacs reloads one page.
+func TestTheWebappReloadNamesItsBuildOnlyForADeploy(t *testing.T) {
+	tests := []struct {
+		name string
+		push func(s Server)
+		want *string
+	}{
+		{name: "deploy", push: func(s Server) { s.PushReloadWebappBuild(testWorkspaceID, "Web2") }, want: proto.String("Web2")},
+		{name: "restart", push: func(s Server) { s.Relay().ReloadWebapp(testWorkspaceID) }, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream, err := h.Client.WatchHostWorkspace(ctx,
+				connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+			if err != nil {
+				t.Fatalf("open the host stream: %v", err)
+			}
+
+			// Act.
+			tt.push(h.Server)
+			push := receiveHostEvent(t, stream)
+
+			// Assert.
+			reload := push.GetReloadWebapp()
+			if reload == nil {
+				t.Fatalf("event = %v, want reload_webapp", push)
+			}
+			if got := reload.WebappBuild; (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("webapp_build = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

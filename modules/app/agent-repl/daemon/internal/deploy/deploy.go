@@ -184,8 +184,9 @@ type Clients interface {
 	// WebviewBuilds answers, per workspace, the webapp build every open
 	// webview of it reported.
 	WebviewBuilds() map[ids.WorkspaceID][]string
-	// PushReloadWebapp pushes reload_webapp on one workspace's host stream.
-	PushReloadWebapp(ws ids.WorkspaceID)
+	// PushReloadWebappBuild pushes reload_webapp on one workspace's host
+	// stream, naming the webapp build the deploy brings.
+	PushReloadWebappBuild(ws ids.WorkspaceID, build string)
 }
 
 // Services restarts the launchd services.
@@ -1018,7 +1019,7 @@ func (d *Deployer) webapp(fresh builds) Outcome {
 		if !stale {
 			continue
 		}
-		d.deps.Clients.PushReloadWebapp(ws)
+		d.deps.Clients.PushReloadWebappBuild(ws, fresh.webapp)
 		out.Recipients++
 		d.log.Info(opDecide, "a webview runs an older webapp; pushed the reload", dlog.Context{
 			"workspace": string(ws), "running": running, "fresh": fresh.webapp,

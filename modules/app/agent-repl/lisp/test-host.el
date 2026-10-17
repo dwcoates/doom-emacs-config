@@ -286,7 +286,7 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-roster-apply-current)
                 (lambda () (cl-incf agent-repl-test-host--reapplied)))
                ((symbol-function 'agent-repl-frontend-reload-webapp)
-                (lambda (ws) (push (cons :reload-webapp ws) agent-repl-test-host--effects)))
+                (lambda (ws build) (push (list :reload-webapp ws build) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-frontend-reload-webview)
                 (lambda (ws)
                   ;; The conn is captured AS THE RELOAD SEES IT: frontend.el
@@ -2246,14 +2246,17 @@ would adopt onto a connection the link has let go of."
 ;;;; ---- The two relayed acts ----
 
 (ert-deftest agent-repl-test-host-reload-webapp-reloads-that-workspace ()
-  "A webapp-only rollout bounces the webview against the SAME daemon."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :reload-webapp :value nil))
-    ;; Assert
-    (should (equal (assq :reload-webapp agent-repl-test-host--effects) '(:reload-webapp . "ws-1")))))
+  "A reload push reloads against the SAME daemon, handing on the build it names."
+  (dolist (build '("Web2" nil))
+    (agent-repl-test-host--with-harness
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :reload-webapp
+                                               :value (list :webapp-build build)))
+      ;; Assert
+      (should (equal (assq :reload-webapp agent-repl-test-host--effects)
+                     (list :reload-webapp "ws-1" build))))))
 
 (ert-deftest agent-repl-test-host-open-in-editor-passes-the-line ()
   "The 1-indexed line rides through to the one shared popup subroutine."

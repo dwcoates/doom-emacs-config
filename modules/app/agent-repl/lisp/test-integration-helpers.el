@@ -1052,6 +1052,7 @@ signals."
                 (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
                 (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
                 (agent-repl--webhost-reload-timer nil)
+                (agent-repl--webhost-build nil)
                 ;; The opens are process-wide (open-tabs.el): each scenario
                 ;; runs with the startup over, its opens asked of its own
                 ;; daemon, unless it stages its own.

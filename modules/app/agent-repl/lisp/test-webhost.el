@@ -579,6 +579,33 @@ so stubbing the accessor would not reach the code under test."
       ;; Assert
       (should (= armed 1)))))
 
+(ert-deftest agent-repl-test-wh-a-deploy-reloads-the-host-once-per-build ()
+  "Pushes naming one build, over several turns, reload the host once; a new build again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((reloads nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (push agent-repl--webhost-build reloads) 'reload-timer)))
+        ;; Act
+        (dolist (build '("Web2" "Web2" "Web2" "Web3"))
+          (setq agent-repl--webhost-reload-timer nil)
+          (agent-repl-webhost-reload-onto 'conn build)))
+      ;; Assert
+      (should (equal (length reloads) 2))
+      (should (equal agent-repl--webhost-build "Web3")))))
+
+(ert-deftest agent-repl-test-wh-a-reload-of-unnamed-build-forgets-the-deploys ()
+  "A reload nobody named a build for (a handover's) forgets the deploy's build."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) 'reload-timer)))
+      (agent-repl-webhost-reload-onto 'conn "Web2")
+      (setq agent-repl--webhost-reload-timer nil)
+      ;; Act
+      (agent-repl-webhost-reload 'conn))
+    ;; Assert
+    (should (null agent-repl--webhost-build))))
+
 (ert-deftest agent-repl-test-wh-a-reload-navigates-the-host-to-its-url ()
   "The host is navigated to the host page on the daemon."
   ;; Arrange
