@@ -428,17 +428,6 @@ func (r *Repo) AddBranch(name string) string {
 	return sha
 }
 
-// AddBranchAtTip adds a branch at the default branch's head, carrying no work
-// of its own and checked out NOWHERE: a branch already on its target, which
-// no workspace owns.
-func (r *Repo) AddBranchAtTip(name string) {
-	r.t.Helper()
-	r.edit(func(s *fakegit.State) {
-		repo := r.state(s)
-		repo.AddBranch(name, repo.BranchHeads[DefaultBranch])
-	})
-}
-
 // RemoveBranch deletes a branch from the repository, as a branch deleted
 // after it was landed outside the daemon's own merge flow is.
 func (r *Repo) RemoveBranch(name string) {
