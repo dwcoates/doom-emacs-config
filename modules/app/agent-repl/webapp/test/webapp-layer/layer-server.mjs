@@ -72,8 +72,13 @@ const progressReporter = {
 // its own name (keepCoverage) for testrun's baseline to merge with the
 // webapp's other tiers.
 const COVERAGE_DIR = process.env.AGENT_REPL_WEBAPP_LAYER_COVERAGE;
+// ISOLATED, TOO: the istanbul provider snapshots and resets each module's
+// counters at the end of every file, and un-isolated a module the warm-up
+// loaded reports nothing for any later file (vitest.config.ts's coverage
+// note; bin/coverage-honesty.mjs). A coverage run pays each area's module
+// evaluation again; the transforms stay warm.
 const coverage = COVERAGE_DIR
-  ? { coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: COVERAGE_DIR, all: false, clean: false } }
+  ? { isolate: true, coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: COVERAGE_DIR, all: false, clean: false } }
   : {};
 
 const vitest = await createVitest("test", {
