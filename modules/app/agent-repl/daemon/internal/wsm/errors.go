@@ -355,6 +355,11 @@ func (m MergeSource) validate() error {
 	if m.CleanupDir != "" && !m.CleanupWorktree {
 		return fmt.Errorf("a cleanup directory %q is recorded only for a request that cleans up", m.CleanupDir)
 	}
+	// A DETACHED MERGE NAMES ITS MAKER, and only a detached merge has one or
+	// lands into it.
+	if (m.Detach != "") != (m.DetachMaker != "") || (m.DetachTargetMaker && m.Detach == "") {
+		return fmt.Errorf("a detached merge names the workspace it forks and only a detached merge does (detach %q, maker %q, into maker %v)", m.Detach, m.DetachMaker, m.DetachTargetMaker)
+	}
 	// A DETACHED MERGE IS NAMED by its requesting agent, and only a detached
 	// merge reserves a name.
 	if (m.Detach != "") != (m.DetachName != "") {

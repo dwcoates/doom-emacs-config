@@ -446,6 +446,10 @@ type DB interface {
 	// StartMergePick records that a merge workspace's pick began as a turn,
 	// with its bubble's ledger identity, before the turn is submitted.
 	StartMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID, turn TurnID, at time.Time) error
+	// ClearMergePick records that a queued merge workspace's begun pick
+	// succeeded: its instruction leaves the row, so its next admission
+	// admits the merge itself.
+	ClearMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) error
 	// RecordMergeWorkspaceRemoved records that the inactivity sweep is
 	// removing a merge workspace, before its records are deleted.
 	RecordMergeWorkspaceRemoved(ctx context.Context, ws WorkspaceID, requester WorkspaceID, at time.Time) error

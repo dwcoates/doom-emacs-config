@@ -141,8 +141,8 @@ func (s *store) StartMergePick(ctx context.Context, repo RepoKey, id WorkspaceID
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
 			`UPDATE merge_queue SET pick_started_at = ?, pick_turn = ?, ledger_id = ?
-			  WHERE repo_key = ? AND workspace_id = ? AND state = ? AND source_pick IS NOT NULL AND pick_started_at IS NULL`,
-			nanos(at), turn, ledger, key, id, int(MergeRequested))
+			  WHERE repo_key = ? AND workspace_id = ? AND state IN (?, ?) AND source_pick IS NOT NULL AND pick_started_at IS NULL`,
+			nanos(at), turn, ledger, key, id, int(MergeRequested), int(MergeQueued))
 		if err != nil {
 			return err
 		}

@@ -1006,6 +1006,13 @@ type MergeSource struct {
 	// a recovery finds the one workspace forked for THIS request. Empty for an
 	// in-place merge.
 	Detach DetachedMergeID
+	// DetachMaker is the workspace a DETACHED request's merge workspace forks:
+	// the one the merged work was done in (a subagent's spawning workspace,
+	// or the workspace that cut the branch). Set iff Detach is.
+	DetachMaker WorkspaceID
+	// DetachTargetMaker lands a DETACHED request into its maker's branch
+	// instead of on the primary branch. Only a detached request carries it.
+	DetachTargetMaker bool
 	// DetachName is a detached request's merge workspace name, as the
 	// requesting agent supplied it (unprefixed): RESERVED from the moment the
 	// request is recorded until the merge workspace exists under it. Set iff

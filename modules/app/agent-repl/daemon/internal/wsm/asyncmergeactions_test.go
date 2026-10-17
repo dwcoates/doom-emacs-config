@@ -15,7 +15,7 @@ var someActions = MergeActions{Before: []string{"run the linters"}, After: []str
 
 // detachedSource is an async request for branch feature carrying ACTIONS.
 func detachedSource(actions MergeActions) MergeSource {
-	return MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachName: "sample-merge", Actions: actions}
+	return MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "sample-merge", Actions: actions}
 }
 
 func TestAnAsyncRequestKeepsItsMergeActionsInTheQueue(t *testing.T) {

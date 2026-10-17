@@ -1149,7 +1149,7 @@ func TestRequestOneShotMergeRefusesASourceThatIsNoOneShot(t *testing.T) {
 		source MergeSource
 	}{
 		{name: "kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID()}},
+		{name: "detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID(), DetachMaker: "maker"}},
 		{name: "another branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
 		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},
 	}
@@ -1231,7 +1231,7 @@ func TestIsOneShotAcceptsOnlyAnInPlaceOwnBranchThatClosesTheRequester(t *testing
 	}{
 		{name: "own branch", source: ownBranch, want: true},
 		{name: "own branch kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "own branch detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d"}},
+		{name: "own branch detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d", DetachMaker: "maker"}},
 		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w"}},
 		{name: "a branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
 		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},

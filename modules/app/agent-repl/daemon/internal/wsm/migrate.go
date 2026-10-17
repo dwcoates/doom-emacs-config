@@ -151,6 +151,7 @@ var migrations = []migration{
 	{To: 58, Name: "sidebar_arrangement", Kind: MigrationAdditive, DDL: arrangementDDL},
 	{To: 59, Name: "subsection_folds", Kind: MigrationAdditive, DDL: subsectionFoldsDDL},
 	{To: 60, Name: "workspace_derivation", Kind: MigrationAdditive, DDL: derivationDDL},
+	{To: 61, Name: "async_merge_maker", Kind: MigrationAdditive, DDL: asyncMergeMakerDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
