@@ -4,13 +4,10 @@
 #
 #   - each grammar's corpus (<grammar>/test/corpus/*.txt);
 #   - each committed generated parser (<grammar>/src/) is the one its
-#     grammar.js generates, so no consumer compiles a stale parser;
-#   - tldr's committed wasm is the one its src/ builds, so the webapp never
-#     ships a stale grammar. Building it runs emscripten in Docker, which the
-#     tree-sitter CLI drives; the build is reproducible byte for byte.
+#     grammar.js generates, so no consumer compiles a stale parser.
 #
 # The tldr grammar's answers are held to the old webapp parser's by the
-# webapp suite (webapp/test/tree-parse.test.ts over tldr/test/golden).
+# daemon suite (daemon/internal/prose/golden_test.go over tldr/test/golden).
 #
 # Run with:   bash tree-sitter-tldr/test-tree-sitter-tldr.sh
 # Tests run only at background priority: re-exec once through bin/background.sh.
@@ -39,14 +36,5 @@ for grammar in tldr tldr_prompt; do
   if [[ $stale -eq 0 ]]; then echo "ok   - $grammar/src/ is what grammar.js generates"; else failed=1; fi
   "$tree_sitter" test || failed=1
 done
-
-cd "$root/tldr"
-"$tree_sitter" build --wasm -o "$scratch/tree-sitter-tldr.wasm" . >/dev/null 2>&1
-if cmp -s tree-sitter-tldr.wasm "$scratch/tree-sitter-tldr.wasm"; then
-  echo "ok   - tldr/tree-sitter-tldr.wasm is what tldr/src/ builds"
-else
-  echo "not ok - tldr/tree-sitter-tldr.wasm is not what tldr/src/ builds: run \`npm run generate\` and commit it"
-  failed=1
-fi
 
 exit "$failed"

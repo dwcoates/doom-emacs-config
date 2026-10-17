@@ -125,6 +125,10 @@ var suiteRules = []suiteRule{
 	// daemon and its shims for real, and the Emacs layer draws the built
 	// webapp, so each system selects both. The daemon suite carries the
 	// daemon's integration tests (daemon/integration) with it.
+	// THE WEBAPP'S PARSED-PROSE FIXTURE IS THE DAEMON'S ANSWER: the daemon's
+	// prose suite writes it from its inputs and fails while it is stale, and
+	// the webapp's tests draw from it.
+	{Kind: matchSubtree, Path: moduleRoot + "webapp/test/fixtures/", Suites: []string{"daemon", "webapp", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
 	// The whole-module scans are their own suite; nothing else reads them.
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/reposcans/", Suites: []string{repoScans}},
@@ -143,10 +147,12 @@ var suiteRules = []suiteRule{
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
 		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
-	// The TLDR-tree grammar. No program loads it yet, so its own suite is the
-	// whole blast radius, with the scans that read its Go binding's go.mod;
-	// each consumer joins this list as it starts parsing with it.
-	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", repoScans}},
+	// The TLDR-tree grammars: their consumer, the daemon (which parses every
+	// drawn text with tldr through cgo, internal/prose, and holds its reading
+	// to tldr's golden answers), the end-to-end suites whose real daemon serves
+	// that parse, and the scans that read the Go binding's go.mod. Each later
+	// consumer joins this list as it starts parsing with them.
+	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e", "e2e-emacs", repoScans}},
 
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite

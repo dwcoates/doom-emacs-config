@@ -255,16 +255,30 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	}
 }
 
-// TestSelectSuitesMapsTheGrammarToItsOwnSuite covers tree-sitter-tldr/: no
-// program loads the grammar yet, so its own suite is the whole blast radius,
-// with the scans that read its Go binding's go.mod.
-func TestSelectSuitesMapsTheGrammarToItsOwnSuite(t *testing.T) {
+// TestSelectSuitesMapsTheGrammarToItsConsumers covers tree-sitter-tldr/: a
+// shared component selects its own suite, its consumer the daemon, the
+// end-to-end suites whose real daemon serves the parse, and the scans, in
+// roster order.
+func TestSelectSuitesMapsTheGrammarToItsConsumers(t *testing.T) {
 	// Act.
-	got := SelectSuites([]string{"modules/app/agent-repl/tree-sitter-tldr/grammar.js"})
+	got := SelectSuites([]string{"modules/app/agent-repl/tree-sitter-tldr/tldr/grammar.js"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "repo-scans,tree-sitter-tldr" {
-		t.Fatalf("the grammar selected %v (full=%v), want repo-scans and tree-sitter-tldr", got.Suites, got.Full)
+	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,e2e,e2e-emacs" {
+		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, e2e, e2e-emacs and repo-scans", got.Suites, got.Full)
+	}
+}
+
+// TestSelectSuitesMapsTheProseFixtureToItsWriterAndReader covers the webapp's
+// parsed-prose fixture: the daemon suite that writes it, the webapp suite
+// that draws from it, and the scans.
+func TestSelectSuitesMapsTheProseFixtureToItsWriterAndReader(t *testing.T) {
+	// Act.
+	got := SelectSuites([]string{"modules/app/agent-repl/webapp/test/fixtures/parsed-prose.json"})
+
+	// Assert.
+	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,webapp" {
+		t.Fatalf("the prose fixture selected %v (full=%v), want daemon, webapp and repo-scans", got.Suites, got.Full)
 	}
 }
 

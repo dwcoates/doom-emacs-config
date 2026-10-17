@@ -2,8 +2,8 @@
  * tree-sitter-tldr — THE ONE GRAMMAR of the metaprompt's TLDR tree and of the
  * prompt entries that answer it.
  *
- * Every program that reads a tree parses it with THIS grammar: the webapp (as
- * wasm) to wrap and link a response's tree, the daemon to bind a prompt's
+ * Every program that reads a tree parses it with THIS grammar: the daemon to
+ * parse a response's tree (with tldr) and to bind a prompt's
  * entries to the labels of the response they answer, and Emacs (`treesit`) to
  * highlight those entries while the user types. One grammar file generates
  * every parser, so no two programs can disagree on what a label, a branch or
