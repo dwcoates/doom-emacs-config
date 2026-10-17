@@ -455,6 +455,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms an interactive clipboard write")
     ("magit.el" agent-repl-open-workspace-pr-in-browser "Opened PR: %s"
      "confirms the interactive browser action")
+    ("magit.el" agent-repl-magit-log-commit
+     "agent-repl: %s is not among the commits %s's log shows"
+     "tells the user the commit they clicked is not in the log that opened")
     ("panels.el" agent-repl-workspace-push-to-back
      "Pushed '%s' to the back; switched to '%s'."
      "confirms the interactive tab reorder and selection")
