@@ -2407,6 +2407,18 @@ persp-mode directly."
   (with-eval-after-load 'persp-mode
     (add-hook 'persp-before-deactivate-functions fn)))
 
+(defun agent-repl--ws-add-before-kill-hook (fn)
+  "Register FN to run before persp-mode kills a perspective.
+Adds FN to `persp-before-kill-functions' once persp-mode loads; FN is
+called with the perspective object.
+
+This is the persp-mode kill-hook boundary owned by `workspace.el'.
+Callers must use this function instead of touching
+`persp-before-kill-functions' or `with-eval-after-load' on persp-mode
+directly."
+  (with-eval-after-load 'persp-mode
+    (add-hook 'persp-before-kill-functions fn)))
+
 (defun agent-repl--ws-install-before-collapse (fn)
   "Advise persp-mode's restore collapse to call FN first, now.
 `persp-delete-other-windows' is the step of every persp-mode window
@@ -2570,6 +2582,32 @@ perspective activation funnels through, so the project picker
 ;; A pseudo deletion the startup deferred runs once the frame is on a real
 ;; workspace (`agent-repl--delete-pseudos-on-activation').
 (agent-repl--ws-add-activated-hook #'agent-repl--delete-pseudos-on-activation)
+
+;;;; ---- Every perspective kill is recorded --------------------------------
+;;
+;; A PERSPECTIVE NEVER DIES UNRECORDED.  agent-repl's own teardown logs its
+;; kills (`agent-repl--ws-land-then-kill'), but persp-mode and Doom kill
+;; perspectives too, and those left no trace: on 2026-10-17 every
+;; perspective but `none' and the current one vanished at once, the tab bar
+;; still drew all thirty, and each later switch failed with "is not an
+;; available workspace" with nothing in any log to say what killed them.
+;; The record names the perspective, the command, and the caller chain.
+
+(defconst agent-repl--ws-persp-kill-scope
+  '(:agent-repl-central "a perspective kill can come from outside any workspace")
+  "The log scope of the perspective kill record.")
+
+(defun agent-repl--ws-record-persp-kill (persp)
+  "Record at INFO that persp-mode is about to kill PERSP, and who asked.
+Registered on `persp-before-kill-functions'
+\(`agent-repl--ws-add-before-kill-hook')."
+  (agent-repl--info agent-repl--ws-persp-kill-scope
+                    "elisp.workspace.persp-kill: ws=%s command=%s callers=%s"
+                    (agent-repl--ws-persp-name persp) this-command
+                    (agent-repl--ws-caller-trace
+                     '(agent-repl--ws-record-persp-kill run-hook-with-args))))
+
+(agent-repl--ws-add-before-kill-hook #'agent-repl--ws-record-persp-kill)
 
 (provide 'agent-repl-workspace)
 ;;; workspace.el ends here
