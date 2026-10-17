@@ -9,8 +9,9 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 )
 
-// deliveredLine is the page line of an inter-session peer message in `book`
-// stating `delivery`, keyed on `uuid` as both planes key it.
+// deliveredLine is the RECIPIENT's end of a cross-session message: the page
+// line of an inter-session peer message in `book` stating `delivery`, keyed on
+// `uuid` as both planes key it.
 func deliveredLine(uuid, book, delivery string) *storev1.StoreEntry {
 	item := &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_PeerMessage{PeerMessage: &conversationv1.PeerMessage{
 		Agent: &conversationv1.AgentId{Value: book},
@@ -23,7 +24,19 @@ func deliveredLine(uuid, book, delivery string) *storev1.StoreEntry {
 	return pageEntry("w-"+uuid, "peer:"+uuid, book, item)
 }
 
-func TestTheDeliveryIndexHoldsADeliveredPeerMessage(t *testing.T) {
+// sentLine is the SENDER's end of a cross-session message: the settled
+// SendMessage unit `call` in `book`, reaching another session under `delivery`.
+func sentLine(call, book, delivery string) *storev1.StoreEntry {
+	send := &conversationv1.AgentSendMessage{Result: &conversationv1.AgentSendMessage_Success{Success: &conversationv1.AgentSendMessageSuccess{
+		AddressedTo: "fix-flaky-3a",
+		Recipient: &conversationv1.AgentSendMessageSuccess_PeerSession{PeerSession: &conversationv1.AgentSendMessagePeerSession{
+			DeliveryId: &conversationv1.PeerDeliveryId{Value: delivery},
+		}},
+	}}}
+	return pageEntry("w-"+call, "act:"+call, book, frameItem(activityFrame(book, call, send)))
+}
+
+func TestTheDeliveryIndexHoldsTheRecipientsEnd(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
 
@@ -31,8 +44,21 @@ func TestTheDeliveryIndexHoldsADeliveredPeerMessage(t *testing.T) {
 	result := writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
 
 	// Assert
-	if got := scalar[string](t, d, `SELECT delivery_id FROM peer_delivery WHERE position = ?`, positionOf(t, result)); got != "m-1" {
-		t.Fatalf("peer_delivery id = %q, want m-1", got)
+	if got := scalar[string](t, d, `SELECT end_kind || '/' || delivery_id FROM peer_delivery WHERE position = ?`, positionOf(t, result)); got != "recipient/m-1" {
+		t.Fatalf("peer_delivery = %q, want recipient/m-1", got)
+	}
+}
+
+func TestTheDeliveryIndexHoldsTheSendersEnd(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	result := writeOK(t, d, sentLine("toolu_send", "session-a", "m-1"))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT end_kind || '/' || delivery_id FROM peer_delivery WHERE position = ?`, positionOf(t, result)); got != "sender/m-1" {
+		t.Fatalf("peer_delivery = %q, want sender/m-1", got)
 	}
 }
 
@@ -49,95 +75,95 @@ func TestTheDeliveryIndexHoldsNoPeerMessageThatStatesNoDelivery(t *testing.T) {
 	}
 }
 
-func TestPeerRecipientAnswersTheSessionHoldingTheDelivery(t *testing.T) {
+func TestPeerDeliveryAnswersBothEnds(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
+	writeOK(t, d, sentLine("toolu_send", "session-a", "m-1"), deliveredLine("u1", "session-b", "m-1"))
 
 	// Act
-	session, found, err := d.PeerRecipient(ctx(), "m-1")
+	sender, recipient, err := d.PeerDelivery(ctx(), "m-1")
 
 	// Assert
-	if err != nil || !found || session != "session-b" {
-		t.Fatalf("PeerRecipient = (%q, %t, %v), want (session-b, true, nil)", session, found, err)
+	if err != nil || sender != "session-a" || recipient != "session-b" {
+		t.Fatalf("PeerDelivery = (%q, %q, %v), want (session-a, session-b, nil)", sender, recipient, err)
 	}
 }
 
-func TestPeerRecipientAnswersTheRootOfASubagentBook(t *testing.T) {
-	// Arrange: the delivery is filed in a subagent's book, spawned by the main agent.
+func TestPeerDeliveryAnswersAnEndNoSessionHoldsAsEmpty(t *testing.T) {
+	// Arrange: only the sender's end is recorded, as for a send to an outside session.
 	d, _ := newStore(t)
-	writeOK(t, d, deliveredLine("u1", "toolu_child", "m-1"))
-	if _, err := d.sql.ExecContext(ctx(), `UPDATE agent SET spawned_by_agent = 'session-b' WHERE agent_id = 'toolu_child'`); err != nil {
+	writeOK(t, d, sentLine("toolu_send", "session-a", "m-1"))
+
+	// Act
+	sender, recipient, err := d.PeerDelivery(ctx(), "m-1")
+
+	// Assert
+	if err != nil || sender != "session-a" || recipient != "" {
+		t.Fatalf("PeerDelivery = (%q, %q, %v), want (session-a, \"\", nil)", sender, recipient, err)
+	}
+}
+
+func TestPeerDeliveryAnswersTheRootOfASubagentBook(t *testing.T) {
+	// Arrange: the send was made by a subagent, spawned by the main agent.
+	d, _ := newStore(t)
+	writeOK(t, d, sentLine("toolu_send", "toolu_child", "m-1"))
+	if _, err := d.sql.ExecContext(ctx(), `UPDATE agent SET spawned_by_agent = 'session-a' WHERE agent_id = 'toolu_child'`); err != nil {
 		t.Fatalf("stamping the lineage: %v", err)
 	}
 
 	// Act
-	session, found, err := d.PeerRecipient(ctx(), "m-1")
+	sender, _, err := d.PeerDelivery(ctx(), "m-1")
 
 	// Assert
-	if err != nil || !found || session != "session-b" {
-		t.Fatalf("PeerRecipient = (%q, %t, %v), want the lineage root (session-b, true, nil)", session, found, err)
+	if err != nil || sender != "session-a" {
+		t.Fatalf("PeerDelivery sender = (%q, %v), want the lineage root session-a", sender, err)
 	}
 }
 
-func TestPeerRecipientAnswersNotFoundForADeliveryNoSessionHolds(t *testing.T) {
-	// Arrange
-	d, _ := newStore(t)
-	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
-
-	// Act
-	session, found, err := d.PeerRecipient(ctx(), "m-2")
-
-	// Assert
-	if err != nil || found || session != "" {
-		t.Fatalf("PeerRecipient = (%q, %t, %v), want not found", session, found, err)
-	}
-}
-
-func TestPeerRecipientRefusesADeliveryHeldByTwoSessions(t *testing.T) {
-	// Arrange: one delivery filed in two sessions breaks the index's invariant.
+func TestPeerDeliveryRefusesAnEndHeldByTwoSessions(t *testing.T) {
+	// Arrange: one delivery filed as received by two sessions breaks the index's invariant.
 	d, _ := newStore(t)
 	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
 	writeOK(t, d, deliveredLine("u2", "session-c", "m-1"))
 
 	// Act
-	_, found, err := d.PeerRecipient(ctx(), "m-1")
+	_, _, err := d.PeerDelivery(ctx(), "m-1")
 
 	// Assert
-	if found || !errors.Is(err, ErrStorage) {
-		t.Fatalf("PeerRecipient = (found %t, %v), want a storage failure", found, err)
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("PeerDelivery = %v, want a storage failure", err)
 	}
 }
 
-func TestPeerRecipientRecordsTheAmbiguousDeliveryAtError(t *testing.T) {
+func TestPeerDeliveryRecordsTheAmbiguousEndAtError(t *testing.T) {
 	// Arrange
 	d, logs := newStore(t)
 	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
 	writeOK(t, d, deliveredLine("u2", "session-c", "m-1"))
 
 	// Act
-	_, _, _ = d.PeerRecipient(ctx(), "m-1")
+	_, _, _ = d.PeerDelivery(ctx(), "m-1")
 
 	// Assert
-	logs.assertLogged(t, "error", "delivery m-1 is held by 2 sessions (session-b, session-c)")
+	logs.assertLogged(t, "error", "the recipient end of delivery m-1 is held by 2 sessions (session-b, session-c)")
 }
 
-func TestPeerRecipientRefusesAnEmptyDelivery(t *testing.T) {
+func TestPeerDeliveryRefusesAnEmptyDelivery(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
 
 	// Act
-	_, _, err := d.PeerRecipient(ctx(), "")
+	_, _, err := d.PeerDelivery(ctx(), "")
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("PeerRecipient(\"\") = %v, want an invalid request", err)
+		t.Fatalf("PeerDelivery(\"\") = %v, want an invalid request", err)
 	}
 }
 
-// prePeerDeliveryDatabase writes a database carrying one delivered peer
-// message but NOT peer_delivery — the shape a store had before the index — and
-// returns its path, closed.
+// prePeerDeliveryDatabase writes a database carrying both ends of one delivery
+// but NOT peer_delivery — the shape a store had before the index — and returns
+// its path, closed.
 func prePeerDeliveryDatabase(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "store.db")
@@ -146,7 +172,7 @@ func prePeerDeliveryDatabase(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
-	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
+	writeOK(t, d, sentLine("toolu_send", "session-a", "m-1"), deliveredLine("u1", "session-b", "m-1"))
 	if _, err := d.sql.Exec(`DROP TABLE peer_delivery`); err != nil {
 		t.Fatalf("dropping peer_delivery: %v", err)
 	}
@@ -156,7 +182,7 @@ func prePeerDeliveryDatabase(t *testing.T) string {
 	return path
 }
 
-func TestOpenIndexesEveryStoredDeliveryWhenItBuildsTheDeliveryIndex(t *testing.T) {
+func TestOpenIndexesBothStoredEndsWhenItBuildsTheDeliveryIndex(t *testing.T) {
 	// Arrange
 	path := prePeerDeliveryDatabase(t)
 	_, log := newSink(t)
@@ -169,8 +195,8 @@ func TestOpenIndexesEveryStoredDeliveryWhenItBuildsTheDeliveryIndex(t *testing.T
 	defer d.Close() //nolint:errcheck // test teardown
 
 	// Assert
-	if got := scalar[string](t, d, `SELECT book_agent_id || '/' || delivery_id FROM peer_delivery`); got != "session-b/m-1" {
-		t.Fatalf("peer_delivery = %q, want the stored delivery indexed", got)
+	if got := scalar[string](t, d, `SELECT group_concat(end_kind || '/' || book_agent_id, ',') FROM (SELECT * FROM peer_delivery ORDER BY end_kind)`); got != "recipient/session-b,sender/session-a" {
+		t.Fatalf("peer_delivery = %q, want both stored ends indexed", got)
 	}
 }
 

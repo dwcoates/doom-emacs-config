@@ -192,11 +192,12 @@ type fakeStore struct {
 	detachedWorkFor   string
 	detachedWorkAsked bool
 
-	// the peer recipient lookup's answer, and what the last lookup asked for
-	peerSession string
-	peerErr     error
-	peerFor     string
-	peerAsked   bool
+	// the peer delivery lookup's answer, and what the last lookup asked for
+	peerSender    string
+	peerRecipient string
+	peerErr       error
+	peerFor       string
+	peerAsked     bool
 
 	settled      []db.SettledRun
 	settledErr   error
@@ -348,12 +349,12 @@ func (f *fakeStore) DetachedWorkByUnit(_ context.Context, unit string) (*storev1
 	return f.detachedWork, f.detachedWork != nil, f.detachedWorkErr
 }
 
-func (f *fakeStore) PeerRecipient(_ context.Context, deliveryID string) (string, bool, error) {
+func (f *fakeStore) PeerDelivery(_ context.Context, deliveryID string) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.peerAsked = true
 	f.peerFor = deliveryID
-	return f.peerSession, f.peerSession != "", f.peerErr
+	return f.peerSender, f.peerRecipient, f.peerErr
 }
 
 func (f *fakeStore) RunSettlements(_ context.Context, runIDs []string) ([]db.SettledRun, error) {
@@ -2364,36 +2365,66 @@ func TestGetRunSettlementsRefusesAnIncompleteRequest(t *testing.T) {
 // ---- GetDetachedWork ----
 
 // detachedWorkOf is a lookup naming one unit.
-func peerRecipientOf(delivery string) *storev1.GetPeerRecipientRequest {
-	return &storev1.GetPeerRecipientRequest{DeliveryId: &conversationv1.PeerDeliveryId{Value: delivery}}
+func peerDeliveryOf(delivery string) *storev1.GetPeerDeliveryRequest {
+	return &storev1.GetPeerDeliveryRequest{DeliveryId: &conversationv1.PeerDeliveryId{Value: delivery}}
 }
 
-func TestGetPeerRecipientServesTheSessionTheStoreNames(t *testing.T) {
+func TestGetPeerDeliveryServesBothEndsTheStoreNames(t *testing.T) {
+	tests := []struct {
+		name string
+		end  func(*storev1.GetPeerDeliverySuccess) *storev1.GetPeerDeliveryEnd
+		want string
+	}{
+		{name: "the sender", end: (*storev1.GetPeerDeliverySuccess).GetSender, want: "session-a"},
+		{name: "the recipient", end: (*storev1.GetPeerDeliverySuccess).GetRecipient, want: "session-b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			store.peerSender, store.peerRecipient = "session-a", "session-b"
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1")))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetPeerDelivery = %v, want nil", err)
+			}
+			if got := tt.end(res.Msg.GetSuccess()).GetSession().GetValue(); got != tt.want {
+				t.Fatalf("session = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetPeerDeliveryAnswersAnEndNoSessionHoldsAsNotRecorded(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
-	store.peerSession = "vendor-session-b"
+	store.peerSender = "session-a"
 	h := newHarness(t, store, 0)
 
 	// Act.
-	res, err := h.client.GetPeerRecipient(context.Background(), connect.NewRequest(peerRecipientOf("m-1")))
+	res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1")))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("GetPeerRecipient = %v, want nil", err)
+		t.Fatalf("GetPeerDelivery = %v, want nil", err)
 	}
-	if got := res.Msg.GetSuccess().GetSession().GetValue(); got != "vendor-session-b" {
-		t.Fatalf("session = %q, want vendor-session-b", got)
+	if res.Msg.GetSuccess().GetRecipient().GetNotRecorded() == nil {
+		t.Fatalf("recipient = %v, want not_recorded", res.Msg.GetSuccess().GetRecipient())
 	}
 }
 
-func TestGetPeerRecipientAsksTheStoreForTheDeliveryVerbatim(t *testing.T) {
+func TestGetPeerDeliveryAsksTheStoreForTheDeliveryVerbatim(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
 	h := newHarness(t, store, 0)
 
 	// Act.
-	if _, err := h.client.GetPeerRecipient(context.Background(), connect.NewRequest(peerRecipientOf("m-1"))); err != nil {
-		t.Fatalf("GetPeerRecipient = %v, want nil", err)
+	if _, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1"))); err != nil {
+		t.Fatalf("GetPeerDelivery = %v, want nil", err)
 	}
 
 	// Assert.
@@ -2404,48 +2435,31 @@ func TestGetPeerRecipientAsksTheStoreForTheDeliveryVerbatim(t *testing.T) {
 	}
 }
 
-func TestGetPeerRecipientAnswersNotFoundWhenNoSessionHoldsIt(t *testing.T) {
-	// Arrange.
-	store := newFakeStore()
-	h := newHarness(t, store, 0)
-
-	// Act.
-	res, err := h.client.GetPeerRecipient(context.Background(), connect.NewRequest(peerRecipientOf("m-1")))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("GetPeerRecipient = %v, want nil", err)
-	}
-	if res.Msg.GetNotFound() == nil {
-		t.Fatalf("result = %v, want the not_found arm", res.Msg.GetResult())
-	}
-}
-
-func TestGetPeerRecipientMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
+func TestGetPeerDeliveryMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
 	store.peerErr = fmt.Errorf("%w: scan failed", ErrStorage)
 	h := newHarness(t, store, 0)
 
 	// Act.
-	res, err := h.client.GetPeerRecipient(context.Background(), connect.NewRequest(peerRecipientOf("m-1")))
+	res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(peerDeliveryOf("m-1")))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("GetPeerRecipient = %v, want nil", err)
+		t.Fatalf("GetPeerDelivery = %v, want nil", err)
 	}
 	if res.Msg.GetFailure().GetStorageFailure() == nil {
 		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
 	}
 }
 
-func TestGetPeerRecipientRefusesAnIncompleteRequest(t *testing.T) {
+func TestGetPeerDeliveryRefusesAnIncompleteRequest(t *testing.T) {
 	tests := []struct {
 		name    string
-		request *storev1.GetPeerRecipientRequest
+		request *storev1.GetPeerDeliveryRequest
 	}{
-		{name: "delivery unset", request: &storev1.GetPeerRecipientRequest{}},
-		{name: "delivery with an empty value", request: peerRecipientOf("")},
+		{name: "delivery unset", request: &storev1.GetPeerDeliveryRequest{}},
+		{name: "delivery with an empty value", request: peerDeliveryOf("")},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -2454,17 +2468,17 @@ func TestGetPeerRecipientRefusesAnIncompleteRequest(t *testing.T) {
 			h := newHarness(t, store, 0)
 
 			// Act.
-			res, err := h.client.GetPeerRecipient(context.Background(), connect.NewRequest(test.request))
+			res, err := h.client.GetPeerDelivery(context.Background(), connect.NewRequest(test.request))
 
 			// Assert.
 			if err != nil {
-				t.Fatalf("GetPeerRecipient = %v, want nil", err)
+				t.Fatalf("GetPeerDelivery = %v, want nil", err)
 			}
 			invalid := res.Msg.GetFailure().GetInvalidRequest()
 			if invalid == nil || invalid.GetField() != "delivery_id" {
 				t.Fatalf("result = %v, want invalid_request naming delivery_id", res.Msg.GetResult())
 			}
-			rec, ok := findRecord(t, h.logs, "store.rpc.get-peer-recipient", "warn")
+			rec, ok := findRecord(t, h.logs, "store.rpc.get-peer-delivery", "warn")
 			if !ok || rec.Context["refusal_site"] != SiteDeliveryEmpty {
 				t.Fatalf("records = %+v, want one warn refusal at site %q", records(t, h.logs), SiteDeliveryEmpty)
 			}

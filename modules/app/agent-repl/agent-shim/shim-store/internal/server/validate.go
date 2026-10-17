@@ -387,10 +387,10 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 	return nil
 }
 
-// validateGetPeerRecipientRequest is the use site for GetPeerRecipient: the
+// validateGetPeerDeliveryRequest is the use site for GetPeerDelivery: the
 // delivery id, set and non-empty. Unscoped on purpose: the answer is always
 // another session.
-func validateGetPeerRecipientRequest(req *storev1.GetPeerRecipientRequest) *refusal {
+func validateGetPeerDeliveryRequest(req *storev1.GetPeerDeliveryRequest) *refusal {
 	if req.GetDeliveryId().GetValue() == "" {
 		return refuse(SiteDeliveryEmpty, "delivery_id", "delivery_id: the lookup names no delivery")
 	}

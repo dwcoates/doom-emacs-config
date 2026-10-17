@@ -255,6 +255,8 @@ func activityFrame(agentID, activityID string, item any) *conversationv1.AgentFr
 		activity.Item = &conversationv1.AgentActivity_Hook{Hook: typed}
 	case *conversationv1.AgentWrite:
 		activity.Item = &conversationv1.AgentActivity_Write{Write: typed}
+	case *conversationv1.AgentSendMessage:
+		activity.Item = &conversationv1.AgentActivity_SendMessage{SendMessage: typed}
 	default:
 		panic("unsupported activity item in test fixture")
 	}

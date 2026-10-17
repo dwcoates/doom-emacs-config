@@ -76,10 +76,10 @@ type Store interface {
 	// record holds it from the agent's spawn start; `found` false with no
 	// error when the record holds no start for it.
 	AgentCommission(ctx context.Context, agentID string) (commission *conversationv1.AgentSubagentPrompt, found bool, err error)
-	// PeerRecipient answers which session holds the delivered copy of one
-	// cross-session message; `found` false with no error is the not-found
-	// answer.
-	PeerRecipient(ctx context.Context, deliveryID string) (session string, found bool, err error)
+	// PeerDelivery answers which sessions hold the two ends of one
+	// cross-session message; an end no recorded session holds is "" with no
+	// error.
+	PeerDelivery(ctx context.Context, deliveryID string) (sender, recipient string, err error)
 	// DetachedWorkByUnit answers the kind and end of the detached work that
 	// left a unit (the spawning call's activity id); `found` false with no
 	// error is the not-found answer.
