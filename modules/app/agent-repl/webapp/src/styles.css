@@ -7945,6 +7945,9 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 /* A RUNNING SUITE'S DOT IS NEVER PURPLE (owner ruling, 2026-10-08) and
    NEVER GREEN (owner request, 2026-10-11): it breathes yellow while started
    and unfinished, red once a test failed. Green belongs to the settled ✓. */
+/* The row's indicator draws at 70% of the row's size (owner request,
+   2026-10-17). */
+.merge-suite-glyph { font-size: 0.7em; }
 .merge-suite-glyph.is-live { animation: merge-breathe 1.8s ease-in-out infinite; }
 .merge-suite-glyph.is-unreported { color: var(--suite-running); }
 .merge-suite-glyph.is-passing { color: var(--suite-running); }
@@ -7960,6 +7963,9 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* A row's counts draw at 80% of the suite's name (owner request,
+   2026-10-17); the run tally keeps the strip's own size. */
+.merge-suite-head > .merge-suite-counts { font-size: 0.8em; }
 .merge-suite-counts .is-passed { color: var(--ok); }
 .merge-suite-counts .is-failed { color: var(--err); }
 /* A RUN'S TALLY, every suite's counts summed, inside the run's own badge

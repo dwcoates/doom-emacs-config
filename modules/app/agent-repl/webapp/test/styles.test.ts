@@ -5105,6 +5105,45 @@ describe("the merge bubble's run badge", () => {
   });
 });
 
+/** A merge test row's head: its glyph, its name and its counts (src/feed/merge/tests-tab.ts). */
+function suiteHead(): { suite: HTMLElement; glyph: HTMLElement; counts: HTMLElement } {
+  const suite = document.createElement("div");
+  suite.className = "merge-suite";
+  const head = document.createElement("div");
+  head.className = "merge-suite-head";
+  const glyph = document.createElement("span");
+  glyph.className = "merge-suite-glyph is-live is-passing";
+  const name = document.createElement("span");
+  name.className = "merge-suite-name";
+  const counts = document.createElement("span");
+  counts.className = "merge-suite-counts";
+  head.append(glyph, name, counts);
+  suite.append(head);
+  return { suite, glyph, counts };
+}
+
+/** A merge test row's indicator and counts draw smaller than its name (owner request, 2026-10-17). */
+describe("the merge test row's indicator and counts", () => {
+  it("draws the indicator 30% smaller than the row", () => {
+    const { suite, glyph } = suiteHead();
+    expect(inDocument(suite, () => cascadedValue(glyph, "font-size"))).toBe("0.7em");
+  });
+
+  it("draws the counts at 80% of the suite's name", () => {
+    const { suite, counts } = suiteHead();
+    expect(inDocument(suite, () => cascadedValue(counts, "font-size"))).toBe("0.8em");
+  });
+
+  it("leaves the run tally's counts at the strip's own size", () => {
+    const tally = document.createElement("span");
+    tally.className = "merge-run-tally";
+    const counts = document.createElement("span");
+    counts.className = "merge-suite-counts";
+    tally.append(counts);
+    expect(inDocument(tally, () => cascadedValue(counts, "font-size"))).not.toBe("0.8em");
+  });
+});
+
 /**
  * THE MERGE QUEUE'S HEADER (owner request, 2026-10-13): the column names sit a
  * shade darker than the muted grey, above a thicker line than the rows' own.
