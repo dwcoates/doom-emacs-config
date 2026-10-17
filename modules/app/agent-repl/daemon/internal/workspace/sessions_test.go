@@ -22,6 +22,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/opentabs"
@@ -3640,5 +3641,47 @@ func TestReadRecordedSessionSurfacesTheReadError(t *testing.T) {
 	}
 	if recorded.hasConversation() {
 		t.Error("a failed read answered a conversation")
+	}
+}
+
+func TestARaisedGateOffersHaikuFirstThenSonnetAsTheSummarizer(t *testing.T) {
+	tests := []struct {
+		name string
+		got  func(f *fleetFixture, ws ids.WorkspaceID) []string
+	}{
+		{"the drawn menu", func(f *fleetFixture, _ ids.WorkspaceID) []string {
+			var names []string
+			for _, o := range lastGateStanding(t, f).GetCompact().GetModels() {
+				names = append(names, o.GetModel().GetName())
+			}
+			return names
+		}},
+		{"the served menu an answer is echoed against", func(f *fleetFixture, ws ids.WorkspaceID) []string {
+			served, ok := f.fleet.ColdGate(ws)
+			if !ok {
+				t.Fatal("no gate is standing")
+			}
+			var names []string
+			for _, m := range served.Compact.Models {
+				names = append(names, m.GetName())
+			}
+			return names
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+
+			// Act.
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+
+			// Assert.
+			want := []string{headless.ModelHaiku, headless.ModelSonnet}
+			if got := tt.got(f, ws.ID); !slices.Equal(got, want) {
+				t.Fatalf("summarizers = %v, want %v", got, want)
+			}
+		})
 	}
 }
