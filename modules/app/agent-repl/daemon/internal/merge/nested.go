@@ -371,18 +371,20 @@ func (v *rebaseView) commitTab(i int, waiting bool) *frontendv1.FeedMergeTab {
 
 // textLines wraps narration sentences as drawn line elements.
 func textLines(lines []string) []*frontendv1.FeedMergeRebaseLine {
-	out := make([]*frontendv1.FeedMergeRebaseLine, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, textLine(line).drawn())
-	}
-	return out
+	return drawEach(lines, textLine)
 }
 
 // drawnLines wraps the rebase-wide narration as drawn line elements.
 func drawnLines(lines []rebaseLine) []*frontendv1.FeedMergeRebaseLine {
+	return drawEach(lines, func(line rebaseLine) rebaseLine { return line })
+}
+
+// drawEach draws every line of lines, read as a narration line by asLine, in
+// order.
+func drawEach[T any](lines []T, asLine func(T) rebaseLine) []*frontendv1.FeedMergeRebaseLine {
 	out := make([]*frontendv1.FeedMergeRebaseLine, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, line.drawn())
+		out = append(out, asLine(line).drawn())
 	}
 	return out
 }

@@ -672,3 +672,33 @@ func TestEveryRunEndingSettlesThroughEndRun(t *testing.T) {
 		}
 	}
 }
+
+func TestNarrationLinesAreDrawnInOrderThroughOneShape(t *testing.T) {
+	tests := []struct {
+		name string
+		got  []*frontendv1.FeedMergeRebaseLine
+	}{
+		{name: "a commit's sentences", got: textLines([]string{"a", "b"})},
+		{name: "the rebase-wide narration", got: drawnLines([]rebaseLine{textLine("a"), textLine("b")})},
+		{name: "drawn one by one", got: drawEach([]string{"a", "b"}, textLine)},
+	}
+	want := []*frontendv1.FeedMergeRebaseLine{textLine("a").drawn(), textLine("b").drawn()}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Assert
+			if len(tt.got) != len(want) || !proto.Equal(tt.got[0], want[0]) || !proto.Equal(tt.got[1], want[1]) {
+				t.Fatalf("lines = %v, want %v", tt.got, want)
+			}
+		})
+	}
+}
+
+func TestNoNarrationIsDrawnAsNoLines(t *testing.T) {
+	// Act
+	got := drawEach(nil, textLine)
+
+	// Assert
+	if got == nil || len(got) != 0 {
+		t.Fatalf("lines = %#v, want an empty, non-nil list", got)
+	}
+}
