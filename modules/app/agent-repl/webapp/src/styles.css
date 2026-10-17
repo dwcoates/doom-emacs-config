@@ -1113,12 +1113,17 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
-/* The workspace Emacs is currently showing. The accent gutter bar is the
-   ONLY selection mark (owner ruling, 2026-10-11): no row tint, no bolder
-   name. The bar is the accent a step brighter (owner request, 2026-10-17),
-   mixed from it so the two never drift. */
-#ws-sidebar { --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white); }
+/* The workspace Emacs is currently showing. The accent gutter bar marks it,
+   the accent a step brighter (owner request, 2026-10-17), mixed from it so
+   the two never drift. The row line also carries a slight accent tint (owner
+   request, 2026-10-17, superseding the 2026-10-11 "no row tint" ruling),
+   however the workspace came to be selected. No bolder name. */
+#ws-sidebar {
+  --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white);
+  --row-current-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 #ws-sidebar .ws.current > .row {
+  background-color: var(--row-current-tint);
   border-left: var(--row-gutter-w) solid var(--row-current-gutter);
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
