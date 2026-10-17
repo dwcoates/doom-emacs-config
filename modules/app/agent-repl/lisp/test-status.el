@@ -4517,8 +4517,8 @@ on SelectWorkspace and re-pushes the roster."
 
 ;;;; ---- The switch flash -------------------------------------------------
 
-(ert-deftest agent-repl-test-status-switch-flash-flashes-twice-over-750ms ()
-  "Inverted at 0 ms, normal at 250, inverted at 500, normal from 750."
+(ert-deftest agent-repl-test-status-switch-flash-flashes-once-for-250ms ()
+  "Inverted at 0 ms, normal from 250."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--capturing-timers steps
@@ -4527,7 +4527,7 @@ on SelectWorkspace and re-pushes the roster."
       ;; Assert
       (should (equal (mapcar (lambda (step) (cons (car step) (cadr (nth 2 step))))
                              (nreverse steps))
-                     '((0.0 . t) (0.25 . nil) (0.5 . t) (0.75 . nil)))))))
+                     '((0.0 . t) (0.25 . nil)))))))
 
 (ert-deftest agent-repl-test-status-switch-flash-targets-the-switched-to-workspace ()
   "Every step is about the workspace switched to."
