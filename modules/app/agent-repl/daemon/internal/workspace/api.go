@@ -588,6 +588,9 @@ type Deps struct {
 	// CacheLapses holds a hidden workspace's keep-alives and stands its
 	// session down once its cache lapses (cachelapse.Keeper).
 	CacheLapses CacheLapses
+	// Summaries installs a workspace's persisted summary into the topbar when
+	// the workspace is registered (titlesynth.Synthesizer.Restore).
+	Summaries Summaries
 	// Cards answers what the daemon SERVED for a permission ask, a question
 	// batch or a cold gate. Every answer verb echoes against it: an answer
 	// that does not match what was served is refused, never forwarded.
@@ -614,6 +617,13 @@ type Deps struct {
 // told of every hide and show once it is recorded.
 type CacheLapses interface {
 	VisibilityChanged(ws ids.WorkspaceID)
+}
+
+// Summaries restores a workspace's persisted summary (titlesynth.Synthesizer):
+// registration is the one edge every workspace passes before any session
+// trigger, so a restarted daemon draws the summary at once.
+type Summaries interface {
+	Restore(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // StandDowns stands a withheld workspace's session down as the idle sweep
@@ -905,6 +915,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a withheld workspace's stand-down")
 	case deps.CacheLapses == nil:
 		return nil, missing("the hidden workspaces' cache keeper")
+	case deps.Summaries == nil:
+		return nil, missing("a summary restorer")
 	case deps.Cards == nil:
 		return nil, missing("a served-card store")
 	case deps.PromptsDir == "":

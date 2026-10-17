@@ -44,6 +44,7 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 		{name: "no shim resolver", strip: func(d *Deps) { d.Shim = nil }},
 		{name: "no freeness probe", strip: func(d *Deps) { d.Freeness = nil }},
 		{name: "no ownership probe", strip: func(d *Deps) { d.Ownership = nil }},
+		{name: "no summary restorer", strip: func(d *Deps) { d.Summaries = nil }},
 		{name: "no served-card store", strip: func(d *Deps) { d.Cards = nil }},
 		{name: "no prompts directory", strip: func(d *Deps) { d.PromptsDir = "" }},
 		{name: "no home directory", strip: func(d *Deps) { d.HomeDir = "" }},

@@ -33,6 +33,12 @@
 // untruncated, oldest first, with agent-repl's injected meta spans stripped
 // (they are the editor's decoration, not the user's request) and no response.
 //
+// THE SUMMARY OUTLIVES THE DAEMON. Each distillation is recorded in wsm with
+// the digest it was distilled from, and Restore installs it again when the
+// next daemon registers the workspace, so a restart neither drops a workspace
+// back to its bare name nor spends a model call re-distilling a summary that
+// was already standing.
+//
 // BEST EFFORT, NEVER A FAULT. The summary is an enhancement over the workspace
 // name; a shim that cannot answer, a guard that refuses the vendor call, or a
 // model that returns nothing all leave the previous title standing and are
@@ -49,6 +55,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // Digester gathers one workspace's title digest from its shim.
@@ -69,6 +76,21 @@ type ConfigDirSource interface {
 	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
+// SummaryStore keeps each workspace's summary and the digest it was distilled
+// from, so a restarted daemon draws the summary at once and keeps the cadence
+// rather than spending a model call to re-distill what was already standing.
+type SummaryStore interface {
+	// WorkspaceSummaryOf loads the workspace's summary; the bool is false when
+	// none stands.
+	WorkspaceSummaryOf(ctx context.Context, ws ids.WorkspaceID) (wsm.WorkspaceSummary, bool, error)
+	// PutWorkspaceSummary records the summary, replacing any it had.
+	PutWorkspaceSummary(ctx context.Context, ws ids.WorkspaceID, sum wsm.WorkspaceSummary) error
+	// ResetWorkspaceSummaryDigest forgets the digest, keeping the title.
+	ResetWorkspaceSummaryDigest(ctx context.Context, ws ids.WorkspaceID) error
+	// DropWorkspaceSummary deletes the summary.
+	DropWorkspaceSummary(ctx context.Context, ws ids.WorkspaceID) error
+}
+
 // TitleSink installs the synthesized title into the topbar.
 type TitleSink interface {
 	// SetSynthesizedTitle installs the title (empty retracts it).
@@ -87,6 +109,8 @@ type Deps struct {
 	ConfigDirs ConfigDirSource
 	// Titles installs the synthesized title into the topbar.
 	Titles TitleSink
+	// Store keeps the summary and its cadence across daemon restarts.
+	Store SummaryStore
 	// PromptsDir is where the headless brief is read from AT USE TIME, so an
 	// edit takes effect without a daemon bounce.
 	PromptsDir string

@@ -618,6 +618,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Headless:   headlessClient,
 		ConfigDirs: configDirs,
 		Titles:     topbarResolver,
+		Store:      p.DB,
 		PromptsDir: paths.PromptsDir,
 		Log:        log,
 	})
@@ -1157,6 +1158,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:         feedResolver,
 		Footer:       footerResolver,
 		Topbar:       topbarResolver,
+		Summaries:    titleSynth,
 		Sidebar:      sidebarResolver,
 		Host:         relay,
 		Banners:      notifier,
