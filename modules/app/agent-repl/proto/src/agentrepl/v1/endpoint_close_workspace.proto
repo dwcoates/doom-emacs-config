@@ -18,18 +18,32 @@
 // the activity line) — pushed on the footer stream beside this response, so
 // this response never restates the reasons. The user waits or interrupts
 // the work the normal way, then closes again.
+//
+// A WORKSPACE CLOSING ITSELF never races the turn that asks. Its agent asks
+// from inside a running turn, so that turn is not counted as a blocker:
+// when every OTHER condition is quiet, the close is accepted as
+// `closes_when_turn_ends` and the daemon performs it at the edge where that
+// turn ends, never sooner. If something else blocks by then (a held prompt
+// arrived, work went live), the close is abandoned and the footer shows the
+// close-blocked state, exactly as a refused close does. Killing is not
+// subject to any of this: a kill never waits.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "agentrepl/v1/family.proto";
+import "agentrepl/v1/workspace_topology.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message CloseWorkspaceRequest {
+  // The workspace to close.
   workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked. A requesting workspace that IS `workspace` is a self-close,
+  // carried out when its current turn ends. REQUIRED.
+  WorkspaceRequester requester = 2;
 }
 
 // THE ARM IS THE OUTCOME. Fast by design: the quiet check is an in-memory
@@ -42,7 +56,20 @@ message CloseWorkspaceResponse {
     CloseWorkspaceError error = 2;
   }
 }
-message CloseWorkspaceSuccess {}
+message CloseWorkspaceSuccess {
+  // THE ARM IS WHEN THE CLOSE HAPPENS.
+  oneof outcome {
+    // Closed now.
+    CloseWorkspaceSuccessClosed closed = 1;
+    // A self-close, accepted: the workspace closes when the turn that asked
+    // ends. The caller's turn goes on; nothing more is answered.
+    CloseWorkspaceSuccessClosesWhenTurnEnds closes_when_turn_ends = 2;
+  }
+}
+// Closed now. No fields.
+message CloseWorkspaceSuccessClosed {}
+// Closing when the asking turn ends. No fields.
+message CloseWorkspaceSuccessClosesWhenTurnEnds {}
 
 // THE ARM IS THE REFUSAL.
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
@@ -68,7 +95,8 @@ message CloseWorkspaceError {
 // state draws, so a caller with no footer (a test, a log line, the host's
 // own message) can still say why. (Landing 7, 2026-09-02.)
 message CloseWorkspaceBlocked {
-  // The main thread has a turn in flight.
+  // The main thread has a turn in flight. Always FALSE for a self-close,
+  // whose own asking turn is never a blocker.
   bool turn_in_flight = 1;
   // Detached items live now (subagents, runs, tasks).
   uint32 live_work = 2;

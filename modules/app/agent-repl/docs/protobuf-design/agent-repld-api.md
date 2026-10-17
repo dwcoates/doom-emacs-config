@@ -170,6 +170,14 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     of the agent API: both destroy or drop records, and the owner asked for
     neither.
 
+14. SELF-CLOSE WAITS FOR ITS TURN (owner, 2026-10-17). CloseWorkspace gains
+    a required `requester`. When the requester is the workspace being closed,
+    the asking turn is not a blocker; if everything else is quiet the close is
+    answered `closes_when_turn_ends` and performed by the daemon at the edge
+    where that turn ends, so the close can never race the turn that asked for
+    it. A blocker that appears before then abandons the close into the
+    footer's close-blocked state. Kill never waits.
+
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing
