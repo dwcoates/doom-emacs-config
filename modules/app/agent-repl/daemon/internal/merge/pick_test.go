@@ -35,10 +35,15 @@ func requestPick(t *testing.T, h *harness) {
 	t.Helper()
 	err := h.o.Enqueue(context.Background(), Request{
 		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
-		Detached: &DetachedRun{Name: "reconnect-fix", Pick: "the reconnect fix"},
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Pick: "the reconnect fix"},
 	})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
+	}
+	// THE PICK BEGINS AT THE HEAD: the hand-off put the merge workspace in
+	// line, and its admission starts the pick.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("admit: %v", err)
 	}
 }
 
@@ -100,9 +105,11 @@ func TestAPickDrawsAPlacedHeadAndALivePickTabInTheRequestersFeed(t *testing.T) {
 	requestPick(t, h)
 
 	// Assert
+	// The bubble is drawn as the merge waits in line, then again as its pick
+	// begins at the head: one bubble, its last head live.
 	heads := h.feed.headsOn(theWorkspace)
-	if len(heads) != 1 || heads[0].GetUpdate() == nil {
-		t.Fatalf("heads = %+v, want one live head", heads)
+	if len(heads) == 0 || heads[len(heads)-1].GetUpdate() == nil {
+		t.Fatalf("heads = %+v, want the bubble's last head live", heads)
 	}
 	for _, row := range h.feed.rows {
 		if row.Pinned {
@@ -154,12 +161,14 @@ func TestAPickSubmitsItsBriefToTheMergeWorkspace(t *testing.T) {
 	// Arrange
 	h := pickHarness(t)
 	requestPick(t, h)
+	// The pick's turn is read before it runs: a pick that succeeds at the head
+	// clears itself off the row.
+	entry, _ := h.entryOf(theMergeWorkspace)
 
 	// Act
 	runThePick(t, h, context.Background(), false)
 
 	// Assert
-	entry, _ := h.entryOf(theMergeWorkspace)
 	if len(h.queue.submissions) != 1 {
 		t.Fatalf("submissions = %d, want the pick's brief", len(h.queue.submissions))
 	}
@@ -388,5 +397,107 @@ func TestAPickIsTimedByHowItEnded(t *testing.T) {
 				t.Fatalf("timings = %v, want %s first", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAnAsyncMergeWithAnInstructionWaitsInLineUntilItHeadsTheQueue(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+
+	// Act: the hand-off, with no admission yet.
+	err := h.o.Enqueue(context.Background(), Request{
+		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Pick: "the reconnect fix"},
+	})
+
+	// Assert: the merge workspace is in line, its pick pending and not begun.
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entry, ok := h.entryOf(theMergeWorkspace)
+	if !ok || entry.State != wsm.MergeQueued || entry.Source.Pick == "" || entry.Source.PickStartedAt != nil {
+		t.Fatalf("entry = %+v, %v; want it queued with its pick pending", entry, ok)
+	}
+	if _, picking := h.o.picks[theMergeWorkspace]; picking || len(h.queue.submissions) != 0 {
+		t.Fatalf("a pick began before the merge headed its queue (submissions %d)", len(h.queue.submissions))
+	}
+}
+
+func TestAPickAtTheHeadHoldsTheSlotUntilItSucceedsAndThenTheMergeIsAdmitted(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestPick(t, h)
+
+	// Act: the pump runs again while the pick stands, and after it.
+	whilePicking, err := h.o.pumpOnce(context.Background(), h.repoKey())
+	if err != nil {
+		t.Fatalf("pump while picking: %v", err)
+	}
+	held, _ := h.entryOf(theMergeWorkspace)
+	runThePick(t, h, context.Background(), false)
+	cleared, _ := h.entryOf(theMergeWorkspace)
+	afterPick, err := h.o.pumpOnce(context.Background(), h.repoKey())
+	if err != nil {
+		t.Fatalf("pump after the pick: %v", err)
+	}
+
+	// Assert
+	if whilePicking || held.State != wsm.MergeQueued {
+		t.Fatalf("admitted while picking = %v, entry %+v; want nothing admitted and the merge holding the head", whilePicking, held)
+	}
+	if cleared.Source.Pick != "" || cleared.Source.PickStartedAt != nil {
+		t.Fatalf("entry after the pick = %+v, want its pick cleared", cleared)
+	}
+	if !afterPick {
+		t.Fatal("the merge was not admitted once its pick succeeded")
+	}
+}
+
+func TestAMergeWorkspaceWhosePickIsPendingNeverJoinsARace(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry wsm.MergeQueueEntry
+		want  bool
+	}{
+		{name: "an ordinary merge in line", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}, want: true},
+		{name: "a merge workspace whose pick is pending", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "rebase it"}}},
+		{name: "a branch merged upstream", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}}},
+		{name: "a merge only requested", entry: wsm.MergeQueueEntry{State: wsm.MergeRequested, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := racable(tt.entry)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("racable = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestARestartTakesBackAPickItCutShortAtTheHead(t *testing.T) {
+	// Arrange: the pick began at the head, then the daemon went away.
+	h := pickHarness(t)
+	requestPick(t, h)
+	entry, _ := h.entryOf(theMergeWorkspace)
+	h.o.mu.Lock()
+	delete(h.o.picks, theMergeWorkspace)
+	delete(h.o.requested, theMergeWorkspace)
+	h.o.mu.Unlock()
+
+	// Act
+	err := h.o.recoverEntry(context.Background(), h.repoKey(), entry)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("recoverEntry: %v", err)
+	}
+	h.o.mu.Lock()
+	p, picking := h.o.picks[theMergeWorkspace]
+	h.o.mu.Unlock()
+	if !picking || p.turn != entry.Source.PickTurn {
+		t.Fatalf("pick = %+v, %v; want the begun pick taken back on its own turn %s", p, picking, entry.Source.PickTurn)
 	}
 }

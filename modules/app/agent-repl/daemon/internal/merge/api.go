@@ -268,16 +268,21 @@ type DetachedRun struct {
 	// runs: it never inherits its requester's. Empty when the request names
 	// none.
 	Actions wsm.MergeActions
+	// Maker is the workspace the merged work was done in: the merge workspace
+	// forks its conversation, and it is the one target besides the primary
+	// branch the branch may land in (agentrepl.v1.CreateWorkspaceAsyncMerge).
+	Maker ids.WorkspaceID
+	// IntoMaker lands the branch into the maker's branch instead of on the
+	// primary branch.
+	IntoMaker bool
 }
 
-// NewDetachedRun is the async run an ingress reads off a request: the merge
+// NewDetachedRun is the async run the rpc reads off a request: the merge
 // workspace's name and the instruction with their surrounding space trimmed,
-// and the landing asks and merge actions as given. Every ingress builds its
-// run here, so the rpc and the command file cannot read the same request
-// apart.
-func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, actions wsm.MergeActions) *DetachedRun {
+// and the landing asks, merge actions, maker and target as given.
+func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, actions wsm.MergeActions, maker ids.WorkspaceID, intoMaker bool) *DetachedRun {
 	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(instruction), CompactAfter: compactAfter,
-		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Actions: actions}
+		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Actions: actions, Maker: maker, IntoMaker: intoMaker}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and

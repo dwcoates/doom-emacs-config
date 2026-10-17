@@ -394,9 +394,19 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		}
 	}
 
-	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
-		log.Error(opCreate, "the session did not come up", dlog.Context{"cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
+	// A MERGE WORKSPACE'S SESSION COMES UP ONLY WHEN A TURN FIRST NEEDS IT
+	// (its pick at the head of the queue, or a repair): the bring-up is what
+	// makes the fork it owes, so its context is its maker's as it stands when
+	// the merge has started, never as it stood when the merge was asked for.
+	// A merge that needs no turn never forks at all.
+	if spec.MergeOf == nil {
+		if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+			log.Error(opCreate, "the session did not come up", dlog.Context{"cause": err.Error()})
+			return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
+		}
+	} else {
+		log.Info(opCreate, "created a merge workspace whose session comes up when its merge first needs a turn", dlog.Context{
+			"requester": string(spec.MergeOf.Requester), "maker": string(spec.MergeOf.Maker)})
 	}
 
 	if err := v.submitInitialPrompt(ctx, log, record, spec, policy); err != nil {

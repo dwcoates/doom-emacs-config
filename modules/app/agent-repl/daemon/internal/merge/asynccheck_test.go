@@ -23,13 +23,27 @@ func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 		run     *DetachedRun
 		arm     string
 	}{
-		{name: "the branch the requester has checked out", arrange: func(h *harness) {
-			h.git.mu.Lock()
-			h.git.branches[h.sourceD] = asyncBranch
-			h.git.mu.Unlock()
-		}, run: &DetachedRun{Name: "n"}, arm: ArmBranchCheckedOutInRequester},
-		{name: "a one-shot naming the requester", run: &DetachedRun{Name: "n", CloseOnLanding: theWorkspace}, arm: ArmUnknownOneShotWorkspace},
-		{name: "a one-shot naming no registered workspace", run: &DetachedRun{Name: "n", CloseOnLanding: "ws-9"}, arm: ArmUnknownOneShotWorkspace},
+		{name: "the requester's own branch", arrange: func(h *harness) {
+			h.db.mu.Lock()
+			w := h.db.workspaces[theWorkspace]
+			w.Branch = asyncBranch
+			h.db.workspaces[theWorkspace] = w
+			h.db.mu.Unlock()
+		}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}, arm: ArmBranchOwned},
+		{name: "another workspace's own branch", arrange: func(h *harness) {
+			h.registerOther(otherWorkspace, "ws-two", asyncBranch)
+		}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}, arm: ArmBranchOwned},
+		{name: "a maker no workspace is registered as", run: &DetachedRun{Maker: "ws-9", Name: "n"}, arm: ArmUnknownMaker},
+		{name: "a maker of another repository", arrange: func(h *harness) {
+			h.registerOther(otherWorkspace, "ws-two", "b")
+			h.db.mu.Lock()
+			w := h.db.workspaces[otherWorkspace]
+			w.Repo = "repo-9"
+			h.db.workspaces[otherWorkspace] = w
+			h.db.mu.Unlock()
+		}, run: &DetachedRun{Maker: otherWorkspace, Name: "n"}, arm: ArmUnknownMaker},
+		{name: "a one-shot naming the requester", run: &DetachedRun{Maker: theWorkspace, Name: "n", CloseOnLanding: theWorkspace}, arm: ArmUnknownCloseAfter},
+		{name: "a one-shot naming no registered workspace", run: &DetachedRun{Maker: theWorkspace, Name: "n", CloseOnLanding: "ws-9"}, arm: ArmUnknownCloseAfter},
 		{name: "a one-shot naming a closed workspace", arrange: func(h *harness) {
 			h.registerOther(otherWorkspace, "ws-two", "b")
 			h.db.mu.Lock()
@@ -37,7 +51,7 @@ func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 			w.Closed = true
 			h.db.workspaces[otherWorkspace] = w
 			h.db.mu.Unlock()
-		}, run: &DetachedRun{Name: "n", CloseOnLanding: otherWorkspace}, arm: ArmUnknownOneShotWorkspace},
+		}, run: &DetachedRun{Maker: theWorkspace, Name: "n", CloseOnLanding: otherWorkspace}, arm: ArmUnknownCloseAfter},
 		{name: "a one-shot naming a workspace of another repository", arrange: func(h *harness) {
 			h.registerOther(otherWorkspace, "ws-two", "b")
 			h.db.mu.Lock()
@@ -45,7 +59,7 @@ func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 			w.Repo = "repo-9"
 			h.db.workspaces[otherWorkspace] = w
 			h.db.mu.Unlock()
-		}, run: &DetachedRun{Name: "n", CloseOnLanding: otherWorkspace}, arm: ArmUnknownOneShotWorkspace},
+		}, run: &DetachedRun{Maker: theWorkspace, Name: "n", CloseOnLanding: otherWorkspace}, arm: ArmUnknownCloseAfter},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,7 +97,7 @@ func TestAnAsyncRequestFromAWorkspaceTheDaemonNeverCreatedIsAccepted(t *testing.
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
-		Detached: &DetachedRun{Name: "n"}})
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "n"}})
 
 	// Assert.
 	if err != nil {
@@ -105,7 +119,7 @@ func TestAnAsyncRequestRecordsItsLandingEffects(t *testing.T) {
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
-		Detached: &DetachedRun{Name: "n", Pick: "rebase it", CloseOnLanding: otherWorkspace, CleanupWorktree: true}})
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "n", Pick: "rebase it", CloseOnLanding: otherWorkspace, CleanupWorktree: true}})
 
 	// Assert.
 	if err != nil {
@@ -115,7 +129,7 @@ func TestAnAsyncRequestRecordsItsLandingEffects(t *testing.T) {
 	if !ok {
 		t.Fatal("the async request was not recorded")
 	}
-	want := wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBranch, Detach: entry.Source.Detach, DetachName: "n", Pick: "rebase it",
+	want := wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBranch, Detach: entry.Source.Detach, DetachMaker: theWorkspace, DetachName: "n", Pick: "rebase it",
 		CloseOnLanding: otherWorkspace, CleanupWorktree: true, CleanupDir: "/wt/agent-fix"}
 	if !reflect.DeepEqual(entry.Source, want) {
 		t.Fatalf("source = %+v, want %+v", entry.Source, want)

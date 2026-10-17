@@ -1878,7 +1878,7 @@ func TestAnAsyncOneShotLandingClosesTheWorkspaceItNames(t *testing.T) {
 	dir := h.registerOther(otherWorkspace, "ws-two", "other-branch")
 
 	// Act.
-	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CloseOnLanding: otherWorkspace})
+	landAsync(t, h, &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CloseOnLanding: otherWorkspace})
 
 	// Assert: the named workspace is stamped merged and closed and its
 	// worktree removed, as the merge workspace's own is; the requester stays.
@@ -1902,7 +1902,7 @@ func TestAnAsyncOneShotWhoseWorkspaceClosedMeanwhileClosesNothingMore(t *testing
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
 	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
-		Detached: &DetachedRun{Name: "reconnect-fix", CloseOnLanding: otherWorkspace}}); err != nil {
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CloseOnLanding: otherWorkspace}}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	h.db.mu.Lock()
@@ -1934,7 +1934,7 @@ func TestAnAsyncCleanupRemovesItsRecordedWorktreeOnceItLands(t *testing.T) {
 	h.git.mu.Unlock()
 
 	// Act.
-	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CleanupWorktree: true})
+	landAsync(t, h, &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CleanupWorktree: true})
 
 	// Assert.
 	if len(h.git.cleanedWorktrees) != 1 || h.git.cleanedWorktrees[0] != "/wt/agent-fix" {
@@ -1952,7 +1952,7 @@ func TestAnAsyncCleanupKeepsAWorktreeWithUncommittedChanges(t *testing.T) {
 	h.git.mu.Unlock()
 
 	// Act.
-	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CleanupWorktree: true})
+	landAsync(t, h, &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CleanupWorktree: true})
 
 	// Assert.
 	if len(h.git.cleanedWorktrees) != 0 {
@@ -1973,7 +1973,7 @@ func TestAnAsyncCleanupThatGitRefusesIsLoggedAndTheMergeStillLands(t *testing.T)
 	h.git.mu.Unlock()
 
 	// Act.
-	landAsync(t, h, &DetachedRun{Name: "reconnect-fix", CleanupWorktree: true})
+	landAsync(t, h, &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CleanupWorktree: true})
 
 	// Assert.
 	if !teardownRecorded(h, "error", "could not remove the worktree an async merge asked to clean up") {

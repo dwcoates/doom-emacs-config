@@ -68,22 +68,27 @@ const (
 	// ArmSubscriberClosed refuses a subscription of a closed workspace
 	// (UpdateMergeQueueError.subscriber_closed).
 	ArmSubscriberClosed = "subscriber_closed"
-	// ArmUnknownOneShotWorkspace refuses an async request whose one-shot
+	// ArmUnknownCloseAfter refuses an async request whose close-after
 	// workspace is not open, is in another repository, or is the requester
-	// itself (MergeWorkspaceError.unknown_one_shot_workspace).
-	ArmUnknownOneShotWorkspace = "unknown_one_shot_workspace"
-	// ArmBranchCheckedOutInRequester refuses an async request whose branch is
-	// the one checked out in the requester's own worktree
-	// (MergeWorkspaceError.branch_checked_out_in_requester).
-	ArmBranchCheckedOutInRequester = "branch_checked_out_in_requester"
-	// ArmUnknownBranch refuses a request whose source branch does not exist
-	// (MergeWorkspaceError.unknown_branch).
-	ArmUnknownBranch = "unknown_branch"
+	// itself (CreateWorkspaceError.async_merge_unknown_close_after).
+	ArmUnknownCloseAfter = "async_merge_unknown_close_after"
+	// ArmBranchOwned refuses an async request whose branch a registered
+	// workspace owns: landing it is that workspace's own act
+	// (CreateWorkspaceError.async_merge_branch_owned). Its `branch` and
+	// `owner` fields name the branch and the workspace.
+	ArmBranchOwned = "async_merge_branch_owned"
+	// ArmUnknownMaker refuses an async request whose maker workspace is not
+	// registered in the requester's repository
+	// (CreateWorkspaceError.async_merge_unknown_maker).
+	ArmUnknownMaker = "async_merge_unknown_maker"
+	// ArmUnknownBranch refuses an async request whose branch does not exist
+	// (CreateWorkspaceError.async_merge_unknown_branch).
+	ArmUnknownBranch = "async_merge_unknown_branch"
 	// ArmNameTaken refuses an async request whose merge workspace name is
 	// already a workspace, a branch, or another pending async merge's
-	// reservation (MergeWorkspaceError.name_taken). Its `branch` field names
-	// the branch the name resolves to.
-	ArmNameTaken = "name_taken"
+	// reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
+	// field names the branch the name resolves to.
+	ArmNameTaken = "async_merge_name_taken"
 	// ArmNotMergeTab refuses a merge-tab interrupt whose row is no live agentic
 	// merge tab (InterruptError.not_merge_tab).
 	ArmNotMergeTab = "not_merge_tab"

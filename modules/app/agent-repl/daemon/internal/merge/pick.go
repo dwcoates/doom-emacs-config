@@ -198,9 +198,28 @@ func (o *orchestrator) runPick(ctx context.Context, p *pick, resumed bool) {
 		return
 	}
 	o.settlePick(p, "")
-	log.Info(op, "the pick succeeded; the merge joins the queue", dlog.Context{"workspace": string(p.ws), "repo": string(p.repo)})
-	if err := o.queueRequest(ctx, p.ws, p.repo); err != nil {
-		log.Error(op, "could not put the picked merge in line; it stays recorded for the next boot", dlog.Context{"workspace": string(p.ws), "error": err.Error()})
+	entry, found, err := o.requestOf(ctx, p.repo, p.ws)
+	switch {
+	case err != nil:
+		log.Error(op, "could not read the picked merge's row; it stays recorded for the next boot", dlog.Context{"workspace": string(p.ws), "error": err.Error()})
+	case !found:
+		log.Error(op, "the picked merge has no row; nothing is admitted", dlog.Context{"workspace": string(p.ws), "repo": string(p.repo)})
+	case entry.State == wsm.MergeRequested:
+		// A PICK A PREVIOUS BUILD BEGAN before the merge joined the queue
+		// joins it now, as that build did.
+		log.Info(op, "the pick succeeded; the merge joins the queue", dlog.Context{"workspace": string(p.ws), "repo": string(p.repo)})
+		if err := o.queueRequest(ctx, p.ws, p.repo); err != nil {
+			log.Error(op, "could not put the picked merge in line; it stays recorded for the next boot", dlog.Context{"workspace": string(p.ws), "error": err.Error()})
+		}
+	default:
+		// THE PICK RAN AT THE HEAD: it clears itself, and the pump admits the
+		// merge it held the slot for.
+		if err := o.deps.DB.ClearMergePick(ctx, p.repo, p.ws, o.deps.Now()); err != nil {
+			log.Error(op, "could not record the pick's success; the merge stays at the head for the next boot", dlog.Context{"workspace": string(p.ws), "error": err.Error()})
+			return
+		}
+		log.Info(op, "the pick succeeded at the head of the queue; the merge is admitted", dlog.Context{"workspace": string(p.ws), "repo": string(p.repo)})
+		o.kick(p.repo)
 	}
 }
 

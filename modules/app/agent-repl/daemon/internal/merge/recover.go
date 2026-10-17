@@ -124,6 +124,13 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 	if err != nil || !requeued {
 		return err
 	}
+	// A PICK THE RESTART CUT SHORT AT THE HEAD is taken back where it stood;
+	// one that never began waits for its admission to begin it (admitFront).
+	if entry.Source.Pick != "" && entry.Source.PickStartedAt != nil {
+		o.deps.Log.Global().Info(op, "resumes the pick a restart cut short at the head of the queue", dlog.Context{
+			"workspace": string(entry.Workspace), "repo": string(repo)})
+		return o.resumePick(ctx, repo, entry)
+	}
 	o.deps.Log.Global().Debug(op, "re-enqueued a waiting merge", dlog.Context{
 		"workspace": string(entry.Workspace), "repo": string(repo), "position": entry.Position})
 	return nil

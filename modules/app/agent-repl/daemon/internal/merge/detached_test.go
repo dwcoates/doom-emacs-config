@@ -165,7 +165,7 @@ func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, reque
 // async, as BY asks, under the name "reconnect-fix".
 func requestDetached(t *testing.T, h *harness, by Requester) error {
 	t.Helper()
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: by, Detached: &DetachedRun{Name: "reconnect-fix"}})
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: by, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}})
 }
 
 // entryOf answers ws's queue entry, false when it has none.
@@ -232,9 +232,9 @@ func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *test
 		source wsm.MergeSource
 		run    *DetachedRun
 	}{
-		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, run: &DetachedRun{Name: "n"}},
-		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, run: &DetachedRun{Name: "n"}},
-		{name: "no name", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, run: &DetachedRun{}},
+		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}},
+		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}},
+		{name: "no name", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, run: &DetachedRun{Maker: theWorkspace, }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -385,7 +385,7 @@ func TestAnAsyncRequestThatCompactsAfterRecordsTheAskOnItsEntry(t *testing.T) {
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-		By: RequestedByAgent, Detached: &DetachedRun{Name: "reconnect-fix", CompactAfter: true}})
+		By: RequestedByAgent, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CompactAfter: true}})
 
 	// Assert
 	if err != nil {
@@ -412,7 +412,7 @@ func TestAnAsyncRequestsHandOffForksWithItsCompactAfterAsk(t *testing.T) {
 
 			// Act: the user's ask is put in line at once, which hands it off.
 			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-				By: RequestedByUser, Detached: &DetachedRun{Name: "reconnect-fix", CompactAfter: tt.compactAfter}})
+				By: RequestedByUser, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", CompactAfter: tt.compactAfter}})
 
 			// Assert: the fork's origin names the requester, the request, and
 			// the ask, which the merge workspace's handback reads.
@@ -1066,6 +1066,16 @@ func withParentBranch(h *harness, parent string) {
 	h.db.workspaces[theWorkspace] = requester
 }
 
+// detachedRunFor is the "reconnect-fix" request with ACTIONS, landing into the
+// harness's other workspace as its maker when INTOMAKER, else made by the
+// requester and landing on the primary branch.
+func detachedRunFor(intoMaker bool, actions wsm.MergeActions) *DetachedRun {
+	if intoMaker {
+		return &DetachedRun{Maker: otherWorkspace, IntoMaker: true, Name: "reconnect-fix", Actions: actions}
+	}
+	return &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Actions: actions}
+}
+
 func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) {
 	actions := wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}
 	tests := []struct {
@@ -1075,11 +1085,13 @@ func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) 
 		wantParent    string
 		actions       wsm.MergeActions
 		wantOriginAct wsm.MergeActions
+		intoMaker     bool
 	}{
-		{name: "a created requester lands at its creation job's target", arrange: func(h *harness) { withParentBranch(h, "feature-parent") },
-			wantTarget: func(h *harness) string { return h.targetD }, wantParent: "feature-parent", actions: actions, wantOriginAct: actions},
-		{name: "the main checkout lands in its main worktree", arrange: asMainCheckout,
+		{name: "a request onto the primary branch lands in the main worktree", arrange: func(h *harness) {},
 			wantTarget: func(h *harness) string { return h.sourceD }, wantParent: "master", actions: actions, wantOriginAct: actions},
+		{name: "a request into its maker lands in the maker's worktree on its branch", intoMaker: true, arrange: func(h *harness) {
+			h.registerOther(otherWorkspace, "ws-two", "maker-branch")
+		}, wantTarget: func(h *harness) string { return h.db.workspaces[otherWorkspace].Dir }, wantParent: "maker-branch", actions: actions, wantOriginAct: actions},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1089,7 +1101,7 @@ func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) 
 
 			// Act: the user's ask is put in line at once, which hands it off.
 			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-				By: RequestedByUser, Detached: &DetachedRun{Name: "reconnect-fix", Actions: tt.actions}})
+				By: RequestedByUser, Detached: detachedRunFor(tt.intoMaker, tt.actions)})
 
 			// Assert
 			if err != nil {
@@ -1139,7 +1151,7 @@ func TestAnAsyncRequestRecordsItsMergeActionsOnItsEntry(t *testing.T) {
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-		By: RequestedByAgent, Detached: &DetachedRun{Name: "reconnect-fix", Actions: actions}})
+		By: RequestedByAgent, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Actions: actions}})
 
 	// Assert
 	if err != nil {
@@ -1165,7 +1177,7 @@ func TestAHandOffWhoseLandingCannotBeDecidedDropsTheRequestAndTellsTheRequester(
 	if !ok {
 		t.Fatal("the request was not recorded")
 	}
-	joblessLinkedWorktree(h)
+	entry.Source.DetachMaker, entry.Source.DetachTargetMaker = "ws-gone", true
 
 	// Act
 	err := h.o.handOffDetached(context.Background(), theWorkspace, h.repoKey(), entry.Source)
@@ -1185,33 +1197,3 @@ func TestAHandOffWhoseLandingCannotBeDecidedDropsTheRequestAndTellsTheRequester(
 	}
 }
 
-func TestBothAsyncLandingSitesDecideByTheOneRule(t *testing.T) {
-	tests := []struct {
-		name string
-		act  func(h *harness) error
-	}{
-		{name: "the request's version check", act: func(h *harness) error {
-			return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser, Detached: &DetachedRun{Name: "n"}})
-		}},
-		{name: "the hand-off", act: func(h *harness) error {
-			source := asyncSource
-			source.Detach, source.DetachName = wsm.NewDetachedMergeID(), "n"
-			return h.o.handOffDetached(context.Background(), theWorkspace, h.repoKey(), source)
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the one state detachedTarget alone refuses.
-			h := newHarness(t)
-			joblessLinkedWorktree(h)
-
-			// Act
-			_ = tt.act(h)
-
-			// Assert: the refusal is detachedTarget's own record.
-			if _, ok := h.recordFor(dlog.LevelError, opDetachedTarget); !ok {
-				t.Fatalf("%s did not decide by detachedTarget: no %s record", tt.name, opDetachedTarget)
-			}
-		})
-	}
-}

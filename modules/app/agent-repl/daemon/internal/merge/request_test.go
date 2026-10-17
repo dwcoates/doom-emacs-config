@@ -428,7 +428,7 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 	}{
 		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent}, want: []ids.WorkspaceID{theWorkspace}},
 		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Detached: &DetachedRun{Name: "flush-async"}}, want: nil},
+		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Detached: &DetachedRun{Maker: theWorkspace, Name: "flush-async"}}, want: nil},
 		{name: "the user's request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: nil},
 	}
 	for _, tt := range tests {
@@ -476,8 +476,11 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		closeOnLanding   ids.WorkspaceID
 		cleanupWorktree  bool
 		actions          wsm.MergeActions
+		maker            ids.WorkspaceID
+		intoMaker        bool
 		want             DetachedRun
 	}{
+		{name: "its maker and its target", inName: "reconnect-fix", maker: "maker", intoMaker: true, want: DetachedRun{Name: "reconnect-fix", Maker: "maker", IntoMaker: true}},
 		{name: "a branch as it is", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
 		{name: "an instruction", inName: "reconnect-fix", instruct: "\tthe fix \n", want: DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
 		{name: "a blank instruction", inName: "reconnect-fix", instruct: "   ", want: DetachedRun{Name: "reconnect-fix"}},
@@ -490,7 +493,7 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.actions)
+			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.actions, tt.maker, tt.intoMaker)
 
 			// Assert
 			if got == nil || !reflect.DeepEqual(*got, tt.want) {

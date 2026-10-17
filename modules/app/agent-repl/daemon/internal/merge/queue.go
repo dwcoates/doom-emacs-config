@@ -1044,6 +1044,25 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
 		return "", nil, false, nil
 	}
+	// A MERGE WORKSPACE'S PICK RUNS AT THE HEAD, holding the slot: the merge
+	// has STARTED, so its pick -- and the fork its first turn brings up -- sees
+	// the maker as it stands now. Nothing is admitted until the pick settles:
+	// a pick that succeeds clears itself and kicks the pump, which then admits
+	// the merge; one that fails takes the merge off the queue.
+	if front.Source.Pick != "" {
+		o.mu.Lock()
+		_, picking := o.picks[front.Workspace]
+		o.mu.Unlock()
+		if !picking && front.Source.PickStartedAt == nil {
+			if err := o.startPick(ctx, front.Workspace, repo, front); err != nil {
+				o.releaseRepoLockIfIdle(ctx, repo)
+				return "", nil, false, err
+			}
+		}
+		o.deps.Log.Global().Debug(op, "the queue front is a merge workspace whose pick runs at the head; it is admitted once the pick succeeds",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "picking": picking})
+		return "", nil, false, nil
+	}
 	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {
 		o.releaseRepoLockIfIdle(ctx, repo)
 		return "", nil, false, err
