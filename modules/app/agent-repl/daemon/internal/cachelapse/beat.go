@@ -107,9 +107,10 @@ func (k *Keeper) beatFailure(ctx context.Context, log dlog.Logger, out *agentrep
 		return
 	}
 	shimCallFailed(ctx, log, opBeat, shimFailure{
-		doing:  "sending a hidden workspace its keep-alive",
-		died:   "the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit",
-		failed: "could not send the hidden workspace its keep-alive",
+		doing:     "sending a hidden workspace its keep-alive",
+		died:      "the shim died under the keep-alive call; the death is recorded by daemon.shimclient.exit",
+		stoodDown: "the shim was being stood down by this daemon under the keep-alive call",
+		failed:    "could not send the hidden workspace its keep-alive",
 	}, nil, err)
 	var submit *BeatSubmitFailed
 	detail := err.Error()

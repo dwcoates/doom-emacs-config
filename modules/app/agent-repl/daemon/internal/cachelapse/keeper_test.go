@@ -419,6 +419,7 @@ func TestReconcileAnswersAShimFailure(t *testing.T) {
 	}{
 		{name: "a shim with no session yet", err: ErrNoSession, level: "debug"},
 		{name: "a shim that died under the call", err: fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrShimDied), level: "info"},
+		{name: "a shim this daemon was standing down", err: fmt.Errorf("%w: unavailable: use of closed network connection", shimclient.ErrStandDownOrdered), level: "info"},
 		{name: "a shim that cannot be reached", err: errors.New("connection refused"), level: "error"},
 	}
 	for _, tt := range tests {

@@ -356,9 +356,10 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		}
 		// The next session's coming up sets the cadence again.
 		shimCallFailed(ctx, log, opCadence, shimFailure{
-			doing:  "setting the shim's keep-alive cadence",
-			died:   "the shim died under the cadence call; the death is recorded by daemon.shimclient.exit, and the next session's coming up sets its cadence",
-			failed: "could not set the shim's keep-alive cadence",
+			doing:     "setting the shim's keep-alive cadence",
+			died:      "the shim died under the cadence call; the death is recorded by daemon.shimclient.exit, and the next session's coming up sets its cadence",
+			stoodDown: "the shim was being stood down by this daemon under the cadence call; the next session's coming up sets its cadence",
+			failed:    "could not set the shim's keep-alive cadence",
 		}, fields, err)
 		return
 	}
@@ -431,6 +432,10 @@ type shimFailure struct {
 	doing string
 	// died is the INFO record of a shim that died under the call.
 	died string
+	// stoodDown is the INFO record of a shim this daemon was already standing
+	// down (a kill marks the row closed before its teardown, so the close's
+	// last round meets the shim the kill is stopping).
+	stoodDown string
 	// failed is the ERROR record of any other failure.
 	failed string
 }
@@ -438,12 +443,16 @@ type shimFailure struct {
 // shimCallFailed records a shim call that failed for a reason other than the
 // shim holding no session, which each caller answers in its own terms. A
 // SHIM THAT DIED UNDER THE CALL is not this keeper's failure: the death is
-// recorded once, by daemon.shimclient.exit, so it is INFO here. A call the
+// recorded once, by daemon.shimclient.exit, so it is INFO here. Nor is a SHIM
+// THIS DAEMON WAS STANDING DOWN (shimclient.ErrStandDownOrdered): the shim did
+// what it was told, and the stand-down is recorded where it was ordered. A call the
 // daemon's exit cancelled is INFO (leaving). Anything else is an ERROR. It is
 // THE ONE triage of a failed shim call in this package
 // (TestShimCallFailureTriageHasOneHome).
 func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimFailure, fields dlog.Context, err error) {
 	switch {
+	case errors.Is(err, shimclient.ErrStandDownOrdered):
+		log.Info(op, words.stoodDown, dlog.WithCause(fields, err))
 	case errors.Is(err, shimclient.ErrShimDied):
 		log.Info(op, words.died, dlog.WithCause(fields, err))
 	case leaving(ctx, log, op, words.doing, err):
