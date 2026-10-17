@@ -10,7 +10,7 @@ import {
 } from "../../src/sidebar/selection-blink.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import stylesheet from "../../src/styles.css?raw";
-import { rulesOf } from "../stylesheet.js";
+import { keyframesOf, rulesOf } from "../stylesheet.js";
 
 /** A drawn copy of workspace ID's row, under ROOT. */
 function drawnRow(root: HTMLElement, id: string): HTMLElement {
@@ -157,6 +157,27 @@ describe("the selection blink's styling", () => {
         /animation:\s*ws-selection-blink var\(--selection-blink-duration\) ease-in-out var\(--selection-blink-delay\) 1;/,
       ),
     );
+  });
+
+  it("swells once: the blink's keyframes carry a single stop", () => {
+    // Arrange / Act
+    const stops = rulesOf(keyframesOf("ws-selection-blink")).map((rule) => rule.selectors);
+
+    // Assert
+    expect(stops).toEqual([["50%"]]);
+  });
+
+  it("rises from and settles back to the row's own background, so a current row ends on its tint", () => {
+    // Arrange / Act
+    const stops = rulesOf(keyframesOf("ws-selection-blink")).flatMap((rule) => rule.selectors);
+
+    // Assert
+    expect([stops.includes("0%"), stops.includes("100%"), stops.includes("from"), stops.includes("to")]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 
   it("stops the blink under reduced motion", () => {

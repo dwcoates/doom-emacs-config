@@ -1113,19 +1113,26 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
-/* The workspace Emacs is currently showing. The accent gutter bar is the
-   ONLY selection mark (owner ruling, 2026-10-11): no row tint, no bolder
-   name. The bar is the accent a step brighter (owner request, 2026-10-17),
-   mixed from it so the two never drift. */
-#ws-sidebar { --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white); }
+/* The workspace Emacs is currently showing. The accent gutter bar marks it,
+   the accent a step brighter (owner request, 2026-10-17), mixed from it so
+   the two never drift. The row line also carries a slight accent tint (owner
+   request, 2026-10-17, superseding the 2026-10-11 "no row tint" ruling),
+   however the workspace came to be selected. No bolder name. */
+#ws-sidebar {
+  --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white);
+  --row-current-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 #ws-sidebar .ws.current > .row {
+  background-color: var(--row-current-tint);
   border-left: var(--row-gutter-w) solid var(--row-current-gutter);
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
-/* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): two soft,
-   slow swells of an accent wash over the row line, on every click, the
-   current workspace's included. The class and the blink's length are set by
+/* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): one soft,
+   slow swell of an accent wash over the row line (owner request, 2026-10-17:
+   once, not twice), on every click, the current workspace's included. The
+   swell rises from and settles back to the row's own background, so it ends
+   on the current row's tint rather than snapping to it. The class and the blink's length are set by
    src/sidebar/selection-blink.ts, which also seeks a redrawn row into the
    blink already running (a negative --selection-blink-delay), so a roster
    push mid-blink never restarts it. The blink runs
@@ -1134,8 +1141,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   animation: ws-selection-blink var(--selection-blink-duration) ease-in-out var(--selection-blink-delay) 1;
 }
 @keyframes ws-selection-blink {
-  0%, 50%, 100% { background-color: transparent; }
-  25%, 75% { background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  50% { background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
 }
 
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)

@@ -112,6 +112,22 @@ export function rulesOf(css: string): CssRule[] {
 }
 
 /**
+ * The body of the `@keyframes NAME` block in CSS (the real stylesheet by
+ * default): everything between its opening brace and the closing brace on its
+ * own line, so a block of any number of stops comes back whole. Fails loudly
+ * when the stylesheet has no such block.
+ */
+export function keyframesOf(name: string, css: string = stylesheet): string {
+  const opener = `@keyframes ${name} {`;
+  const start = css.indexOf(opener);
+  if (start === -1) throw new Error(`the stylesheet has no @keyframes ${name}`);
+  const bodyStart = start + opener.length;
+  const end = css.indexOf("\n}", bodyStart);
+  if (end === -1) throw new Error(`the stylesheet's @keyframes ${name} never closes`);
+  return css.slice(bodyStart, end);
+}
+
+/**
  * The selector PATTERN's first group captures from the real stylesheet,
  * comments stripped, or a loud failure naming WHAT the test looked for.
  */

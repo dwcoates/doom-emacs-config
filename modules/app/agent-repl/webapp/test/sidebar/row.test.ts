@@ -274,14 +274,34 @@ describe("the highlight and the receded styling", () => {
     expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--row-current-gutter\)/.test(d))).toBe(true);
   });
 
-  it.each([
-    { what: "tint", property: /\bbackground(-color)?\s*:/ },
-    { what: "embolden", property: /\bfont-weight\s*:/ },
-  ])("does not $what the current row: the gutter bar is its only mark", ({ property }) => {
+  it("tints the current row's line slightly with the accent", () => {
+    // Arrange / Act
+    const declarations = currentRowDeclarations();
+    const tint = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes("#ws-sidebar"))
+      .map((rule) => /--row-current-tint:\s*([^;]+);/.exec(rule.declarations)?.[1])
+      .find((value) => value !== undefined);
+    // Assert
+    expect([
+      declarations.some((d) => /background-color:\s*var\(--row-current-tint\)/.test(d)),
+      tint,
+    ]).toEqual([true, "color-mix(in srgb, var(--accent) 8%, transparent)"]);
+  });
+
+  it("paints the current row's tint through the cascade", () => {
+    // Arrange
+    const ws = drawRosterRow(row({ id: "ws-1", current: true }), sidebarContext(), "R");
+    // Act
+    const background = inRail(ws, () => cascadedValue(ws.querySelector(".row")!, "background-color"));
+    // Assert
+    expect(background).toBe("var(--row-current-tint)");
+  });
+
+  it("does not embolden the current row", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
-    expect(declarations.filter((d) => property.test(d))).toEqual([]);
+    expect(declarations.filter((d) => /\bfont-weight\s*:/.test(d))).toEqual([]);
   });
 
   it("recedes a closed workspace", () => {

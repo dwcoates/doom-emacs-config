@@ -36,7 +36,7 @@ import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
@@ -910,12 +910,12 @@ describe("the footer status wave's stylesheet contract", () => {
    * own line rather than by the two-stop pattern the lighten keyframe used.
    */
   function colorKeyframeBody(): string {
-    return /@keyframes pfooter-status-color \{([\s\S]*?)\n\}/.exec(stylesheet)?.[1] ?? "";
+    return keyframesOf("pfooter-status-color");
   }
 
   it("scales the letter rather than resizing it, so the word's width never moves", () => {
     // Arrange / Act
-    const keyframes = /@keyframes pfooter-status-wave \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1];
+    const keyframes = keyframesOf("pfooter-status-wave");
 
     // Assert — 1.18, nudged up from 1.15 (owner ruling, 2026-09-14).
     expect(keyframes).toMatch(/transform:\s*scale\(1\.18\)/);
@@ -2407,7 +2407,7 @@ describe("the reviving shimmer's stylesheet contract", () => {
 
   it("pans only between 0% and 100%, so the gradient always covers the text", () => {
     // Arrange / Act
-    const keyframes = /@keyframes ws-revive-shimmer \{([\s\S]*?)\n\}/.exec(stylesheet)?.[1] ?? "";
+    const keyframes = keyframesOf("ws-revive-shimmer");
     const positions = [...keyframes.matchAll(/background-position-x:\s*(-?\d+)%/g)].map((m) => Number(m[1]));
 
     // Assert
@@ -4430,7 +4430,7 @@ describe("the rail's marks", () => {
   // THE BREATH ONLY FADES (owner ruling, 2026-10-14): no size change.
   it("never changes a breathing name's size", () => {
     // Arrange / Act
-    const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
+    const keyframes = keyframesOf("ws-pulse");
 
     // Assert
     expect(keyframes).not.toBe("");
@@ -4439,7 +4439,7 @@ describe("the rail's marks", () => {
 
   it("fades a breathing name to 58% opacity at mid-breath, 35% shallower than the 0.35 it once reached", () => {
     // Arrange / Act
-    const keyframes = /@keyframes ws-pulse \{([^}]*\}[^}]*\})/.exec(stylesheet)?.[1] ?? "";
+    const keyframes = keyframesOf("ws-pulse");
 
     // Assert
     expect(keyframes).toMatch(/50%\s*\{[^}]*opacity:\s*0\.58\s*;/);
