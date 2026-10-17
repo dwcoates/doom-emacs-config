@@ -7406,6 +7406,11 @@ ar-button.outcome-marker-pill {
   min-width: 12rem;
   max-width: min(90vw, 32rem);
   overflow-y: auto;
+}
+/* THE ONE DROPDOWN LOOK: the topbar's reveals and the merge bubble's run view
+   menu (owner request, 2026-10-17) draw one panel. */
+.topbar-reveal,
+.merge-run-views {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -7419,7 +7424,8 @@ ar-button.outcome-marker-pill {
 .topbar-model-option,
 .topbar-effort-option,
 .topbar-mode-option,
-.topbar-warning-row {
+.topbar-warning-row,
+.merge-run-view-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -7437,7 +7443,9 @@ ar-button.outcome-marker-pill {
 .topbar-model-option:hover,
 .topbar-effort-option:hover,
 .topbar-mode-option:hover,
-.topbar-warning-row:hover {
+.topbar-warning-row:hover,
+.merge-run-view-item:hover,
+.merge-run-view-item.is-active {
   background: var(--border);
 }
 /* The root's own path under its address: the SECOND line of an account row,
@@ -7798,19 +7806,7 @@ ar-button.outcome-marker-pill {
   display: flex;
   flex-direction: column;
   min-width: 8em;
-  border: 1px solid var(--border);
-  border-radius: var(--tab-radius);
-  background: var(--panel-bg);
-  font-size: 0.85em;
 }
-ar-button.merge-run-view-item {
-  display: block;
-  padding: 0.15rem 0.5rem;
-  text-align: left;
-  cursor: pointer;
-}
-ar-button.merge-run-view-item:hover { background: rgba(128, 128, 128, 0.12); }
-ar-button.merge-run-view-item.is-active { background: rgba(128, 128, 128, 0.16); }
 /* The remediation view's heading: the attempt, its clock and its glyph on one
    line, the badge the fixing attempt no longer has. */
 .merge-remediation-line {
