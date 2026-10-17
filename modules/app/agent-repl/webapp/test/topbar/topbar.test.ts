@@ -27,6 +27,7 @@ import { cascadedValue, installStylesheet } from "../stylesheet.js";
 function view(overrides: Partial<TopbarView> = {}): TopbarView {
   const base = create(TopbarViewSchema, {
     title: { text: "ABC/fix" },
+    workspaceName: { text: "fix" },
     sessionLine: { text: "session abc" },
     account: {
       state: { case: "loggedIn", value: { email: "a@b.test" } },
@@ -60,6 +61,7 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
 function sessionlessView(reason: string, context = "0"): TopbarView {
   return create(TopbarViewSchema, {
     title: { text: "ABC/fix" },
+    workspaceName: { text: "fix" },
     account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
     connectivity: { tone: "none", glyph: "○", title: "no session" },
     context: { text: context, breakdown: { sections: [{ heading: { text: reason }, rows: [] }] } },
@@ -78,9 +80,37 @@ describe("drawTopbarView", () => {
     const row = drawTopbarView(view(), tc);
     expect([
       row.querySelector(".topbar-left") !== null,
-      row.querySelector(".topbar-title") !== null,
+      row.querySelector(".topbar-heading") !== null,
       row.querySelector(".topbar-right") !== null,
     ]).toEqual([true, true, true]);
+  });
+
+  it("draws the workspace's name beneath the summary in the heading", () => {
+    const { tc } = topbarContext();
+    const heading = drawTopbarView(view(), tc).querySelector(".topbar-heading");
+    expect([...(heading?.children ?? [])].map((el) => el.textContent)).toEqual(["ABC/fix", "fix"]);
+  });
+
+  it("draws no summary line, and the name alone, when the view carries no title", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(view({ title: undefined }), tc);
+    expect([row.querySelector(".topbar-title"), row.querySelector(".topbar-workspace-name")?.textContent])
+      .toEqual([null, "fix"]);
+  });
+
+  it("refuses a view with no workspace name", () => {
+    const { tc } = topbarContext();
+    expect(() => drawTopbarView(view({ workspaceName: undefined }), tc)).toThrow(MalformedView);
+  });
+
+  it("opens the session line from the heading when the view carries no title", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarView(view({ title: undefined }), tc));
+    // ACT
+    host.querySelector(".topbar-workspace-name")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.textContent).toBe("session abc");
   });
 
   it("places the persistent-wifi chip between the context chip and the warning chip", () => {
@@ -107,7 +137,7 @@ describe("drawTopbarView", () => {
     expect([
       row.querySelector(".topbar-account") !== null,
       row.querySelector(".topbar-connectivity") !== null,
-      row.querySelector(".topbar-title") !== null,
+      row.querySelector(".topbar-heading") !== null,
       row.querySelector(".topbar-model") !== null,
       row.querySelector(".topbar-mode") !== null,
       row.querySelector(".topbar-context") !== null,

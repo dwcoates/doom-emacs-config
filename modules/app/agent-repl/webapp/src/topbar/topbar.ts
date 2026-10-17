@@ -59,10 +59,10 @@ import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import { bindAgentReplSessionReveal } from "./session.js";
 import {
-  bindTitleSessionReveal,
+  bindHeadingSessionReveal,
   drawTopbarAccount,
   drawTopbarConnectivity,
-  drawTopbarTitle,
+  drawTopbarHeading,
 } from "./strip.js";
 import {
   drawLocalWarningStrip,
@@ -227,14 +227,17 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   bindAgentReplSessionReveal(glyph, connectivity.session, tc);
   accountCell.append(glyph, drawTopbarAccount(accountView));
   // THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
-  // 2026-09-13). The session line rides the TITLE, which carries it whatever
+  // 2026-09-13). The session line rides the HEADING, which carries it whatever
   // the account state.
   bindAccountReveal(accountCell, accountView, tc);
   left.append(accountCell);
 
-  const center = drawTopbarTitle(requireMessage(u.title, "TopbarView.title"));
-  // The title opens the session line too, in every account state.
-  bindTitleSessionReveal(center, u.sessionLine, tc);
+  const center = drawTopbarHeading(
+    u.title,
+    requireMessage(u.workspaceName, "TopbarView.workspaceName"),
+  );
+  // The heading opens the session line too, in every account state.
+  bindHeadingSessionReveal(center, u.sessionLine, tc);
 
   const right = document.createElement("div");
   right.className = "topbar-right";

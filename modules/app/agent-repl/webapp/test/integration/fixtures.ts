@@ -2261,6 +2261,7 @@ export type AccountOptionInit = {
 
 type TopbarInit = {
   title?: string;
+  workspaceName?: string;
   sessionLine?: string;
   account?: (typeof TOPBAR_ACCOUNT_ARMS)[number];
   /**
@@ -2340,6 +2341,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
   ];
   return create(TopbarViewSchema, {
     title: { text: init?.title ?? "port the webapp" },
+    workspaceName: { text: init?.workspaceName ?? "overhaul" },
     sessionLine: { text: init?.sessionLine ?? "session 3 of the overhaul" },
     modelSelector: {
       selected:

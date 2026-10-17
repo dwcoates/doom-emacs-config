@@ -1,6 +1,6 @@
 /**
  * The strip's left and center: the account chip, the connectivity glyph, and
- * the title.
+ * the heading (the summary over the workspace's name).
  *
  * THE ACCOUNT LABEL IS THE WARNING (topbar.proto). A session whose config root
  * is logged out cannot run a turn, so `logged_out` draws the words "logged out"
@@ -12,7 +12,7 @@
  * different fact and usually an empty one, and the login overlay when logged
  * out; the dropdown `./account.ts` draws answers both — every root the daemon
  * knows, and picking one switches the workspace and then opens that root's
- * login when it has none. The session line stays on the TITLE, which carries
+ * login when it has none. The session line stays on the HEADING, which carries
  * it in every account state.
  *
  * THE CONNECTIVITY INDICATOR IS FULLY RESOLVED: the daemon sends the glyph
@@ -21,8 +21,10 @@
  * class — it never maps a connectivity state to a color of its own, because the
  * footer paints the same condition from the same file and the two must agree.
  *
- * THE TITLE IS PRE-COMPOSED. The daemon decides whether a branch is worth
- * showing; this end never concatenates identity fragments.
+ * THE TITLE IS THE SUMMARY, DRAWN VERBATIM, AND THE NAME IS ITS OWN LINE. The
+ * daemon states the summary only when one exists and never folds the
+ * workspace's name into it; this end never concatenates identity fragments and
+ * never stands the name in for a missing summary.
  */
 import { createControl } from "../control.js";
 import type {
@@ -30,6 +32,7 @@ import type {
   TopbarConnectivity,
   TopbarSessionLine,
   TopbarTitle,
+  TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
@@ -83,23 +86,24 @@ export function drawTopbarAccount(u: TopbarAccount): HTMLElement {
 }
 
 /**
- * Wire the TITLE's session-line reveal.
+ * Wire the HEADING's session-line reveal.
  *
- * The session line names the session the title names, and the title is present
- * in every account state — a logged-out session still has one. So the title
- * opens the same reveal the logged-in chip does: the account chip is the
- * identity door, the title is the session's own.
+ * The session line names the session the heading names, and the heading is
+ * present in every account state — a logged-out session still has one, and a
+ * workspace with no summary yet still draws its name line. So the heading opens
+ * the same reveal the logged-in chip does: the account chip is the identity
+ * door, the heading is the session's own.
  */
-export function bindTitleSessionReveal(
-  title: HTMLElement,
+export function bindHeadingSessionReveal(
+  heading: HTMLElement,
   line: TopbarSessionLine | undefined,
   tc: TopbarContext,
 ): void {
   if (line === undefined) return;
-  asAnchor(title, "session");
+  asAnchor(heading, "session");
   const body = (): HTMLElement => drawTopbarSessionLine(line);
   tc.reveals.register("session", "session", body);
-  title.addEventListener("click", () => {
+  heading.addEventListener("click", () => {
     tc.reveals.toggle("session", "session", body);
   });
 }
@@ -133,10 +137,37 @@ export function drawTopbarConnectivity(u: TopbarConnectivity): HTMLElement {
   return element;
 }
 
-/** The title, pre-composed by the daemon and drawn verbatim. */
+/**
+ * The heading: the summary on the strip's band, and the workspace's name on the
+ * line beneath it. The heading box hugs its two lines and both are centered in
+ * it, so the name's midpoint is the summary's midpoint rather than the strip's.
+ * With no summary (the daemon left the title absent) the band stays empty and
+ * the name keeps its own line: nothing stands in for the summary.
+ */
+export function drawTopbarHeading(
+  title: TopbarTitle | undefined,
+  name: TopbarWorkspaceName,
+): HTMLElement {
+  const heading = document.createElement("div");
+  heading.className = "topbar-heading";
+  if (title !== undefined) heading.append(drawTopbarTitle(title));
+  heading.append(drawTopbarWorkspaceName(name));
+  return heading;
+}
+
+/** The title: the workspace's generated summary, drawn verbatim. */
 export function drawTopbarTitle(u: TopbarTitle): HTMLElement {
   const element = document.createElement("div");
   element.className = "topbar-title";
+  element.title = u.text;
+  element.textContent = u.text;
+  return element;
+}
+
+/** The workspace's name, drawn verbatim on the heading's second line. */
+export function drawTopbarWorkspaceName(u: TopbarWorkspaceName): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "topbar-workspace-name";
   element.title = u.text;
   element.textContent = u.text;
   return element;

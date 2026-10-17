@@ -164,6 +164,42 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(m.cells.find((c) => c.cell === "topbar-context")?.fontSize).toBe(m.accountFontSize);
   });
 
+  // THE HEADING (owner ruling, 2026-10-17): the workspace's name sits on a
+  // line of its own below the summary, centered under the SUMMARY'S TEXT. The
+  // right group is far wider than the left, so a name centered on the strip
+  // would miss the summary's midpoint by a wide margin.
+  it("centers the workspace name under the summary's text", async () => {
+    // ACT
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    // ASSERT
+    const mid = (b: { left: number; right: number }): number => (b.left + b.right) / 2;
+    expect(Math.abs(mid(m.name) - mid(m.title!))).toBeLessThanOrEqual(0.5);
+  });
+
+  it("draws the name below the summary and inside the strip", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    expect([m.name.top >= m.title!.bottom - 1, m.name.bottom <= m.row.bottom]).toEqual([true, true]);
+  });
+
+  // THE EXTRA HEIGHT IS DOWNWARD: the flanks keep the band they always had,
+  // at the strip's top, and the strip grows below them.
+  it("keeps both flanks in the strip's top band", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    const band = 2.75 * 16;
+    expect([m.left.top, m.left.bottom, m.right.top, m.right.bottom].map((v) => v - m.row.top)).toEqual([
+      0, band, 0, band,
+    ]);
+  });
+
+  it("keeps the name on its own line when there is no summary", async () => {
+    // ARRANGE
+    const summarized = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, true));
+    // ACT
+    const bare = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, false));
+    // ASSERT
+    expect([bare.title, bare.name.top]).toEqual([null, summarized.name.top]);
+  });
+
   it("writes no error while drawing", async () => {
     const records = await rig.page.evaluate(() => window.topbarPage.records());
     expect(records.filter((r) => r.startsWith("error "))).toEqual([]);

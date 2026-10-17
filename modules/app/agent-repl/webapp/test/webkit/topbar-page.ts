@@ -23,10 +23,11 @@ export interface TopbarPage {
   drawWifi(offset: number): void;
   /**
    * Draw the whole strip in a `#topbar` header, with a session (every
-   * session-scoped control drawn) or without one (their dashes drawn), and
+   * session-scoped control drawn) or without one (their dashes drawn), with a
+   * summary or without one (SUMMARY false leaves the title absent), and
    * measure it.
    */
-  drawStrip(session: boolean): StripMeasure;
+  drawStrip(session: boolean, summary?: boolean): StripMeasure;
   /** Every record the page wrote, as `level operation`. */
   records(): string[];
 }
@@ -39,12 +40,29 @@ export interface CellMeasure {
   fontSize: string;
 }
 
+/** One drawn box's edges, in CSS px. */
+export interface BoxMeasure {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 /** What one drawn strip measured, in CSS px. */
 export interface StripMeasure {
   /** The account label's computed font size. */
   accountFontSize: string;
   /** The right group's cells, in order. */
   cells: CellMeasure[];
+  /** The strip's row. */
+  row: BoxMeasure;
+  /** The two flank groups. */
+  left: BoxMeasure;
+  right: BoxMeasure;
+  /** The summary's box, null when the strip drew none. */
+  title: BoxMeasure | null;
+  /** The workspace name's box. */
+  name: BoxMeasure;
 }
 
 declare global {
@@ -72,9 +90,10 @@ function topbarContext(): TopbarContext {
 }
 
 /** The strip's view: one of every right-hand cell, warnings included. */
-function stripView(session: boolean) {
+function stripView(session: boolean, summary: boolean) {
   return create(TopbarViewSchema, {
-    title: { text: "ABC/fix" },
+    ...(summary ? { title: { text: "ABC/fix the flaky reconnect backoff" } } : {}),
+    workspaceName: { text: "fix-reconnect" },
     sessionLine: { text: "session abc" },
     account: { state: { case: "loggedIn", value: { email: "someone@example.com" } } },
     connectivity: { tone: "green", glyph: "●", title: "connected" },
@@ -115,9 +134,23 @@ function measureCell(cell: Element): CellMeasure {
   };
 }
 
+/** One element's box, or null when it is absent. */
+function box(element: Element | null): BoxMeasure | null {
+  if (element === null) return null;
+  const r = element.getBoundingClientRect();
+  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+}
+
+/** One element's box, which the strip always draws. */
+function requiredBox(header: Element, selector: string): BoxMeasure {
+  const measured = box(header.querySelector(selector));
+  if (measured === null) throw new Error(`the strip drew no ${selector}`);
+  return measured;
+}
+
 window.topbarPage = {
   records,
-  drawStrip(session) {
+  drawStrip(session, summary = true) {
     const header = document.createElement("header");
     header.id = "topbar";
     host().replaceChildren(header);
@@ -130,13 +163,18 @@ window.topbarPage = {
       openLogin: () => undefined,
       localFailures: () => [],
     };
-    strip.append(drawTopbarView(stripView(session), tc));
+    strip.append(drawTopbarView(stripView(session, summary), tc));
     const account = header.querySelector(".topbar-account");
     const right = header.querySelector(".topbar-right");
     if (account === null || right === null) throw new Error("the strip drew no account or no right group");
     return {
       accountFontSize: getComputedStyle(account).fontSize,
       cells: [...right.children].map(measureCell),
+      row: requiredBox(header, ".topbar-row"),
+      left: requiredBox(header, ".topbar-left"),
+      right: requiredBox(header, ".topbar-right"),
+      title: box(header.querySelector(".topbar-title")),
+      name: requiredBox(header, ".topbar-workspace-name"),
     };
   },
   drawWifi(offset) {
