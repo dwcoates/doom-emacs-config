@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -128,6 +130,27 @@ func (v *verbs) OpenDaemonFileInEditor(ctx context.Context, ws ids.WorkspaceID, 
 	}
 	v.deps.Host.OpenInEditor(ws, path, nil)
 	log.Info(opOpenInEditor, "relayed an open-in-editor of a file the daemon holds", dlog.Context{"path": path})
+	return nil
+}
+
+// OpenCommitLogInEditor relays a click on a landed merge's commit onto the
+// workspace's host stream, verbatim: Emacs opens the branch's log in the
+// repository with point on the commit. The target is echoed from the merge
+// head the daemon served, so it is not held to the worktree; a repository dir
+// that is not absolute is a client that built its own and is refused.
+func (v *verbs) OpenCommitLogInEditor(ctx context.Context, ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) error {
+	_, log, err := v.owned(ctx, "OpenInEditor", ws)
+	if err != nil {
+		return err
+	}
+	fields := dlog.Context{"repository_dir": target.GetRepositoryDir(), "branch": target.GetBranch(), "commit": target.GetCommit()}
+	if !filepath.IsAbs(target.GetRepositoryDir()) {
+		err := fmt.Errorf("workspace: a commit log's repository dir must be absolute, got %q", target.GetRepositoryDir())
+		log.Error(opOpenInEditor, "refused to relay a commit log whose repository dir is not absolute", fields)
+		return err
+	}
+	v.deps.Host.OpenCommitLog(ws, target)
+	log.Info(opOpenInEditor, "relayed an open of a landed commit in its branch's log", fields)
 	return nil
 }
 

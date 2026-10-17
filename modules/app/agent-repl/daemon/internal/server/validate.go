@@ -931,6 +931,15 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 		if target.FeedLink.GetOnUnresolved() == nil {
 			return invalid("feed_link.on_unresolved", "an on_unresolved arm is required")
 		}
+	case *agentreplv1.OpenInEditorRequest_CommitLog:
+		switch {
+		case target.CommitLog.GetRepositoryDir() == "":
+			return invalid("commit_log.repository_dir", "a repository dir is required")
+		case target.CommitLog.GetBranch() == "":
+			return invalid("commit_log.branch", "a branch is required")
+		case target.CommitLog.GetCommit() == "":
+			return invalid("commit_log.commit", "a commit is required")
+		}
 	default:
 		return invalid("target", "a target arm is required")
 	}

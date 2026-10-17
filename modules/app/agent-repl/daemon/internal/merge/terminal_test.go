@@ -2223,3 +2223,54 @@ func TestAFinishedRunLeavesItsLineBeforeItsEntryGoes(t *testing.T) {
 		t.Fatalf("the run's mark at its entry's removal was %v, want it already out of its line", marked)
 	}
 }
+
+// TestALandedHeadNamesWhereItsCommitLanded covers the head's commit link: both
+// merged arms say which checkout and branch the commit is on, so the webapp
+// can open that branch's log at it.
+func TestALandedHeadNamesWhereItsCommitLanded(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(h *harness)
+		wantCommit string
+	}{
+		{
+			name: "a landed merge",
+			arrange: func(h *harness) {
+				h.landsCleanly("abc123def4567")
+				h.gatePasses("daemon")
+			},
+			wantCommit: "abc123def4567",
+		},
+		{
+			name:    "a branch already on the target",
+			arrange: func(h *harness) { h.git.contained = true },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.emacsRepo()
+			tt.arrange(h)
+			enqueue(t, h)
+
+			// Act
+			if err := h.admit(context.Background()); err != nil {
+				t.Fatalf("the merge failed: %v", err)
+			}
+
+			// Assert
+			success := h.feed.lastHead().Row.GetActivity().GetMerge().GetSuccess()
+			if success == nil {
+				t.Fatal("the head did not conclude as merged")
+			}
+			if tt.wantCommit != "" && success.GetCommit() != tt.wantCommit {
+				t.Fatalf("commit = %q, want %q", success.GetCommit(), tt.wantCommit)
+			}
+			on := success.GetLandedOn()
+			if on.GetRepositoryDir() != h.targetD || on.GetBranch() != "master" {
+				t.Fatalf("landed_on = %+v, want %s on master", on, h.targetD)
+			}
+		})
+	}
+}

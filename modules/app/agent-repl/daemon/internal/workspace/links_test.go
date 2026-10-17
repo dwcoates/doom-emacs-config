@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 )
 
@@ -298,6 +301,51 @@ func TestOpenDaemonFileInEditorRefusesAnUnknownWorkspace(t *testing.T) {
 	// Assert.
 	if err == nil || len(f.host.editorOpens) != 0 {
 		t.Fatalf("OpenDaemonFileInEditor = %v, want the unknown workspace refused", err)
+	}
+}
+
+func TestOpenCommitLogInEditor(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		dir       string
+		wantErr   bool
+		wantError string
+	}{
+		{name: "an absolute repository dir is relayed verbatim", workspace: "w1", dir: "/repo"},
+		{name: "a relative repository dir is refused", workspace: "w1", dir: "repo", wantErr: true,
+			wantError: "refused to relay a commit log whose repository dir is not absolute"},
+		{name: "an unknown workspace is refused", workspace: "w9", dir: "/repo", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			target := &agentreplv1.OpenInEditorCommitLog{RepositoryDir: tt.dir, Branch: "master", Commit: "abc123"}
+
+			// Act.
+			err := f.verbs.OpenCommitLogInEditor(context.Background(), ids.WorkspaceID(tt.workspace), target)
+
+			// Assert.
+			if tt.wantErr {
+				if err == nil || len(f.host.commitLogOpens) != 0 {
+					t.Fatalf("OpenCommitLogInEditor = %v with opens %+v, want a refusal and nothing relayed", err, f.host.commitLogOpens)
+				}
+			} else if err != nil || len(f.host.commitLogOpens) != 1 || f.host.commitLogOpens[0] != target {
+				t.Fatalf("OpenCommitLogInEditor = %v with opens %+v, want the target relayed", err, f.host.commitLogOpens)
+			}
+			if tt.wantError == "" {
+				return
+			}
+			for _, rec := range f.log.logger.Records() {
+				if rec.Level == dlog.LevelError && rec.Operation == opOpenInEditor && rec.Message == tt.wantError &&
+					rec.Context["repository_dir"] == tt.dir && rec.Context["commit"] == "abc123" {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want an ERROR naming the target", f.log.logger.Records())
+		})
 	}
 }
 

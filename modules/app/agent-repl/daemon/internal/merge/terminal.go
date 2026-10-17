@@ -72,7 +72,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 	case out.alreadyOn != "":
 		// NOTHING WAS MERGED, AND NOTHING FAILED: the branch was on the target
 		// already. It concludes as merged, and says why there is no commit.
-		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
+		r.head(r.success(endedMS, out))
 		r.concluded(MergeFacts{State: StateMerged, Detail: fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)})
 		// Nothing landed, so the count its turns last recorded stands.
 		r.stampClosed(ctx, log, op, nil)
@@ -80,7 +80,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
 	default:
-		r.head(landedHead{success: &frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed}, version: headVersion(out.version)})
+		r.head(landedHead{success: r.success(endedMS, out), version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
 		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: r.landingDeploy(ctx, out)})
@@ -91,6 +91,17 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 			fields["version"] = out.version.tag
 		}
 		log.Info(op, "a merge landed", fields)
+	}
+}
+
+// success is the head's merged arm: the commit the target now carries, and
+// where it landed, which makes the drawn commit a link to the target branch's
+// log in that checkout.
+func (r *run) success(endedMS int64, out outcome) *frontendv1.FeedMergeSuccess {
+	return &frontendv1.FeedMergeSuccess{
+		EndedAtMs: endedMS,
+		Commit:    out.landed,
+		LandedOn:  &frontendv1.FeedMergeLandedOn{RepositoryDir: r.subject.targetDir, Branch: out.target},
 	}
 }
 

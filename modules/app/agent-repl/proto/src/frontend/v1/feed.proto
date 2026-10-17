@@ -3070,6 +3070,19 @@ message FeedMergeUpdate {}
 message FeedMergeSuccess {
   int64 ended_at_ms = 1;
   string commit = 2;
+  // WHERE THE COMMIT LANDED, which makes the head's commit a link: clicking it
+  // opens the target branch's log in the editor with the commit selected
+  // (agentrepl.v1.OpenInEditorRequest.commit_log, echoed from here). UNSET on
+  // a head recorded before heads carried it, whose commit draws as plain text.
+  optional FeedMergeLandedOn landed_on = 3;
+}
+
+// The branch a landed merge's commit is on, and the checkout it lives in.
+message FeedMergeLandedOn {
+  // The target's checkout on the daemon's host, whose log is opened.
+  string repository_dir = 1;
+  // The target branch the commit landed on (master, or a source branch).
+  string branch = 2;
 }
 
 // It did not land: when, and why. THE ARM IS WHY.

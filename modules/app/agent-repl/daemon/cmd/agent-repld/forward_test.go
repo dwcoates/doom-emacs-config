@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -20,14 +21,19 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// recordingRelay is a workspace.HostRelay that records feed tail returns.
+// recordingRelay is a workspace.HostRelay that records feed tail returns and
+// commit log opens.
 type recordingRelay struct {
-	tailReturns []ids.WorkspaceID
+	tailReturns    []ids.WorkspaceID
+	commitLogOpens []*agentreplv1.OpenInEditorCommitLog
 }
 
 func (r *recordingRelay) OpenInEditor(ids.WorkspaceID, string, *uint32) {}
-func (r *recordingRelay) ReloadWebapp(ids.WorkspaceID)                  {}
-func (r *recordingRelay) PublishHostWorkspace(ids.WorkspaceID)          {}
+func (r *recordingRelay) OpenCommitLog(_ ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) {
+	r.commitLogOpens = append(r.commitLogOpens, target)
+}
+func (r *recordingRelay) ReloadWebapp(ids.WorkspaceID)         {}
+func (r *recordingRelay) PublishHostWorkspace(ids.WorkspaceID) {}
 func (r *recordingRelay) ReturnFeedToTail(ws ids.WorkspaceID) {
 	r.tailReturns = append(r.tailReturns, ws)
 }
@@ -44,6 +50,22 @@ func TestRelayForwarderCarriesReturnFeedToTailToTheBoundRelay(t *testing.T) {
 	// Assert.
 	if !slices.Equal(target.tailReturns, []ids.WorkspaceID{"w1"}) {
 		t.Fatalf("tail returns = %v, want [w1]", target.tailReturns)
+	}
+}
+
+func TestRelayForwarderCarriesOpenCommitLogToTheBoundRelay(t *testing.T) {
+	// Arrange.
+	target := &recordingRelay{}
+	var f relayForwarder
+	f.bind(target)
+	log := &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master", Commit: "abc123"}
+
+	// Act.
+	f.OpenCommitLog("w1", log)
+
+	// Assert.
+	if len(target.commitLogOpens) != 1 || target.commitLogOpens[0] != log {
+		t.Fatalf("commit log opens = %v, want the one forwarded", target.commitLogOpens)
 	}
 }
 

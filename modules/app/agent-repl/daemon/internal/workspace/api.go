@@ -443,6 +443,11 @@ type Verbs interface {
 	// daemon served, which is what stands in for the worktree containment
 	// check.
 	OpenDaemonFileInEditor(ctx context.Context, ws ids.WorkspaceID, path string) error
+	// OpenCommitLogInEditor relays a click on a landed merge's commit onto the
+	// host stream verbatim: Emacs opens the branch's log in the repository
+	// with point on the commit. The workspace is checked as every verb checks
+	// it, and the repository dir must be absolute.
+	OpenCommitLogInEditor(ctx context.Context, ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) error
 	// OpenFeedLink resolves a non-web link clicked in a prompt or response
 	// bubble (OpenInEditorFeedLink's order) and relays the file it names
 	// exactly as OpenInEditor relays a workspace file. A link that names no
@@ -486,6 +491,9 @@ type HostRelay interface {
 	// OpenInEditor pushes the open_in_editor arm to the workspace's host
 	// stream.
 	OpenInEditor(ws ids.WorkspaceID, path string, line *uint32)
+	// OpenCommitLog pushes the open_commit_log arm to the workspace's host
+	// stream.
+	OpenCommitLog(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog)
 	// ReloadWebapp pushes the reload_webapp arm.
 	ReloadWebapp(ws ids.WorkspaceID)
 	// PublishHostWorkspace recomposes and republishes the workspace's host

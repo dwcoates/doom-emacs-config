@@ -516,6 +516,30 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "merge_test_log.value",
 		},
 		{
+			name: "open in editor of a commit log with no repository dir",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_CommitLog{CommitLog: &agentreplv1.OpenInEditorCommitLog{Branch: "master", Commit: "abc"}}})
+			},
+			field: "commit_log.repository_dir",
+		},
+		{
+			name: "open in editor of a commit log with no branch",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_CommitLog{CommitLog: &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Commit: "abc"}}})
+			},
+			field: "commit_log.branch",
+		},
+		{
+			name: "open in editor of a commit log with no commit",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_CommitLog{CommitLog: &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master"}}})
+			},
+			field: "commit_log.commit",
+		},
+		{
 			name:  "merge with no workspace",
 			check: func() *connect.Error { return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{}) },
 			field: "workspace",
@@ -641,6 +665,13 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			check: func() *connect.Error {
 				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
 					Target: &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{Path: "/tmp/a.go"}}})
+			},
+		},
+		{
+			name: "open in editor of a commit log",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_CommitLog{CommitLog: &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master", Commit: "abc"}}})
 			},
 		},
 		{

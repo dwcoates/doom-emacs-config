@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -1689,7 +1690,9 @@ func (s *fakeSidebar) snapshot() (calls []string, selected []ids.WorkspaceID, re
 // fakeHost is a HostRelay.
 type fakeHost struct {
 	editorOpens []editorOpen
-	reloads     []ids.WorkspaceID
+	// commitLogOpens records every relayed open_commit_log target.
+	commitLogOpens []*agentreplv1.OpenInEditorCommitLog
+	reloads        []ids.WorkspaceID
 	// hostPublishes records every host-state republish the verbs asked for.
 	hostPublishes []ids.WorkspaceID
 	// tailReturns records every feed return-to-tail the verbs asked for.
@@ -1712,6 +1715,10 @@ type editorOpen struct {
 
 func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 	h.editorOpens = append(h.editorOpens, editorOpen{ws, path, line})
+}
+
+func (h *fakeHost) OpenCommitLog(_ ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) {
+	h.commitLogOpens = append(h.commitLogOpens, target)
 }
 
 func (h *fakeHost) ReloadWebapp(ws ids.WorkspaceID) { h.reloads = append(h.reloads, ws) }

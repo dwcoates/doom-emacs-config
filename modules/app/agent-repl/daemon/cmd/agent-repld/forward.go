@@ -165,6 +165,12 @@ func (f *relayForwarder) OpenInEditor(ws ids.WorkspaceID, path string, line *uin
 	}
 }
 
+func (f *relayForwarder) OpenCommitLog(ws ids.WorkspaceID, log *agentreplv1.OpenInEditorCommitLog) {
+	if target, ok := f.relay(); ok {
+		target.OpenCommitLog(ws, log)
+	}
+}
+
 func (f *relayForwarder) ReloadWebapp(ws ids.WorkspaceID) {
 	if target, ok := f.relay(); ok {
 		target.ReloadWebapp(ws)
