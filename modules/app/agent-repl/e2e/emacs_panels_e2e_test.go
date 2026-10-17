@@ -59,7 +59,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 		names = registryNames(raw)
 		awaitRegistrationLanding(e, repository.Dir)
 	}
-	awaitTabsOpen(e, emacsVerbBound, names)
+	awaitTabsOpen(e, names)
 	// The registry is a hash, so its iteration order says nothing; the
 	// current workspace is what the panel verbs act on, and it is the one
 	// most recently added.

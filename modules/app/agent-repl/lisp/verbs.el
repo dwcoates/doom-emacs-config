@@ -2475,7 +2475,8 @@ out itself.
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
-  (agent-repl-verbs--create-oneshot 'agent-repl-create-oneshot pick-model nil))
+  (agent-repl-verbs--create-oneshot
+   'agent-repl-create-oneshot pick-model nil #'agent-repl-verbs--oneshot-repository))
 
 (defun agent-repl-create-oneshot-for-current-workspace (&optional pick-model)
   "Create a ONE-SHOT that fixes something wrong with the CURRENT workspace.
@@ -2491,12 +2492,71 @@ worktree is carried over.
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
   (agent-repl-verbs--create-oneshot
-   'agent-repl-create-oneshot-for-current-workspace pick-model t))
+   'agent-repl-create-oneshot-for-current-workspace pick-model t
+   #'agent-repl-verbs--oneshot-repository))
 
-(defun agent-repl-verbs--create-oneshot (command pick-model about-current)
+(defun agent-repl-verbs--oneshot-repository ()
+  "Return the current workspace\='s repository, the one a one-shot is cut in.
+Every one-shot command but the explanation-engine one targets it."
+  (agent-repl-verbs--dynamic-repository "a one-shot"))
+
+;; THE EXPLANATION-ENGINE ONE-SHOT (`SPC TAB O') is the one one-shot whose
+;; repository is FIXED: it is commissioned from any workspace, doom's
+;; included, and always lands in the explanation-engine checkout.  What it
+;; does on completion is still that repository's own policy
+;; (`docs/ONE-SHOT-POLICY.md'): its `.agent-repl/prompts/' at the main
+;; checkout states the completion directive and the after-merge
+;; `/create-or-update-pr --add-to-merge-queue'.  Emacs chooses no finish.
+
+(defconst agent-repl-verbs--explanation-engine-basename "explanation-engine"
+  "The explanation-engine checkout\='s directory name under `MULTI_REPO_ROOT\='.
+The Setup section of `docs/USER-GUIDE.md\=' documents `MULTI_REPO_ROOT\=' as
+the directory holding this checkout.")
+
+(defvar agent-repl-daemon-multi-repo-root)
+
+(defun agent-repl-verbs--explanation-engine-repository ()
+  "Return the `RepositoryRef\=' of the explanation-engine checkout.
+The checkout is `agent-repl-verbs--explanation-engine-basename\=' under
+`agent-repl-daemon-multi-repo-root\=' (`MULTI_REPO_ROOT\='), matched against
+the roster\='s repository sections by canonical directory.
+
+Refuses when `MULTI_REPO_ROOT\=' is unset, and when the checkout is not on
+the roster -- registering it (`SPC TAB C-n\=') is the user\='s act."
+  (let ((root agent-repl-daemon-multi-repo-root))
+    (unless root
+      (agent-repl--error agent-repl-verbs--create-log-scope
+                         "elisp.verbs.explanation-engine-repository-unresolved cause=multi-repo-root-unset")
+      (user-error "agent-repl: MULTI_REPO_ROOT is unset, so the explanation-engine checkout has no known directory; see the Setup section of docs/USER-GUIDE.md"))
+    (let ((main (agent-repl--path-canonical
+                 (expand-file-name agent-repl-verbs--explanation-engine-basename root))))
+      (or (agent-repl-verbs--roster-repository-at main)
+          (progn
+            (agent-repl--warn agent-repl-verbs--create-log-scope
+                              "elisp.verbs.explanation-engine-repository-unregistered root=%s main=%s"
+                              root main)
+            (user-error "agent-repl: the explanation-engine repository %s is not on the roster; register it with SPC TAB C-n"
+                        main))))))
+
+(defun agent-repl-create-explanation-engine-oneshot (&optional pick-model)
+  "Create a ONE-SHOT in the explanation-engine repository (`SPC TAB O\=').
+Exactly `agent-repl-create-oneshot\=', except the repository is always
+the explanation-engine checkout
+\(`agent-repl-verbs--explanation-engine-repository\='), whichever workspace
+\(or none) this runs from.  The repository\='s own policy finishes it:
+a one-shot merge, then `/create-or-update-pr --add-to-merge-queue\=' once
+the merge lands.
+
+A prefix argument PICK-MODEL asks for the model."
+  (interactive "P")
+  (agent-repl-verbs--create-oneshot
+   'agent-repl-create-explanation-engine-oneshot pick-model nil
+   #'agent-repl-verbs--explanation-engine-repository))
+
+(defun agent-repl-verbs--create-oneshot (command pick-model about-current repository-fn)
   "Create a one-shot for COMMAND, asking for the model when PICK-MODEL.
-The one composition every one-shot command shares: the repository is the
-current workspace\='s, the commission is read UNSEEDED into the one-shot
+The one composition every one-shot command shares: the repository is what
+REPOSITORY-FN answers, the commission is read UNSEEDED into the one-shot
 history, and the model is asked for only under a prefix argument.
 
 ABOUT-CURRENT names the current workspace as the one-shot\='s context, the
@@ -2505,7 +2565,7 @@ user knows which one the commission will be read against."
   (agent-repl-verbs--create-invoked command)
   (let* ((repository (agent-repl-verbs--read-for
                       command 'repository
-                      (lambda () (agent-repl-verbs--dynamic-repository "a one-shot"))))
+                      repository-fn))
          (about (and about-current (agent-repl--ws-current-name)))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
@@ -2563,6 +2623,20 @@ The preamble is meta-wrapped, so the drawn bubble is QUESTION alone while
 the agent receives both."
   (concat (agent-repl--meta-wrap agent-repl-help-preamble) "\n\n" question))
 
+(defun agent-repl-verbs--roster-repository-at (main)
+  "Return the `RepositoryRef' of the roster section whose directory is MAIN.
+MAIN is a canonical main worktree; each section\='s directory is
+canonicalized before the comparison.  Answers nil when no section matches,
+because what a missing repository means -- and how it is refused -- is the
+caller\='s: every creation that targets a FIXED repository rather than the
+current workspace\='s finds it here."
+  (when-let* ((section (cl-find-if
+                        (lambda (section)
+                          (let ((dir (plist-get (agent-repl-verbs--section-ref section) :dir)))
+                            (and dir (equal (agent-repl--path-canonical dir) main))))
+                        (agent-repl-verbs--repo-sections))))
+    (agent-repl-verbs--section-ref section)))
+
 (defun agent-repl-verbs--help-repository ()
   "Return the `RepositoryRef' of the repository agent-repl\='s source lives in.
 The repository is found by its main worktree: the parent of the git
@@ -2581,18 +2655,13 @@ go, and registering the repository (`SPC TAB C-n') is the user\='s act."
                          "elisp.verbs.help-repository-unresolved module-root=%s cause=not-a-git-repository"
                          module-root)
       (user-error "agent-repl: agent-repl's source at %s is in no git repository" module-root))
-    (let* ((section (cl-find-if
-                     (lambda (section)
-                       (let ((dir (plist-get (agent-repl-verbs--section-ref section) :dir)))
-                         (and dir (equal (agent-repl--path-canonical dir) main))))
-                     (agent-repl-verbs--repo-sections))))
-      (unless section
-        (agent-repl--warn agent-repl-verbs--create-log-scope
-                          "elisp.verbs.help-repository-unregistered module-root=%s main=%s"
-                          module-root main)
-        (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
-                    main))
-      (agent-repl-verbs--section-ref section))))
+    (or (agent-repl-verbs--roster-repository-at main)
+        (progn
+          (agent-repl--warn agent-repl-verbs--create-log-scope
+                            "elisp.verbs.help-repository-unregistered module-root=%s main=%s"
+                            module-root main)
+          (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
+                      main)))))
 
 (defun agent-repl-create-help-workspace ()
   "Create a HELP workspace (`SPC o h\='): a question about agent-repl.

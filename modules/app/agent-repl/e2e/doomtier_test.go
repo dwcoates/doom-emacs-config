@@ -78,7 +78,7 @@ func TestDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
 	a, b, c := w.register(t, box, "repo-a"), w.register(t, box, "repo-b"), w.register(t, box, "repo-c")
 	// The drawn order is the ROSTER's, deliberately not registration order.
 	w.pushRoster(t, c, b, c, a)
-	order := awaitTabsOpen(e, emacsVerbBound, []string{a.Name, b.Name, c.Name})
+	order := awaitTabsOpen(e, []string{a.Name, b.Name, c.Name})
 	if strings.Join(order, ",") != strings.Join([]string{b.Name, c.Name, a.Name}, ",") {
 		t.Fatalf("agent-repl-roster--tab-order = %v, want the roster's own order %v", order, []string{b.Name, c.Name, a.Name})
 	}

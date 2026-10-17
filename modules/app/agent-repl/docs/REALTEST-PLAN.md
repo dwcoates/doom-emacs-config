@@ -225,13 +225,13 @@ Workspaces — COMPLETE
    mints the name), work in it, delete it. The tab appears, is selected,
    disappears; the user lands somewhere sensible.
 6. Register a directory (`SPC TAB C-n` — "Add project directory: "); re-open a
-   closed workspace (`SPC TAB O` — "Open workspace: ").
+   closed workspace (`SPC TAB C-r` — "Open workspace: ").
    Register a REPOSITORY on its own (`SPC j .` — "Register repository from
    file: ", which takes any file inside it): the rail draws the repository as a
    section with no rows, and `SPC TAB N` can then pick it.
 7. Fork a workspace with its conversation (`SPC TAB f` — "Initial prompt: "
    alone, like every dynamic mode). The fork carries the history.
-8. Reorder by priority; close, reopen (`SPC TAB O`), kill a workspace.
+8. Reorder by priority; close, reopen (`SPC TAB C-r`), kill a workspace.
 
    The creation keys are the owner's 2026-09-12 ruling, recorded in
    docs/REALTEST-JUDGEMENT-CALLS.md: `n` dynamic create, `N` static create

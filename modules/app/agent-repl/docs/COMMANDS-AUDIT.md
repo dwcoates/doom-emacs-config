@@ -117,6 +117,7 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-fork-workspace-static` | Fork into a named child, no prompt. | `SPC TAB F` | leader | leader |
 | `agent-repl-create-oneshot` | Create a one-shot workspace for a commission. | `SPC TAB o` | leader | leader |
 | `agent-repl-create-oneshot-for-current-workspace` | Create a one-shot whose commission is about the current workspace. | `SPC TAB C-o` | leader | leader |
+| `agent-repl-create-explanation-engine-oneshot` | Create a one-shot in the explanation-engine repository, from any workspace. | `SPC TAB O` | leader | leader |
 | `agent-repl-add-project-workspace` | Onboard a directory as a workspace. | `SPC TAB C-n` | leader | leader |
 | `agent-repl-register-repository` | Register the repository a picked file is inside. | `SPC j .` | leader | leader |
 
@@ -125,7 +126,7 @@ Findings are collected at the end, in "Audit findings".
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
 | `agent-repl-close-workspace` | Close the current workspace (view only). | `SPC j d` | leader | leader |
-| `agent-repl-open-workspace` | Re-open a closed workspace. | `SPC TAB O` | leader | leader |
+| `agent-repl-open-workspace` | Re-open a closed workspace. | `SPC TAB C-r` | leader | leader |
 | `agent-repl-merge-workspace` | Enqueue a merge of the current workspace's branch. | `SPC TAB M` | leader | leader |
 | `agent-repl-restart-workspace` | Restart the workspace's shim and webapp page. | `SPC o C-c` | leader | leader |
 | `agent-repl-kill-workspace` | Kill the workspace's session by force. | `SPC j x` | leader | leader |

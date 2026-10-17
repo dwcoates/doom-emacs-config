@@ -101,6 +101,10 @@
   "The SPC TAB C-o one-shot about the current workspace exists."
   (should (commandp 'agent-repl-create-oneshot-for-current-workspace)))
 
+(ert-deftest agent-repl-test-keybindings-explanation-engine-oneshot-command-is-defined ()
+  "The SPC TAB O one-shot in the explanation-engine repository exists."
+  (should (commandp 'agent-repl-create-explanation-engine-oneshot)))
+
 (ert-deftest agent-repl-test-keybindings-help-workspace-command-is-defined ()
   "The SPC o h help-workspace command exists."
   (should (commandp 'agent-repl-create-help-workspace)))
@@ -325,6 +329,16 @@ walked for KEY followed by its #\\='COMMAND."
   "`SPC TAB C\=' is the child fork asking for a name instead of a prompt."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "C")
               'agent-repl-fork-workspace-static)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-upper-o-is-the-explanation-engine-oneshot ()
+  "`SPC TAB O\=' makes a one-shot in the explanation-engine repository."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "O")
+              'agent-repl-create-explanation-engine-oneshot)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-c-r-reopens-a-closed-workspace ()
+  "`SPC TAB C-r\=' re-opens a closed workspace, moved off `SPC TAB O\='."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "C-r")
+              'agent-repl-open-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-h-hides-the-workspace ()
   "`SPC TAB h\=' hides the current workspace: off the tab bar, into the sidebar's hidden section."
