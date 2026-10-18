@@ -73,7 +73,9 @@
     "red the webapp's cleared rule shares, purple the tool title's purple.",
     "design-dark-accent-tuner.html beside this module derives it. The",
     "dark green is the deeper #1a7a1a the tab bar's names wore (owner",
-    "ruling, 2026-10-17: the pastel green read light yet weak). The 'light'",
+    "ruling, 2026-10-17: the pastel green read light yet weak), then taken",
+    "0.06 lighter in OKLCH lightness to #318c2f (owner ruling, 2026-10-18;",
+    "design-green-lighter.html beside this module). The 'light'",
     "row is the light theme's set as it stood. The dark red and blue are the",
     "pastel ones taken 0.12 darker in OKLCH lightness, hue and strength kept",
     "(owner ruling, 2026-10-18; design-red-blue-darker.html beside this",
@@ -94,7 +96,7 @@
       "red": "#c44746",
       "turquoise": "#1cd1ec",
       "yellow": "#eab00b",
-      "green": "#1a7a1a"
+      "green": "#318c2f"
     }
   },
   "colors": [
