@@ -41,3 +41,16 @@ Each entry says what was decided, why, and what it departs from.
   - A version is a property of the deployed source tree, which is what a
     regression hunt groups by; the content hashes say which programs
     actually changed between two versions.
+
+## 4. The shared package lives in the shared logging module
+
+- Plan said: a new module beside `agent-shim/logging/go`.
+- Decided: `agentrepl/logging/metrics`, a package inside that module.
+- Why: the deploy's staleness pathspecs (`bin/lib-deploy-stamp.sh`) and the
+  build's pre-flight (`bin/build-frontend.sh` `require_go_source_dirs`)
+  already cover `agent-shim/logging/` for every Go runtime, and the module
+  already hosts the other runtime-wide packages (`profiling`,
+  `buildreport`). A new module would need every one of those tables
+  extended, and a table someone forgets reads as "fully deployed".
+- Consequence: the module's `go` directive moved to 1.24.0 (client_golang's
+  floor), and `shim-lock` followed.
