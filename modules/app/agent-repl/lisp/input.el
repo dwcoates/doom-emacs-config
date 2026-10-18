@@ -195,12 +195,13 @@ Pre-formatted once so the common case costs no formatting.")
   '((t :background "white" :foreground "black" :weight bold))
   "Face for the Agent Input header line.")
 
-(defcustom agent-repl-input-background "#1a1a19"
+(defcustom agent-repl-input-background "#181817"
   "The input buffer's background, a #rrggbb hex string.
 The webapp's dark `--composer-bg' (webapp/src/styles.css): the input
-window is the host-native composer, so the two wear one color.  Halfway
-from the Claude composer's #20201f to the feed's #151514, each channel
-rounded down (owner request, 2026-10-17)."
+window is the host-native composer, so the two wear one color.  A touch
+above the feed's #151514, still told apart from it (owner requests,
+2026-10-17: halfway from the Claude composer's #20201f, then a touch
+closer to the feed)."
   :type 'string
   :group 'agent-repl)
 
