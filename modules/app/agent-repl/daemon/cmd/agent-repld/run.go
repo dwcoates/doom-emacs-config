@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"agent-repld/internal/boot"
+	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/pprofsurface"
+	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/server"
@@ -194,6 +196,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("agent-repld: open the metrics surface: %w", err)
 	}
 	defer metricsSurface.Close()
+	if err := metricsSurface.RegisterProcesses(procmetrics.Kernel{}, layout.SockDir(), layout.Dir(), hostOnBattery); err != nil {
+		log.Error(runtimemetrics.Operation, "the process collector was refused", dlog.Context{"error": err.Error()})
+		return fmt.Errorf("agent-repld: %w", err)
+	}
 
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
@@ -1010,6 +1016,21 @@ func bootModeFor(opts options) daemonaddr.BootMode {
 		return daemonaddr.BootReplacing
 	}
 	return daemonaddr.BootOrdinary
+}
+
+// hostOnBattery answers whether the host runs on battery, through the same
+// power source the merge queue's governor reads (cpugov.HostPowerSource), so
+// a harness's fixed source reads the same in both.
+func hostOnBattery() (bool, error) {
+	source, err := cpugov.HostPowerSource(os.Getenv(cpugov.FixedPowerEnv))
+	if err != nil {
+		return false, err
+	}
+	power, err := source.Power()
+	if err != nil {
+		return false, err
+	}
+	return power == cpugov.PowerBattery, nil
 }
 
 // publishOwnership publishes the two advertisements of a daemon that owns

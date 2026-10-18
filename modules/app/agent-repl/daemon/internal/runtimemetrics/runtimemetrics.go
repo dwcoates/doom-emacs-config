@@ -10,8 +10,10 @@ package runtimemetrics
 
 import (
 	"fmt"
+	"os"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/procmetrics"
 
 	"agentrepl/logging/metrics"
 
@@ -82,4 +84,23 @@ func (s *Surface) Close() {
 	if err := s.srv.Close(); err != nil {
 		s.log.Error(Operation, "the metrics surface did not stop cleanly", dlog.Context{"error": err.Error()})
 	}
+}
+
+// RegisterProcesses registers the process and host collector
+// (procmetrics) for this daemon, whose shims listen in sockDir and whose
+// state root is on diskPath's volume. The off surface registers nothing.
+func (s *Surface) RegisterProcesses(reader procmetrics.Reader, sockDir, diskPath string, onBattery func() (bool, error)) error {
+	if s == nil {
+		return nil
+	}
+	c, err := procmetrics.New(procmetrics.Deps{
+		Reader: reader, Self: os.Getpid(), SockDir: sockDir, DiskPath: diskPath, OnBattery: onBattery, Log: s.log,
+	})
+	if err != nil {
+		return fmt.Errorf("runtimemetrics: %w", err)
+	}
+	if err := s.srv.Registry().Register(c); err != nil {
+		return fmt.Errorf("runtimemetrics: register the process collector: %w", err)
+	}
+	return nil
 }
