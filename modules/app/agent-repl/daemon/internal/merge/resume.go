@@ -57,7 +57,7 @@ func (o *orchestrator) register(r *run) {
 // prompt with nothing to release it.
 func (o *orchestrator) startResumed(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, doc progressDoc) (*run, error) {
 	runCtx, cancel := context.WithCancelCause(ctx)
-	r := o.newRun(runCtx, cancel, repo, ws)
+	r := o.newRun(runCtx, cancel, repo, ws, doc.QueuedMS)
 	return r, o.resumeInto(runCtx, r, doc)
 }
 
@@ -68,7 +68,7 @@ func (o *orchestrator) resumeInto(runCtx context.Context, r *run, doc progressDo
 	r.mu.Lock()
 	r.lease, r.resume = lease, &doc
 	r.mu.Unlock()
-	r.startedMS, r.queuedMS = doc.StartedMS, doc.QueuedMS
+	r.startedMS = doc.StartedMS
 	r.restoreFrom(doc)
 	o.register(r)
 	switch {

@@ -1280,7 +1280,7 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 			h.o.window = 4
 			var chain []*run
 			for _, ws := range tc.chain {
-				r := h.o.newRun(ctx, cancel, h.repoKey(), ws)
+				r := h.o.newRun(ctx, cancel, h.repoKey(), ws, 1)
 				r.joined, r.leftLine = true, ws == tc.leftLine
 				chain = append(chain, r)
 			}

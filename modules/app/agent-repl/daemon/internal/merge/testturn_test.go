@@ -33,7 +33,7 @@ func (w *turnWorld) run(ws ids.WorkspaceID, name string) *run {
 	w.h.register(ws, name)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	w.h.t.Cleanup(func() { cancel(nil) })
-	return w.h.o.newRun(ctx, cancel, w.h.repoKey(), ws)
+	return w.h.o.newRun(ctx, cancel, w.h.repoKey(), ws, 1)
 }
 
 // round is a tests round of r's for the wait to draw on.

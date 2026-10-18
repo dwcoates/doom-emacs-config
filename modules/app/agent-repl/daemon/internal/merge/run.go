@@ -548,17 +548,21 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	displaces := o.displaces[ws]
 	delete(o.displaces, ws)
 	o.mu.Unlock()
-	r := o.newRun(runCtx, cancel, repo, ws)
+	r := o.newRun(runCtx, cancel, repo, ws, entry.EnqueuedAt.UnixMilli())
 	r.source, r.job, r.lease, r.displaces = entry.Source, job, lease, displaces
-	r.startedMS, r.queuedMS = o.deps.Now().UnixMilli(), entry.EnqueuedAt.UnixMilli()
+	r.startedMS = o.deps.Now().UnixMilli()
 	return r, r.admit(runCtx)
 }
 
 // newRun builds one run of a workspace's merge, with nothing about it read
-// yet: the shape a fresh admission, a resume and a speculative start share.
-func (o *orchestrator) newRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID) *run {
+// yet but QUEUEDMS, when it was queued: the shape a fresh admission, a resume,
+// a speculative start and a waiting member's rebase share. The queue instant
+// is the constructor's to take, so no run publishes a merge counted from the
+// epoch (checkQueuedAt): a waiting member's rebase once built its run without
+// one.
+func (o *orchestrator) newRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
 	return &run{
-		o: o, ws: ws, repo: repo,
+		o: o, ws: ws, repo: repo, queuedMS: queuedMS,
 		ctx: ctx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}),
 		rounds:     map[string]int{},
 		openRounds: map[string]tabRound{},

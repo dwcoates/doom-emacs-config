@@ -83,6 +83,51 @@ func TestALandingRebasesEveryWaitingMergeOntoTheNewTip(t *testing.T) {
 	w.finish(t)
 }
 
+func TestAWaitingMergesRebaseIsCountedFromWhenItWasQueued(t *testing.T) {
+	// Arrange
+	w := newWaitingWorld(t, "ws-c")
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	w.h.footer.mu.Lock()
+	var told int
+	for i, facts := range w.h.footer.facts {
+		if w.h.footer.told[i] != "ws-c" || (facts.State != StateQueued && facts.State != StateMerging) {
+			continue
+		}
+		told++
+		if facts.QueuedAt.UnixMilli() <= 0 {
+			t.Errorf("ws-c was told %s at step %s with no queue instant", facts.State, facts.Step)
+		}
+	}
+	w.h.footer.mu.Unlock()
+	if told == 0 {
+		t.Fatal("ws-c's footer was told no merge in line or in flight")
+	}
+	w.finish(t)
+}
+
+func TestAWaitingMergeWithNoQueueInstantIsNotRebasedAndSaysSo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	entry := wsm.MergeQueueEntry{Workspace: "ws-c", Repo: h.repoKey(), State: wsm.MergeQueued}
+
+	// Act
+	h.o.rebaseWaitingMember(context.Background(), h.repoKey(), entry)
+
+	// Assert
+	rec, ok := h.recordFor("error", "daemon.merge.rebase_waiting")
+	if !ok || rec.Context["workspace"] != "ws-c" || rec.Context["error"] == nil {
+		t.Fatalf("records = %+v, want the waiting merge's missing queue instant at ERROR", h.logs.Records())
+	}
+	if h.footer.toldTo("ws-c") {
+		t.Fatal("ws-c's footer was told a merge whose rebase never started")
+	}
+}
+
 func TestWaitingMergesAreRebasedOneAtATimeInQueueOrder(t *testing.T) {
 	// Arrange
 	w := newWaitingWorld(t, "ws-c", "ws-d")
