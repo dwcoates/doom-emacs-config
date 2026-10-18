@@ -714,6 +714,9 @@ var gateWaitingOrigins = []conversationv1.PromptOrigin{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
 }
 
 // gateWaitingSubmission is a deferred submission of ORIGIN.
@@ -786,6 +789,11 @@ func TestWhichPromptsWaitOutAColdGate(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED, false},
