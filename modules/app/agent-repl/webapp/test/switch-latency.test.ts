@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ReportedLatencyKind } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
 import { createPresence, type PresenceSource } from "../src/presence.js";
 import { watchPageBoot, watchSwitchLatency, type SwitchLatencyEnv } from "../src/switch-latency.js";
+import { frameQueue, type FrameQueue } from "./frame-queue.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
 /** An environment whose clocks, frames and drawn mark a test drives. */
@@ -13,14 +14,12 @@ class FakeEnv implements SwitchLatencyEnv {
   wall = 0;
   mono = 0;
   isDrawn = false;
-  private frames: (() => void)[] = [];
+  private readonly frames: FrameQueue = frameQueue();
   private drawnWaiters = new Set<() => void>();
 
   readonly wallNow = (): number => this.wall;
   readonly monoNow = (): number => this.mono;
-  readonly frame = (fn: () => void): void => {
-    this.frames.push(fn);
-  };
+  readonly frame = (fn: () => void): void => this.frames.frame(fn);
   readonly drawn = (): boolean => this.isDrawn;
   readonly onDrawn = (fn: () => void): (() => void) => {
     if (this.isDrawn) {
@@ -31,11 +30,9 @@ class FakeEnv implements SwitchLatencyEnv {
     return () => this.drawnWaiters.delete(fn);
   };
 
-  /** Run every animation frame queued so far. */
+  /** Start one animation frame. */
   runFrames(): void {
-    const due = this.frames;
-    this.frames = [];
-    for (const fn of due) fn();
+    this.frames.run();
   }
 
   /** The page draws its conversation. */
