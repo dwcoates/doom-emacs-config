@@ -147,6 +147,13 @@ type Deps struct {
 	// attached page stream serves which workspace, and which has drawn
 	// (internal/opentabs).
 	Opens Opens
+	// StallBeat watches the webhost's main-thread stalls for WebKit's
+	// memory-pressure beat, raising sustained memory pressure as an error
+	// (internal/stallbeat).
+	StallBeat StallBeat
+	// Pages raises a replaced page that goes on subscribing: an unloaded
+	// page's script still running (internal/pagesupersede).
+	Pages SupersededPages
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -437,6 +444,10 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the editor instance tracker")
 	case deps.Opens == nil:
 		return nil, missing("the editor's opens")
+	case deps.StallBeat == nil:
+		return nil, missing("the stall beat detector")
+	case deps.Pages == nil:
+		return nil, missing("the superseded-page tracker")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:

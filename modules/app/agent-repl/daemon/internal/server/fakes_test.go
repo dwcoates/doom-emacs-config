@@ -1468,7 +1468,11 @@ type harness struct {
 	ClassifierPrompt *fakeClassifierPrompt
 	EditorInstances  *fakeEditorInstances
 	// Opens is the REAL OpenTabs coordinator over the fakes in OpenWorld.
-	Opens       *opentabs.Coordinator
+	Opens *opentabs.Coordinator
+	// StallBeat and Pages record what the server hands its two web-process
+	// detectors.
+	StallBeat   *fakeStallBeat
+	Pages       *fakeSupersededPages
 	OpenWorld   *fakeOpenWorld
 	ChessBoards *fakeChessSquares
 	// SlashCommands is the real catalog table, which a test feeds directly.
@@ -1554,6 +1558,8 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
 		SlashCommands:    commandcatalog.New(),
+		StallBeat:        &fakeStallBeat{},
+		Pages:            &fakeSupersededPages{},
 	}
 
 	opens, err := opentabs.New(h.OpenWorld.deps())
@@ -1591,6 +1597,8 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ClassifierPrompt:  h.ClassifierPrompt,
 		EditorInstances:   h.EditorInstances,
 		Opens:             h.Opens,
+		StallBeat:         h.StallBeat,
+		Pages:             h.Pages,
 		WebappDist:        dist,
 		ImageOrigin:       http.NotFoundHandler(),
 		ChessBoards:       h.ChessBoards,
@@ -1919,4 +1927,50 @@ func (h *harness) withoutDep(strip func(*Deps)) Deps {
 	deps := h.Deps
 	strip(&deps)
 	return deps
+}
+
+// fakeStallBeat records every stall the server observes.
+type fakeStallBeat struct {
+	mu       sync.Mutex
+	observed []observedStall
+}
+
+type observedStall struct {
+	at        time.Time
+	blockedMS int64
+}
+
+func (f *fakeStallBeat) Observe(at time.Time, blockedMS int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.observed = append(f.observed, observedStall{at: at, blockedMS: blockedMS})
+}
+
+func (f *fakeStallBeat) stalls() []observedStall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]observedStall(nil), f.observed...)
+}
+
+// fakeSupersededPages records every page the server reports serving a workspace.
+type fakeSupersededPages struct {
+	mu     sync.Mutex
+	served []servedPage
+}
+
+type servedPage struct {
+	page string
+	ws   ids.WorkspaceID
+}
+
+func (f *fakeSupersededPages) Served(page string, ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.served = append(f.served, servedPage{page: page, ws: ws})
+}
+
+func (f *fakeSupersededPages) pages() []servedPage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]servedPage(nil), f.served...)
 }

@@ -278,6 +278,7 @@ func (s *server) ClientLog(
 		if err := s.deps.Log.CentralClientLog(clientRecord(clientKind, record)); err != nil {
 			return nil, fail(s.log, rpc, fmt.Errorf("persist a webhost client record: %w", err))
 		}
+		s.observeWebhostStall(record)
 		resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 		return connect.NewResponse(resp), nil
 	}

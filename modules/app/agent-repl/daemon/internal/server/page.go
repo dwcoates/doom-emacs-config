@@ -279,6 +279,7 @@ func (s *server) SubscribePage(
 			// means.
 			if servesWorkspace {
 				s.deps.Opens.PageServes(page.id, served)
+				s.deps.Pages.Served(page.id, served)
 			}
 			close(accepted)
 		})
