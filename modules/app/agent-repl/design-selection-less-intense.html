@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>agent-repl: the selection a touch less intense</title>
+<script>
+// ===================== OPTIONS (edited by the agent on request) =====================
+// Each option takes BOTH selection markers down together, by the same small step:
+//   the Emacs tab bar's selected tab grey (agent-repl--color-selected-bg, #c0c0c0 today),
+//   the sidebar's selected row fill (--card mixed toward the rail, 75% today), and
+//   its gutter bar (--muted #898782 today, mixed toward the rail).
+const OPTIONS = [
+  { name: "Today",                 tab: "#c0c0c0", fill: 75, gutter: 100 },
+  { name: "A touch less",          tab: "#b3b3b1", fill: 65, gutter: 88 },
+  { name: "Less",                  tab: "#a7a7a5", fill: 55, gutter: 76 },
+  { name: "Less still",            tab: "#9b9b99", fill: 45, gutter: 64 },
+];
+// =====================================================================================
+</script>
+<style>
+  body { margin:0; background:#000; color:#ddd; font:13px -apple-system,system-ui,sans-serif; padding:20px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 4px; }
+  p { color:#888; margin:0 0 16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:18px; }
+  h2 { font-size:13px; margin:0 0 2px; }
+  .hex { color:#888; font:11px ui-monospace,Menlo,monospace; margin-bottom:6px; }
+  .stage { background:#151514; padding:10px; border-radius:10px; display:flex; flex-direction:column; gap:10px; }
+  .tabs { display:flex; gap:0; background:#161719; padding:4px 2px; border-radius:6px; flex-wrap:wrap; font:12px Menlo,monospace; font-weight:bold; }
+  .tab { padding:3px 0; margin-right:8px; }
+  .tab .b { padding:0 2px; }
+  .tab .sp { padding:0 3px; }
+  .tab .nm { padding:0 3px 0 0; }
+  aside { background:#111110; border-radius:8px; padding:4px 0; color:#f1efe9; }
+  .row { display:flex; align-items:center; gap:7px; padding:5px 11px 5px 14px; border-left:3px solid transparent; }
+  .row:hover { background:#232322; }
+  .row .n { color:#898782; width:1em; font-size:12px; }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .row.cur { background:var(--fill); border-left-color:var(--gutter); }
+</style>
+<h1>The selection, a touch less intense</h1>
+<p>Each option lowers the Emacs tab bar's selected tab and the sidebar's selected row (fill and gutter bar) together, by one small step. Hover a sidebar row for the hover color.</p>
+<div class="grid" id="grid"></div>
+<script>
+const GREEN = "#318c2f", RED = "#c44746", PURPLE = "#9f74f4";
+const grid = document.getElementById("grid");
+for (const o of OPTIONS) {
+  const fill = `color-mix(in srgb, #232322 ${o.fill}%, #111110)`;
+  const gutter = `color-mix(in srgb, #898782 ${o.gutter}%, #111110)`;
+  const tab = (n, name, bg, fg, sel) => `<span class="tab"><span class="b" style="background:${sel ? o.tab : bg};color:${sel ? "#000" : fg}">[${n}]</span><span class="sp"> </span><span class="nm" style="background:${sel ? o.tab : bg};color:${sel ? "#000" : fg};${sel ? "text-decoration:underline" : ""}">${name}</span></span>`;
+  const cell = document.createElement("div");
+  cell.style.setProperty("--fill", fill);
+  cell.style.setProperty("--gutter", gutter);
+  cell.innerHTML = `<h2>${o.name}</h2>
+    <div class="hex">tab ${o.tab} · row fill ${o.fill}% --card · gutter ${o.gutter}% --muted</div>
+    <div class="stage">
+      <div class="tabs">${tab(1, "queen-model", GREEN, "#000", false)}${tab(2, "dark-theme-brown-palette", "", "", true)}${tab(3, "footer-tiers", RED, "#fff", false)}${tab(4, "land-palette", PURPLE, "#000", false)}</div>
+      <aside>
+        <div class="row"><span class="n">1</span><span class="dot" style="background:${GREEN}"></span>queen-model</div>
+        <div class="row cur"><span class="n">2</span><span class="dot" style="background:${GREEN}"></span>dark-theme-brown-palette</div>
+        <div class="row"><span class="n">3</span><span class="dot" style="background:${RED}"></span>footer-tiers</div>
+        <div class="row"><span class="n">4</span><span class="dot" style="background:${PURPLE}"></span>land-palette</div>
+      </aside>
+    </div>`;
+  grid.append(cell);
+}
+</script>
