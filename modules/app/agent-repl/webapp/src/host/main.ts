@@ -23,6 +23,7 @@
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createHost, hostHasFocus, type Host } from "./host.js";
 import { WEBHOST_SIDEBAR_ID, startWebhostSidebar } from "./sidebar.js";
+import { installColorValues } from "../vocab.js";
 import "./host.css";
 
 /** A call Emacs made before the host started, queued on the page. */
@@ -52,6 +53,11 @@ export interface StartHostDeps {
 export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}): Host {
   doc.body.replaceChildren();
   doc.documentElement.classList.add(HOST_ROOT_CLASS);
+  // THE STATUS COLORS' VALUES come from the shared vocabulary, never from
+  // styles.css, and the webhost draws the sidebar every status dot is in: a
+  // host that did not install them drew every dot in the text's off-white
+  // (2026-10-17, the pastel landing).
+  installColorValues(doc);
   // THE SIDEBAR OVER THE PAGES: one nav, drawn over every page's reserved
   // sidebar column (host/sidebar.ts), and the stack of workspace pages under it.
   const nav = doc.createElement("nav");
