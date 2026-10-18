@@ -47,7 +47,7 @@ import { applyFeedTextScale } from "./feed-text-scale.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
-import { watchStream, type StreamHandle } from "../rpc/streams.js";
+import { DEFAULT_BACKOFF_INITIAL_MS, DEFAULT_BACKOFF_MAX_MS, watchStream, type StreamHandle } from "../rpc/streams.js";
 import type { AgentReplClient } from "../rpc/client.js";
 import {
   OpenFeedResponseSchema,
@@ -252,6 +252,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   let composer: Handle | null = null;
   let opening: Promise<boolean> | null = null;
   let disposed = false;
+  // AN OPEN THAT NEVER REACHED THE DAEMON IS TRIED AGAIN, on the shared
+  // stream backoff and at once when the page's link comes back, for as long as
+  // the bubble is wanted open. A pinned merge bubble takes no click, so
+  // without this a transport blip during a daemon handover left its head
+  // saying "the daemon could not be reached" for good (2026-10-17).
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryMs = DEFAULT_BACKOFF_INITIAL_MS;
+  const stopRetryOnRestore = opts.ctx.onLinkRestored(() => retryOpenNow());
   // The overlay drawn now, the key it was drawn for, and whether an answer
   // closed it ahead of the push that retires its question.
   let overlayKey: string | undefined;
@@ -551,8 +559,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       );
     } catch {
       drawRefusal("transport", "the daemon could not be reached");
+      scheduleOpenRetry();
       return false;
     }
+    // THE DAEMON ANSWERED, so whatever the last failed attempt said about
+    // reaching it no longer stands.
+    clearRefusal();
+    cancelOpenRetry();
+    retryMs = DEFAULT_BACKOFF_INITIAL_MS;
     const result = requireCase(response.result, "OpenFeedResponse.result");
     switch (result.case) {
       case "success": {
@@ -771,9 +785,44 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     for (const stale of queryAll(headLine, ".refusal")) stale.remove();
   }
 
+  /** Try the failed open again after the backoff, unless one is already due. */
+  function scheduleOpenRetry(): void {
+    if (disposed || !wantOpen || retryTimer !== null) return;
+    const delay = retryMs;
+    retryMs = Math.min(retryMs * 2, DEFAULT_BACKOFF_MAX_MS);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      retryOpen("backoff", delay);
+    }, delay);
+  }
+
+  /** The link came back: a retry that is due runs now. */
+  function retryOpenNow(): void {
+    if (retryTimer === null) return;
+    cancelOpenRetry();
+    retryOpen("link_restored", 0);
+  }
+
+  function retryOpen(cause: string, delayMs: number): void {
+    if (disposed || !wantOpen || expanded) return;
+    log.info("re-trying a bubble's open that never reached the daemon", {
+      operation: "feed.bubble-open-retry",
+      context: { row: id.value, cause, delay_ms: delayMs },
+    });
+    void expand();
+  }
+
+  function cancelOpenRetry(): void {
+    if (retryTimer === null) return;
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    cancelOpenRetry();
+    stopRetryOnRestore();
     watch?.cancel();
     composer?.dispose();
     child?.dispose();
