@@ -956,10 +956,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* A repository section's header takes its fold's grey rather than the
    --info-ws hue the task and merged headers keep. */
 #ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }
-/* A REPOSITORY'S NAME AND ITS COUNT READ A STEP SMALLER (owner request,
-   2026-10-17), the name still above the workspace names it heads; the count
-   scales with it (0.85em). */
+/* A REPOSITORY'S NAME, ITS COUNT AND ITS FOLD TRIANGLE READ A STEP SMALLER
+   (owner requests, 2026-10-17), the name still above the workspace names it
+   heads; the count scales with it (0.85em), and the triangle shrinks by the
+   name's own step (1.05rem x 0.7/0.75). */
 #ws-sidebar .repo.repo-section > .repo-head { font-size: 0.7rem; }
+#ws-sidebar .repo.repo-section > .repo-head .tri { font-size: 0.98rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
