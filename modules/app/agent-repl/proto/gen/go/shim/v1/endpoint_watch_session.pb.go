@@ -240,8 +240,12 @@ type ShimMeasurements struct {
 	// When this shim process started counting, Unix milliseconds. The same in
 	// every frame of one process's lifetime.
 	CountedSinceUnixMs int64 `protobuf:"varint,1,opt,name=counted_since_unix_ms,json=countedSinceUnixMs,proto3" json:"counted_since_unix_ms,omitempty"`
-	// Bytes exchanged with the vendor API since `counted_since_unix_ms`.
-	VendorTraffic *ShimVendorTraffic `protobuf:"bytes,2,opt,name=vendor_traffic,json=vendorTraffic,proto3" json:"vendor_traffic,omitempty"`
+	// Bytes exchanged with the vendor API since `counted_since_unix_ms`. UNSET
+	// when this shim cannot count them: the vendor's HTTP is made by the
+	// agent SDK's own child process, outside the shim, so a shim sets this only
+	// where it carries that traffic itself. The daemon publishes no traffic
+	// series for a workspace whose shim leaves it unset, rather than a zero.
+	VendorTraffic *ShimVendorTraffic `protobuf:"bytes,2,opt,name=vendor_traffic,json=vendorTraffic,proto3,oneof" json:"vendor_traffic,omitempty"`
 	// One cumulative histogram per shim-measured latency kind, each kind at
 	// most once. A kind with no observation yet is absent.
 	Latencies     []*ShimLatencyHistogram `protobuf:"bytes,3,rep,name=latencies,proto3" json:"latencies,omitempty"`
@@ -300,10 +304,10 @@ func (x *ShimMeasurements) GetLatencies() []*ShimLatencyHistogram {
 	return nil
 }
 
-// The shim's traffic with the vendor API, counted in memory at the shim's
-// own HTTP layer: request and response bodies and headers as the shim sends
-// and receives them. It is the vendor traffic of this workspace's session;
-// traffic of processes the agent runs is not in it.
+// The shim's traffic with the vendor API, counted in memory where the shim
+// carries it: request and response bytes as they pass. It is the vendor
+// traffic of this workspace's session; traffic of processes the agent runs is
+// not in it.
 type ShimVendorTraffic struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Bytes sent to the vendor since the counting instant.
@@ -501,11 +505,12 @@ const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\x06update\x12J\n" +
 	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStarted\x12?\n" +
 	"\fmeasurements\x18\x03 \x01(\v2\x19.shim.v1.ShimMeasurementsH\x00R\fmeasurementsB\a\n" +
-	"\x05frame\"\xc5\x01\n" +
+	"\x05frame\"\xdd\x01\n" +
 	"\x10ShimMeasurements\x121\n" +
-	"\x15counted_since_unix_ms\x18\x01 \x01(\x03R\x12countedSinceUnixMs\x12A\n" +
-	"\x0evendor_traffic\x18\x02 \x01(\v2\x1a.shim.v1.ShimVendorTrafficR\rvendorTraffic\x12;\n" +
-	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatencies\"Y\n" +
+	"\x15counted_since_unix_ms\x18\x01 \x01(\x03R\x12countedSinceUnixMs\x12F\n" +
+	"\x0evendor_traffic\x18\x02 \x01(\v2\x1a.shim.v1.ShimVendorTrafficH\x00R\rvendorTraffic\x88\x01\x01\x12;\n" +
+	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatenciesB\x11\n" +
+	"\x0f_vendor_traffic\"Y\n" +
 	"\x11ShimVendorTraffic\x12\x1d\n" +
 	"\n" +
 	"bytes_sent\x18\x01 \x01(\x04R\tbytesSent\x12%\n" +
@@ -573,6 +578,7 @@ func file_shim_v1_endpoint_watch_session_proto_init() {
 		(*WatchSessionResponse_SessionStarted)(nil),
 		(*WatchSessionResponse_Measurements)(nil),
 	}
+	file_shim_v1_endpoint_watch_session_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

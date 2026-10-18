@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_session.proto.
  */
 export const file_shim_v1_endpoint_watch_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSKXAQoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSMgoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljEjAKCWxhdGVuY2llcxgDIAMoCzIdLnNoaW0udjEuU2hpbUxhdGVuY3lIaXN0b2dyYW0iPwoRU2hpbVZlbmRvclRyYWZmaWMSEgoKYnl0ZXNfc2VudBgBIAEoBBIWCg5ieXRlc19yZWNlaXZlZBgCIAEoBCKPAQoUU2hpbUxhdGVuY3lIaXN0b2dyYW0SJgoEa2luZBgBIAEoDjIYLnNoaW0udjEuU2hpbUxhdGVuY3lLaW5kEisKB2J1Y2tldHMYAiADKAsyGi5zaGltLnYxLlNoaW1MYXRlbmN5QnVja2V0Eg0KBWNvdW50GAMgASgEEhMKC3N1bV9zZWNvbmRzGAQgASgBIkoKEVNoaW1MYXRlbmN5QnVja2V0EhsKE3VwcGVyX2JvdW5kX3NlY29uZHMYASABKAESGAoQY3VtdWxhdGl2ZV9jb3VudBgCIAEoBCpYCg9TaGltTGF0ZW5jeUtpbmQSIQodU0hJTV9MQVRFTkNZX0tJTkRfVU5TUEVDSUZJRUQQABIiCh5TSElNX0xBVEVOQ1lfS0lORF9GSVJTVF9PVVRQVVQQAUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSKvAQoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSNwoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljSACIAQESMAoJbGF0ZW5jaWVzGAMgAygLMh0uc2hpbS52MS5TaGltTGF0ZW5jeUhpc3RvZ3JhbUIRCg9fdmVuZG9yX3RyYWZmaWMiPwoRU2hpbVZlbmRvclRyYWZmaWMSEgoKYnl0ZXNfc2VudBgBIAEoBBIWCg5ieXRlc19yZWNlaXZlZBgCIAEoBCKPAQoUU2hpbUxhdGVuY3lIaXN0b2dyYW0SJgoEa2luZBgBIAEoDjIYLnNoaW0udjEuU2hpbUxhdGVuY3lLaW5kEisKB2J1Y2tldHMYAiADKAsyGi5zaGltLnYxLlNoaW1MYXRlbmN5QnVja2V0Eg0KBWNvdW50GAMgASgEEhMKC3N1bV9zZWNvbmRzGAQgASgBIkoKEVNoaW1MYXRlbmN5QnVja2V0EhsKE3VwcGVyX2JvdW5kX3NlY29uZHMYASABKAESGAoQY3VtdWxhdGl2ZV9jb3VudBgCIAEoBCpYCg9TaGltTGF0ZW5jeUtpbmQSIQodU0hJTV9MQVRFTkNZX0tJTkRfVU5TUEVDSUZJRUQQABIiCh5TSElNX0xBVEVOQ1lfS0lORF9GSVJTVF9PVVRQVVQQAUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
 
 /**
  * Nothing to say: the session is the connection's.
@@ -108,9 +108,13 @@ export type ShimMeasurements = Message<"shim.v1.ShimMeasurements"> & {
   countedSinceUnixMs: bigint;
 
   /**
-   * Bytes exchanged with the vendor API since `counted_since_unix_ms`.
+   * Bytes exchanged with the vendor API since `counted_since_unix_ms`. UNSET
+   * when this shim cannot count them: the vendor's HTTP is made by the
+   * agent SDK's own child process, outside the shim, so a shim sets this only
+   * where it carries that traffic itself. The daemon publishes no traffic
+   * series for a workspace whose shim leaves it unset, rather than a zero.
    *
-   * @generated from field: shim.v1.ShimVendorTraffic vendor_traffic = 2;
+   * @generated from field: optional shim.v1.ShimVendorTraffic vendor_traffic = 2;
    */
   vendorTraffic?: ShimVendorTraffic | undefined;
 
@@ -131,10 +135,10 @@ export const ShimMeasurementsSchema: GenMessage<ShimMeasurements> = /*@__PURE__*
   messageDesc(file_shim_v1_endpoint_watch_session, 2);
 
 /**
- * The shim's traffic with the vendor API, counted in memory at the shim's
- * own HTTP layer: request and response bodies and headers as the shim sends
- * and receives them. It is the vendor traffic of this workspace's session;
- * traffic of processes the agent runs is not in it.
+ * The shim's traffic with the vendor API, counted in memory where the shim
+ * carries it: request and response bytes as they pass. It is the vendor
+ * traffic of this workspace's session; traffic of processes the agent runs is
+ * not in it.
  *
  * @generated from message shim.v1.ShimVendorTraffic
  */

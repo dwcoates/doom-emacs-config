@@ -137,3 +137,24 @@ owner's delegation.
   Pairing in the daemon by prompt id would break the first principle.
 - What would close it: a feed-row element carrying the prompt's submit
   instant, after which the webapp measures and reports a `prompt_echo` kind.
+
+### 4. Vendor traffic is optional, and no shim sets it yet
+
+- What: `ShimMeasurements.vendor_traffic` is `optional`; unset means the
+  shim could not count the bytes, and the daemon then publishes no traffic
+  series for that workspace instead of a zero.
+- Why: verified in `agent-shim/claude/shim/src/sdk/real-query.ts` (code
+  tier): the shim drives the agent SDK, which spawns its own bundled `claude`
+  binary (`spawnClaudeCodeProcess`), and that child makes every vendor HTTP
+  request. The shim's Node process never carries the traffic, so it has
+  nothing to count in memory. Recording a zero would be a sentinel saying
+  "no traffic" when the truth is "not measured".
+- What would set it: either a byte-counting proxy in the shim that the child
+  is pointed at (`HTTPS_PROXY`), which puts a new mechanism on the vendor
+  path of every session, or per-process kernel network statistics, which are
+  ruled out by `docs/protobuf-design/drop-vendor-traffic.md`. Choosing the
+  proxy is the owner's call (`docs/METRICS-JUDGEMENT-CALLS.md`, call 6).
+- Correction kept visible: entry 2 above stated the shim counts vendor bytes
+  "in memory at its HTTP layer". That rested on a name-tier reading of
+  "shim drives the vendor" and was wrong; the code shows the child process
+  owns the HTTP.

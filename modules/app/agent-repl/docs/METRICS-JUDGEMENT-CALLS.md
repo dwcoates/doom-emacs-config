@@ -89,3 +89,22 @@ Each entry says what was decided, why, and what it departs from.
 - Not done on the owner's machine: installing VictoriaMetrics and loading the
   service. Both are outside the repository; `bin/requirements.sh install` (or
   `/install-agent-repl`) does them.
+
+## 6. Vendor bytes are not counted yet: the owner's call
+
+- The plan (step 7) and the owner's ruling put network counting in the shim.
+- Verified: the vendor HTTP is made by the agent SDK's bundled `claude`
+  child process (`agent-shim/claude/shim/src/sdk/real-query.ts`,
+  `spawnClaudeCodeProcess`), not by the shim's Node process, so the shim has
+  no bytes of its own to count.
+- The two ways to count them:
+  - a CONNECT proxy inside the shim that the child is pointed at through
+    `HTTPS_PROXY`, counting tunnel bytes in both directions without
+    decrypting. Accurate, userspace only, but every session's vendor traffic
+    would then depend on it: a defect in it takes every session down;
+  - per-process kernel network statistics, ruled out by the mbuf incident
+    (`docs/protobuf-design/drop-vendor-traffic.md`).
+- Decided for now: the contract's `vendor_traffic` is optional, no shim sets
+  it, and the daemon publishes no traffic series rather than a zero. The
+  proxy is a change to the vendor path of every session, so it waits for the
+  owner.

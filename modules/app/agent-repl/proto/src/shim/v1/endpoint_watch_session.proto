@@ -49,17 +49,21 @@ message ShimMeasurements {
   // When this shim process started counting, Unix milliseconds. The same in
   // every frame of one process's lifetime.
   int64 counted_since_unix_ms = 1;
-  // Bytes exchanged with the vendor API since `counted_since_unix_ms`.
-  ShimVendorTraffic vendor_traffic = 2;
+  // Bytes exchanged with the vendor API since `counted_since_unix_ms`. UNSET
+  // when this shim cannot count them: the vendor's HTTP is made by the
+  // agent SDK's own child process, outside the shim, so a shim sets this only
+  // where it carries that traffic itself. The daemon publishes no traffic
+  // series for a workspace whose shim leaves it unset, rather than a zero.
+  optional ShimVendorTraffic vendor_traffic = 2;
   // One cumulative histogram per shim-measured latency kind, each kind at
   // most once. A kind with no observation yet is absent.
   repeated ShimLatencyHistogram latencies = 3;
 }
 
-// The shim's traffic with the vendor API, counted in memory at the shim's
-// own HTTP layer: request and response bodies and headers as the shim sends
-// and receives them. It is the vendor traffic of this workspace's session;
-// traffic of processes the agent runs is not in it.
+// The shim's traffic with the vendor API, counted in memory where the shim
+// carries it: request and response bytes as they pass. It is the vendor
+// traffic of this workspace's session; traffic of processes the agent runs is
+// not in it.
 message ShimVendorTraffic {
   // Bytes sent to the vendor since the counting instant.
   uint64 bytes_sent = 1;

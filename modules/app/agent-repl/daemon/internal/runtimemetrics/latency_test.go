@@ -175,6 +175,23 @@ func TestShimFramesFold(t *testing.T) {
 	}
 }
 
+func TestAShimThatCountsNoTrafficPublishesNoTrafficSeries(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	m := frame(100, 0, 0, ones(1), 1, 1)
+	m.VendorTraffic = nil
+
+	// Act
+	s.FoldShimMeasurements("ws1", m)
+	body := scrape(t, s)
+
+	// Assert
+	if strings.Contains(body, VendorBytesSentName+"{") || strings.Contains(body, VendorBytesReceivedName+"{") {
+		t.Fatalf("an uncounted traffic was published:\n%s", body)
+	}
+	mustContain(t, body, `agentrepl_latency_seconds_count{latency="vendor_first_output",workspace="ws1"} 1`)
+}
+
 func TestAnInvalidShimFrameIsRefusedOncePerCause(t *testing.T) {
 	badBound := frame(100, 1, 1, ones(1), 1, 1)
 	badBound.Latencies[0].Buckets[0].UpperBoundSeconds = 0.25

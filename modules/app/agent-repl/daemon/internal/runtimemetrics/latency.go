@@ -84,10 +84,11 @@ type seriesKey struct {
 // shimRun is the last measurements frame folded for one workspace's shim,
 // within one counting run.
 type shimRun struct {
-	since    int64
-	sent     uint64
-	received uint64
-	hists    map[shimv1.ShimLatencyKind]*shimv1.ShimLatencyHistogram
+	since int64
+	// traffic is the run's last traffic figures, nil while the shim has not
+	// counted any.
+	traffic *shimv1.ShimVendorTraffic
+	hists   map[shimv1.ShimLatencyKind]*shimv1.ShimLatencyHistogram
 }
 
 // traffic is one workspace's folded vendor traffic.
@@ -182,19 +183,25 @@ func (l *latencies) foldShim(ws ids.WorkspaceID, m *shimv1.ShimMeasurements) {
 	if l.causes.Succeeded("shim:" + string(ws)) {
 		l.log.Info(Operation, "a shim's measurements are folded again", dlog.Context{"workspace_id": string(ws)})
 	}
-	t := l.traffic[ws]
-	if t == nil {
-		t = &traffic{}
-		l.traffic[ws] = t
-	}
-	vt := m.GetVendorTraffic()
-	run := &shimRun{since: m.GetCountedSinceUnixMs(), sent: vt.GetBytesSent(), received: vt.GetBytesReceived(), hists: map[shimv1.ShimLatencyKind]*shimv1.ShimLatencyHistogram{}}
-	if sameRun {
-		t.sent += float64(vt.GetBytesSent() - prev.sent)
-		t.received += float64(vt.GetBytesReceived() - prev.received)
-	} else {
-		t.sent += float64(vt.GetBytesSent())
-		t.received += float64(vt.GetBytesReceived())
+	run := &shimRun{since: m.GetCountedSinceUnixMs(), hists: map[shimv1.ShimLatencyKind]*shimv1.ShimLatencyHistogram{}}
+	if vt := m.GetVendorTraffic(); vt != nil {
+		// A shim that counts no traffic leaves it unset, and no series is
+		// published for it rather than a zero.
+		t := l.traffic[ws]
+		if t == nil {
+			t = &traffic{}
+			l.traffic[ws] = t
+		}
+		if sameRun && prev.traffic != nil {
+			t.sent += float64(vt.GetBytesSent() - prev.traffic.GetBytesSent())
+			t.received += float64(vt.GetBytesReceived() - prev.traffic.GetBytesReceived())
+		} else {
+			t.sent += float64(vt.GetBytesSent())
+			t.received += float64(vt.GetBytesReceived())
+		}
+		run.traffic = vt
+	} else if sameRun {
+		run.traffic = prev.traffic
 	}
 	for _, sh := range m.GetLatencies() {
 		kind := ShimKinds[sh.GetKind()]
@@ -273,9 +280,9 @@ func validateShim(m *shimv1.ShimMeasurements) error {
 // regressed answers an error when any figure of m is below the same run's
 // last frame.
 func regressed(prev *shimRun, m *shimv1.ShimMeasurements) error {
-	vt := m.GetVendorTraffic()
-	if vt.GetBytesSent() < prev.sent || vt.GetBytesReceived() < prev.received {
-		return fmt.Errorf("vendor traffic went from %d/%d to %d/%d bytes", prev.sent, prev.received, vt.GetBytesSent(), vt.GetBytesReceived())
+	if vt, was := m.GetVendorTraffic(), prev.traffic; vt != nil && was != nil &&
+		(vt.GetBytesSent() < was.GetBytesSent() || vt.GetBytesReceived() < was.GetBytesReceived()) {
+		return fmt.Errorf("vendor traffic went from %d/%d to %d/%d bytes", was.GetBytesSent(), was.GetBytesReceived(), vt.GetBytesSent(), vt.GetBytesReceived())
 	}
 	for _, h := range m.GetLatencies() {
 		before := prev.hists[h.GetKind()]
