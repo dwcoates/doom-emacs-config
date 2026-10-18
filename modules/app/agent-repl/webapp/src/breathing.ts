@@ -256,7 +256,7 @@ export const PROMPT_WAVE_WORKING = "working";
  * it, which is one more thing to get wrong for no gain.
  */
 export function bubbleWaveStyle(nowMs: number = Date.now()): string {
-  return `animation-delay:-${Math.round(bubbleWave.delayMs(nowMs))}ms`;
+  return animationDelayStyle(bubbleWave.delayMs(nowMs));
 }
 
 /**

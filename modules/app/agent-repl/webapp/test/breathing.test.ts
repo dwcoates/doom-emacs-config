@@ -744,8 +744,9 @@ describe("StatusWave: the footer status word's slower colour sweep", () => {
   });
 });
 
-describe("statusColorStyle and statusWaveStyle: the status word's inline delays", () => {
+describe("bubbleWaveStyle, statusColorStyle and statusWaveStyle: the inline delays", () => {
   it.each([
+    ["the prompt bubble's wave", () => bubbleWaveStyle(NOW)],
     ["the colour sweep", () => statusColorStyle(NOW)],
     ["a letter's bulge", () => statusWaveStyle(3, NOW)],
   ])("renders %s as one whole-millisecond negative animation-delay", (_name, style) => {
