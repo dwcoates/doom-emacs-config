@@ -1,9 +1,10 @@
 /**
- * THE BAND FIT, IN WEBKIT (owner request, 2026-10-11).
+ * THE SECTION FIT, IN WEBKIT (owner requests, 2026-10-11 and 2026-10-18).
  *
- * Once the rail is out of room, Hidden Workspaces and Recently Merged are
- * scrolling viewports of at most six lines each, the one line short of both
- * going to Hidden Workspaces. jsdom lays nothing out, so this draws a rail in
+ * The rail never scrolls. Once it is out of room, the Open section lengthens
+ * until Hidden Workspaces and Recently Merged are left four lines each, the
+ * two sharing those eight lines and Recently Merged claiming only today's
+ * merges, and each section scrolls the rest. jsdom lays nothing out, so this draws a rail in
  * the shape the sidebar draws it, in real headless WebKit over the real
  * stylesheet, runs the REAL `fitBands` (src/sidebar/band-fit.ts, bundled), and
  * measures the viewports the engine draws.
@@ -17,9 +18,14 @@ import { bundlePage } from "./bundle";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-/** One rail row, as the sidebar draws its line. */
-function wsRow(id: string, merged: boolean): string {
-  return `<div class="ws${merged ? " receded" : ""}" data-roster-row="${id}"><div class="row"><span class="st st-ready tone-green" data-glyph="dot"></span><span class="name${merged ? " band-name" : ""}">${id}</span></div></div>`;
+/** A merge instant of today (local date) and one of a week ago, for a stamped row. */
+const TODAY = "today";
+const OLDER = "older";
+
+/** One rail row, as the sidebar draws its line; a merged one stamped with MERGED's instant. */
+function wsRow(id: string, merged: typeof TODAY | typeof OLDER | null): string {
+  const stamp = merged === null ? "" : ` data-merged-at="${merged === TODAY ? Date.now() : Date.now() - 7 * 86_400_000}"`;
+  return `<div class="ws${merged === null ? "" : " receded"}" data-roster-row="${id}"${stamp}><div class="row"><span class="st st-ready tone-green" data-glyph="dot"></span><span class="name${merged ? " band-name" : ""}">${id}</span></div></div>`;
 }
 
 /** One band's section around its rows region's INNER markup, drawn as roster.ts draws it. */
@@ -27,24 +33,33 @@ function bandSection(cls: string, label: string, count: number, inner: string): 
   return `<div class="repo ${cls}"><div class="repo-head"><span class="sb-label">${label}</span><span class="sb-count" data-section-count>(${count})</span></div><div class="rows">${inner}</div></div>`;
 }
 
-/** The Recently Merged band's rows region: MERGED rows dealt round-robin into GROUPS repository groups. */
-function mergedGroups(merged: number, groups: number): string {
+/** The Recently Merged band's rows region: MERGED rows, the first TODAY of them today's, dealt round-robin into GROUPS repository groups. */
+function mergedGroups(merged: number, today: number, groups: number): string {
   return Array.from({ length: groups }, (_, g) => {
     const rows = Array.from({ length: merged }, (_, i) => i)
       .filter((i) => i % groups === g)
-      .map((i) => wsRow(`merged-${i}`, true))
+      .map((i) => wsRow(`merged-${i}`, i < today ? TODAY : OLDER))
       .join("");
     return `<div class="merged-group" data-repository="repo-${g}" data-repository-collapsed="false"><div class="merged-group-head"><span class="sb-label">repo-${g}</span></div><div class="rows">${rows}</div></div>`;
   }).join("");
 }
 
-/** A rail HEIGHT px tall, under the rail's head: LIVE live rows above HIDDEN hidden and MERGED merged rows in GROUPS repository groups. */
-function rail(height: number, live: number, hidden: number, merged: number, groups = 1): string {
+/** What a rail is drawn with: its rows per section, how many merges are today's, and the merged groups. */
+interface Drawing {
+  live: number;
+  hidden: number;
+  merged: number;
+  today?: number;
+  groups?: number;
+}
+
+/** A rail HEIGHT px tall, under the rail's head, drawn as DRAWING says. */
+function rail(height: number, { live, hidden, merged, today = merged, groups = 1 }: Drawing): string {
   const ids = (prefix: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${prefix}-${i}`);
   return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster">
-<div class="sb-pane"><div class="sb-sections"><div class="repo"><div class="repo-head"><span class="sb-label">alpha</span></div><div class="rows">${ids("live", live).map((id) => wsRow(id, false)).join("")}</div></div></div>
-${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, false)).join(""))}
-${bandSection("merged-section", "Recently Merged", merged, mergedGroups(merged, groups))}
+<div class="sb-pane"><div class="repo open-section"><div class="repo-head"><span class="sb-label">Open</span></div><div class="sb-sections"><div class="repo repo-section"><div class="repo-head"><span class="sb-label">alpha</span></div><div class="rows">${ids("live", live).map((id) => wsRow(id, null)).join("")}</div></div></div></div>
+${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, null)).join(""))}
+${bandSection("merged-section", "Recently Merged", merged, mergedGroups(merged, today, groups))}
 </div></div></div></nav>`;
 }
 
@@ -61,6 +76,7 @@ interface Viewport {
 
 /** What one fitted rail measured. */
 interface Fitted {
+  open: Viewport;
   hidden: Viewport;
   merged: Viewport;
   railScrolls: boolean;
@@ -72,10 +88,9 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
     document.body.innerHTML = html;
     const scroller = document.querySelector(".sb-scroll") as HTMLElement;
     const pane = document.querySelector(".sb-pane") as HTMLElement;
-    const api = (window as unknown as { BandFit: { fitBands: (s: HTMLElement, p: HTMLElement) => unknown } }).BandFit;
-    api.fitBands(scroller, pane);
-    const measure = (cls: string): Viewport => {
-      const region = document.querySelector(`.${cls} > .rows`) as HTMLElement;
+    const api = (window as unknown as { BandFit: { fitBands: (s: HTMLElement, p: HTMLElement, nowMs: number) => unknown } }).BandFit;
+    api.fitBands(scroller, pane, Date.now());
+    const measure = (region: HTMLElement): Viewport => {
       const box = region.getBoundingClientRect();
       let whole = 0;
       let cut = 0;
@@ -85,16 +100,18 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
         else if (r.top < box.bottom - 0.5 && r.bottom > box.top + 0.5) cut += 1;
       }
       let danglingHead = false;
-      for (const head of region.querySelectorAll(".merged-group-head")) {
+      for (const head of region.querySelectorAll(".merged-group-head, .repo-section > .repo-head")) {
         const h = head.getBoundingClientRect();
         const next = head.parentElement?.querySelector(".row")?.getBoundingClientRect();
         if (h.top >= box.top - 0.5 && h.top < box.bottom - 0.5 && next !== undefined && next.bottom > box.bottom + 0.5) danglingHead = true;
       }
       return { whole, cut, danglingHead, scrolls: region.scrollHeight > region.clientHeight };
     };
+    const region = (selector: string): HTMLElement => document.querySelector(selector) as HTMLElement;
     return {
-      hidden: measure("hidden-section"),
-      merged: measure("merged-section"),
+      open: measure(region(".open-section > .sb-sections")),
+      hidden: measure(region(".hidden-section > .rows")),
+      merged: measure(region(".merged-section > .rows")),
       railScrolls: scroller.scrollHeight > scroller.clientHeight,
     };
   }, markup);
@@ -112,18 +129,18 @@ interface Refit {
  * Fit the bands of a rail of every height in HEIGHTS, twice each, and report
  * every height whose second fit drew other lines than its first or refused.
  */
-async function unsettled(page: Page, heights: number[], live: number, hidden: number, merged: number): Promise<Refit[]> {
-  const markups = heights.map((h) => [h, rail(h, live, hidden, merged)] as const);
+async function unsettled(page: Page, heights: number[], drawing: Drawing): Promise<Refit[]> {
+  const markups = heights.map((h) => [h, rail(h, drawing)] as const);
   return page.evaluate((cases) => {
-    const api = (window as unknown as { BandFit: { fitBands: (s: HTMLElement, p: HTMLElement) => unknown } }).BandFit;
+    const api = (window as unknown as { BandFit: { fitBands: (s: HTMLElement, p: HTMLElement, nowMs: number) => unknown } }).BandFit;
     const out: Refit[] = [];
     for (const [height, html] of cases) {
       document.body.innerHTML = html;
       const scroller = document.querySelector(".sb-scroll") as HTMLElement;
       const pane = document.querySelector(".sb-pane") as HTMLElement;
       try {
-        const first = JSON.stringify(api.fitBands(scroller, pane));
-        const second = JSON.stringify(api.fitBands(scroller, pane));
+        const first = JSON.stringify(api.fitBands(scroller, pane, Date.now()));
+        const second = JSON.stringify(api.fitBands(scroller, pane, Date.now()));
         if (first !== second) out.push({ height, first, second, refused: null });
       } catch (err) {
         out.push({ height, first: "", second: "", refused: String(err) });
@@ -162,57 +179,89 @@ describe("the band fit in WebKit", () => {
     await browser.close();
   });
 
-  it("shows six whole lines of each band in a rail out of room", async () => {
-    const got = await fit(page, rail(300, 30, 20, 20));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([6, 6]);
+  it("leaves each band four whole lines in a rail the Open section fills", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    expect([got.hidden.whole, got.merged.whole]).toEqual([4, 4]);
+  });
+
+  it("scrolls the Open section in a rail it fills", async () => {
+    const got = await fit(page, rail(800, { live: 40, hidden: 20, merged: 20 }));
+    expect([got.open.whole > 4, got.open.scrolls]).toEqual([true, true]);
+  });
+
+  it("never scrolls the rail itself", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    expect(got.railScrolls).toBe(false);
   });
 
   it("cuts no line through in a rail out of room", async () => {
-    const got = await fit(page, rail(300, 30, 20, 20));
-    expect([got.hidden.cut, got.merged.cut]).toEqual([0, 0]);
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    expect([got.open.cut, got.hidden.cut, got.merged.cut]).toEqual([0, 0, 0]);
   });
 
-  it("shows six whole merged lines across several repository groups", async () => {
-    const got = await fit(page, rail(300, 30, 20, 20, 3));
-    expect([got.merged.whole, got.merged.cut]).toEqual([6, 0]);
+  it("gives Hidden Workspaces seven lines beside one merge today", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 1 }));
+    expect([got.hidden.whole, got.merged.whole]).toEqual([7, 1]);
   });
 
-  it("never leaves a repository group's header dangling at the viewport's foot", async () => {
-    const got = await fit(page, rail(300, 30, 20, 20, 6));
-    expect(got.merged.danglingHead).toBe(false);
+  it("gives Hidden Workspaces six lines beside two merges today", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 2 }));
+    expect([got.hidden.whole, got.merged.whole]).toEqual([6, 2]);
+  });
+
+  it("shows no older merge while the Open section scrolls", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, today: 0 }));
+    expect([got.hidden.whole, got.merged.whole]).toEqual([8, 0]);
+  });
+
+  it("shows four whole merged lines across several repository groups", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 3 }));
+    expect([got.merged.whole, got.merged.cut]).toEqual([4, 0]);
+  });
+
+  it("never leaves a group's header dangling at a viewport's foot", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 6 }));
+    expect([got.open.danglingHead, got.merged.danglingHead]).toEqual([false, false]);
   });
 
   it("scrolls both bands in a rail out of room", async () => {
-    const got = await fit(page, rail(300, 30, 20, 20));
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
     expect([got.hidden.scrolls, got.merged.scrolls]).toEqual([true, true]);
   });
 
-  it("shows every line of both bands, unscrolled, in a rail that holds them", async () => {
-    const got = await fit(page, rail(880, 2, 4, 5));
-    expect([got.hidden.whole, got.hidden.scrolls, got.merged.whole, got.merged.scrolls]).toEqual([4, false, 5, false]);
+  it("shows every line of every section, unscrolled, in a rail that holds them", async () => {
+    const got = await fit(page, rail(880, { live: 2, hidden: 4, merged: 5 }));
+    expect([got.open.whole, got.open.scrolls, got.hidden.whole, got.hidden.scrolls, got.merged.whole, got.merged.scrolls]).toEqual([
+      2,
+      false,
+      4,
+      false,
+      5,
+      false,
+    ]);
   });
 
   it("keeps the rail's head its own height when the rows overflow", async () => {
-    const short = await railBoxes(page, rail(400, 1, 1, 1));
-    const overflowing = await railBoxes(page, rail(400, 40, 20, 20));
+    const short = await railBoxes(page, rail(400, { live: 1, hidden: 1, merged: 1 }));
+    const overflowing = await railBoxes(page, rail(400, { live: 40, hidden: 20, merged: 20 }));
     expect(overflowing.head).toBe(short.head);
   });
 
   it("gives the rail's scroller the same height however many rows it holds", async () => {
-    const short = await railBoxes(page, rail(400, 1, 1, 1));
-    const overflowing = await railBoxes(page, rail(400, 40, 20, 20));
+    const short = await railBoxes(page, rail(400, { live: 1, hidden: 1, merged: 1 }));
+    const overflowing = await railBoxes(page, rail(400, { live: 40, hidden: 20, merged: 20 }));
     expect(overflowing.scroller).toBe(short.scroller);
   });
 
   it("draws the same lines when a rail of any height is fitted again", async () => {
-    // Every pixel of rail height crosses every line boundary of both bands,
-    // the rail overflowing below the capped viewports and fitting above them.
-    const heights = Array.from({ length: 601 }, (_, i) => 200 + i);
-    expect(await unsettled(page, heights, 2, 9, 9)).toEqual([]);
+    // Every pixel of rail height crosses every line boundary of every
+    // section, from a rail too short for the bands' share to one holding all.
+    const heights = Array.from({ length: 701 }, (_, i) => 200 + i);
+    expect(await unsettled(page, heights, { live: 12, hidden: 9, merged: 9, today: 4 })).toEqual([]);
   });
 
-  it("grows the bands into a tall rail's spare room without scrolling it", async () => {
-    const got = await fit(page, rail(880, 2, 40, 40));
-    expect([got.hidden.whole > 6, got.merged.whole > 6, got.railScrolls]).toEqual([true, true, false]);
+  it("grows the bands into the room a whole Open section leaves", async () => {
+    const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40 }));
+    expect([got.hidden.whole > 4, got.merged.whole > 4, got.railScrolls]).toEqual([true, true, false]);
   });
 });

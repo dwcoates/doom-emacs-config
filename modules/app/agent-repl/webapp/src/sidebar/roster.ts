@@ -16,7 +16,14 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
-import { BAND_CAP, HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
+import {
+  BAND_FLOOR,
+  HIDDEN_SECTION_CLASS,
+  MERGED_AT_ATTRIBUTE,
+  MERGED_SECTION_CLASS,
+  OPEN_REGION_CLASS,
+  OPEN_SECTION_CLASS,
+} from "./band-fit.js";
 import {
   RosterHiddenSectionSchema,
   RosterMergedSectionSchema,
@@ -132,7 +139,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   roster.className = "sb-roster";
   // ONE COPY OF EVERY SECTION (owner ruling, 2026-10-15): the open workspaces
   // by repository, then the hidden workspaces, then the recently-merged band.
-  // The pane is the box band-fit.ts fits the two bands' viewports in.
+  // The pane is the box band-fit.ts fits the three sections' viewports in.
   const pane = document.createElement("div");
   pane.className = "sb-pane";
   roster.appendChild(pane);
@@ -227,7 +234,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         (a, b) => a.count === b.count && equals(RosterOpenSectionSchema, a.open, b.open),
         (scoped) => {
           const body = document.createElement("div");
-          body.className = "sb-sections";
+          body.className = OPEN_REGION_CLASS;
           return { element: drawRosterOpenSection(openWire, { body, openCount }, scoped, `${path}.open`), body };
         },
         discarded,
@@ -311,8 +318,8 @@ export function drawRosterOpenCount(u: RosterOpenCount, path: string): number {
   return u.workspaces;
 }
 
-/** The class of the open-workspaces section, and of its count. */
-export const OPEN_SECTION_CLASS = "open-section";
+/** The class of the open-workspaces section (`band-fit.ts` fits it), and of its count. */
+export { OPEN_SECTION_CLASS };
 export const OPEN_COUNT_CLASS = "sb-open-count";
 
 /**
@@ -550,8 +557,8 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
  *
  * EVERY MERGE THE DAEMON SENDS IS DRAWN (a week of them), under the daemon's
  * count of the shown groups' rows; once the band is laid out, `fitBands`
- * (band-fit.ts) sizes its scrolling viewport against the Hidden Workspaces
- * band's.
+ * (band-fit.ts) sizes its scrolling viewport against the Open section's and
+ * the Hidden Workspaces band's, its merges of today claiming room first.
  */
 export function drawRosterMergedSection(
   u: RosterMergedSection,
@@ -594,17 +601,17 @@ export function drawRosterMergedSection(
 /**
  * How many of the band's rows are drawn with the band; every later one is a
  * stand-in until it comes into view (`reveal.ts`, owner ruling 2026-10-15:
- * a row scrolled out of the band's viewport is not drawn). Twice the band's
- * capped viewport, so a band opened or fitted shows drawn rows at once.
+ * a row scrolled out of the band's viewport is not drawn). Twice the bands'
+ * whole share of the rail, so a band opened or fitted shows drawn rows at once.
  */
-export const MERGED_DRAWN_AT_ONCE = BAND_CAP * 2;
+export const MERGED_DRAWN_AT_ONCE = BAND_FLOOR * 4;
 
 /** The class of one repository's group inside the band, and of its header. */
 export const MERGED_GROUP_CLASS = "merged-group";
 export const MERGED_GROUP_HEAD_CLASS = "merged-group-head";
 
-/** The attribute a merged row states its merged instant (epoch ms) on. */
-export const MERGED_AT_ATTRIBUTE = "data-merged-at";
+/** The attribute a merged row states its merged instant (epoch ms) on (`band-fit.ts` reads it). */
+export { MERGED_AT_ATTRIBUTE };
 
 /** The attribute a group states whether its repository is collapsed on. */
 export const MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE = "data-repository-collapsed";
@@ -779,7 +786,8 @@ export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
  * nothing is a fold toggle onto nothing.
  *
  * ITS ROWS SCROLL once the rail is out of room: `fitBands` (band-fit.ts)
- * sizes its viewport against the Recently Merged band's.
+ * sizes its viewport against the Open section's and the Recently Merged
+ * band's.
  *
  * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceHidden`), rather
  * than selecting it: the push that follows moves it back into its groupings
