@@ -601,3 +601,27 @@ A site that hand-rolls `delete-process' on a subprocess orphans its children."
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
+
+;;;; ---- The color contract's one path ----
+
+(ert-deftest agent-repl-test-helpers-render-colors-path-names-the-checked-in-contract ()
+  "`agent-repl-test--render-colors-path' names a readable render-colors.json."
+  ;; Arrange / Act
+  (let ((path agent-repl-test--render-colors-path))
+    ;; Assert
+    (should (equal (file-name-nondirectory path) "render-colors.json"))
+    (should (file-readable-p path))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-spells-the-render-colors-path-itself ()
+  "Every suite reads render-colors.json through the one helper path."
+  ;; Arrange
+  (let ((spelled nil))
+    ;; Act
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`test-.*\\.el\\'"))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (when (re-search-forward "(expand-file-name \"[./]*proto/vocab/render-colors\\.json\"" nil t)
+          (unless (equal (file-name-nondirectory file) "test-helpers.el")
+            (push (file-name-nondirectory file) spelled)))))
+    ;; Assert
+    (should-not spelled)))
