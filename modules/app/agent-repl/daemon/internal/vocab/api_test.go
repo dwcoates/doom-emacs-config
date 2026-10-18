@@ -1111,6 +1111,18 @@ func TestEveryMarkSectionChecksItsMotionThroughCheckMotion(t *testing.T) {
 	}
 }
 
+func TestLoadRenderColorsReadsTheCompactionOrangePerTheme(t *testing.T) {
+	// Arrange / Act.
+	c := loadColors(t)
+
+	// Assert.
+	for _, theme := range ColorThemes {
+		if !hexColor.MatchString(c.ColorValues[theme]["orange"]) {
+			t.Errorf("color_values[%q][\"orange\"] = %q", theme, c.ColorValues[theme]["orange"])
+		}
+	}
+}
+
 func TestLoadRenderColorsReadsEachColorsOneValuePerTheme(t *testing.T) {
 	// Arrange / Act.
 	c := loadColors(t)
@@ -1134,6 +1146,7 @@ func TestLoadRenderColorsRefusesMalformedColorValues(t *testing.T) {
 		{"an extra theme", func(v map[string]any) { v["sepia"] = v["dark"] }},
 		{"a theme missing a color", func(v map[string]any) { delete(v["dark"].(map[string]any), "green") }},
 		{"a theme naming an unknown color", func(v map[string]any) { v["dark"].(map[string]any)["chartreuse"] = "#7fff00" }},
+		{"a theme missing an ink the other gives", func(v map[string]any) { delete(v["dark"].(map[string]any), "orange") }},
 		{"a value that is no hex", func(v map[string]any) { v["dark"].(map[string]any)["green"] = "green" }},
 		{"an uppercase hex value", func(v map[string]any) { v["dark"].(map[string]any)["green"] = "#5DD87C" }},
 	}

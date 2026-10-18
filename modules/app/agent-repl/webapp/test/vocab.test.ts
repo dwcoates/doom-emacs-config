@@ -19,6 +19,7 @@ import { rulesOf } from "./stylesheet.js";
 import {
   COLOR_THEMES,
   COLOR_TOKENS,
+  INK_TOKENS,
   colorValue,
   colorValuesStylesheet,
   installColorValues,
@@ -511,6 +512,30 @@ describe("color_values, each color's one value per theme", () => {
     expect(named).toEqual([...renderColors.colors].sort());
   });
 
+  it("names a token for exactly the glyph-only inks the file gives a value", () => {
+    // Arrange
+    const valued = Object.keys(renderColors.color_values.dark).filter((name) => !renderColors.colors.includes(name));
+
+    // Act
+    const named = Object.keys(INK_TOKENS).sort();
+
+    // Assert
+    expect(named).toEqual(valued.sort());
+  });
+
+  it.each(COLOR_THEMES)("defines the %s theme's compaction orange from the file", (theme) => {
+    // Arrange
+    const css = colorValuesStylesheet();
+    const darkAt = css.indexOf("@media (prefers-color-scheme: dark)");
+    const block = theme === "light" ? css.slice(0, darkAt) : css.slice(darkAt);
+
+    // Act
+    const declared = block.includes(`--compact-rule: ${colorValue(theme, "orange")};`);
+
+    // Assert
+    expect(declared).toBe(true);
+  });
+
   it.each(CASES)("reads the %s value of %s from the file", (theme, color) => {
     // Arrange
     const values: Record<string, Record<string, string>> = renderColors.color_values;
@@ -560,7 +585,7 @@ describe("color_values, each color's one value per theme", () => {
     ]);
   });
 
-  it.each(Object.values(COLOR_TOKENS))("leaves %s's value to the file: styles.css declares none", (token) => {
+  it.each([...Object.values(COLOR_TOKENS), ...Object.values(INK_TOKENS)])("leaves %s's value to the file: styles.css declares none", (token) => {
     // Arrange
     const declaration = new RegExp(`(?:^|;)\\s*${token}\\s*:`);
 

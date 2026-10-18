@@ -856,9 +856,11 @@ The workspace has an unseen notification.  The daemon sets
 CLEARS it when SelectWorkspace names the workspace, so an ordinary tab
 switch is the whole clearing act — no dedicated ack verb exists.")
 
-(defconst agent-repl--color-compaction-orange "#f97316"
+(defconst agent-repl--color-compaction-orange (agent-repl-status--color-value "orange")
   "The orange of the feed\='s compaction rule (`--compact-rule\=' in the
-webapp\='s dark theme), which a compacting turn\='s dot is inked with.")
+webapp\='s dark theme), which a compacting turn\='s dot is inked with.
+Its one value is render-colors.json\='s dark `orange\=' (owner ruling,
+2026-10-18), so the tab\='s dot and the webapp\='s orange are one color.")
 
 (defconst agent-repl--ink-by-name
   `(("red"    . ,agent-repl--color-thinking-red)

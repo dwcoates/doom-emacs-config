@@ -47,7 +47,9 @@ var FailureSides = []string{"machinery", "vendor", "client_local"}
 type RenderColors struct {
 	// ColorValues maps each theme ("light", "dark") to each color's #rrggbb
 	// value: the one value every renderer paints the color with (owner ruling,
-	// 2026-10-17). The daemon paints nothing, so it only validates them.
+	// 2026-10-17), and to the value of each glyph-only ink drawn in one
+	// (orange, owner ruling 2026-10-18). The daemon paints nothing, so it only
+	// validates them.
 	ColorValues map[string]map[string]string
 	// Colors is the closed set of color names.
 	Colors []string
@@ -204,7 +206,7 @@ var ColorThemes = []string{"light", "dark"}
 var hexColor = regexp.MustCompile(`^#[0-9a-f]{6}$`)
 
 // validateColorValues holds color_values to exactly ColorThemes, each giving
-// exactly the closed set of colors a lowercase #rrggbb value.
+// every color and the same glyph-only inks a lowercase #rrggbb value.
 func (c RenderColors) validateColorValues() error {
 	themes := make([]string, 0, len(c.ColorValues))
 	for theme := range c.ColorValues {
@@ -222,11 +224,34 @@ func (c RenderColors) validateColorValues() error {
 				return fmt.Errorf("color_values[%q][%q] = %q, which is not a lowercase #rrggbb value", theme, name, value)
 			}
 		}
-		if !sameSet(names, c.Colors) {
-			return fmt.Errorf("color_values[%q] names %v, not the colors %v", theme, names, c.Colors)
+		inks := make([]string, 0, len(names))
+		for _, name := range names {
+			if !contains(c.Colors, name) {
+				inks = append(inks, name)
+			}
+		}
+		if len(names)-len(inks) != len(c.Colors) {
+			return fmt.Errorf("color_values[%q] names %v, missing some of the colors %v", theme, names, c.Colors)
+		}
+		for _, ink := range inks {
+			if !contains(c.GlyphOnlyColors, ink) {
+				return fmt.Errorf("color_values[%q] names %q, which is neither a color nor a glyph-only ink", theme, ink)
+			}
+		}
+		if !sameSet(names, keysOf(c.ColorValues[ColorThemes[0]])) {
+			return fmt.Errorf("color_values[%q] names %v, not the same values as color_values[%q]", theme, names, ColorThemes[0])
 		}
 	}
 	return nil
+}
+
+// keysOf returns M's keys, in no order.
+func keysOf(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func (c RenderColors) validate() error {
