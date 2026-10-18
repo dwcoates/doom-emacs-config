@@ -1,46 +1,44 @@
 /**
- * selection-fade — the tab number of a row the user selects from the rail
- * fades quickly into white and, a second later, back to its own grey, once
- * per click (owner request, 2026-10-17).
+ * selection-fade — the tab number of the rail's highlighted row is white.
  *
- * THE ROW ITSELF STAYS STILL (owner request, 2026-10-18): the wash the row
- * once swelled in on a click is gone, and only its number answers the click.
+ * THE NUMBER RISES AND STAYS (owner request, 2026-10-18): when the highlight
+ * moves to a row, its tab number fades from its own grey into white over a
+ * second and stays white for as long as the row stays highlighted. The row
+ * the highlight left fades back to its grey, faster than the rise. The row
+ * itself stays still: the wash it once swelled in on a click is gone.
  *
- * EVERY CLICK FADES, even on the row already selected: the fade answers the
- * click, not the roster, so it is started where the rail's one select verb
- * runs (`row.ts` `selectWorkspace`) and never from `WorkspaceRoster.current`,
- * which a re-selection does not change.
+ * THE FADE FOLLOWS THE HIGHLIGHT, NOT THE CLICK: a selection made anywhere
+ * (a rail click, a tab chord in Emacs, the picker) moves the highlight, and a
+ * click on the row already highlighted moves nothing, so nothing fades. The
+ * highlight moves in two places, and both report here: a row drawn
+ * highlighted (`apply`), and the webhost showing a page ahead of the roster
+ * (`sidebar.ts` `markShown`, through `highlight`).
  *
- * THE FADE OUTLIVES THE ROW IT STARTED ON. A selection is answered by a
- * roster push, and the push redraws the rows whose wire changed (the
- * highlight moves), so the clicked element is usually replaced mid-fade; a
- * band return even moves the row to another section. The fade is therefore
- * the rail's, keyed by workspace id and stamped with its start instant, and
- * every drawn copy of the row joins it at the phase the clock says
- * (`apply`): a negative delay (`--selection-number-fade-delay`) seeks the
+ * THE FIRST HIGHLIGHT IS NOT A MOVE: the rail's first draw finds a row
+ * already highlighted, and its number is drawn white at once.
+ *
+ * A FADE OUTLIVES THE ROW IT STARTED ON. A switch is answered by a roster
+ * push, and the push redraws the rows whose wire changed (the highlight
+ * moved), so the element is usually replaced mid-fade; a band return even
+ * moves the row to another section. Each fade is therefore the rail's, keyed
+ * by workspace id and stamped with its start instant, and every drawn copy of
+ * the row joins it at the phase the clock says: a negative delay seeks the
  * fresh element's animation to the elapsed time, so a redraw continues the
- * fade rather than restarting it. Once every animation has run its length
- * the click is forgotten.
+ * fade rather than restarting it.
  *
- * EACH LENGTH LIVES HERE, ONCE: a row is handed each animation's length in
- * its duration property, which the stylesheet's animation reads.
+ * EACH LENGTH LIVES HERE, ONCE: a row is handed its animation's length in
+ * the animation's duration property, which the stylesheet's animation reads.
  */
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 
-/** How long the tab number's fade runs, in milliseconds: a quick rise to white, a second held, then the fall back. */
-export const SELECTION_NUMBER_FADE_MS = 1600;
+/** How long the highlighted row's number takes to rise into white, in milliseconds. */
+export const SELECTION_NUMBER_RISE_MS = 1000;
 
-/** The class a row whose tab number is fading carries. */
-export const SELECTION_NUMBER_FADE_CLASS = "selection-number-fade";
+/** How long the number of the row the highlight left takes to fall back to its grey, in milliseconds: faster than the rise. */
+export const SELECTION_NUMBER_FALL_MS = 200;
 
-/** The custom property a row is handed the number fade's length in. */
-export const SELECTION_NUMBER_FADE_DURATION_PROPERTY = "--selection-number-fade-duration";
-
-/** The custom property a row is handed the number fade's delay in: minus the time already faded. */
-export const SELECTION_NUMBER_FADE_DELAY_PROPERTY = "--selection-number-fade-delay";
-
-/** One animation a selection runs on the clicked row, seeked by the rail's clock. */
+/** One animation the number runs when the highlight moves, seeked by the rail's clock. */
 export interface SelectionAnimation {
   /** The class the row carries while the animation runs. */
   className: string;
@@ -52,76 +50,111 @@ export interface SelectionAnimation {
   ms: number;
 }
 
-/** Every animation one selection runs: the number's fade. */
-export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [
-  {
-    className: SELECTION_NUMBER_FADE_CLASS,
-    durationProperty: SELECTION_NUMBER_FADE_DURATION_PROPERTY,
-    delayProperty: SELECTION_NUMBER_FADE_DELAY_PROPERTY,
-    ms: SELECTION_NUMBER_FADE_MS,
-  },
-];
+/** The number's rise into white, on the row the highlight moved to. */
+export const SELECTION_NUMBER_RISE: SelectionAnimation = {
+  className: "selection-number-rise",
+  durationProperty: "--selection-number-rise-duration",
+  delayProperty: "--selection-number-rise-delay",
+  ms: SELECTION_NUMBER_RISE_MS,
+};
 
-/** How long a selection is remembered: until its longest animation has run. */
-const SELECTION_REMEMBERED_MS = Math.max(...SELECTION_ANIMATIONS.map((animation) => animation.ms));
+/** The number's fall back to its grey, on the row the highlight left. */
+export const SELECTION_NUMBER_FALL: SelectionAnimation = {
+  className: "selection-number-fall",
+  durationProperty: "--selection-number-fall-duration",
+  delayProperty: "--selection-number-fall-delay",
+  ms: SELECTION_NUMBER_FALL_MS,
+};
 
-/** The rail's selection fades. */
+/** Every animation a move of the highlight runs. */
+export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [SELECTION_NUMBER_RISE, SELECTION_NUMBER_FALL];
+
+/** The rail's number fades. */
 export interface SelectionFade {
-  /** Workspace ID was selected from the rail: fade every drawn copy of its row from now. */
-  start(id: string): void;
-  /** ROW was just drawn for workspace ID: join a fade still running for it. */
-  apply(id: string, row: HTMLElement): void;
+  /** The rail highlights workspace ID now: rise its number, fall the number of the row highlighted before. */
+  highlight(id: string): void;
+  /** ROW was just drawn for workspace ID, HIGHLIGHTED or not: follow the highlight, and join a fade still running for it. */
+  apply(id: string, row: HTMLElement, highlighted: boolean): void;
+}
+
+/** One running fade: which animation, and its start instant in epoch milliseconds. */
+interface Fade {
+  animation: SelectionAnimation;
+  start: number;
 }
 
 /**
- * The selection fades of the rail drawn under ROOT, on the wall clock NOW.
+ * The number fades of the rail drawn under ROOT, on the wall clock NOW.
  */
 export function createSelectionFade(root: ParentNode, now: () => number = () => Date.now()): SelectionFade {
-  /** Each fading workspace's start instant, in epoch milliseconds. */
-  const started = new Map<string, number>();
+  /** The highlighted workspace: undefined before the first highlight, null once the highlight left every row. */
+  let current: string | null | undefined;
+  /** Each workspace's running fade. */
+  const fades = new Map<string, Fade>();
 
-  /** How far into its fade workspace ID is, or null when it is not fading. */
-  const elapsedOf = (id: string): number | null => {
-    const start = started.get(id);
-    if (start === undefined) return null;
-    const elapsed = now() - start;
-    if (elapsed < SELECTION_REMEMBERED_MS) return elapsed;
-    started.delete(id);
+  /** Workspace ID's running fade and how far into it the clock is, or null when none runs. */
+  const runningOf = (id: string): { fade: Fade; elapsed: number } | null => {
+    const fade = fades.get(id);
+    if (fade === undefined) return null;
+    const elapsed = now() - fade.start;
+    if (elapsed < fade.animation.ms) return { fade, elapsed };
+    fades.delete(id);
     return null;
   };
 
-  /** Seek each of ROW's animations still running at ELAPSED to it, restarting them. */
-  const paint = (row: HTMLElement, elapsed: number): void => {
-    const running = SELECTION_ANIMATIONS.filter((animation) => elapsed < animation.ms);
-    for (const animation of running) {
-      row.style.setProperty(animation.durationProperty, `${animation.ms}ms`);
-      row.style.setProperty(animation.delayProperty, `${-elapsed}ms`);
-    }
+  /** Draw ROW in workspace ID's running fade, if any, seeked to the clock and restarted. */
+  const paint = (id: string, row: HTMLElement): void => {
+    const running = runningOf(id);
     // A row already animating only restarts its animation if the style is
     // flushed between the class leaving and coming back. A freshly drawn row
     // carries no class, so a draw never pays for the flush.
-    if (running.some((animation) => row.classList.contains(animation.className))) {
-      for (const animation of running) row.classList.remove(animation.className);
+    if (SELECTION_ANIMATIONS.some((animation) => row.classList.contains(animation.className))) {
+      for (const animation of SELECTION_ANIMATIONS) row.classList.remove(animation.className);
       void row.offsetWidth;
     }
-    for (const animation of running) row.classList.add(animation.className);
+    if (running === null) return;
+    const { animation } = running.fade;
+    row.style.setProperty(animation.durationProperty, `${animation.ms}ms`);
+    row.style.setProperty(animation.delayProperty, `${-running.elapsed}ms`);
+    row.classList.add(animation.className);
+  };
+
+  /** Paint every drawn copy of workspace ID's row. */
+  const paintDrawn = (id: string): void => {
+    for (const row of queryAll<HTMLElement>(root, "[data-roster-row]")) {
+      if (row.getAttribute("data-roster-row") === id) paint(id, row);
+    }
+  };
+
+  /** Move the highlight from wherever it is to NEXT (null: no row), fading both numbers. */
+  const move = (next: string | null): void => {
+    const previous = current;
+    current = next;
+    // The first highlight is the rail's first draw, not a move.
+    if (previous === undefined || previous === next) return;
+    const start = now();
+    log.debug("the rail's highlight moved; fading the numbers", {
+      operation: "sidebar.selection-fade",
+      context: { workspace: next, previous },
+    });
+    if (previous !== null) {
+      fades.set(previous, { animation: SELECTION_NUMBER_FALL, start });
+      paintDrawn(previous);
+    }
+    if (next !== null) {
+      fades.set(next, { animation: SELECTION_NUMBER_RISE, start });
+      paintDrawn(next);
+    }
   };
 
   return {
-    start(id: string): void {
-      started.set(id, now());
-      const rows = queryAll<HTMLElement>(root, "[data-roster-row]").filter(
-        (row) => row.getAttribute("data-roster-row") === id,
-      );
-      log.debug("fading the number of the row selected from the rail", {
-        operation: "sidebar.selection-fade",
-        context: { workspace: id, drawn: rows.length },
-      });
-      for (const row of rows) paint(row, 0);
+    highlight(id: string): void {
+      move(id);
     },
-    apply(id: string, row: HTMLElement): void {
-      const elapsed = elapsedOf(id);
-      if (elapsed !== null) paint(row, elapsed);
+    apply(id: string, row: HTMLElement, highlighted: boolean): void {
+      if (highlighted) move(id);
+      else if (id === current) move(null);
+      paint(id, row);
     },
   };
 }

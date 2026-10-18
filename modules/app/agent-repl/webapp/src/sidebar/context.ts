@@ -63,7 +63,7 @@ export interface RailContext {
   attention: AttentionMarks;
   /** Draws a row the first time it comes into view (`reveal.ts`). */
   reveal: RowReveal;
-  /** The number fade a row selected from the rail runs, across redraws (`selection-fade.ts`). */
+  /** The highlighted row's number fade, across redraws (`selection-fade.ts`). */
   selectionFade: SelectionFade;
   /**
    * The workspace whose page the webhost shows, while the roster has not yet

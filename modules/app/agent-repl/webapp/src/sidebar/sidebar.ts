@@ -395,6 +395,7 @@ function mountSidebarIn(
           row.removeAttribute("data-current");
         }
       }
+      rail.selectionFade.highlight(id);
       log.debug("the webhost showed a page; the rail highlights its row ahead of the roster", {
         operation: "sidebar.shown-ahead",
         context: { workspace: id, rows },

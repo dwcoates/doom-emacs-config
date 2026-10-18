@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   SELECTION_ANIMATIONS,
-  SELECTION_NUMBER_FADE_CLASS,
-  SELECTION_NUMBER_FADE_DELAY_PROPERTY,
-  SELECTION_NUMBER_FADE_DURATION_PROPERTY,
-  SELECTION_NUMBER_FADE_MS,
+  SELECTION_NUMBER_FALL,
+  SELECTION_NUMBER_FALL_MS,
+  SELECTION_NUMBER_RISE,
+  SELECTION_NUMBER_RISE_MS,
   createSelectionFade,
+  type SelectionAnimation,
   type SelectionFade,
 } from "../../src/sidebar/selection-fade.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -22,8 +23,20 @@ function drawnRow(root: HTMLElement, id: string): HTMLElement {
   return ws;
 }
 
-const fading = (row: HTMLElement): boolean => row.classList.contains(SELECTION_NUMBER_FADE_CLASS);
-const fadeDelayOf = (row: HTMLElement): string => row.style.getPropertyValue(SELECTION_NUMBER_FADE_DELAY_PROPERTY);
+/** A row freshly drawn for ID, not yet in the document. */
+const fresh = (id: string): HTMLElement => {
+  const ws = document.createElement("div");
+  ws.setAttribute("data-roster-row", id);
+  return ws;
+};
+
+/** Which of the number's animations ROW runs, and at what delay: "" for none. */
+const runningOn = (row: HTMLElement): [string, string] => {
+  const animation: SelectionAnimation | undefined = SELECTION_ANIMATIONS.find((a) =>
+    row.classList.contains(a.className),
+  );
+  return animation === undefined ? ["", ""] : [animation.className, row.style.getPropertyValue(animation.delayProperty)];
+};
 
 describe("the selection fade", () => {
   let root: HTMLElement;
@@ -41,124 +54,217 @@ describe("the selection fade", () => {
     root.remove();
   });
 
-  it("fades every drawn copy of the selected workspace's number from its start", () => {
+  it("draws the first highlighted row white at once: the rail's first draw is not a move", () => {
     // Arrange
-    const copies = [drawnRow(root, "ws-1"), drawnRow(root, "ws-1")];
+    const row = fresh("ws-1");
 
     // Act
-    fade.start("ws-1");
+    fade.apply("ws-1", row, true);
 
     // Assert
-    expect(copies.map((row) => [fading(row), fadeDelayOf(row)])).toEqual([
-      [true, "0ms"],
-      [true, "0ms"],
+    expect(runningOn(row)).toEqual(["", ""]);
+  });
+
+  it("rises the number of a row the highlight moves to", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    const row = fresh("ws-2");
+
+    // Act
+    fade.apply("ws-2", row, true);
+
+    // Assert
+    expect(runningOn(row)).toEqual([SELECTION_NUMBER_RISE.className, "0ms"]);
+  });
+
+  it("falls the number of the row the highlight left, when that row is drawn after", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    fade.apply("ws-2", fresh("ws-2"), true);
+    clock += 50;
+    const left = fresh("ws-1");
+
+    // Act
+    fade.apply("ws-1", left, false);
+
+    // Assert
+    expect(runningOn(left)).toEqual([SELECTION_NUMBER_FALL.className, "-50ms"]);
+  });
+
+  it("falls the number of a row drawn unhighlighted before the row the highlight moved to", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    const left = fresh("ws-1");
+
+    // Act
+    fade.apply("ws-1", left, false);
+
+    // Assert
+    expect(runningOn(left)).toEqual([SELECTION_NUMBER_FALL.className, "0ms"]);
+  });
+
+  it("rises the row the highlight moved to after the row it left was drawn first", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    fade.apply("ws-1", fresh("ws-1"), false);
+    const row = fresh("ws-2");
+
+    // Act
+    fade.apply("ws-2", row, true);
+
+    // Assert
+    expect(runningOn(row)).toEqual([SELECTION_NUMBER_RISE.className, "0ms"]);
+  });
+
+  it("leaves a row the highlight never touched still", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    fade.apply("ws-2", fresh("ws-2"), true);
+    const other = fresh("ws-3");
+
+    // Act
+    fade.apply("ws-3", other, false);
+
+    // Assert
+    expect(runningOn(other)).toEqual(["", ""]);
+  });
+
+  it("does not restart the rise when the highlighted row is drawn again", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    fade.apply("ws-2", fresh("ws-2"), true);
+    clock += SELECTION_NUMBER_RISE_MS / 2;
+    const redrawn = fresh("ws-2");
+
+    // Act
+    fade.apply("ws-2", redrawn, true);
+
+    // Assert
+    expect(runningOn(redrawn)).toEqual([SELECTION_NUMBER_RISE.className, `-${SELECTION_NUMBER_RISE_MS / 2}ms`]);
+  });
+
+  it("draws the highlighted row's number still once the rise has run its length", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    fade.apply("ws-2", fresh("ws-2"), true);
+    clock += SELECTION_NUMBER_RISE_MS;
+    const redrawn = fresh("ws-2");
+
+    // Act
+    fade.apply("ws-2", redrawn, true);
+
+    // Assert
+    expect(runningOn(redrawn)).toEqual(["", ""]);
+  });
+
+  it("draws the left row's number still once the fall has run its length", () => {
+    // Arrange
+    fade.apply("ws-1", fresh("ws-1"), true);
+    fade.apply("ws-2", fresh("ws-2"), true);
+    clock += SELECTION_NUMBER_FALL_MS;
+    const redrawn = fresh("ws-1");
+
+    // Act
+    fade.apply("ws-1", redrawn, false);
+
+    // Assert
+    expect(runningOn(redrawn)).toEqual(["", ""]);
+  });
+
+  it("rises and falls the drawn rows in place when the highlight moves ahead of the roster", () => {
+    // Arrange
+    const left = drawnRow(root, "ws-1");
+    const moved = drawnRow(root, "ws-2");
+    fade.apply("ws-1", left, true);
+    fade.apply("ws-2", moved, false);
+
+    // Act
+    fade.highlight("ws-2");
+
+    // Assert
+    expect([runningOn(left), runningOn(moved)]).toEqual([
+      [SELECTION_NUMBER_FALL.className, "0ms"],
+      [SELECTION_NUMBER_RISE.className, "0ms"],
     ]);
   });
 
-  it("runs the number fade for 1600 ms", () => {
+  it("swaps a rising row to the fall when the highlight leaves it mid-rise", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-2");
+    fade.highlight("ws-1");
+    fade.highlight("ws-2");
+    clock += 300;
+
+    // Act
+    fade.highlight("ws-1");
+
+    // Assert
+    expect(runningOn(row)).toEqual([SELECTION_NUMBER_FALL.className, "0ms"]);
+  });
+
+  it("moves nothing when the row already highlighted is highlighted again", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-1");
+    fade.highlight("ws-1");
+
+    // Act
+    fade.highlight("ws-1");
+
+    // Assert
+    expect(runningOn(row)).toEqual(["", ""]);
+  });
+
+  it("hands a rising row the rise's length", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-2");
+    fade.highlight("ws-1");
+
+    // Act
+    fade.highlight("ws-2");
+
+    // Assert
+    expect(row.style.getPropertyValue(SELECTION_NUMBER_RISE.durationProperty)).toBe(`${SELECTION_NUMBER_RISE_MS}ms`);
+  });
+
+  it("hands a falling row the fall's length", () => {
+    // Arrange
+    const row = drawnRow(root, "ws-1");
+    fade.highlight("ws-1");
+
+    // Act
+    fade.highlight("ws-2");
+
+    // Assert
+    expect(row.style.getPropertyValue(SELECTION_NUMBER_FALL.durationProperty)).toBe(`${SELECTION_NUMBER_FALL_MS}ms`);
+  });
+
+  it("rises over one second and falls faster than it rises", () => {
     // Arrange, Act, Assert
-    expect(SELECTION_NUMBER_FADE_MS).toBe(1600);
+    expect([SELECTION_NUMBER_RISE_MS, SELECTION_NUMBER_FALL_MS < SELECTION_NUMBER_RISE_MS]).toEqual([1000, true]);
   });
 
-  it("hands a fading row the fade's length", () => {
-    // Arrange
-    const row = drawnRow(root, "ws-1");
-
-    // Act
-    fade.start("ws-1");
-
-    // Assert
-    expect(row.style.getPropertyValue(SELECTION_NUMBER_FADE_DURATION_PROPERTY)).toBe(`${SELECTION_NUMBER_FADE_MS}ms`);
-  });
-
-  it("leaves another workspace's row still", () => {
-    // Arrange
-    const other = drawnRow(root, "ws-2");
-
-    // Act
-    fade.start("ws-1");
-
-    // Assert
-    expect(fading(other)).toBe(false);
-  });
-
-  it("restarts a row already fading when it is selected again", () => {
-    // Arrange
-    const row = drawnRow(root, "ws-1");
-    fade.start("ws-1");
-    clock += 700;
-
-    // Act
-    fade.start("ws-1");
-
-    // Assert
-    expect([fading(row), fadeDelayOf(row)]).toEqual([true, "0ms"]);
-  });
-
-  it("joins a row redrawn mid-fade at the elapsed time", () => {
-    // Arrange
-    fade.start("ws-1");
-    const elapsed = SELECTION_NUMBER_FADE_MS / 2;
-    clock += elapsed;
-    const redrawn = document.createElement("div");
-
-    // Act
-    fade.apply("ws-1", redrawn);
-
-    // Assert
-    expect([fading(redrawn), fadeDelayOf(redrawn)]).toEqual([true, `-${elapsed}ms`]);
-  });
-
-  it("draws a row's number still once its fade has run its length", () => {
-    // Arrange
-    fade.start("ws-1");
-    clock += SELECTION_NUMBER_FADE_MS;
-    const redrawn = document.createElement("div");
-
-    // Act
-    fade.apply("ws-1", redrawn);
-
-    // Assert
-    expect(fading(redrawn)).toBe(false);
-  });
-
-  it("draws a never-selected row still", () => {
-    // Arrange
-    const drawn = document.createElement("div");
-
-    // Act
-    fade.apply("ws-1", drawn);
-
-    // Assert
-    expect([fading(drawn), fadeDelayOf(drawn)]).toEqual([false, ""]);
-  });
-
-  it("runs the number fade alone, under its own class and properties", () => {
+  it("runs the rise and the fall under their own classes and properties", () => {
     // Arrange / Act
     const shapes = SELECTION_ANIMATIONS.map((a) => [a.className, a.durationProperty, a.delayProperty, a.ms]);
 
     // Assert
     expect(shapes).toEqual([
-      [
-        SELECTION_NUMBER_FADE_CLASS,
-        SELECTION_NUMBER_FADE_DURATION_PROPERTY,
-        SELECTION_NUMBER_FADE_DELAY_PROPERTY,
-        SELECTION_NUMBER_FADE_MS,
-      ],
+      ["selection-number-rise", "--selection-number-rise-duration", "--selection-number-rise-delay", SELECTION_NUMBER_RISE_MS],
+      ["selection-number-fall", "--selection-number-fall-duration", "--selection-number-fall-delay", SELECTION_NUMBER_FALL_MS],
     ]);
   });
 
-  it("states the workspace and how many copies fade, in the canonical log", async () => {
+  it("states the workspace and the one it left, in the canonical log", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
-    drawnRow(root, "ws-1");
+    fade.highlight("ws-1");
 
     // Act
-    fade.start("ws-1");
+    fade.highlight("ws-2");
 
     // Assert
     const record = await forwardedRecord(capture, "sidebar.selection-fade");
-    expect(record.context).toMatchObject({ workspace: "ws-1", drawn: 1 });
+    expect(record.context).toMatchObject({ workspace: "ws-2", previous: "ws-1" });
   });
 });
 
@@ -174,42 +280,60 @@ describe("the selection fade's styling", () => {
     expect(stylesheet).not.toContain("selection-blink");
   });
 
-  it("animates the fading row's number on the fade's length and delay, once", () => {
+  it("draws the highlighted row's number white for as long as it is highlighted", () => {
     // Arrange / Act
-    const declarations = declarationsOf(`#ws-sidebar .ws.${SELECTION_NUMBER_FADE_CLASS} > .row .sb-num`);
+    const declarations = declarationsOf("#ws-sidebar .ws.current > .row .sb-num");
 
     // Assert
-    expect(declarations).toContainEqual(
-      expect.stringMatching(
-        /animation:\s*ws-selection-number-fade var\(--selection-number-fade-duration\) ease-in-out var\(--selection-number-fade-delay\) 1;/,
-      ),
+    expect(declarations.map((d) => d.trim())).toContain("color: white;");
+  });
+
+  it.each([
+    { animation: SELECTION_NUMBER_RISE, keyframes: "ws-selection-number-rise", easing: "ease-out" },
+    { animation: SELECTION_NUMBER_FALL, keyframes: "ws-selection-number-fall", easing: "ease-in" },
+  ])("animates the $keyframes number on its length and delay, once", ({ animation, keyframes, easing }) => {
+    // Arrange / Act
+    const declarations = declarationsOf(`#ws-sidebar .ws.${animation.className} > .row .sb-num`);
+
+    // Assert
+    expect(declarations.map((d) => d.trim())).toContain(
+      `animation: ${keyframes} var(${animation.durationProperty}) ${easing} var(${animation.delayProperty}) 1;`,
     );
   });
 
-  it("holds the number white from a quick rise until a second later", () => {
+  it("rises from the number's own grey, ending on the highlighted white", () => {
     // Arrange / Act
-    const stops = rulesOf(keyframesOf("ws-selection-number-fade"));
+    const stops = rulesOf(keyframesOf("ws-selection-number-rise")).map((rule) => [rule.selectors, rule.declarations.trim()]);
 
     // Assert
-    const [whiteFromMs = NaN, whiteUntilMs = NaN] = (stops[0]?.selectors ?? []).map(
-      (stop) => (parseFloat(stop) / 100) * SELECTION_NUMBER_FADE_MS,
-    );
-    expect([stops.length, whiteFromMs, whiteUntilMs - whiteFromMs, stops[0]?.declarations.trim()]).toEqual([
-      1,
-      160,
-      1000,
-      "color: white;",
-    ]);
+    expect(stops).toEqual([[["from"], "color: var(--tab-number-color);"]]);
   });
 
-  it("stops the number fade under reduced motion", () => {
+  it("falls from white, ending on the number's own grey", () => {
+    // Arrange / Act
+    const stops = rulesOf(keyframesOf("ws-selection-number-fall")).map((rule) => [rule.selectors, rule.declarations.trim()]);
+
+    // Assert
+    expect(stops).toEqual([[["from"], "color: white;"]]);
+  });
+
+  it("draws the number in the grey the rise starts from", () => {
+    // Arrange / Act
+    const declarations = declarationsOf("#ws-sidebar .sb-num");
+
+    // Assert
+    expect(declarations.some((d) => d.includes("color: var(--tab-number-color);"))).toBe(true);
+  });
+
+  it.each(["selection-number-rise", "selection-number-fall"])("stops the %s under reduced motion", (className) => {
     // Arrange
     const reduced = stylesheet
       .split("@media (prefers-reduced-motion: reduce)")
       .slice(1)
-      .some((block: string) =>
-        /#ws-sidebar \.ws\.selection-number-fade > \.row \.sb-num \{\s*animation: none;/.test(block),
-      );
+      .some((block: string) => {
+        const rule = block.match(/([^{}]*)\{\s*animation: none;/g) ?? [];
+        return rule.some((r) => r.includes(`#ws-sidebar .ws.${className} > .row .sb-num`));
+      });
 
     // Assert
     expect(reduced).toBe(true);

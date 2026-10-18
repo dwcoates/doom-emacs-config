@@ -51,7 +51,7 @@ import {
   startOfTomorrow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
-import { SELECTION_NUMBER_FADE_CLASS, SELECTION_NUMBER_FADE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
+import { SELECTION_NUMBER_RISE, SELECTION_NUMBER_RISE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 
@@ -1152,55 +1152,52 @@ describe("the selection fade", () => {
     const sc = sidebarContext(appContext({ selectWorkspace: () => SELECT_OK }));
     return { ...sc, selectionFade: createSelectionFade(document, clock) };
   };
+  const rising = (drawn: HTMLElement): boolean => drawn.classList.contains(SELECTION_NUMBER_RISE.className);
 
   afterEach(() => {
     document.body.replaceChildren();
   });
 
-  it.each([
-    { what: "another workspace's row", current: false },
-    { what: "the current workspace's row", current: true },
-  ])("fades the number of $what when it is clicked", async ({ current }) => {
+  it("rises the number of a row drawn current after another row was", () => {
     // Arrange
     const sc = fadeContext(() => NOW);
-    const drawn = drawRosterRow(row({ id: "ws-1", current }), sc, "R");
+    drawRosterRow(row({ id: "ws-1", current: true }), sc, "R");
+
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-2", current: true }), sc, "R");
+
+    // Assert
+    expect(rising(drawn)).toBe(true);
+  });
+
+  it("does not fade a number on a click alone: the highlight has not moved", async () => {
+    // Arrange
+    const sc = fadeContext(() => NOW);
+    document.body.appendChild(drawRosterRow(row({ id: "ws-1", current: true }), sc, "R"));
+    const drawn = drawRosterRow(row({ id: "ws-2" }), sc, "R");
     document.body.appendChild(drawn);
 
     // Act
     await click(drawn.querySelector("[data-select]") as Element);
 
     // Assert
-    expect(drawn.classList.contains(SELECTION_NUMBER_FADE_CLASS)).toBe(true);
+    expect(rising(drawn)).toBe(false);
   });
 
-  it("does not fade the number of a row still opening", async () => {
-    // Arrange
-    const sc = fadeContext(() => NOW);
-    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "inactive", value: {} }, opening: true }), sc, "R");
-    document.body.appendChild(drawn);
-
-    // Act
-    await click(drawn.querySelector(".row") as Element);
-
-    // Assert
-    expect(drawn.classList.contains(SELECTION_NUMBER_FADE_CLASS)).toBe(false);
-  });
-
-  it("draws a row redrawn mid-fade into the fade", async () => {
+  it("draws a row redrawn mid-rise into the rise", () => {
     // Arrange
     let clock = NOW;
     const sc = fadeContext(() => clock);
-    const before = drawRosterRow(row({ id: "ws-1" }), sc, "R");
-    document.body.appendChild(before);
-    await click(before.querySelector("[data-select]") as Element);
-    const elapsed = SELECTION_NUMBER_FADE_MS / 2;
+    drawRosterRow(row({ id: "ws-1", current: true }), sc, "R");
+    drawRosterRow(row({ id: "ws-2", current: true }), sc, "R");
+    const elapsed = SELECTION_NUMBER_RISE_MS / 2;
     clock += elapsed;
 
     // Act
-    const after = drawRosterRow(row({ id: "ws-1", current: true }), sc, "R");
+    const after = drawRosterRow(row({ id: "ws-2", current: true }), sc, "R");
 
     // Assert
-    expect([after.classList.contains(SELECTION_NUMBER_FADE_CLASS), after.style.getPropertyValue("--selection-number-fade-delay")]).toEqual([
+    expect([rising(after), after.style.getPropertyValue(SELECTION_NUMBER_RISE.delayProperty)]).toEqual([
       true,
       `-${elapsed}ms`,
     ]);

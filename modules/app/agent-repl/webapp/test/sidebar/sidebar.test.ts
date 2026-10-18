@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { CreateWorkspaceResponseSchema, type CreateWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SELECTION_NUMBER_FALL, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -1011,6 +1012,39 @@ describe("the webhost's page on screen leads the roster", () => {
       ["ws-2"],
       false,
     ]);
+  });
+
+  it("rises the shown row's number and falls the left row's, in place", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const sidebar = mountWebhostSidebar(host, ctxFor([twoRows("ws-1")]), { storage: null, timers: fakeTimers() });
+    await settle();
+
+    // Act
+    sidebar.markShown("ws-2");
+
+    // Assert
+    const animating = (id: string): string[] =>
+      [SELECTION_NUMBER_RISE.className, SELECTION_NUMBER_FALL.className].filter((c) =>
+        host.querySelector(`[data-roster-row='${id}']`)?.classList.contains(c),
+      );
+    expect([animating("ws-1"), animating("ws-2")]).toEqual([[SELECTION_NUMBER_FALL.className], [SELECTION_NUMBER_RISE.className]]);
+  });
+
+  it("rises the number of the row a push names current", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    stream.push(twoRows("ws-1"));
+    await settle();
+
+    // Act
+    stream.push(twoRows("ws-2"));
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-2']")?.classList.contains(SELECTION_NUMBER_RISE.className)).toBe(true);
   });
 
   it("keeps the highlight on the shown row through a push from before the daemon took the select", async () => {
