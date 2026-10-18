@@ -17,6 +17,7 @@ import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../h
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
 import { HEAD_CLOCK_CLASS } from "../../../src/feed/cards/tool-head.js";
+import { WAITING_STAGE } from "../../../src/feed/merge/queue.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 beforeEach(() => {
@@ -50,6 +51,11 @@ describe("drawFeedMerge: every result arm", () => {
     const el = draw(mergeHead({ case: "update", stage: "merging" }));
     expect(el.getAttribute("data-state")).toBe("update");
     expect(el.querySelector(".merge-badge")?.textContent).toBe("merging");
+  });
+
+  it("says a waiting merge in the queue tab's own word for a waiting entry", () => {
+    const el = draw(mergeHead({ case: "update", stage: "waiting" }));
+    expect(el.querySelector(".merge-badge")?.textContent).toBe(WAITING_STAGE);
   });
 
   it("says 'waiting' while the merge waits in its queue", () => {

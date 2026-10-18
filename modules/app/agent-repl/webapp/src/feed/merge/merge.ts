@@ -38,6 +38,7 @@ import { asHeadClock } from "../cards/tool-head.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
+import { WAITING_STAGE } from "./queue.js";
 import { drawFeedMergeVersion } from "./version.js";
 import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
 import type {
@@ -229,11 +230,13 @@ function summaryOf(summary: string): HTMLElement {
  * The stage is required, so a live head the daemon sent without one is a
  * malformed view rather than a guessed word.
  */
-export function liveWord(update: FeedMergeUpdate): "waiting" | "merging" {
+export function liveWord(update: FeedMergeUpdate): string {
   const stage = requireCase(update.stage, `${PATH}.update.stage`);
   switch (stage.case) {
     case "waiting":
-      return "waiting";
+      // THE ONE WORD for a merge waiting in line: the queue tab's stage column
+      // says it of every entry behind the front.
+      return WAITING_STAGE;
     case "merging":
       return "merging";
     default:
