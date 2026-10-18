@@ -18,6 +18,7 @@ import {
   drawFooterStrip,
   WAITING_FOR_API_GLYPH,
   chipGlyph,
+  chipWaiting,
   footerStatusActivity,
   subStatusWords,
 } from "../../src/footer/strip.js";
@@ -526,6 +527,33 @@ describe("drawFooterChipAgents: the waiting-for-the-API glyph", () => {
   it("says what the glyph counts on hover", () => {
     const { row } = drawStrip({ liveWork: { agents: { count: 3, waitingForApi: { count: 2 } } } });
     expect(row.querySelector<HTMLElement>(".footer-chip-waiting")?.title).toBe("2 waiting for the API");
+  });
+});
+
+describe("chipWaiting", () => {
+  it("draws a space, the named glyph and the count", () => {
+    const waiting = chipWaiting("waitingOnUser", "?", 3, "waiting on you");
+    expect([waiting.textContent, waiting.querySelector("[data-glyph]")?.getAttribute("data-glyph")]).toEqual([
+      " ? 3",
+      "waitingOnUser",
+    ]);
+  });
+
+  it("stamps the count under the name in kebab case", () => {
+    expect(chipWaiting("waitingForApi", "⧗", 2, "waiting for the API").getAttribute("data-waiting-for-api")).toBe("2");
+  });
+
+  it("titles the figure with what the rows wait for", () => {
+    expect(chipWaiting("waitingOnUser", "?", 3, "waiting on you").title).toBe("3 waiting on you");
+  });
+
+  it.each([
+    ["agents", { agents: { count: 3, waitingForApi: { count: 1 } } }],
+  ])("is the one shape the %s chip's waiting figure takes", (chip, liveWork) => {
+    const { row } = drawStrip({ liveWork });
+    const drawn = row.querySelector(`[data-chip="${chip}"] .footer-chip-waiting`);
+    expect(drawn?.childNodes).toHaveLength(3);
+    expect(drawn?.querySelector(".footer-chip-glyph")).not.toBeNull();
   });
 });
 

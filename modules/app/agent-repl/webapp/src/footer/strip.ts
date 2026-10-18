@@ -687,15 +687,26 @@ export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps)
 export function drawFooterChipAgents(u: FooterChipAgents, deps: StripDeps): HTMLElement {
   const el = chip("agents", "⚙", String(u.count), deps);
   if (u.waitingForApi === undefined) return el;
+  el.appendChild(
+    chipWaiting("waitingForApi", WAITING_FOR_API_GLYPH, u.waitingForApi.count, "waiting for the API"),
+  );
+  return el;
+}
+
+/**
+ * A chip's waiting figure: " <glyph> N", titled with what the N rows wait
+ * for, and stamped `data-<name in kebab case>` with the count. The agents
+ * chip's waiting-for-the-API figure is drawn by it.
+ */
+export function chipWaiting(name: string, glyph: string, count: number, waitsFor: string): HTMLElement {
   const waiting = document.createElement("span");
   waiting.className = "footer-chip-waiting";
-  waiting.setAttribute("data-waiting-for-api", String(u.waitingForApi.count));
-  waiting.title = `${u.waitingForApi.count} waiting for the API`;
+  waiting.setAttribute(`data-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, String(count));
+  waiting.title = `${count} ${waitsFor}`;
   waiting.appendChild(document.createTextNode(" "));
-  waiting.appendChild(chipGlyph("waitingForApi", WAITING_FOR_API_GLYPH));
-  waiting.appendChild(document.createTextNode(` ${u.waitingForApi.count}`));
-  el.appendChild(waiting);
-  return el;
+  waiting.appendChild(chipGlyph(name, glyph));
+  waiting.appendChild(document.createTextNode(` ${count}`));
+  return waiting;
 }
 
 /**
