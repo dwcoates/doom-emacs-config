@@ -2407,7 +2407,7 @@ func newHarness(t *testing.T) *harness {
 	h.detached = &fakeDetached{h: h}
 	h.events = &fakeQueueEvents{}
 	h.names = &fakeNames{}
-	h.banners = &fakeBanners{}
+	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
 	h.queue = &fakeQueue{db: h.db}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
