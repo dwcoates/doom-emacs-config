@@ -847,7 +847,7 @@ describe("the footer status word's letter wave", () => {
 
 // ---- the status word's colour sweep (the blanking-bug regression lock) -----
 
-describe("the footer status word's per-letter colour sweep", () => {
+describe("the footer status word's whole-word colour sweep", () => {
   /** Every drawn `.pfooter-wave-letter` of the status word. */
   function statusLetters(row: HTMLElement): HTMLElement[] {
     return [...row.querySelectorAll<HTMLElement>(".footer-status .pfooter-wave-letter")];
@@ -890,12 +890,45 @@ describe("the footer status word's per-letter colour sweep", () => {
     expect(style).not.toMatch(/color:\s*transparent/);
   });
 
-  it("carries no colour-swept letters at all under a non-progress arm", () => {
+  it("renders the first letter's delay on the word holder, so the sweep shares the wave's clock", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
+    const holder = row.querySelector(".footer-status .pfooter-status-word");
+
+    // Assert
+    expect(holder?.getAttribute("style")).toBe(statusLetters(row)[0]?.getAttribute("style"));
+  });
+
+  it("continues the word's colour phase across a redraw rather than restarting at zero", () => {
+    // Arrange
+    const holderDelay = (row: HTMLElement): number =>
+      Number(/animation-delay:-(\d+)ms/.exec(row.querySelector(".pfooter-status-word")?.getAttribute("style") ?? "")?.[1]);
+    const before = holderDelay(drawStrip({ status: withSubStatus("working", "thinking") }).row);
+    vi.setSystemTime(NOW + 900);
+
+    // Act
+    const after = holderDelay(drawStrip({ status: withSubStatus("working", "thinking") }).row);
+
+    // Assert
+    expect(after).toBe((before + 900) % STATUS_WAVE_CYCLE_MS);
+  });
+
+  it("sets no colour of its own on any letter, so every letter wears the word's hue", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
+
+    // Assert — a letter's inline style is its bulge delay alone.
+    for (const letter of statusLetters(row)) {
+      expect(letter.getAttribute("style")).toMatch(/^animation-delay:-\d+ms$/);
+    }
+  });
+
+  it("carries no colour-swept word at all under a non-progress arm", () => {
     // Arrange — a settled status stands still and hosts no colour sweep.
     const { row } = drawStrip({ status: status("idle", {}) });
 
-    // Assert — the sweep lives only on `.pfooter-wave-letter`, absent here.
-    expect(statusLetters(row)).toHaveLength(0);
+    // Assert — the sweep lives only on `.pfooter-status-word`, absent here.
+    expect(row.querySelectorAll(".footer-status .pfooter-status-word")).toHaveLength(0);
   });
 });
 

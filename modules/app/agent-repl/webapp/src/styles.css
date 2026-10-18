@@ -3736,9 +3736,9 @@ html[data-page-unshown] *::after {
      single constant: each letter's negative `animation-delay` is computed
      against one STATUS_WAVE_PERIOD_MS, and a reduced-motion override that merely
      LENGTHENED the pass would leave every delay seeking to the wrong phase.
-     `animation: none` stops BOTH the bulge and the colour sweep at once (they
-     are one shorthand on this selector); the letter then rests at its arm tone,
-     legible and never transparent. */
+     The colour sweep on the word holder stops with it, so the word then
+     rests at its arm tone, legible and never transparent. */
+  .pfooter-status-word,
   .pfooter-wave-letter {
     animation: none;
   }
@@ -4169,19 +4169,20 @@ html[data-page-unshown] *::after {
    ADDITIONAL TO THE COLOUR BREATH, which is untouched: the word keeps its arm's
    tone and the per-arrival shade step.
 
-   A COLOUR SWEEP RIDES THE SAME LETTERS, coexisting with the bulge (owner
-   ruling, 2026-09-14). It is done PER LETTER, never as a whole-word
+   A COLOUR SWEEP RIDES THE WHOLE WORD, coexisting with the bulge (owner
+   rulings, 2026-09-14 and 2026-10-17). The word holder animates its own `color`
+   from the arm tone (`currentColor`, so it stays legible) THROUGH A PASTEL
+   SPECTRUM — a rainbow hue cycle (red, orange, yellow, green, cyan, blue,
+   violet) and back to the arm tone — and the letters, which set no colour of
+   their own, inherit it: every letter wears the same hue at the same moment, so
+   the word as a whole rotates through the colours in sequence rather than a band
+   travelling across the letters (owner ruling, 2026-10-17). It is NEVER a
    `background-clip: text` gradient: an earlier attempt clipped a gradient to the
    holder span and set `-webkit-text-fill-color: transparent`, which inherited
    into the split letters and rendered the whole word BLANK (the glyphs live in
    the child letter spans, so there was no text on the holder to clip the
-   gradient to). Here each letter simply animates its OWN `color` from the arm
-   tone (`currentColor`, so it stays legible) THROUGH THE FULL SPECTRUM — a
-   rainbow hue cycle (red, orange, yellow, green, cyan, blue, violet) and back to
-   the arm tone — on the SAME staggered negative `animation-delay` the bulge uses,
-   so a travelling rainbow band crosses the letters exactly in step with the
-   bulge. A letter can never go transparent because every keyframe stop is a
-   fully opaque colour and its rest colour is always the arm tone.
+   gradient to). The word can never go transparent because every keyframe stop
+   is a fully opaque colour and its rest colour is always the arm tone.
 
    `transform: scale` and NEVER `font-size`, exactly as `.pfooter-breath` above:
    a font-size oscillation re-measures the word every frame and shoves the whole
@@ -4212,49 +4213,48 @@ html[data-page-unshown] *::after {
    NO `animation-delay` HERE, on purpose: each letter renders its own negative
    one inline, which is what carries the wave's phase across a footer push, and a
    delay declared in this rule would be the value that inline style exists to
-   override. That ONE inline delay drives BOTH animations below — the single
-   `animation-delay` value applies position-for-position to every name in the
-   shorthand — so the bulge and the colour sweep share the same phase, epoch and
-   period by construction and can never drift; there is no second clock. */
+   override. The word holder likewise renders the FIRST letter's delay inline
+   for its colour sweep, so the sweep shares the bulge's epoch and period and
+   continues across a push the same way; there is no second clock. */
 .pfooter-status-word {
   white-space: pre;
+  animation: pfooter-status-color 2.6s ease-in-out infinite alternate;
 }
 .pfooter-wave-letter {
   display: inline-block;
   transform-origin: 50% 100%;
-  animation:
-    pfooter-status-wave 2.6s ease-in-out infinite alternate,
-    pfooter-status-color 2.6s ease-in-out infinite alternate;
+  animation: pfooter-status-wave 2.6s ease-in-out infinite alternate;
 }
 @keyframes pfooter-status-wave {
   from { transform: scale(1); }
   to { transform: scale(1.18); }
 }
-/* The colour sweep, PER LETTER (never a `background-clip: text` gradient — see
-   the block comment above for why that blanked the word). The letter rests at
-   its arm tone (`currentColor`, which resolves to the inherited arm colour, so
-   the letter is always legible and NEVER transparent) and rides the FULL colour
-   spectrum while it runs (owner ruling, 2026-09-14): a rainbow hue cycle — red,
-   orange, yellow, green, cyan, blue, violet — rather than the arm tone merely
-   brightening. Run staggered by the same per-letter delay as the bulge and
-   `alternate`d the same way, the bright band travels along the word and back in
-   lockstep with the bulge.
+/* The colour sweep, on the WHOLE WORD (never a `background-clip: text`
+   gradient — see the block comment above for why that blanked the word). The
+   word rests at its arm tone (`currentColor`, which resolves to the inherited
+   arm colour, so the word is always legible and NEVER transparent) and rides
+   the FULL colour spectrum while it runs (owner ruling, 2026-09-14): a rainbow
+   hue cycle — red, orange, yellow, green, cyan, blue, violet — rather than the
+   arm tone merely brightening. The hues are PASTEL (owner ruling, 2026-10-17):
+   lightness 68-78% at moderate saturation, a softer set than the vivid one
+   they replaced. `alternate`d like the bulge, the word steps through the hues
+   and back.
 
    EVERY STOP IS A FULLY OPAQUE COLOUR, and the from-stop is `currentColor`: so
-   a letter caught at rest (the animation stopped under reduced motion, or seeked
+   a word caught at rest (the animation stopped under reduced motion, or seeked
    to 0%) shows the LEGIBLE ARM TONE, never a mid-spectrum hue and never
    transparent — only the running animation shows the spectrum. The 0% and 100%
    stops are both `currentColor` so each `alternate` pass departs from and
    returns to the arm tone rather than snapping between two random hues. */
 @keyframes pfooter-status-color {
   0% { color: currentColor; }
-  8% { color: hsl(0 85% 60%); }
-  22% { color: hsl(35 90% 55%); }
-  36% { color: hsl(58 85% 52%); }
-  50% { color: hsl(140 68% 48%); }
-  64% { color: hsl(190 75% 50%); }
-  78% { color: hsl(232 78% 62%); }
-  92% { color: hsl(288 70% 62%); }
+  8% { color: hsl(0 72% 76%); }
+  22% { color: hsl(32 80% 72%); }
+  36% { color: hsl(56 70% 70%); }
+  50% { color: hsl(140 50% 70%); }
+  64% { color: hsl(190 60% 70%); }
+  78% { color: hsl(232 72% 78%); }
+  92% { color: hsl(288 58% 78%); }
   100% { color: currentColor; }
 }
 

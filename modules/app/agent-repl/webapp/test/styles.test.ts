@@ -975,29 +975,62 @@ describe("the footer status wave's stylesheet contract", () => {
     expect(declarations).toMatch(/animation:\s*none/);
   });
 
-  it("runs a per-letter colour sweep alongside the bulge, on the same letter", () => {
+  it("runs the colour sweep on the whole word holder", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-word") ?? "";
+
+    // Assert — the word changes hue as one (owner ruling, 2026-10-17).
+    expect(declarations).toMatch(/animation:\s*pfooter-status-color 2\.6s ease-in-out infinite alternate/);
+  });
+
+  it("keeps the colour sweep off the letters, so no letter changes hue on its own stagger", () => {
     // Arrange / Act
     const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
 
-    // Assert — the colour animation rides the SAME shorthand as the bulge.
-    expect(declarations).toMatch(/pfooter-status-color 2\.6s ease-in-out infinite alternate/);
+    // Assert — the letter carries the bulge alone.
+    expect(declarations).toMatch(/animation:\s*pfooter-status-wave 2\.6s ease-in-out infinite alternate;/);
+    expect(declarations).not.toMatch(/pfooter-status-color/);
   });
 
   it("runs the colour sweep at the scale wave's exact 2.6s period, so the two are locked", () => {
-    // Arrange / Act — both names carry the same duration in the one shorthand.
-    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
-    const durations = [...declarations.matchAll(/pfooter-status-\w+ (\d\.\d+)s/g)].map((m) => m[1]);
+    // Arrange / Act
+    const word = ruleFor(baseSheet(), ".pfooter-status-word") ?? "";
+    const letter = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+    const durations = [word, letter].map((rule) => /pfooter-status-\w+ (\d\.\d+)s/.exec(rule)?.[1]);
 
     // Assert — the bulge and the sweep share one duration.
     expect(durations).toEqual(["2.6", "2.6"]);
   });
 
-  it("rests each letter at its arm tone (currentColor), so a letter is never transparent", () => {
+  it("stops the word's colour sweep outright under prefers-reduced-motion", () => {
+    // Arrange / Act
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-status-word") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*none/);
+  });
+
+  it("sweeps pastel hues, light and never fully saturated", () => {
+    // Arrange / Act — every hsl() stop's saturation and lightness.
+    const stops = [...colorKeyframeBody().matchAll(/hsl\(\d+ (\d+)% (\d+)%\)/g)].map((m) => ({
+      saturation: Number(m[1]),
+      lightness: Number(m[2]),
+    }));
+
+    // Assert — pastel (owner ruling, 2026-10-17): light, softened saturation.
+    expect(stops.length).toBeGreaterThan(0);
+    for (const { saturation, lightness } of stops) {
+      expect(lightness).toBeGreaterThanOrEqual(68);
+      expect(saturation).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("rests the word at its arm tone (currentColor), so the word is never transparent", () => {
     // Arrange / Act
     const keyframes = colorKeyframeBody();
 
     // Assert — the 0% stop is the inherited arm colour, legible at rest, so a
-    // letter caught stopped shows the arm tone rather than a mid-spectrum hue.
+    // word caught stopped shows the arm tone rather than a mid-spectrum hue.
     expect(keyframes).toMatch(/0%\s*\{\s*color:\s*currentColor/);
   });
 

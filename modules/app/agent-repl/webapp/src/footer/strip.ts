@@ -292,16 +292,17 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * push that rewrites this whole subtree mid-wave continues the wave instead of
  * snapping it back to the word's head.
  *
- * THAT ONE INLINE DELAY ALSO DRIVES THE COLOUR SWEEP. The letter carries a
- * second CSS animation (`pfooter-status-color`) that sweeps its own `color`
- * through the FULL SPECTRUM — a rainbow hue cycle from the arm tone and back;
- * a single `animation-delay` value applies to every name in the shorthand, so
- * the colour sweep rides the very same phase, epoch and period as the scale
- * bulge with no second clock. The colour is done PER LETTER on the letter's own
- * `color` — never a `background-clip: text` gradient on the holder, which
- * blanked the word once because the transparent text-fill inherited into these
- * split letters. Every keyframe stop is opaque and the rest stop is the arm tone,
- * so a stopped letter is always legible and never transparent.
+ * THE COLOUR SWEEP RIDES THE WHOLE WORD. The holder carries the CSS animation
+ * (`pfooter-status-color`) that sweeps its `color` through a pastel rainbow hue
+ * cycle from the arm tone and back, and the letters inherit it, so the word as
+ * a whole changes hue rather than each letter on its own stagger (owner ruling,
+ * 2026-10-17). The holder renders the FIRST letter's inline delay, so the sweep
+ * rides the bulge's epoch and period and continues across a push with no second
+ * clock. The colour is the holder's plain `color` — never a `background-clip:
+ * text` gradient, which blanked the word once because the transparent
+ * text-fill inherited into these split letters. Every keyframe stop is opaque
+ * and the rest stop is the arm tone, so a stopped word is always legible and
+ * never transparent.
  *
  * A NON-PROGRESS STATUS IS PLAIN TEXT. Waiting, the three faults, idle,
  * interrupted and background stand still, and they carry no spans at all rather
@@ -325,6 +326,7 @@ function drawStatusWord(word: HTMLElement, armCase: string): void {
   word.setAttribute(STATUS_WAVE_ATTRIBUTE, STATUS_WAVE_PROGRESS);
   const holder = document.createElement("span");
   holder.className = STATUS_WAVE_WORD_CLASS;
+  holder.setAttribute("style", statusWaveStyle(0));
   [...text].forEach((character, index) => {
     if (character === " ") {
       holder.appendChild(document.createTextNode(" "));
