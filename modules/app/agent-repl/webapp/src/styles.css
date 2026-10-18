@@ -1164,10 +1164,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    the row line takes the rail's own lifted grey, --card, as Claude's
    selected row does, and the gutter bar is the muted grey, so the palette's
    grounds stay grey and no hue marks selection. However the workspace came
-   to be selected. No bolder name. */
+   to be selected. No bolder name. The fill sits a quarter of the way back
+   from --card toward the rail's own ground (owner request, 2026-10-18), so
+   a hover (--card) still lifts the selected row. */
 #ws-sidebar {
   --row-current-gutter: var(--muted);
-  --row-current-tint: var(--card);
+  --row-current-tint: color-mix(in srgb, var(--card) 75%, var(--sidebar-bg));
 }
 #ws-sidebar .ws.current > .row {
   background-color: var(--row-current-tint);
