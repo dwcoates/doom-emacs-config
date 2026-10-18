@@ -220,14 +220,8 @@ export async function togglePersistentWifiMode(
           context: {
             mode: state.mode.case ?? "unknown",
             wifi: state.wifi.case ?? "unknown",
-            hotspot: requireCase(
-              requireMessage(success.hotspot, "UpdatePersistentWifiModeSuccess.hotspot").outcome,
-              "UpdatePersistentWifiModeHotspot.outcome",
-            ).case,
-            display: requireCase(
-              requireMessage(success.display, "UpdatePersistentWifiModeSuccess.display").outcome,
-              "UpdatePersistentWifiModeDisplay.outcome",
-            ).case,
+            hotspot: stepOutcomeArm(success.hotspot, "hotspot", "UpdatePersistentWifiModeHotspot"),
+            display: stepOutcomeArm(success.display, "display", "UpdatePersistentWifiModeDisplay"),
           },
         });
         return;
@@ -251,4 +245,21 @@ export async function togglePersistentWifiMode(
       throw err;
     }
   }
+}
+
+/**
+ * THE ONE READ of a success's step outcome: the required step `field` of
+ * `agentrepl.v1.UpdatePersistentWifiModeSuccess`, whose `message` type holds
+ * its outcome in a required `outcome` oneof. Answers the set arm's name, and
+ * throws a malformed-view error naming the path when either is absent.
+ */
+export function stepOutcomeArm(
+  step: { outcome: { case?: string | undefined } } | undefined,
+  field: string,
+  message: string,
+): string {
+  return requireCase(
+    requireMessage(step, `UpdatePersistentWifiModeSuccess.${field}`).outcome,
+    `${message}.outcome`,
+  ).case;
 }

@@ -17,7 +17,7 @@ import {
   type UpdatePersistentWifiModeResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { DISC_RADIUS, drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
+import { DISC_RADIUS, drawTopbarPersistentWifi, stepOutcomeArm } from "../../src/topbar/persistent-wifi.js";
 import { oneofArms } from "../arms.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { RecordingSink, appContext, topbarContext } from "./fixtures.js";
@@ -306,5 +306,23 @@ describe("clicking the persistent-wifi chip", () => {
     await settle();
     // Assert
     expect(host.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("stepOutcomeArm", () => {
+  it("answers the set arm's name", () => {
+    expect(stepOutcomeArm({ outcome: { case: "dimmed" } }, "display", "UpdatePersistentWifiModeDisplay")).toBe("dimmed");
+  });
+
+  it("throws naming the success field when the step is absent", () => {
+    expect(() => stepOutcomeArm(undefined, "display", "UpdatePersistentWifiModeDisplay")).toThrow(
+      "malformed view at UpdatePersistentWifiModeSuccess.display:",
+    );
+  });
+
+  it("throws naming the oneof when the outcome sets no arm", () => {
+    expect(() => stepOutcomeArm({ outcome: { case: undefined } }, "display", "UpdatePersistentWifiModeDisplay")).toThrow(
+      "malformed view at UpdatePersistentWifiModeDisplay.outcome:",
+    );
   });
 });
