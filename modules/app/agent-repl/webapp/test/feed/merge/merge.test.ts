@@ -16,6 +16,7 @@ import { drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText } from "../../..
 import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
+import { HEAD_CLOCK_CLASS } from "../../../src/feed/cards/tool-head.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 beforeEach(() => {
@@ -46,9 +47,27 @@ describe("drawFeedMerge: the head's constant props", () => {
 
 describe("drawFeedMerge: every result arm", () => {
   it("says 'merging' while the run is live", () => {
-    const el = draw(mergeHead({ case: "update" }));
+    const el = draw(mergeHead({ case: "update", stage: "merging" }));
     expect(el.getAttribute("data-state")).toBe("update");
     expect(el.querySelector(".merge-badge")?.textContent).toBe("merging");
+  });
+
+  it("says 'waiting' while the merge waits in its queue", () => {
+    const el = draw(mergeHead({ case: "update", stage: "waiting" }));
+    expect([el.getAttribute("data-state"), el.querySelector(".merge-badge")?.textContent]).toEqual(["update", "waiting"]);
+  });
+
+  it("breathes the waiting word in the live badge's tone, as it does the merging one", () => {
+    const el = draw(mergeHead({ case: "update", stage: "waiting" }));
+    expect(el.querySelector(".merge-badge")?.classList.contains("is-live")).toBe(true);
+  });
+
+  it("refuses a live head whose stage oneof is unset", () => {
+    const msg = create(FeedMergeSchema, {
+      head: { glyph: { icon: "merge" }, label: { text: "x" }, runtime: { startedAtMs: 0n } },
+      result: { case: "update", value: {} },
+    });
+    expect(() => draw(msg)).toThrow(MalformedView);
   });
 
   it("says 'merged' and the commit when it landed", () => {
@@ -264,7 +283,8 @@ describe("drawFeedMerge: a detached merge's switch", () => {
   });
 });
 
-// THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11).
+// THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11), and THE CLOCK
+// CLOSES THE HEAD'S RIGHT END (owner request, 2026-10-18).
 describe("drawFeedMerge: the badge before the clock", () => {
   it.each([
     ["a running merge", { case: "update" } as const],
@@ -277,6 +297,25 @@ describe("drawFeedMerge: the badge before the clock", () => {
     const el = drawFeedMerge(mergeHead(result), rowContext(h.ctx, mergeRow("m1")));
     // Assert
     expect(drawnBefore(el.querySelector(".merge-badge"), el.querySelector(".merge-clock"))).toBe(true);
+  });
+
+  it.each([
+    ["a running merge", { case: "update" } as const],
+    ["a landed merge", { case: "success", endedAtMs: 12_000n, commit: "abc1234" } as const],
+    ["a failed merge", { case: "failed", endedAtMs: 12_000n, summary: "tests never passed" } as const],
+    ["an abandoned merge", { case: "abandoned", endedAtMs: 12_000n, summary: "dropped" } as const],
+  ])("closes %s's head with its clock, in the right end, as the head's clock", (_name, result) => {
+    // Arrange
+    const h = harness();
+    // Act
+    const el = drawFeedMerge(mergeHead(result), rowContext(h.ctx, mergeRow("m1")));
+    // Assert
+    const clock = el.querySelector(".merge-clock");
+    expect([
+      el.lastElementChild?.classList.contains("merge-head-end"),
+      el.querySelector(".merge-head-end")?.lastElementChild === clock,
+      clock?.classList.contains(HEAD_CLOCK_CLASS),
+    ]).toEqual([true, true, true]);
   });
 });
 
@@ -299,7 +338,7 @@ describe("drawFeedMerge: the landed commit", () => {
     expect([el.querySelector(".merge-commit")?.tagName, el.querySelector(".merge-commit-link")]).toEqual(["SPAN", null]);
   });
 
-  it("sits at the head's right end, before the workspace switch", () => {
+  it("sits at the head's right end, before the workspace switch and the clock", () => {
     const msg = landed();
     msg.head!.mode = create(FeedMergeModeSchema, {
       mode: {
@@ -313,7 +352,7 @@ describe("drawFeedMerge: the landed commit", () => {
       },
     });
     const end = draw(msg).querySelector(".merge-head-end");
-    expect(Array.from(end?.children ?? [], (c) => c.classList.contains("merge-commit"))).toEqual([true, false]);
+    expect(Array.from(end?.children ?? [], (c) => c.classList.contains("merge-commit"))).toEqual([true, false, false]);
   });
 });
 

@@ -120,7 +120,7 @@ func (o *orchestrator) resumePick(ctx context.Context, repo wsm.RepoKey, entry w
 // drawPickLive draws the head and the live pick tab, and stands the mirror the
 // pick turn is drawn at in the requester's bubble.
 func (o *orchestrator) drawPickLive(p *pick) {
-	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, nil, headPick)
+	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, headMerging, headPick)
 	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: o.deps.Asks.Waiting(p.ws)}))
 	o.deps.Feed.SetOutputMirror(p.ws, &wsm.MirrorAddress{
 		Workspace: p.requester, Feed: mergeFeed(p.ledger), Parent: tabRef(p.requester, p.ledger, roundTabKey(TabPick, 1)),

@@ -704,7 +704,7 @@ func (r *run) place(ctx context.Context) error {
 	if r.exiting() {
 		return nil
 	}
-	r.head(nil)
+	r.head(headMerging)
 	if err := r.o.republishQueue(ctx, r.repo); err != nil {
 		return fmt.Errorf("could not publish the queue: %w", err)
 	}

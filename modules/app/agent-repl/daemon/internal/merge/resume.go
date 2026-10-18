@@ -109,7 +109,7 @@ func (r *run) resumeRun(ctx context.Context) error {
 	// THE BUBBLE IS THE ONE THE MERGE ALREADY HAD, drawn live again and still
 	// pinned, and the footer shows the step the merge stands on before that
 	// step speaks.
-	r.head(nil)
+	r.head(headMerging)
 	o.publish(r.repo, ws, r.factsNow())
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		r.end(ctx, fmt.Errorf("could not publish the queue: %w", err))

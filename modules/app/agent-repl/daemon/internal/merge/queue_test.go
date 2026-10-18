@@ -809,12 +809,18 @@ func TestTheFrontsSettledQueueTabStaysFixed(t *testing.T) {
 // lastHeadOf answers the newest merge head pushed to WS's bubble.
 func lastHeadOf(t *testing.T, h *harness, ws wsm.WorkspaceID) *frontendv1.FeedMergeHead {
 	t.Helper()
+	return lastMergeOf(t, h, ws).GetHead()
+}
+
+// lastMergeOf answers the last merge head row pushed to WS, whole.
+func lastMergeOf(t *testing.T, h *harness, ws wsm.WorkspaceID) *frontendv1.FeedMerge {
+	t.Helper()
 	h.feed.mu.Lock()
 	defer h.feed.mu.Unlock()
-	var found *frontendv1.FeedMergeHead
+	var found *frontendv1.FeedMerge
 	for _, row := range h.feed.rows {
-		if head := row.Row.GetActivity().GetMerge().GetHead(); row.WS == ws && head != nil {
-			found = head
+		if merge := row.Row.GetActivity().GetMerge(); row.WS == ws && merge.GetHead() != nil {
+			found = merge
 		}
 	}
 	if found == nil {
@@ -899,9 +905,50 @@ func TestAWaitingMergesHeadClockRunsFromItsQueuedTime(t *testing.T) {
 	}
 }
 
-// TestHeadClockMSFollowsTheEntrysStanding covers the head clock's origin per
-// standing: queued while waiting, the run's admission once admitted, and no
-// redraw while an admission has no run registered yet.
+// TestAMergeHeadsStageIsWhereItStandsInTheQueue covers the live head's badge
+// arm (frontend.v1.FeedMergeUpdate.stage): the front, admitted and held in its
+// gate, reads merging, and a merge queued behind it reads waiting.
+func TestAMergeHeadsStageIsWhereItStandsInTheQueue(t *testing.T) {
+	tests := []struct {
+		name        string
+		ws          wsm.WorkspaceID
+		wantWaiting bool
+	}{
+		{name: "the front merges", ws: theWorkspace, wantWaiting: false},
+		{name: "the merge behind waits", ws: "ws-2", wantWaiting: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.landsCleanly("abc123def4567")
+			inGate, release := holdTheGate(h)
+			enqueue(t, h)
+			done := admitAsync(h, context.Background())
+			<-inGate
+
+			// Act.
+			queueAnother(t, h, "ws-2", "two")
+			update := lastMergeOf(t, h, tc.ws).GetUpdate()
+			close(release)
+			<-done
+
+			// Assert.
+			if update == nil {
+				t.Fatalf("the head of %s is not live", tc.ws)
+			}
+			if got := update.GetWaiting() != nil; got != tc.wantWaiting || (update.GetMerging() != nil) == tc.wantWaiting {
+				t.Fatalf("the head of %s has stage %T, want waiting %v", tc.ws, update.GetStage(), tc.wantWaiting)
+			}
+		})
+	}
+}
+
+// TestHeadClockMSFollowsTheEntrysStanding covers the head clock's origin and
+// stage per standing: queued and waiting while it waits, the run's admission
+// and merging once admitted, and no redraw while an admission has no run
+// registered yet.
 func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -909,11 +956,12 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 		running     bool
 		wantClocked bool
 		wantMS      func(r *run) int64
+		wantStage   liveHead
 	}{
 		{name: "waiting", state: wsm.MergeQueued, wantClocked: true,
-			wantMS: func(*run) int64 { return 1000 }},
+			wantMS: func(*run) int64 { return 1000 }, wantStage: headWaiting},
 		{name: "admitted with its run", state: wsm.MergeAdmitted, running: true, wantClocked: true,
-			wantMS: func(r *run) int64 { return r.startedMS }},
+			wantMS: func(r *run) int64 { return r.startedMS }, wantStage: headMerging},
 		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantClocked: false,
 			wantMS: func(*run) int64 { return 0 }},
 	}
@@ -928,14 +976,14 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
 
 			// Act.
-			ms, clocked, err := h.o.headClockMS(entry)
+			ms, stage, clocked, err := h.o.headClockMS(entry)
 
 			// Assert.
 			if err != nil {
 				t.Fatalf("headClockMS: %v", err)
 			}
-			if clocked != tc.wantClocked || ms != tc.wantMS(r) {
-				t.Fatalf("headClockMS = %d clocked %v, want %d clocked %v", ms, clocked, tc.wantMS(r), tc.wantClocked)
+			if clocked != tc.wantClocked || ms != tc.wantMS(r) || stage != tc.wantStage {
+				t.Fatalf("headClockMS = %d stage %d clocked %v, want %d stage %d clocked %v", ms, stage, clocked, tc.wantMS(r), tc.wantStage, tc.wantClocked)
 			}
 		})
 	}
@@ -1016,7 +1064,7 @@ func TestTheQueueTabAndTheHeadClockShareOneWait(t *testing.T) {
 
 			// Act.
 			tab, _, tabErr := h.o.queueTabState(entry)
-			clock, _, clockErr := h.o.headClockMS(entry)
+			clock, _, _, clockErr := h.o.headClockMS(entry)
 
 			// Assert.
 			if tabErr != nil || clockErr != nil {
@@ -1040,7 +1088,7 @@ func TestAWaitingHeadClockWithNoQueuedTimeIsRefused(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	_, clocked, err := h.o.headClockMS(wsm.MergeQueueEntry{Workspace: theWorkspace, State: wsm.MergeQueued})
+	_, _, clocked, err := h.o.headClockMS(wsm.MergeQueueEntry{Workspace: theWorkspace, State: wsm.MergeQueued})
 
 	// Assert.
 	if err == nil || clocked {

@@ -183,8 +183,10 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 		merge.Result = &frontendv1.FeedMerge_Success{Success: r}
 	case *frontendv1.FeedMergeError:
 		merge.Result = &frontendv1.FeedMerge_Error{Error: r}
+	case liveHead:
+		merge.Result = &frontendv1.FeedMerge_Update{Update: r.update()}
 	default:
-		merge.Result = &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}
+		panic(fmt.Sprintf("merge: a head's result is %T, which is no head arm", result))
 	}
 	return &frontendv1.FeedRow{
 		Id: feedid.Encode(headRef(ws, lease)),
@@ -192,6 +194,39 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: merge},
 		}},
 	}
+}
+
+// liveHead is the head's result for a merge still in flight: WAITING in its
+// queue behind the merges ahead of it, or MERGING once its run was admitted
+// (frontend.v1.FeedMergeUpdate.stage). It is resolved from the same fact the
+// head's clock origin switches on (headClockMS), so the badge and the clock
+// never disagree.
+type liveHead int
+
+const (
+	// headMerging is a merge being worked on: its run admitted, or an async
+	// merge's resolving turn running before it joins the queue.
+	headMerging liveHead = iota + 1
+	// headWaiting is a merge waiting in its queue.
+	headWaiting
+)
+
+// update is the live arm the head draws for STAGE.
+func (stage liveHead) update() *frontendv1.FeedMergeUpdate {
+	switch stage {
+	case headMerging:
+		return &frontendv1.FeedMergeUpdate{Stage: &frontendv1.FeedMergeUpdate_Merging{Merging: &frontendv1.FeedMergeUpdateMerging{}}}
+	case headWaiting:
+		return &frontendv1.FeedMergeUpdate{Stage: &frontendv1.FeedMergeUpdate_Waiting{Waiting: &frontendv1.FeedMergeUpdateWaiting{}}}
+	}
+	panic(fmt.Sprintf("merge: live head stage %d is no stage", int(stage)))
+}
+
+// headIsLive reports whether RESULT is a live head's (liveHead) rather than an
+// outcome's.
+func headIsLive(result any) bool {
+	_, live := result.(liveHead)
+	return live
 }
 
 // landedHead is the head's result for a merge that landed a commit: the
@@ -297,21 +332,21 @@ func (o *orchestrator) mergeWorkspaceVisible(ws ids.WorkspaceID) bool {
 // THE HEADS, is held across each publication's decision and its feed upsert,
 // so publications reach the feed in the order they were decided.
 //
-// A RESOLVED HEAD IS FINAL FOR ITS LEDGER. Once a head carrying a result is
-// published for a ledger, a later publication of that ledger WITHOUT one is
-// not drawn: it was decided from a read taken before the merge resolved (a
+// A RESOLVED HEAD IS FINAL FOR ITS LEDGER. Once a head carrying an outcome
+// is published for a ledger, a later LIVE publication of that ledger
+// (liveHead) is not drawn: it was decided from a read taken before the merge resolved (a
 // queue redraw whose stored queue still held the merge, a restate of the head
 // as it stood). Decided under the same lock as the resolved publication, it
 // can never reach the feed after it, so a settled head is never pinned again
 // (daemon.feed.pin_refused) and an async head never reverts to in flight.
-// A publication carrying a result is always drawn: an outcome replaces an
+// A publication carrying an outcome is always drawn: an outcome replaces an
 // outcome.
 type headBook struct {
 	mu sync.Mutex
 	// last is the head each merging workspace's bubble last drew, so a reveal
 	// of its merge workspace can restate it with its switch.
 	last map[ids.WorkspaceID]headArgs
-	// resolved are the ledgers whose head was published with a result. A
+	// resolved are the ledgers whose head was published with an outcome. A
 	// ledger identity is minted once and never reused, so the set only grows,
 	// by one per merge resolved in this daemon's life.
 	resolved map[ids.LeaseID]bool
@@ -357,8 +392,8 @@ type headArgs struct {
 //
 // A SYNC HEAD IS PINNED TO THE ROOT FEED'S BOTTOM WHILE THE MERGE IS IN FLIGHT
 // and settles where it stands when the merge resolves (owner ruling,
-// 2026-10-10; frontend.v1 FeedRowOrder.pinned): a live head (no result) is
-// published pinned, and the first publication carrying a result — landed,
+// 2026-10-10; frontend.v1 FeedRowOrder.pinned): a live head (liveHead) is
+// published pinned, and the first publication carrying an outcome — landed,
 // failed or abandoned — settles it, after which every later row lands below
 // it. AN ASYNC HEAD IS NEVER PINNED (owner ruling, 2026-10-11): it is placed
 // where it is first drawn. An async head carries the switch to the merge
@@ -385,7 +420,7 @@ func (o *orchestrator) restateHead(ws ids.WorkspaceID, cause headCause) {
 }
 
 // restateLiveHead restates WS's merge head only while it is LIVE (drawn, with
-// no result), running MARK first, and answers whether a head was drawn and
+// a liveHead), running MARK first, and answers whether a head was drawn and
 // whether it was live and restated. The liveness, MARK and the restate are
 // one step under the head book's lock, so a head that resolves meanwhile is
 // never restated as live.
@@ -393,7 +428,7 @@ func (o *orchestrator) restateLiveHead(ws ids.WorkspaceID, cause headCause, mark
 	o.heads.mu.Lock()
 	defer o.heads.mu.Unlock()
 	head, drawn := o.heads.last[ws]
-	if !drawn || head.result != nil {
+	if !drawn || !headIsLive(head.result) {
 		return drawn, false
 	}
 	mark()
@@ -404,19 +439,19 @@ func (o *orchestrator) restateLiveHead(ws ids.WorkspaceID, cause headCause, mark
 // drawHead decides and upserts one head publication. The caller holds the
 // head book's lock.
 func (o *orchestrator) drawHead(ws ids.WorkspaceID, head headArgs, cause headCause) {
-	fields := dlog.Context{"workspace": string(ws), "ledger": string(head.lease), "cause": string(cause), "resolved": head.result != nil}
-	if head.result == nil && o.heads.resolved[head.lease] {
+	fields := dlog.Context{"workspace": string(ws), "ledger": string(head.lease), "cause": string(cause), "resolved": !headIsLive(head.result)}
+	if headIsLive(head.result) && o.heads.resolved[head.lease] {
 		o.log(context.Background(), ws).Debug("daemon.merge.head", "a live head publication came after its ledger resolved; the resolved head stands and the live one is not drawn", fields)
 		return
 	}
 	o.heads.last[ws] = head
-	if head.result != nil {
+	if !headIsLive(head.result) {
 		o.heads.resolved[head.lease] = true
 	}
 	at := o.bubbleOf(ws)
 	row := headRow(at.ws, head.lease, head.label, head.startedMS, head.result)
 	row.GetActivity().GetMerge().Head.Mode = o.headMode(ws, at)
-	pinned := head.result == nil && !at.async()
+	pinned := headIsLive(head.result) && !at.async()
 	fields["pinned"] = pinned
 	if pinned {
 		o.mu.Lock()

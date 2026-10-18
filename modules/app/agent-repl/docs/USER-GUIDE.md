@@ -110,6 +110,8 @@ These clicks jump to an entry in the feed:
   - When the merge finishes, the bubble stays where it finished, and everything written afterward lands below it.
   - While it waits for your workspace, the footer reads `merging · waiting for` what is still running (the turn, subagents, shells), and the sidebar dot and the Emacs tab are purple with the waiting glyph.
   - Prompts you send meanwhile are held, as during the merge.
+- **The bubble's head reads `waiting` while the merge waits in line behind other merges, and `merging` once it is worked on.**
+  - Its clock sits at the head's right end, as on every tool card and bubble head.
 - **A merge bubble is open while the merge is queued, runs, waits on you, hits conflicts, fails or is abandoned.**
   - While it is pinned to the bottom of the feed it cannot be closed.
   - Once it stays where it finished, click its head to close it; it stays closed until you click the head again.

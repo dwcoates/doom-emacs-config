@@ -84,7 +84,8 @@ func TestHeadShipsNoFold(t *testing.T) {
 		name   string
 		result any
 	}{
-		{"update", nil},
+		{"merging", headMerging},
+		{"waiting", headWaiting},
 		{"success", &frontendv1.FeedMergeSuccess{}},
 		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}},
 		{"abandoned", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}}}},
@@ -98,6 +99,61 @@ func TestHeadShipsNoFold(t *testing.T) {
 			if fold := row.GetActivity().GetMerge().GetHead().GetFold(); fold != nil {
 				t.Fatalf("the head ships fold %+v, want none", fold)
 			}
+		})
+	}
+}
+
+// TestALiveHeadDrawsItsStage covers the live head's badge arm
+// (frontend.v1.FeedMergeUpdate.stage): each stage draws its own arm.
+func TestALiveHeadDrawsItsStage(t *testing.T) {
+	tests := []struct {
+		name        string
+		stage       liveHead
+		wantWaiting bool
+	}{
+		{name: "merging", stage: headMerging, wantWaiting: false},
+		{name: "waiting", stage: headWaiting, wantWaiting: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange and act.
+			update := headRow(theWorkspace, "lease-1", "branch", 1, tt.stage).GetActivity().GetMerge().GetUpdate()
+
+			// Assert.
+			if update == nil {
+				t.Fatalf("the head draws no live arm")
+			}
+			if (update.GetWaiting() != nil) != tt.wantWaiting || (update.GetMerging() != nil) == tt.wantWaiting {
+				t.Fatalf("the head draws stage %T, want waiting %v", update.GetStage(), tt.wantWaiting)
+			}
+		})
+	}
+}
+
+// TestHeadRowRefusesAResultThatIsNoHeadArm covers the invariant: a result
+// that is neither a live stage nor an outcome panics rather than drawing a
+// guessed arm, including the untyped nil and a stage outside the enum.
+func TestHeadRowRefusesAResultThatIsNoHeadArm(t *testing.T) {
+	tests := []struct {
+		name   string
+		result any
+	}{
+		{name: "nil", result: nil},
+		{name: "a stage outside the enum", result: liveHead(99)},
+		{name: "a foreign type", result: "merging"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			defer func() {
+				// Assert.
+				if recover() == nil {
+					t.Fatalf("headRow drew a head for result %#v, want a panic", tt.result)
+				}
+			}()
+
+			// Act.
+			headRow(theWorkspace, "lease-1", "branch", 1, tt.result)
 		})
 	}
 }
@@ -337,7 +393,7 @@ func TestPublishHeadPinsALiveHeadAndSettlesAResolvedOne(t *testing.T) {
 		result     any
 		wantPinned bool
 	}{
-		{name: "in flight", result: nil, wantPinned: true},
+		{name: "in flight", result: headMerging, wantPinned: true},
 		{name: "landed", result: &frontendv1.FeedMergeSuccess{Commit: "abc123"}, wantPinned: false},
 		{name: "failed", result: &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: "tests failed"}}}, wantPinned: false},
 		{name: "abandoned", result: &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: "closed"}}}, wantPinned: false},
@@ -410,7 +466,7 @@ func TestAStaleLiveHeadIsRecordedWithTheCauseThatDrewIt(t *testing.T) {
 	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, failedHead(), headRun)
 
 	// Act.
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil, headQueue)
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, headMerging, headQueue)
 
 	// Assert.
 	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{
@@ -428,7 +484,7 @@ func TestEveryDrawnHeadIsRecordedWithTheCauseThatDrewIt(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil, headRecover)
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, headMerging, headRecover)
 
 	// Assert.
 	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{
@@ -449,11 +505,11 @@ func TestTheHeadBookOrdersEveryPublication(t *testing.T) {
 		wantDrawn  bool
 		wantPinned bool
 	}{
-		{name: "live after its ledger resolved is not drawn", first: failedHead(), lease: "lease-1", then: nil, wantDrawn: false},
-		{name: "live after another ledger resolved is drawn pinned", first: failedHead(), lease: "lease-2", then: nil, wantDrawn: true, wantPinned: true},
+		{name: "live after its ledger resolved is not drawn", first: failedHead(), lease: "lease-1", then: headMerging, wantDrawn: false},
+		{name: "live after another ledger resolved is drawn pinned", first: failedHead(), lease: "lease-2", then: headMerging, wantDrawn: true, wantPinned: true},
 		{name: "an outcome after an outcome is drawn", first: failedHead(), lease: "lease-1", then: &frontendv1.FeedMergeSuccess{Commit: "abc123"}, wantDrawn: true, wantPinned: false},
-		{name: "live after live is drawn pinned", first: nil, lease: "lease-1", then: nil, wantDrawn: true, wantPinned: true},
-		{name: "an outcome after live is drawn settled", first: nil, lease: "lease-1", then: failedHead(), wantDrawn: true, wantPinned: false},
+		{name: "live after live is drawn pinned", first: headMerging, lease: "lease-1", then: headMerging, wantDrawn: true, wantPinned: true},
+		{name: "an outcome after live is drawn settled", first: headMerging, lease: "lease-1", then: failedHead(), wantDrawn: true, wantPinned: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -487,7 +543,7 @@ func TestRestateHeadDrawsTheHeadAsItLastStood(t *testing.T) {
 		wantPinned bool
 	}{
 		{name: "never drawn", drawn: false, wantHeads: 0},
-		{name: "live", drawn: true, result: nil, wantHeads: 2, wantPinned: true},
+		{name: "live", drawn: true, result: headMerging, wantHeads: 2, wantPinned: true},
 		{name: "resolved", drawn: true, result: failedHead(), wantHeads: 2, wantPinned: false},
 	}
 	for _, tt := range tests {
@@ -525,7 +581,7 @@ func TestRestateLiveHeadRestatesOnlyALiveHead(t *testing.T) {
 	}{
 		{name: "never drawn", drawn: false, wantDrawn: false, wantLive: false},
 		{name: "resolved", drawn: true, result: failedHead(), wantDrawn: true, wantLive: false},
-		{name: "live", drawn: true, result: nil, wantDrawn: true, wantLive: true},
+		{name: "live", drawn: true, result: headMerging, wantDrawn: true, wantLive: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

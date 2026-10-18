@@ -10,8 +10,13 @@
  *
  * THE ARM IS THE STATE OF THE MERGE AS A WHOLE, not of whatever step is
  * running: "what it is doing right now" is the last tab of the sub-feed. So the
- * head badge says merging / merged / failed / abandoned and no more — no counts
- * (R5), no phase word derived from a table the client would own.
+ * head badge says waiting / merging / merged / failed / abandoned and no more —
+ * no counts (R5), no phase word derived from a table the client would own. A
+ * live merge's word is the daemon's stage (`frontend.v1.FeedMergeUpdate.stage`):
+ * `waiting` while it waits in line, `merging` once it is worked on.
+ *
+ * THE CLOCK CLOSES THE HEAD'S RIGHT END, after the landed commit and the
+ * switch (`HEAD_CLOCK_CLASS`, owner request 2026-10-18), at the badge's size.
  *
  * THE CLOCK IS THE CLIENT'S: the wire ships `started_at_ms` (the enqueue
  * instant while queued, the admission instant once popped, as the daemon
@@ -29,6 +34,7 @@ import { renderMergeCommitLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
+import { asHeadClock } from "../cards/tool-head.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
@@ -42,6 +48,7 @@ import type {
   FeedMergeLabel,
   FeedMergeRuntime,
   FeedMergeSuccess,
+  FeedMergeUpdate,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
 const PATH = "FeedMerge";
@@ -64,12 +71,12 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-head";
   el.append(drawFeedMergeHead(head));
-  // THE HEAD'S RIGHT END: the landed commit, then the workspace switch. One
-  // box, pushed right by the stylesheet, so the two never split the line's
-  // free space between them.
+  // THE HEAD'S RIGHT END: the landed commit, the workspace switch, then the
+  // clock. One box, pushed right by the stylesheet, so they never split the
+  // line's free space between them. Each arm closes the head with it, so the
+  // drawn order is the order read.
   const end = document.createElement("span");
   end.className = "merge-head-end";
-  el.append(end);
   // A DETACHED MERGE'S BUBBLE CARRIES ITS SWITCH for its whole life: queued,
   // running and settled alike (workspace-switch.ts). Only the async mode has
   // one; a head with no mode was recorded before heads carried theirs.
@@ -88,14 +95,14 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
     case "update":
       el.setAttribute("data-state", "update");
       // THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11).
-      el.append(badge("merging", "is-live"), drawLiveClock(runtime, rc));
+      el.append(badge(liveWord(result.value), "is-live"));
+      end.append(drawLiveClock(runtime, rc));
+      el.append(end);
       return el;
     case "success": {
       el.setAttribute("data-state", "success");
-      el.append(
-        badge("merged", "is-succeeded"),
-        settledClock(runtime, msOf(result.value.endedAtMs, `${PATH}.success.ended_at_ms`)),
-      );
+      el.append(badge("merged", "is-succeeded"));
+      end.append(settledClock(runtime, msOf(result.value.endedAtMs, `${PATH}.success.ended_at_ms`)));
       // THE VERSION A MERGE ONTO AGENT-REPL'S MASTER LANDED AS, when the
       // daemon resolved one (version.ts).
       if (head.version !== undefined) {
@@ -104,6 +111,7 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
       // THE COMMIT SHOWS ONLY WHILE THE BUBBLE IS EXPANDED (the stylesheet
       // hides it on a folded bubble's head), and opens its branch's log.
       end.prepend(drawFeedMergeCommit(result.value, rc));
+      el.append(end);
       // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES: the clock beside a
       // landed merge is the span the MESSAGE reports, and nothing on this
       // element ticks past it.
@@ -111,11 +119,13 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
       return el;
     }
     case "error":
-      el.append(drawFeedMergeError(result.value, runtime));
+      el.append(drawFeedMergeError(result.value));
+      end.append(settledClock(runtime, msOf(result.value.endedAtMs, `${PATH}.error.ended_at_ms`)));
       el.setAttribute(
         "data-state",
         requireCase(result.value.reason, `${PATH}.error.reason`).case,
       );
+      el.append(end);
       stopTicking(el);
       return el;
     default:
@@ -187,23 +197,19 @@ export function drawFeedMergeLabel(label: FeedMergeLabel): HTMLElement {
 }
 
 /** The terminal failure arms: why it did not land. */
-export function drawFeedMergeError(
-  error: FeedMergeError,
-  runtime: FeedMergeRuntime,
-): HTMLElement {
+export function drawFeedMergeError(error: FeedMergeError): HTMLElement {
   const reason = requireCase(error.reason, `${PATH}.error.reason`);
   const el = document.createElement("span");
   el.className = "merge-error";
-  const clock = settledClock(runtime, msOf(error.endedAtMs, `${PATH}.error.ended_at_ms`));
   switch (reason.case) {
     case "failed":
-      el.append(badge("failed", "is-failed"), clock, summaryOf(reason.value.summary));
+      el.append(badge("failed", "is-failed"), summaryOf(reason.value.summary));
       return el;
     case "abandoned":
       // Landing 7: `abandoned` carries the daemon's resolved sentence too (the
       // cause — a user drop, a closed workspace, a shutdown — otherwise lives
       // only in the daemon's log), and it is drawn exactly as `failed`'s is.
-      el.append(badge("abandoned", "is-abandoned"), clock, summaryOf(reason.value.summary));
+      el.append(badge("abandoned", "is-abandoned"), summaryOf(reason.value.summary));
       return el;
     default:
       return unreachableArm(`${PATH}.error.reason`, armName(reason));
@@ -216,6 +222,23 @@ function summaryOf(summary: string): HTMLElement {
   el.className = "merge-summary";
   el.textContent = summary;
   return el;
+}
+
+/**
+ * A live merge's badge word: where the daemon says it stands in its queue.
+ * The stage is required, so a live head the daemon sent without one is a
+ * malformed view rather than a guessed word.
+ */
+export function liveWord(update: FeedMergeUpdate): "waiting" | "merging" {
+  const stage = requireCase(update.stage, `${PATH}.update.stage`);
+  switch (stage.case) {
+    case "waiting":
+      return "waiting";
+    case "merging":
+      return "merging";
+    default:
+      return unreachableArm(`${PATH}.update.stage`, armName(stage));
+  }
 }
 
 /** The head's badge: the word for the merge as a whole. No counts (R5). */
@@ -232,11 +255,11 @@ function badge(word: string, tone: string): HTMLElement {
  */
 function drawLiveClock(runtime: FeedMergeRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  return reservedLiveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs);
+  return asHeadClock(reservedLiveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs));
 }
 
 /** The settled clock: the span that ran, stopped where it stopped. */
 function settledClock(runtime: FeedMergeRuntime, endedMs: number): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  return reservedSettledElapsedClock("merge-clock", endedMs - startedMs);
+  return asHeadClock(reservedSettledElapsedClock("merge-clock", endedMs - startedMs));
 }

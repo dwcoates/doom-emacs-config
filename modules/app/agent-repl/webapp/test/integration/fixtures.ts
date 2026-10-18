@@ -1560,7 +1560,7 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
     },
     result:
       result === "update"
-        ? { case: "update", value: {} }
+        ? { case: "update", value: { stage: { case: "merging", value: {} } } }
         : result === "success"
           ? {
               case: "success",

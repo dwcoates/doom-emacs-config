@@ -540,14 +540,14 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// waits lands above it. Its ledger identity is minted as it takes its
 		// place, so the head has its queue tab to hang on from the start.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
-			clock, clocked, err := o.headClockMS(entry)
+			clock, stage, clocked, err := o.headClockMS(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "a queued merge carries no queued time; the queue is not drawn",
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
 			if clocked {
-				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, nil, headQueue)
+				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, stage, headQueue)
 			}
 			state, shown, err := o.queueTabState(entry)
 			if err != nil {
@@ -1207,16 +1207,17 @@ func (o *orchestrator) queueTabState(entry wsm.MergeQueueEntry) (tabState, bool,
 // queue change never restarts it, and WHEN ITS RUN WAS ADMITTED once it has
 // left the queue, so the head shows only the time it has been worked on. A
 // mid-admission entry's head is not redrawn (false); the run draws it the
-// moment it starts.
-func (o *orchestrator) headClockMS(entry wsm.MergeQueueEntry) (int64, bool, error) {
+// moment it starts. The head's stage switches on the same admission: WAITING
+// while it waits, MERGING once admitted (liveHead).
+func (o *orchestrator) headClockMS(entry wsm.MergeQueueEntry) (int64, liveHead, bool, error) {
 	span, clocked, err := o.queueSpanOf(entry)
 	if err != nil || !clocked {
-		return 0, clocked, err
+		return 0, 0, clocked, err
 	}
 	if span.admitted {
-		return span.admittedMS, true, nil
+		return span.admittedMS, headMerging, true, nil
 	}
-	return span.queuedMS, true, nil
+	return span.queuedMS, headWaiting, true, nil
 }
 
 // queueStandings resolves each in-line entry's standing for the queue

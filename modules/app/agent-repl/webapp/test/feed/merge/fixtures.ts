@@ -151,7 +151,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
 /** A merge head message. */
 export function mergeHead(
   result:
-    | { case: "update" }
+    | { case: "update"; stage?: "waiting" | "merging" }
     | {
         case: "success";
         endedAtMs: bigint;
@@ -169,7 +169,7 @@ export function mergeHead(
 ): FeedMerge {
   const arm =
     result.case === "update"
-      ? { case: "update" as const, value: {} }
+      ? { case: "update" as const, value: { stage: { case: result.stage ?? "merging", value: {} } } }
       : result.case === "success"
         ? {
             case: "success" as const,
