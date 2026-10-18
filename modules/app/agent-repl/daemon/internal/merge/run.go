@@ -555,12 +555,24 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 }
 
 // newRun builds one run of a workspace's merge, with nothing about it read
-// yet but QUEUEDMS, when it was queued: the shape a fresh admission, a resume,
-// a speculative start and a waiting member's rebase share. The queue instant
-// is the constructor's to take, so no run publishes a merge counted from the
-// epoch (checkQueuedAt): a waiting member's rebase once built its run without
-// one.
+// yet but QUEUEDMS, when it was queued: the shape a fresh admission, a resume
+// and a speculative start share. The queue instant is the constructor's to
+// take, so no run publishes a merge counted from the epoch (checkQueuedAt): a
+// waiting member's rebase once built its run without one.
 func (o *orchestrator) newRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
+	return o.buildRun(ctx, cancel, repo, ws, queuedMS)
+}
+
+// newBackgroundRun builds a waiting member's rebase (rebasewaiting.go): a
+// run that never tests.
+func (o *orchestrator) newBackgroundRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
+	r := o.buildRun(ctx, cancel, repo, ws, queuedMS)
+	r.background = true
+	return r
+}
+
+// buildRun is the run newRun and newBackgroundRun share.
+func (o *orchestrator) buildRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
 	return &run{
 		o: o, ws: ws, repo: repo, queuedMS: queuedMS,
 		ctx: ctx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}),

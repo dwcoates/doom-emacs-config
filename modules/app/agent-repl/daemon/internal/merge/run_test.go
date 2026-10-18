@@ -990,3 +990,35 @@ func TestTheMergeAsksWhetherAContextEndedOnlyThroughItsTwoHelpers(t *testing.T) 
 		t.Fatalf("ctxend is asked at %v, want only inside cutUnder and recordFailed", sites)
 	}
 }
+
+// TestEveryRunIsBuiltByBuildRun holds the package to its one run shape: only
+// buildRun spells a run, and only newBackgroundRun marks one background.
+func TestEveryRunIsBuiltByBuildRun(t *testing.T) {
+	// Arrange.
+	cases := []struct{ pattern, wantSite string }{
+		{pattern: "&run{", wantSite: "func (o *orchestrator) buildRun("},
+		{pattern: ".background = true", wantSite: "func (o *orchestrator) newBackgroundRun("},
+	}
+	for _, tc := range cases {
+		t.Run(tc.pattern, func(t *testing.T) {
+			// Act: each occurrence's enclosing top-level func.
+			var sites []string
+			for _, f := range sourcescan.Production(t) {
+				enclosing := ""
+				for _, line := range strings.Split(string(f.Source), "\n") {
+					if strings.HasPrefix(line, "func ") {
+						enclosing = line
+					}
+					if strings.Contains(line, tc.pattern) {
+						sites = append(sites, enclosing)
+					}
+				}
+			}
+
+			// Assert.
+			if len(sites) != 1 || !strings.HasPrefix(sites[0], tc.wantSite) {
+				t.Fatalf("%q appears in %v, want only in %s", tc.pattern, sites, tc.wantSite)
+			}
+		})
+	}
+}

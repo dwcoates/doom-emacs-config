@@ -130,8 +130,7 @@ func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey
 	}
 	runCtx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
-	r := o.newRun(runCtx, cancel, repo, ws, queuedMS)
-	r.background = true
+	r := o.newBackgroundRun(runCtx, cancel, repo, ws, queuedMS)
 	r.source = entry.Source
 	if !o.registerBackground(r) {
 		return
