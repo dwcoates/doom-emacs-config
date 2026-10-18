@@ -3292,6 +3292,13 @@ describe("the one bubble rule set", () => {
     expect(others.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
+  it("sets a tool card head at the thinking bubble's smaller prose size", () => {
+    // Arrange / Act
+    const head = ownDeclarationsOf(".tool-head") ?? "";
+    // Assert
+    expect(head).toMatch(/font-size:\s*calc\(var\(--small-prose-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
   it("carries no second leading token for prompts", () => {
     // Arrange / Act / Assert
     expect(withoutBlockComments(stylesheet)).not.toMatch(/--prompt-line-h/);
@@ -4676,10 +4683,10 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
 
   it("sets a thinking bubble's prose a touch smaller than every other bubble's", () => {
     // Arrange / Act
-    const got = Number(cascadedOnResponse("thinking", ["assistant", "thinking-bubble"], "--bubble-font-rem"));
+    const got = cascadedOnResponse("thinking", ["assistant", "thinking-bubble"], "--bubble-font-rem");
 
     // Assert
-    expect(got).toBe(0.8);
+    expect([got, rootToken("--small-prose-font-rem")]).toEqual(["var(--small-prose-font-rem)", "0.8"]);
   });
 
   it("sets an interim response's prose at the thinking bubble's smaller size", () => {
