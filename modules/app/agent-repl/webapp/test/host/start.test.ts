@@ -20,6 +20,7 @@ afterEach(() => {
   delete window.xwHasFocus;
   delete window.__agentReplHostPending;
   document.body.replaceChildren();
+  document.head.replaceChildren();
 });
 
 describe("startHost", () => {
@@ -32,6 +33,14 @@ describe("startHost", () => {
 
     // Assert
     expect(document.getElementById("main-col")).toBeNull();
+  });
+
+  it("installs the status colors' values before the sidebar draws", () => {
+    // Act
+    started = startHost(document, window, { startSidebar: noSidebar });
+
+    // Assert
+    expect(document.head.querySelector('style[data-source="render-colors.json#color_values"]')).not.toBeNull();
   });
 
   it("lays out the stack of workspace pages and the sidebar over it", () => {
