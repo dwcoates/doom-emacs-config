@@ -176,37 +176,38 @@ export type ReanchorBox = ScrollPosition;
  */
 export interface ScrollFloor {
   /**
-   * Keep the box's scrollable height at EXTENT px or more; 0 lifts the floor.
-   * Answers the blank px the floor adds below the content to do it (0 when
-   * the content is tall enough on its own).
+   * Keep the box able to stand at TOP, whatever its content or its own height
+   * does: its scrollable height never falls below TOP plus the box's height.
+   * null lifts the floor.
    */
-  set(extent: number): number;
+  hold(top: number | null): void;
 }
 
-/** The class the scroll floor's blank wears (`scrollFloor`). */
+/** The class the scroll floor's block wears (`scrollFloor`). */
 export const SCROLL_FLOOR_CLASS = "scroll-floor";
 
+/** The class a box holding a scroll floor wears: it is the floor's containing block. */
+export const SCROLL_FLOOR_HOST_CLASS = "scroll-floor-host";
+
 /**
- * The real floor of BOX: a blank block kept as the box's LAST child, as tall
- * as the content falls short of the floor. It is laid out in the box's flow,
- * so it is re-measured on every `set`: the tail owner sets the floor afresh on
- * every size change while one stands.
+ * The real floor of BOX: an absolutely positioned block at TOP in the box's
+ * scrolled content, one box-height tall (`height: 100%` of the box, its
+ * containing block). THE BROWSER'S OWN LAYOUT KEEPS IT: the block's bottom is
+ * TOP plus the box's height in every layout pass, so no content shrinking,
+ * however briefly, and no growth of the box can clamp the box above TOP. It
+ * is set once per held position and never measured.
  */
 export function scrollFloor(box: HTMLElement): ScrollFloor {
-  const blank = box.ownerDocument.createElement("div");
-  blank.className = SCROLL_FLOOR_CLASS;
-  blank.setAttribute("aria-hidden", "true");
-  blank.hidden = true;
-  box.append(blank);
+  const block = box.ownerDocument.createElement("div");
+  block.className = SCROLL_FLOOR_CLASS;
+  block.setAttribute("aria-hidden", "true");
+  block.hidden = true;
+  box.classList.add(SCROLL_FLOOR_HOST_CLASS);
+  box.append(block);
   return {
-    set: (extent) => {
-      if (box.lastElementChild !== blank) box.append(blank);
-      const shown = blank.hidden ? 0 : blank.offsetHeight;
-      const content = box.scrollHeight - shown;
-      const px = extent <= 0 ? 0 : Math.max(0, Math.ceil(extent - content));
-      blank.hidden = px === 0;
-      blank.style.height = `${px.toString()}px`;
-      return px;
+    hold: (top) => {
+      block.hidden = top === null;
+      block.style.top = top === null ? "" : `${top.toString()}px`;
     },
   };
 }
@@ -454,13 +455,11 @@ export class TailFollow {
   /** What the feed's content last changed, stated on every uncaused move (`witnessMoves`). */
   private witness: () => MoveWitnessReport | null = () => null;
   /**
-   * The scrollable height the floor holds the box to (`ScrollFloor`), 0 when
-   * none stands: the held view's bottom while the reader's click holds it, and
-   * afterwards whatever of it the reader has not scrolled back above.
+   * The position the floor keeps the box able to stand at (`ScrollFloor`),
+   * null when none stands: the held position while the reader's click holds
+   * it, and afterwards whatever of it the reader has not scrolled back above.
    */
-  private floorExtent = 0;
-  /** The blank px the floor last added, so a change of it is recorded once. */
-  private floorBlank = 0;
+  private floorTop: number | null = null;
   /**
    * Where the reader's click holds the view, while `clickHeld` stands: the
    * position at the click, moved only by this owner's own anchoring. Kept
@@ -601,9 +600,10 @@ export class TailFollow {
    * (`takeAnchor`): its top stays where the reader sees it, and its own growth
    * or shrinking runs downward from there, however long it takes to land (a
    * sub-feed drawn later, a redraw). Content shrinking below the held view,
-   * or the box growing under it, would make the box clamp it upward; the
-   * floor holds the box's scrollable height at the held view's bottom instead
-   * (`holdFloor`), so it cannot. Moves nothing.
+   * even for one layout pass of a redraw, or the box growing under it, would
+   * make the box clamp it upward; the floor keeps the box able to stand at
+   * the held position in every layout (`scrollFloor`), so it cannot. Moves
+   * nothing.
    *
    * This is the CLICK, not the expansion. A jump that expands an entry
    * centers it (`entryJumped`), and a selection stepped from Emacs centers its
@@ -668,7 +668,7 @@ export class TailFollow {
     this.touched = false;
     this.clickedRow = target === null ? null : this.rootRowOf(target);
     this.heldTop = this.box.scrollTop;
-    this.holdFloor();
+    this.setFloor(this.heldTop);
     this.takeAnchor();
     log.info("the reader clicked; the view holds until the reader's next input", {
       operation: "scroll.click-held",
@@ -677,7 +677,7 @@ export class TailFollow {
         at: this.box.scrollTop,
         row: heldRowName(this.clickedRow),
         target: target === null ? "none" : nodeLabel(target),
-        floor: this.floorExtent,
+        floor_top: this.floorTop,
       },
     });
   }
@@ -773,81 +773,63 @@ export class TailFollow {
   /**
    * A NAMED CAUSE MOVES THE FEED NEXT: it supersedes the reader's last click.
    * The click hold ends and the floor is lifted, so the cause lands on the
-   * feed's own content, never on the blank a click held.
+   * feed's own content, never on the blank below it a click held.
    */
   private supersedeClick(by: ClickSupersede): void {
     if (this.clickHeld) this.recordHoldEnded(by);
     this.clickHeld = false;
     this.clickedRow = null;
-    this.setFloor(0);
+    this.setFloor(null);
   }
 
   /**
-   * THE HELD VIEW CANNOT BE CLAMPED. While the reader's click holds the view,
-   * the floor is the held view's bottom: the box's scrollable height never
-   * drops below it, however far the content below shrinks or the box grows.
-   *
-   * The box clamps in its layout, before it tells anyone it resized, so a
-   * clamp may already stand when this runs: the box sits below the held
-   * position AND at the very end of its range, which nothing but the clamp
-   * leaves it at. That clamp is undone here, in the box's resize pass (before
-   * the frame paints) or in its scroll event, whichever the browser delivers
-   * first. Any other move is no clamp and is not undone: the held position
-   * becomes wherever the box now stands.
+   * THE HELD VIEW CANNOT BE CLAMPED: the floor keeps the box able to stand at
+   * the held position in every layout (`scrollFloor`). So a move the box made
+   * under the hold is no clamp: something moved it (the browser revealing an
+   * element, a write this owner does not make), and the held position becomes
+   * wherever the box now stands, the floor following it there.
    */
   private holdFloor(): void {
-    if (!this.clickHeld || this.floor === null) return;
+    if (!this.clickHeld) return;
     const top = this.box.scrollTop;
-    const end = this.box.scrollHeight - this.box.clientHeight;
-    const clamped = top < this.heldTop && top >= end - 1;
-    if (!clamped && top !== this.heldTop) {
-      log.info("the view moved under the reader's click hold, and the hold takes the new position", {
-        operation: "scroll.click-hold-moved",
-        context: { from: this.heldTop, to: top, end, scroll_height: this.box.scrollHeight, floor: this.floorExtent },
-      });
-    }
-    if (!clamped) this.heldTop = top;
-    this.setFloor(this.heldTop + this.box.clientHeight);
-    if (!clamped) return;
-    this.box.scrollTop = this.heldTop;
-    this.lastTop = this.box.scrollTop;
-    log.info("the box clamped the view the reader's click holds; the floor put it back", {
-      operation: "scroll.click-floor-restored",
-      context: { from: top, to: this.box.scrollTop, floor: this.floorExtent },
+    if (top === this.heldTop) return;
+    log.info("the view moved under the reader's click hold, and the hold takes the new position", {
+      operation: "scroll.click-hold-moved",
+      context: {
+        from: this.heldTop,
+        to: top,
+        end: this.box.scrollHeight - this.box.clientHeight,
+        scroll_height: this.box.scrollHeight,
+        floor_top: this.floorTop,
+      },
     });
+    this.heldTop = top;
+    this.setFloor(top);
   }
 
   /**
    * ONCE THE HOLD ENDS the floor follows the reader up: it never reaches
    * below the view's bottom, so blank the reader scrolled above is gone, and
-   * once the content itself is as tall the floor is lifted.
+   * once the content itself reaches past the floor's bottom the floor is
+   * lifted.
    */
   private recedeFloor(): void {
-    if (this.clickHeld || this.floorExtent === 0) return;
-    this.setFloor(Math.min(this.floorExtent, this.box.scrollTop + this.box.clientHeight));
+    if (this.clickHeld || this.floorTop === null) return;
+    const top = this.box.scrollTop;
+    const contentReaches = this.box.scrollHeight > this.floorTop + this.box.clientHeight;
+    this.setFloor(contentReaches ? null : Math.min(this.floorTop, top));
   }
 
-  /** Hold the box's scrollable height at EXTENT (0 lifts it), keeping it only while it holds anything or a click stands. */
-  private setFloor(extent: number): void {
-    if (this.floor === null) return;
-    if (extent === 0 && this.floorExtent === 0) return;
-    const blank = this.floor.set(extent);
-    const was = { extent: this.floorExtent, blank: this.floorBlank };
-    this.floorExtent = extent > 0 && (blank > 0 || this.clickHeld) ? extent : 0;
-    this.floorBlank = blank;
-    if (blank !== was.blank || this.floorExtent !== was.extent) {
-      log.info("the scroll floor changed", {
-        operation: "scroll.floor-set",
-        context: {
-          extent: this.floorExtent,
-          blank,
-          held: this.clickHeld,
-          at: this.box.scrollTop,
-          scroll_height: this.box.scrollHeight,
-          client_height: this.box.clientHeight,
-        },
-      });
-    }
+  /** Keep the box able to stand at TOP (null lifts the floor), recording a change once. */
+  private setFloor(top: number | null): void {
+    if (this.floor === null || top === this.floorTop) return;
+    this.floor.hold(top);
+    this.floorTop = top;
+    log.debug("the scroll floor changed", {
+      operation: "scroll.floor-set",
+      // No geometry read here: a read right after the write would force a layout.
+      context: { floor_top: top, held: this.clickHeld },
+    });
   }
 
   /**
@@ -950,7 +932,7 @@ export class TailFollow {
     this.sync();
     const from = this.box.scrollTop;
     // An anchoring correction under a click hold must reach its target too.
-    if (this.clickHeld) this.setFloor(from + delta + this.box.clientHeight);
+    if (this.clickHeld) this.setFloor(from + delta);
     if (delta !== 0) this.box.scrollTop += delta;
     this.lastTop = this.box.scrollTop;
     if (this.clickHeld) this.heldTop = this.lastTop;

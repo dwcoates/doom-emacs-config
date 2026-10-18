@@ -37,6 +37,13 @@ export interface ClickHoldPage {
    */
   answerTailCard(click: boolean, px: number, frames: number): Promise<number>;
   /**
+   * The reader clicks the tail card, and its redraw swaps its body a task
+   * later: PX shorter for one forced layout, then back to its height, as a
+   * merge tab's panel swap does. Answers the largest painted move of the
+   * card's top across FRAMES frames.
+   */
+  swapTailCard(px: number, frames: number): Promise<number>;
+  /**
    * The reader answers the docked gate: the dock hides a task later, and the
    * page then shrinks by the dock's height as Emacs shows the input window
    * again. Answers the largest painted move of the tail card's top across
@@ -129,6 +136,20 @@ window.clickHold = {
     });
     await later(() => {
       card.style.height = `${(CARD_PX - px).toString()}px`;
+    });
+    return worstMove(before, frames);
+  },
+  async swapTailCard(px, frames) {
+    const before = await frame(() => {
+      const at = tailRow.getBoundingClientRect().top;
+      option.click();
+      return at;
+    });
+    await later(() => {
+      card.style.height = `${(CARD_PX - px).toString()}px`;
+      // The read lays the shorter card out, where a real box clamps.
+      void box.scrollTop;
+      card.style.height = `${CARD_PX.toString()}px`;
     });
     return worstMove(before, frames);
   },

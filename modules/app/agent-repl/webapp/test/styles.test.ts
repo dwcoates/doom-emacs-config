@@ -5239,6 +5239,34 @@ describe("the merge bubble's run badge", () => {
   });
 });
 
+/**
+ * THE SCROLL FLOOR IS HELD BY LAYOUT (src/scroll.ts `scrollFloor`): one
+ * box-height tall at its top, out of the flow, against the box that holds it.
+ */
+describe("the scroll floor's layout", () => {
+  /** The floor inside its host; answers CHECK's result. */
+  function inHost<T>(check: (host: HTMLElement, floor: HTMLElement) => T): T {
+    const host = document.createElement("div");
+    host.className = "scroll-floor-host";
+    const floor = document.createElement("div");
+    floor.className = "scroll-floor";
+    host.append(floor);
+    return inDocument(host, () => check(host, floor));
+  }
+
+  it("makes its host the containing block", () => {
+    expect(inHost((host) => cascadedValue(host, "position"))).toBe("relative");
+  });
+
+  it("takes the block out of the flow, one host-height tall", () => {
+    expect(inHost((_, floor) => ["position", "height"].map((p) => cascadedValue(floor, p)))).toEqual(["absolute", "100%"]);
+  });
+
+  it("neither paints nor takes a click", () => {
+    expect(inHost((_, floor) => ["visibility", "pointer-events"].map((p) => cascadedValue(floor, p)))).toEqual(["hidden", "none"]);
+  });
+});
+
 /** A merge test row's head: its glyph, its name and its counts (src/feed/merge/tests-tab.ts). */
 function suiteHead(): { suite: HTMLElement; glyph: HTMLElement; counts: HTMLElement } {
   const suite = document.createElement("div");

@@ -29,6 +29,7 @@ import {
   holdViewOnClicks,
   scrollFloor,
   SCROLL_FLOOR_CLASS,
+  SCROLL_FLOOR_HOST_CLASS,
   type ScrollFloor,
   latestEntryVisible,
   MoveWitness,
@@ -1613,8 +1614,6 @@ describe("no scroll write outside scroll.ts", () => {
       .map((line) => line.trim());
     // Assert
     expect(writes).toEqual([
-      // The scroll floor undoing a clamp under a click-held view (`holdFloor`).
-      "this.box.scrollTop = this.heldTop;",
       "this.box.scrollTop = this.box.scrollHeight;",
       "if (delta !== 0) this.box.scrollTop += delta;",
       "feed.scrollTop += delta;",
@@ -3449,34 +3448,41 @@ describe("MoveWitness", () => {
  * reader's click never moves the feed, not even by the box's own clamp.
  *
  * The box here CLAMPS like a real one: `scrollTop` never sits past
- * `scrollHeight - clientHeight`, and the floor's extent counts in
- * `scrollHeight` exactly as the real floor's blank does.
+ * `scrollHeight - clientHeight`, and the floor counts in `scrollHeight`
+ * exactly as the real floor's block does: one box-height tall at its top, in
+ * every layout, so a clamp under it reads the box's height of that moment.
  */
 describe("TailFollow: the scroll floor under a click-held view", () => {
   /** A clamping box over CONTENT px, a 300px viewport at TOP, with a fake floor. */
   function floored(top: number, content = 1000) {
-    const state = { content, floor: 0, top, clientHeight: 300 };
+    const state: { content: number; floorTop: number | null; top: number; clientHeight: number } = {
+      content,
+      floorTop: null,
+      top,
+      clientHeight: 300,
+    };
+    /** The scrollable height a layout gives: the content, or the floor's bottom when that reaches further. */
+    const scrollHeight = (): number =>
+      Math.max(state.content, state.floorTop === null ? 0 : state.floorTop + state.clientHeight);
     const box: ReanchorBox = {
       get clientHeight() {
         return state.clientHeight;
       },
       get scrollHeight() {
-        return Math.max(state.content, state.floor);
+        return scrollHeight();
       },
       get scrollTop() {
         return state.top;
       },
       set scrollTop(v: number) {
-        state.top = Math.max(0, Math.min(v, Math.max(state.content, state.floor) - state.clientHeight));
+        state.top = Math.max(0, Math.min(v, scrollHeight() - state.clientHeight));
       },
     };
-    const extents: number[] = [];
+    const holds: (number | null)[] = [];
     const floor: ScrollFloor = {
-      set: (extent) => {
-        extents.push(extent);
-        const blank = extent <= 0 ? 0 : Math.max(0, extent - state.content);
-        state.floor = blank > 0 ? extent : 0;
-        return blank;
+      hold: (at) => {
+        holds.push(at);
+        state.floorTop = at;
       },
     };
     let onScroll = (): void => {};
@@ -3496,9 +3502,10 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
       tail,
       box,
       state,
-      extents,
+      holds,
       layout,
       scroll: () => onScroll(),
+      resize: () => onResize(),
       input: () => onInput("wheel"),
       /** The content below the view shrinks by PX, the box lays out, then tells its owner. */
       shrink: (px: number) => {
@@ -3521,7 +3528,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     // Act
     f.tail.readerClicked(document.createElement("div"));
     // Assert
-    expect(f.extents).toEqual([1000]);
+    expect(f.holds).toEqual([700]);
   });
 
   it("holds the view when the content below the clicked card shrinks", () => {
@@ -3555,11 +3562,11 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1000]);
   });
 
-  it("undoes the clamp in the box's scroll event when that arrives before its resize pass", () => {
+  it("holds the view when the box lays out a shorter card and tells its scroll first", () => {
     // Arrange
     const f = floored(700);
     f.tail.readerClicked(document.createElement("div"));
-    // Act -- the box laid out the shorter card and clamped; WebKit tells the scroll first.
+    // Act -- the box laid out the shorter card; WebKit tells the scroll first.
     f.state.content -= 200;
     f.layout();
     f.scroll();
@@ -3590,16 +3597,31 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     expect(f.box.scrollTop).toBe(600);
   });
 
-  it("records the clamp it undid", async () => {
+  it("holds the view through a redraw that shrinks the content and grows it back before anyone is told", () => {
+    // Arrange -- a merge tab swap: the old panel leaves a layout before the new one lands.
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    // Act
+    f.state.content -= 217;
+    f.layout();
+    f.state.content += 217;
+    f.layout();
+    f.resize();
+    f.scroll();
+    // Assert
+    expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([700, 1000]);
+  });
+
+  it("never moves the floor while the held view stands still", () => {
     // Arrange
     const f = floored(700);
     f.tail.readerClicked(document.createElement("div"));
-    const capture = captureLogRecords("debug");
     // Act
+    f.shrink(200);
     f.grow(210);
-    // Assert
-    const record = await forwardedRecord(capture, "scroll.click-floor-restored");
-    expect([record.level.case, record.context]).toMatchObject(["info", { from: 490, to: 700, floor: 1210 }]);
+    f.grow(-210);
+    // Assert -- set once at the click, and never measured or set again.
+    expect(f.holds).toEqual([700]);
   });
 
   it("records the reader input that ends a standing hold", async () => {
@@ -3665,22 +3687,15 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     expect(capture.sent.filter((r) => r.operation === "scroll.click-hold-moved")).toEqual([]);
   });
 
-  it("records the floor it sets with the box's geometry", async () => {
+  it("records the floor it sets at debug, with no geometry read", async () => {
     // Arrange
     const f = floored(700);
-    f.tail.readerClicked(document.createElement("div"));
-    const capture = captureLogRecords("info");
+    const capture = captureLogRecords("debug");
     // Act
-    f.shrink(200);
-    // Assert -- the click armed the floor; the shrink is what laid its blank.
-    capture.logger.flush();
-    await Promise.resolve();
-    const record = capture.sent.filter((r) => r.operation === "scroll.floor-set").at(-1);
-    expect([record?.level.case, record?.context]).toMatchObject([
-      "info",
-      // `at` is where the box's own clamp left it, before the floor restores it.
-      { extent: 1000, blank: 200, held: true, at: 500, scroll_height: 1000, client_height: 300 },
-    ]);
+    f.tail.readerClicked(document.createElement("div"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.floor-set");
+    expect([record.level.case, record.context]).toEqual(["debug", { connection_id: "test-connection", floor_top: 700, held: true }]);
   });
 
   it("records the clicked element and the floor standing when the hold is taken", async () => {
@@ -3693,8 +3708,8 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     f.tail.readerClicked(target);
     // Assert
     const record = await forwardedRecord(capture, "scroll.click-held");
-    // The floor the click armed: the held view's bottom.
-    expect(record.context).toMatchObject({ target: "span.merge-tab.is-active", floor: 1000 });
+    // The floor the click armed: the held position.
+    expect(record.context).toMatchObject({ target: "span.merge-tab.is-active", floor_top: 700 });
   });
 
   it("recedes the floor as the reader scrolls back up once the hold ends", () => {
@@ -3710,7 +3725,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     expect([f.box.scrollTop, f.box.scrollHeight]).toEqual([600, 900]);
   });
 
-  it("lifts the floor once the reader is back above the blank", () => {
+  it("leaves no blank once the reader is back above it", () => {
     // Arrange
     const f = floored(700);
     f.tail.readerClicked(document.createElement("div"));
@@ -3719,8 +3734,22 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     f.input();
     f.box.scrollTop = 400;
     f.scroll();
+    // Assert -- the floor followed the reader up to where the content alone reaches.
+    expect([f.box.scrollHeight, f.holds.at(-1)]).toEqual([800, 400]);
+  });
+
+  it("lifts the floor at the next scroll once the content reaches past it", () => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    f.shrink(200);
+    f.input();
+    f.box.scrollTop = 400;
+    f.scroll();
+    // Act
+    f.scroll();
     // Assert
-    expect([f.box.scrollHeight, f.extents.at(-1)]).toEqual([800, 700]);
+    expect([f.box.scrollHeight, f.state.floorTop]).toEqual([800, null]);
   });
 
   it("lifts the floor once new content fills the blank", () => {
@@ -3732,7 +3761,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     // Act -- the next rows land, taller than the blank.
     f.shrink(-300);
     // Assert -- the content stands on its own, and the floor holds nothing.
-    expect([f.box.scrollHeight, f.state.floor]).toEqual([1100, 0]);
+    expect([f.box.scrollHeight, f.state.floorTop]).toEqual([1100, null]);
   });
 
   it("keeps a floor the reader has not scrolled above, after the hold ends", () => {
@@ -3884,72 +3913,57 @@ describe("scrollFloor", () => {
     document.body.replaceChildren();
   });
 
-  /** A box whose laid-out scroll height is CONTENT plus the floor's shown blank, as a browser's would be. */
-  function boxOver(content: number) {
+  /** A box over some content, with its floor. */
+  function boxWithFloor() {
     const box = document.createElement("div");
     box.append(document.createElement("main"));
     document.body.append(box);
     const floor = scrollFloor(box);
-    const blank = box.lastElementChild as HTMLElement;
-    const shown = (): number => (blank.hidden ? 0 : Number.parseFloat(blank.style.height));
-    Object.defineProperty(blank, "offsetHeight", { get: shown });
-    Object.defineProperty(box, "scrollHeight", { get: () => content + shown() });
-    return { box, floor, blank };
+    const block = box.lastElementChild as HTMLElement;
+    return { box, floor, block };
   }
 
-  it("hangs a hidden blank as the box's last child", () => {
+  it("hangs a hidden block in the box", () => {
     // Arrange + Act
-    const { box, blank } = boxOver(800);
+    const { block } = boxWithFloor();
     // Assert
-    expect([blank.className, blank.hidden, box.lastElementChild === blank]).toEqual([SCROLL_FLOOR_CLASS, true, true]);
+    expect([block.className, block.hidden, block.getAttribute("aria-hidden")]).toEqual([SCROLL_FLOOR_CLASS, true, "true"]);
   });
 
-  it("adds the blank the content falls short of the floor by", () => {
-    // Arrange
-    const { floor, blank } = boxOver(800);
-    // Act
-    const added = floor.set(1000);
+  it("makes the box the block's containing block", () => {
+    // Arrange + Act
+    const { box } = boxWithFloor();
     // Assert
-    expect([added, blank.hidden, blank.style.height]).toEqual([200, false, "200px"]);
+    expect(box.classList.contains(SCROLL_FLOOR_HOST_CLASS)).toBe(true);
   });
 
-  it("measures the content without the blank it already shows", () => {
+  it("shows the block at the held position", () => {
     // Arrange
-    const { floor } = boxOver(800);
-    floor.set(1000);
+    const { floor, block } = boxWithFloor();
     // Act
-    const added = floor.set(900);
+    floor.hold(700);
     // Assert
-    expect(added).toBe(100);
+    expect([block.hidden, block.style.top]).toEqual([false, "700px"]);
   });
 
-  it("adds nothing when the content reaches the floor on its own", () => {
+  it("moves the block to a new held position", () => {
     // Arrange
-    const { floor, blank } = boxOver(1200);
+    const { floor, block } = boxWithFloor();
+    floor.hold(700);
     // Act
-    const added = floor.set(1000);
+    floor.hold(400);
     // Assert
-    expect([added, blank.hidden]).toEqual([0, true]);
+    expect(block.style.top).toBe("400px");
   });
 
-  it("hides the blank when the floor is lifted", () => {
+  it("hides the block when the floor is lifted", () => {
     // Arrange
-    const { floor, blank } = boxOver(800);
-    floor.set(1000);
+    const { floor, block } = boxWithFloor();
+    floor.hold(700);
     // Act
-    const added = floor.set(0);
+    floor.hold(null);
     // Assert
-    expect([added, blank.hidden]).toEqual([0, true]);
-  });
-
-  it("moves the blank back to the end when something was appended after it", () => {
-    // Arrange
-    const { box, floor, blank } = boxOver(800);
-    box.append(document.createElement("section"));
-    // Act
-    floor.set(1000);
-    // Assert
-    expect(box.lastElementChild).toBe(blank);
+    expect([block.hidden, block.style.top]).toEqual([true, ""]);
   });
 });
 

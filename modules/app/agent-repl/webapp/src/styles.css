@@ -1606,6 +1606,20 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   );
 }
 
+/* THE SCROLL FLOOR (src/scroll.ts `scrollFloor`): one box-height tall at the
+   held position in the scrolled content, so the box can always stand there.
+   Absolutely positioned against the box that holds it, so it takes no part
+   in the flow and the layout itself keeps its bottom at the held view's. */
+.scroll-floor-host { position: relative; }
+.scroll-floor {
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 100%;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* The band's trailing spacer: the scrolled content's last box, one gap tall,
    after #feed AND the held section, so the gap is the same whether or not
    anything is held. A pseudo-element rather than padding on #feed-scroll:
