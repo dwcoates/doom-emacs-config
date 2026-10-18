@@ -1655,51 +1655,52 @@ spec's (unspecified) :bg/:fg."
 
 ;; --- defface forms referencing the named constants --- ;;
 ;; Each `:unselected' palette row has the same colors these forms read,
-;; by construction.  Kept as explicit defface calls so Doom users can
-;; customize via `customize-face' (the Doom theming hook).
+;; by construction: both take their ground from the color constant and
+;; their ink from `agent-repl--tab-bar-legible-fg' against it
+;; (`agent-repl--tab-face-spec').  Kept as explicit defface calls so Doom
+;; users can customize via `customize-face' (the Doom theming hook), and
+;; RE-SPECCED ON EVERY LOAD (`agent-repl--tab-state-faces'): a `defface'
+;; keeps a face's first spec when its file is loaded again, so a moved
+;; color would otherwise leave the name region on the old one while the
+;; [N] bracket, painted from the palette, took the new one (owner report,
+;; 2026-10-17: two greens in one tab).
+
+(defun agent-repl--tab-face-spec (color)
+  "The `defface' spec of a tab face filled with COLOR.
+Its ink is `agent-repl--tab-bar-legible-fg' against COLOR, the same ink
+`agent-repl--tab-palette-row' gives the row's text and numeral."
+  `((t :background ,color
+       :foreground ,(agent-repl--tab-bar-legible-fg color)
+       :weight ,agent-repl--tab-weight)))
 
 (defface agent-repl-tab-init
-  `((t :background ,agent-repl--color-init-blue
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-init-blue)
   "Face for workspace tabs where the agent is initializing (blue).")
 
 (defface agent-repl-tab-thinking
-  `((t :background ,agent-repl--color-thinking-red
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-thinking-red)
   "Face for workspace tabs where the agent is thinking (red).")
 
 (defface agent-repl-tab-done
-  `((t :background ,agent-repl--color-done-green
-       :foreground ,agent-repl--color-dark
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-done-green)
   "Face for workspace tabs where the agent is done (green).")
 
 (defface agent-repl-tab-permission
-  `((t :background ,agent-repl--color-done-green
-       :foreground ,agent-repl--color-dark
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-done-green)
   "Face for workspace tabs where the agent needs permission (green + emoji).")
 
 (defface agent-repl-tab-ready
-  `((t :background ,agent-repl--color-done-green
-       :foreground ,agent-repl--color-dark
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-done-green)
   "Face for workspace tabs whose agent is ready (green): came up and was
 never prompted, or went quiet after a clean conclusion.")
 
 (defface agent-repl-tab-usable-fault
-  `((t :background ,agent-repl--color-usable-fault-turquoise
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-usable-fault-turquoise)
   "Face for workspace tabs where something went wrong while the workspace
 stays usable (turquoise): a failed turn, a degraded view, a vendor fault.")
 
 (defface agent-repl-tab-idle-async
-  `((t :background ,agent-repl--color-idle-async-yellow
-       :foreground ,agent-repl--color-dark
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-idle-async-yellow)
   "Face for workspace tabs with no foreground turn but live detached
 background work (yellow).")
 
@@ -1727,9 +1728,7 @@ against the bar's measured background by
 of black and white can be read on this bar\".")
 
 (defface agent-repl-tab-merging
-  `((t :background ,agent-repl--color-merging-purple
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
+  (agent-repl--tab-face-spec agent-repl--color-merging-purple)
   "Face for workspace tabs with a merge in flight (purple): about to
 enqueue, waiting behind a sibling, or running.
 
@@ -1738,6 +1737,26 @@ more.  A vendor-blocked workspace paints BLUE on the tab bar, so it
 takes `agent-repl-tab-init' exactly as `:severed', `:dead' and
 `:degraded' do — every one of them a compromised route to a working
 session.")
+
+(defconst agent-repl--tab-state-faces
+  `((agent-repl-tab-init         . ,agent-repl--color-init-blue)
+    (agent-repl-tab-thinking     . ,agent-repl--color-thinking-red)
+    (agent-repl-tab-done         . ,agent-repl--color-done-green)
+    (agent-repl-tab-permission   . ,agent-repl--color-done-green)
+    (agent-repl-tab-ready        . ,agent-repl--color-done-green)
+    (agent-repl-tab-usable-fault . ,agent-repl--color-usable-fault-turquoise)
+    (agent-repl-tab-idle-async   . ,agent-repl--color-idle-async-yellow)
+    (agent-repl-tab-merging      . ,agent-repl--color-merging-purple))
+  "Each colored tab face and the color it is filled with.")
+
+(defun agent-repl--respec-tab-faces ()
+  "Re-state each colored tab face's default spec from its color.
+A `defface' does not re-spec a face that already exists, so this runs on
+every load of this file; a user's own customization still wins over it."
+  (dolist (pair agent-repl--tab-state-faces)
+    (face-spec-set (car pair) (agent-repl--tab-face-spec (cdr pair)) 'face-defface-spec)))
+
+(agent-repl--respec-tab-faces)
 
 (defun agent-repl--force-tab-bar-redraw ()
   "Force the tab-bar to repaint NOW, bypassing its string-equality cache.
