@@ -43,11 +43,12 @@ type Config struct {
 
 // Server is an open metrics surface.
 type Server struct {
-	program string
-	root    string
-	addr    string
-	srv     *http.Server
-	done    chan struct{}
+	program  string
+	root     string
+	addr     string
+	registry *prometheus.Registry
+	srv      *http.Server
+	done     chan struct{}
 }
 
 // Open listens on an ephemeral loopback port and serves Path. It does NOT
@@ -73,11 +74,12 @@ func Open(cfg Config) (*Server, error) {
 		ErrorHandling: promhttp.HTTPErrorOnError,
 	}))
 	s := &Server{
-		program: cfg.Program,
-		root:    cfg.Root,
-		addr:    ln.Addr().String(),
-		srv:     &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second},
-		done:    make(chan struct{}),
+		program:  cfg.Program,
+		root:     cfg.Root,
+		addr:     ln.Addr().String(),
+		registry: cfg.Registry,
+		srv:      &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second},
+		done:     make(chan struct{}),
 	}
 	go func() {
 		defer close(s.done)
@@ -87,6 +89,10 @@ func Open(cfg Config) (*Server, error) {
 	}()
 	return s, nil
 }
+
+// Registry answers the registry the surface serves, for collectors a runtime
+// registers after opening.
+func (s *Server) Registry() *prometheus.Registry { return s.registry }
 
 // Addr answers the loopback host:port the surface listens on.
 func (s *Server) Addr() string { return s.addr }

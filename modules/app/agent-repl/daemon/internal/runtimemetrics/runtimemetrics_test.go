@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,16 +11,6 @@ import (
 
 	"agentrepl/logging/metrics"
 )
-
-// fakeExe writes a stand-in binary for the build hash.
-func fakeExe(t *testing.T) string {
-	t.Helper()
-	exe := filepath.Join(t.TempDir(), "agent-repld")
-	if err := os.WriteFile(exe, []byte("binary bytes"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return exe
-}
 
 func scrape(t *testing.T, s *Surface) string {
 	t.Helper()
@@ -45,7 +34,7 @@ func TestOpenWithoutRootIsOffAndSaysSo(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	s, err := Open(log, "", fakeExe(t))
+	s, err := Open(log, "")
 
 	// Assert
 	if err != nil || s != nil {
@@ -61,31 +50,11 @@ func TestOpenWithoutRootIsOffAndSaysSo(t *testing.T) {
 	}
 }
 
-func TestOpenRefusesAnUnreadableBinary(t *testing.T) {
-	// Arrange
-	log := dlog.NewTestLogger()
-	root := t.TempDir()
-
-	// Act
-	s, err := Open(log, root, filepath.Join(root, "missing"))
-
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "hash the daemon binary") {
-		t.Fatalf("err = %v, want the hash refusal", err)
-	}
-	if s != nil {
-		t.Fatalf("a refused surface was answered")
-	}
-	if _, statErr := os.Stat(metrics.TargetPath(root, metrics.ProgramDaemon)); !os.IsNotExist(statErr) {
-		t.Fatalf("a refused open left a target behind: %v", statErr)
-	}
-}
-
 func TestOpenServesBuildInfoAndAdvertises(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	root := t.TempDir()
-	s, err := Open(log, root, fakeExe(t))
+	s, err := Open(log, root)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -134,7 +103,7 @@ func TestDeployedVersion(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			s, err := Open(log, root, fakeExe(t))
+			s, err := Open(log, root)
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
@@ -178,7 +147,7 @@ func TestDeployedVersionRecoveryIsRecorded(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	root := t.TempDir()
-	s, err := Open(log, root, fakeExe(t))
+	s, err := Open(log, root)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

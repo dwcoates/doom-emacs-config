@@ -8,10 +8,59 @@ import (
 	"testing"
 
 	"agentrepl/logging/buildreport"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func fixedSelf(build string) func() (buildreport.Report, error) {
 	return func() (buildreport.Report, error) { return buildreport.Report{PID: 1, Build: build}, nil }
+}
+
+// extraCollector is a runtime-owned collector OpenRunning must register.
+type extraCollector struct{ desc *prometheus.Desc }
+
+func (c extraCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+func (c extraCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 7)
+}
+
+func TestOpenRunningRegistersExtraCollectorsAndDoesNotAdvertise(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	sink := &errSink{}
+	extra := extraCollector{desc: prometheus.NewDesc("agentrepl_test_extra", "extra", nil, nil)}
+
+	// Act
+	s, err := openRunning(ProgramDaemon, root, sink.record, fixedSelf("abc"), extra)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("openRunning: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	_, body := get(t, "http://"+s.Addr()+Path)
+	if !strings.Contains(body, "agentrepl_test_extra 7") || !strings.Contains(body, `program="daemon"`) {
+		t.Fatalf("scrape lacks the extra collector or the build info:\n%s", body)
+	}
+	if _, statErr := os.Stat(TargetPath(root, ProgramDaemon)); !os.IsNotExist(statErr) {
+		t.Fatalf("OpenRunning advertised (stat err = %v)", statErr)
+	}
+	if s.Registry() == nil {
+		t.Fatalf("an open surface has no registry")
+	}
+}
+
+func TestOpenRunningRefusesADuplicateCollector(t *testing.T) {
+	// Arrange
+	desc := prometheus.NewDesc("agentrepl_test_extra", "extra", nil, nil)
+
+	// Act
+	s, err := openRunning(ProgramDaemon, t.TempDir(), (&errSink{}).record, fixedSelf("abc"), extraCollector{desc}, extraCollector{desc})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), `register a collector for "daemon"`) || s != nil {
+		t.Fatalf("openRunning = (%v, %v), want the duplicate refused", s, err)
+	}
 }
 
 func TestOpenSelf(t *testing.T) {

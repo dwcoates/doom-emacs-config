@@ -26,11 +26,7 @@ func (c *recordingClaim) Publish() error {
 
 func openOwnershipSurface(t *testing.T, root string) *runtimemetrics.Surface {
 	t.Helper()
-	exe := filepath.Join(t.TempDir(), "agent-repld")
-	if err := os.WriteFile(exe, []byte("bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	s, err := runtimemetrics.Open(dlog.NewTestLogger(), root, exe)
+	s, err := runtimemetrics.Open(dlog.NewTestLogger(), root)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

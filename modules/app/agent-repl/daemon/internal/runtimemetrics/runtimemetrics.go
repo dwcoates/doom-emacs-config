@@ -11,7 +11,6 @@ package runtimemetrics
 import (
 	"fmt"
 
-	"agent-repld/internal/buildid"
 	"agent-repld/internal/dlog"
 
 	"agentrepl/logging/metrics"
@@ -25,47 +24,29 @@ const Operation = "daemon.metrics"
 
 // Surface is the daemon's open metrics surface.
 type Surface struct {
-	reg *prometheus.Registry
 	srv *metrics.Server
 	log dlog.Logger
 }
 
-// Open opens the daemon's metrics surface under root, hashing exe for the
-// build info. An empty root is OFF and answers (nil, nil); every method of a
-// nil Surface is the off surface's.
-func Open(log dlog.Logger, root, exe string) (*Surface, error) {
+// Open opens, without advertising, the daemon's metrics surface under root.
+// An empty root is OFF and answers (nil, nil); every method of a nil Surface
+// is the off surface's.
+func Open(log dlog.Logger, root string) (*Surface, error) {
 	if root == "" {
 		log.Info(Operation, "the metrics surface is off: no metrics root was configured", nil)
 		return nil, nil
 	}
-	build, err := buildid.File(exe)
-	if err != nil {
-		return nil, fmt.Errorf("runtimemetrics: hash the daemon binary %q: %w", exe, err)
-	}
-	reg, err := metrics.NewRegistry(metrics.ProgramDaemon, build)
-	if err != nil {
-		return nil, fmt.Errorf("runtimemetrics: %w", err)
-	}
-	if err := reg.Register(newDeployedVersionCollector(log, DeployedVersionPath(root))); err != nil {
-		return nil, fmt.Errorf("runtimemetrics: register the deployed version: %w", err)
-	}
-	srv, err := metrics.Open(metrics.Config{
-		Program:  metrics.ProgramDaemon,
-		Root:     root,
-		Registry: reg,
-		OnError: func(op string, err error) {
-			log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-		},
-	})
+	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
+		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
+	}, newDeployedVersionCollector(log, DeployedVersionPath(root)))
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
 	}
 	log.Info(Operation, "the metrics surface is listening", dlog.Context{
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
-		"build":   build,
 	})
-	return &Surface{reg: reg, srv: srv, log: log}, nil
+	return &Surface{srv: srv, log: log}, nil
 }
 
 // Registry answers the registry every daemon collector registers on, nil
@@ -74,7 +55,7 @@ func (s *Surface) Registry() *prometheus.Registry {
 	if s == nil {
 		return nil
 	}
-	return s.reg
+	return s.srv.Registry()
 }
 
 // Advertise publishes the surface's target file. The daemon calls it at the
