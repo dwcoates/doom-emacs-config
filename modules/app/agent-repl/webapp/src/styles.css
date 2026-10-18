@@ -513,13 +513,14 @@
        design-dark-accent-tuner.html beside this module derives them. The six
        status colors come from render-colors.json#color_values (src/vocab.ts),
        and EVERY PURPLE IS THE ONE PURPLE, the purple status --blocked, the
-       tool title's purple. */
+       tool title's purple. The greens are THE ONE GREEN, the green status
+       --ok (owner ruling, 2026-10-17). */
     --thinking: #ffa15a;
     --tool-command: #898782;
     --tool-title: var(--blocked);
     --accent: #97bafe;
     --retry: var(--blocked);
-    --info-ws: #46db7d;
+    --info-ws: var(--ok);
     --info-model: #1cd1ec;
     --info-tokens: #eab00b;
     --info-time: #8dbff7;
@@ -546,7 +547,7 @@
     /* A light amber, apart from the cleared rule's red at a glance (owner
        ruling, 2026-10-17: the two blurred as neighboring oranges). */
     --compact-rule: #ffc07a;
-    --final-response: #46db7d;
+    --final-response: var(--ok);
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #8bbeff;
