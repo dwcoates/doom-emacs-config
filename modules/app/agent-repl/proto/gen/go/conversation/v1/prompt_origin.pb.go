@@ -198,7 +198,10 @@ const (
 	// is.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE PromptOrigin = 40
 	// A prompt a workspace's AGENT sent to a workspace through the agent API
-	// (`agent-repld workspace prompt`). Drawn as an ordinary prompt bubble. A
+	// (`agent-repld workspace prompt`). It names its sender
+	// (agentrepl.v1.SubmitPromptRequest.sent_by), and the recipient's feed
+	// draws it as an agent prompt headed by a left arrow, then the sending
+	// workspace's name (frontend.v1.FeedAgentPromptAddressReceived.workspace). A
 	// prompt of this origin that begins with a slash command is refused
 	// (agentrepl.v1.SubmitPromptError.slash_command_from_agent): an agent's acts
 	// on a conversation are the ones the API names, such as compaction.

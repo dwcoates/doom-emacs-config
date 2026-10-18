@@ -42,7 +42,7 @@ func (s *server) CompactWorkspace(
 		return nil, fail(subject.Log, rpc, err)
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, feed.SaidText(CompactionPrompt(req.Msg.GetInstructions())), key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, wsm.DeliveryDeferred, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}

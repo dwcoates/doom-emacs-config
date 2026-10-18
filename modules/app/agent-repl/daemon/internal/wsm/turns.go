@@ -11,7 +11,7 @@ import (
 )
 
 // turnColumns is the one select list every turn read shares.
-const turnColumns = `id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind`
+const turnColumns = `id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind, sent_by`
 
 // scanTurn decodes one turn all-or-nothing. A turn's close is a whole: a close
 // kind without an instant (or the reverse) is corruption, and an undeclared
@@ -21,11 +21,12 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 		t       Turn
 		address sql.NullString
 		mirror  sql.NullString
+		sentBy  sql.NullString
 		started int64
 		closed  sql.NullInt64
 		kind    sql.NullInt64
 	)
-	if err := row.Scan(&t.ID, &t.Workspace, &t.Text, &t.Origin, &address, &mirror, &t.Displaced, &started, &closed, &kind); err != nil {
+	if err := row.Scan(&t.ID, &t.Workspace, &t.Text, &t.Origin, &address, &mirror, &t.Displaced, &started, &closed, &kind, &sentBy); err != nil {
 		return Turn{}, err
 	}
 	id := string(t.ID)
@@ -43,6 +44,11 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 		}
 		t.Mirror = m
 	}
+	from, err := decodeSentBy("turns", id, t.Origin, sentBy)
+	if err != nil {
+		return Turn{}, err
+	}
+	t.SentBy = from
 	t.StartedAt = fromNanos(started)
 	switch {
 	case !closed.Valid && !kind.Valid:
@@ -115,14 +121,19 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		s.log.Error(op, "refused a turn record carrying a close", withError(fields, err))
 		return err
 	}
+	if err := checkSender(t.Origin, t.SentBy); err != nil {
+		s.log.Error(op, "refused a turn record whose sender and origin disagree", withError(fields, err))
+		return err
+	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO turns (id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+			`INSERT INTO turns (id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind, sent_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, text = excluded.text, origin = excluded.origin,
-			   address = excluded.address, mirror = excluded.mirror, displaced = excluded.displaced, started_at = excluded.started_at`,
-			t.ID, t.Workspace, t.Text, t.Origin, address, mirror, t.Displaced, nanos(t.StartedAt))
+			   address = excluded.address, mirror = excluded.mirror, displaced = excluded.displaced, started_at = excluded.started_at,
+			   sent_by = excluded.sent_by`,
+			t.ID, t.Workspace, t.Text, t.Origin, address, mirror, t.Displaced, nanos(t.StartedAt), sentByColumn(t.SentBy))
 		if err != nil {
 			return err
 		}

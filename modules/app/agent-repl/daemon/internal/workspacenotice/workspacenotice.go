@@ -246,7 +246,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 		log.Error(op, "could not mint a derived workspace notice's idempotency key; the source is not told", dlog.WithCause(fields, err))
 		return
 	}
-	outcome, err := prompts.Submit(ctx, told.Source, feed.SaidText(text), key, origin, wsm.DeliveryDeferred, nil)
+	outcome, err := prompts.Submit(ctx, told.Source, feed.SaidText(text), key, origin, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		log.Error(op, "could not submit a derived workspace notice to its source", dlog.WithCause(fields, err))
 		return

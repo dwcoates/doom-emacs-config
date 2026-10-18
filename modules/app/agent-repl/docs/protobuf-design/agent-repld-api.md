@@ -204,6 +204,22 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     clears it only at the workspace's close or the awaited workspace's forget,
     since it cannot judge whether a reply is the one awaited.
 
+18. AN AGENT'S PROMPT IS HEADED BY ITS SENDER (owner, 2026-10-18). It
+    converges on the agent-to-agent header (2026-10-17-agent-to-agent-headers.md):
+    the recipient's feed draws a prompt of origin `PROMPT_ORIGIN_AGENT_SENT`
+    as a `FeedAgentPrompt` whose header is a left arrow, then the sending
+    workspace's name, never as a user prompt authored "Agent".
+    `SubmitPromptRequest.sent_by` names the sender, set exactly when the
+    origin is `PROMPT_ORIGIN_AGENT_SENT` (InvalidArgument otherwise), and a
+    sender that is no other registered workspace is refused
+    (`SubmitPromptError.unknown_sender`). `FeedAgentPromptAddressReceived`'s
+    sender becomes a oneof, `agent` or the new `workspace`
+    (`FeedAgentPromptAddressWorkspace`: `named`, or `unnamed` when the daemon
+    cannot name a sender it recorded). The sender is a daemon fact, recorded
+    on the hold and the turn (`wsm` layout 62), so a replay heads the prompt
+    as the live draw did; the shim is untouched. A held prompt is never folded
+    by the classifier into one with another author.
+
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing

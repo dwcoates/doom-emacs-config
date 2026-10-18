@@ -537,3 +537,33 @@ func TestAFoldedPromptIsResubmittedOnlyOnce(t *testing.T) {
 		t.Fatalf("resubmitted = %v, want no second resubmission", again)
 	}
 }
+
+func TestAResubmittedFoldedPromptKeepsItsSender(t *testing.T) {
+	// Arrange: an agent's prompt joins the running turn, is folded in, and the
+	// turn fails.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = afterToolCall
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "also cover the edge case")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseFolded)
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseFailed)
+
+	// Assert
+	joined, _ := h.db.startedTurn("t1")
+	if joined.SentBy == nil || *joined.SentBy != theSender {
+		t.Fatalf("joined turn = %+v, want it recorded with sender %s", joined, theSender)
+	}
+	turns := resubmitted(h)
+	if len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want one turn", turns)
+	}
+	if turn, _ := h.db.startedTurn(turns[0]); turn.SentBy == nil || *turn.SentBy != theSender {
+		t.Fatalf("resubmitted turn = %+v, want the folded prompt's own sender %s", turn, theSender)
+	}
+}

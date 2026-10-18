@@ -20,7 +20,7 @@ import (
 // refuse (see schema.go).
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
-	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced`
+	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -45,13 +45,19 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		delivery int64
 		actKind  sql.NullString
 		actValue sql.NullString
+		sentBy   sql.NullString
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
 		&arm, &reason, &command, &classAt, &tombKind, &tombAt, &queued, &delivery,
-		&actKind, &actValue, &h.Coalesced); err != nil {
+		&actKind, &actValue, &h.Coalesced, &sentBy); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
+	from, err := decodeSentBy("held_prompts", id, h.Origin, sentBy)
+	if err != nil {
+		return HeldPrompt{}, err
+	}
+	h.SentBy = from
 	// A delivery this build does not know is never read as the ordinary one: a
 	// deferred prompt misread would be classified and could interject.
 	h.Delivery = Delivery(delivery)
@@ -169,6 +175,10 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		s.log.Error(op, "refused an inconsistent hold", withError(fields, err))
 		return err
 	}
+	if err := checkSender(h.Origin, h.SentBy); err != nil {
+		s.log.Error(op, "refused a held prompt whose sender and origin disagree", withError(fields, err))
+		return err
+	}
 	if h.Hold != nil {
 		fields["hold_kind"] = h.Hold.String()
 	}
@@ -205,8 +215,8 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
-			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -218,10 +228,11 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   accepted = 0,
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
 			   queued_at = excluded.queued_at, delivery = excluded.delivery,
-			   act_kind = excluded.act_kind, act_value = excluded.act_value, coalesced = excluded.coalesced`,
+			   act_kind = excluded.act_kind, act_value = excluded.act_value, coalesced = excluded.coalesced,
+			   sent_by = excluded.sent_by`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
 			arm, reason, command, classAt, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
-			actKind, actValue, h.Coalesced)
+			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy))
 		return err
 	})
 }

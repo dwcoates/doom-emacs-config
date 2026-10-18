@@ -63,7 +63,7 @@ type fakePrompts struct {
 
 var _ prompthandler.Submitter = (*fakePrompts)(nil)
 
-func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	if err := p.failFor[ws]; err != nil {
 		return prompthandler.Outcome{}, err
 	}

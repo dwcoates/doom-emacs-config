@@ -157,7 +157,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 		log.Error(op, "could not mint a workspace notice's idempotency key; the subscriber is not told", dlog.WithCause(fields, err))
 		return
 	}
-	outcome, err := prompts.Submit(ctx, subscriber, feed.SaidText(text), key, Origin, wsm.DeliveryDeferred, nil)
+	outcome, err := prompts.Submit(ctx, subscriber, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		log.Error(op, "could not submit a workspace notice to its subscriber", dlog.WithCause(fields, err))
 		return

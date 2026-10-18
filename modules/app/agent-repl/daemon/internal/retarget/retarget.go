@@ -129,7 +129,7 @@ func (s *Service) notify(ctx context.Context, change wsm.ParentChange) (ids.Turn
 	if err != nil {
 		return "", fmt.Errorf("mint the idempotency key: %w", err)
 	}
-	outcome, err := s.deps.Prompts.Submit(ctx, change.Workspace, feed.SaidText(text), key, Origin, wsm.DeliveryDeferred, nil)
+	outcome, err := s.deps.Prompts.Submit(ctx, change.Workspace, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		return "", fmt.Errorf("submit: %w", err)
 	}

@@ -78,7 +78,7 @@ func TestABubbleAddressedSendLooksForTheAskOnThatBubble(t *testing.T) {
 
 	// Act.
 	if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("yes"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, wsm.DeliveryOrdinary, target); err != nil {
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, nil, wsm.DeliveryOrdinary, target); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestOnlyAPlainUserSendCanBeATypedAnswer(t *testing.T) {
 			h.asks.answered = true
 
 			// Act.
-			outcome, err := h.h.Submit(tc.ctx, theWorkspace, tc.said, "key-1", tc.origin, tc.delivery, nil)
+			outcome, err := h.h.Submit(tc.ctx, theWorkspace, tc.said, "key-1", tc.origin, nil, tc.delivery, nil)
 
 			// Assert.
 			if err != nil {

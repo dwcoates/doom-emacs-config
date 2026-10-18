@@ -270,6 +270,10 @@ type DB interface {
 	// rows were drawn (an async merge workspace's merge turn, in the
 	// requester's bubble). A feed replay mirrors each such turn by it.
 	TurnMirrors(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*MirrorAddress, error)
+	// TurnSenders answers the workspace whose agent sent each named turn's
+	// prompt, for the turns that have one (sentby.go). A feed replay heads each
+	// such turn's prompt by it.
+	TurnSenders(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]WorkspaceID, error)
 	// RecordedTurns answers which of the named turns this workspace recorded,
 	// open or closed: the durable statement of which turns are the
 	// workspace's OWN work. A fork's feed reads it to tell the conversation it

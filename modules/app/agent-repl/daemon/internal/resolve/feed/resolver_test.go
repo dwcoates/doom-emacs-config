@@ -145,6 +145,10 @@ type harness struct {
 	// replay; mirrorsErr fails that read.
 	mirrors    map[ids.TurnID]*wsm.MirrorAddress
 	mirrorsErr error
+	// senders are the recorded senders of turns the resolver reads on a
+	// replay; sendersErr fails that read.
+	senders    map[ids.TurnID]ids.WorkspaceID
+	sendersErr error
 	// faults is the fake fault record every raise in this resolver lands in.
 	faults *fakeFaults
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
@@ -256,6 +260,18 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 			for _, turn := range turns {
 				if addr, ok := h.addresses[turn]; ok {
 					out[turn] = addr
+				}
+			}
+			return out, nil
+		},
+		TurnSenders: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]ids.WorkspaceID, error) {
+			if h.sendersErr != nil {
+				return nil, h.sendersErr
+			}
+			out := map[ids.TurnID]ids.WorkspaceID{}
+			for _, turn := range turns {
+				if sender, ok := h.senders[turn]; ok {
+					out[turn] = sender
 				}
 			}
 			return out, nil

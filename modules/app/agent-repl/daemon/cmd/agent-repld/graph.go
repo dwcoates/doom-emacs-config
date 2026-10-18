@@ -585,6 +585,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TurnCloses:    p.DB.TurnCloses,
 		TurnAddresses: p.DB.TurnAddresses,
 		TurnMirrors:   p.DB.TurnMirrors,
+		TurnSenders:   p.DB.TurnSenders,
 		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
 		DurableRows: p.DB,
 		Faults:      p.DB,

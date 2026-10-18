@@ -174,6 +174,18 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 	if req.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		return invalid("origin", "the prompt origin is required")
 	}
+	// THE SENDER IS NAMED EXACTLY WHEN AN AGENT SENT THE PROMPT.
+	agentSent := req.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+	switch {
+	case agentSent && req.SentBy == nil:
+		return invalid("sent_by", "an agent-sent prompt names the workspace that sent it")
+	case !agentSent && req.SentBy != nil:
+		return invalid("sent_by", "only an agent-sent prompt names the workspace that sent it")
+	case agentSent:
+		if err := validateWorkspaceRef("sent_by", req.GetSentBy()); err != nil {
+			return err
+		}
+	}
 	if req.Feed != nil {
 		if err := validateFeedID("feed", req.GetFeed()); err != nil {
 			return err

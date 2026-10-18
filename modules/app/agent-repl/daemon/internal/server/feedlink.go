@@ -42,7 +42,7 @@ func (s *server) askAboutUnresolvedLink(ctx context.Context, log dlog.Logger, ws
 		return fmt.Errorf("ask about unresolved link %q: %w", link.Href, err)
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, ws, said, key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED, wsm.DeliveryDeferred, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		return fmt.Errorf("ask about unresolved link %q: %w", link.Href, err)
 	}

@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
@@ -40,6 +41,13 @@ func (s *server) SubmitPrompt(
 	}
 	if command, refused := agentSlashCommand(req.Msg.GetOrigin(), req.Msg.GetSaid()); refused {
 		return answer(resp, s.refuseAgentSlashCommand(subject.Log, rpc, resp, command))
+	}
+	sentBy, senderRefused, err := s.submitSender(ctx, subject, req.Msg.GetSentBy())
+	if err != nil {
+		return nil, fail(subject.Log, rpc, err)
+	}
+	if senderRefused != nil {
+		return answer(resp, s.refuse(subject.Log, rpc, resp, *senderRefused))
 	}
 
 	// The FeedId is decoded HERE, before the handler is called: a value that
@@ -102,7 +110,7 @@ func (s *server) SubmitPrompt(
 		return nil, fail(subject.Log, rpc, err)
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
-		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), delivery, target)
+		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), sentBy, delivery, target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(askRefused(refused))))))
@@ -125,6 +133,33 @@ func (s *server) SubmitPrompt(
 		s.endSelection(subject.Log, subject.Record.ID, sentWith, returnToTail(), "prompt_sent")
 	}
 	return answer(resp, cerr)
+}
+
+// submitSender resolves the workspace an agent-sent prompt names as its
+// sender, nil for a prompt no agent sent (validation has paired the two). A
+// sender that is no other registered workspace is refused `unknown_sender`:
+// the recipient's feed heads the prompt with it, and no workspace is known to
+// have sent it.
+func (s *server) submitSender(ctx context.Context, subject resolved, ref *workspacev1.WorkspaceRef) (*ids.WorkspaceID, *refusal, error) {
+	if ref == nil {
+		return nil, nil, nil
+	}
+	id := ids.WorkspaceID(ref.GetId())
+	_, err := s.deps.DB.Workspace(ctx, id)
+	switch {
+	case id == subject.Record.ID, errors.Is(err, wsm.ErrNotFound):
+		r := submitRefusal(s.fill(refusal{
+			Arm:    "unknown_sender",
+			Reason: fmt.Sprintf("workspace %s is no other registered workspace to have sent the prompt", id),
+			Fields: map[string]any{"sent_by": ref},
+		}))
+		return nil, &r, nil
+	case err != nil:
+		subject.Log.Error(opSubmit, "could not read the workspace an agent-sent prompt names as its sender",
+			dlog.Context{"sent_by": string(id), "cause": err.Error()})
+		return nil, nil, fmt.Errorf("read sender %q: %w", id, err)
+	}
+	return &id, nil, nil
 }
 
 // encodeSubmitOutcome renders the handler's outcome as SubmitPromptSuccess.

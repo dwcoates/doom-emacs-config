@@ -69,7 +69,7 @@ func (h *handler) movedOn(ctx context.Context, ws ids.WorkspaceID) {
 // is checked before anything is minted or mirrored, the addressed feed is
 // checked against the workspace, recognition forks the answer, and only an
 // ordinary prompt reaches the queue.
-func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error) {
+func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error) {
 	log, err := h.logger(ctx, ws)
 	if err != nil {
 		return Outcome{}, err
@@ -79,6 +79,10 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		log.Warn(opSubmit, "the submission carries no origin", nil)
 		return Outcome{}, ErrOriginRequired
+	}
+	if (origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT) != (sentBy != nil) {
+		log.Error(opSubmit, "the submission's sender disagrees with its origin", dlog.Context{"sender_named": sentBy != nil})
+		return Outcome{}, ErrSenderMismatch
 	}
 	if target != nil && target.WS != ws {
 		log.Warn(opSubmit, "the addressed feed belongs to another workspace",
@@ -133,7 +137,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		h.deps.Feed.ClaimIngress(ws, c.key, turn)
 	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
-		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target, Delivery: delivery,
+		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery,
 	})
 	if err != nil {
 		return Outcome{}, err

@@ -147,6 +147,11 @@ type Submission struct {
 	// submission, and the accepted value is persisted onto the turn via
 	// StartTurn.
 	Origin conversationv1.PromptOrigin
+	// SentBy is the workspace whose agent sent the prompt, set exactly when
+	// Origin is PROMPT_ORIGIN_AGENT_SENT: Submit refuses a submission breaking
+	// either half. It rides the hold and the turn record (wsm), so the
+	// recipient's feed heads the prompt with it.
+	SentBy *ids.WorkspaceID
 	// Target, when set, is the bubble composer's addressed feed row — the
 	// prompt goes to THAT agent through UpdateAgent.prompt.
 	Target *feedid.Ref

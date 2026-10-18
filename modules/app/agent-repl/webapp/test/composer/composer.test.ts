@@ -920,6 +920,12 @@ describe("submitPromptRefusal: the agent-only arm", () => {
       submitPromptRefusal({ case: "slashCommandFromAgent", value: { command: "/clear" } } as never),
     ).toThrow(MalformedView);
   });
+
+  it("refuses unknownSender, which never answers a user's prompt", () => {
+    expect(() =>
+      submitPromptRefusal({ case: "unknownSender", value: {} } as never),
+    ).toThrow(MalformedView);
+  });
 });
 
 describe("submitPromptRefusal: the unknown arm", () => {

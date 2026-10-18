@@ -59,7 +59,7 @@ func TestSubmitRefusesAnUnspecifiedOrigin(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED, wsm.DeliveryOrdinary, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED, nil, wsm.DeliveryOrdinary, nil)
 	// Assert
 	if !errors.Is(err, ErrOriginRequired) {
 		t.Fatalf("err = %v, want ErrOriginRequired", err)
@@ -71,7 +71,7 @@ func TestSubmitMintsNothingWhenTheOriginIsMissing(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED, wsm.DeliveryOrdinary, nil); err == nil {
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED, nil, wsm.DeliveryOrdinary, nil); err == nil {
 		t.Fatal("the submission must be refused")
 	}
 	// Assert
@@ -85,7 +85,7 @@ func TestSubmitRefusesAFeedFromAnotherWorkspace(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("keep going"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, bubbleRef("another-workspace"))
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, bubbleRef("another-workspace"))
 	// Assert
 	if !errors.Is(err, ErrFeedNotInWorkspace) {
 		t.Fatalf("err = %v, want ErrFeedNotInWorkspace", err)
@@ -97,7 +97,7 @@ func TestSubmitForwardsABubbleAddressedPromptFromItsOwnWorkspace(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("keep going"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, bubbleRef(theWorkspace)); err != nil {
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, bubbleRef(theWorkspace)); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	// Assert
@@ -129,7 +129,7 @@ func TestSubmitCarriesTheOriginIntoTheQueue(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, wsm.DeliveryOrdinary, nil); err != nil {
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, nil, wsm.DeliveryOrdinary, nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	// Assert
@@ -189,7 +189,7 @@ func TestADuplicateIsRecordedAtItsLevelByWhetherTheSubmissionIsARedrive(t *testi
 
 			// Act
 			_, err := h.h.Submit(tc.ctx(context.Background()), theWorkspace, userSaid("hello"), "key-1",
-				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 
 			// Assert
 			if !errors.Is(err, ErrDuplicateSubmission) {
@@ -230,7 +230,7 @@ func TestAClaimNeverAcceptedIsRecordedAtItsLevelByWhetherTheSubmissionIsARedrive
 
 			// Act
 			_, _ = h.h.Submit(tc.ctx(context.Background()), theWorkspace, userSaid("hello"), "key-1",
-				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 
 			// Assert
 			var levels []string
@@ -345,7 +345,7 @@ func TestSubmitForwardsWithoutAKeyWhenNoneWasSupplied(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 	// Assert
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -396,7 +396,7 @@ func TestSubmitRecognizesACommandTypedAsAReply(t *testing.T) {
 	said := replyquote.Quote(userSaid("/status"), "an earlier answer", false)
 	// Act
 	got, err := h.h.Submit(context.Background(), theWorkspace, said, "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 	// Assert
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -589,7 +589,7 @@ func TestSubmitCarriesTheOriginOntoAContextCut(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("/compact"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, wsm.DeliveryOrdinary, nil); err != nil {
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, nil, wsm.DeliveryOrdinary, nil); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	// Assert
@@ -817,7 +817,7 @@ func TestSubmitKeepsARetryOutWhileItsOriginalIsInFlight(t *testing.T) {
 
 	// Act
 	_, err := h.h.Submit(gaveUp, theWorkspace, userSaid("hello"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 
 	// Assert
 	close(h.queue.gate)
@@ -890,7 +890,7 @@ func TestSubmitCarriesTheDeliveryToTheQueue(t *testing.T) {
 
 			// Act
 			if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1",
-				conversationv1.PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT, tc.delivery, nil); err != nil {
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT, nil, tc.delivery, nil); err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
 
@@ -931,5 +931,59 @@ func TestSubmitTellsTheWorkspaceMovedOnOnlyWhenTheQueueAccepted(t *testing.T) {
 				t.Fatalf("moved on = %v, want %d", got, tc.wantLen)
 			}
 		})
+	}
+}
+
+func TestSubmitRefusesASenderThatDisagreesWithTheOrigin(t *testing.T) {
+	sender := ids.WorkspaceID("ws-sender")
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		sentBy *ids.WorkspaceID
+	}{
+		{name: "an agent-sent prompt naming no sender", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT},
+		{name: "a user's prompt naming a sender", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, sentBy: &sender},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1", tt.origin, tt.sentBy, wsm.DeliveryOrdinary, nil)
+
+			// Assert
+			if !errors.Is(err, ErrSenderMismatch) {
+				t.Fatalf("err = %v, want ErrSenderMismatch", err)
+			}
+			if len(h.queue.forwarded()) != 0 || len(h.db.claimed) != 0 {
+				t.Fatal("nothing may be minted, claimed or forwarded for a mismatched sender")
+			}
+			logged := false
+			for _, r := range h.log.Records() {
+				logged = logged || (r.Level == "error" && r.Operation == opSubmit && r.Message == "the submission's sender disagrees with its origin")
+			}
+			if !logged {
+				t.Fatalf("records = %+v, want the mismatch at ERROR", h.log.Records())
+			}
+		})
+	}
+}
+
+func TestSubmitCarriesTheSenderIntoTheQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sender := ids.WorkspaceID("ws-sender")
+
+	// Act
+	if _, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, &sender, wsm.DeliveryOrdinary, nil); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	forwarded := h.queue.forwarded()
+	if len(forwarded) != 1 || forwarded[0].SentBy == nil || *forwarded[0].SentBy != sender {
+		t.Fatalf("forwarded = %+v, want one submission sent by %s", forwarded, sender)
 	}
 }

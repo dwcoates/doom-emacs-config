@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/holdfold"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -241,5 +242,63 @@ func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
 				t.Fatalf("holdfold.SessionAct = %v, want it to agree with the queue's cut reading %v", got, cut)
 			}
 		})
+	}
+}
+
+func TestSameAuthor(t *testing.T) {
+	sender, other := theSender, ids.WorkspaceID("ws-other")
+	tests := []struct {
+		name  string
+		sub   *ids.WorkspaceID
+		ahead *ids.WorkspaceID
+		want  bool
+	}{
+		{name: "no workspace sent either", want: true},
+		{name: "one workspace sent both", sub: &sender, ahead: &sender, want: true},
+		{name: "two workspaces sent them", sub: &sender, ahead: &other, want: false},
+		{name: "a workspace sent the prompt, the one ahead is not a workspace's", sub: &sender, want: false},
+		{name: "the prompt is not a workspace's, a workspace sent the one ahead", ahead: &sender, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := sameAuthor(Submission{SentBy: tt.sub}, wsm.HeldPrompt{SentBy: tt.ahead})
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("sameAuthor = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
+	// Arrange: the user's prompt is queued, and an agent's prompt is ruled to
+	// interrupt it.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("later", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert: both stand, each as it was, and the agent's waits its turn.
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 2 || standing[0].Coalesced || saidText(standing[0].Said) != "an earlier question" {
+		t.Fatalf("standing = (%+v, %v), want both prompts standing apart", standing, err)
+	}
+	if got := verdictOf(t, h, "later"); got.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("verdict = %v, want the agent's prompt waiting its turn", got.Arm)
+	}
+	if !logged(h.log.Records(), "info", opClassify, "the prompt ahead has another author, so the prompt is not folded into it and waits its turn") {
+		t.Fatalf("records = %+v, want the refused fold said at info", h.log.Records())
 	}
 }

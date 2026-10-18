@@ -13,6 +13,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/workspace"
@@ -487,10 +488,14 @@ func TestAnAgentSentSlashCommandIsRefused(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			sentBy := registerSender(h)
+			if tt.origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
+				sentBy = nil
+			}
 
 			// Act
 			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-				Workspace: ref(), Said: workspace.SaidText(tt.text), IdempotencyKey: "k-1", Origin: tt.origin}))
+				Workspace: ref(), Said: workspace.SaidText(tt.text), IdempotencyKey: "k-1", Origin: tt.origin, SentBy: sentBy}))
 
 			// Assert
 			if err != nil {
@@ -502,6 +507,122 @@ func TestAnAgentSentSlashCommandIsRefused(t *testing.T) {
 			}
 		})
 	}
+}
+
+// senderWorkspaceID is the workspace registerSender registers as the sender of
+// agent-sent prompts.
+const senderWorkspaceID ids.WorkspaceID = "ws-sender"
+
+// registerSender registers the sending workspace in H's store and answers its
+// ref.
+func registerSender(h *harness) *workspacev1.WorkspaceRef {
+	h.DB.workspaces[senderWorkspaceID] = wsm.Workspace{ID: senderWorkspaceID, Dir: "/tmp/sender", Name: "sender"}
+	return &workspacev1.WorkspaceRef{Id: string(senderWorkspaceID), Dir: "/tmp/sender"}
+}
+
+// submitAgentPrompt submits an agent-sent prompt naming SENTBY to the harness
+// workspace.
+func submitAgentPrompt(h *harness, origin conversationv1.PromptOrigin, sentBy *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
+	return h.Client.SubmitPrompt(context.Background(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace: ref(), Said: workspace.SaidText("hello"), IdempotencyKey: "k-1", Origin: origin, SentBy: sentBy}))
+}
+
+func TestSubmitPromptNamesItsSenderExactlyWhenAnAgentSentIt(t *testing.T) {
+	agentSent := conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+	userSent := conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		named  bool
+	}{
+		{name: "an agent-sent prompt naming no sender", origin: agentSent, named: false},
+		{name: "a user's prompt naming a sender", origin: userSent, named: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			var sentBy *workspacev1.WorkspaceRef
+			if tt.named {
+				sentBy = registerSender(h)
+			}
+
+			// Act
+			_, err := submitAgentPrompt(h, tt.origin, sentBy)
+
+			// Assert
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument || h.Prompts.submits != 0 {
+				t.Fatalf("code %v, submits %d; want InvalidArgument and nothing submitted", code, h.Prompts.submits)
+			}
+		})
+	}
+}
+
+func TestSubmitPromptHandsTheSenderToTheHandler(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentBy := registerSender(h)
+
+	// Act
+	resp, err := submitAgentPrompt(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy)
+
+	// Assert
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("SubmitPrompt: %v / %v", err, resp.Msg.GetError())
+	}
+	if got := h.Prompts.lastSentBy; got == nil || *got != senderWorkspaceID {
+		t.Fatalf("the handler was handed sender %v, want %s", got, senderWorkspaceID)
+	}
+}
+
+func TestSubmitPromptRefusesASenderThatIsNoOtherWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		sentBy *workspacev1.WorkspaceRef
+	}{
+		{name: "a sender no workspace is registered as", sentBy: &workspacev1.WorkspaceRef{Id: "ws-gone", Dir: "/tmp/gone"}},
+		{name: "the recipient itself", sentBy: ref()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			resp, err := submitAgentPrompt(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, tt.sentBy)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			if got := resp.Msg.GetError().GetUnknownSender().GetSentBy().GetId(); got != tt.sentBy.GetId() || h.Prompts.submits != 0 {
+				t.Fatalf("unknown_sender names %q, submits %d; want %q and nothing submitted", got, h.Prompts.submits, tt.sentBy.GetId())
+			}
+		})
+	}
+}
+
+func TestSubmitPromptSurfacesAnUnreadableSender(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t)
+	h.Surfaces.workspace = log
+	sentBy := registerSender(h)
+	h.DB.workspaceErrs = map[ids.WorkspaceID]error{senderWorkspaceID: errors.New("database is locked")}
+
+	// Act
+	_, err := submitAgentPrompt(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy)
+
+	// Assert
+	if err == nil || h.Prompts.submits != 0 {
+		t.Fatalf("err %v, submits %d; want a failure and nothing submitted", err, h.Prompts.submits)
+	}
+	for _, record := range log.Records() {
+		if record.Level == "error" && record.Operation == opSubmit && record.Context["sent_by"] == string(senderWorkspaceID) && record.Context["cause"] == "database is locked" {
+			return
+		}
+	}
+	t.Fatalf("no error record named the unreadable sender: %+v", log.Records())
 }
 
 // ---- EvaluateInEditor ----------------------------------------------------------

@@ -999,8 +999,11 @@ type fakeFeed struct {
 	turnAddrs map[ids.TurnID]*sessionwatcher.OutputAddress
 	// mirror is the standing output mirror; turnMirrors are the mirrors
 	// MirrorTurn handed over, by turn.
-	mirror          *wsm.MirrorAddress
-	turnMirrors     map[ids.TurnID]*wsm.MirrorAddress
+	mirror      *wsm.MirrorAddress
+	turnMirrors map[ids.TurnID]*wsm.MirrorAddress
+	// turnSenders are the senders SenderTurn handed over, by turn; nil entries
+	// are turns handed over with no sender.
+	turnSenders     map[ids.TurnID]*ids.WorkspaceID
 	clearReceived   []ids.TurnID
 	compactReceived []ids.TurnID
 	cutAborted      []ids.TurnID
@@ -1204,6 +1207,43 @@ func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *sessionwatcher.Outp
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.address = addr
+}
+
+func (f *fakeFeed) SenderTurn(_ ids.WorkspaceID, turn ids.TurnID, sender *ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.turnSenders == nil {
+		f.turnSenders = map[ids.TurnID]*ids.WorkspaceID{}
+	}
+	f.turnSenders[turn] = sender
+}
+
+// turnSender answers the sender SenderTurn handed over for TURN, and whether
+// it handed one over at all.
+func (f *fakeFeed) turnSender(turn ids.TurnID) (*ids.WorkspaceID, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sender, ok := f.turnSenders[turn]
+	return sender, ok
+}
+
+// PromptHeader heads an agent-sent turn's prompt by the sender SenderTurn
+// handed over, named by its id, as the resolver heads it by its name.
+func (f *fakeFeed) PromptHeader(_ ids.WorkspaceID, turn ids.TurnID, origin conversationv1.PromptOrigin) *frontendv1.FeedAgentPromptAddress {
+	if origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
+		return nil
+	}
+	sender, _ := f.turnSender(turn)
+	name := "no sender"
+	if sender != nil {
+		name = string(*sender)
+	}
+	return &frontendv1.FeedAgentPromptAddress{
+		Name: &frontendv1.FeedAgentPromptAddressName{Text: name},
+		Direction: &frontendv1.FeedAgentPromptAddress_Received{Received: &frontendv1.FeedAgentPromptAddressReceived{
+			Sender: &frontendv1.FeedAgentPromptAddressReceived_Workspace{Workspace: &frontendv1.FeedAgentPromptAddressWorkspace{}},
+		}},
+	}
 }
 
 func (f *fakeFeed) mirrored() []*frontendv1.FeedRow {
@@ -1702,6 +1742,18 @@ func submission(turn ids.TurnID, text string) Submission {
 		Said:   userSaid(text),
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 	}
+}
+
+// theSender is the workspace agentSubmission's prompts are sent by.
+const theSender ids.WorkspaceID = "ws-sender"
+
+// agentSubmission is submission's prompt as theSender's agent sent it.
+func agentSubmission(turn ids.TurnID, text string) Submission {
+	sub := submission(turn, text)
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+	sender := theSender
+	sub.SentBy = &sender
+	return sub
 }
 
 // userSaid composes a one-block text submission.

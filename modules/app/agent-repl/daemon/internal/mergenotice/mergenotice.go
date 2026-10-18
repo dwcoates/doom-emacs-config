@@ -182,7 +182,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 		log.Error(op, "could not mint a merge queue notice's idempotency key; the subscriber is not told of the change", dlog.WithCause(fields, err))
 		return
 	}
-	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, wsm.DeliveryDeferred, nil)
+	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		log.Error(op, "could not submit a merge queue notice to its subscriber", dlog.WithCause(fields, err))
 		return

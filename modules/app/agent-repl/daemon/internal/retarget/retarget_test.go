@@ -60,7 +60,7 @@ type fakePrompts struct {
 	calls *[]string
 }
 
-func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (prompthandler.Outcome, error) {
+func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref) (prompthandler.Outcome, error) {
 	*p.calls = append(*p.calls, "submit")
 	text := said.GetContent().GetBlocks()[0].GetText().GetText()
 	p.got = append(p.got, submission{ws: ws, text: text, key: key, origin: origin, delivery: delivery, target: target})

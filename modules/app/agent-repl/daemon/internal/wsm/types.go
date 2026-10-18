@@ -520,6 +520,9 @@ type HeldPrompt struct {
 	Said *conversationv1.UserSaid
 	// Origin is the prompt's origin, as conversation.v1.PromptOrigin names it.
 	Origin string
+	// SentBy is the workspace whose agent sent the prompt, set exactly when
+	// Origin is PROMPT_ORIGIN_AGENT_SENT (sentby.go).
+	SentBy *WorkspaceID
 	// Target, when set, is the bubble composer's addressed row.
 	Target *feedid.Ref
 	// Hold is the daemon-side condition holding the prompt, nil when no
@@ -686,6 +689,9 @@ type Turn struct {
 	Text string
 	// Origin is the prompt's origin.
 	Origin string
+	// SentBy is the workspace whose agent sent the turn's prompt, set exactly
+	// when Origin is PROMPT_ORIGIN_AGENT_SENT (sentby.go).
+	SentBy *WorkspaceID
 	// Address is where the turn's output lands, nil for the root feed.
 	Address *OutputAddress
 	// Mirror is where the turn is ALSO drawn, in another workspace's feed: an

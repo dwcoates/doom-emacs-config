@@ -31,6 +31,10 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		log.Error(opSubmit, "a submission reached the queue with no origin", nil)
 		return Disposition{}, fmt.Errorf("submit to %q: the prompt origin is required", sub.WS)
 	}
+	if (sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT) != (sub.SentBy != nil) {
+		log.Error(opSubmit, "a submission reached the queue with a sender that disagrees with its origin", dlog.Context{"sender_named": sub.SentBy != nil})
+		return Disposition{}, fmt.Errorf("submit to %q: %w", sub.WS, wsm.ErrSenderMismatch)
+	}
 
 	disposition, handled, err := q.applyLeasePolicy(ctx, sub, log)
 	if handled || err != nil {

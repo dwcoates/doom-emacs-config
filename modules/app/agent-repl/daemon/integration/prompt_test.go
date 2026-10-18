@@ -1879,3 +1879,56 @@ func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
 		t.Fatalf("drawn blocks = %v, want the quote arm taken apart (%v) then the words", drawn, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// An agent-sent prompt is headed by the workspace that sent it
+// ---------------------------------------------------------------------------
+
+func TestAnAgentSentPromptIsDrawnUnderTheSendingWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
+	feed := f.watchRootFeed()
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-agent",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender,
+	})
+
+	// Assert
+	turn := resp.GetSuccess().GetTurn().GetTurn().GetValue()
+	if turn == "" {
+		t.Fatalf("SubmitPrompt = %v, want a minted turn", resp)
+	}
+	row := awaitRow(t, f, feed, "the agent prompt headed by its sender", func(r *frontendv1.FeedRow) bool {
+		return r.GetAgentPrompt().GetAddress().GetReceived().GetWorkspace().GetNamed() != nil
+	})
+	if row.GetTurn().GetValue() != turn || row.GetUserPrompt() != nil {
+		t.Fatalf("row = %v, want the agent prompt of turn %s", row, turn)
+	}
+	if name := row.GetAgentPrompt().GetAddress().GetName().GetText(); !strings.Contains(name, "parser-fix") {
+		t.Fatalf("header names %q, want the sending workspace", name)
+	}
+	if req := f.shim.ExpectStartTurn(); req.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
+		t.Fatalf("StartTurn.origin = %v, want the agent-sent origin", req.GetOrigin())
+	}
+}
+
+func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("hello"), IdempotencyKey: "k-self",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: f.ws,
+	})
+
+	// Assert
+	if resp.GetError().GetUnknownSender().GetSentBy().GetId() != f.ws.GetId() {
+		t.Fatalf("SubmitPrompt = %v, want unknown_sender naming the workspace itself", resp)
+	}
+}

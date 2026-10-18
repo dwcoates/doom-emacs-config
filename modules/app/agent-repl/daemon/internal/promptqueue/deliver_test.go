@@ -988,3 +988,95 @@ func TestASessionUpDuringASuccessfulCallDeliversThePromptOnce(t *testing.T) {
 		t.Fatalf("StartTurn attempts = %d, want 1", h.sender.attempts)
 	}
 }
+
+func TestDeliverRecordsTheSenderOnTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	record, ok := h.db.startedTurn("t1")
+	if !ok || record.SentBy == nil || *record.SentBy != theSender {
+		t.Fatalf("turn = (%+v, %v), want it recorded with sender %s", record, ok, theSender)
+	}
+}
+
+func TestDeliverHandsTheSenderToTheFeed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	sender, ok := h.feed.turnSender("t1")
+	if !ok || sender == nil || *sender != theSender {
+		t.Fatalf("feed's turn sender = (%v, %v), want %s", sender, ok, theSender)
+	}
+}
+
+func TestDeliverHandsNoSenderToTheFeedForAUsersPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if sender, ok := h.feed.turnSender("t1"); !ok || sender != nil {
+		t.Fatalf("feed's turn sender = (%v, %v), want the turn handed over with none", sender, ok)
+	}
+}
+
+func TestDeliverMirrorsAnAgentSentPromptUnderItsSender(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	rows := h.feed.mirrored()
+	if len(rows) != 1 {
+		t.Fatalf("mirrored rows = %d, want 1", len(rows))
+	}
+	prompt := rows[0].GetAgentPrompt()
+	if prompt.GetAddress().GetReceived().GetWorkspace() == nil || prompt.GetAddress().GetName().GetText() != string(theSender) {
+		t.Fatalf("row = %v, want an agent prompt received from %s", rows[0], theSender)
+	}
+}
+
+func TestAHeldAgentSentPromptIsDeliveredWithItsSender(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	held, ok, err := h.db.HeldPromptByTurn(context.Background(), "t1")
+	if err != nil || !ok || held.SentBy == nil || *held.SentBy != theSender {
+		t.Fatalf("hold = (%+v, %v, %v), want it held with sender %s", held, ok, err, theSender)
+	}
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	record, ok := h.db.startedTurn("t1")
+	if !ok || record.SentBy == nil || *record.SentBy != theSender {
+		t.Fatalf("turn = (%+v, %v), want it delivered with sender %s", record, ok, theSender)
+	}
+}

@@ -155,6 +155,7 @@ var migrations = []migration{
 	{To: 62, Name: "workspace_subscriptions", Kind: MigrationAdditive, DDL: workspaceSubscriptionsDDL},
 	{To: 63, Name: "self_close", Kind: MigrationAdditive, DDL: selfCloseDDL},
 	{To: 64, Name: "standings", Kind: MigrationAdditive, DDL: standingsDDL},
+	{To: 65, Name: "prompt_sent_by", Kind: MigrationAdditive, DDL: sentByDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its

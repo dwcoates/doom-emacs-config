@@ -49,6 +49,10 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 		addresses map[ids.TurnID]*wsm.OutputAddress
 		mirrors   map[ids.TurnID]*wsm.MirrorAddress
 	)
+	// A PROMPT'S SENDER IS READ FROM THE WORKSPACE THAT RECORDED THE TURN, on
+	// both planes: it names no tab, so an inherited turn is headed by the
+	// workspace that sent it to the ancestor.
+	senders := r.recordedSenders(records, entryTurns(whole))
 	if plane == planeHistory {
 		turns := entryTurns(whole)
 		addresses = r.recordedAddresses(ws, turns)
@@ -103,6 +107,9 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	for turn, m := range mirrors {
 		s.mirrorTurn(turn, m)
+	}
+	for turn, sender := range senders {
+		s.senderTurn(turn, &sender)
 	}
 	if load == nil && len(page.GetHeads()) > 0 {
 		log.Debug("daemon.feed.catch_up_heads_ignored",

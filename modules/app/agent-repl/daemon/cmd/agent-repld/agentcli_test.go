@@ -414,6 +414,39 @@ func TestPromptIsSentAsTheAgents(t *testing.T) {
 	}
 }
 
+func TestPromptNamesTheCallingWorkspaceAsItsSender(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "prompt", "peer", "please rebase")
+
+	// Assert
+	req := only[*agentreplv1.SubmitPromptRequest](t, f)
+	if code != exitSuccess || req.GetSentBy().GetId() != "ws-caller" {
+		t.Fatalf("exit %d, sent_by %v; want the calling workspace", code, req.GetSentBy())
+	}
+}
+
+func TestPromptFromNoWorkspaceSendsNothing(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.cwd = "/elsewhere"
+
+	// Act
+	code := f.run(workspaceNoun, "prompt", "peer", "please rebase")
+
+	// Assert
+	for _, req := range f.client.requests {
+		if _, sent := req.(*agentreplv1.SubmitPromptRequest); sent {
+			t.Fatalf("a prompt was sent from no workspace: %v", req)
+		}
+	}
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "inside no workspace") {
+		t.Fatalf("exit %d, stderr %q; want the calling directory refused", code, f.errOut.String())
+	}
+}
+
 func TestSubscribeReadsItsEvents(t *testing.T) {
 	tests := []struct {
 		name   string

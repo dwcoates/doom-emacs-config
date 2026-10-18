@@ -1846,8 +1846,8 @@ here."
 
 (ert-deftest agent-repl-test-wire-verbs-submit-reason-arms-pinned ()
   "SubmitPromptError's reason oneof is the arms this codec decodes and
-`slash_command_from_agent', which refuses only an agent\='s prompt and so
-never answers the editor\='s."
+`slash_command_from_agent' and `unknown_sender', which refuse only an
+agent\='s prompt and so never answer the editor\='s."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
@@ -1856,7 +1856,7 @@ never answers the editor\='s."
                    "feedNotInWorkspace" "feedUndecodable" "merging"
                    "modelNotInCatalog" "modelRefused" "noSession"
                    "notYetAdopted" "slashCommandFromAgent" "transferringAway"
-                   "unknownWorkspace" "workspaceRefMismatch"))))
+                   "unknownSender" "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
   "UpdateShutdownScheduleRequest's action oneof has exactly the three arms
@@ -3085,7 +3085,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()

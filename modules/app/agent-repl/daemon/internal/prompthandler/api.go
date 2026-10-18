@@ -41,6 +41,11 @@ var (
 	// ErrOriginRequired is a submission carrying PROMPT_ORIGIN_UNSPECIFIED. It
 	// is refused HERE, before anything is minted or mirrored.
 	ErrOriginRequired = errors.New("prompthandler: the prompt origin is required")
+	// ErrSenderMismatch is a submission whose sender disagrees with its
+	// origin: a sender on a prompt no agent sent, or an agent-sent prompt
+	// naming none. The rpc's validation refuses both before this, so reaching
+	// it is a defect.
+	ErrSenderMismatch = wsm.ErrSenderMismatch
 	// ErrFeedNotInWorkspace is an echoed FeedId belonging to another workspace.
 	ErrFeedNotInWorkspace = errors.New("prompthandler: the addressed feed belongs to another workspace")
 	// ErrDuplicateSubmission is a retried request whose idempotency key is
@@ -141,12 +146,14 @@ type Submitter interface {
 	// Submit runs one submission: recognize it, mirror what it produced into
 	// the root feed, and forward an ordinary prompt to the queue. origin is
 	// REQUIRED — an UNSPECIFIED origin is refused here, before anything is
-	// minted or mirrored. delivery is how the prompt asked to be delivered
+	// minted or mirrored. sentBy is the workspace whose agent sent the prompt,
+	// set exactly when origin is PROMPT_ORIGIN_AGENT_SENT; a submission
+	// breaking either half is refused (ErrSenderMismatch). delivery is how the prompt asked to be delivered
 	// (agentrepl.v1 SubmitPromptDelivery; wsm.DeliveryOrdinary for an absent
 	// field) and is carried to the queue, which stores it on any hold. feed,
 	// when set, addresses a subagent bubble's composer; recognition is
 	// unchanged either way.
-	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error)
+	Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error)
 }
 
 // Handler is SubmitPrompt's body.

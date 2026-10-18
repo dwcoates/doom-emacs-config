@@ -9,7 +9,7 @@ import {
   FeedAgentPromptSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { receivedFrom, sentTo, sentToWorkspace } from "../addresses.js";
+import { receivedFrom, receivedFromWorkspace, sentTo, sentToWorkspace } from "../addresses.js";
 import { PEER_ARROW_CLASS } from "../../../src/feed/rows/peer-arrow.js";
 import { drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
@@ -186,6 +186,13 @@ describe("drawFeedAgentPrompt: the arrow says which way it went", () => {
     expect(headerParts(drawFeedAgentPrompt(agentPrompt(receivedFrom("the main agent"))))).toEqual([
       "arrow-in",
       "the main agent",
+    ]);
+  });
+
+  it("draws a prompt from another workspace's agent as a left arrow, then its name", () => {
+    expect(headerParts(drawFeedAgentPrompt(agentPrompt(receivedFromWorkspace("parser-fix"))))).toEqual([
+      "arrow-in",
+      "parser-fix",
     ]);
   });
 

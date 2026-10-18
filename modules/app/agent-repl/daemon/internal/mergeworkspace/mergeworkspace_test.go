@@ -118,7 +118,7 @@ type fakePrompts struct {
 	keys []string
 }
 
-func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	text := said.GetContent().GetBlocks()[0].GetText().GetText()

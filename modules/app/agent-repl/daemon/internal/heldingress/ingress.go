@@ -286,7 +286,7 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 
 	// The submission RE-DRIVES the attempt the client gave up on, so an
 	// already-accepted key is the expected answer, not an anomaly.
-	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(ctx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, entry.delivery, nil)
+	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(ctx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, nil, entry.delivery, nil)
 	switch {
 	case errors.Is(err, prompthandler.ErrDuplicateSubmission):
 		wlog.Info(opDedupe, "the held prompt was already accepted under its idempotency key, so it is not delivered twice", nil)

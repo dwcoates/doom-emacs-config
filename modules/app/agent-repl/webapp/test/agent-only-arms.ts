@@ -27,7 +27,7 @@ export const AGENT_ONLY_REFUSAL_ARMS = {
     "asyncMergeRequesterMerging",
     "asyncMergeRequesterSessionDeleted",
   ]),
-  submitPrompt: new Set<string>(["slashCommandFromAgent"]),
+  submitPrompt: new Set<string>(["slashCommandFromAgent", "unknownSender"]),
 } as const satisfies Record<string, ReadonlySet<string>>;
 
 /** The rpcs that have agent-only refusal arms. */

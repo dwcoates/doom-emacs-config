@@ -49,7 +49,7 @@ func newFakeHandler() *fakeHandler {
 	return &fakeHandler{accepted: map[string]bool{}, deliveries: map[string]int{}, refuse: map[string]error{}}
 }
 
-func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	h.calls = append(h.calls, submission{WS: ws, Key: key, Text: said.GetContent().GetBlocks()[0].GetText().GetText(), Origin: origin, Delivery: delivery})
 	if err, ok := h.refuse[key]; ok {
 		return prompthandler.Outcome{}, err

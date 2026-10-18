@@ -90,6 +90,16 @@ message SubmitPromptRequest {
   // (ReportedLatencyKind PROMPT_ECHO). It is metrics only: it never changes how
   // the prompt is handled. Not positive is InvalidArgument.
   optional int64 submitted_at_unix_ms = 8;
+  // THE WORKSPACE WHOSE AGENT SENT THIS PROMPT, as the roster served it. SET
+  // EXACTLY WHEN `origin` IS PROMPT_ORIGIN_AGENT_SENT, and unset for every
+  // other origin; a request breaking either half is refused as
+  // InvalidArgument. `agent-repld workspace prompt` fills it from the
+  // workspace whose worktree holds its working directory. The daemon records
+  // it on the turn, and the recipient's feed heads the prompt with it
+  // (frontend.v1.FeedAgentPromptAddressReceived.workspace): a left arrow, then
+  // the sending workspace's name. A ref naming no registered workspace is
+  // refused (`unknown_sender`).
+  optional workspace.v1.WorkspaceRef sent_by = 9;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -248,7 +258,16 @@ message SubmitPromptError {
     // the rpcs that name them (CompactWorkspace), and the rest -- clearing it
     // among them -- are the user's alone.
     SubmitPromptSlashCommandFromAgent slash_command_from_agent = 16;
+    // `sent_by` names no registered workspace, or names the recipient itself.
+    // Nothing was submitted: a prompt's header names the workspace that sent
+    // it, and no workspace is known to have.
+    SubmitPromptUnknownSender unknown_sender = 17;
   }
+}
+// Names the sender that is no other registered workspace.
+message SubmitPromptUnknownSender {
+  // The ref as the request carried it.
+  workspace.v1.WorkspaceRef sent_by = 1;
 }
 // Names the refused slash command.
 message SubmitPromptSlashCommandFromAgent {

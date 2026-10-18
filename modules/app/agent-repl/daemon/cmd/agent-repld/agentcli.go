@@ -621,13 +621,19 @@ func workspacePrompt(c *cliCall, args []string) int {
 	if len(rest) != 1 || strings.TrimSpace(rest[0]) == "" {
 		return c.usageFailed("the command names the prompt's text, once")
 	}
+	// THE SENDER IS THE CALLING WORKSPACE: the recipient's feed heads the
+	// prompt with it.
+	sender, ok := c.calling()
+	if !ok {
+		return exitFailure
+	}
 	key, err := c.deps.mintKey("agent-prompt")
 	if err != nil {
 		c.failed("%v", err)
 		return exitFailure
 	}
 	resp, err := c.client.SubmitPrompt(c.ctx, connect.NewRequest(&agentreplv1.SubmitPromptRequest{Workspace: ref, Said: feed.SaidText(rest[0]),
-		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT}))
+		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender}))
 	return answer(c, resp, err)
 }
 

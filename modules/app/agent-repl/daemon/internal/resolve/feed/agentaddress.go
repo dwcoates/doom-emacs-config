@@ -66,7 +66,25 @@ func receivedFromAgent(end agentEnd) *frontendv1.FeedAgentPromptAddress {
 	return &frontendv1.FeedAgentPromptAddress{
 		Name: &frontendv1.FeedAgentPromptAddressName{Text: end.name},
 		Direction: &frontendv1.FeedAgentPromptAddress_Received{Received: &frontendv1.FeedAgentPromptAddressReceived{
-			Agent: end.identity,
+			Sender: &frontendv1.FeedAgentPromptAddressReceived_Agent{Agent: end.identity},
+		}},
+	}
+}
+
+// receivedFromWorkspace is the header of a prompt another workspace's agent
+// sent, through the agent API: NAME is its workspace name when NAMED, and the
+// daemon's stand-in for a workspace it cannot name otherwise.
+func receivedFromWorkspace(name string, named bool) *frontendv1.FeedAgentPromptAddress {
+	identity := &frontendv1.FeedAgentPromptAddressWorkspace{
+		Identity: &frontendv1.FeedAgentPromptAddressWorkspace_Unnamed{Unnamed: &frontendv1.FeedAgentPromptAddressWorkspaceUnnamed{}},
+	}
+	if named {
+		identity.Identity = &frontendv1.FeedAgentPromptAddressWorkspace_Named{Named: &frontendv1.FeedAgentPromptAddressWorkspaceNamed{}}
+	}
+	return &frontendv1.FeedAgentPromptAddress{
+		Name: &frontendv1.FeedAgentPromptAddressName{Text: name},
+		Direction: &frontendv1.FeedAgentPromptAddress_Received{Received: &frontendv1.FeedAgentPromptAddressReceived{
+			Sender: &frontendv1.FeedAgentPromptAddressReceived_Workspace{Workspace: identity},
 		}},
 	}
 }

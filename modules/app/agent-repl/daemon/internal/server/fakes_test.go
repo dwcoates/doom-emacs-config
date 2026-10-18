@@ -157,6 +157,8 @@ type fakeDB struct {
 	// workspaceErr fails every registry read, standing in for the closed
 	// state client an exiting daemon leaves behind.
 	workspaceErr error
+	// workspaceErrs fails Workspace for the one workspace each names.
+	workspaceErrs map[ids.WorkspaceID]error
 	// turnStarted answers Turn's start by turn; turnStartedErr fails every
 	// read instead (wsm.ErrNotFound for a turn the workspace never recorded).
 	turnStarted    map[ids.TurnID]time.Time
@@ -195,6 +197,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	}
 	if f.workspaceErr != nil {
 		return wsm.Workspace{}, f.workspaceErr
+	}
+	if err := f.workspaceErrs[id]; err != nil {
+		return wsm.Workspace{}, err
 	}
 	record, ok := f.workspaces[id]
 	if !ok {
@@ -695,12 +700,15 @@ type fakePrompts struct {
 	lastDelivery wsm.Delivery
 	// lastOrigin is the origin the last submission was handed with.
 	lastOrigin conversationv1.PromptOrigin
+	// lastSentBy is the sender the last submission was handed with.
+	lastSentBy *ids.WorkspaceID
 	// submits counts the submissions.
 	submits int
 }
 
-func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.lastSaid = said
+	f.lastSentBy = sentBy
 	f.lastDelivery = delivery
 	f.lastOrigin = origin
 	f.submits++

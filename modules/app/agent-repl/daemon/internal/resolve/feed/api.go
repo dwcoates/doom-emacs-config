@@ -169,6 +169,16 @@ type Resolver interface {
 	// handed over as it is recorded, so the live draw and every replay
 	// (TurnMirrors) mirror the turn from one fact.
 	MirrorTurn(ws ids.WorkspaceID, turn ids.TurnID, m *wsm.MirrorAddress)
+	// SenderTurn records the workspace whose agent sent one turn's prompt, nil
+	// for a prompt no agent sent: the sender the prompt queue recorded on the
+	// turn (wsm.Turn.SentBy), handed over as it is recorded, so the live draw
+	// and every replay (TurnSenders) head the prompt from one fact.
+	SenderTurn(ws ids.WorkspaceID, turn ids.TurnID, sender *ids.WorkspaceID)
+	// PromptHeader answers the header one turn's prompt is drawn under: the
+	// sending workspace for an agent-sent prompt, nil for every other origin.
+	// The prompt queue's mirror of an accepted prompt draws PromptRow with it,
+	// as the resolver's own draw does (turnsender.go).
+	PromptHeader(ws ids.WorkspaceID, turn ids.TurnID, origin conversationv1.PromptOrigin) *frontendv1.FeedAgentPromptAddress
 
 	// ResetWorkspace empties one workspace's feed whole: every row of every
 	// feed is retired on the wire and every accumulation is dropped, so the
@@ -437,6 +447,14 @@ type Deps struct {
 	// nil adds no mirror, which is what a test that is not about mirrored
 	// turns wants.
 	TurnMirrors func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.MirrorAddress, error)
+	// TurnSenders answers the workspace whose agent sent each named turn's
+	// prompt (wsm.DB.TurnSenders), for the turns that have one. A replay takes
+	// each into the table the live draw heads agent-sent prompts by
+	// (turnsender.go).
+	//
+	// nil adds no sender, which is what a test that is not about agent-sent
+	// prompts wants.
+	TurnSenders func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]ids.WorkspaceID, error)
 	// DurableRows records the rows UpsertDurable publishes and answers them
 	// again to a new daemon (wsm.DB's durable feed rows).
 	//
