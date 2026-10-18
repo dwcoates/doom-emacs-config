@@ -75,7 +75,7 @@ response, and the other way round.
 
 These clicks jump to an entry in the feed:
 
-- a background agent, shell or monitor row in the expanded footer;
+- a background agent, shell, monitor or async merge row in the expanded footer;
 - a breadcrumb above a subagent's feed;
 - the "gated:" link on a hook card.
 
@@ -140,6 +140,7 @@ These clicks jump to an entry in the feed:
   - Clicking it opens the target branch's magit log (master's, for a merge onto master) in the popup on the right, with point on that commit.
   - A commit older than the log's commit limit opens the log at its top, and the echo area says the commit is not shown.
 - **A merge never opens the expanded footer.**
+  - An async merge still in flight is listed in it, under the `⇄` chip (see "Background work in the expanded footer").
 - **The bubble has one rebasing tab and one tests tab, each with tabs of its own inside.**
   - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.
     - The short hash is drawn smaller and in a darker grey than the subject.
@@ -240,6 +241,12 @@ Clicking a link to a file (not a web address) in a prompt or response bubble ope
 ## Background work in the expanded footer
 
 The expanded footer lists the running background agents, shells and monitors, one row each.
+
+- **The `⇄` chip lists your async merges that are still queued or merging.**
+  - Each row reads the branch line, the step the merge is on (the bubble's current tab), and its clock.
+  - A row reads `waiting on you` while the merge workspace's agent waits on a question or a permission, and the chip then carries `? N` beside its count.
+  - A row leaves when its merge lands, fails or is taken off the queue, and clicking it jumps to the merge's bubble.
+  - Your workspace's own sync merge has no row: the footer's `merging` status already shows it.
 
 - **Clicking anywhere on a row jumps to its entry in the feed.**
   - Hovering anywhere on the row highlights the whole row.
