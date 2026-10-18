@@ -46,7 +46,7 @@
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
 import { log } from "../log.js";
-import { daemonUnreachable, frameUndecodable, type FailureSink } from "../failure/sink.js";
+import { daemonUnreachable, frameUndecodable, frameUndrawable, type FailureSink } from "../failure/sink.js";
 import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
@@ -57,7 +57,9 @@ import { pageEnded } from "../page-teardown.js";
 export type StreamEnd =
   | { kind: "cancelled" }
   | { kind: "transport_failure"; error: unknown }
-  | { kind: "producer_ended" };
+  | { kind: "producer_ended" }
+  /** A push was read and this page failed to draw it: the page's defect. */
+  | { kind: "draw_failed"; error: unknown };
 
 export interface StreamHandle {
   /** Abort the stream and stop reopening it. Idempotent. */
@@ -224,6 +226,9 @@ export function watchStream<Res extends Message>(
     // verdict and nothing else: the stream that could not read the last frame
     // has just read this one. A verb that never arrived is untouched by it.
     clearClientFailure("frame_undecodable_card");
+    // AND IT WAS DRAWN, which disproves the undrawable verdict: the stream
+    // drawn afresh after a frame this page could not draw is drawing again.
+    clearClientFailure("frame_undrawable_card");
     // A frame arrived and was drawn, so the link is up. Retract the window and
     // re-arm the backoff, or a link that flaps every few minutes would creep
     // to the ceiling and stay there.
@@ -262,6 +267,15 @@ export function watchStream<Res extends Message>(
     );
   };
 
+  const reportUndrawable = (err: unknown): void => {
+    const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    log.error(`a ${opts.name} push was read and this page could not draw it; drawing the stream afresh`, {
+      operation: "rpc.stream-frame-undrawable",
+      context: { rpc: opts.name, cause, stack: err instanceof Error ? (err.stack ?? "") : "", backoff_ms: backoffMs },
+    });
+    ctx.failures.report(frameUndrawable(opts.name, cause));
+  };
+
   const reportUnreachable = (end: StreamEnd): void => {
     const { closeCode, closeReason } = closeEvidence(end);
     log.error(`the ${opts.name} stream ended without being cancelled; reopening`, {
@@ -294,14 +308,27 @@ export function watchStream<Res extends Message>(
       controller = new AbortController();
       endingSeen = false;
       let end: StreamEnd;
+      // A DRAW THAT THREW is the page's defect, never the link's (owner
+      // ruling, 2026-10-18): it ends this run apart from a transport failure,
+      // so the footer and the chip name the page rather than the daemon.
+      let undrawn: { error: unknown } | null = null;
       try {
         for await (const response of opts.open(ctx.client, controller.signal)) {
           if (cancelled) break;
           const began = performance.now();
-          consume(response);
+          try {
+            consume(response);
+          } catch (err) {
+            undrawn = { error: err };
+            break;
+          }
           ctx.noteStreamCost?.(opts.name, performance.now() - began);
         }
-        end = cancelled ? { kind: "cancelled" } : { kind: "producer_ended" };
+        end = cancelled
+          ? { kind: "cancelled" }
+          : undrawn !== null
+            ? { kind: "draw_failed", error: undrawn.error }
+            : { kind: "producer_ended" };
       } catch (err) {
         // THE PAGE ENDED with the stream open (page-teardown.ts): nothing is
         // left to reopen it for.
@@ -324,8 +351,14 @@ export function watchStream<Res extends Message>(
       }
       // producer_ended and transport_failure are the SAME condition here: a
       // standing stream that ended without our cancel. The arms differ only so
-      // an onEnd observer can tell a clean conclusion from a thrown one.
-      reportUnreachable(end);
+      // an onEnd observer can tell a clean conclusion from a thrown one. A
+      // frame this page could not draw is reopened the same way, which draws
+      // the daemon's state afresh, but it is filed as the page's own failure.
+      if (end.kind === "draw_failed") {
+        reportUndrawable(end.error);
+      } else {
+        reportUnreachable(end);
+      }
       await waitBackoff(backoffMs);
       if (cancelled) return;
       backoffMs = Math.min(backoffMs * 2, maxMs);

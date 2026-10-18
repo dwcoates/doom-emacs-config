@@ -181,6 +181,7 @@ type FailureKind struct {
 	//	*FailureKind_ControlPlaneFailed
 	//	*FailureKind_FrameUndecodable
 	//	*FailureKind_StaleBundle
+	//	*FailureKind_FrameUndrawable
 	Kind          isFailureKind_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -376,6 +377,15 @@ func (x *FailureKind) GetStaleBundle() *FailureStaleBundle {
 	return nil
 }
 
+func (x *FailureKind) GetFrameUndrawable() *FailureFrameUndrawable {
+	if x != nil {
+		if x, ok := x.Kind.(*FailureKind_FrameUndrawable); ok {
+			return x.FrameUndrawable
+		}
+	}
+	return nil
+}
+
 type isFailureKind_Kind interface {
 	isFailureKind_Kind()
 }
@@ -465,6 +475,10 @@ type FailureKind_StaleBundle struct {
 	StaleBundle *FailureStaleBundle `protobuf:"bytes,17,opt,name=stale_bundle,json=staleBundle,proto3,oneof"`
 }
 
+type FailureKind_FrameUndrawable struct {
+	FrameUndrawable *FailureFrameUndrawable `protobuf:"bytes,18,opt,name=frame_undrawable,json=frameUndrawable,proto3,oneof"`
+}
+
 func (*FailureKind_ShimVersionMismatch) isFailureKind_Kind() {}
 
 func (*FailureKind_ShimSeqRegression) isFailureKind_Kind() {}
@@ -498,6 +512,8 @@ func (*FailureKind_ControlPlaneFailed) isFailureKind_Kind() {}
 func (*FailureKind_FrameUndecodable) isFailureKind_Kind() {}
 
 func (*FailureKind_StaleBundle) isFailureKind_Kind() {}
+
+func (*FailureKind_FrameUndrawable) isFailureKind_Kind() {}
 
 // The agent process speaks a different protocol version than the daemon. Both versions are named because the fix is to align them and the user needs to know which way.
 //
@@ -1877,6 +1893,66 @@ func (x *FailureFrameUndecodable) GetFrameHead() string {
 	return ""
 }
 
+// A frame from the daemon was read, and this page failed to draw it: a defect
+// in the page, not in the link, so it never reads as the daemon being
+// unreachable (owner ruling, 2026-10-18). The stream the frame came on is
+// reopened, which draws the daemon's state afresh.
+//
+// Resolves the workspace BLUE.
+type FailureFrameUndrawable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The stream the frame came on (`WatchFeed`).
+	Stream string `protobuf:"bytes,1,opt,name=stream,proto3" json:"stream,omitempty"`
+	// The draw failure, verbatim.
+	Cause         string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FailureFrameUndrawable) Reset() {
+	*x = FailureFrameUndrawable{}
+	mi := &file_frontend_v1_failure_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FailureFrameUndrawable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FailureFrameUndrawable) ProtoMessage() {}
+
+func (x *FailureFrameUndrawable) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_failure_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FailureFrameUndrawable.ProtoReflect.Descriptor instead.
+func (*FailureFrameUndrawable) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *FailureFrameUndrawable) GetStream() string {
+	if x != nil {
+		return x.Stream
+	}
+	return ""
+}
+
+func (x *FailureFrameUndrawable) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
 // This page cannot read the daemon's state and reloading did not fix it.
 // Deliberately loud and DELIBERATELY UNRESOLVABLE: the only exit is restarting
 // the view, and offering a self-clearing version of this would hide a page
@@ -1893,7 +1969,7 @@ type FailureStaleBundle struct {
 
 func (x *FailureStaleBundle) Reset() {
 	*x = FailureStaleBundle{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[29]
+	mi := &file_frontend_v1_failure_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1905,7 +1981,7 @@ func (x *FailureStaleBundle) String() string {
 func (*FailureStaleBundle) ProtoMessage() {}
 
 func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[29]
+	mi := &file_frontend_v1_failure_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1918,7 +1994,7 @@ func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureStaleBundle.ProtoReflect.Descriptor instead.
 func (*FailureStaleBundle) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *FailureStaleBundle) GetDetail() string {
@@ -1966,7 +2042,7 @@ type QueryTerminationFailure struct {
 
 func (x *QueryTerminationFailure) Reset() {
 	*x = QueryTerminationFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[30]
+	mi := &file_frontend_v1_failure_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1978,7 +2054,7 @@ func (x *QueryTerminationFailure) String() string {
 func (*QueryTerminationFailure) ProtoMessage() {}
 
 func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[30]
+	mi := &file_frontend_v1_failure_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1991,7 +2067,7 @@ func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminationFailure.ProtoReflect.Descriptor instead.
 func (*QueryTerminationFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *QueryTerminationFailure) GetQueryInstanceId() string {
@@ -2120,7 +2196,7 @@ type QueryTerminationVendorIdentityUnavailable struct {
 
 func (x *QueryTerminationVendorIdentityUnavailable) Reset() {
 	*x = QueryTerminationVendorIdentityUnavailable{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[31]
+	mi := &file_frontend_v1_failure_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2132,7 +2208,7 @@ func (x *QueryTerminationVendorIdentityUnavailable) String() string {
 func (*QueryTerminationVendorIdentityUnavailable) ProtoMessage() {}
 
 func (x *QueryTerminationVendorIdentityUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[31]
+	mi := &file_frontend_v1_failure_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2145,7 +2221,7 @@ func (x *QueryTerminationVendorIdentityUnavailable) ProtoReflect() protoreflect.
 
 // Deprecated: Use QueryTerminationVendorIdentityUnavailable.ProtoReflect.Descriptor instead.
 func (*QueryTerminationVendorIdentityUnavailable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{31}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{32}
 }
 
 // The SDK iterator ended without an intentional shim shutdown.
@@ -2157,7 +2233,7 @@ type QueryTerminationUnexpectedEof struct {
 
 func (x *QueryTerminationUnexpectedEof) Reset() {
 	*x = QueryTerminationUnexpectedEof{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[32]
+	mi := &file_frontend_v1_failure_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2169,7 +2245,7 @@ func (x *QueryTerminationUnexpectedEof) String() string {
 func (*QueryTerminationUnexpectedEof) ProtoMessage() {}
 
 func (x *QueryTerminationUnexpectedEof) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[32]
+	mi := &file_frontend_v1_failure_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2182,7 +2258,7 @@ func (x *QueryTerminationUnexpectedEof) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminationUnexpectedEof.ProtoReflect.Descriptor instead.
 func (*QueryTerminationUnexpectedEof) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{32}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{33}
 }
 
 // The SDK iterator threw an error.
@@ -2196,7 +2272,7 @@ type QueryTerminationIteratorFailure struct {
 
 func (x *QueryTerminationIteratorFailure) Reset() {
 	*x = QueryTerminationIteratorFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[33]
+	mi := &file_frontend_v1_failure_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2208,7 +2284,7 @@ func (x *QueryTerminationIteratorFailure) String() string {
 func (*QueryTerminationIteratorFailure) ProtoMessage() {}
 
 func (x *QueryTerminationIteratorFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[33]
+	mi := &file_frontend_v1_failure_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2221,7 +2297,7 @@ func (x *QueryTerminationIteratorFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminationIteratorFailure.ProtoReflect.Descriptor instead.
 func (*QueryTerminationIteratorFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{33}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *QueryTerminationIteratorFailure) GetCause() string {
@@ -2242,7 +2318,7 @@ type QueryTerminationStartupFailure struct {
 
 func (x *QueryTerminationStartupFailure) Reset() {
 	*x = QueryTerminationStartupFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[34]
+	mi := &file_frontend_v1_failure_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2254,7 +2330,7 @@ func (x *QueryTerminationStartupFailure) String() string {
 func (*QueryTerminationStartupFailure) ProtoMessage() {}
 
 func (x *QueryTerminationStartupFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[34]
+	mi := &file_frontend_v1_failure_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2267,7 +2343,7 @@ func (x *QueryTerminationStartupFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminationStartupFailure.ProtoReflect.Descriptor instead.
 func (*QueryTerminationStartupFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{34}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *QueryTerminationStartupFailure) GetCause() string {
@@ -2322,7 +2398,7 @@ type SessionResumeFailure struct {
 
 func (x *SessionResumeFailure) Reset() {
 	*x = SessionResumeFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[35]
+	mi := &file_frontend_v1_failure_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2334,7 +2410,7 @@ func (x *SessionResumeFailure) String() string {
 func (*SessionResumeFailure) ProtoMessage() {}
 
 func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[35]
+	mi := &file_frontend_v1_failure_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2347,7 +2423,7 @@ func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResumeFailure.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{35}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SessionResumeFailure) GetClaudeSessionId() string {
@@ -2505,7 +2581,7 @@ type SessionResumeFailureCreate struct {
 
 func (x *SessionResumeFailureCreate) Reset() {
 	*x = SessionResumeFailureCreate{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[36]
+	mi := &file_frontend_v1_failure_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2517,7 +2593,7 @@ func (x *SessionResumeFailureCreate) String() string {
 func (*SessionResumeFailureCreate) ProtoMessage() {}
 
 func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[36]
+	mi := &file_frontend_v1_failure_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2530,7 +2606,7 @@ func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResumeFailureCreate.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureCreate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{36}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{37}
 }
 
 // Marks a resume failure encountered while restoring an allocated agent-repl
@@ -2543,7 +2619,7 @@ type SessionResumeFailureAutomaticRestore struct {
 
 func (x *SessionResumeFailureAutomaticRestore) Reset() {
 	*x = SessionResumeFailureAutomaticRestore{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[37]
+	mi := &file_frontend_v1_failure_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2555,7 +2631,7 @@ func (x *SessionResumeFailureAutomaticRestore) String() string {
 func (*SessionResumeFailureAutomaticRestore) ProtoMessage() {}
 
 func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[37]
+	mi := &file_frontend_v1_failure_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2568,7 +2644,7 @@ func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SessionResumeFailureAutomaticRestore.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureAutomaticRestore) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{37}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{38}
 }
 
 // Records every transcript location examined for the authoritative Claude
@@ -2583,7 +2659,7 @@ type SessionResumeFailureTranscriptUnavailable struct {
 
 func (x *SessionResumeFailureTranscriptUnavailable) Reset() {
 	*x = SessionResumeFailureTranscriptUnavailable{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[38]
+	mi := &file_frontend_v1_failure_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2595,7 +2671,7 @@ func (x *SessionResumeFailureTranscriptUnavailable) String() string {
 func (*SessionResumeFailureTranscriptUnavailable) ProtoMessage() {}
 
 func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[38]
+	mi := &file_frontend_v1_failure_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2608,7 +2684,7 @@ func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.
 
 // Deprecated: Use SessionResumeFailureTranscriptUnavailable.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureTranscriptUnavailable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{38}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SessionResumeFailureTranscriptUnavailable) GetSearchedPaths() []string {
@@ -2631,7 +2707,7 @@ type SessionResumeFailureIdentityMismatch struct {
 
 func (x *SessionResumeFailureIdentityMismatch) Reset() {
 	*x = SessionResumeFailureIdentityMismatch{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[39]
+	mi := &file_frontend_v1_failure_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2643,7 +2719,7 @@ func (x *SessionResumeFailureIdentityMismatch) String() string {
 func (*SessionResumeFailureIdentityMismatch) ProtoMessage() {}
 
 func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[39]
+	mi := &file_frontend_v1_failure_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2656,7 +2732,7 @@ func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SessionResumeFailureIdentityMismatch.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureIdentityMismatch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{39}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SessionResumeFailureIdentityMismatch) GetReplacementClaudeSessionId() string {
@@ -2679,7 +2755,7 @@ type SessionResumeFailureBringUpFailure struct {
 
 func (x *SessionResumeFailureBringUpFailure) Reset() {
 	*x = SessionResumeFailureBringUpFailure{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[40]
+	mi := &file_frontend_v1_failure_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2691,7 +2767,7 @@ func (x *SessionResumeFailureBringUpFailure) String() string {
 func (*SessionResumeFailureBringUpFailure) ProtoMessage() {}
 
 func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[40]
+	mi := &file_frontend_v1_failure_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2704,7 +2780,7 @@ func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SessionResumeFailureBringUpFailure.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureBringUpFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{40}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SessionResumeFailureBringUpFailure) GetCause() string {
@@ -2730,7 +2806,7 @@ type FailureCardRef struct {
 
 func (x *FailureCardRef) Reset() {
 	*x = FailureCardRef{}
-	mi := &file_frontend_v1_failure_proto_msgTypes[41]
+	mi := &file_frontend_v1_failure_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2742,7 +2818,7 @@ func (x *FailureCardRef) String() string {
 func (*FailureCardRef) ProtoMessage() {}
 
 func (x *FailureCardRef) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_failure_proto_msgTypes[41]
+	mi := &file_frontend_v1_failure_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2755,7 +2831,7 @@ func (x *FailureCardRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureCardRef.ProtoReflect.Descriptor instead.
 func (*FailureCardRef) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{41}
+	return file_frontend_v1_failure_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *FailureCardRef) GetCardUuid() string {
@@ -2773,7 +2849,7 @@ const file_frontend_v1_failure_proto_rawDesc = "" +
 	"\x14VendorFailureContext\x12*\n" +
 	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12$\n" +
 	"\x0eapi_request_id\x18\x02 \x01(\tR\fapiRequestId\x12$\n" +
-	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\xe1\v\n" +
+	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\xb3\f\n" +
 	"\vFailureKind\x12]\n" +
 	"\x15shim_version_mismatch\x18\x01 \x01(\v2'.frontend.v1.FailureShimVersionMismatchH\x00R\x13shimVersionMismatch\x12W\n" +
 	"\x13shim_seq_regression\x18\x02 \x01(\v2%.frontend.v1.FailureShimSeqRegressionH\x00R\x11shimSeqRegression\x12G\n" +
@@ -2793,7 +2869,8 @@ const file_frontend_v1_failure_proto_rawDesc = "" +
 	"bootFailed\x12Z\n" +
 	"\x14control_plane_failed\x18\x0f \x01(\v2&.frontend.v1.FailureControlPlaneFailedH\x00R\x12controlPlaneFailed\x12S\n" +
 	"\x11frame_undecodable\x18\x10 \x01(\v2$.frontend.v1.FailureFrameUndecodableH\x00R\x10frameUndecodable\x12D\n" +
-	"\fstale_bundle\x18\x11 \x01(\v2\x1f.frontend.v1.FailureStaleBundleH\x00R\vstaleBundleB\x06\n" +
+	"\fstale_bundle\x18\x11 \x01(\v2\x1f.frontend.v1.FailureStaleBundleH\x00R\vstaleBundle\x12P\n" +
+	"\x10frame_undrawable\x18\x12 \x01(\v2#.frontend.v1.FailureFrameUndrawableH\x00R\x0fframeUndrawableB\x06\n" +
 	"\x04kind\"f\n" +
 	"\x1aFailureShimVersionMismatch\x12!\n" +
 	"\fshim_version\x18\x01 \x01(\tR\vshimVersion\x12%\n" +
@@ -2859,7 +2936,10 @@ const file_frontend_v1_failure_proto_rawDesc = "" +
 	"\x17FailureFrameUndecodable\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\x12\x1d\n" +
 	"\n" +
-	"frame_head\x18\x02 \x01(\tR\tframeHead\",\n" +
+	"frame_head\x18\x02 \x01(\tR\tframeHead\"F\n" +
+	"\x16FailureFrameUndrawable\x12\x16\n" +
+	"\x06stream\x18\x01 \x01(\tR\x06stream\x12\x14\n" +
+	"\x05cause\x18\x02 \x01(\tR\x05cause\",\n" +
 	"\x12FailureStaleBundle\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xc8\x04\n" +
 	"\x17QueryTerminationFailure\x12*\n" +
@@ -2916,7 +2996,7 @@ func file_frontend_v1_failure_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_failure_proto_rawDescData
 }
 
-var file_frontend_v1_failure_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_frontend_v1_failure_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_frontend_v1_failure_proto_goTypes = []any{
 	(*VendorFailureContext)(nil),                      // 0: frontend.v1.VendorFailureContext
 	(*FailureKind)(nil),                               // 1: frontend.v1.FailureKind
@@ -2947,19 +3027,20 @@ var file_frontend_v1_failure_proto_goTypes = []any{
 	(*FailureBootFailed)(nil),                         // 26: frontend.v1.FailureBootFailed
 	(*FailureControlPlaneFailed)(nil),                 // 27: frontend.v1.FailureControlPlaneFailed
 	(*FailureFrameUndecodable)(nil),                   // 28: frontend.v1.FailureFrameUndecodable
-	(*FailureStaleBundle)(nil),                        // 29: frontend.v1.FailureStaleBundle
-	(*QueryTerminationFailure)(nil),                   // 30: frontend.v1.QueryTerminationFailure
-	(*QueryTerminationVendorIdentityUnavailable)(nil), // 31: frontend.v1.QueryTerminationVendorIdentityUnavailable
-	(*QueryTerminationUnexpectedEof)(nil),             // 32: frontend.v1.QueryTerminationUnexpectedEof
-	(*QueryTerminationIteratorFailure)(nil),           // 33: frontend.v1.QueryTerminationIteratorFailure
-	(*QueryTerminationStartupFailure)(nil),            // 34: frontend.v1.QueryTerminationStartupFailure
-	(*SessionResumeFailure)(nil),                      // 35: frontend.v1.SessionResumeFailure
-	(*SessionResumeFailureCreate)(nil),                // 36: frontend.v1.SessionResumeFailureCreate
-	(*SessionResumeFailureAutomaticRestore)(nil),      // 37: frontend.v1.SessionResumeFailureAutomaticRestore
-	(*SessionResumeFailureTranscriptUnavailable)(nil), // 38: frontend.v1.SessionResumeFailureTranscriptUnavailable
-	(*SessionResumeFailureIdentityMismatch)(nil),      // 39: frontend.v1.SessionResumeFailureIdentityMismatch
-	(*SessionResumeFailureBringUpFailure)(nil),        // 40: frontend.v1.SessionResumeFailureBringUpFailure
-	(*FailureCardRef)(nil),                            // 41: frontend.v1.FailureCardRef
+	(*FailureFrameUndrawable)(nil),                    // 29: frontend.v1.FailureFrameUndrawable
+	(*FailureStaleBundle)(nil),                        // 30: frontend.v1.FailureStaleBundle
+	(*QueryTerminationFailure)(nil),                   // 31: frontend.v1.QueryTerminationFailure
+	(*QueryTerminationVendorIdentityUnavailable)(nil), // 32: frontend.v1.QueryTerminationVendorIdentityUnavailable
+	(*QueryTerminationUnexpectedEof)(nil),             // 33: frontend.v1.QueryTerminationUnexpectedEof
+	(*QueryTerminationIteratorFailure)(nil),           // 34: frontend.v1.QueryTerminationIteratorFailure
+	(*QueryTerminationStartupFailure)(nil),            // 35: frontend.v1.QueryTerminationStartupFailure
+	(*SessionResumeFailure)(nil),                      // 36: frontend.v1.SessionResumeFailure
+	(*SessionResumeFailureCreate)(nil),                // 37: frontend.v1.SessionResumeFailureCreate
+	(*SessionResumeFailureAutomaticRestore)(nil),      // 38: frontend.v1.SessionResumeFailureAutomaticRestore
+	(*SessionResumeFailureTranscriptUnavailable)(nil), // 39: frontend.v1.SessionResumeFailureTranscriptUnavailable
+	(*SessionResumeFailureIdentityMismatch)(nil),      // 40: frontend.v1.SessionResumeFailureIdentityMismatch
+	(*SessionResumeFailureBringUpFailure)(nil),        // 41: frontend.v1.SessionResumeFailureBringUpFailure
+	(*FailureCardRef)(nil),                            // 42: frontend.v1.FailureCardRef
 }
 var file_frontend_v1_failure_proto_depIdxs = []int32{
 	2,  // 0: frontend.v1.FailureKind.shim_version_mismatch:type_name -> frontend.v1.FailureShimVersionMismatch
@@ -2978,29 +3059,30 @@ var file_frontend_v1_failure_proto_depIdxs = []int32{
 	26, // 13: frontend.v1.FailureKind.boot_failed:type_name -> frontend.v1.FailureBootFailed
 	27, // 14: frontend.v1.FailureKind.control_plane_failed:type_name -> frontend.v1.FailureControlPlaneFailed
 	28, // 15: frontend.v1.FailureKind.frame_undecodable:type_name -> frontend.v1.FailureFrameUndecodable
-	29, // 16: frontend.v1.FailureKind.stale_bundle:type_name -> frontend.v1.FailureStaleBundle
-	30, // 17: frontend.v1.FailureQueryTermination.detail:type_name -> frontend.v1.QueryTerminationFailure
-	35, // 18: frontend.v1.FailureSessionResumeFailed.detail:type_name -> frontend.v1.SessionResumeFailure
-	0,  // 19: frontend.v1.FailureVendorNetworkDown.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 20: frontend.v1.FailureVendorMaxTurns.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 21: frontend.v1.FailureVendorMaxBudget.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 22: frontend.v1.FailureVendorExecutionError.vendor:type_name -> frontend.v1.VendorFailureContext
-	0,  // 23: frontend.v1.FailureVendorTurnFailed.vendor:type_name -> frontend.v1.VendorFailureContext
-	31, // 24: frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> frontend.v1.QueryTerminationVendorIdentityUnavailable
-	32, // 25: frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> frontend.v1.QueryTerminationUnexpectedEof
-	33, // 26: frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> frontend.v1.QueryTerminationIteratorFailure
-	34, // 27: frontend.v1.QueryTerminationFailure.startup_failure:type_name -> frontend.v1.QueryTerminationStartupFailure
-	36, // 28: frontend.v1.SessionResumeFailure.create:type_name -> frontend.v1.SessionResumeFailureCreate
-	37, // 29: frontend.v1.SessionResumeFailure.automatic_restore:type_name -> frontend.v1.SessionResumeFailureAutomaticRestore
-	38, // 30: frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> frontend.v1.SessionResumeFailureTranscriptUnavailable
-	39, // 31: frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> frontend.v1.SessionResumeFailureIdentityMismatch
-	30, // 32: frontend.v1.SessionResumeFailure.query_termination:type_name -> frontend.v1.QueryTerminationFailure
-	40, // 33: frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> frontend.v1.SessionResumeFailureBringUpFailure
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	30, // 16: frontend.v1.FailureKind.stale_bundle:type_name -> frontend.v1.FailureStaleBundle
+	29, // 17: frontend.v1.FailureKind.frame_undrawable:type_name -> frontend.v1.FailureFrameUndrawable
+	31, // 18: frontend.v1.FailureQueryTermination.detail:type_name -> frontend.v1.QueryTerminationFailure
+	36, // 19: frontend.v1.FailureSessionResumeFailed.detail:type_name -> frontend.v1.SessionResumeFailure
+	0,  // 20: frontend.v1.FailureVendorNetworkDown.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 21: frontend.v1.FailureVendorMaxTurns.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 22: frontend.v1.FailureVendorMaxBudget.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 23: frontend.v1.FailureVendorExecutionError.vendor:type_name -> frontend.v1.VendorFailureContext
+	0,  // 24: frontend.v1.FailureVendorTurnFailed.vendor:type_name -> frontend.v1.VendorFailureContext
+	32, // 25: frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> frontend.v1.QueryTerminationVendorIdentityUnavailable
+	33, // 26: frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> frontend.v1.QueryTerminationUnexpectedEof
+	34, // 27: frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> frontend.v1.QueryTerminationIteratorFailure
+	35, // 28: frontend.v1.QueryTerminationFailure.startup_failure:type_name -> frontend.v1.QueryTerminationStartupFailure
+	37, // 29: frontend.v1.SessionResumeFailure.create:type_name -> frontend.v1.SessionResumeFailureCreate
+	38, // 30: frontend.v1.SessionResumeFailure.automatic_restore:type_name -> frontend.v1.SessionResumeFailureAutomaticRestore
+	39, // 31: frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> frontend.v1.SessionResumeFailureTranscriptUnavailable
+	40, // 32: frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> frontend.v1.SessionResumeFailureIdentityMismatch
+	31, // 33: frontend.v1.SessionResumeFailure.query_termination:type_name -> frontend.v1.QueryTerminationFailure
+	41, // 34: frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> frontend.v1.SessionResumeFailureBringUpFailure
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_failure_proto_init() }
@@ -3026,15 +3108,16 @@ func file_frontend_v1_failure_proto_init() {
 		(*FailureKind_ControlPlaneFailed)(nil),
 		(*FailureKind_FrameUndecodable)(nil),
 		(*FailureKind_StaleBundle)(nil),
+		(*FailureKind_FrameUndrawable)(nil),
 	}
-	file_frontend_v1_failure_proto_msgTypes[30].OneofWrappers = []any{
+	file_frontend_v1_failure_proto_msgTypes[31].OneofWrappers = []any{
 		(*QueryTerminationFailure_VendorSessionId)(nil),
 		(*QueryTerminationFailure_VendorSessionIdentityUnavailable)(nil),
 		(*QueryTerminationFailure_UnexpectedEof)(nil),
 		(*QueryTerminationFailure_IteratorFailure)(nil),
 		(*QueryTerminationFailure_StartupFailure)(nil),
 	}
-	file_frontend_v1_failure_proto_msgTypes[35].OneofWrappers = []any{
+	file_frontend_v1_failure_proto_msgTypes[36].OneofWrappers = []any{
 		(*SessionResumeFailure_Create)(nil),
 		(*SessionResumeFailure_AutomaticRestore)(nil),
 		(*SessionResumeFailure_TranscriptUnavailable)(nil),
@@ -3048,7 +3131,7 @@ func file_frontend_v1_failure_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_failure_proto_rawDesc), len(file_frontend_v1_failure_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   42,
+			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

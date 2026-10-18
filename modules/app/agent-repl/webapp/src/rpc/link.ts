@@ -45,13 +45,14 @@ export type ClientFailureKind =
   | "client_log_failed"
   | "daemon_unreachable_card"
   | "frame_undecodable_card"
+  | "frame_undrawable_card"
   | "feed_not_tailing";
 
 /**
  * The substatus word each kind draws under the disconnected status.
  *
  * THE STATUS IS ALWAYS `disconnected` (the ruling), and the default substatus
- * is the ruling's own "daemon unreachable". Two kinds deviate, and both are
+ * is the ruling's own "daemon unreachable". Three kinds deviate, the first two
  * argued in `docs/REALTEST-JUDGEMENT-CALLS.md`:
  *
  *   - `frame_undecodable_card`: the daemon was reached and answered; one frame
@@ -61,6 +62,9 @@ export type ClientFailureKind =
  *     audit records that misnaming as a defect in its own right (§3, N3 row
  *     14: "a card that says the daemon is unreachable when it is not"), so the
  *     word here is what actually stopped — the feed's tail.
+ *   - `frame_undrawable_card`: the daemon was reached and the frame read; this
+ *     page failed to draw it, which is the page's defect (owner ruling,
+ *     2026-10-18).
  */
 const KIND_SUBSTATUS: Readonly<Record<ClientFailureKind, string>> = Object.freeze({
   unary_transport: "daemon unreachable",
@@ -70,6 +74,7 @@ const KIND_SUBSTATUS: Readonly<Record<ClientFailureKind, string>> = Object.freez
   client_log_failed: "daemon unreachable",
   daemon_unreachable_card: "daemon unreachable",
   frame_undecodable_card: "frame unreadable",
+  frame_undrawable_card: "page draw failed",
   feed_not_tailing: "feed not tailing",
 });
 
