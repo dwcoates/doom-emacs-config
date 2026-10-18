@@ -660,29 +660,27 @@ func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentReques
 // validateSwapWorkspacesRequest is SwapWorkspacesRequest's base function: two
 // refs naming two different workspaces.
 func validateSwapWorkspacesRequest(req *agentreplv1.SwapWorkspacesRequest) *connect.Error {
-	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
-		return err
-	}
-	if err := validateWorkspaceRef("target", req.GetTarget()); err != nil {
-		return err
-	}
-	if req.GetWorkspace().GetId() == req.GetTarget().GetId() {
-		return invalid("target", "a workspace cannot swap with itself")
-	}
-	return nil
+	return validateWorkspacePair(req.GetWorkspace(), req.GetTarget(), "a workspace cannot swap with itself")
 }
 
 // validateMoveWorkspaceRequest is MoveWorkspaceRequest's base function: two
 // refs naming two different workspaces.
 func validateMoveWorkspaceRequest(req *agentreplv1.MoveWorkspaceRequest) *connect.Error {
-	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+	return validateWorkspacePair(req.GetWorkspace(), req.GetTarget(), "a workspace cannot move onto its own tab")
+}
+
+// validateWorkspacePair is the base of a request naming two different
+// workspaces in its `workspace' and `target' fields; SAME is the refusal of
+// one workspace named twice.
+func validateWorkspacePair(workspace, target *workspacev1.WorkspaceRef, same string) *connect.Error {
+	if err := validateWorkspaceRef("workspace", workspace); err != nil {
 		return err
 	}
-	if err := validateWorkspaceRef("target", req.GetTarget()); err != nil {
+	if err := validateWorkspaceRef("target", target); err != nil {
 		return err
 	}
-	if req.GetWorkspace().GetId() == req.GetTarget().GetId() {
-		return invalid("target", "a workspace cannot move onto its own tab")
+	if workspace.GetId() == target.GetId() {
+		return invalid("target", same)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"connectrpc.com/connect"
 
@@ -141,24 +142,21 @@ func (s *server) placeWorkspaces(
 	into *agentreplv1.SubsectionRef,
 	anchor *workspacev1.WorkspaceRef,
 ) (answered bool, cerr *connect.Error, err error) {
-	resolve := func(ref *workspacev1.WorkspaceRef) (ids.WorkspaceID, *connect.Error, bool) {
-		subject, refused, done := s.resolveNaming(ctx, rpc, resp, ref, nil)
-		return subject.Record.ID, refused, done
+	named := refs
+	if anchor != nil {
+		named = append(slices.Clone(refs), anchor)
+	}
+	subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, named)
+	if done {
+		return true, refused, nil
 	}
 	placed := make([]ids.WorkspaceID, 0, len(refs))
-	for _, ref := range refs {
-		id, refused, done := resolve(ref)
-		if done {
-			return true, refused, nil
-		}
-		placed = append(placed, id)
+	for _, subject := range subjects[:len(refs)] {
+		placed = append(placed, subject.Record.ID)
 	}
 	var before *ids.WorkspaceID
 	if anchor != nil {
-		id, refused, done := resolve(anchor)
-		if done {
-			return true, refused, nil
-		}
+		id := subjects[len(refs)].Record.ID
 		before = &id
 	}
 	var destination *ids.SubsectionID

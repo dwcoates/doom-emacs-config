@@ -389,20 +389,28 @@ func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Prio
 	return nil
 }
 
+// ownedPair refuses RPC unless this daemon serves both ws and target, as
+// `owned' does for one workspace, and answers ws's logger naming target.
+func (v *verbs) ownedPair(ctx context.Context, rpc string, ws, target ids.WorkspaceID) (dlog.Logger, error) {
+	_, log, err := v.owned(ctx, rpc, ws)
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := v.owned(ctx, rpc, target); err != nil {
+		return nil, err
+	}
+	return log.With(dlog.Context{"target": string(target)}), nil
+}
+
 // Swap exchanges the places of workspaces ws and target in the registry order,
 // every other workspace keeping its own (wsm's SwapPlaces). The sidebar and the
 // tab bar are both views of the registry, so one swap shows on both; any two
 // workspaces can swap.
 func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
-	const rpc = "SwapWorkspaces"
-	_, log, err := v.owned(ctx, rpc, ws)
+	log, err := v.ownedPair(ctx, "SwapWorkspaces", ws, target)
 	if err != nil {
 		return err
 	}
-	if _, _, err := v.owned(ctx, rpc, target); err != nil {
-		return err
-	}
-	log = log.With(dlog.Context{"target": string(target)})
 	if err := v.deps.DB.SwapPlaces(ctx, ws, target); err != nil {
 		log.Error(opSwap, "could not swap the workspaces' places", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("swap %q with %q: %w", ws, target, err)
@@ -419,14 +427,10 @@ func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
 // pairing not_siblings.
 func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
 	const rpc = "MoveWorkspace"
-	_, log, err := v.owned(ctx, rpc, ws)
+	log, err := v.ownedPair(ctx, rpc, ws, target)
 	if err != nil {
 		return err
 	}
-	if _, _, err := v.owned(ctx, rpc, target); err != nil {
-		return err
-	}
-	log = log.With(dlog.Context{"target": string(target)})
 	if err := v.deps.DB.MoveWorkspace(ctx, ws, target); err != nil {
 		switch {
 		case errors.Is(err, wsm.ErrOtherRepository):

@@ -1240,6 +1240,38 @@ func TestSwapSurfacesAStoreFailure(t *testing.T) {
 	}
 }
 
+func TestOwnedPairNamesTheTargetOnTheWorkspacesLogger(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+
+	// Act.
+	log, err := f.verbs.(*verbs).ownedPair(context.Background(), "MoveWorkspace", "w1", "w2")
+	log.Info(opMove, "probe", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ownedPair: %v", err)
+	}
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opMove})
+	if !ok || rec.Context["target"] != "w2" {
+		t.Fatalf("probe record = %+v (found %v), want it to name target w2", rec, ok)
+	}
+}
+
+func TestOwnedPairRefusesATargetThisDaemonDoesNotKnow(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	_, err := f.verbs.(*verbs).ownedPair(context.Background(), "MoveWorkspace", "w1", "absent")
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownWorkspace)
+}
+
 func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

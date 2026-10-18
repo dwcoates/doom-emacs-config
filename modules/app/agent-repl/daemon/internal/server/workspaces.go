@@ -975,13 +975,9 @@ func (s *server) SwapWorkspaces(
 		return nil, err
 	}
 	resp := &agentreplv1.SwapWorkspacesResponse{}
-	var subjects []resolved
-	for _, ref := range []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetTarget()} {
-		subject, refused, done := s.resolveNaming(ctx, rpc, resp, ref, nil)
-		if done {
-			return answer(resp, refused)
-		}
-		subjects = append(subjects, subject)
+	subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetTarget()})
+	if done {
+		return answer(resp, refused)
 	}
 	if err := s.deps.Verbs.Swap(ctx, subjects[0].Record.ID, subjects[1].Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subjects[0].Log, rpc, resp, err, nil))
@@ -1005,13 +1001,9 @@ func (s *server) MoveWorkspace(
 		return nil, err
 	}
 	resp := &agentreplv1.MoveWorkspaceResponse{}
-	var subjects []resolved
-	for _, ref := range []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetTarget()} {
-		subject, refused, done := s.resolveNaming(ctx, rpc, resp, ref, nil)
-		if done {
-			return answer(resp, refused)
-		}
-		subjects = append(subjects, subject)
+	subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetTarget()})
+	if done {
+		return answer(resp, refused)
 	}
 	if err := s.deps.Verbs.Move(ctx, subjects[0].Record.ID, subjects[1].Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subjects[0].Log, rpc, resp, err, nil))
@@ -1057,6 +1049,26 @@ func (s *server) resolveNaming(
 		named.Fields[field] = value
 	}
 	return resolved{}, s.refuse(s.log, rpc, resp, named), true
+}
+
+// resolveAllNaming resolves REFS in order through resolveNaming, each
+// refusal naming the ref it refused. The first refusal answers at once, so
+// nothing after it is resolved; `done' says the caller answers with refused.
+func (s *server) resolveAllNaming(
+	ctx context.Context,
+	rpc string,
+	resp proto.Message,
+	refs []*workspacev1.WorkspaceRef,
+) ([]resolved, *connect.Error, bool) {
+	subjects := make([]resolved, 0, len(refs))
+	for _, ref := range refs {
+		subject, refused, done := s.resolveNaming(ctx, rpc, resp, ref, nil)
+		if done {
+			return nil, refused, true
+		}
+		subjects = append(subjects, subject)
+	}
+	return subjects, nil, false
 }
 
 // FoldRepository expands or collapses one repository's roster section. The
