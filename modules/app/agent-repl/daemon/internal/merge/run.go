@@ -560,11 +560,16 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 // take, so no run publishes a merge counted from the epoch (checkQueuedAt): a
 // waiting member's rebase once built its run without one.
 func (o *orchestrator) newRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
-	return o.buildRun(ctx, cancel, repo, ws, queuedMS)
+	r := o.buildRun(ctx, cancel, repo, ws, queuedMS)
+	if o.onRunStart != nil {
+		o.onRunStart(r)
+	}
+	return r
 }
 
 // newBackgroundRun builds a waiting member's rebase (rebasewaiting.go): a
-// run that never tests.
+// run that never tests, so onRunStart, which names the runs that may ask
+// for a test turn, is not told of it.
 func (o *orchestrator) newBackgroundRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
 	r := o.buildRun(ctx, cancel, repo, ws, queuedMS)
 	r.background = true

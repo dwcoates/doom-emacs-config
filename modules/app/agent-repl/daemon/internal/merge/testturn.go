@@ -154,7 +154,7 @@ func (r *run) awaitTestTurn(ctx context.Context, round tabRound) error {
 	const op = "daemon.merge.test_turn"
 	o := r.o
 	if o.onTestTurnAsk != nil {
-		o.onTestTurnAsk(ctx, r.ws)
+		o.onTestTurnAsk(ctx, r)
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
 		}

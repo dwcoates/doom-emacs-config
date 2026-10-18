@@ -530,41 +530,77 @@ type chain struct {
 }
 
 // chainTurns orders the gates of a chain's merges at their repository's test
-// turn: a parked merge's next ask for the turn holds until it is released or
-// its run is stopped, and every merge that joins the line for it is told.
+// turn: a parked merge's run holds at its next ask for the turn until it is
+// released or the run is stopped, and every merge that joins the line for it
+// is told.
 type chainTurns struct {
 	mu    sync.Mutex
-	parks map[ids.WorkspaceID]chan struct{}
+	parks map[ids.WorkspaceID]*turnPark
 	lined chan ids.WorkspaceID
 }
 
-// ask is the orchestrator's onTestTurnAsk.
-func (c *chainTurns) ask(ctx context.Context, ws ids.WorkspaceID) {
+// turnPark is one park: held is closed by its release, and run is the run it
+// holds, the first run of its workspace built once it was set. A later run
+// of the workspace (a resume, a start over) is never held by it, so a run
+// stopped before it ever asked takes the park with it.
+type turnPark struct {
+	held chan struct{}
+	run  *run
+}
+
+// started is the orchestrator's onRunStart: it binds an unbound park of r's
+// workspace to r.
+func (c *chainTurns) started(r *run) {
 	c.mu.Lock()
-	park, ok := c.parks[ws]
-	delete(c.parks, ws)
-	c.mu.Unlock()
-	if !ok {
+	defer c.mu.Unlock()
+	if p, ok := c.parks[r.ws]; ok && p.run == nil {
+		p.run = r
+	}
+}
+
+// ask is the orchestrator's onTestTurnAsk.
+func (c *chainTurns) ask(ctx context.Context, r *run) {
+	held, parked := c.claim(r)
+	if !parked {
 		return
 	}
 	select {
-	case <-park:
+	case <-held:
 	case <-ctx.Done():
 	}
 }
 
-// parkTurn holds ws's next ask for its test turn, until the release it
-// answers is called or its run is stopped.
+// claim takes the park r's ask holds on, if one was set for r: it answers
+// the park's release and whether there was one.
+func (c *chainTurns) claim(r *run) (held <-chan struct{}, parked bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.parks[r.ws]
+	if !ok || p.run != r {
+		return nil, false
+	}
+	delete(c.parks, r.ws)
+	return p.held, true
+}
+
+// parkTurn holds the next run of ws at its next ask for its test turn, until
+// the release it answers is called or that run is stopped. The release may be
+// called more than once.
 func (c *chain) parkTurn(ws ids.WorkspaceID) (release func()) {
-	park := make(chan struct{})
+	p := &turnPark{held: make(chan struct{})}
 	c.turns.mu.Lock()
-	c.turns.parks[ws] = park
+	c.turns.parks[ws] = p
 	c.turns.mu.Unlock()
+	var once sync.Once
 	return func() {
-		c.turns.mu.Lock()
-		delete(c.turns.parks, ws)
-		c.turns.mu.Unlock()
-		close(park)
+		once.Do(func() {
+			c.turns.mu.Lock()
+			if c.turns.parks[ws] == p {
+				delete(c.turns.parks, ws)
+			}
+			c.turns.mu.Unlock()
+			close(p.held)
+		})
 	}
 }
 
@@ -621,7 +657,7 @@ func newChainOfWidth(t *testing.T, width int) *chain {
 	c := &chain{h: h, git: newChainGit(h.git), runner: newChainRunner(),
 		idle: make(chan ids.WorkspaceID, 1024), kicks: make(chan wsm.RepoKey, 1),
 		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"},
-		turns: &chainTurns{parks: map[ids.WorkspaceID]chan struct{}{}, lined: make(chan ids.WorkspaceID, 1024)}}
+		turns: &chainTurns{parks: map[ids.WorkspaceID]*turnPark{}, lined: make(chan ids.WorkspaceID, 1024)}}
 	cfg := cpugov.DefaultConfig()
 	if width > 0 {
 		cfg.MaxGates = width
@@ -646,6 +682,7 @@ func (c *chain) wire(o *orchestrator) {
 	o.deps.Governor = c.h.governor
 	c.h.governor.OnModeChange(o.modeChanged)
 	o.onChainIdle = func(ws ids.WorkspaceID) { c.idle <- ws }
+	o.onRunStart = c.turns.started
 	o.onTestTurnAsk = c.turns.ask
 	o.onTestTurnLine = func(ws ids.WorkspaceID) { c.turns.lined <- ws }
 	o.onKick = func(repo wsm.RepoKey) {
@@ -1322,4 +1359,86 @@ func headInGate(t *testing.T) (*chain, <-chan error) {
 	done := admitAsync(c.h, context.Background())
 	<-inGate
 	return c, done
+}
+
+// TestAParkHoldsOnlyTheRunItWasSetFor covers parkTurn's binding: the park
+// binds to the first run of its workspace built once it was set, and only
+// that run's ask claims it.
+func TestAParkHoldsOnlyTheRunItWasSetFor(t *testing.T) {
+	cases := []struct {
+		name       string
+		later      bool // a later run of the workspace asks, not the first
+		background bool // the first run built is a waiting member's rebase
+		wantParked bool
+	}{
+		{name: "the run built first after the park claims it", wantParked: true},
+		{name: "a later run of the workspace does not", later: true},
+		{name: "a waiting member's rebase does not take the park from the run after it", background: true, later: true, wantParked: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newChain(t)
+			release := c.parkTurn(theWorkspace)
+			defer release()
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			build := c.h.o.newRun
+			if tc.background {
+				build = c.h.o.newBackgroundRun
+			}
+			asker := build(ctx, cancel, c.h.repoKey(), theWorkspace, 1)
+			if tc.later {
+				asker = c.h.o.newRun(ctx, cancel, c.h.repoKey(), theWorkspace, 1)
+			}
+
+			// Act.
+			_, parked := c.turns.claim(asker)
+
+			// Assert.
+			if parked != tc.wantParked {
+				t.Fatalf("the ask claimed a park = %v, want %v", parked, tc.wantParked)
+			}
+		})
+	}
+}
+
+func TestAClaimedParkHoldsTheAskUntilItsRelease(t *testing.T) {
+	// Arrange.
+	c := newChain(t)
+	release := c.parkTurn(theWorkspace)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	r := c.h.o.newRun(ctx, cancel, c.h.repoKey(), theWorkspace, 1)
+	held, _ := c.turns.claim(r)
+	select {
+	case <-held:
+		t.Fatal("a park let go before its release")
+	default:
+	}
+
+	// Act.
+	release()
+
+	// Assert.
+	select {
+	case <-held:
+	default:
+		t.Fatal("a released park still holds")
+	}
+}
+
+func TestAParkReleasedTwiceClosesOnce(t *testing.T) {
+	// Arrange.
+	c := newChain(t)
+	release := c.parkTurn(theWorkspace)
+
+	// Act: a release before the end and the deferred one at it.
+	release()
+	release()
+
+	// Assert.
+	if _, parked := c.turns.parks[theWorkspace]; parked {
+		t.Fatal("a released park still holds its workspace")
+	}
 }

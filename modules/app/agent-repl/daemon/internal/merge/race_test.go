@@ -209,3 +209,31 @@ func TestASuspensionThatFailsAfterTheRaceIsRecorded(t *testing.T) {
 	}
 	c.drain(t)
 }
+
+func TestAHeadOvertakenBeforeItAsksForItsTurnLandsOnceResumed(t *testing.T) {
+	// Arrange: master moved, so the head rebases first; its rebase holds, and
+	// its first ask for the test turn is parked, so the merge behind it passes
+	// and overtakes it before the head ever asks.
+	c := newChain(t)
+	c.git.commitOn("master", "m1")
+	releaseHeadTurn := c.parkTurn(theWorkspace)
+	defer releaseHeadTurn()
+	headRebase, releaseHeadRebase := c.git.holdRebase(c.dirs[theWorkspace])
+	c.h.o.onGitStopWait = func() { close(releaseHeadRebase) }
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	done := admitAsync(c.h, context.Background())
+	<-headRebase
+
+	// Act: the overtaken head's rebase ends once its suspension stopped its
+	// git, so it never asked for the turn; its resumed run asks for it.
+	if err := <-done; err != nil {
+		t.Fatalf("the overtaken head's admission ended on: %v", err)
+	}
+	c.drain(t)
+
+	// Assert.
+	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[0], []string{"b1"}) || !slices.Equal(got[1], []string{"a1"}) {
+		t.Fatalf("landings brought %v, want [b1] then [a1]", got)
+	}
+}

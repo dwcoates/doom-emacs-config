@@ -220,11 +220,15 @@ type orchestrator struct {
 	// idle between steps, waiting for its chain to change. Nil in production;
 	// a test reads where the chain stands from it.
 	onChainIdle func(ws ids.WorkspaceID)
-	// onTestTurnAsk, when set, is called each time a gate is about to ask for
-	// its repository's test turn, and may hold it there until ctx is done;
-	// onTestTurnLine, when set, each time a gate joined the line for it. Nil
-	// in production; a test orders the gates of two merges through them.
-	onTestTurnAsk  func(ctx context.Context, ws ids.WorkspaceID)
+	// onRunStart, when set, is called with each run that may ask for its
+	// repository's test turn, as it is built and before any of its steps;
+	// onTestTurnAsk, when set, each time a gate of run r is about to ask for
+	// that turn, and may hold it there until ctx is done; onTestTurnLine,
+	// when set, each time a gate joined the line for it. Nil in production; a
+	// test orders the gates of two merges through them, holding one run's
+	// ask and never a later run's of the same workspace.
+	onRunStart     func(r *run)
+	onTestTurnAsk  func(ctx context.Context, r *run)
 	onTestTurnLine func(ws ids.WorkspaceID)
 	// onKick, when set, is called by every kick of a synchronous (test)
 	// orchestrator, whose kick starts no pump: a test that pumps by hand
