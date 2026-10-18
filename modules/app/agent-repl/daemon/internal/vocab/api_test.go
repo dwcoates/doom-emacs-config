@@ -1110,3 +1110,45 @@ func TestEveryMarkSectionChecksItsMotionThroughCheckMotion(t *testing.T) {
 		t.Fatalf("api.go tests markMotions membership %d times, want once, inside checkMotion", handRolled)
 	}
 }
+
+func TestLoadRenderColorsReadsEachColorsOneValuePerTheme(t *testing.T) {
+	// Arrange / Act.
+	c := loadColors(t)
+
+	// Assert.
+	for _, theme := range ColorThemes {
+		for _, color := range c.Colors {
+			if !hexColor.MatchString(c.ColorValues[theme][color]) {
+				t.Errorf("color_values[%q][%q] = %q", theme, color, c.ColorValues[theme][color])
+			}
+		}
+	}
+}
+
+func TestLoadRenderColorsRefusesMalformedColorValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(values map[string]any)
+	}{
+		{"a missing theme", func(v map[string]any) { delete(v, "dark") }},
+		{"an extra theme", func(v map[string]any) { v["sepia"] = v["dark"] }},
+		{"a theme missing a color", func(v map[string]any) { delete(v["dark"].(map[string]any), "green") }},
+		{"a theme naming an unknown color", func(v map[string]any) { v["dark"].(map[string]any)["chartreuse"] = "#7fff00" }},
+		{"a value that is no hex", func(v map[string]any) { v["dark"].(map[string]any)["green"] = "green" }},
+		{"an uppercase hex value", func(v map[string]any) { v["dark"].(map[string]any)["green"] = "#5DD87C" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := writeColors(t, func(m map[string]any) { tc.mutate(m["color_values"].(map[string]any)) })
+
+			// Act.
+			_, err := LoadRenderColors(dir)
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), "color_values") {
+				t.Fatalf("LoadRenderColors error = %v, want a color_values refusal", err)
+			}
+		})
+	}
+}

@@ -41,39 +41,53 @@
 (ert-deftest agent-repl-test-tab-palette-row-carries-the-face ()
   "The builder puts the caller\='s face on the row."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should (eq 'agent-repl-tab-done (plist-get row :face)))))
 
 (ert-deftest agent-repl-test-tab-palette-row-unselected-paints-the-color ()
   "The unselected look takes the state color as its background."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should (equal "#123456" (plist-get (plist-get row :unselected) :bg)))))
 
-(ert-deftest agent-repl-test-tab-palette-row-unselected-takes-the-given-foreground ()
-  "The unselected foreground is the caller\='s, since no luminance rule
-picks the right one for all six colors."
-  ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "black")))
-    ;; Act / Assert
-    (should (equal "black" (plist-get (plist-get row :unselected) :fg)))))
+(ert-deftest agent-repl-test-tab-palette-row-unselected-ink-is-light-on-a-dark-fill ()
+  "On a dark fill the unselected text takes the light ink."
+  ;; Arrange / Act
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
+    ;; Assert
+    (should (equal agent-repl--color-light (plist-get (plist-get row :unselected) :fg)))))
 
-(ert-deftest agent-repl-test-tab-palette-row-unselected-bracket-numeral-is-the-default ()
-  "Every unselected bracket numeral is `agent-repl--color-default-bracket\='."
-  ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
-    ;; Act / Assert
-    (should (equal agent-repl--color-default-bracket
-                   (plist-get (plist-get row :unselected) :bracket-fg)))))
+(ert-deftest agent-repl-test-tab-palette-row-unselected-ink-is-dark-on-a-light-fill ()
+  "On a pastel fill the unselected text takes the dark ink."
+  ;; Arrange / Act
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#96bbff")))
+    ;; Assert
+    (should (equal agent-repl--color-dark (plist-get (plist-get row :unselected) :fg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-unselected-bracket-numeral-wears-the-text-ink ()
+  "The unselected [N] numeral wears the same ink as the tab\='s text."
+  ;; Arrange / Act
+  (let* ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#96bbff"))
+         (look (plist-get row :unselected)))
+    ;; Assert
+    (should (equal (plist-get look :fg) (plist-get look :bracket-fg)))))
+
+(ert-deftest agent-repl-test-tab-palette-every-row-clears-the-contrast-floor ()
+  "Every palette row\='s unselected text clears the contrast floor on its fill."
+  ;; Arrange / Act / Assert
+  (dolist (entry agent-repl--tab-palette)
+    (let ((look (plist-get (cdr entry) :unselected)))
+      (should (>= (agent-repl-color-contrast-ratio (plist-get look :fg) (plist-get look :bg))
+                  agent-repl-tab-contrast-floor)))))
 
 (ert-deftest agent-repl-test-tab-palette-row-unselected-has-no-bracket-bg ()
   "The unselected look carries NO `:bracket-bg\=', so the entry is one color.
 The renderer falls back to `:bg\=' only when the key is absent, and a row
 that set it would paint a two-color entry."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should-not (plist-member (plist-get row :unselected) :bracket-bg))))
 
@@ -82,7 +96,7 @@ that set it would paint a two-color entry."
 color (owner ruling, 2026-09-14): a selected tab's background is now the
 lightish grey regardless of its connection state."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should (equal agent-repl--color-selected-bg
                    (plist-get (plist-get row :selected) :bg)))))
@@ -91,7 +105,7 @@ lightish grey regardless of its connection state."
   "The selected look\='s foreground is chosen against the selection grey and
 clears `agent-repl-tab-contrast-floor\=' against it."
   ;; Arrange
-  (let* ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white"))
+  (let* ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456"))
          (spec (plist-get row :selected)))
     ;; Act / Assert
     (should (>= (agent-repl-color-contrast-ratio (plist-get spec :fg)
@@ -103,7 +117,7 @@ clears `agent-repl-tab-contrast-floor\=' against it."
 `:underline\=' marker — the subtle, distinct selection indicator that does
 not reuse a background."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should (eq t (plist-get (plist-get row :selected) :underline)))))
 
@@ -111,7 +125,7 @@ not reuse a background."
   "The unselected look carries NO underline, so the marker is the selected
 tab\='s alone."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should-not (plist-member (plist-get row :unselected) :underline))))
 
@@ -121,7 +135,7 @@ one: the selected look\='s background differs from the unselected look\='s
 STATE color (owner ruling, 2026-09-14 — grey now IS the selection
 background, not merely the underline)."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should-not (equal (plist-get (plist-get row :unselected) :bg)
                        (plist-get (plist-get row :selected) :bg)))))
@@ -129,7 +143,7 @@ background, not merely the underline)."
 (ert-deftest agent-repl-test-tab-palette-row-weight-is-the-shared-one ()
   "Both looks take `agent-repl--tab-weight\=', which no row has ever varied."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456")))
     ;; Act / Assert
     (should (equal agent-repl--tab-weight
                    (plist-get (plist-get row :unselected) :weight)))
@@ -1010,7 +1024,8 @@ Only a status update resets; a plain activation just restarts the clock."
     (should (eq 'unspecified (plist-get spec :bg)))
     (should (eq 'unspecified (plist-get spec :fg)))
     (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))
-    (should (equal agent-repl--color-default-bracket (plist-get spec :bracket-fg)))))
+    (should (equal (agent-repl--tab-bar-legible-fg agent-repl--color-thinking-red)
+                   (plist-get spec :bracket-fg)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-selected-thinking ()
   "Bracket-only spec for :thinking selected keeps THINKING-RED on the
@@ -1101,8 +1116,8 @@ status on [N] and the selection marker under its name."
 (ert-deftest agent-repl-test-tab-spec-unselected-known-state ()
   "tab-spec returns the :unselected plist from the palette for a known state."
   (let ((spec (agent-repl--tab-spec :thinking nil)))
-    (should (equal (plist-get spec :bg) "#cc3333"))
-    (should (equal (plist-get spec :fg) "white"))))
+    (should (equal (plist-get spec :bg) agent-repl--color-thinking-red))
+    (should (equal (plist-get spec :fg) (agent-repl--tab-bar-legible-fg agent-repl--color-thinking-red)))))
 
 (ert-deftest agent-repl-test-tab-spec-selected-known-state ()
   "tab-spec returns the :selected plist from the palette for a known state:
@@ -1623,7 +1638,7 @@ invented here would let an illegible pair pass the floor check."
 
 (ert-deftest agent-repl-test-default-spec-unselected-bracket-meets-the-contrast-floor ()
   "The default spec's unselected NUMERAL is readable on its own background.
-It was `agent-repl--color-default-bracket' — white — over an inherited
+It was white over an inherited
 background, which resolved to about 1.3:1 on a headless sandbox frame."
   ;; Arrange
   (let* ((spec (plist-get (agent-repl--tab-default) :unselected))
@@ -2716,7 +2731,8 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
   "tab-spec for :vendor-blocked unselected returns the turquoise plist."
   (let ((spec (agent-repl--tab-spec :vendor-blocked nil)))
     (should (equal (plist-get spec :bg) agent-repl--color-usable-fault-turquoise))
-    (should (equal (plist-get spec :fg) agent-repl--color-light))))
+    (should (equal (plist-get spec :fg)
+                   (agent-repl--tab-bar-legible-fg agent-repl--color-usable-fault-turquoise)))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-selected ()
   "tab-spec for :vendor-blocked selected paints the selection grey, not
@@ -5218,3 +5234,42 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
         (agent-repl-status-sync-attention nil)
         ;; Assert
         (should (zerop records))))))
+
+;;;; ---- Tests: the status colors' values come from render-colors.json ----
+
+(defconst agent-repl-test-status--color-constants
+  '(("blue"      . agent-repl--color-init-blue)
+    ("purple"    . agent-repl--color-merging-purple)
+    ("red"       . agent-repl--color-thinking-red)
+    ("turquoise" . agent-repl--color-usable-fault-turquoise)
+    ("yellow"    . agent-repl--color-idle-async-yellow)
+    ("green"     . agent-repl--color-done-green))
+  "Each color name and the constant the tab bar paints it with.")
+
+(defun agent-repl-test-status--dark-value (color)
+  "Return COLOR's dark value, read straight off render-colors.json."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--render-colors-path)
+    (gethash color (gethash "dark" (gethash "color_values" (json-parse-buffer))))))
+
+(ert-deftest agent-repl-test-status-every-color-constant-is-the-files-dark-value ()
+  "Each tab color constant is render-colors.json\\='s dark value for its color."
+  ;; Arrange / Act / Assert
+  (dolist (pair agent-repl-test-status--color-constants)
+    (should (equal (symbol-value (cdr pair))
+                   (agent-repl-test-status--dark-value (car pair))))))
+
+(ert-deftest agent-repl-test-status-color-constants-cover-every-color ()
+  "The constants cover exactly the file\\='s closed set of colors."
+  ;; Arrange
+  (let ((values agent-repl-status--color-values)
+        (named (sort (mapcar #'car agent-repl-test-status--color-constants) #'string<)))
+    ;; Act / Assert
+    (should (equal named (sort (hash-table-keys values) #'string<)))))
+
+(ert-deftest agent-repl-test-status-color-value-signals-on-an-unknown-color ()
+  "A color the file gives no value is a broken contract, and signals."
+  ;; Arrange / Act
+  (let ((err (should-error (agent-repl-status--color-value "chartreuse"))))
+    ;; Assert
+    (should (string-match-p "no dark value for \"chartreuse\"" (cadr err)))))

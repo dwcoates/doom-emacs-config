@@ -87,6 +87,58 @@ export const FOOTER_STATUS_ARMS: readonly string[] = Object.keys(FOOTER_STATUS);
 export const TOPBAR_TONES: readonly string[] = renderColors.topbar_tones;
 
 /**
+ * The stylesheet token each color paints through: the `.tone-*` rules and
+ * every other status use in `styles.css` read these, and nothing in
+ * `styles.css` gives them a value.
+ */
+export const COLOR_TOKENS: Readonly<Record<Exclude<Color, "none">, string>> = {
+  blue: "--init",
+  purple: "--blocked",
+  red: "--err",
+  turquoise: "--turquoise",
+  yellow: "--async",
+  green: "--ok",
+};
+
+/** The themes `color_values` carries, the light one first. */
+export const COLOR_THEMES = ["light", "dark"] as const;
+
+/**
+ * A color's ONE value in THEME, from `render-colors.json#color_values`: the
+ * value the Emacs tab bar fills with too, so a status is one color everywhere
+ * (owner ruling, 2026-10-17). The file is checked in and validated by every
+ * suite, so a missing value is a broken contract, never a runtime condition.
+ */
+export function colorValue(theme: (typeof COLOR_THEMES)[number], color: Exclude<Color, "none">): string {
+  const values: Readonly<Record<string, Record<string, string>>> = renderColors.color_values;
+  const value = values[theme]?.[color];
+  if (value === undefined) {
+    throw new Error(`render-colors.json#color_values has no ${theme} value for '${color}'`);
+  }
+  return value;
+}
+
+/** The CSS defining every color token from `color_values`, in both themes. */
+export function colorValuesStylesheet(): string {
+  const block = (theme: (typeof COLOR_THEMES)[number]): string =>
+    (Object.entries(COLOR_TOKENS) as [Exclude<Color, "none">, string][])
+      .map(([color, token]) => `${token}: ${colorValue(theme, color)};`)
+      .join(" ");
+  return `:root { ${block("light")} }\n@media (prefers-color-scheme: dark) { :root { ${block("dark")} } }`;
+}
+
+/**
+ * Define the color tokens on DOC, once, ahead of every stylesheet rule that
+ * reads them: the page's one place a status color gets its value.
+ */
+export function installColorValues(doc: Document): void {
+  const style = doc.createElement("style");
+  style.dataset.source = "render-colors.json#color_values";
+  style.textContent = colorValuesStylesheet();
+  doc.head.prepend(style);
+}
+
+/**
  * The color a `RosterRow.status` arm paints the rail dot.
  *
  * ARM is the generated case name. An arm with no row here is a MalformedView

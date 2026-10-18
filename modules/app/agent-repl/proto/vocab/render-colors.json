@@ -5,11 +5,12 @@
     "mechanism that makes a divergence between the three fail loudly instead",
     "of quietly.",
     "",
-    "It pins WHICH of the six colors a state takes, not what that color's",
-    "value is: each renderer keeps its own hex, because a tab-bar background",
-    "and a CSS dot legitimately want different shades of the same idea. What",
-    "may never differ is the ASSIGNMENT — a workspace that reads green in one",
-    "surface and red in another is the failure this file exists to prevent.",
+    "It pins WHICH of the six colors a state takes AND what each color's",
+    "value is ('color_values'): a status is one color on every surface, the",
+    "Emacs tab bar's fill and the webapp's dot alike (owner ruling,",
+    "2026-10-17). A workspace that reads green in one surface and red in",
+    "another, or a green tab beside a different green dot, is the failure",
+    "this file exists to prevent.",
     "",
     "'none' is a real answer, not a gap. The merge states deliberately carry",
     "glyphs instead of colors so they never spend one of the five, and a",
@@ -61,6 +62,36 @@
     "state a renderer paints, and there is no second spelling to keep aligned",
     "by hand."
   ],
+  "_color_values_comment": [
+    "THE ONE VALUE OF EACH COLOR, per theme. Every renderer paints a color",
+    "from here and holds no hex of its own: the webapp defines its status",
+    "tokens from it (src/vocab.ts), and the Emacs tab bar, which is always",
+    "dark, fills its tabs with the 'dark' row (lisp/status.el).",
+    "",
+    "The 'dark' row is the pastel set (owner ruling, 2026-10-17): each hue",
+    "kept, drawn at one lightness with its strength capped, red the deeper",
+    "red the webapp's cleared rule shares, purple the tool title's purple.",
+    "design-dark-accent-tuner.html beside this module derives it. The",
+    "'light' row is the light theme's set as it stood."
+  ],
+  "color_values": {
+    "light": {
+      "blue": "#3366cc",
+      "purple": "#a21caf",
+      "red": "#dc2626",
+      "turquoise": "#0891b2",
+      "yellow": "#f59e0b",
+      "green": "#16a34a"
+    },
+    "dark": {
+      "blue": "#96bbff",
+      "purple": "#9f74f4",
+      "red": "#ee6d69",
+      "turquoise": "#1cd1ec",
+      "yellow": "#eab00b",
+      "green": "#5dd87c"
+    }
+  },
   "colors": [
     "blue",
     "purple",

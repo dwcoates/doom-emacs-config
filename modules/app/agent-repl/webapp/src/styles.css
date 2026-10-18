@@ -106,11 +106,11 @@
   /* A link inside a blue prompt bubble. It is --accent in this theme; the dark
      theme's bright prompt blue swallows --accent, so it sets its own. */
   --prompt-link: var(--accent);
-  --ok: #16a34a;
+  /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
   --cold-gate-compact-border: #128a3d;
-  --err: #dc2626;
+  /* --err, the red status: render-colors.json#color_values (src/vocab.ts). */
   /* THE CLASSIC DIFF's line backgrounds (owner request, 2026-10-08;
      src/feed/cards/diff-view.ts): an added line on a soft green, a removed
      line on a soft red, the text staying the card's own color. */
@@ -132,7 +132,7 @@
   /* Agent boot: the same blue the Emacs tab-bar paints the :init state
      (`agent-repl--color-init-blue'), so a starting workspace reads as one
      state across both renderers instead of red in one and blue in the other. */
-  --init: #3366cc;
+  /* --init, the blue status: render-colors.json#color_values (src/vocab.ts). */
   /* Hibernation: the same teal the Emacs tab-bar paints the hibernated state
      (`agent-repl--color-hibernated-teal'), and the sixth color in the shared
      vocabulary.
@@ -147,7 +147,7 @@
      workspace is USABLE — a failed turn, a failed merge, a degraded view
      (owner ruling, 2026-09-28). A cyan well clear of --init's blue and --ok's
      green, so the three read apart at a glance. */
-  --turquoise: #0891b2;
+  /* --turquoise, the turquoise status: render-colors.json#color_values (src/vocab.ts). */
   /* The revival gate's own fill and frame (#revival-gate): a SOLID yellow
      card inside a solid orange frame. Solid rather than a color-mix wash of
      the feed, because the gate is the only interaction available while it
@@ -278,13 +278,13 @@
      idle, model AVAILABLE, background work continues" — neither the working
      orange nor a settled green, so a quiescent-but-still-watching session is
      unmistakable at a glance. */
-  --async: #f59e0b;
+  /* --async, the yellow status: render-colors.json#color_values (src/vocab.ts). */
   /* The vendor/account block: stopped until a human or the vendor acts.
      Deliberately a MAGENTA-leaning purple rather than the violet --retry
      (#8b5cf6) or --info-agents (#7c3aed): a retry is the system working and
      a merged workspace is a settled success, so neither may be confusable
      with a session that has stopped and will not restart on its own. */
-  --blocked: #a21caf;
+  /* --blocked, the purple status: render-colors.json#color_values (src/vocab.ts). */
   /* AskUserQuestion picker. Two tokens shape the "answer me" panel:
      --q-opt-bg lifts the option bubbles (and the question badge, which shares
        their fill) clear of the plain feed background the picker sits on, so an
@@ -508,15 +508,23 @@
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
-    --thinking: #fb923c;
+    /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
+       kept, drawn at one lightness with its strength capped, as
+       design-dark-accent-tuner.html beside this module derives them. The six
+       status colors come from render-colors.json#color_values (src/vocab.ts),
+       and EVERY PURPLE IS THE ONE PURPLE, the purple status --blocked, the
+       tool title's purple. */
+    --thinking: #ffa15a;
     --tool-command: #898782;
-    --retry: #a78bfa;
-    --info-ws: #4ade80;
-    --info-model: #22d3ee;
-    --info-tokens: #fbbf24;
-    --info-time: #93c5fd;
-    --info-agents: #c4b5fd;
-    --info-tasks: #fda4af;
+    --tool-title: var(--blocked);
+    --accent: #97bafe;
+    --retry: var(--blocked);
+    --info-ws: #46db7d;
+    --info-model: #1cd1ec;
+    --info-tokens: #eab00b;
+    --info-time: #8dbff7;
+    --info-agents: var(--blocked);
+    --info-tasks: #f69ea9;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
     /* Halfway from the Claude composer's #20201f to the feed's #151514, each
@@ -530,15 +538,18 @@
        dark text on a bright wash is the readable pair in both. */
     --search-match: #eab308;
     --search-current: #f97316;
-    --remediation: #facc15;
-    --interrupted: #facc15;
-    --suite-running: #facc15;
-    --clear-divider: #ef4444;
-    --compact-rule: #f97316;
-    --final-response: #4ade80;
+    --remediation: #e0b603;
+    --interrupted: #e0b603;
+    --suite-running: #e0b603;
+    /* The cleared rule is the red status's red (owner ruling, 2026-10-17). */
+    --clear-divider: var(--err);
+    /* A light amber, apart from the cleared rule's red at a glance (owner
+       ruling, 2026-10-17: the two blurred as neighboring oranges). */
+    --compact-rule: #ffc07a;
+    --final-response: #46db7d;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
-    --selected-entry: #60a5fa;
+    --selected-entry: #8bbeff;
     /* A moderate grey a little lighter than the dark --assistant (the dark
        --panel-bg, #1a1a19). */
     --selected-bubble-bg: #313130;
@@ -546,28 +557,23 @@
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
-    /* Brighter amber for the dark theme, as the other state borders lift. */
-    --async: #fbbf24;
     /* Brighter token yellow for the dark theme, so the figure reads on the
        deep ground the same way the light one does on white. */
-    --token-yellow: #eab308;
+    --token-yellow: #e8b100;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
-    --hibernated: #2dd4bf;
-    /* Brighter turquoise for the dark theme, as the other state colors lift. */
-    --turquoise: #22d3ee;
+    --hibernated: #30d6c1;
     /* The gate stays a SOLID yellow card in the dark theme too, but a deep
        yellow rather than the light theme's bright one, so --fg still reads on
        it. The frame lifts to the brighter orange the dark theme already gives
        --compact-rule. */
     --revival-gate-bg: #5c4a10;
-    --revival-gate-border: #f97316;
-    --blocked: #e879f9;
-    --q-border: #facc15;
+    --revival-gate-border: var(--compact-rule);
+    --q-border: #e0b603;
     --news-digest-ipo: #e8916f;
     --async-card: #09433b;
     --async-border: #4fc4b0;
     --merge-card: #3a2e0a;
-    --merge-border: #facc15;
+    --merge-border: #e0b603;
     /* A white wash, lighter than the dark bubble (see the :root note). */
     --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
   }
@@ -3463,13 +3469,13 @@ html[data-page-unshown] *::after {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --hl-keyword: #c084fc;
-    --hl-string: #4ade80;
-    --hl-number: #fbbf24;
+    --hl-keyword: var(--blocked);
+    --hl-string: #46db7d;
+    --hl-number: #eab00b;
     --hl-comment: #838897;
-    --hl-title: #60a5fa;
-    --hl-attr: #22d3ee;
-    --hl-meta: #fbbf24;
+    --hl-title: #8bbeff;
+    --hl-attr: #1cd1ec;
+    --hl-meta: #eab00b;
   }
 }
 

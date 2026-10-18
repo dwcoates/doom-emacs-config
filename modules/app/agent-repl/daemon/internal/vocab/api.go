@@ -13,6 +13,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -41,10 +42,13 @@ const PlainClass = ""
 var FailureSides = []string{"machinery", "vendor", "client_local"}
 
 // RenderColors is render-colors.json: which of the six colors each state
-// takes, plus the glyph names the merge states carry beside their color.
-// Values are the names the file spells; nothing here holds a hex value,
-// because each renderer keeps its own.
+// takes, the one value of each color per theme, and the glyph names the merge
+// states carry beside their color.
 type RenderColors struct {
+	// ColorValues maps each theme ("light", "dark") to each color's #rrggbb
+	// value: the one value every renderer paints the color with (owner ruling,
+	// 2026-10-17). The daemon paints nothing, so it only validates them.
+	ColorValues map[string]map[string]string
 	// Colors is the closed set of color names.
 	Colors []string
 	// Precedence is the six-color precedence, strongest claim first.
@@ -128,6 +132,7 @@ var markMotions = []string{"breathes", "still"}
 // renderColorsJSON is the file's on-disk shape. It is separate from
 // RenderColors so an absent table is distinguishable from an empty one.
 type renderColorsJSON struct {
+	ColorValues             map[string]map[string]string `json:"color_values"`
 	Colors                  []string                     `json:"colors"`
 	Precedence              []string                     `json:"precedence"`
 	RosterStatus            map[string]string            `json:"roster_status"`
@@ -192,12 +197,47 @@ func LoadRenderColors(vocabDir string) (RenderColors, error) {
 	return c, nil
 }
 
+// ColorThemes are the themes color_values must carry, and the only ones.
+var ColorThemes = []string{"light", "dark"}
+
+// hexColor is the one spelling a color value may take.
+var hexColor = regexp.MustCompile(`^#[0-9a-f]{6}$`)
+
+// validateColorValues holds color_values to exactly ColorThemes, each giving
+// exactly the closed set of colors a lowercase #rrggbb value.
+func (c RenderColors) validateColorValues() error {
+	themes := make([]string, 0, len(c.ColorValues))
+	for theme := range c.ColorValues {
+		themes = append(themes, theme)
+	}
+	if !sameSet(themes, ColorThemes) {
+		return fmt.Errorf("color_values themes %v are not %v", themes, ColorThemes)
+	}
+	for _, theme := range ColorThemes {
+		values := c.ColorValues[theme]
+		names := make([]string, 0, len(values))
+		for name, value := range values {
+			names = append(names, name)
+			if !hexColor.MatchString(value) {
+				return fmt.Errorf("color_values[%q][%q] = %q, which is not a lowercase #rrggbb value", theme, name, value)
+			}
+		}
+		if !sameSet(names, c.Colors) {
+			return fmt.Errorf("color_values[%q] names %v, not the colors %v", theme, names, c.Colors)
+		}
+	}
+	return nil
+}
+
 func (c RenderColors) validate() error {
 	if len(c.Colors) == 0 {
 		return fmt.Errorf("colors is empty")
 	}
 	if !sameSet(c.Colors, c.Precedence) {
 		return fmt.Errorf("precedence %v does not cover colors %v", c.Precedence, c.Colors)
+	}
+	if err := c.validateColorValues(); err != nil {
+		return err
 	}
 	for _, table := range []struct {
 		name string
