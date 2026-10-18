@@ -83,8 +83,15 @@ func (f *fakeDurableRows) recorded(ws ids.WorkspaceID, id string) (wsm.DurableFe
 // record, with the harness's deterministic encoding.
 func daemonOver(t *testing.T, store DurableRows) (*resolver, *dlog.TestLogger) {
 	t.Helper()
+	return daemonOverWith(t, store, nil)
+}
+
+// daemonOverWith is daemonOver with ADJUST applied to its deps first (nil
+// adjusts nothing).
+func daemonOverWith(t *testing.T, store DurableRows, adjust func(*Deps)) (*resolver, *dlog.TestLogger) {
+	t.Helper()
 	log := dlog.NewTestLogger()
-	r, err := newResolver(Deps{
+	deps := Deps{
 		Log:          &fakeSurfaces{log: log},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/ws", nil },
 		Encode:       testEncode,
@@ -93,7 +100,11 @@ func daemonOver(t *testing.T, store DurableRows) (*resolver, *dlog.TestLogger) {
 		Painter:      &fakePainter{},
 		ResolveImage: func(*conversationv1.ImageBlock) (string, string, error) { return "", "", nil },
 		DurableRows:  store,
-	})
+	}
+	if adjust != nil {
+		adjust(&deps)
+	}
+	r, err := newResolver(deps)
 	if err != nil {
 		t.Fatalf("newResolver: %v", err)
 	}

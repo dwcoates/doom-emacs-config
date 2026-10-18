@@ -571,7 +571,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// and only the feed knows that. Called under the feed's lock; the
 		// footer never calls back into the feed (the fault path above already
 		// takes the same feed-then-footer order).
-		EntryPlaced: footerResolver.OnEntryPlaced,
+		EntryPlaced:     footerResolver.OnEntryPlaced,
+		MergeRow:        footerResolver.OnMergeRow,
+		MergeRowRetired: footerResolver.OnMergeRowRetired,
 		// THE REVEAL WINDOW on the main agent's live bubbles, measured from the
 		// gaps between the bursts their streamed fragments arrive in.
 		Pacing: pacer,

@@ -35,6 +35,7 @@ import { armButtonRole } from "../control.js";
 import type {
   FooterChipAgents,
   FooterChipCrons,
+  FooterChipMerges,
   FooterChipMonitors,
   FooterChipShells,
   FooterChipTasks,
@@ -663,7 +664,8 @@ export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps)
     u.tasks === undefined &&
     u.shells === undefined &&
     u.monitors === undefined &&
-    u.crons === undefined
+    u.crons === undefined &&
+    u.merges === undefined
   ) {
     return null;
   }
@@ -674,6 +676,7 @@ export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps)
   if (u.shells !== undefined) cell.appendChild(drawFooterChipShells(u.shells, deps));
   if (u.monitors !== undefined) cell.appendChild(drawFooterChipMonitors(u.monitors, deps));
   if (u.crons !== undefined) cell.appendChild(drawFooterChipCrons(u.crons, deps));
+  if (u.merges !== undefined) cell.appendChild(drawFooterChipMerges(u.merges, deps));
   return cell;
 }
 
@@ -687,15 +690,27 @@ export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps)
 export function drawFooterChipAgents(u: FooterChipAgents, deps: StripDeps): HTMLElement {
   const el = chip("agents", "⚙", String(u.count), deps);
   if (u.waitingForApi === undefined) return el;
+  el.appendChild(
+    chipWaiting("waitingForApi", WAITING_FOR_API_GLYPH, u.waitingForApi.count, "waiting for the API"),
+  );
+  return el;
+}
+
+/**
+ * A chip's waiting figure: " <glyph> N", titled with what the N rows wait
+ * for, and stamped `data-<name in kebab case>` with the count. The agents
+ * chip's waiting-for-the-API figure and the merges chip's waiting-on-you
+ * figure are both drawn by it.
+ */
+export function chipWaiting(name: string, glyph: string, count: number, waitsFor: string): HTMLElement {
   const waiting = document.createElement("span");
   waiting.className = "footer-chip-waiting";
-  waiting.setAttribute("data-waiting-for-api", String(u.waitingForApi.count));
-  waiting.title = `${u.waitingForApi.count} waiting for the API`;
+  waiting.setAttribute(`data-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, String(count));
+  waiting.title = `${count} ${waitsFor}`;
   waiting.appendChild(document.createTextNode(" "));
-  waiting.appendChild(chipGlyph("waitingForApi", WAITING_FOR_API_GLYPH));
-  waiting.appendChild(document.createTextNode(` ${u.waitingForApi.count}`));
-  el.appendChild(waiting);
-  return el;
+  waiting.appendChild(chipGlyph(name, glyph));
+  waiting.appendChild(document.createTextNode(` ${count}`));
+  return waiting;
 }
 
 /**
@@ -721,6 +736,21 @@ export function drawFooterChipShells(u: FooterChipShells, deps: StripDeps): HTML
 export function drawFooterChipMonitors(u: FooterChipMonitors, deps: StripDeps): HTMLElement {
   return chip("monitors", "◉", String(u.count), deps);
 }
+
+/**
+ * ⇄ N — the async merges in flight, and, while any of them waits on the user,
+ * the waiting glyph with ITS count beside it: "⇄ 2 ? 1". Both counts are the
+ * daemon's.
+ */
+export function drawFooterChipMerges(u: FooterChipMerges, deps: StripDeps): HTMLElement {
+  const el = chip("merges", "⇄", String(u.count), deps);
+  if (u.waitingOnUser === undefined) return el;
+  el.appendChild(chipWaiting("waitingOnUser", WAITING_ON_USER_GLYPH, u.waitingOnUser.count, "waiting on you"));
+  return el;
+}
+
+/** The waiting-on-you glyph: a plain question mark, never the emoji. */
+export const WAITING_ON_USER_GLYPH = "?";
 
 /**
  * ◷ N — the scheduled jobs. The schema's comment names a stopwatch; the glyph

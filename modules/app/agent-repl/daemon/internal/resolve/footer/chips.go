@@ -891,6 +891,7 @@ func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	if scheduled := scheduledRows(r.cronsPanel(s)); scheduled > 0 {
 		out.Crons = &frontendv1.FooterChipCrons{Count: uint32(scheduled)}
 	}
+	out.Merges = s.mergesChip()
 	return out
 }
 
@@ -904,6 +905,7 @@ func (r *resolver) expanded(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterEx
 		Shells:   r.shellsPanel(ws, s),
 		Monitors: r.monitorsPanel(s),
 		Crons:    r.cronsPanel(s),
+		Merges:   s.mergesPanel(),
 	}
 }
 

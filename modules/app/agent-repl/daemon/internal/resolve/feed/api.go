@@ -476,6 +476,18 @@ type Deps struct {
 	// into this resolver. nil tells nobody, which is what a test that is not
 	// about the footer wants.
 	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
+	// MergeRow is told every merge bubble row the feed holds, as it stands
+	// after each publication: a merge head on the root feed, and every tab
+	// row on a merge's sub-feed, each with the merge's ledger id.
+	// MergeRowRetired is told each one the feed retires, a reset's included.
+	// They are the footer's ⇄ chip and panel's whole source, so the footer
+	// draws exactly the merges the feed draws (mergerows.go).
+	//
+	// CALLED WITH THE RESOLVER'S LOCK HELD, as EntryPlaced is: the receiver
+	// must never call back into this resolver. nil tells nobody, which is what
+	// a test that is not about the footer wants.
+	MergeRow        func(ws ids.WorkspaceID, lease ids.LeaseID, row *frontendv1.FeedRow)
+	MergeRowRetired func(ws ids.WorkspaceID, lease ids.LeaseID, id string)
 	// Commands answers the workspace's standing slash-command catalog
 	// (commandcatalog.Catalogs, the one table ListSlashCommands also reads),
 	// and false while none has been stated. A user-prompt row's `commands`
