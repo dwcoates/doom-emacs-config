@@ -6,33 +6,27 @@ import (
 )
 
 // openMetricsSurface opens and advertises the store's ALWAYS-ON metrics
-// surface under root (docs/PLAN-runtime-metrics.md) and records the decision
-// either way. Off (no root) is recorded at debug; a configured surface that
-// cannot open is a boot error, because a store the launcher asked to measure
-// and that silently is not would leave a hole nobody sees in the history.
+// surface under root (docs/PLAN-runtime-metrics.md), every decision recorded
+// as store.metrics (metrics.OpenService). A configured surface that cannot
+// open is a boot error.
 func openMetricsSurface(root string, log *logging.Logger) (*metrics.Server, error) {
-	surface, err := metrics.OpenSelf(metrics.ProgramStore, root, func(op string, err error) {
-		log.Log(logging.Fields{Operation: "store.metrics", Level: "error"}, "the metrics surface failed step=%s: %v", op, err)
-	})
-	if err != nil {
-		log.Log(logging.Fields{Operation: "store.metrics", Level: "error"}, "the metrics surface could not open root=%s: %v", root, err)
-		return nil, err
-	}
-	if surface == nil {
-		log.LogVerbose(logging.Fields{Operation: "store.metrics", Level: "debug"}, "the metrics surface is off flag=--metrics-root")
-		return nil, nil
-	}
-	log.Log(logging.Fields{Operation: "store.metrics", Level: "info"},
-		"the metrics surface is listening address=%s target=%s", surface.Addr(), surface.TargetPath())
-	return surface, nil
+	return metrics.OpenService(metrics.ProgramStore, root, metricsRecord(log))
 }
 
 // closeMetricsSurface stops an open surface, recording a failure to stop.
 func closeMetricsSurface(surface *metrics.Server, log *logging.Logger) {
-	if surface == nil {
-		return
-	}
-	if err := surface.Close(); err != nil {
-		log.Log(logging.Fields{Operation: "store.metrics", Level: "error"}, "the metrics surface did not stop cleanly: %v", err)
+	metrics.CloseService(surface, metricsRecord(log))
+}
+
+// metricsRecord is the store's canonical logger as the metrics surface
+// records through it; a debug record is verbose.
+func metricsRecord(log *logging.Logger) metrics.Record {
+	return func(level, message string) {
+		fields := logging.Fields{Operation: "store.metrics", Level: level}
+		if level == "debug" {
+			log.LogVerbose(fields, "%s", message)
+			return
+		}
+		log.Log(fields, "%s", message)
 	}
 }

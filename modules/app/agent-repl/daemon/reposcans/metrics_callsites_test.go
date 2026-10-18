@@ -10,22 +10,26 @@ import (
 
 // TestEveryRuntimeOpensItsMetricsThroughTheSharedHelpers pins the shape the
 // shared metrics package (agentrepl/logging/metrics) gives every Go runtime:
-// the daemon, the store and the sidecar each open their surface in exactly
-// one place through OpenRunning or OpenSelf, and none assembles a registry
-// and calls Open itself, so no runtime can serve a surface without its build
-// info or with a hand-rolled error path.
+// the daemon opens its surface in exactly one place through OpenRunning, the
+// store and the sidecar each through OpenService, and none assembles a
+// registry or calls Open or OpenSelf itself, so no runtime can serve a
+// surface without its build info or record its decisions its own way.
 func TestEveryRuntimeOpensItsMetricsThroughTheSharedHelpers(t *testing.T) {
 	// Arrange
 	root := moduleRootDir(t)
-	runtimes := map[string]string{
-		"daemon":  filepath.Join(root, "daemon"),
-		"store":   filepath.Join(root, "agent-shim", "shim-store"),
-		"sidecar": filepath.Join(root, "agent-shim", "claude", "shim-sidecar"),
+	runtimes := map[string]struct {
+		dir    string
+		helper string
+	}{
+		"daemon":  {filepath.Join(root, "daemon"), "OpenRunning"},
+		"store":   {filepath.Join(root, "agent-shim", "shim-store"), "OpenService"},
+		"sidecar": {filepath.Join(root, "agent-shim", "claude", "shim-sidecar"), "OpenService"},
 	}
-	shared := regexp.MustCompile(`\bmetrics\.(OpenRunning|OpenSelf)\(`)
-	direct := regexp.MustCompile(`\bmetrics\.(Open|NewRegistry)\(`)
+	direct := regexp.MustCompile(`\bmetrics\.(Open|OpenSelf|NewRegistry)\(`)
 
-	for name, dir := range runtimes {
+	for name, rt := range runtimes {
+		shared := regexp.MustCompile(`\bmetrics\.` + rt.helper + `\(`)
+		dir := rt.dir
 		// Act
 		var sharedUses, directUses []string
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -56,10 +60,10 @@ func TestEveryRuntimeOpensItsMetricsThroughTheSharedHelpers(t *testing.T) {
 			t.Fatalf("walk %s: %v", dir, err)
 		}
 		if len(sharedUses) != 1 {
-			t.Errorf("%s opens its metrics surface through the shared helpers in %v, want exactly one site", name, sharedUses)
+			t.Errorf("%s opens its metrics surface through metrics.%s in %v, want exactly one site", name, rt.helper, sharedUses)
 		}
 		if len(directUses) != 0 {
-			t.Errorf("%s calls metrics.Open or metrics.NewRegistry directly in %v", name, directUses)
+			t.Errorf("%s calls metrics.Open, OpenSelf or NewRegistry directly in %v", name, directUses)
 		}
 	}
 }

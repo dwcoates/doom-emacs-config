@@ -6,34 +6,27 @@ import (
 )
 
 // openMetricsSurface opens and advertises the sidecar's ALWAYS-ON metrics
-// surface under root (docs/PLAN-runtime-metrics.md) and records the decision
-// either way. Off (no root) is recorded at debug; a configured surface that
-// cannot open is a boot error, because a sidecar the launcher asked to
-// measure and that silently is not would leave a hole nobody sees in the
-// history.
+// surface under root (docs/PLAN-runtime-metrics.md), every decision recorded
+// as metrics (metrics.OpenService). A configured surface that cannot open is
+// a boot error.
 func openMetricsSurface(root string, logf *logging.Bound) (*metrics.Server, error) {
-	surface, err := metrics.OpenSelf(metrics.ProgramSidecar, root, func(op string, err error) {
-		logf.With(logging.Context{Operation: "metrics", Level: "error"}).Log("the metrics surface failed step=%s: %v", op, err)
-	})
-	if err != nil {
-		logf.With(logging.Context{Operation: "metrics", Level: "error"}).Log("the metrics surface could not open root=%s: %v", root, err)
-		return nil, err
-	}
-	if surface == nil {
-		logf.With(logging.Context{Operation: "metrics", Level: "debug"}).LogVerbose("the metrics surface is off flag=--metrics-root")
-		return nil, nil
-	}
-	logf.With(logging.Context{Operation: "metrics", Level: "info"}).Log(
-		"the metrics surface is listening address=%s target=%s", surface.Addr(), surface.TargetPath())
-	return surface, nil
+	return metrics.OpenService(metrics.ProgramSidecar, root, metricsRecord(logf))
 }
 
 // closeMetricsSurface stops an open surface, recording a failure to stop.
 func closeMetricsSurface(surface *metrics.Server, logf *logging.Bound) {
-	if surface == nil {
-		return
-	}
-	if err := surface.Close(); err != nil {
-		logf.With(logging.Context{Operation: "metrics", Level: "error"}).Log("the metrics surface did not stop cleanly: %v", err)
+	metrics.CloseService(surface, metricsRecord(logf))
+}
+
+// metricsRecord is the sidecar's canonical logger as the metrics surface
+// records through it; a debug record is verbose.
+func metricsRecord(logf *logging.Bound) metrics.Record {
+	return func(level, message string) {
+		bound := logf.With(logging.Context{Operation: "metrics", Level: level})
+		if level == "debug" {
+			bound.LogVerbose("%s", message)
+			return
+		}
+		bound.Log("%s", message)
 	}
 }
