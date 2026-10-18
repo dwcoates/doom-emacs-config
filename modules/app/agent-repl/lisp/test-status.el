@@ -1236,19 +1236,19 @@ foreground (owner ruling, 2026-10-01), for every state."
     (should (equal (plist-get face :background) "#cc3333"))
     (should (equal (plist-get face :foreground) "white"))))
 
-(ert-deftest agent-repl-test-render-tab-gap-takes-the-name-face-over-a-distinct-bracket ()
-  "The space after [N] is drawn in the name\='s face even when the bracket\='s
-ground differs from the name\='s (owner request, 2026-10-13)."
+(ert-deftest agent-repl-test-render-tab-gap-sits-on-the-bar-over-a-distinct-bracket ()
+  "The space after [N] is on the bar\='s own ground, never the bracket\='s or
+the name\='s (owner ruling, 2026-10-18)."
   ;; Arrange
   (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white" :weight bold))
          ;; Act
          (result (agent-repl--render-tab "ws1" spec "1" '+workspace-tab-face nil))
          (gap-pos (1+ (string-match "\\]" result))))
     ;; Assert
-    (should (eq (get-text-property gap-pos 'face result) '+workspace-tab-face))))
+    (should (eq (plist-get (get-text-property gap-pos 'face result) :background) 'unspecified))))
 
-(ert-deftest agent-repl-test-render-tab-gap-takes-the-name-face-with-a-badge ()
-  "With a badge, the space after [N] is still the name\='s and directly
+(ert-deftest agent-repl-test-render-tab-gap-sits-on-the-bar-with-a-badge ()
+  "With a badge, the space after [N] is still on the bar\='s ground and directly
 precedes the name: the badge is drawn before [N] and splits nothing after it."
   ;; Arrange
   (let* ((spec '(:bg "#22c55e" :fg "black" :bracket-bg "#a21caf" :bracket-fg "white" :weight bold))
@@ -1257,7 +1257,7 @@ precedes the name: the badge is drawn before [N] and splits nothing after it."
          (gap-pos (1+ (string-match "\\]" result)))
          (name-pos (string-match "ws1" result)))
     ;; Assert
-    (should (eq (get-text-property gap-pos 'face result) '+workspace-tab-face))
+    (should (eq (plist-get (get-text-property gap-pos 'face result) :background) 'unspecified))
     (should (= name-pos (1+ gap-pos)))))
 
 (ert-deftest agent-repl-test-render-tab-bracket-bg-falls-back-to-bg ()
@@ -1780,8 +1780,9 @@ row carries the async-merging marker."
      ,@body))
 
 (ert-deftest agent-repl-test-render-tab-entry-async-merge-paints-only-the-bracket ()
-  "An async-merging tab reads `[N] name\=' with `[N]\=' purple and ` name\='
-on its own status ground (owner request, 2026-10-13)."
+  "An async-merging tab reads `[N] name\=' with `[N]\=' purple, the gap on the
+bar, and `name\=' on its own status ground (owner requests, 2026-10-13 and
+2026-10-18)."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--with-entry :done t
@@ -1793,8 +1794,8 @@ on its own status ground (owner request, 2026-10-13)."
         ;; Assert
         (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
                        agent-repl--color-merging-purple))
-        (should (eq (get-text-property gap-pos 'face result)
-                    (agent-repl--tab-face :done nil)))
+        (should (eq (plist-get (get-text-property gap-pos 'face result) :background)
+                    'unspecified))
         (should (eq (get-text-property name-pos 'face result)
                     (agent-repl--tab-face :done nil)))))))
 
