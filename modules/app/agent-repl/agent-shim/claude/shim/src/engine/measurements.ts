@@ -201,7 +201,7 @@ export async function* withMeasurements(
     // here would hold this stream's own end hostage to it. The inner stream
     // ends itself at that frame either way.
     iterator.return?.().catch((error: unknown) => {
-      LOGGER.error({ error: String(error) }, "the session stream under the measurements did not end cleanly");
+      LOGGER.error({ cause: String(error) }, "the session stream under the measurements did not end cleanly");
     });
   }
 }
