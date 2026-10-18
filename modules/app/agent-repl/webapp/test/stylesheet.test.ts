@@ -85,9 +85,9 @@ describe("keyframesOf", () => {
 
   it("reads the real stylesheet by default", () => {
     // Arrange / Act
-    const body = keyframesOf("ws-selection-blink");
+    const body = keyframesOf("ws-selection-number-fade");
     // Assert
-    expect(body).toMatch(/50%\s*\{/);
+    expect(body).toMatch(/10%,\s*72\.5%\s*\{/);
   });
 
   it("fails loudly naming the block when the stylesheet has none", () => {

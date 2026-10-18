@@ -41,7 +41,7 @@ import { createSidebarView, type DrawnView, type SidebarView } from "../../src/s
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
 import type { RowReveal } from "../../src/sidebar/reveal.js";
-import { createSelectionBlink } from "../../src/sidebar/selection-blink.js";
+import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -189,7 +189,7 @@ export function sidebarContext(
     rowHover: createRowHover(dropdowns, openDetails),
     attention: new AttentionRegistry(timers),
     reveal,
-    selectionBlink: createSelectionBlink(document),
+    selectionFade: createSelectionFade(document),
     shownAhead: () => null,
     disposers,
     onDispose: (fn) => {

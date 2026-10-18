@@ -39,7 +39,7 @@ export function openScope(rail: RailContext): DrawScope {
     dropdowns: rail.dropdowns,
     rowHover: rail.rowHover,
     reveal: rail.reveal,
-    selectionBlink: rail.selectionBlink,
+    selectionFade: rail.selectionFade,
     shownAhead: () => rail.shownAhead(),
     view: {
       track: (key, wire, paint) => viewScope.track(key, wire, paint),

@@ -1,45 +1,32 @@
 /**
- * selection-blink — a row the user selects from the rail blinks, softly,
- * once per click (owner request, 2026-10-17).
+ * selection-fade — the tab number of a row the user selects from the rail
+ * fades quickly into white and, a second later, back to its own grey, once
+ * per click (owner request, 2026-10-17).
  *
- * EVERY CLICK BLINKS, even on the row already selected: the blink answers the
+ * THE ROW ITSELF STAYS STILL (owner request, 2026-10-18): the wash the row
+ * once swelled in on a click is gone, and only its number answers the click.
+ *
+ * EVERY CLICK FADES, even on the row already selected: the fade answers the
  * click, not the roster, so it is started where the rail's one select verb
  * runs (`row.ts` `selectWorkspace`) and never from `WorkspaceRoster.current`,
  * which a re-selection does not change.
  *
- * THE BLINK OUTLIVES THE ROW IT STARTED ON. A selection is answered by a
+ * THE FADE OUTLIVES THE ROW IT STARTED ON. A selection is answered by a
  * roster push, and the push redraws the rows whose wire changed (the
- * highlight moves), so the clicked element is usually replaced mid-blink; a
- * band return even moves the row to another section. The blink is therefore
+ * highlight moves), so the clicked element is usually replaced mid-fade; a
+ * band return even moves the row to another section. The fade is therefore
  * the rail's, keyed by workspace id and stamped with its start instant, and
  * every drawn copy of the row joins it at the phase the clock says
- * (`apply`): a negative delay (`--selection-blink-delay`) seeks the fresh
- * element's animation to the elapsed time, so a redraw continues the blink
- * rather than restarting it. Once the blink has run its length the entry is dropped.
- *
- * THE NUMBER FADES WITH IT (owner request, 2026-10-17): the row's tab number
- * fades quickly into white and, a second later, back to its own grey. The fade
- * is a second animation of the same click, on the same clock: it runs longer
- * than the wash, so a row redrawn after the wash has ended still joins the
- * fade, and the click is forgotten only once both have run their lengths.
+ * (`apply`): a negative delay (`--selection-number-fade-delay`) seeks the
+ * fresh element's animation to the elapsed time, so a redraw continues the
+ * fade rather than restarting it. Once every animation has run its length
+ * the click is forgotten.
  *
  * EACH LENGTH LIVES HERE, ONCE: a row is handed each animation's length in
  * its duration property, which the stylesheet's animation reads.
  */
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
-
-/** How long one selection blink runs, in milliseconds (owner request, 2026-10-17: twice as fast as the first 900). */
-export const SELECTION_BLINK_MS = 450;
-
-/** The class a blinking row's box carries. */
-export const SELECTION_BLINK_CLASS = "selection-blink";
-
-/** The custom property a blinking row is handed the blink's length in. */
-export const SELECTION_BLINK_DURATION_PROPERTY = "--selection-blink-duration";
-
-/** The custom property a blinking row is handed its animation's delay in: minus the time already blinked. */
-export const SELECTION_BLINK_DELAY_PROPERTY = "--selection-blink-delay";
 
 /** How long the tab number's fade runs, in milliseconds: a quick rise to white, a second held, then the fall back. */
 export const SELECTION_NUMBER_FADE_MS = 1600;
@@ -65,14 +52,8 @@ export interface SelectionAnimation {
   ms: number;
 }
 
-/** Every animation one selection runs: the row's wash, then the number's fade. */
+/** Every animation one selection runs: the number's fade. */
 export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [
-  {
-    className: SELECTION_BLINK_CLASS,
-    durationProperty: SELECTION_BLINK_DURATION_PROPERTY,
-    delayProperty: SELECTION_BLINK_DELAY_PROPERTY,
-    ms: SELECTION_BLINK_MS,
-  },
   {
     className: SELECTION_NUMBER_FADE_CLASS,
     durationProperty: SELECTION_NUMBER_FADE_DURATION_PROPERTY,
@@ -84,22 +65,22 @@ export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [
 /** How long a selection is remembered: until its longest animation has run. */
 const SELECTION_REMEMBERED_MS = Math.max(...SELECTION_ANIMATIONS.map((animation) => animation.ms));
 
-/** The rail's selection blinks. */
-export interface SelectionBlink {
-  /** Workspace ID was selected from the rail: blink every drawn copy of its row from now. */
+/** The rail's selection fades. */
+export interface SelectionFade {
+  /** Workspace ID was selected from the rail: fade every drawn copy of its row from now. */
   start(id: string): void;
-  /** ROW was just drawn for workspace ID: join a blink still running for it. */
+  /** ROW was just drawn for workspace ID: join a fade still running for it. */
   apply(id: string, row: HTMLElement): void;
 }
 
 /**
- * The selection blinks of the rail drawn under ROOT, on the wall clock NOW.
+ * The selection fades of the rail drawn under ROOT, on the wall clock NOW.
  */
-export function createSelectionBlink(root: ParentNode, now: () => number = () => Date.now()): SelectionBlink {
-  /** Each blinking workspace's start instant, in epoch milliseconds. */
+export function createSelectionFade(root: ParentNode, now: () => number = () => Date.now()): SelectionFade {
+  /** Each fading workspace's start instant, in epoch milliseconds. */
   const started = new Map<string, number>();
 
-  /** How far into its blink workspace ID is, or null when it is not blinking. */
+  /** How far into its fade workspace ID is, or null when it is not fading. */
   const elapsedOf = (id: string): number | null => {
     const start = started.get(id);
     if (start === undefined) return null;
@@ -132,8 +113,8 @@ export function createSelectionBlink(root: ParentNode, now: () => number = () =>
       const rows = queryAll<HTMLElement>(root, "[data-roster-row]").filter(
         (row) => row.getAttribute("data-roster-row") === id,
       );
-      log.debug("blinking the row selected from the rail", {
-        operation: "sidebar.selection-blink",
+      log.debug("fading the number of the row selected from the rail", {
+        operation: "sidebar.selection-fade",
         context: { workspace: id, drawn: rows.length },
       });
       for (const row of rows) paint(row, 0);

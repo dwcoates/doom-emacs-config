@@ -51,7 +51,7 @@ import {
   startOfTomorrow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
-import { SELECTION_BLINK_CLASS, SELECTION_BLINK_MS, createSelectionBlink } from "../../src/sidebar/selection-blink.js";
+import { SELECTION_NUMBER_FADE_CLASS, SELECTION_NUMBER_FADE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 
@@ -1146,11 +1146,11 @@ describe("the row click", () => {
   });
 });
 
-describe("the selection blink", () => {
-  /** A rail context whose selection blink reads CLOCK, with every drawn row under the document. */
-  const blinkContext = (clock: () => number) => {
+describe("the selection fade", () => {
+  /** A rail context whose selection fade reads CLOCK, with every drawn row under the document. */
+  const fadeContext = (clock: () => number) => {
     const sc = sidebarContext(appContext({ selectWorkspace: () => SELECT_OK }));
-    return { ...sc, selectionBlink: createSelectionBlink(document, clock) };
+    return { ...sc, selectionFade: createSelectionFade(document, clock) };
   };
 
   afterEach(() => {
@@ -1160,9 +1160,9 @@ describe("the selection blink", () => {
   it.each([
     { what: "another workspace's row", current: false },
     { what: "the current workspace's row", current: true },
-  ])("blinks $what when it is clicked", async ({ current }) => {
+  ])("fades the number of $what when it is clicked", async ({ current }) => {
     // Arrange
-    const sc = blinkContext(() => NOW);
+    const sc = fadeContext(() => NOW);
     const drawn = drawRosterRow(row({ id: "ws-1", current }), sc, "R");
     document.body.appendChild(drawn);
 
@@ -1170,12 +1170,12 @@ describe("the selection blink", () => {
     await click(drawn.querySelector("[data-select]") as Element);
 
     // Assert
-    expect(drawn.classList.contains(SELECTION_BLINK_CLASS)).toBe(true);
+    expect(drawn.classList.contains(SELECTION_NUMBER_FADE_CLASS)).toBe(true);
   });
 
-  it("does not blink a row still opening", async () => {
+  it("does not fade the number of a row still opening", async () => {
     // Arrange
-    const sc = blinkContext(() => NOW);
+    const sc = fadeContext(() => NOW);
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "inactive", value: {} }, opening: true }), sc, "R");
     document.body.appendChild(drawn);
 
@@ -1183,24 +1183,24 @@ describe("the selection blink", () => {
     await click(drawn.querySelector(".row") as Element);
 
     // Assert
-    expect(drawn.classList.contains(SELECTION_BLINK_CLASS)).toBe(false);
+    expect(drawn.classList.contains(SELECTION_NUMBER_FADE_CLASS)).toBe(false);
   });
 
-  it("draws a row redrawn mid-blink into the blink", async () => {
+  it("draws a row redrawn mid-fade into the fade", async () => {
     // Arrange
     let clock = NOW;
-    const sc = blinkContext(() => clock);
+    const sc = fadeContext(() => clock);
     const before = drawRosterRow(row({ id: "ws-1" }), sc, "R");
     document.body.appendChild(before);
     await click(before.querySelector("[data-select]") as Element);
-    const elapsed = SELECTION_BLINK_MS / 2;
+    const elapsed = SELECTION_NUMBER_FADE_MS / 2;
     clock += elapsed;
 
     // Act
     const after = drawRosterRow(row({ id: "ws-1", current: true }), sc, "R");
 
     // Assert
-    expect([after.classList.contains(SELECTION_BLINK_CLASS), after.style.getPropertyValue("--selection-blink-delay")]).toEqual([
+    expect([after.classList.contains(SELECTION_NUMBER_FADE_CLASS), after.style.getPropertyValue("--selection-number-fade-delay")]).toEqual([
       true,
       `-${elapsed}ms`,
     ]);
