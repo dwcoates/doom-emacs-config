@@ -353,6 +353,11 @@
      lines sit as far apart as a tree's (owner request, 2026-10-13), less a quarter of the gap (2026-10-14). */
   --bubble-base-font-rem: 0.9;
   --bubble-font-rem: var(--bubble-base-font-rem);
+  /* THE SMALLER PROSE SIZE: a thinking bubble's and an interim response's
+     text (they narrow `--bubble-font-rem` to it), and a tool card head's
+     text, the title and a Bash card's `$ <command>` alike (owner request,
+     2026-10-17: the same size as the thinking bubble's text). */
+  --small-prose-font-rem: 0.8;
   --tree-font-rem: 0.85;
   --tree-line-h: 1.45;
   /* THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the one source of the
@@ -1943,7 +1948,7 @@ pre {
    scales it. */
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
-  --bubble-font-rem: 0.8;
+  --bubble-font-rem: var(--small-prose-font-rem);
 }
 /* THE THINKING PROSE (owner request, 2026-10-14): a thinking bubble's text is
    italic and a touch greyer than an interim's (--thinking-text), so reasoning
@@ -2352,7 +2357,16 @@ html[data-page-unshown] *::after {
   background: var(--merge-card);
   border-color: var(--merge-border);
 }
-.tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
+/* A tool card head is set at the thinking bubble's size (owner request,
+   2026-10-17), from the one shared `--small-prose-font-rem`, below the card
+   body's 0.85rem. */
+.tool-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  font-size: calc(var(--small-prose-font-rem) * 1rem * var(--feed-text-scale));
+}
 .tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: calc(0.7rem * var(--feed-text-scale)); padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
