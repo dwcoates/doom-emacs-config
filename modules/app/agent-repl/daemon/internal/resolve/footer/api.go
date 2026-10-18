@@ -481,6 +481,13 @@ type Resolver interface {
 	// id). It is the feed resolver's Deps.EntryPlaced, and it is what a jump
 	// row names: FooterJump.entry, never an address the footer guessed.
 	OnEntryPlaced(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
+	// OnMergeRow takes one merge bubble row the feed now holds for merge
+	// LEASE, its head or one of its tabs, and OnMergeRowRetired the feed's
+	// retirement of one. They are the feed resolver's Deps.MergeRow and
+	// Deps.MergeRowRetired, and they are the ⇄ chip's and panel's whole
+	// source (merges.go).
+	OnMergeRow(ws ids.WorkspaceID, lease ids.LeaseID, row *frontendv1.FeedRow)
+	OnMergeRowRetired(ws ids.WorkspaceID, lease ids.LeaseID, id string)
 }
 
 // Option adjusts the resolver's injectable knobs. The defaults are the

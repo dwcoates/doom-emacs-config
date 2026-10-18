@@ -1118,6 +1118,8 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	}
 	f.rows[id] = snapshot
 	s.noteProduced(snapshot)
+	// A MERGE BUBBLE ROW IS TOLD TO THE FOOTER as it now stands (mergerows.go).
+	r.announceMergeRow(s, at.feed, snapshot)
 	// A ROW OF A MIRRORED TURN IS DRAWN AT THE MIRROR TOO (turnmirror.go).
 	r.mirrorRow(s, snapshot)
 	if !durable {
@@ -1274,6 +1276,7 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
 		return false
 	}
+	r.announceMergeRowRetired(s, addr, f.rows[id])
 	wasResponse := isResponseRow(f.rows[id])
 	retiredTurn := f.rows[id].GetTurn().GetValue()
 	retiredCounted := countsAfter(f.rows[id], retiredTurn)
