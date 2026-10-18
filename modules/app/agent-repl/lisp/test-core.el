@@ -3334,16 +3334,6 @@ The master kill-switch overrides the always-on file-write decoupling."
 
 ;;;; ---- Tests: Buffer background color (moved from overlay.el) ----
 
-(ert-deftest agent-repl-test-rgb-hex-format ()
-  "rgb-hex should format R, G, B independently into a #rrggbb string."
-  (should (equal (agent-repl--rgb-hex 0 0 0) "#000000"))
-  (should (equal (agent-repl--rgb-hex 255 255 255) "#ffffff"))
-  (should (equal (agent-repl--rgb-hex 20 20 26) "#14141a")))
-
-(ert-deftest agent-repl-test-rgb-hex-channels-independent ()
-  "rgb-hex keeps each channel distinct rather than collapsing to grey."
-  (should (equal (agent-repl--rgb-hex 1 2 3) "#010203")))
-
 (ert-deftest agent-repl-test-set-buffer-background-remaps-default-and-fringe ()
   "set-buffer-background remaps both the default and fringe faces."
   (agent-repl-test--with-temp-buffer " *test-bg*"

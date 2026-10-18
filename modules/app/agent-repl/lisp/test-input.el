@@ -1444,6 +1444,33 @@ workspace's dwell clear another composer's badge."
     ;; Assert.
     (should visual-line-mode)))
 
+(ert-deftest agent-repl-input-mode-paints-the-composer-background ()
+  "The composer paints `agent-repl-input-background' behind its text."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#123456")
+        (remapped nil))
+    (cl-letf (((symbol-function 'agent-repl--set-buffer-background)
+               (lambda (color) (setq remapped color))))
+      (with-temp-buffer
+        ;; Act.
+        (agent-repl-input-mode)
+        ;; Assert.
+        (should (equal remapped "#123456"))))))
+
+(ert-deftest agent-repl-input-background-is-the-webapp-composer-color ()
+  "The composer's default background is the webapp's dark `--composer-bg'."
+  ;; Arrange.
+  (let* ((css (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "webapp/src/styles.css" agent-repl-test--module-root))
+                (buffer-string)))
+         (dark (substring css (string-match "@media (prefers-color-scheme: dark)" css))))
+    ;; Act.
+    (string-match "--composer-bg: \\(#[0-9a-f]\\{6\\}\\);" dark)
+    ;; Assert.
+    (should (equal (eval (car (get 'agent-repl-input-background 'standard-value)))
+                   (match-string 1 dark)))))
+
 (ert-deftest agent-repl-input-mode-wraps-at-word-boundaries ()
   "The composer soft-wraps long lines at word boundaries."
   ;; Arrange.

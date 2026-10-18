@@ -80,7 +80,6 @@
 (defvar agent-repl--log-context-workspace)
 (defvar agent-repl--global-log-scope)
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
-(declare-function agent-repl--rgb-hex "agent-repl-core" (r g b))
 (declare-function agent-repl--set-buffer-background "agent-repl-core" (color))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
@@ -196,24 +195,13 @@ Pre-formatted once so the common case costs no formatting.")
   '((t :background "white" :foreground "black" :weight bold))
   "Face for the Agent Input header line.")
 
-(defcustom agent-repl-input-background-shade 20
-  "Base greyscale level (0-255) for the input buffer background.
-Sets the red and green channels; the blue channel adds
-`agent-repl-input-background-blue-boost' on top for a faint blue tint."
-  :type 'integer
+(defcustom agent-repl-input-background "#20201f"
+  "The input buffer's background, a #rrggbb hex string.
+The webapp's dark `--composer-bg' (webapp/src/styles.css), which follows
+the Claude desktop app's composer (owner ruling, 2026-10-17): the input
+window is the host-native composer, so the two wear one color."
+  :type 'string
   :group 'agent-repl)
-
-(defcustom agent-repl-input-background-blue-boost 6
-  "Extra amount added to the blue channel of the input buffer background."
-  :type 'integer
-  :group 'agent-repl)
-
-(defun agent-repl--input-background-color ()
-  "Return the input buffer background as a #rrggbb hex string."
-  (agent-repl--rgb-hex agent-repl-input-background-shade
-                       agent-repl-input-background-shade
-                       (+ agent-repl-input-background-shade
-                          agent-repl-input-background-blue-boost)))
 
 (defvar-local agent-repl-input-notice nil
   "The composer's standing notice, drawn in the input buffer's mode line.
@@ -276,7 +264,7 @@ The standing notice first, then the held-prompt waiting line."
   (setq-local header-line-format
               "C-c C-c: clear+save | (cmd) <up>/<down>: history | C-M-r: search history")
   (face-remap-add-relative 'header-line 'agent-repl-header-line)
-  (agent-repl--set-buffer-background (agent-repl--input-background-color))
+  (agent-repl--set-buffer-background agent-repl-input-background)
   (unless (member agent-repl--input-mode-line-spec mode-line-format)
     (setq-local mode-line-format
                 (append mode-line-format (list agent-repl--input-mode-line-spec))))
