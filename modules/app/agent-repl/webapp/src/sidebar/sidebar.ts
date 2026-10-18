@@ -44,7 +44,7 @@ import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
-import { createSelectionBlink } from "./selection-blink.js";
+import { createSelectionFade } from "./selection-fade.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -228,7 +228,7 @@ function mountSidebarIn(
     rowHover: createRowHover(dropdowns, openDetails),
     attention,
     reveal,
-    selectionBlink: createSelectionBlink(body),
+    selectionFade: createSelectionFade(body),
     shownAhead: () => shownAhead,
   };
   // THE BAND FIT (band-fit.ts): the Hidden Workspaces and Recently Merged
@@ -395,6 +395,7 @@ function mountSidebarIn(
           row.removeAttribute("data-current");
         }
       }
+      rail.selectionFade.highlight(id);
       log.debug("the webhost showed a page; the rail highlights its row ahead of the roster", {
         operation: "sidebar.shown-ahead",
         context: { workspace: id, rows },

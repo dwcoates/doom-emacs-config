@@ -223,9 +223,10 @@ export function drawRosterRow(
   // row's name reads in the Recently Merged band's grey, which is the band
   // name colour at the receded opacity.
   if (closed || hidden) ws.classList.add("receded");
-  // A ROW SELECTED FROM THE RAIL BLINKS (selection-blink.ts), and a redraw
-  // mid-blink joins the blink where the clock says it has got to.
-  sc.selectionBlink.apply(workspace.id, ws);
+  // THE HIGHLIGHTED ROW'S NUMBER IS WHITE (selection-fade.ts): a row drawn
+  // highlighted moves the highlight to it, and a redraw mid-fade joins the
+  // fade where the clock says it has got to.
+  sc.selectionFade.apply(workspace.id, ws, highlighted);
   // THE DETAIL IS A DROPDOWN, transient to this page (owner ruling,
   // 2026-10-06), so its openness is the page's own and survives a redraw.
   if (sc.openDetails.has(workspace.id)) ws.classList.add("open");
@@ -905,10 +906,6 @@ async function selectWorkspace(
     operation: "sidebar.row.select",
     context: { workspace: workspace.id },
   });
-  // EVERY SELECTION BLINKS ITS ROW, the current workspace's included (owner
-  // request, 2026-10-17): the blink answers the click, which a re-selection
-  // is as much as a switch.
-  sc.selectionBlink.start(workspace.id);
   // The row LINE is the control: a refusal lands as its next sibling, inside
   // the row's own box, exactly where a menu item's refusal lands.
   await runVerb(line, {

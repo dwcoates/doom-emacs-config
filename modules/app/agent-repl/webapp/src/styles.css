@@ -1002,14 +1002,17 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    padding, so the rows indent only slightly, and its right margin sets the
    number a little further from the mark than the mark sits from the name
    (owner request, 2026-10-17). */
-#ws-sidebar { --tab-number-w: 0.85rem; }
+#ws-sidebar {
+  --tab-number-w: 0.85rem;
+  --tab-number-color: color-mix(in srgb, var(--muted) 75%, black);
+}
 #ws-sidebar .sb-num {
   flex: 0 0 auto;
   width: var(--tab-number-w);
   margin-left: -0.4rem;
   margin-right: 0.1rem;
   text-align: right;
-  color: color-mix(in srgb, var(--muted) 75%, black);
+  color: var(--tab-number-color);
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
 }
@@ -1177,33 +1180,26 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
-/* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): one soft
-   swell of a neutral wash, the text color thinned (owner ruling, 2026-10-17:
-   no hue marks selection), over the row line (owner request, 2026-10-17:
-   once, not twice), on every click, the current workspace's included. The
-   swell rises from and settles back to the row's own background, so it ends
-   on the current row's tint rather than snapping to it. The class and the blink's length are set by
-   src/sidebar/selection-blink.ts, which also seeks a redrawn row into the
-   blink already running (a negative --selection-blink-delay), so a roster
-   push mid-blink never restarts it. The blink runs
-   once: it is no loop, so the rail's wall-clock seek leaves it alone. */
-#ws-sidebar .ws.selection-blink > .row {
-  animation: ws-selection-blink var(--selection-blink-duration) ease-in-out var(--selection-blink-delay) 1;
+/* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
+   rises from its own grey into white over a second when the highlight moves
+   to the row, and stays white while the row stays highlighted. The row the
+   highlight left falls back to its grey, faster than the rise. The row
+   itself stays still (no wash). The classes and lengths are set by
+   src/sidebar/selection-fade.ts, which also seeks a redrawn row into the
+   fade already running (a negative delay), so a roster push mid-fade
+   continues it. */
+#ws-sidebar .ws.current > .row .sb-num { color: white; }
+#ws-sidebar .ws.selection-number-rise > .row .sb-num {
+  animation: ws-selection-number-rise var(--selection-number-rise-duration) ease-out var(--selection-number-rise-delay) 1;
 }
-@keyframes ws-selection-blink {
-  50% { background-color: color-mix(in srgb, var(--fg) 12%, transparent); }
+@keyframes ws-selection-number-rise {
+  from { color: var(--tab-number-color); }
 }
-/* THE SELECTED ROW'S TAB NUMBER FADES INTO WHITE (owner request, 2026-10-17):
-   a quick rise from its own grey to white, held for a second, then a fall
-   back to the grey. The class and the fade's length are set by
-   src/sidebar/selection-blink.ts beside the row's wash, and seeked the same
-   way, so a redraw mid-fade continues it. The stops are fractions of
-   SELECTION_NUMBER_FADE_MS (1600 ms): white from 160 ms to 1160 ms. */
-#ws-sidebar .ws.selection-number-fade > .row .sb-num {
-  animation: ws-selection-number-fade var(--selection-number-fade-duration) ease-in-out var(--selection-number-fade-delay) 1;
+#ws-sidebar .ws.selection-number-fall > .row .sb-num {
+  animation: ws-selection-number-fall var(--selection-number-fall-duration) ease-in var(--selection-number-fall-delay) 1;
 }
-@keyframes ws-selection-number-fade {
-  10%, 72.5% { color: white; }
+@keyframes ws-selection-number-fall {
+  from { color: white; }
 }
 
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)
@@ -3725,12 +3721,9 @@ html[data-page-unshown] *::after {
   #ws-sidebar .sb-search {
     transition: none;
   }
-  /* A selected row does not blink: the brighter bar already says which. */
-  #ws-sidebar .ws.selection-blink > .row {
-    animation: none;
-  }
-  /* Nor does its tab number fade. */
-  #ws-sidebar .ws.selection-number-fade > .row .sb-num {
+  /* The highlighted row's tab number turns white at once, and back. */
+  #ws-sidebar .ws.selection-number-rise > .row .sb-num,
+  #ws-sidebar .ws.selection-number-fall > .row .sb-num {
     animation: none;
   }
   .thinking-spinner {
