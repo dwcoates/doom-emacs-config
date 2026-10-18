@@ -62,6 +62,7 @@ import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
 import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
 import "agentrepl/v1/endpoint_set_workspace_parent.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
+import "agentrepl/v1/endpoint_move_workspace.proto";
 import "agentrepl/v1/endpoint_swap_workspaces.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
@@ -234,6 +235,9 @@ service AgentRepl {
   // Exchange two workspaces' places in the registry order. See
   // endpoint_swap_workspaces.proto.
   rpc SwapWorkspaces(SwapWorkspacesRequest) returns (SwapWorkspacesResponse);
+  // Move one workspace onto another's tab, the tabs between shifting over. See
+  // endpoint_move_workspace.proto.
+  rpc MoveWorkspace(MoveWorkspaceRequest) returns (MoveWorkspaceResponse);
   rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
   // Change one piece of the sidebar's view state (a fold, the grouping),
   // pushed to every page on the roster stream. See

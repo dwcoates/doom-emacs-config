@@ -276,3 +276,42 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   (`agent-repl-workspace-swap`) are renamed the same way. Log operations
   become `daemon.wsm.swap_places`, `daemon.workspace.swap` and
   `elisp.commands.swap*`.
+
+## `SPC TAB P` moves, beside the swap on `SPC TAB p` (owner, 2026-10-18)
+
+- **Ruling:** the move (`SPC TAB p` before 2026-10-17) comes back on
+  `SPC TAB P`, and `SPC TAB p` stays the swap.
+- **Why:** the sidebar's arrangement now groups the tab bar by repository,
+  then each repository's unsectioned workspaces and each subsection's, each
+  family depth-first (`endpoint_arrange_sidebar.proto`). A swap of two
+  workspaces of different repositories or different families exchanges their
+  stored places but moves no tab, so the owner asked for the insert form
+  beside it.
+
+### MoveWorkspace returns, judged against the grouped tab bar (2026-10-18)
+
+- **What:** `agentrepl.v1.MoveWorkspace` (`endpoint_move_workspace.proto`),
+  listed in `service.proto` beside `SwapWorkspaces`. Same two roster-served
+  refs as before; two new error arms, `other_repository` and `not_siblings`.
+- **Semantics (implementer's, carried through under the owner's 2026-10-13
+  standing approval of contract changes, reported to the owner):**
+  - two top-level workspaces of one repository: the mover joins the target's
+    subsection (or none), just before the target when it comes from a later
+    tab, just after the target's whole family when it comes from an earlier
+    one;
+  - two children of one parent: the same rule among the siblings;
+  - every other pairing is refused, because no tab of the target is a place
+    the mover can occupy: different repositories never interleave
+    (`other_repository`), and a child always follows its parent's family
+    (`not_siblings`).
+- **Why the direction rule:** it is the old move's rule ("moving right shifts
+  the tabs it passes left") lifted from single tabs to families, so the mover
+  ends exactly where the target's family stood.
+- **Why the store judges it in one transaction:** the direction and the anchor
+  ("after the target's family" is "before the next root in the target's
+  bucket") are read and written in the same write, so an arrangement landing
+  between a read and the write cannot misplace the mover.
+- **Rejected:** composing the move in the editor from `ArrangeSidebar
+  place_workspace`. That needs a read of the arrangement before the write, and
+  `place_workspace` places only top-level workspaces, so siblings could not
+  move at all.
