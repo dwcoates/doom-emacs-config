@@ -69,4 +69,6 @@ wait is never invisible. The owner delegated the contract decision.
 - **Tests that needed two gates at once were re-arranged, not weakened**:
   the chain and race suites order the two merges with the TEST-ONLY seams
   `onTestTurnAsk` / `onTestTurnLine` (`chain.parkTurn`, `chain.awaitLined`),
-  and `chainRunner.overlapped` asserts no two gates ever ran together.
+  and `chainRunner.overlapped` asserts no two gates ever ran together. A
+  park is bound through `onRunStart` to the run it was set for, so a later
+  run of the same workspace is never held by it.
