@@ -31,6 +31,7 @@ import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { feedSubagentDotColor } from "../../vocab.js";
 import { drawWorkDot } from "../work-dot.js";
+import { asHeadClock } from "../cards/tool-head.js";
 import type {
   FeedDetachedSubagent,
   FeedSubagent,
@@ -194,7 +195,7 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       const word = document.createElement("span");
       word.className = "subagent-outcome badge muted";
       word.textContent = "settling";
-      el.append(word, reservedSettledElapsedClock("subagent-clock", stoppedMs - startedMs));
+      el.append(word, asHeadClock(reservedSettledElapsedClock("subagent-clock", stoppedMs - startedMs)));
       stopTicking(el);
       break;
     }
@@ -220,7 +221,7 @@ function isDetachedRow(rc: RowContext): boolean {
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedSubagentRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  return reservedLiveElapsedClock(rc.ctx.ticker, "subagent-clock", startedMs);
+  return asHeadClock(reservedLiveElapsedClock(rc.ctx.ticker, "subagent-clock", startedMs));
 }
 
 /** The settled clock: the span that ran, stopped where the run stopped. */
@@ -230,7 +231,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  return reservedSettledElapsedClock("subagent-clock", endedMs - startedMs);
+  return asHeadClock(reservedSettledElapsedClock("subagent-clock", endedMs - startedMs));
 }
 
 /**

@@ -10,6 +10,7 @@ import { RESERVED_CLOCK_CLASS } from "../../../src/elapsed-clock.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { TICKING_ATTRIBUTE } from "../../../src/feed/ticking.js";
 import {
+  HEAD_CLOCK_CLASS,
   TOOL_CARD_HEAD_ATTRIBUTE,
   TOOL_CLOCK_CLASS,
   TOOL_HEAD_CLASS,
@@ -18,7 +19,9 @@ import {
   drawToolCardClock,
   drawToolCardHead,
   drawToolHead,
+  asHeadClock,
 } from "../../../src/feed/cards/tool-head.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { runningClock, stoppedClock } from "./tool-card-head-shape.js";
 import { filesUnder } from "../../files-under.js";
 
@@ -66,6 +69,11 @@ describe("drawToolCardHead", () => {
   it("marks the head as the shared head, wearing the shared class", () => {
     const head = drawToolCardHead({ title: "Bash", badge: badge("done"), clock: undefined, clockPath: "X.clock", ticker: createTicker() });
     expect([head.className, head.hasAttribute(TOOL_CARD_HEAD_ATTRIBUTE)]).toEqual([TOOL_HEAD_CLASS, true]);
+  });
+
+  it("marks its clock as the head's clock", () => {
+    const head = drawToolCardHead({ title: "Bash", badge: badge("done"), clock: stoppedClock(0, 3_000), clockPath: "X.clock", ticker: createTicker() });
+    expect(head.querySelector(`.${TOOL_CLOCK_CLASS}`)?.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
   });
 
   it("draws no clock when the view carries none", () => {
@@ -132,6 +140,59 @@ describe("drawToolCardClock", () => {
   it("refuses a clock whose span is unset", () => {
     const clock = create(FeedToolCardClockSchema, { startedAtMs: 1_000n });
     expect(() => drawToolCardClock(clock, "X.clock", createTicker())).toThrow(MalformedView);
+  });
+});
+
+describe("asHeadClock", () => {
+  it("adds the head clock class beside the clock's own and answers the same element", () => {
+    // Arrange
+    const clock = document.createElement("span");
+    clock.className = "shell-clock reserved-clock";
+
+    // Act
+    const marked = asHeadClock(clock);
+
+    // Assert
+    expect([marked === clock, [...clock.classList]]).toEqual([true, ["shell-clock", "reserved-clock", HEAD_CLOCK_CLASS]]);
+  });
+
+  it("sends the head clock to its row's right end, last whatever the draw order", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const clock = asHeadClock(document.createElement("span"));
+    document.body.append(clock);
+    try {
+      // Act
+      const placed = [cascadedValue(clock, "margin-left"), cascadedValue(clock, "order")];
+
+      // Assert
+      expect(placed).toEqual(["auto", "99"]);
+    } finally {
+      clock.remove();
+      teardown();
+    }
+  });
+});
+
+/**
+ * Every module drawing a head's elapsed clock: the tool card head and each
+ * bubble head. A module here that draws a reserved elapsed clock not wrapped
+ * in `asHeadClock` has a head clock the stylesheet leaves where it was drawn.
+ */
+const HEAD_CLOCK_SITES = ["feed/cards/tool-head.ts", "feed/cards/shell.ts", "feed/rows/subagent.ts", "feed/merge/merge.ts"] as const;
+
+describe("every head marks its clock through asHeadClock", () => {
+  it.each(HEAD_CLOCK_SITES)("wraps every reserved elapsed clock %s draws", (file) => {
+    // Arrange
+    const source = readFileSync(path.join(SRC, file), "utf8");
+
+    // Act
+    const drawn = [...source.matchAll(/reserved(?:Live|Settled)ElapsedClock\(/g)].length;
+    const marked = [...source.matchAll(/asHeadClock\(\s*reserved(?:Live|Settled)ElapsedClock\(/g)].length;
+    const viaCardClock = /asHeadClock\(drawToolCardClock\(/.test(source);
+
+    // Assert
+    expect(file === "feed/cards/tool-head.ts" ? viaCardClock : drawn > 0 && marked === drawn).toBe(true);
   });
 });
 

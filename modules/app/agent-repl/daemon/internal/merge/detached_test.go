@@ -479,7 +479,7 @@ func TestAnAsyncMergesHeadIsNeverPinned(t *testing.T) {
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 	// Act: a live head, the one a sync merge would pin.
-	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil, headRun)
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, headMerging, headRun)
 
 	// Assert
 	h.feed.mu.Lock()
@@ -494,7 +494,7 @@ func TestASyncMergesLiveHeadIsPinnedInItsOwnFeed(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, nil, headRun)
+	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, headMerging, headRun)
 
 	// Assert
 	h.feed.mu.Lock()
@@ -511,7 +511,7 @@ func TestAnAsyncHeadCarriesNoSwitchWhileItsWorkspaceIsHidden(t *testing.T) {
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 	// Act
-	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil, headRun)
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, headMerging, headRun)
 
 	// Assert
 	heads := h.feed.headsOn(theWorkspace)
@@ -525,7 +525,7 @@ func TestARevealRestatesTheAsyncHeadWithTheSwitch(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
-	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil, headRun)
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, headMerging, headRun)
 
 	// Act
 	if err := h.o.RevealMergeWorkspace(context.Background(), theMergeWorkspace, "the user selected it"); err != nil {
@@ -545,7 +545,7 @@ func TestEveryHeadAnAsyncMergePublishesIsAsync(t *testing.T) {
 		name   string
 		result any
 	}{
-		{"queued or running", nil},
+		{"queued or running", headMerging},
 		{"landed", &frontendv1.FeedMergeSuccess{}},
 		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}},
 		{"did not run", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}}}},
@@ -573,7 +573,7 @@ func TestEveryHeadASyncMergePublishesIsSync(t *testing.T) {
 		name   string
 		result any
 	}{
-		{"queued or running", nil},
+		{"queued or running", headMerging},
 		{"landed", &frontendv1.FeedMergeSuccess{}},
 		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}},
 	}

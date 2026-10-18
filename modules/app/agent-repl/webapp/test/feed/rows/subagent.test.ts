@@ -24,6 +24,7 @@ import {
 } from "../../../src/feed/bubble-more.js";
 import { fireResize } from "../../resize-observer.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { HEAD_CLOCK_CLASS } from "../../../src/feed/cards/tool-head.js";
 import { inBubbleFold, measureTitle } from "../title-measure.js";
 
 beforeEach(() => {
@@ -119,6 +120,14 @@ describe("drawFeedSubagent: the head's parts", () => {
 });
 
 describe("drawFeedSubagent: the clocks", () => {
+  it.each([
+    ["live", {}],
+    ["settled", { settled: { endedAtMs: 1_030_000n, outcome: "succeeded" } }],
+  ] as const)("marks the %s clock as the head's clock", (_name, opts) => {
+    const { el } = drawRow(subagentRow("b1", { startedAtMs: 1_000_000n, ...opts }));
+    expect(el.querySelector(".subagent-clock")?.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
+  });
+
   it("counts up from the ORIGINAL start while live", () => {
     const { el } = drawRow(subagentRow("b1", { startedAtMs: 940_000n }));
     expect(el.querySelector(".subagent-clock")?.textContent).toBe("1m");
@@ -673,5 +682,16 @@ describe("drawFeedSubagent: the badge before the clock", () => {
     const { el } = drawRow(row);
     // Assert
     expect(drawnBefore(el.querySelector(".subagent-outcome"), el.querySelector(".subagent-clock"))).toBe(true);
+  });
+
+  it("marks a settling head's clock as the head's clock", () => {
+    // Arrange
+    const row = subagentRow("s");
+    if (row.row.case !== "activity" || row.row.value.unit.case !== "subagent") throw new Error("fixture is not a subagent");
+    row.row.value.unit.value.state = { case: "settling", value: create(FeedSubagentSettlingSchema, { stoppedAtMs: 5000n }) };
+    // Act
+    const { el } = drawRow(row);
+    // Assert
+    expect(el.querySelector(".subagent-clock")?.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
   });
 });

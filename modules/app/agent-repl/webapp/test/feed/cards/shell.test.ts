@@ -32,6 +32,7 @@ import {
   shellDotState,
 } from "../../../src/feed/cards/shell.js";
 import { TICKING_ATTRIBUTE } from "../../../src/feed/ticking.js";
+import { HEAD_CLOCK_CLASS } from "../../../src/feed/cards/tool-head.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { armsOf } from "../arms.js";
 import {
@@ -195,6 +196,14 @@ describe("drawFeedShellBody is spool-only", () => {
 });
 
 describe("drawFeedShellHead clocks", () => {
+  it.each([
+    ["live", {}],
+    ["settled", { settled: { endedAtMs: 3_000n, outcome: "completed" } }],
+  ] as const)("marks the %s clock as the head's clock", (_name, opts) => {
+    const el = drawFeedShellHead(shell({ startedAtMs: 0n, ...opts }), ctxFor().rc);
+    expect(el.querySelector(".shell-clock")?.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
+  });
+
   it("counts up from the original start while live", () => {
     vi.setSystemTime(45_000);
     const el = drawFeedShellHead(shell({ startedAtMs: 0n }), ctxFor().rc);

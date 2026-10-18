@@ -4,7 +4,7 @@
  * Every purple-titled card in the feed (a tool call such as Bash or Write, a
  * question, a permission, a skill, a hook) heads the same way, as an
  * invariant (owner ruling, 2026-10-13): its TITLE, its status BADGE, then its
- * CLOCK, and nothing else. Only the words differ per card; the arrangement,
+ * CLOCK at the head's right end (`HEAD_CLOCK_CLASS`), and nothing else. Only the words differ per card; the arrangement,
  * the title's weight and color and the clock's shape are this module's, so a
  * card hands `drawToolCardHead` its parts and never lays a head out itself.
  * Anything bespoke to one card (a shell's exit code, a hook's) lives in the
@@ -33,6 +33,20 @@ export const TOOL_NAME_CLASS = "tool-name";
 
 /** The class a tool card head's clock wears. */
 export const TOOL_CLOCK_CLASS = "tool-clock";
+
+/**
+ * The class EVERY head's clock wears, on a tool card and on every bubble head
+ * alike: the stylesheet sends it to the head's right end (owner request,
+ * 2026-10-18), so a reader finds how long anything ran in the same place on
+ * every head. Worn through `asHeadClock`, the one way a head marks its clock.
+ */
+export const HEAD_CLOCK_CLASS = "head-clock";
+
+/** Mark CLOCK as its head's clock (`HEAD_CLOCK_CLASS`), and answer it. */
+export function asHeadClock(clock: HTMLElement): HTMLElement {
+  clock.classList.add(HEAD_CLOCK_CLASS);
+  return clock;
+}
 
 /** The attribute every head built by `drawToolCardHead` carries. */
 export const TOOL_CARD_HEAD_ATTRIBUTE = "data-tool-card-head";
@@ -63,7 +77,7 @@ export function drawToolCardHead(parts: ToolCardHead): HTMLElement {
   const title = typeof parts.title === "string" ? drawToolName(parts.title) : parts.title;
   title.classList.add(TOOL_NAME_CLASS);
   head.append(title, parts.badge);
-  if (parts.clock !== undefined) head.append(drawToolCardClock(parts.clock, parts.clockPath, parts.ticker));
+  if (parts.clock !== undefined) head.append(asHeadClock(drawToolCardClock(parts.clock, parts.clockPath, parts.ticker)));
   return head;
 }
 

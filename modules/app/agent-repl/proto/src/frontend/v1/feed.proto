@@ -3222,7 +3222,25 @@ message FeedMergeRuntime {
 }
 
 // Still in the queue or still merging.
-message FeedMergeUpdate {}
+message FeedMergeUpdate {
+  // THE ARM IS WHERE THE MERGE STANDS in its queue, the head's badge word
+  // (owner request, 2026-10-18): `waiting` while it waits in line behind the
+  // merges ahead of it, `merging` once its run has been admitted (popped off
+  // the queue) and is being worked on. The daemon resolves it from the queue
+  // entry's own state, the same fact the head's clock origin
+  // (FeedMergeRuntime.started_at_ms) switches on, so the badge and the clock
+  // never disagree. An async merge's resolving turn, which runs before the
+  // merge joins the queue, is work underway and draws `merging`.
+  oneof stage {
+    FeedMergeUpdateWaiting waiting = 1;
+    FeedMergeUpdateMerging merging = 2;
+  }
+}
+// The merge waits in the queue for the merges ahead of it.
+message FeedMergeUpdateWaiting {}
+// The merge is being worked on: admitted off the queue, or resolving its
+// instruction before it joins.
+message FeedMergeUpdateMerging {}
 
 // It landed: when, and the commit it produced. `ended_at_ms` lives on the
 // terminal arms because it means nothing while live.

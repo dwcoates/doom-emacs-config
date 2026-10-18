@@ -43,6 +43,7 @@ import type {
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { feedShellDotColor } from "../../vocab.js";
 import { drawWorkDot } from "../work-dot.js";
+import { asHeadClock } from "./tool-head.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
@@ -277,7 +278,7 @@ export function drawFeedShellLastProgress(
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedShellRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  return reservedLiveElapsedClock(rc.ctx.ticker, "shell-clock", startedMs);
+  return asHeadClock(reservedLiveElapsedClock(rc.ctx.ticker, "shell-clock", startedMs));
 }
 
 /** The settled clock: the span that ran, stopped where the command stopped. */
@@ -287,7 +288,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  return reservedSettledElapsedClock("shell-clock", endedMs - startedMs);
+  return asHeadClock(reservedSettledElapsedClock("shell-clock", endedMs - startedMs));
 }
 
 /** The stop a live shell offers: its own row, stopped as detached work. */

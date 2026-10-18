@@ -2395,6 +2395,17 @@ html[data-page-unshown] *::after {
   font-size: calc(var(--tool-head-font-rem) * 1rem * var(--feed-text-scale));
 }
 .tool-name { font-weight: 600; color: var(--tool-title); }
+/* EVERY HEAD'S CLOCK CLOSES ITS HEAD at the right end (owner request,
+   2026-10-18; asHeadClock in src/feed/cards/tool-head.ts): a tool card's, a
+   shell's, a subagent's and a merge's alike, so how long anything ran is read
+   in the same place on every head. Last in the row whatever the draw order,
+   and pushed right by the one auto margin, so a head with nothing after its
+   badge still ends on its clock. */
+.head-clock {
+  order: 99;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
 .badge { font-size: calc(0.7rem * var(--feed-text-scale)); padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
@@ -5517,12 +5528,15 @@ bubble-body.bubble-body { display: block; }
 /* The head's slot may shrink below its widest word, which then wraps, rather
    than push the head past the feed column. */
 .bubble-head-slot { min-width: 0; }
+/* The slot and the head it holds span the bubble's head row, so a head's
+   right end (.head-clock, .merge-head-end) is the bubble's right edge. */
+.bubble-head-slot { flex: 1 1 auto; }
 
 /* The subagent head line: label, description, tokens, clock, quietness, stop.
    Laid out on one row in the fold's own pill, which the existing .async-ticker
    rule already dresses. */
 .subagent-head {
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: 0.4rem;
   min-width: 0;
@@ -7809,8 +7823,11 @@ ar-button.outcome-marker-pill {
 }
 .merge-clock,
 .merge-commit { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The head's clock reads at the badge's size (owner request, 2026-10-18). */
+.merge-clock { font-size: 0.85em; }
 .merge-commit { font-family: var(--mono, monospace); }
-/* The head's right end (merge.ts): the landed commit, then the switch. */
+/* The head's right end (merge.ts): the landed commit, the switch, then the
+   clock. */
 .merge-head-end {
   order: 1;
   margin-left: auto;
