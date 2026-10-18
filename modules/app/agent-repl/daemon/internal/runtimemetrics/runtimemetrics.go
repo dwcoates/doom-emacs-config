@@ -26,9 +26,10 @@ const Operation = "daemon.metrics"
 
 // Surface is the daemon's open metrics surface.
 type Surface struct {
-	srv     *metrics.Server
-	log     dlog.Logger
-	version *deployedVersion
+	srv       *metrics.Server
+	log       dlog.Logger
+	version   *deployedVersion
+	latencies *latencies
 }
 
 // Open opens, without advertising, the daemon's metrics surface under root.
@@ -40,9 +41,10 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		return nil, nil
 	}
 	version := newDeployedVersion()
+	lat := newLatencies(log)
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-	}, version)
+	}, version, lat)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
 	}
@@ -50,7 +52,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{srv: srv, log: log, version: version}, nil
+	return &Surface{srv: srv, log: log, version: version, latencies: lat}, nil
 }
 
 // Registry answers the registry every daemon collector registers on, nil

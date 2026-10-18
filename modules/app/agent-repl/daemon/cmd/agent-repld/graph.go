@@ -714,7 +714,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Commands:   slashCommands,
 			CacheLapse: cacheKeeper,
 			Stalls:     stalls,
-			Clock:      clock.System{},
+			// The shim's measurements frames land in the metrics surface.
+			Measurements: p.Metrics,
+			Clock:        clock.System{},
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,
@@ -1444,6 +1446,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Opens:             opens,
 			StallBeat:         stallBeat,
 			Pages:             supersededPages,
+			Latencies:         p.Metrics,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,

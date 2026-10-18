@@ -395,6 +395,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return err
 	}
+	// A FORGOTTEN WORKSPACE TAKES ITS SERIES WITH IT: every way a workspace
+	// leaves the registry is this client's Forget.
+	db = metricsSurface.ObserveForgets(db)
 	// THE CLOSE RELEASES EVERY LEASE THIS PROCESS STILL OWNS (wsm Close), so
 	// its failure is a lease left behind and is said at ERROR, never dropped.
 	defer teardown.step("state_close", func() {
