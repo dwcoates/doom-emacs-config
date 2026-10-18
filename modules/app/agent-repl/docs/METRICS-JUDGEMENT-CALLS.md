@@ -108,3 +108,32 @@ Each entry says what was decided, why, and what it departs from.
   it, and the daemon publishes no traffic series rather than a zero. The
   proxy is a change to the vendor path of every session, so it waits for the
   owner.
+
+## 7. The profile tool keeps its own 2-second sampler
+
+- Plan said: the process collector replaces the `ps` sampler in
+  `bin/profile-agent-repl.sh`.
+- Decided: both stay, each for its own question.
+  - The profile session samples every 2 seconds for its 30-minute window
+    and ranks individual processes, every WebKit process on the host
+    included (its report tells the reader to close Safari for a clean
+    reading). The metrics sample every 15 seconds, forever, and fold
+    processes into agent-repl's groups (a shim and its tools by workspace,
+    only Emacs's WebKit).
+  - Reading the daemon's `/metrics` every 2 seconds instead would make the
+    profile depend on the metrics surface being on, and a profile taken on a
+    daemon started without a metrics root would have no process table, with
+    no honest substitute.
+- What was consolidated instead: the profile report's latency budgets now
+  come from `proto/vocab/latencies.json`, and `webfootprint` reads the
+  kernel through the collector's reader.
+
+## 8. Emacs reports no latencies yet
+
+- The contract lets Emacs call `ReportLatencies`, and the plan named Emacs
+  as a reporter.
+- Every latency whose end Emacs sees is today measured elsewhere: a switch
+  is measured by the page from the instant Emacs hands it
+  (`agent-repl-webhost-note-switch`), and Emacs's CPU and memory come from
+  the daemon's process collector. So no Emacs encoder for the rpc was
+  written; the first Emacs-measured latency adds one to `lisp/rpc.el`.

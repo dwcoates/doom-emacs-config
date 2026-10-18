@@ -173,3 +173,17 @@ owner's delegation.
 - Correction kept visible: entry 2 stated "sent once right after every new
   watch attaches". That was replaced by this entry before any consumer
   depended on it.
+
+### 6. Emacs reports nothing yet; switches carry their instant to the page
+
+- What: no Emacs encoder for `ReportLatencies` exists. A switch's start
+  instant travels from Emacs to the page through the webhost's `show` call
+  and the host protocol's `presence` message (`switchStartedAtMs`, absent
+  unless the show was a user's switch), and the page reports
+  `switch_repeat` / `switch_first`.
+- Why: the first principle (the runtime that sees the end measures). The
+  switch ends in the page, and the webhost's `show` is the channel that
+  already carries the switch from Emacs to the page.
+- Correction kept visible: entry 1's consequences named an Emacs encoder
+  in `lisp/rpc.el`; none is needed until Emacs measures a latency itself
+  (`docs/METRICS-JUDGEMENT-CALLS.md`, call 8).
