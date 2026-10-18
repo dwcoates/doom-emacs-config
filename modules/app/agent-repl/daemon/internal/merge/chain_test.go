@@ -64,6 +64,9 @@ type chainGit struct {
 	// one ignores its caller's cancellation, as a git command mid-flight does.
 	rebaseHolds map[string]chainHold
 	stubborn    map[string]bool
+	// cleanHolds parks the next cleanliness read in a worktree, ignoring its
+	// caller's cancellation as a git command mid-flight does.
+	cleanHolds map[string]chainHold
 }
 
 func newChainGit(inner *fakeGit) *chainGit {
@@ -71,6 +74,7 @@ func newChainGit(inner *fakeGit) *chainGit {
 		fakeGit: inner, commits: map[string]*chainCommit{}, refs: map[string]string{},
 		rebases: map[string]*chainRebase{}, conflicts: map[[2]string][]string{}, recorded: map[[2]string]bool{},
 		trees: map[string]string{}, rebaseHolds: map[string]chainHold{}, stubborn: map[string]bool{},
+		cleanHolds: map[string]chainHold{},
 	}
 	root := g.mintLocked(nil, "base")
 	g.refs["master"] = root
@@ -275,6 +279,29 @@ func (g *chainGit) holdRebaseStubbornly(dir string) (entered, release chan struc
 	g.stubborn[dir] = true
 	g.cmu.Unlock()
 	return entered, release
+}
+
+// holdClean parks the next cleanliness read in dir until release closes;
+// entered closes once it is parked. A rebase reads it first, so a held read
+// stands the run after it read the target's tip and before its rebase began.
+func (g *chainGit) holdClean(dir string) (entered, release chan struct{}) {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	h := chainHold{entered: make(chan struct{}), release: make(chan struct{})}
+	g.cleanHolds[dir] = h
+	return h.entered, h.release
+}
+
+func (g *chainGit) IsClean(ctx context.Context, dir string) (bool, error) {
+	g.cmu.Lock()
+	hold, held := g.cleanHolds[dir]
+	delete(g.cleanHolds, dir)
+	g.cmu.Unlock()
+	if held {
+		close(hold.entered)
+		<-hold.release
+	}
+	return g.fakeGit.IsClean(ctx, dir)
 }
 
 func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
