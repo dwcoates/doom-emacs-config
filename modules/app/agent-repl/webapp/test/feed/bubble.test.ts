@@ -33,6 +33,7 @@ import {
 import type { RowContext } from "../../src/feed/cards/context.js";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { TailFollow } from "../../src/scroll.js";
+import { DEFAULT_BACKOFF_INITIAL_MS, DEFAULT_BACKOFF_MAX_MS } from "../../src/rpc/streams.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { orderFor } from "../feed-order.js";
 
@@ -2185,5 +2186,126 @@ describe("mountBubble: a press on a bubble's control is no fold", () => {
     control.click();
     // Assert
     expect(seen).toEqual([]);
+  });
+});
+
+describe("mountBubble: an open that never reached the daemon is tried again", () => {
+  /** A daemon whose first FAILURES opens throw at the transport, then answer. */
+  function flaky(failures: number): Harness {
+    let calls = 0;
+    return harness({
+      openFeed: (req) => {
+        calls += 1;
+        if (calls <= failures) throw new Error("Load failed");
+        return openSuccess(page([]), tokenFor(req));
+      },
+    });
+  }
+
+  /** A pinned merge bubble, open by the wire and not foldable by a click. */
+  function pinned(h: Harness) {
+    return mount(mergeRow("m1", false), h, {
+      folded: false,
+      foldOf: mergeFold,
+      merge: true,
+      collapsible: () => false,
+    });
+  }
+
+  it("opens a pinned merge bubble once the backoff has passed", async () => {
+    // Arrange
+    const { bubble } = pinned(flaky(1));
+    await settle();
+    // Act
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_INITIAL_MS);
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("takes down the unreachable message once a retried open is answered", async () => {
+    // Arrange
+    const { bubble } = pinned(flaky(1));
+    await settle();
+    // Act
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_INITIAL_MS);
+    await settle();
+    // Assert
+    expect(bubble.element.querySelector(".refusal")).toBeNull();
+  });
+
+  it("keeps the unreachable message while every retry fails", async () => {
+    // Arrange
+    const { bubble } = pinned(flaky(Number.POSITIVE_INFINITY));
+    await settle();
+    // Act
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_INITIAL_MS * 3);
+    await settle();
+    // Assert
+    expect(bubble.element.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("backs off between failed retries", async () => {
+    // Arrange
+    const h = flaky(Number.POSITIVE_INFINITY);
+    pinned(h);
+    await settle();
+    // Act: the first retry is due after the initial backoff, the second only
+    // after twice that again.
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_INITIAL_MS * 2);
+    await settle();
+    // Assert
+    expect(h.calls.openFeed).toHaveLength(2);
+  });
+
+  it("retries at once when the page's link comes back", async () => {
+    // Arrange
+    const h = flaky(1);
+    const { bubble } = pinned(h);
+    await settle();
+    // Act
+    h.ctx.noteLinkRestored();
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("stops retrying once the daemon folds the bubble", async () => {
+    // Arrange: an unpinned merge bubble, open by the wire.
+    const h = flaky(Number.POSITIVE_INFINITY);
+    const { bubble } = mount(mergeRow("m1", false), h, { folded: false, foldOf: mergeFold, merge: true });
+    await settle();
+    // Act: its merge succeeded, so the daemon ships it folded.
+    bubble.update(mergeRow("m1", true));
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_MAX_MS);
+    await settle();
+    // Assert
+    expect(h.calls.openFeed).toHaveLength(1);
+  });
+
+  it("stops retrying once the bubble is disposed", async () => {
+    // Arrange
+    const h = flaky(Number.POSITIVE_INFINITY);
+    const { bubble } = pinned(h);
+    await settle();
+    // Act
+    bubble.dispose();
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_MAX_MS);
+    await settle();
+    // Assert
+    expect(h.calls.openFeed).toHaveLength(1);
+  });
+
+  it("records each retry at info with its cause", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    pinned(flaky(1));
+    await settle();
+    // Act
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF_INITIAL_MS);
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "feed.bubble-open-retry");
+    expect([record.level.case, record.context?.cause]).toEqual(["info", "backoff"]);
   });
 });
