@@ -516,7 +516,10 @@
     --info-tasks: #fda4af;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    --composer-bg: #20201f;
+    /* Halfway from the Claude composer's #20201f to the feed's #151514, each
+       channel rounded down (owner request, 2026-10-17). Emacs's input window
+       (agent-repl-input-background, lisp/input.el) wears this same color. */
+    --composer-bg: #1a1a19;
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg
