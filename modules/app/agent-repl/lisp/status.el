@@ -1515,7 +1515,10 @@ blink still in flight."
 ;;
 ;; ARRIVING AT A WORKSPACE FLASHES ITS TAB-BAR ENTRY ONCE for 250 ms (owner
 ;; request, 2026-10-17: once, not twice), so the eye finds the tab it just
-;; landed on.  However the switch was made (a cycle chord, a slot chord, the
+;; landed on.  The flash drops the selection highlight and brings it back
+;; (owner request, 2026-10-18): the tab lights up as selected on arrival,
+;; is drawn unselected for the flash, then selected again, rather than
+;; flashing in inverse video.  However the switch was made (a cycle chord, a slot chord, the
 ;; picker, a tab click, a sidebar click the roster follows), the frame's arrival runs the one deferred switch pass
 ;; (`agent-repl--on-workspace-switch'), and that pass starts the flash.  Only
 ;; one workspace is ever flashed: a later arrival restarts the schedule on the
@@ -1523,9 +1526,11 @@ blink still in flight."
 ;; workspaces.
 
 (defconst agent-repl-status-switch-flash-schedule
-  '((0.0 . t) (0.25 . nil))
+  '((0.0 . nil) (0.15 . t) (0.4 . nil))
   "The switch flash, as (DELAY . ON) steps in seconds.
-Inverted at 0 ms, normal from 250 — one flash of 250 ms.")
+Selected at 0 ms, drawn unselected from 150, selected again from 400 —
+one flash of 250 ms.  The 0 ms step is an explicit OFF, so an arrival
+during a flash still in its ON step shows the selection at once.")
 
 (defvar agent-repl-status--switch-flash-ws nil
   "The workspace whose tab-bar entry is drawn flashed right now, or nil.")
@@ -1557,14 +1562,6 @@ flight restarts the schedule on WS."
    #'agent-repl-status--switch-flash-timer-key
    #'agent-repl-status--set-switch-flash ws)
   ws)
-
-(defun agent-repl-status--flash-entry (entry)
-  "Return ENTRY, a rendered tab-bar entry, drawn in inverse video.
-The face is added over the entry's own faces, so its colors swap rather
-than being replaced, and the entry's width is unchanged."
-  (let ((flashed (copy-sequence entry)))
-    (add-face-text-property 0 (length flashed) '(:inverse-video t) nil flashed)
-    flashed))
 
 (defun agent-repl-status-repaint-on-roster-push (_roster)
   "Repaint the tab bar because a roster push just changed what it draws.
@@ -2173,10 +2170,12 @@ Every character of the entry carries NAME under
 packed, padded and joined, and binds a click on it to NAME.
 
 While NAME\='s switch flash is on (`agent-repl-status-switch-flash-on-p')
-the whole entry is drawn in inverse video (`agent-repl-status--flash-entry')."
+the entry is drawn as though NAME were not selected, so the flash drops
+the selection highlight and the next step brings it back."
   ;; Called on every tab-bar redisplay, potentially many times per second;
   ;; renderer branch traces would overwhelm even verbose diagnostics.
-  (let* ((selected      (equal current-name name))
+  (let* ((selected      (and (equal current-name name)
+                             (not (agent-repl-status-switch-flash-on-p name))))
          (display-state (agent-repl--ws-display-state name))
          (bracket-state (and (null display-state)
                              (agent-repl--ws-bracket-state name)))
@@ -2191,11 +2190,8 @@ the whole entry is drawn in inverse video (`agent-repl-status--flash-entry')."
          (face          (agent-repl--tab-face display-state selected))
          (badge         (agent-repl--tab-badge-str
                          name (or display-state bracket-state))))
-    (let ((entry (propertize (agent-repl--render-tab name spec label face badge)
-                             agent-repl--tab-workspace-property name)))
-      (if (agent-repl-status-switch-flash-on-p name)
-          (agent-repl-status--flash-entry entry)
-        entry))))
+    (propertize (agent-repl--render-tab name spec label face badge)
+                agent-repl--tab-workspace-property name)))
 
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.

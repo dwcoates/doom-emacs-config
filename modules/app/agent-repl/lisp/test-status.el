@@ -4534,7 +4534,7 @@ on SelectWorkspace and re-pushes the roster."
 ;;;; ---- The switch flash -------------------------------------------------
 
 (ert-deftest agent-repl-test-status-switch-flash-flashes-once-for-250ms ()
-  "Inverted at 0 ms, normal from 250."
+  "Selected at 0 ms, unselected from 150, selected again from 400."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-status--capturing-timers steps
@@ -4543,7 +4543,7 @@ on SelectWorkspace and re-pushes the roster."
       ;; Assert
       (should (equal (mapcar (lambda (step) (cons (car step) (cadr (nth 2 step))))
                              (nreverse steps))
-                     '((0.0 . t) (0.25 . nil)))))))
+                     '((0.0 . nil) (0.15 . t) (0.4 . nil)))))))
 
 (ert-deftest agent-repl-test-status-switch-flash-targets-the-switched-to-workspace ()
   "Every step is about the workspace switched to."
@@ -4623,61 +4623,43 @@ workspace's pending steps rather than running beside them."
         ;; Assert
         (should (= repaints 1))))))
 
-(ert-deftest agent-repl-test-status-flash-entry-inverts-every-character ()
-  "The flashed entry carries inverse video on every character."
-  ;; Arrange
-  (let ((entry (concat (propertize "[1]" 'face 'bold) (propertize " ws1" 'face 'italic))))
-    ;; Act
-    (let ((flashed (agent-repl-status--flash-entry entry)))
-      ;; Assert
-      (should (cl-every (lambda (i)
-                          (member '(:inverse-video t)
-                                  (ensure-list (get-text-property i 'face flashed))))
-                        (number-sequence 0 (1- (length flashed))))))))
-
-(ert-deftest agent-repl-test-status-flash-entry-keeps-the-entry-faces ()
-  "The inverse video is added over the entry's own face, not instead of it."
-  ;; Arrange
-  (let ((entry (propertize "ws1" 'face 'bold)))
-    ;; Act
-    (let ((flashed (agent-repl-status--flash-entry entry)))
-      ;; Assert
-      (should (memq 'bold (ensure-list (get-text-property 0 'face flashed)))))))
-
-(ert-deftest agent-repl-test-status-flash-entry-leaves-the-original-alone ()
-  "Flashing copies the entry: the caller's string keeps its own faces."
-  ;; Arrange
-  (let ((entry (propertize "ws1" 'face 'bold)))
-    ;; Act
-    (agent-repl-status--flash-entry entry)
-    ;; Assert
-    (should (eq (get-text-property 0 'face entry) 'bold))))
-
-(ert-deftest agent-repl-test-render-tab-entry-draws-the-flashed-workspace-inverted ()
-  "The entry of the workspace being flashed renders in inverse video."
+(ert-deftest agent-repl-test-render-tab-entry-draws-the-flashed-workspace-unselected ()
+  "The selected entry being flashed renders exactly as it would unselected."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-status--switch-flash-ws "ws1"))
-      (agent-repl-test-status--with-entry :done nil
+    (agent-repl-test-status--with-entry :done nil
+      (let ((unselected (let ((agent-repl-status--switch-flash-ws nil))
+                          (agent-repl--render-tab-entry "ws1" "ws2" 1)))
+            (agent-repl-status--switch-flash-ws "ws1"))
         ;; Act
         (let ((result (agent-repl--render-tab-entry "ws1" "ws1" 1)))
           ;; Assert
-          (should (member '(:inverse-video t)
-                          (ensure-list (get-text-property
-                                        (string-match "ws1" result) 'face result)))))))))
+          (should (equal-including-properties result unselected)))))))
 
-(ert-deftest agent-repl-test-render-tab-entry-leaves-unflashed-workspaces-normal ()
-  "Every other entry renders without inverse video."
+(ert-deftest agent-repl-test-render-tab-entry-keeps-unflashed-selection-highlighted ()
+  "The selected entry renders selected while another workspace is flashed."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-status--switch-flash-ws "ws2"))
-      (agent-repl-test-status--with-entry :done nil
+    (agent-repl-test-status--with-entry :done nil
+      (let ((selected (let ((agent-repl-status--switch-flash-ws nil))
+                        (agent-repl--render-tab-entry "ws1" "ws1" 1)))
+            (agent-repl-status--switch-flash-ws "ws2"))
         ;; Act
         (let ((result (agent-repl--render-tab-entry "ws1" "ws1" 1)))
           ;; Assert
-          (should-not (member '(:inverse-video t)
-                              (ensure-list (get-text-property
-                                            (string-match "ws1" result) 'face result)))))))))
+          (should (equal-including-properties result selected)))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-flash-off-draws-the-selection ()
+  "With no flash on, the selected entry differs from its unselected look."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--switch-flash-ws nil))
+      (agent-repl-test-status--with-entry :done nil
+        ;; Act
+        (let ((selected (agent-repl--render-tab-entry "ws1" "ws1" 1))
+              (unselected (agent-repl--render-tab-entry "ws1" "ws2" 1)))
+          ;; Assert
+          (should-not (equal-including-properties selected unselected)))))))
 
 ;;;; ---- Following the roster's attention marker -------------------------
 
