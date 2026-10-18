@@ -22,6 +22,8 @@ import (
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/server"
 	"agent-repld/internal/wsm"
+
+	"agentrepl/logging/metrics"
 )
 
 // shortRoot is a state root SHORT ENOUGH for a unix socket path. The daemon
@@ -638,6 +640,49 @@ func TestPprofIsOffByDefault(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, errServed) {
 		t.Fatalf("run error = %v, want the spine to have reached the graph with pprof off", err)
+	}
+}
+
+// TestAnIncumbentAdvertisesItsMetricsTarget pins that the metrics target is
+// written beside daemon.addr and names a listener that answers /metrics.
+func TestAnIncumbentAdvertisesItsMetricsTarget(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	metricsRoot := t.TempDir()
+
+	// Act.
+	err := runIn(t, root, func(o *options) { o.metricsRoot = metricsRoot })
+
+	// Assert.
+	if !errors.Is(err, errServed) {
+		t.Fatalf("run error = %v, want the spine to have reached the graph", err)
+	}
+	raw, readErr := os.ReadFile(metrics.TargetPath(metricsRoot, metrics.ProgramDaemon))
+	if readErr != nil {
+		t.Fatalf("no metrics target was advertised: %v", readErr)
+	}
+	if !strings.Contains(string(raw), `"instance":"daemon"`) || !strings.Contains(string(raw), "127.0.0.1:") {
+		t.Fatalf("target = %s, want a loopback daemon target", raw)
+	}
+}
+
+// TestAJoiningDaemonDefersItsMetricsTarget pins that a successor advertises
+// its metrics surface only with daemon.addr, never at bind: until it owns the
+// workspaces the target keeps naming the incumbent.
+func TestAJoiningDaemonDefersItsMetricsTarget(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	metricsRoot := t.TempDir()
+
+	// Act.
+	_ = runIn(t, root, func(o *options) {
+		o.joining = "127.0.0.1:41111"
+		o.metricsRoot = metricsRoot
+	})
+
+	// Assert.
+	if _, err := os.Stat(metrics.TargetPath(metricsRoot, metrics.ProgramDaemon)); !os.IsNotExist(err) {
+		t.Fatalf("a joining daemon advertised its metrics target at bind (stat err = %v)", err)
 	}
 }
 

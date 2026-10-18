@@ -226,6 +226,17 @@ the only channel."
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-daemon-metrics-root
+  (expand-file-name ".cache/agent-repl/metrics" "~")
+  "Root of the daemon\='s always-on metrics surface, or nil for none.
+Passed as `--metrics-root\=': the daemon listens on an ephemeral loopback
+port and advertises it in `targets/daemon.json\=' under this root, which
+the metrics store reads (docs/PLAN-runtime-metrics.md).  A successor the
+daemon spawns inherits the flag.  Nil or empty passes no flag, and the
+daemon runs with its metrics surface off."
+  :type '(choice (const :tag "Off" nil) directory)
+  :group 'agent-repl)
+
 (defcustom agent-repl-daemon-multi-repo-config-dir
   (expand-file-name "~/.claude-chesscom")
   "Vendor config root for workspaces UNDER `agent-repl-daemon-multi-repo-root\='.
@@ -1518,11 +1529,14 @@ without either, and the process exits 2 before it serves.")
 (defun agent-repl-daemon--argv ()
   "The full spawn argv: `agent-repl-daemon-command\=' plus the account roots.
 Every path is expanded, because the daemon compares config roots against
-resolved workspace paths and a `~\=' the shell never saw would never match."
+resolved workspace paths and a `~\=' the shell never saw would never match.
+`--metrics-root\=' follows when `agent-repl-daemon-metrics-root\=' is set."
   (append agent-repl-daemon-command
           (mapcan (lambda (entry)
                     (list (car entry) (agent-repl-daemon--config-value (cdr entry))))
-                  agent-repl-daemon--required-config-flags)))
+                  agent-repl-daemon--required-config-flags)
+          (let ((metrics (agent-repl-daemon--config-value 'agent-repl-daemon-metrics-root)))
+            (and metrics (list "--metrics-root" metrics)))))
 
 (defconst agent-repl-daemon--detach-shell "/bin/sh"
   "The shell that detaches the daemon from this Emacs\='s lifetime.

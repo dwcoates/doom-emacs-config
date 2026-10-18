@@ -74,6 +74,10 @@ type options struct {
 	// pprof is the OPT-IN profiling surface: a unix socket path or an
 	// explicitly loopback host:port. Empty is OFF and is the default.
 	pprof string
+	// metricsRoot is the ALWAYS-ON metrics surface's root
+	// (agentrepl/logging/metrics): the listener advertises its target file
+	// under it. Empty is OFF; the production launcher passes it.
+	metricsRoot string
 	// webapp is the webapp dist directory served on the daemon's one origin.
 	webapp string
 	// shim is agent-shim/claude/shim/dist/main.js.
@@ -256,6 +260,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.stateDir, "state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
 	config.BoolVar(&opts.fake, "fake", false, "run without a real vendor: shims spawn with --fake and the classifier is scripted")
 	config.StringVar(&opts.pprof, "pprof", "", "opt-in profiling surface: a unix socket path or a loopback host:port (empty is off)")
+	config.StringVar(&opts.metricsRoot, "metrics-root", "", "always-on metrics surface root: the listener advertises its target file under it (empty is off)")
 	config.StringVar(&opts.webapp, "webapp-dist", "", "webapp dist directory to serve")
 	config.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
 	config.StringVar(&opts.node, "node", "node", "node binary that runs the shim")

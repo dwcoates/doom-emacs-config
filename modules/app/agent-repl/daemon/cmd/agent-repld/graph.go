@@ -966,7 +966,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
 		},
-		WriteDaemonAddr: func(context.Context) error { return p.Claim.Publish() },
+		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
+		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
 		ShimBuild:       shimBundle.Build,
 		ColdGate:        fleet.RaiseColdGate,
