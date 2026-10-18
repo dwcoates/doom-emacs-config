@@ -9,6 +9,7 @@
 //	--db            SQLite database path                          (…/store/events.db)
 //	--log           size-capped rotating log file (…/log/shim-store.log)
 //	--pprof         OPT-IN local-only profiling surface           (env AGENT_REPL_STORE_PPROF_ADDR)
+//	--metrics-root  ALWAYS-ON metrics surface root (empty = off; the plist passes it)
 //	--watch-buffer  per-subscriber watch frame buffer             (8192)
 //
 // THERE IS NO HEALTH MODE. The old -health-check/-health-request-id/
@@ -59,10 +60,11 @@ func main() {
 	dbPath := flag.String("db", filepath.Join(base, "store", "events.db"), "SQLite database path")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-store.log"), "log file path (size-capped, rotated into N generations)")
 	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
+	metricsRoot := flag.String("metrics-root", "", "ALWAYS-ON metrics surface root: the store listens on an ephemeral loopback port and advertises it in targets/store.json under it. Empty = OFF; the launchd plist passes it")
 	watchBuffer := flag.Int("watch-buffer", server.DefaultWatchBuffer, "per-subscriber WatchAgentSession frame buffer; a subscriber that overflows it is ended and must re-open with known_through")
 	flag.Parse()
 
-	if err := run(*socketPath, *dbPath, *logPath, *pprofAddr, *watchBuffer); err != nil {
+	if err := run(*socketPath, *dbPath, *logPath, *pprofAddr, *metricsRoot, *watchBuffer); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
@@ -91,7 +93,7 @@ func reportFatal(err error, stderr io.Writer) {
 // run wires up logging, the profiling surface, the database and the server,
 // then blocks until a termination signal or a fatal serve error. Factored out
 // of main so its wiring is exercised with temp paths in tests.
-func run(socketPath, dbPath, logPath, pprofAddr string, watchBuffer int) (err error) {
+func run(socketPath, dbPath, logPath, pprofAddr, metricsRoot string, watchBuffer int) (err error) {
 	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
 	if err != nil {
 		return err
@@ -99,12 +101,12 @@ func run(socketPath, dbPath, logPath, pprofAddr string, watchBuffer int) (err er
 	defer closeLog()
 	defer logProcessExit(log, &err)
 	reportBuild(log, defaultBuildReportDeps())
-	return runWithLogger(socketPath, dbPath, pprofAddr, watchBuffer, log)
+	return runWithLogger(socketPath, dbPath, pprofAddr, metricsRoot, watchBuffer, log)
 }
 
 // runWithLogger owns errors that reach the process orchestration after logging
 // is available. db.Open and server.Listen retain their lower-layer ownership.
-func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *logging.Logger) (err error) {
+func runWithLogger(socketPath, dbPath, pprofAddr, metricsRoot string, watchBuffer int, log *logging.Logger) (err error) {
 	// OPENED BEFORE THE DATABASE, so a store wedged recreating its schema or
 	// on a cold-cache first read of a large database is still profilable.
 	pprofSurface, err := openPprofSurface(pprofAddr, log)
@@ -116,6 +118,13 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
 		}
 	}()
+	// THE METRICS SURFACE opens beside it and advertises at once: launchd
+	// never runs two stores, so this process owns the role from boot.
+	metricsSurface, err := openMetricsSurface(metricsRoot, log)
+	if err != nil {
+		return err
+	}
+	defer closeMetricsSurface(metricsSurface, log)
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)

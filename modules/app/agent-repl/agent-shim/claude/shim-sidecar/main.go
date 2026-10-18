@@ -23,6 +23,7 @@
 //	--poll-interval    how often each watched file is polled, and how often the
 //	                   directory-change probe looks for NEW files (1s)
 //	--pprof            OPT-IN local-only profiling surface (env AGENT_REPL_SIDECAR_PPROF_ADDR; OFF by default)
+//	--metrics-root     ALWAYS-ON metrics surface root (empty = off; the plist passes it)
 //	--rescan-interval  how often the FULL discovery enumeration runs (30s)
 //
 // The LOST policy's windows (internal/stale) are configurable too, so the
@@ -148,6 +149,7 @@ func main() {
 	recoverBackoffMaxFlag := flag.String("recover-backoff-max", "",
 		"ceiling the store-recovery ladder's doubling holds forever (Go duration; default $"+RecoverBackoffMaxEnv+", else 10s)")
 	pprofAddr := flag.String("pprof", os.Getenv(pprofsurface.EnvAddr), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6062). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the pprof.enabled record at startup")
+	metricsRoot := flag.String("metrics-root", "", "ALWAYS-ON metrics surface root: the sidecar listens on an ephemeral loopback port and advertises it in targets/sidecar.json under it. Empty = OFF; the launchd plist passes it")
 	flag.Parse()
 
 	// ONE RESOLUTION, ONE REFUSAL. Every window is resolved by a single tested
@@ -188,6 +190,7 @@ func main() {
 		RecoverBackoffMin:  w.RecoverBackoffMin,
 		RecoverBackoffMax:  w.RecoverBackoffMax,
 		PprofAddr:          *pprofAddr,
+		MetricsRoot:        *metricsRoot,
 	}
 	if err := run(options, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
@@ -220,6 +223,8 @@ type Options struct {
 	RecoverBackoffMax time.Duration
 	// PprofAddr is the opt-in profiling surface's address. Empty is OFF.
 	PprofAddr string
+	// MetricsRoot is the always-on metrics surface's root. Empty is OFF.
+	MetricsRoot string
 	// LockDir is the kernel-lock directory the shims hold their workspace locks
 	// in ($AGENT_REPL_LOCK_DIR, else ~/.cache/agent-repl/run). A held lock is
 	// what makes a workspace ACTIVE, and only an active workspace's files are
@@ -512,6 +517,13 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 		return err
 	}
 	defer closePprofSurface(pprofSurface, logf)
+	// THE METRICS SURFACE opens beside it and advertises at once: launchd
+	// never runs two sidecars, so this process owns the role from boot.
+	metricsSurface, err := openMetricsSurface(options.MetricsRoot, logf)
+	if err != nil {
+		return err
+	}
+	defer closeMetricsSurface(metricsSurface, logf)
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(logf, os.Getenv, os.UserHomeDir)

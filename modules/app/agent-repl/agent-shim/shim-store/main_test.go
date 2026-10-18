@@ -99,7 +99,7 @@ func TestRunWithLoggerOpensThePprofSurfaceBeforeTheDatabase(t *testing.T) {
 	log := logging.New(sink, &bytes.Buffer{}, true)
 
 	// Act.
-	err := runWithLogger(shortSocketPath(t), unopenable, storePprofSock(t), 0, log)
+	err := runWithLogger(shortSocketPath(t), unopenable, storePprofSock(t), "", 0, log)
 
 	// Assert.
 	if err == nil {
@@ -117,7 +117,7 @@ func TestRunWithLoggerRefusesAnUnsafePprofAddressBeforeTouchingTheDatabase(t *te
 	log := logging.New(sink, &bytes.Buffer{}, true)
 
 	// Act.
-	err := runWithLogger(shortSocketPath(t), filepath.Join(root, "events.db"), "0.0.0.0:6061", 0, log)
+	err := runWithLogger(shortSocketPath(t), filepath.Join(root, "events.db"), "0.0.0.0:6061", "", 0, log)
 
 	// Assert.
 	if err == nil {
