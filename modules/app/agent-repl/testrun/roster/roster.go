@@ -315,6 +315,9 @@ var Suites = []Suite{
 var AlwaysRunRegions = []string{
 	// The module's scripts and what their harnesses and the e2e suites read.
 	"bin/", "scripts/", "skills/", "hooks/", "launchd/", "images/", "testdata/",
+	// The metrics store's manifest and scrape config, which the requirements
+	// harness reads and installs, as it does launchd/'s plists.
+	"metrics/",
 	// The proto suite (bin/report-nonlisp-coverage.sh proto) reads the
 	// contract's sources; the keyed suites read what they import of
 	// proto/gen through their build graph, and proto/vocab as declared data.
