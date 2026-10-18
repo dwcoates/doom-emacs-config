@@ -158,3 +158,18 @@ owner's delegation.
   "in memory at its HTTP layer". That rested on a name-tier reading of
   "shim drives the vendor" and was wrong; the code shows the child process
   owns the HTTP.
+
+### 5. The first measurements frame comes at the first tick, not at the open
+
+- What: the measurements arm is sent on a 15-second tick that starts when a
+  watch opens, whenever the figures differ from the last frame that watch
+  carried. A new watch's first tick sends whatever is already counted. It is
+  never sent among the opening frames.
+- Why: the opening frames (diagnostics first, then the re-announcement, a
+  standing death, the last rollback's settle) are the readiness protocol, and
+  the shim's session tests pin their exact order. A measurements frame among
+  them changed that order for no gain; an adopting daemon learning the totals
+  within 15 seconds instead of at once costs nothing measurable.
+- Correction kept visible: entry 2 stated "sent once right after every new
+  watch attaches". That was replaced by this entry before any consumer
+  depended on it.

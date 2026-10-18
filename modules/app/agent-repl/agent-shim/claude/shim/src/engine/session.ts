@@ -181,6 +181,7 @@ import {
   PermissionGate,
   toVendorPermissionMode,
 } from "./permission-gate.js";
+import { Measurements, withMeasurements, type Wait } from "./measurements.js";
 import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
@@ -277,6 +278,11 @@ interface EngineDeps {
     readonly cwd: string;
   };
   readonly nowMs: () => number;
+  /**
+   * The wait between a watch's measurements frames (engine/measurements.ts).
+   * Unset is the process's own timer; a test supplies one it releases by hand.
+   */
+  readonly measurementsWait?: Wait;
   /**
    * Mints the client uuid a keep-alive send carries, the one the vendor echoes
    * on every reply to it (engine/keepalive.ts, `KeepaliveScope`). Injected so a
@@ -746,12 +752,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   const keepaliveScope = new KeepaliveScope();
   /**
+   * THE SHIM'S PERFORMANCE COUNTERS (engine/measurements.ts): every prompt's
+   * first vendor reply is timed by the send ledger below, and every watch
+   * carries the figures as its measurements frames.
+   */
+  const measurements = new Measurements(deps.nowMs);
+  /**
    * WHICH SEND EACH VENDOR TURN ANSWERS (engine/sends.ts, ruled 2026-09-28).
    * Every send is registered here under the client uuid it carries before it
    * is pushed, and every vendor message is attributed by the vendor's echo of
    * that uuid, once, in {@link onSdkMessage}. Arrival order attributes nothing.
    */
-  const sends = new SendLedger();
+  const sends = new SendLedger((_send, seconds) => measurements.observeFirstOutput(seconds));
   /** The minter of the keep-alive send's client uuid, which the vendor echoes back. */
   const newUuid = deps.newUuid ?? randomUUID;
   /** The minter of a fresh conversation's vendor session id. */
@@ -7445,7 +7457,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // call, and a generator that only subscribed on first `next()` would leave
     // the daemon unable to tell "not ready" from "refused".
     watchSession: () =>
-      watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath, () => lastRollbackSettled),
+      withMeasurements(
+        watchSessionFrames(pushes.subscribe(), reannounceStart, () => standingDeath, () => lastRollbackSettled),
+        measurements,
+        deps.measurementsWait,
+      ),
     // EVERY CALL THAT NEEDS THE VENDOR WAITS FOR A ROLLBACK'S RESTART TO SETTLE
     // (`restartSettling`); reads and watches do not.
     setSessionModel: afterRestart(setSessionModel),

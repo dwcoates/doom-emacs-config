@@ -214,11 +214,13 @@ type WatchSessionResponse_SessionStarted struct {
 
 type WatchSessionResponse_Measurements struct {
 	// The shim's own performance counters, for the daemon's always-on
-	// metrics. Sent once right after every new watch attaches, so a daemon
-	// that adopted this shim learns its totals at once, then whenever any
-	// counter changed, at most once per 15 seconds. Every figure is
-	// CUMULATIVE since ShimMeasurements' counting instant, so a frame lost
-	// with a broken stream is subsumed by the next one.
+	// metrics. Sent on a 15-second tick that starts when a watch opens,
+	// whenever the figures differ from the last frame this watch carried; a
+	// new watch's first tick sends any figures already counted, so a daemon
+	// that adopted this shim learns its totals within 15 seconds. Never sent
+	// among the opening frames, whose order is the readiness protocol. Every
+	// figure is CUMULATIVE since ShimMeasurements' counting instant, so a
+	// frame lost with a broken stream is subsumed by the next one.
 	Measurements *ShimMeasurements `protobuf:"bytes,3,opt,name=measurements,proto3,oneof"`
 }
 
