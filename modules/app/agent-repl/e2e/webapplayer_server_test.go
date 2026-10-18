@@ -49,6 +49,18 @@ const wlProgressPrefix = "WEBAPP-LAYER-PROGRESS "
 // the 20s bound fired before its first test could finish (2026-10-14).
 const wlCollectedPrefix = "WEBAPP-LAYER-COLLECTED"
 
+// WebappLayerCollectBound bounds how long an area on the warm driver may take
+// to have its file collected, the silence before WebappLayerSilence takes
+// over. Collecting is not finishing a test: it imports the area's file and
+// whatever of the app's graph the warm-up left unevaluated, so its measure is
+// its own.
+//
+// MEASURED 2026-10-18 over 1691 passing collects in the merge queue's gate
+// logs: p50 2.8s, p99 12.3s, max 19.1s. Bounded by WebappLayerSilence, the
+// slowest healthy collects sat at its 20s edge, and cards and client-log failed
+// "never collected" in three gates. 40s is just over twice the 19.1s maximum.
+const WebappLayerCollectBound = 40 * time.Second
+
 // wlReadyPrefix marks the driver's one line once its warm-up has run
 // (READY_PREFIX in layer-server.mjs). No area is sent before it, so no area's
 // WebappLayerTimeout carries vitest's cold transform and collect.
@@ -102,9 +114,11 @@ type wlServer struct {
 	broken error
 	// tmp is the driver's own temp dir, removed once it has stopped.
 	tmp string
-	// silence is how long a run may go without finishing a test
-	// (WebappLayerSilence), and newTimer makes the timer that bounds it: a
-	// real one, or a unit test's own.
+	// collect is how long a run may take to have its file collected
+	// (WebappLayerCollectBound), silence how long it may then go without
+	// finishing a test (WebappLayerSilence), and newTimer makes the timer that
+	// bounds both: a real one, or a unit test's own.
+	collect  time.Duration
 	silence  time.Duration
 	newTimer func(time.Duration) wlTimer
 }
@@ -175,7 +189,7 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the layer driver in %s: %w", webappDir, err)
 	}
-	s := &wlServer{cmd: cmd, stdin: stdin, lines: make(chan string, 4096), tmp: tmp, silence: WebappLayerSilence, newTimer: newWlRealTimer}
+	s := &wlServer{cmd: cmd, stdin: stdin, lines: make(chan string, 4096), tmp: tmp, collect: WebappLayerCollectBound, silence: WebappLayerSilence, newTimer: newWlRealTimer}
 	var streams sync.WaitGroup
 	pump := func(r io.Reader) {
 		defer streams.Done()
@@ -284,7 +298,8 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 		return s.broken
 	}
 	var tail []string
-	deadline := s.newTimer(s.silence)
+	bound := s.collect
+	deadline := s.newTimer(bound)
 	defer deadline.Stop()
 	lastProgress, longestSilence, finished := started, time.Duration(0), 0
 	collected := "the file was never collected"
@@ -301,14 +316,16 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 				t.Logf("e2e/webapp-layer: %s collected after %s", file, collectedAfter.Round(time.Millisecond))
 				longestSilence = max(longestSilence, time.Since(lastProgress))
 				lastProgress = time.Now()
-				deadline.Reset(s.silence)
+				bound = s.silence
+				deadline.Reset(bound)
 				continue
 			}
 			if strings.HasPrefix(line, wlProgressPrefix) {
 				finished++
 				longestSilence = max(longestSilence, time.Since(lastProgress))
 				lastProgress = time.Now()
-				deadline.Reset(s.silence)
+				bound = s.silence
+				deadline.Reset(bound)
 				continue
 			}
 			if rest, isAnswer := strings.CutPrefix(line, wlResultPrefix); isAnswer {
@@ -333,7 +350,7 @@ func (s *wlServer) Run(t *testing.T, file string, world wlWorld) error {
 				tail = tail[len(tail)-wlTailLines:]
 			}
 		case <-deadline.C():
-			s.broken = errors.Join(fmt.Errorf("%s finished no test for %s (%d finished before), and %s; last output:\n%s", file, s.silence, finished, collected, strings.Join(tail, "\n")), s.killGroup())
+			s.broken = errors.Join(fmt.Errorf("%s finished no test for %s (%d finished before), and %s; last output:\n%s", file, bound, finished, collected, strings.Join(tail, "\n")), s.killGroup())
 			return s.broken
 		}
 	}

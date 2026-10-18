@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -81,16 +82,17 @@ func TestTheLayerDriverIsKilledOnlyThroughKillGroup(t *testing.T) {
 	}
 }
 
-// wlFakeTimer is a silence bound the test fires itself; every restart is
-// signalled on resets.
+// wlFakeTimer is a run's bound the test fires itself; the bound it was made
+// with is in first, and every restart is signalled on resets with its bound.
 type wlFakeTimer struct {
 	c      chan time.Time
-	resets chan struct{}
+	first  time.Duration
+	resets chan time.Duration
 }
 
-func (f *wlFakeTimer) C() <-chan time.Time { return f.c }
-func (f *wlFakeTimer) Reset(time.Duration) { f.resets <- struct{}{} }
-func (f *wlFakeTimer) Stop()               {}
+func (f *wlFakeTimer) C() <-chan time.Time   { return f.c }
+func (f *wlFakeTimer) Reset(d time.Duration) { f.resets <- d }
+func (f *wlFakeTimer) Stop()                 {}
 
 // wlFakeServer is a wlServer over a driver this test plays: requests are
 // read off stdin, and the lines are whatever the test sends. Its process is a
@@ -114,9 +116,9 @@ func wlFakeServer(t *testing.T) (*wlServer, chan<- string, *wlFakeTimer) {
 	r, w := io.Pipe()
 	go func() { _, _ = io.Copy(io.Discard, r) }() // the driver's stdin, drained
 	lines := make(chan string, 64)
-	timer := &wlFakeTimer{c: make(chan time.Time, 1), resets: make(chan struct{}, 64)}
-	s := &wlServer{cmd: cmd, stdin: w, lines: lines, silence: WebappLayerSilence,
-		newTimer: func(time.Duration) wlTimer { return timer }}
+	timer := &wlFakeTimer{c: make(chan time.Time, 1), resets: make(chan time.Duration, 64)}
+	s := &wlServer{cmd: cmd, stdin: w, lines: lines, collect: WebappLayerCollectBound, silence: WebappLayerSilence,
+		newTimer: func(d time.Duration) wlTimer { timer.first = d; return timer }}
 	return s, lines, timer
 }
 
@@ -213,5 +215,64 @@ func TestWlServerRunThatTimesOutNamesWhetherTheFileWasCollected(t *testing.T) {
 				t.Fatalf("Run = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestWlServerRunBoundsEachStretchByItsOwnMeasure(t *testing.T) {
+	cases := []struct {
+		name  string
+		lines []string
+		want  []time.Duration
+	}{
+		{name: "the stretch before the collect takes the collect bound", want: []time.Duration{WebappLayerCollectBound}},
+		{name: "the stretch after the collect takes the silence bound", lines: []string{wlCollectedPrefix}, want: []time.Duration{WebappLayerCollectBound, WebappLayerSilence}},
+		{name: "the stretch after a finished test takes the silence bound", lines: []string{wlCollectedPrefix, wlProgressPrefix + "pass"}, want: []time.Duration{WebappLayerCollectBound, WebappLayerSilence, WebappLayerSilence}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the case's lines, then the answer.
+			s, lines, timer := wlFakeServer(t)
+			for _, line := range tc.lines {
+				lines <- line
+			}
+			lines <- wlResultPrefix + `{"file":"a.layer.test.ts","ok":true,"tests":1}`
+
+			// Act
+			err := s.Run(t, "a.layer.test.ts", wlWorld{})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Run = %v, want the run answered", err)
+			}
+			got := []time.Duration{timer.first}
+			for len(timer.resets) > 0 {
+				got = append(got, <-timer.resets)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("the run's bounds were %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWlServerRunThatIsNeverCollectedNamesTheCollectBound(t *testing.T) {
+	// Arrange: silence from the start.
+	s, _, timer := wlFakeServer(t)
+	timer.c <- time.Now()
+
+	// Act
+	err := s.Run(t, "a.layer.test.ts", wlWorld{})
+
+	// Assert
+	want := fmt.Sprintf("a.layer.test.ts finished no test for %s (0 finished before), and the file was never collected", WebappLayerCollectBound)
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Run = %v, want an error naming %q", err, want)
+	}
+}
+
+func TestWebappLayerCollectBoundOutlivesTheSilenceBound(t *testing.T) {
+	// Arrange, Act, Assert: a collect is bounded no tighter than a test's gap.
+	if WebappLayerCollectBound <= WebappLayerSilence {
+		t.Fatalf("WebappLayerCollectBound %s <= WebappLayerSilence %s", WebappLayerCollectBound, WebappLayerSilence)
 	}
 }
