@@ -9878,6 +9878,27 @@ describe("the retry label a failed vendor start carries", () => {
       expect(logContextFor(before, RECORD)?.["retry"]).toBe("retryable");
     });
 
+    it("states how long the vendor took to prove itself live", async () => {
+      // Arrange: the clock moves 40ms while the live signal is held.
+      let now = 1_000_000;
+      const h = harness({ clock: () => now, holdLiveSignal: true, initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE });
+      const before = logSinkMark();
+      const pending = h.engine.startSession(freshRequest());
+      const first = await untilQuery(h, 0);
+
+      // Act.
+      now += 40;
+      first.query.releaseModels();
+      await pending;
+
+      // Assert.
+      expect(
+        logContextFor(before, "the vendor answered a control request, so the child is proven live and the start settles on it")?.[
+          "answered_ms"
+        ],
+      ).toBe(40);
+    });
+
     it("states how long the start ran before it failed", async () => {
       // Arrange: the clock moves 250ms between the start's first and last reads.
       let now = 1_000_000;

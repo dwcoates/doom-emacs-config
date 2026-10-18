@@ -4810,12 +4810,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * component, which a later re-read can lift.
    */
   async function proveLive(active: QueryLike, boundMs: number): Promise<void> {
+    // HOW LONG THE ANSWER TOOK is the measurement the bound is set from
+    // (2026-10-17: a deploy restarting thirty shims at once tripped the 3s
+    // bound 130 times, and no successful start said how close it came).
+    const askedAtMs = deps.nowMs();
     try {
       modelCatalog = modelOptions(await withinBound(active.supportedModels(), boundMs, "supportedModels"));
       pushes.resolveComponent(MODEL_CATALOG_COMPONENT, 0);
       if (startResolve !== undefined) {
         LOGGER.info(
-          { bound_ms: boundMs, models: modelCatalog.length },
+          { bound_ms: boundMs, answered_ms: deps.nowMs() - askedAtMs, models: modelCatalog.length },
           "the vendor answered a control request, so the child is proven live and the start settles on it",
         );
       }
