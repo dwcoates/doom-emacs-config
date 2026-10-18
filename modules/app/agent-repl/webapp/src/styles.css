@@ -1170,12 +1170,15 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    the row line takes the rail's own lifted grey, --card, as Claude's
    selected row does, and the gutter bar is the muted grey, so the palette's
    grounds stay grey and no hue marks selection. However the workspace came
-   to be selected. No bolder name. The fill sits a quarter of the way back
-   from --card toward the rail's own ground (owner request, 2026-10-18), so
-   a hover (--card) still lifts the selected row. */
+   to be selected. No bolder name. The fill sits partway back from --card
+   toward the rail's own ground (owner request, 2026-10-18), so
+   a hover (--card) still lifts the selected row; then the fill (45%) and the
+   gutter bar (64% of --muted) were both taken a few steps less intense, with
+   the Emacs tab bar's selected grey (owner ruling, 2026-10-18;
+   design-selection-less-intense.html beside this module). */
 #ws-sidebar {
-  --row-current-gutter: var(--muted);
-  --row-current-tint: color-mix(in srgb, var(--card) 75%, var(--sidebar-bg));
+  --row-current-gutter: color-mix(in srgb, var(--muted) 64%, var(--sidebar-bg));
+  --row-current-tint: color-mix(in srgb, var(--card) 45%, var(--sidebar-bg));
 }
 #ws-sidebar .ws.current > .row {
   background-color: var(--row-current-tint);
@@ -1186,8 +1189,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
    rises from its own grey into white over a second when the highlight moves
    to the row, and stays white while the row stays highlighted. The row the
-   highlight left falls back to its grey, faster than the rise. The row
-   itself stays still (no wash). The classes and lengths are set by
+   highlight left is back on its grey at once, with no fade (owner request,
+   2026-10-18). The row itself stays still (no wash). The classes and lengths are set by
    src/sidebar/selection-fade.ts, which also seeks a redrawn row into the
    fade already running (a negative delay), so a roster push mid-fade
    continues it. */
@@ -1197,12 +1200,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 @keyframes ws-selection-number-rise {
   from { color: var(--tab-number-color); }
-}
-#ws-sidebar .ws.selection-number-fall > .row .sb-num {
-  animation: ws-selection-number-fall var(--selection-number-fall-duration) ease-in var(--selection-number-fall-delay) 1;
-}
-@keyframes ws-selection-number-fall {
-  from { color: white; }
 }
 
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)
@@ -3735,9 +3732,8 @@ html[data-page-unshown] *::after {
   #ws-sidebar .sb-search {
     transition: none;
   }
-  /* The highlighted row's tab number turns white at once, and back. */
-  #ws-sidebar .ws.selection-number-rise > .row .sb-num,
-  #ws-sidebar .ws.selection-number-fall > .row .sb-num {
+  /* The highlighted row's tab number turns white at once. */
+  #ws-sidebar .ws.selection-number-rise > .row .sb-num {
     animation: none;
   }
   .thinking-spinner {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { CreateWorkspaceResponseSchema, type CreateWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SELECTION_NUMBER_FALL, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
+import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -1014,7 +1014,7 @@ describe("the webhost's page on screen leads the roster", () => {
     ]);
   });
 
-  it("rises the shown row's number and falls the left row's, in place", async () => {
+  it("rises the shown row's number and greys the left row's at once, in place", async () => {
     // Arrange
     const host = document.createElement("nav");
     const sidebar = mountWebhostSidebar(host, ctxFor([twoRows("ws-1")]), { storage: null, timers: fakeTimers() });
@@ -1025,10 +1025,10 @@ describe("the webhost's page on screen leads the roster", () => {
 
     // Assert
     const animating = (id: string): string[] =>
-      [SELECTION_NUMBER_RISE.className, SELECTION_NUMBER_FALL.className].filter((c) =>
+      SELECTION_ANIMATIONS.map((a) => a.className).filter((c) =>
         host.querySelector(`[data-roster-row='${id}']`)?.classList.contains(c),
       );
-    expect([animating("ws-1"), animating("ws-2")]).toEqual([[SELECTION_NUMBER_FALL.className], [SELECTION_NUMBER_RISE.className]]);
+    expect([animating("ws-1"), animating("ws-2")]).toEqual([[], [SELECTION_NUMBER_RISE.className]]);
   });
 
   it("rises the number of the row a push names current", async () => {

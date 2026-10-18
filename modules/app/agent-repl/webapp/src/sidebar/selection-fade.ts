@@ -4,8 +4,9 @@
  * THE NUMBER RISES AND STAYS (owner request, 2026-10-18): when the highlight
  * moves to a row, its tab number fades from its own grey into white over a
  * second and stays white for as long as the row stays highlighted. The row
- * the highlight left fades back to its grey, faster than the rise. The row
- * itself stays still: the wash it once swelled in on a click is gone.
+ * the highlight left turns back to its grey AT ONCE, with no fade (owner
+ * request, 2026-10-18), a rise still running on it included. The row itself
+ * stays still: the wash it once swelled in on a click is gone.
  *
  * THE FADE FOLLOWS THE HIGHLIGHT, NOT THE CLICK: a selection made anywhere
  * (a rail click, a tab chord in Emacs, the picker) moves the highlight, and a
@@ -35,9 +36,6 @@ import { log } from "../log.js";
 /** How long the highlighted row's number takes to rise into white, in milliseconds. */
 export const SELECTION_NUMBER_RISE_MS = 1000;
 
-/** How long the number of the row the highlight left takes to fall back to its grey, in milliseconds: faster than the rise. */
-export const SELECTION_NUMBER_FALL_MS = 200;
-
 /** One animation the number runs when the highlight moves, seeked by the rail's clock. */
 export interface SelectionAnimation {
   /** The class the row carries while the animation runs. */
@@ -58,20 +56,12 @@ export const SELECTION_NUMBER_RISE: SelectionAnimation = {
   ms: SELECTION_NUMBER_RISE_MS,
 };
 
-/** The number's fall back to its grey, on the row the highlight left. */
-export const SELECTION_NUMBER_FALL: SelectionAnimation = {
-  className: "selection-number-fall",
-  durationProperty: "--selection-number-fall-duration",
-  delayProperty: "--selection-number-fall-delay",
-  ms: SELECTION_NUMBER_FALL_MS,
-};
-
-/** Every animation a move of the highlight runs. */
-export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [SELECTION_NUMBER_RISE, SELECTION_NUMBER_FALL];
+/** Every animation a move of the highlight runs: the rise alone, since the row it left turns grey at once. */
+export const SELECTION_ANIMATIONS: readonly SelectionAnimation[] = [SELECTION_NUMBER_RISE];
 
 /** The rail's number fades. */
 export interface SelectionFade {
-  /** The rail highlights workspace ID now: rise its number, fall the number of the row highlighted before. */
+  /** The rail highlights workspace ID now: rise its number, and turn the number of the row highlighted before grey at once. */
   highlight(id: string): void;
   /** ROW was just drawn for workspace ID, HIGHLIGHTED or not: follow the highlight, and join a fade still running for it. */
   apply(id: string, row: HTMLElement, highlighted: boolean): void;
@@ -126,19 +116,21 @@ export function createSelectionFade(root: ParentNode, now: () => number = () => 
     }
   };
 
-  /** Move the highlight from wherever it is to NEXT (null: no row), fading both numbers. */
+  /** Move the highlight from wherever it is to NEXT (null: no row): the left row's number turns grey at once, NEXT's rises. */
   const move = (next: string | null): void => {
     const previous = current;
     current = next;
     // The first highlight is the rail's first draw, not a move.
     if (previous === undefined || previous === next) return;
     const start = now();
-    log.debug("the rail's highlight moved; fading the numbers", {
+    log.debug("the rail's highlight moved; rising the new row's number", {
       operation: "sidebar.selection-fade",
       context: { workspace: next, previous },
     });
     if (previous !== null) {
-      fades.set(previous, { animation: SELECTION_NUMBER_FALL, start });
+      // No fall: the left row drops any rise still running on it, and its
+      // number is the plain grey at once.
+      fades.delete(previous);
       paintDrawn(previous);
     }
     if (next !== null) {

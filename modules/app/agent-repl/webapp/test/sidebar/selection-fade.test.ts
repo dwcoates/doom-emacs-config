@@ -2,8 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   SELECTION_ANIMATIONS,
-  SELECTION_NUMBER_FALL,
-  SELECTION_NUMBER_FALL_MS,
   SELECTION_NUMBER_RISE,
   SELECTION_NUMBER_RISE_MS,
   createSelectionFade,
@@ -77,21 +75,20 @@ describe("the selection fade", () => {
     expect(runningOn(row)).toEqual([SELECTION_NUMBER_RISE.className, "0ms"]);
   });
 
-  it("falls the number of the row the highlight left, when that row is drawn after", () => {
+  it("draws the number of the row the highlight left grey at once, when that row is drawn after", () => {
     // Arrange
     fade.apply("ws-1", fresh("ws-1"), true);
     fade.apply("ws-2", fresh("ws-2"), true);
-    clock += 50;
     const left = fresh("ws-1");
 
     // Act
     fade.apply("ws-1", left, false);
 
     // Assert
-    expect(runningOn(left)).toEqual([SELECTION_NUMBER_FALL.className, "-50ms"]);
+    expect(runningOn(left)).toEqual(["", ""]);
   });
 
-  it("falls the number of a row drawn unhighlighted before the row the highlight moved to", () => {
+  it("draws the number of a row drawn unhighlighted before the row the highlight moved to grey at once", () => {
     // Arrange
     fade.apply("ws-1", fresh("ws-1"), true);
     const left = fresh("ws-1");
@@ -100,7 +97,7 @@ describe("the selection fade", () => {
     fade.apply("ws-1", left, false);
 
     // Assert
-    expect(runningOn(left)).toEqual([SELECTION_NUMBER_FALL.className, "0ms"]);
+    expect(runningOn(left)).toEqual(["", ""]);
   });
 
   it("rises the row the highlight moved to after the row it left was drawn first", () => {
@@ -157,21 +154,7 @@ describe("the selection fade", () => {
     expect(runningOn(redrawn)).toEqual(["", ""]);
   });
 
-  it("draws the left row's number still once the fall has run its length", () => {
-    // Arrange
-    fade.apply("ws-1", fresh("ws-1"), true);
-    fade.apply("ws-2", fresh("ws-2"), true);
-    clock += SELECTION_NUMBER_FALL_MS;
-    const redrawn = fresh("ws-1");
-
-    // Act
-    fade.apply("ws-1", redrawn, false);
-
-    // Assert
-    expect(runningOn(redrawn)).toEqual(["", ""]);
-  });
-
-  it("rises and falls the drawn rows in place when the highlight moves ahead of the roster", () => {
+  it("rises the moved-to row and greys the left row at once when the highlight moves ahead of the roster", () => {
     // Arrange
     const left = drawnRow(root, "ws-1");
     const moved = drawnRow(root, "ws-2");
@@ -183,12 +166,12 @@ describe("the selection fade", () => {
 
     // Assert
     expect([runningOn(left), runningOn(moved)]).toEqual([
-      [SELECTION_NUMBER_FALL.className, "0ms"],
+      ["", ""],
       [SELECTION_NUMBER_RISE.className, "0ms"],
     ]);
   });
 
-  it("swaps a rising row to the fall when the highlight leaves it mid-rise", () => {
+  it("stops a rising row's rise at once when the highlight leaves it mid-rise", () => {
     // Arrange
     const row = drawnRow(root, "ws-2");
     fade.highlight("ws-1");
@@ -199,7 +182,7 @@ describe("the selection fade", () => {
     fade.highlight("ws-1");
 
     // Assert
-    expect(runningOn(row)).toEqual([SELECTION_NUMBER_FALL.className, "0ms"]);
+    expect(runningOn(row)).toEqual(["", ""]);
   });
 
   it("moves nothing when the row already highlighted is highlighted again", () => {
@@ -226,31 +209,18 @@ describe("the selection fade", () => {
     expect(row.style.getPropertyValue(SELECTION_NUMBER_RISE.durationProperty)).toBe(`${SELECTION_NUMBER_RISE_MS}ms`);
   });
 
-  it("hands a falling row the fall's length", () => {
-    // Arrange
-    const row = drawnRow(root, "ws-1");
-    fade.highlight("ws-1");
-
-    // Act
-    fade.highlight("ws-2");
-
-    // Assert
-    expect(row.style.getPropertyValue(SELECTION_NUMBER_FALL.durationProperty)).toBe(`${SELECTION_NUMBER_FALL_MS}ms`);
-  });
-
-  it("rises over one second and falls faster than it rises", () => {
+  it("rises over one second", () => {
     // Arrange, Act, Assert
-    expect([SELECTION_NUMBER_RISE_MS, SELECTION_NUMBER_FALL_MS < SELECTION_NUMBER_RISE_MS]).toEqual([1000, true]);
+    expect(SELECTION_NUMBER_RISE_MS).toBe(1000);
   });
 
-  it("runs the rise and the fall under their own classes and properties", () => {
+  it("runs the rise alone, under its own class and properties", () => {
     // Arrange / Act
     const shapes = SELECTION_ANIMATIONS.map((a) => [a.className, a.durationProperty, a.delayProperty, a.ms]);
 
     // Assert
     expect(shapes).toEqual([
       ["selection-number-rise", "--selection-number-rise-duration", "--selection-number-rise-delay", SELECTION_NUMBER_RISE_MS],
-      ["selection-number-fall", "--selection-number-fall-duration", "--selection-number-fall-delay", SELECTION_NUMBER_FALL_MS],
     ]);
   });
 
@@ -290,7 +260,6 @@ describe("the selection fade's styling", () => {
 
   it.each([
     { animation: SELECTION_NUMBER_RISE, keyframes: "ws-selection-number-rise", easing: "ease-out" },
-    { animation: SELECTION_NUMBER_FALL, keyframes: "ws-selection-number-fall", easing: "ease-in" },
   ])("animates the $keyframes number on its length and delay, once", ({ animation, keyframes, easing }) => {
     // Arrange / Act
     const declarations = declarationsOf(`#ws-sidebar .ws.${animation.className} > .row .sb-num`);
@@ -309,12 +278,9 @@ describe("the selection fade's styling", () => {
     expect(stops).toEqual([[["from"], "color: var(--tab-number-color);"]]);
   });
 
-  it("falls from white, ending on the number's own grey", () => {
-    // Arrange / Act
-    const stops = rulesOf(keyframesOf("ws-selection-number-fall")).map((rule) => [rule.selectors, rule.declarations.trim()]);
-
-    // Assert
-    expect(stops).toEqual([[["from"], "color: white;"]]);
+  it("carries no fall: the row the highlight left has no animation to run", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toContain("selection-number-fall");
   });
 
   it("draws the number in the grey the rise starts from", () => {
@@ -325,7 +291,7 @@ describe("the selection fade's styling", () => {
     expect(declarations.some((d) => d.includes("color: var(--tab-number-color);"))).toBe(true);
   });
 
-  it.each(["selection-number-rise", "selection-number-fall"])("stops the %s under reduced motion", (className) => {
+  it.each(["selection-number-rise"])("stops the %s under reduced motion", (className) => {
     // Arrange
     const reduced = stylesheet
       .split("@media (prefers-reduced-motion: reduce)")

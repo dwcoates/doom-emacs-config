@@ -435,10 +435,12 @@ It is purple on every surface: the tab bar, the sidebar and the footer
 It is THE ONE PURPLE (owner ruling, 2026-10-17): the webapp\='s tool
 titles, retries and code keywords wear it too.")
 
-(defconst agent-repl--color-selected-bg      "#c0c0c0"
+(defconst agent-repl--color-selected-bg      "#9b9b99"
   "Lightish grey: THE selected tab's background (owner ruling, 2026-09-14).
 
-Silver.  Previously dormant — for a stretch, selection was an
+A softened silver: #c0c0c0 taken three small steps less intense (owner
+ruling, 2026-10-18, with the sidebar's selected row and gutter bar;
+design-selection-less-intense.html beside this module).  Previously dormant — for a stretch, selection was an
 `:underline' alone and a tab's background carried only its connection
 COLOR (armed) or the panels-open EXTENT (any tab).  The owner overrode
 that: the SELECTED tab now paints this grey across whatever extent it
