@@ -55,3 +55,13 @@ export function createTicker(intervalMs: number = DEFAULT_TICK_MS): Ticker {
     },
   };
 }
+
+/**
+ * Whether A_MS and B_MS fall on the same LOCAL calendar date: the ONE test
+ * every "today" in the app (a merge's, the rail's re-fit at midnight) asks.
+ */
+export function sameLocalDate(aMs: number, bMs: number): boolean {
+  const a = new Date(aMs);
+  const b = new Date(bMs);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
