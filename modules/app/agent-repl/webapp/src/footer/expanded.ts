@@ -745,13 +745,12 @@ export function drawFooterShellRow(
   const row = jumpRow("shells", u.work, u.jump, deps, path);
   row.appendChild(glyph("shells", "$"));
   row.appendChild(drawFooterShellRowCommand(requireMessage(u.command, `${path}.command`)));
-  const figures = document.createElement("span");
-  figures.className = "footer-row-figures";
-  figures.appendChild(
-    drawFooterShellRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
+  row.appendChild(
+    rowFigures(
+      drawFooterShellRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
+      caret(),
+    ),
   );
-  figures.appendChild(caret());
-  row.appendChild(figures);
   return finishJumpRow(row);
 }
 
@@ -796,17 +795,12 @@ export function drawFooterMonitorRow(
     drawFooterMonitorRowDescription(requireMessage(u.description, `${path}.description`)),
   );
   if (u.persistent !== undefined) row.appendChild(marker("persistent"));
-  const figures = document.createElement("span");
-  figures.className = "footer-row-figures";
-  figures.appendChild(
-    drawFooterMonitorRowRuntime(
-      requireMessage(u.runtime, `${path}.runtime`),
-      deps,
-      `${path}.runtime`,
+  row.appendChild(
+    rowFigures(
+      drawFooterMonitorRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
+      caret(),
     ),
   );
-  figures.appendChild(caret());
-  row.appendChild(figures);
   return finishJumpRow(row);
 }
 
@@ -851,13 +845,12 @@ export function drawFooterMergeRow(
   row.appendChild(drawFooterMergeRowLabel(requireMessage(u.label, `${path}.label`)));
   if (u.step !== undefined) row.appendChild(drawFooterMergeRowStep(u.step));
   if (u.waitingOnUser !== undefined) row.appendChild(drawFooterMergeRowWaitingOnUser());
-  const figures = document.createElement("span");
-  figures.className = "footer-row-figures";
-  figures.appendChild(
-    drawFooterMergeRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
+  row.appendChild(
+    rowFigures(
+      drawFooterMergeRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
+      caret(),
+    ),
   );
-  figures.appendChild(caret());
-  row.appendChild(figures);
   return finishJumpRow(row);
 }
 
@@ -911,10 +904,7 @@ export function drawFooterWakeupRow(
   row.appendChild(rowText("footer-row-label", "wakeup"));
   if (u.reason !== undefined) row.appendChild(drawFooterWakeupRowReason(u.reason));
   if (u.wakeAt !== undefined) {
-    const figures = document.createElement("span");
-    figures.className = "footer-row-figures";
-    figures.appendChild(drawFooterWakeupRowWakeAt(u.wakeAt, deps, `${path}.wake_at`));
-    row.appendChild(figures);
+    row.appendChild(rowFigures(drawFooterWakeupRowWakeAt(u.wakeAt, deps, `${path}.wake_at`)));
   }
   return row;
 }
@@ -946,12 +936,7 @@ export function drawFooterCronRow(
   if (u.recurring !== undefined) row.appendChild(marker("recurring"));
   if (u.durable !== undefined) row.appendChild(marker("durable"));
   if (u.nextFire !== undefined) {
-    const figures = document.createElement("span");
-    figures.className = "footer-row-figures";
-    figures.appendChild(
-      drawFooterCronRowNextFire(u.nextFire, deps, `${path}.next_fire`),
-    );
-    row.appendChild(figures);
+    row.appendChild(rowFigures(drawFooterCronRowNextFire(u.nextFire, deps, `${path}.next_fire`)));
   }
   return row;
 }
@@ -1205,6 +1190,14 @@ export function countdownClock(atMs: bigint, deps: ExpandedDeps, path: string): 
   return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
     span.textContent = remainingLabel(targetMs - nowMs);
   });
+}
+
+/** A row's figures cell: its clock, and its caret on a jump row, in order. */
+export function rowFigures(...children: HTMLElement[]): HTMLElement {
+  const figures = document.createElement("span");
+  figures.className = "footer-row-figures";
+  for (const child of children) figures.appendChild(child);
+  return figures;
 }
 
 /** The jump affordance's caret. */

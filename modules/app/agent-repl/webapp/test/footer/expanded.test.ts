@@ -14,6 +14,7 @@ import {
   FOOTER_PANELS,
   countdownClock,
   createJumpNotices,
+  rowFigures,
   rowText,
   drawFooterExpanded,
   type ExpandedDeps,
@@ -1673,3 +1674,30 @@ describe("the section keeps the reader's scroll", () => {
   });
 });
 
+
+// ---- the rows' figures cell ------------------------------------------------
+
+describe("rowFigures", () => {
+  it("is the figures cell", () => {
+    expect(rowFigures().className).toBe("footer-row-figures");
+  });
+
+  it("holds its children in the order given", () => {
+    const clock = document.createElement("span");
+    const caret = document.createElement("span");
+    expect([...rowFigures(clock, caret).children]).toEqual([clock, caret]);
+  });
+
+  it.each([
+    ["shells", { shells: [SHELL_ROW] }, 2],
+    ["monitors", { monitors: [MONITOR_ROW] }, 2],
+    ["merges", { merges: [MERGE_ROW] }, 2],
+    ["crons", { crons: [{ ...CRON_ROW, nextFire: { fireAtMs: BigInt(NOW + 60_000) } }] }, 1],
+    ["crons", { wakeup: { wakeAt: { wakeAtMs: BigInt(NOW + 60_000) } } }, 1],
+  ] as const)("is the one figures cell a %s row draws", (selection, init, children) => {
+    const { panel } = drawPanel(selection, init);
+    const cells = panel.querySelectorAll(".footer-row-figures");
+    expect(cells).toHaveLength(1);
+    expect(cells[0]?.children).toHaveLength(children);
+  });
+});
