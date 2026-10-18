@@ -17,6 +17,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { FeedId } from "../../frontend/v1/feed_pb";
+import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -25,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_web_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_web_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIl8KGFdhdGNoV2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHdlYmFwcF9idWlsZBgCIAEoCSKoAQoZV2F0Y2hXZWJXb3Jrc3BhY2VSZXNwb25zZRI8Cgt0cmFuc2ZlcnJlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkUKEHNlc3Npb25faWRlbnRpdHkYAiABKAsyKS5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlU2Vzc2lvbklkZW50aXR5SABCBgoEcHVzaCIqChdXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZBIPCgdhZGRyZXNzGAEgASgJIlcKG1dlYldvcmtzcGFjZVNlc3Npb25JZGVudGl0eRIdChVhZ2VudF9yZXBsX3Nlc3Npb25faWQYASABKAkSGQoRY2xhdWRlX3Nlc3Npb25faWQYAiABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIl8KGFdhdGNoV2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHdlYmFwcF9idWlsZBgCIAEoCSLjAQoZV2F0Y2hXZWJXb3Jrc3BhY2VSZXNwb25zZRI8Cgt0cmFuc2ZlcnJlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkUKEHNlc3Npb25faWRlbnRpdHkYAiABKAsyKS5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlU2Vzc2lvbklkZW50aXR5SAASOQoKcmV2ZWFsX3JvdxgDIAEoCzIjLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VSZXZlYWxSb3dIAEIGCgRwdXNoIjkKFVdlYldvcmtzcGFjZVJldmVhbFJvdxIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiKgoXV2ViV29ya3NwYWNlVHJhbnNmZXJyZWQSDwoHYWRkcmVzcxgBIAEoCSJXChtXZWJXb3Jrc3BhY2VTZXNzaW9uSWRlbnRpdHkSHQoVYWdlbnRfcmVwbF9zZXNzaW9uX2lkGAEgASgJEhkKEWNsYXVkZV9zZXNzaW9uX2lkGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.WatchWebWorkspaceRequest
@@ -101,6 +103,18 @@ export type WatchWebWorkspaceResponse = Message<"agentrepl.v1.WatchWebWorkspaceR
      */
     value: WebWorkspaceSessionIdentity;
     case: "sessionIdentity";
+  } | {
+    /**
+     * A ROW TO REVEAL: a SelectWorkspace that named one (its `reveal`). The
+     * page brings the row on screen, opens it and marks it, exactly as it
+     * jumps to any entry. A page that attaches after the selection (its page
+     * was not loaded) is sent it first, so the reveal is never lost to the
+     * load; it is sent once.
+     *
+     * @generated from field: agentrepl.v1.WebWorkspaceRevealRow reveal_row = 3;
+     */
+    value: WebWorkspaceRevealRow;
+    case: "revealRow";
   } | { case: undefined; value?: undefined };
 };
 
@@ -110,6 +124,25 @@ export type WatchWebWorkspaceResponse = Message<"agentrepl.v1.WatchWebWorkspaceR
  */
 export const WatchWebWorkspaceResponseSchema: GenMessage<WatchWebWorkspaceResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 1);
+
+/**
+ * The row a selection asked this workspace's page to reveal.
+ *
+ * @generated from message agentrepl.v1.WebWorkspaceRevealRow
+ */
+export type WebWorkspaceRevealRow = Message<"agentrepl.v1.WebWorkspaceRevealRow"> & {
+  /**
+   * @generated from field: frontend.v1.FeedId row = 1;
+   */
+  row?: FeedId | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.WebWorkspaceRevealRow.
+ * Use `create(WebWorkspaceRevealRowSchema)` to create a new message.
+ */
+export const WebWorkspaceRevealRowSchema: GenMessage<WebWorkspaceRevealRow> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 2);
 
 /**
  * @generated from message agentrepl.v1.WebWorkspaceTransferred
@@ -128,7 +161,7 @@ export type WebWorkspaceTransferred = Message<"agentrepl.v1.WebWorkspaceTransfer
  * Use `create(WebWorkspaceTransferredSchema)` to create a new message.
  */
 export const WebWorkspaceTransferredSchema: GenMessage<WebWorkspaceTransferred> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 2);
+  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 3);
 
 /**
  * The identities the page stamps on the diagnostic records it forwards
@@ -162,5 +195,5 @@ export type WebWorkspaceSessionIdentity = Message<"agentrepl.v1.WebWorkspaceSess
  * Use `create(WebWorkspaceSessionIdentitySchema)` to create a new message.
  */
 export const WebWorkspaceSessionIdentitySchema: GenMessage<WebWorkspaceSessionIdentity> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 4);
 

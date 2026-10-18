@@ -9,6 +9,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { FeedId } from "../../frontend/v1/feed_pb";
+import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -17,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_select_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_select_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFlNlbGVjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXU2VsZWN0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiMQoWU2VsZWN0V29ya3NwYWNlU3VjY2VzcxIXCg9yb3N0ZXJfcmV2aXNpb24YASABKAQilwMKFFNlbGVjdFdvcmtzcGFjZUVycm9yEkoKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi0uYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjEuYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkUKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASQgoNc3RhbmRpbmdfZG93bhgFIAEoCzIpLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdGFuZGluZ0Rvd25IAEIHCgVjYXVzZSIhCh9TZWxlY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjsKI1NlbGVjdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIyCh9TZWxlY3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHgocU2VsZWN0V29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtTZWxlY3RXb3Jrc3BhY2VTdGFuZGluZ0Rvd25CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxImwKFlNlbGVjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIjCgZyZXZlYWwYAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQikQEKF1NlbGVjdFdvcmtzcGFjZVJlc3BvbnNlEjcKB3N1Y2Nlc3MYASABKAsyJC5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlU3VjY2Vzc0gAEjMKBWVycm9yGAIgASgLMiIuYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IjEKFlNlbGVjdFdvcmtzcGFjZVN1Y2Nlc3MSFwoPcm9zdGVyX3JldmlzaW9uGAEgASgEIpcDChRTZWxlY3RXb3Jrc3BhY2VFcnJvchJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkIKDXN0YW5kaW5nX2Rvd24YBSABKAsyKS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlU3RhbmRpbmdEb3duSABCBwoFY2F1c2UiIQofU2VsZWN0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI7CiNTZWxlY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofU2VsZWN0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh4KHFNlbGVjdFdvcmtzcGFjZU5vdFlldEFkb3B0ZWQiHQobU2VsZWN0V29ya3NwYWNlU3RhbmRpbmdEb3duQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SelectWorkspaceRequest
@@ -27,6 +29,18 @@ export type SelectWorkspaceRequest = Message<"agentrepl.v1.SelectWorkspaceReques
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * A ROW OF THE SELECTED WORKSPACE'S ROOT FEED TO REVEAL once it is
+   * selected: its page brings the row on screen, opens it and marks it
+   * (WebWorkspaceRevealRow). Unset selects and reveals nothing. A merge queue
+   * entry for an async merge sets it to the merge's bubble in its requester's
+   * feed (FeedMergeQueueBubble), so the click opens that bubble rather than
+   * the hidden merge workspace (owner ruling, 2026-10-17).
+   *
+   * @generated from field: frontend.v1.FeedId reveal = 2;
+   */
+  reveal?: FeedId | undefined;
 };
 
 /**
