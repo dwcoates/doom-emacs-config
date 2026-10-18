@@ -130,6 +130,12 @@ type controller struct {
 	// tookOver closes once this daemon stops JOINING and becomes the only
 	// daemon (becomeIncumbent). Made lazily under mu (tookOverSignal).
 	tookOver chan struct{}
+	// takeoverOwned marks that a becomeIncumbent call has flipped joining
+	// mode off and so OWNS the takeover: it alone closes tookOver, once its
+	// takeover has run. Two boot-claim waiters (awaitIncumbentExit,
+	// retryAdvertise) both reach becomeIncumbent, so a second caller must
+	// neither close the signal early nor close it again. Guarded by mu.
+	takeoverOwned bool
 	// settled is the TAKEOVER-SETTLED LATCH: it closes once this daemon has
 	// taken over (becomeIncumbent) AND every adoption and session bring-up
 	// the takeover started has finished. A daemon that never joined has no
