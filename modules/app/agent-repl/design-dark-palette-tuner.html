@@ -9,8 +9,10 @@ const DEFAULTS = {
   // Matched to the Claude desktop app's dark theme (sampled from a screenshot,
   // 2026-10-17). Its surfaces are almost pure gray, and its warmth sits mostly
   // in the text, at a yellow-leaning hue near 95.
-  hue: 95,              // 0-360. ~60-90 reads brown/warm, ~95 is Claude's, ~265 is the old blue.
-  surfaceChroma: 0.0015, // tint of the backgrounds. Claude's run 0 to 0.002; the landed palette ~0.004.
+  // Now opening on a SLIGHT BROWN tint of the grounds (owner request, 2026-10-17): the
+  // shipped Claude match is the "Claude" preset; the old too-brown pass is "Landed brown".
+  hue: 70,              // 0-360. ~60-90 reads brown/warm, ~95 is Claude's, ~265 is the old blue.
+  surfaceChroma: 0.0028, // tint of the backgrounds. Claude's run 0 to 0.002; the too-brown pass ~0.0042.
   textChroma: 0.008,     // tint of the text grays. Claude's run 0.004 to 0.014; the landed palette ~0.009.
   lightnessShift: 0,     // added to every token's L.
   tokens: {
@@ -30,6 +32,9 @@ const DEFAULTS = {
     "--hl-comment":        [null,   "fixed",   "#838897"],       // code comment (Claude's is blue-gray)
     "--fg":                [0.9521, "text",    null],            // body text #f0efec
     "--user":              [null,   "fixed",   "#0764c2"],
+    // Emacs: the frame's ground (stock doom-tomorrow-night #1d1f21 today, its lightness kept),
+    // and the input window, which is --composer-bg itself.
+    "emacs-bg":            [0.2380, "surface", null],
   },
 };
 // =====================================================================================
@@ -73,6 +78,10 @@ const DEFAULTS = {
   .btns { display: flex; gap: 8px; }
   .nb { background: var(--button); color: var(--fg); border-radius: 5px; padding: 2px 10px; font-size: 12px; box-shadow: inset 0 .5px 0 rgba(255,255,255,.09), inset 0 0 0 .5px rgba(0,0,0,.25); }
   .nb.off { background: var(--button-disabled); color: var(--muted); }
+  .emacs { margin-top: 14px; border-radius: 10px; overflow: hidden; background: var(--emacs-bg); color: var(--fg); font: 13px Menlo, monospace; }
+  .emacs-title { padding: 5px 10px; font: 12px -apple-system, sans-serif; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .emacs-buf { padding: 10px 12px; line-height: 1.5; }
+  .emacs-input { padding: 8px 12px; background: var(--composer-bg); color: var(--muted); border-top: 1px solid var(--border); line-height: 1.5; }
   .composer { margin: 0 12px 4px; background: var(--composer-bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; color: var(--muted); }
 </style>
 
@@ -85,7 +94,10 @@ const DEFAULTS = {
   <div>
     <button data-preset="old">Old blue</button>
     <button data-preset="landed">Landed brown</button>
-    <button data-preset="claude">Claude</button>
+    <button data-preset="claude">Claude (shipped)</button>
+    <button data-preset="brown1">Brown 1 · faint</button>
+    <button data-preset="brown2">Brown 2 · slight</button>
+    <button data-preset="brown3">Brown 3 · noticeable</button>
     <button data-preset="neutral">Neutral</button>
     <button id="reset">Reset to defaults</button>
   </div>
@@ -122,6 +134,11 @@ const DEFAULTS = {
       <div class="composer">Reply…</div>
     </main>
   </div>
+  <div class="emacs">
+    <div class="emacs-title">Emacs</div>
+    <div class="emacs-buf"><span style="color:var(--muted)">;; config.el</span><br>(setq doom-theme 'doom-tomorrow-night)<br>(load-theme doom-theme t)</div>
+    <div class="emacs-input">C-c C-c: clear+save | (cmd) &lt;up&gt;/&lt;down&gt;: history<br><span style="color:var(--fg)">make the grounds a touch browner</span></div>
+  </div>
 </div>
 
 <script>
@@ -130,6 +147,9 @@ const PRESETS = {
   landed:  { hue: 75,  surfaceChroma: 0.0042, textChroma: 0.0099 },
   neutral: { surfaceChroma: 0, textChroma: 0 },
   claude:  { hue: 95, surfaceChroma: 0.0015, textChroma: 0.008, lightnessShift: 0 },
+  brown1:  { hue: 70, surfaceChroma: 0.002,  textChroma: 0.008, lightnessShift: 0 },
+  brown2:  { hue: 70, surfaceChroma: 0.0028, textChroma: 0.008, lightnessShift: 0 },
+  brown3:  { hue: 65, surfaceChroma: 0.0036, textChroma: 0.008, lightnessShift: 0 },
 };
 let state = structuredClone(DEFAULTS);
 

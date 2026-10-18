@@ -799,7 +799,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .sb-search-btn {
   display: inline-flex;
   align-items: center;
-  color: var(--info-agents);
+  color: var(--blocked);
   background: none;
   border: none;
   outline: none;
@@ -956,6 +956,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* A repository section's header takes its fold's grey rather than the
    --info-ws hue the task and merged headers keep. */
 #ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }
+/* A REPOSITORY'S NAME AND ITS COUNT READ A STEP SMALLER (owner request,
+   2026-10-17), the name still above the workspace names it heads; the count
+   scales with it (0.85em). */
+#ws-sidebar .repo.repo-section > .repo-head { font-size: 0.7rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
@@ -1010,8 +1014,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    ONE shared light rule. Both bands' headers are drawn purple: Recently
    Merged's matches its rows' dots, and Hidden's matches Recently Merged's
    (owner request, 2026-10-11), and so is the open workspaces section's header
-   above the repository sections (owner request, 2026-10-13). The rows under any of them
-   keep their own colours. */
+   above the repository sections (owner request, 2026-10-13). The purple is THE
+   ONE PURPLE, the purple status --blocked (owner ruling, 2026-10-17). The rows
+   under any of them keep their own colours. */
 #ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {
   margin-top: 0.5rem;
@@ -1059,7 +1064,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .repo.open-section > .repo-head,
 #ws-sidebar .repo.hidden-section > .repo-head,
-#ws-sidebar .repo.merged-section > .repo-head { color: var(--info-agents); }
+#ws-sidebar .repo.merged-section > .repo-head { color: var(--blocked); }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
    merged row taller than the content inside it, so the section stood taller
    than the entries it holds — ten merges reached about twelve rows' worth of
@@ -1149,14 +1154,15 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
-/* The workspace Emacs is currently showing. The accent gutter bar marks it,
-   the accent a step brighter (owner request, 2026-10-17), mixed from it so
-   the two never drift. The row line also carries a slight accent tint (owner
-   request, 2026-10-17, superseding the 2026-10-11 "no row tint" ruling),
-   however the workspace came to be selected. No bolder name. */
+/* The workspace Emacs is currently showing. NEUTRAL, WITH A MUTED GUTTER
+   (owner ruling, 2026-10-17, superseding the accent-blue gutter and tint):
+   the row line takes the rail's own lifted grey, --card, as Claude's
+   selected row does, and the gutter bar is the muted grey, so the palette's
+   grounds stay grey and no hue marks selection. However the workspace came
+   to be selected. No bolder name. */
 #ws-sidebar {
-  --row-current-gutter: color-mix(in srgb, var(--accent) 78%, white);
-  --row-current-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+  --row-current-gutter: var(--muted);
+  --row-current-tint: var(--card);
 }
 #ws-sidebar .ws.current > .row {
   background-color: var(--row-current-tint);
@@ -1165,7 +1171,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
 /* A ROW SELECTED FROM THE RAIL BLINKS (owner request, 2026-10-17): one soft
-   swell of an accent wash over the row line (owner request, 2026-10-17:
+   swell of a neutral wash, the text color thinned (owner ruling, 2026-10-17:
+   no hue marks selection), over the row line (owner request, 2026-10-17:
    once, not twice), on every click, the current workspace's included. The
    swell rises from and settles back to the row's own background, so it ends
    on the current row's tint rather than snapping to it. The class and the blink's length are set by
@@ -1177,7 +1184,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   animation: ws-selection-blink var(--selection-blink-duration) ease-in-out var(--selection-blink-delay) 1;
 }
 @keyframes ws-selection-blink {
-  50% { background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  50% { background-color: color-mix(in srgb, var(--fg) 12%, transparent); }
 }
 /* THE SELECTED ROW'S TAB NUMBER FADES INTO WHITE (owner request, 2026-10-17):
    a quick rise from its own grey to white, held for a second, then a fall
@@ -1195,9 +1202,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* A RECEDED ROW stays listed but steps back: a closed (or merged)
    workspace, and a hidden one (owner request, 2026-10-13: a Hidden row reads
    in exactly the grey a Recently Merged row does, which is the band name
-   colour at this opacity). */
+   colour at this opacity). The row's PARTS recede rather than the row, so
+   one part can stand clear of it: A COLD CACHE READS IN THE FULL RED STATUS
+   COLOUR (owner request, 2026-10-17), never the red washed out to a pink. */
 #ws-sidebar { --receded-opacity: 0.55; }
-#ws-sidebar .ws.receded > .row { opacity: var(--receded-opacity); }
+#ws-sidebar .ws.receded > .row > :not(.when[data-cache-cold]) { opacity: var(--receded-opacity); }
 
 /* The current row's merge (sidebar.ts `mergeRowHtml`). The rail LEADS on
    merges, and the merge glyph beside the name says only that one is

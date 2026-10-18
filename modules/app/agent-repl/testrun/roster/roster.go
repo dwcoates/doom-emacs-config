@@ -338,7 +338,7 @@ var ReadByNoSuite = []string{
 	// The module's prose.
 	"docs/", "plans/", "AGENTS.md", "agent-shim/AGENTS.md", ".gitattributes", ".gitignore",
 	"DESIGN-protobuf-surfaces.md", "design-agent-shim-architecture.md", "design-async-response-streaming.md",
-	"design-chessboard-widget.md", "design-dark-accent-tuner.html", "design-dark-palette-tuner.html", "design-progress-footer-samples.html", "design-progress-footer.md",
+	"design-chessboard-widget.md", "design-dark-accent-tuner.html", "design-dark-palette-tuner.html", "design-sidebar-selection-options.html", "design-progress-footer-samples.html", "design-progress-footer.md",
 	"design-shim-transport-inversion.md", "design-watcher-bubble-expansion.md", "design-workspace-sidebar-mock.html",
 	"output-navigation-assessment.md",
 	"test-coverage-autosave.md", "test-coverage-commands.md", "test-coverage-core.md", "test-coverage-history.md",

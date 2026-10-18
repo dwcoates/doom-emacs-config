@@ -170,6 +170,22 @@ describe("the sections", () => {
     });
   });
 
+  it("sets a repository's name a step smaller than the band headers, its count scaling with it", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed: true })] }), sidebarContext());
+    // Act
+    const sizes = inRail(drawn, (rail) => {
+      const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
+      return [
+        cascadedValue(header, "font-size"),
+        cascadedValue(header.querySelector(".sb-count") as HTMLElement, "font-size"),
+        cascadedValue(rail.querySelector(".open-section > .repo-head") as HTMLElement, "font-size"),
+      ];
+    });
+    // Assert
+    expect(sizes).toEqual(["0.7rem", "0.85em", "0.75rem"]);
+  });
+
   it("marks a repository section so its header takes its fold's grey", () => {
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
     expect(pane(drawn).querySelector(".open-section .repo")?.classList.contains("repo-section")).toBe(true);
@@ -791,7 +807,7 @@ describe("the bands' header color", () => {
     const color = inRail(drawn, () => cascadedValue(head, "color"));
 
     // Assert
-    expect(color).toBe("var(--info-agents)");
+    expect(color).toBe("var(--blocked)");
   });
 
   it("leaves a hidden row's name out of the header's purple", () => {
@@ -803,7 +819,7 @@ describe("the bands' header color", () => {
     const color = inRail(drawn, () => cascadedValue(name, "color"));
 
     // Assert
-    expect(color).not.toBe("var(--info-agents)");
+    expect(color).not.toBe("var(--blocked)");
   });
 });
 
@@ -1405,7 +1421,7 @@ describe("the open workspaces section", () => {
   it("draws its header in the Hidden and Recently Merged headers' purple", () => {
     const drawn = drawWorkspaceRoster(roster(), sidebarContext());
     const header = openIn(drawn).querySelector<HTMLElement>(":scope > .repo-head")!;
-    expect(inRail(drawn, () => cascadedValue(header, "color"))).toBe("var(--info-agents)");
+    expect(inRail(drawn, () => cascadedValue(header, "color"))).toBe("var(--blocked)");
   });
 
   it.each([

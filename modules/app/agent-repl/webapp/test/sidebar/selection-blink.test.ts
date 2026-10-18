@@ -261,6 +261,14 @@ describe("the selection blink's styling", () => {
     );
   });
 
+  it("swells in a neutral wash, the text color thinned, never a hue", () => {
+    // Arrange / Act
+    const peak = rulesOf(keyframesOf("ws-selection-blink")).map((rule) => rule.declarations.trim());
+
+    // Assert
+    expect(peak).toEqual(["background-color: color-mix(in srgb, var(--fg) 12%, transparent);"]);
+  });
+
   it("swells once: the blink's keyframes carry a single stop", () => {
     // Arrange / Act
     const stops = rulesOf(keyframesOf("ws-selection-blink")).map((rule) => rule.selectors);

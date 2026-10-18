@@ -4473,7 +4473,7 @@ describe("the rail's search toggle", () => {
     { name: "draws no border", property: "border", want: "none" },
     { name: "draws no focus ring", property: "outline", want: "none" },
     { name: "draws no native button look", property: "appearance", want: "none" },
-    { name: "wears the bands' header purple", property: "color", want: "var(--info-agents)" },
+    { name: "wears the bands' header purple", property: "color", want: "var(--blocked)" },
     { name: "keeps its padded click square", property: "padding", want: "0.1rem" },
   ])("$name", ({ property, want }) => {
     // Arrange / Act
