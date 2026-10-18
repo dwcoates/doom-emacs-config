@@ -492,6 +492,95 @@ function openWithEnding(
   });
 }
 
+describe("watchStream: a frame this page could not draw", () => {
+  /** A draw that throws on its first push and draws every one after. */
+  function drawThatThrowsOnce(): (r: WatchFooterResponse) => void {
+    let calls = 0;
+    return () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError("d.onConnect is not a function");
+    };
+  }
+
+  it("files the page's own failure, never the daemon's", async () => {
+    // Arrange
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    // Act
+    const handle = open(contextFor(client, sink), drawThatThrowsOnce());
+    await settle();
+    handle.cancel();
+    // Assert
+    expect(sink.reported).toEqual(["frameUndrawable"]);
+  });
+
+  it("tells onEnd the run ended on a draw, with what the draw threw", async () => {
+    // Arrange
+    const { client } = scriptedClient([[push()]]);
+    const ends: StreamEnd[] = [];
+    // Act
+    const handle = open(contextFor(client, new RecordingSink()), drawThatThrowsOnce(), (e) => ends.push(e));
+    await settle();
+    handle.cancel();
+    // Assert
+    expect(ends[0]?.kind === "draw_failed" && String(ends[0].error)).toBe("TypeError: d.onConnect is not a function");
+  });
+
+  it("reopens the stream, drawing the daemon's state afresh", async () => {
+    // Arrange
+    const drawn: WatchFooterResponse[] = [];
+    let threw = false;
+    const { client, state } = scriptedClient([[push()], [push()]]);
+    // Act
+    const handle = open(contextFor(client, new RecordingSink()), (r) => {
+      if (!threw) {
+        threw = true;
+        throw new TypeError("boom");
+      }
+      drawn.push(r);
+    });
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // Assert
+    expect([state.openCount >= 2, drawn.length]).toEqual([true, 1]);
+  });
+
+  it("logs the draw failure at error with its cause", async () => {
+    // Arrange
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[push()]]);
+    // Act
+    const handle = open(contextFor(client, new RecordingSink()), drawThatThrowsOnce());
+    await settle();
+    handle.cancel();
+    // Assert
+    expect(
+      lines.some(
+        ([level, line]) =>
+          level === "error" && line.includes("rpc.stream-frame-undrawable") && line.includes("d.onConnect is not a function"),
+      ),
+    ).toBe(true);
+  });
+
+  it("clears the footer's undrawable verdict once a frame draws again", async () => {
+    // Arrange
+    const { client } = scriptedClient([[push()], [push()]]);
+    reportClientFailure("frame_undrawable_card", "this page failed to draw a frame and is drawing the stream afresh");
+    const verdicts: Array<string | null> = [];
+    const stop = onClientVerdict((verdict) => verdicts.push(verdict?.kind ?? null));
+    // Act
+    const handle = open(contextFor(client, new RecordingSink()), () => {});
+    await settle();
+    handle.cancel();
+    stop();
+    // Assert: the verdict standing at the subscription, then the drawn frame
+    // clearing it before the run's own end files anything.
+    expect(verdicts.slice(0, 2)).toEqual(["frame_undrawable_card", null]);
+  });
+});
+
 describe("watchStream: the page ending", () => {
   afterEach(() => beginPage());
 

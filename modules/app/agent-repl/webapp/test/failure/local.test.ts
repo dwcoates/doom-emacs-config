@@ -8,6 +8,7 @@ import {
   controlPlaneFailed,
   daemonUnreachable,
   frameUndecodable,
+  frameUndrawable,
   staleBundle,
   workspaceGone,
 } from "../../src/failure/sink.js";
@@ -36,6 +37,7 @@ const MINTS = [
   ["controlPlaneFailed", () => controlPlaneFailed("OpenLogin", "unavailable")],
   ["frameUndecodable", () => frameUndecodable("a oneof sets no arm", "FooterView")],
   ["staleBundle", () => staleBundle("schema drift")],
+  ["frameUndrawable", () => frameUndrawable("WatchFeed", "TypeError: boom")],
 ] as const;
 
 const armsOf = (failures: ReturnType<typeof createLocalFailures>): string[] =>
@@ -91,6 +93,13 @@ describe("evidenceRows", () => {
     expect(evidenceRows(controlPlaneFailed("OpenLogin", "unavailable"))).toEqual([
       ["request", "OpenLogin"],
       ["cause", "unavailable"],
+    ]);
+  });
+
+  it("keeps the stream and the cause of a frame this page could not draw", () => {
+    expect(evidenceRows(frameUndrawable("WatchFeed", "TypeError: boom"))).toEqual([
+      ["stream", "WatchFeed"],
+      ["cause", "TypeError: boom"],
     ]);
   });
 
@@ -373,6 +382,15 @@ describe("createLocalFailures and the client's link verdict", () => {
       kind: "frame_undecodable_card",
       substatus: "frame unreadable",
       activity: "a frame could not be read and was skipped, so conversation may be missing",
+    });
+  });
+
+  it("relays frameUndrawable as the page's own failure, never the daemon's", () => {
+    createLocalFailures().report(frameUndrawable("WatchFeed", "TypeError: boom"));
+    expect(standingClientFailure()).toEqual({
+      kind: "frame_undrawable_card",
+      substatus: "page draw failed",
+      activity: "this page failed to draw a frame and is drawing the stream afresh",
     });
   });
 

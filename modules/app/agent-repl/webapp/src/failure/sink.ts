@@ -36,6 +36,7 @@ export const CLIENT_FAILURE_ARMS = [
   "controlPlaneFailed",
   "frameUndecodable",
   "staleBundle",
+  "frameUndrawable",
 ] as const;
 
 export type ClientFailureArm = (typeof CLIENT_FAILURE_ARMS)[number];
@@ -69,8 +70,9 @@ export interface FailureSink {
 // THE MINTING HELPERS.
 //
 // They live beside the interface rather than in `local.ts` because
-// `src/rpc/streams.ts` mints two of them (frame_undecodable on a push it could
-// not read, daemon_unreachable on a stream that ended) and must not pull the
+// `src/rpc/streams.ts` mints three of them (frame_undecodable on a push it
+// could not read, frame_undrawable on one it read and could not draw,
+// daemon_unreachable on a stream that ended) and must not pull the
 // failure set in to do it. `local.ts` re-exports them, so a component that
 // files and holds still imports one module.
 // ---------------------------------------------------------------------------
@@ -97,6 +99,16 @@ export function daemonUnreachable(closeCode: number, closeReason: string): Failu
 export function frameUndecodable(cause: string, frameHead: string): FailureKind {
   return create(FailureKindSchema, {
     kind: { case: "frameUndecodable", value: { cause, frameHead } },
+  });
+}
+
+/**
+ * A push was read, and this page failed to draw it: a defect in the page, not
+ * the link (owner ruling, 2026-10-18). STREAM names the stream it came on.
+ */
+export function frameUndrawable(stream: string, cause: string): FailureKind {
+  return create(FailureKindSchema, {
+    kind: { case: "frameUndrawable", value: { stream, cause } },
   });
 }
 

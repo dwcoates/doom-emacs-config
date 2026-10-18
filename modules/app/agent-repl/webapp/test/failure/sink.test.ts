@@ -7,13 +7,14 @@ import {
   controlPlaneFailed,
   daemonUnreachable,
   frameUndecodable,
+  frameUndrawable,
   isClientFailureArm,
   staleBundle,
   workspaceGone,
 } from "../../src/failure/sink.js";
 
 describe("CLIENT_FAILURE_ARMS", () => {
-  it("names exactly the six arms a frontend may mint", () => {
+  it("names exactly the seven arms a frontend may mint", () => {
     expect([...CLIENT_FAILURE_ARMS]).toEqual([
       "daemonUnreachable",
       "workspaceGone",
@@ -21,6 +22,7 @@ describe("CLIENT_FAILURE_ARMS", () => {
       "controlPlaneFailed",
       "frameUndecodable",
       "staleBundle",
+      "frameUndrawable",
     ]);
   });
 
@@ -64,6 +66,14 @@ describe("the minting helpers", () => {
   it("carries the close reason verbatim", () => {
     const kind = daemonUnreachable(1000, "shutting down");
     expect(kind.kind.case === "daemonUnreachable" && kind.kind.value.closeReason).toBe("shutting down");
+  });
+
+  it("mints frameUndrawable with the stream it came on and its cause", () => {
+    const kind = frameUndrawable("WatchFeed", "TypeError: d.onConnect is not a function");
+    expect(kind.kind.case === "frameUndrawable" && [kind.kind.value.stream, kind.kind.value.cause]).toEqual([
+      "WatchFeed",
+      "TypeError: d.onConnect is not a function",
+    ]);
   });
 
   it("mints frameUndecodable with its cause", () => {

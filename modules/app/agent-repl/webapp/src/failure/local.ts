@@ -48,6 +48,7 @@ export {
   controlPlaneFailed,
   daemonUnreachable,
   frameUndecodable,
+  frameUndrawable,
   staleBundle,
   workspaceGone,
 } from "./sink.js";
@@ -86,7 +87,7 @@ export type LocalFailures = FailureSink &
  *
  * COMPOSED HERE, and this is the one place in the webapp that is allowed to
  * compose a sentence rather than draw one the daemon composed — because the
- * daemon does not know about these failures at all. Six fixed strings, one per
+ * daemon does not know about these failures at all. Fixed strings, one per
  * arm, chosen by the arm and never assembled from evidence.
  */
 export const ARM_HEADLINE: Readonly<Record<ClientFailureArm, string>> = {
@@ -96,6 +97,7 @@ export const ARM_HEADLINE: Readonly<Record<ClientFailureArm, string>> = {
   controlPlaneFailed: "a request this page made outside the streams failed",
   frameUndecodable: "a frame could not be read and was skipped, so conversation may be missing",
   staleBundle: "this page cannot read the daemon's state",
+  frameUndrawable: "this page failed to draw a frame and is drawing the stream afresh",
 };
 
 /**
@@ -133,6 +135,11 @@ export function evidenceRows(kind: FailureKind): ReadonlyArray<readonly [string,
         ];
       case "staleBundle":
         return [["detail", arm.value.detail]];
+      case "frameUndrawable":
+        return [
+          ["stream", arm.value.stream],
+          ["cause", arm.value.cause],
+        ];
       default:
         // A daemon-minted arm has no evidence here: neither producer may set
         // the other's arms, and `report` refuses one before it gets this far.
@@ -216,6 +223,9 @@ export function createLocalFailures(): LocalFailures {
       }
       if (arm === "frameUndecodable") {
         reportClientFailure("frame_undecodable_card", ARM_HEADLINE.frameUndecodable);
+      }
+      if (arm === "frameUndrawable") {
+        reportClientFailure("frame_undrawable_card", ARM_HEADLINE.frameUndrawable);
       }
     },
 

@@ -95,6 +95,7 @@ describe("clientFailureSubstatus", () => {
     ["client_log_failed", "daemon unreachable"],
     ["daemon_unreachable_card", "daemon unreachable"],
     ["frame_undecodable_card", "frame unreadable"],
+    ["frame_undrawable_card", "page draw failed"],
     ["feed_not_tailing", "feed not tailing"],
   ];
   for (const [kind, substatus] of table) {

@@ -128,6 +128,7 @@ message FailureKind {
     FailureControlPlaneFailed control_plane_failed = 15;
     FailureFrameUndecodable frame_undecodable = 16;
     FailureStaleBundle stale_bundle = 17;
+    FailureFrameUndrawable frame_undrawable = 18;
   }
 }
 
@@ -374,6 +375,19 @@ message FailureFrameUndecodable {
   string cause = 1;
   // The head of the frame that would not decode, for whoever debugs it.
   string frame_head = 2;
+}
+
+// A frame from the daemon was read, and this page failed to draw it: a defect
+// in the page, not in the link, so it never reads as the daemon being
+// unreachable (owner ruling, 2026-10-18). The stream the frame came on is
+// reopened, which draws the daemon's state afresh.
+//
+// Resolves the workspace BLUE.
+message FailureFrameUndrawable {
+  // The stream the frame came on (`WatchFeed`).
+  string stream = 1;
+  // The draw failure, verbatim.
+  string cause = 2;
 }
 
 // This page cannot read the daemon's state and reloading did not fix it.
