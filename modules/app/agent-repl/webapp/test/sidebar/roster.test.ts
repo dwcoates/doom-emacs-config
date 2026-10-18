@@ -170,6 +170,18 @@ describe("the sections", () => {
     });
   });
 
+  it("sets a repository's fold triangle a step smaller than the band headers'", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
+    // Act
+    const sizes = inRail(drawn, (rail) => [
+      cascadedValue(rail.querySelector(".repo-section > .repo-head .tri") as HTMLElement, "font-size"),
+      cascadedValue(rail.querySelector(".open-section > .repo-head .tri") as HTMLElement, "font-size"),
+    ]);
+    // Assert
+    expect(sizes).toEqual(["0.98rem", "1.05rem"]);
+  });
+
   it("sets a repository's name a step smaller than the band headers, its count scaling with it", () => {
     // Arrange
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed: true })] }), sidebarContext());
