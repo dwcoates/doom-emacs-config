@@ -1954,8 +1954,9 @@ pre {
    - A USER PROMPT then sits 15% WIDER than that ON EVERY SIDE (owner request,
      2026-10-14): 1.15 of the prompt's 0.49 vertically and 0.7 horizontally,
      on a rung of its own that also sets `--bubble-pad-x`.
-   - EVERY PROMPT BUBBLE then sits 30% WIDER top and bottom only (owner
-     request, 2026-10-17): 1.3 of its vertical rung, user and subagent alike.
+   - A USER, AGENT OR PEER PROMPT then sits 30% WIDER top and bottom only
+     (owner request, 2026-10-17): 1.3 of its vertical rung. A HELD prompt is
+     left out, so it keeps the 0.49 on a rung of its own.
    - AN INTERIM RESPONSE, the one with no fill and no border, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
      narrower text did (owner request, 2026-10-14): both tokens are multiplied
@@ -1973,9 +1974,12 @@ pre {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.7);
 }
 .bubble[data-variant="agent"],
-.bubble[data-variant="peer"],
-.bubble[data-variant="held"] {
+.bubble[data-variant="peer"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * 1.3);
+  --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
+}
+.bubble[data-variant="held"] {
+  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
 }
 .bubble[data-variant="user"] {

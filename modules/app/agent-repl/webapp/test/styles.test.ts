@@ -4576,7 +4576,8 @@ const variantSelector = (variant: string): string => `.bubble[data-variant="${va
  */
 const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly string[] }[] = [
   { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
-  { selectors: ["agent", "peer", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: ["agent", "peer"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: [variantSelector("held")], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [variantSelector("user")], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.final-response`], props: ["--bubble-pad-y"] },
@@ -5423,12 +5424,14 @@ describe("the stylesheet's real-height contract", () => {
  * compaction summary keep the base. An interim's gap then shrinks on every side
  * by as much as its narrower text did (owner request, 2026-10-14). Only a
  * prompt's and an interim's rungs move the horizontal token, so no other
- * bubble's sides move with the vertical ladder. Every prompt and the green
- * answer then sit 30% wider top and bottom (owner request, 2026-10-17).
+ * bubble's sides move with the vertical ladder. Every prompt but a held one,
+ * and the green answer, then sit 30% wider top and bottom (owner request,
+ * 2026-10-17).
  */
 describe("the padding ladder", () => {
   const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
   const PROMPT_Y = "calc(var(--bubble-pad-y-base)*0.49*1.3)";
+  const HELD_Y = "calc(var(--bubble-pad-y-base)*0.49)";
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
@@ -5453,7 +5456,7 @@ describe("the padding ladder", () => {
     { variant: "user", y: USER_Y, x: USER_X },
     { variant: "agent", y: PROMPT_Y, x: PROMPT_X },
     { variant: "peer", y: PROMPT_Y, x: PROMPT_X },
-    { variant: "held", y: PROMPT_Y, x: PROMPT_X },
+    { variant: "held", y: HELD_Y, x: PROMPT_X },
     { variant: "thinking", y: THINKING, x: BASE_X },
     { variant: "agentic", y: BASE, x: BASE_X },
     { variant: "compaction", y: BASE, x: BASE_X },
@@ -5481,6 +5484,14 @@ describe("the padding ladder", () => {
 
     // Assert
     expect(got).toEqual([USER_Y, USER_X, PROMPT_Y, PROMPT_X]);
+  });
+
+  it("leaves a held prompt out of the 30% wider top and bottom the other prompts got", () => {
+    // Arrange / Act
+    const got = [tokenOf("--bubble-pad-y", "held"), tokenOf("--bubble-pad-y", "agent")];
+
+    // Assert
+    expect(got).toEqual([HELD_Y, PROMPT_Y]);
   });
 
   it("gives the green answer 1.25 then 1.3 times a plain response's top and bottom", () => {
@@ -5543,7 +5554,8 @@ describe("the padding ladder", () => {
 
   it.each(PAD_LADDER)("sets nothing but its padding tokens on the $selectors rung", ({ selectors, props }) => {
     // Arrange / Act
-    const got = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(","))?.declarations ?? "")
+    // The fill rules key on the same selectors, so the rung is the one of them that pads.
+    const got = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === selectors.join(",") && /--bubble-pad-[xy]\s*:/.test(r.declarations))?.declarations ?? "")
       .split(";")
       .map((decl) => decl.split(":")[0]?.trim() ?? "")
       .filter((prop) => prop !== "");
