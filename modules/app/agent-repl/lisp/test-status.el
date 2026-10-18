@@ -5226,8 +5226,9 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
     ("red"       . agent-repl--color-thinking-red)
     ("turquoise" . agent-repl--color-usable-fault-turquoise)
     ("yellow"    . agent-repl--color-idle-async-yellow)
-    ("green"     . agent-repl--color-done-green))
-  "Each color name and the constant the tab bar paints it with.")
+    ("green"     . agent-repl--color-done-green)
+    ("orange"    . agent-repl--color-compaction-orange))
+  "Each color or ink name and the constant the tab bar paints it with.")
 
 (defun agent-repl-test-status--dark-value (color)
   "Return COLOR's dark value, read straight off render-colors.json."
@@ -5236,14 +5237,14 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
     (gethash color (gethash "dark" (gethash "color_values" (json-parse-buffer))))))
 
 (ert-deftest agent-repl-test-status-every-color-constant-is-the-files-dark-value ()
-  "Each tab color constant is render-colors.json\\='s dark value for its color."
+  "Each tab color constant is render-colors.json\='s dark value for its color."
   ;; Arrange / Act / Assert
   (dolist (pair agent-repl-test-status--color-constants)
     (should (equal (symbol-value (cdr pair))
                    (agent-repl-test-status--dark-value (car pair))))))
 
 (ert-deftest agent-repl-test-status-color-constants-cover-every-color ()
-  "The constants cover exactly the file\\='s closed set of colors."
+  "The constants cover exactly the colors and inks the file gives a value."
   ;; Arrange
   (let ((values agent-repl-status--color-values)
         (named (sort (mapcar #'car agent-repl-test-status--color-constants) #'string<)))
@@ -5268,7 +5269,7 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
                    (list "#1a7a1a" (agent-repl--tab-bar-legible-fg "#1a7a1a"))))))
 
 (ert-deftest agent-repl-test-every-colored-tab-face-matches-its-palette-row ()
-  "Each colored tab face\\='s ground and ink are the palette row\\='s own."
+  "Each colored tab face\='s ground and ink are the palette row\='s own."
   ;; Arrange / Act / Assert
   (dolist (pair agent-repl--tab-state-faces)
     (let ((attrs (cdar (face-default-spec (car pair))))

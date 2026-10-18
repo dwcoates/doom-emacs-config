@@ -440,16 +440,17 @@ titles, retries and code keywords wear it too.")
 
 A softened silver: #c0c0c0 taken three small steps less intense (owner
 ruling, 2026-10-18, with the sidebar's selected row and gutter bar;
-design-selection-less-intense.html beside this module).  Previously dormant — for a stretch, selection was an
-`:underline' alone and a tab's background carried only its connection
-COLOR (armed) or the panels-open EXTENT (any tab).  The owner overrode
-that: the SELECTED tab now paints this grey across whatever extent it
-would otherwise have painted — bracket-only or full — in place of its
-connection color, so the selected tab is legible-grey end to end and the
-underline (kept, belt-and-suspenders) is the secondary marker.  An
-UNSELECTED tab is untouched by this: it still carries its connection
-color (armed) or sits flush on the bar (un-armed), and still goes FULL
-exactly when its panels are open, per owner ruling 5 (2026-09-13).  See
+design-selection-less-intense.html beside this module).  Previously
+dormant — for a stretch, selection was an `:underline' alone and a tab's
+background carried only its connection COLOR (armed) or the panels-open
+EXTENT (any tab).  The owner overrode that: the SELECTED tab now paints
+this grey across whatever extent it would otherwise have painted —
+bracket-only or full — in place of its connection color, so the selected
+tab is legible-grey end to end and the underline (kept,
+belt-and-suspenders) is the secondary marker.  An UNSELECTED tab is
+untouched by this: it still carries its connection color (armed) or sits
+flush on the bar (un-armed), and still goes FULL exactly when its panels
+are open, per owner ruling 5 (2026-09-13).  See
 `agent-repl--tab-palette-row', `agent-repl--tab-default' and
 `agent-repl--tab-face' for where this grey is applied, and
 `agent-repl--tab-bar-legible-fg' for how the foreground is chosen
@@ -856,9 +857,11 @@ The workspace has an unseen notification.  The daemon sets
 CLEARS it when SelectWorkspace names the workspace, so an ordinary tab
 switch is the whole clearing act — no dedicated ack verb exists.")
 
-(defconst agent-repl--color-compaction-orange "#f97316"
+(defconst agent-repl--color-compaction-orange (agent-repl-status--color-value "orange")
   "The orange of the feed\='s compaction rule (`--compact-rule\=' in the
-webapp\='s dark theme), which a compacting turn\='s dot is inked with.")
+webapp\='s dark theme), which a compacting turn\='s dot is inked with.
+Its one value is render-colors.json\='s dark `orange\=' (owner ruling,
+2026-10-18), so the tab\='s dot and the webapp\='s orange are one color.")
 
 (defconst agent-repl--ink-by-name
   `(("red"    . ,agent-repl--color-thinking-red)

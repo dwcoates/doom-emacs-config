@@ -79,7 +79,14 @@
     "row is the light theme's set as it stood. The dark red and blue are the",
     "pastel ones taken 0.12 darker in OKLCH lightness, hue and strength kept",
     "(owner ruling, 2026-10-18; design-red-blue-darker.html beside this",
-    "module)."
+    "module).",
+    "",
+    "A glyph-only ink with one drawn value is here too: 'orange', the",
+    "compaction orange a compacting turn's dot is inked with and the feed's",
+    "compacted rule is drawn in, one value on every surface (owner ruling,",
+    "2026-10-18: the dark one taken stronger, #ffc07a -> #ff9646;",
+    "design-compact-orange.html beside this module). 'grey' has no value: each",
+    "surface draws it in its own muted text grey."
   ],
   "color_values": {
     "light": {
@@ -88,7 +95,8 @@
       "red": "#dc2626",
       "turquoise": "#0891b2",
       "yellow": "#f59e0b",
-      "green": "#16a34a"
+      "green": "#16a34a",
+      "orange": "#ea580c"
     },
     "dark": {
       "blue": "#7295d7",
@@ -96,7 +104,8 @@
       "red": "#c44746",
       "turquoise": "#1cd1ec",
       "yellow": "#eab00b",
-      "green": "#318c2f"
+      "green": "#318c2f",
+      "orange": "#ff9646"
     }
   },
   "colors": [

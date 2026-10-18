@@ -231,7 +231,7 @@
   /* The rule a COMPACTION draws above its "context compacted" stamp: orange,
      the softer sibling of the --clear-divider red, because a compaction
      summarizes the context above rather than dropping it the way a clear does. */
-  --compact-rule: #ea580c;
+  /* --compact-rule: render-colors.json#color_values's orange (src/vocab.ts). */
   /* The border around a turn's final response: green, the palette's success
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
@@ -546,9 +546,9 @@
     --suite-running: #e0b603;
     /* The cleared rule is the red status's red (owner ruling, 2026-10-17). */
     --clear-divider: var(--err);
-    /* A light amber, apart from the cleared rule's red at a glance (owner
-       ruling, 2026-10-17: the two blurred as neighboring oranges). */
-    --compact-rule: #ffc07a;
+    /* --compact-rule, apart from the cleared rule's red at a glance (owner
+       ruling, 2026-10-17: the two blurred as neighboring oranges), is
+       render-colors.json#color_values's dark orange (src/vocab.ts). */
     --final-response: var(--ok);
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */

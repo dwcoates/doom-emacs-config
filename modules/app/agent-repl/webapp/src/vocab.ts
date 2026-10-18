@@ -100,6 +100,17 @@ export const COLOR_TOKENS: Readonly<Record<Exclude<Color, "none">, string>> = {
   green: "--ok",
 };
 
+/**
+ * The stylesheet token each glyph-only ink with a drawn value paints through:
+ * the compaction orange, which the compacted rule and a compacting dot read.
+ */
+export const INK_TOKENS: Readonly<Record<"orange", string>> = {
+  orange: "--compact-rule",
+};
+
+/** A name `color_values` gives a value: one of the six colors, or a glyph-only ink. */
+export type ColorValueName = Exclude<Color, "none"> | keyof typeof INK_TOKENS;
+
 /** The themes `color_values` carries, the light one first. */
 export const COLOR_THEMES = ["light", "dark"] as const;
 
@@ -109,7 +120,7 @@ export const COLOR_THEMES = ["light", "dark"] as const;
  * (owner ruling, 2026-10-17). The file is checked in and validated by every
  * suite, so a missing value is a broken contract, never a runtime condition.
  */
-export function colorValue(theme: (typeof COLOR_THEMES)[number], color: Exclude<Color, "none">): string {
+export function colorValue(theme: (typeof COLOR_THEMES)[number], color: ColorValueName): string {
   const values: Readonly<Record<string, Record<string, string>>> = renderColors.color_values;
   const value = values[theme]?.[color];
   if (value === undefined) {
@@ -121,7 +132,7 @@ export function colorValue(theme: (typeof COLOR_THEMES)[number], color: Exclude<
 /** The CSS defining every color token from `color_values`, in both themes. */
 export function colorValuesStylesheet(): string {
   const block = (theme: (typeof COLOR_THEMES)[number]): string =>
-    (Object.entries(COLOR_TOKENS) as [Exclude<Color, "none">, string][])
+    (Object.entries({ ...COLOR_TOKENS, ...INK_TOKENS }) as [ColorValueName, string][])
       .map(([color, token]) => `${token}: ${colorValue(theme, color)};`)
       .join(" ");
   return `:root { ${block("light")} }\n@media (prefers-color-scheme: dark) { :root { ${block("dark")} } }`;
