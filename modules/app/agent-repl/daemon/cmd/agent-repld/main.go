@@ -112,6 +112,9 @@ type options struct {
 	// its retirement, which is why it is overridable at all. Zero leaves
 	// footer.DefaultMomentaryDwell in force.
 	footerMomentaryDwell time.Duration
+	// startedIn is the directory this process was started in, before main
+	// moved it to stableDir; empty when run is called in-process.
+	startedIn string
 	// selfRepo overrides the daemon's own checkout identity. It is a TEST
 	// HOOK: the merge orchestrator keys its two methods on whether a target is
 	// the same repository as this, and a test needs to say so explicitly.
@@ -215,6 +218,12 @@ func main() {
 			os.Exit(exitFailure)
 		}
 	}
+	startedIn, err := enterStableDir(opts, os.Getwd, os.Chdir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(exitFailure)
+	}
+	opts.startedIn = startedIn
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	switch err := run(ctx, opts, productionHooks()); {
