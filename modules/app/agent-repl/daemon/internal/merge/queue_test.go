@@ -1607,3 +1607,74 @@ func TestAMergeTakenBackWithNoLeaseRecordedIsADefect(t *testing.T) {
 	}()
 	_ = h.o.dropPendingResume(context.Background(), theWorkspace, doc, CauseUserDrop)
 }
+
+// TestTheQueueTabDrawsAnAsyncMergeAsItsRequester covers the queue view's
+// naming: an ordinary merge's entry is drawn as its own workspace, and an
+// async merge's -- whose entry is the hidden merge workspace -- as the
+// requester the sidebar marks merging, so its jump never reveals the merge
+// workspace.
+func TestTheQueueTabDrawsAnAsyncMergeAsItsRequester(t *testing.T) {
+	type drawn struct {
+		id, name, dir string
+	}
+	tests := []struct {
+		name    string
+		ws      ids.WorkspaceID
+		observe func(drawn) string
+		want    func(h *harness, merge wsm.Workspace) string
+	}{
+		{name: "an ordinary merge names itself", ws: theWorkspace,
+			observe: func(d drawn) string { return d.name },
+			want:    func(*harness, wsm.Workspace) string { return "requester" }},
+		{name: "an async merge names its requester", ws: theMergeWorkspace,
+			observe: func(d drawn) string { return d.name },
+			want:    func(*harness, wsm.Workspace) string { return "requester" }},
+		{name: "an async merge jumps to its requester", ws: theMergeWorkspace,
+			observe: func(d drawn) string { return d.id },
+			want:    func(*harness, wsm.Workspace) string { return string(theWorkspace) }},
+		{name: "an async merge carries its requester's directory", ws: theMergeWorkspace,
+			observe: func(d drawn) string { return d.dir },
+			want:    func(h *harness, _ wsm.Workspace) string { return h.sourceD }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the requester, and the merge workspace forked for its async merge.
+			h := newHarness(t)
+			h.register(theWorkspace, "requester")
+			merge := h.registerMergeWorkspace(theWorkspace, "req-1", "feature")
+			entries := []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: tt.ws, Position: 1, EnqueuedAt: h.clock()}}
+
+			// Act.
+			view, err := h.o.viewQueue(context.Background(), h.repoKey(), entries)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("viewQueue: %v", err)
+			}
+			entry := view.snapshot(entries, tt.ws).GetCurrent()
+			got := tt.observe(drawn{id: entry.GetWorkspace().GetRef().GetId(), name: entry.GetLabel().GetText(),
+				dir: entry.GetWorkspace().GetRef().GetDir()})
+			if want := tt.want(h, merge); got != want {
+				t.Fatalf("drawn as %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead covers the
+// failure: a requester the store cannot answer fails the drawing, rather than
+// naming the hidden merge workspace in its place.
+func TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead(t *testing.T) {
+	// Arrange: a merge workspace whose requester is not registered.
+	h := newHarness(t)
+	h.registerMergeWorkspace("ws-gone", "req-1", "feature")
+	entries := []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: theMergeWorkspace, Position: 1, EnqueuedAt: h.clock()}}
+
+	// Act.
+	_, err := h.o.viewQueue(context.Background(), h.repoKey(), entries)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("viewQueue drew a merge whose requester could not be read")
+	}
+}

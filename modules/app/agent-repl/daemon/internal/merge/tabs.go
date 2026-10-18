@@ -479,13 +479,17 @@ func branchLabel(source, target string) string {
 // user sees the front's progress, and every entry behind it when it was
 // queued. The front workspace itself is shown nothing about the queue: its
 // bubble is busy merging.
-func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, names map[ids.WorkspaceID]string, dirs map[ids.WorkspaceID]string, standings []*frontendv1.FeedMergeQueueEntry) *frontendv1.FeedMergeQueue {
+//
+// shown, names and dirs are keyed by each entry's own workspace and answer
+// the workspace it is drawn as (queueView: an async merge is drawn as its
+// requester). "You are here" still compares the entry's own workspace.
+func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, shown map[ids.WorkspaceID]ids.WorkspaceID, names map[ids.WorkspaceID]string, dirs map[ids.WorkspaceID]string, standings []*frontendv1.FeedMergeQueueEntry) *frontendv1.FeedMergeQueue {
 	snap := &frontendv1.FeedMergeQueue{}
 	seenSelf := false
 	for i, entry := range entries {
 		row := &frontendv1.FeedMergeQueueEntry{
 			Workspace: &frontendv1.FeedMergeQueueWorkspace{Ref: &workspacev1.WorkspaceRef{
-				Id:  string(entry.Workspace),
+				Id:  string(shown[entry.Workspace]),
 				Dir: dirs[entry.Workspace],
 			}},
 			Label:  &frontendv1.FeedMergeQueueLabel{Text: names[entry.Workspace]},
