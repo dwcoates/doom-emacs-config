@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { RosterRowSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
@@ -13,7 +14,14 @@ import renderColors from "../../proto/vocab/render-colors.json";
 import paintClasses from "../../proto/vocab/paint-classes.json";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
+import stylesheet from "../src/styles.css?raw";
+import { rulesOf } from "./stylesheet.js";
 import {
+  COLOR_THEMES,
+  COLOR_TOKENS,
+  colorValue,
+  colorValuesStylesheet,
+  installColorValues,
   FEED_MERGE_HEAD_GLYPH,
   composerClosedFor,
   FEED_OUTCOME_MARKER_GLYPH_KEYS,
@@ -488,5 +496,78 @@ describe("the outcome marker's families", () => {
 
   it("refuses a family the table names no glyph for", () => {
     expect(() => feedOutcomeMarkerGlyph("nonesuch")).toThrow(MalformedView);
+  });
+});
+
+describe("color_values, each color's one value per theme", () => {
+  const COLORS = Object.keys(COLOR_TOKENS) as (keyof typeof COLOR_TOKENS)[];
+  const CASES = COLOR_THEMES.flatMap((theme) => COLORS.map((color) => [theme, color] as const));
+
+  it("names a token for exactly the file's colors", () => {
+    // Arrange / Act
+    const named = Object.keys(COLOR_TOKENS).sort();
+
+    // Assert
+    expect(named).toEqual([...renderColors.colors].sort());
+  });
+
+  it.each(CASES)("reads the %s value of %s from the file", (theme, color) => {
+    // Arrange
+    const values: Record<string, Record<string, string>> = renderColors.color_values;
+
+    // Act
+    const got = colorValue(theme, color);
+
+    // Assert
+    expect(got).toBe(values[theme]![color]);
+  });
+
+  it("refuses a color the file gives no value", () => {
+    // Arrange
+    const unknown = "chartreuse" as keyof typeof COLOR_TOKENS;
+
+    // Act / Assert
+    expect(() => colorValue("dark", unknown)).toThrow(/no dark value for 'chartreuse'/);
+  });
+
+  it.each(CASES)("defines the %s theme's %s token from the file", (theme, color) => {
+    // Arrange
+    const css = colorValuesStylesheet();
+    const darkAt = css.indexOf("@media (prefers-color-scheme: dark)");
+    const block = theme === "light" ? css.slice(0, darkAt) : css.slice(darkAt);
+
+    // Act
+    const declared = block.includes(`${COLOR_TOKENS[color]}: ${colorValue(theme, color)};`);
+
+    // Assert
+    expect(declared).toBe(true);
+  });
+
+  it("installs the tokens as the head's first stylesheet, ahead of every rule that reads them", () => {
+    // Arrange
+    const doc = document.implementation.createHTMLDocument("vocab");
+    doc.head.append(doc.createElement("link"));
+
+    // Act
+    installColorValues(doc);
+
+    // Assert
+    const first = doc.head.firstElementChild as HTMLStyleElement;
+    expect([first.tagName, first.dataset.source, first.textContent]).toEqual([
+      "STYLE",
+      "render-colors.json#color_values",
+      colorValuesStylesheet(),
+    ]);
+  });
+
+  it.each(Object.values(COLOR_TOKENS))("leaves %s's value to the file: styles.css declares none", (token) => {
+    // Arrange
+    const declaration = new RegExp(`(?:^|;)\\s*${token}\\s*:`);
+
+    // Act
+    const declaredInCss = rulesOf(stylesheet).some((rule) => declaration.test(rule.declarations));
+
+    // Assert
+    expect(declaredInCss).toBe(false);
   });
 });

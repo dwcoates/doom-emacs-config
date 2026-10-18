@@ -958,6 +958,12 @@ One level above `agent-repl-test--module-dir': the elisp lives in
 `lisp/', while `proto/', `prompts/', `webapp/', `bin/' and friends sit at
 the module root.")
 
+(defconst agent-repl-test--render-colors-path
+  (expand-file-name "proto/vocab/render-colors.json" agent-repl-test--module-root)
+  "Absolute path of the checked-in cross-language color contract.
+Every suite that reads render-colors.json names it through this, so no two
+read different copies.")
+
 (defun agent-repl-test--generated-go-text (relative)
   "Return the text of RELATIVE under the checked-in `proto/gen/go/' tree.
 Signals when the file is absent — a missing generated binding means the

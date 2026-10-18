@@ -27,22 +27,18 @@
   (load (expand-file-name "test-helpers.el" dir) nil t))
 
 (defconst agent-repl-test--color-fixture
-  (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
-         (path (expand-file-name "../proto/vocab/render-colors.json" dir)))
-    (with-temp-buffer
-      (insert-file-contents path)
-      (let ((json-object-type 'alist)
-            (json-array-type 'list)
-            (json-key-type 'string))
-        (json-read))))
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--render-colors-path)
+    (let ((json-object-type 'alist)
+          (json-array-type 'list)
+          (json-key-type 'string))
+      (json-read)))
   "The checked-in cross-language color assignment, decoded.")
 
 (defconst agent-repl-test--color-fixture-text
-  (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
-         (path (expand-file-name "../proto/vocab/render-colors.json" dir)))
-    (with-temp-buffer
-      (insert-file-contents path)
-      (buffer-string)))
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--render-colors-path)
+    (buffer-string))
   "The fixture's raw text, for the assertions that are about what is ABSENT.")
 
 (defun agent-repl-test--fixture (key)

@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import renderColors from "../../proto/vocab/render-colors.json";
+import { colorValuesStylesheet } from "../src/vocab.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
@@ -3960,8 +3961,8 @@ describe("the rail's tone rules", () => {
 });
 
 describe("the turquoise token", () => {
-  it("defines --turquoise in both themes", () => {
-    const defs = rulesOf(stylesheet).filter((rule) =>
+  it("defines --turquoise in both themes, from the shared vocabulary", () => {
+    const defs = rulesOf(colorValuesStylesheet()).filter((rule) =>
       /(?:^|;)\s*--turquoise\s*:/.test(rule.declarations),
     );
     expect(defs.length).toBeGreaterThanOrEqual(2);

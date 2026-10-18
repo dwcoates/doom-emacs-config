@@ -72,7 +72,7 @@ import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { shellElements } from "./shell.js";
-import { composerClosedFor } from "./vocab.js";
+import { composerClosedFor, installColorValues } from "./vocab.js";
 import { childrenMatching } from "./dom.js";
 
 export async function boot(): Promise<void> {
@@ -84,6 +84,9 @@ export async function boot(): Promise<void> {
   // forever, behind a `boot_failed` warning. See the catch.
   let opened: AppContext | null = null;
   try {
+    // The status colors' values come from the shared vocabulary, never from
+    // styles.css, so they go in before anything is drawn.
+    installColorValues(document);
     // THE LOGGER GOES IN BEFORE THE FIRST THING THAT LOGS, AND THAT ORDER IS
     // THE WHOLE OF THIS BLOCK'S SHAPE.
     //
