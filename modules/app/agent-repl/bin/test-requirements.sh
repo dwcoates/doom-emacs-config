@@ -433,6 +433,79 @@ test_uninstall_removes_the_service() {
      && ran "launchctl bootout gui/$(id -u)"; then pass "uninstall boots the service out and removes its plist and binary"; else fail "service uninstall" "rc=$RC" "$OUT"; fi
 }
 
+# command_service_case: a service whose program is an installed command, with
+# one config file it copies into the cache.
+command_service_case() {
+  new_case
+  mkdir -p "$CASE/module/launchd" "$CASE/module/cfg"
+  printf '<plist><string>/usr/bin/env</string><string>svcd</string></plist>\n' >"$CASE/module/launchd/com.example.svcd.plist"
+  printf 'scrape_interval: 15s\n' >"$CASE/module/cfg/scrape.yml"
+  manifest '[{"id": "svcd", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "com.example.svcd", "plist": "launchd/com.example.svcd.plist", "command": "svcd", "files": [{"from": "cfg/scrape.yml", "to": "metrics/scrape.yml"}]}]'
+}
+
+test_install_loads_a_command_service_without_building_and_copies_its_files() {
+  command_service_case
+  tool svcd ""
+  run install
+  if [ "$RC" -eq 0 ] && ! ran "build " && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" \
+     && ran "launchctl bootstrap gui/$(id -u) $CASE/home/Library/LaunchAgents/com.example.svcd.plist" && has "ok          svcd: com.example.svcd loaded"; then
+    pass "install loads a command service without building it and copies its files into the cache"
+  else fail "command service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_command_service_whose_command_is_missing_is_missing_and_not_installed() {
+  command_service_case
+  run install
+  if [ "$RC" -eq 1 ] && has "svcd is not on PATH" && ! ran "launchctl bootstrap"; then
+    pass "a command service whose command is absent is missing, and install loads nothing"
+  else fail "missing command service" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_changed_service_file_is_outdated_and_reinstalled() {
+  command_service_case
+  tool svcd ""
+  run install
+  printf 'scrape_interval: 30s\n' >"$CASE/module/cfg/scrape.yml"
+  : >"$CASE/transcript"
+  run install
+  if [ "$RC" -eq 0 ] && has "svcd is outdated" && has "lacks the module's copy of metrics/scrape.yml" \
+     && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" && ran "launchctl kickstart -k gui/$(id -u)/com.example.svcd"; then
+    pass "a service file that differs from the module's is outdated, copied again and the service restarted"
+  else fail "stale service file" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_uninstall_removes_a_command_services_files_and_leaves_its_command() {
+  command_service_case
+  tool svcd ""
+  run install
+  run uninstall
+  if [ "$RC" -eq 0 ] && [ ! -e "$CASE/home/.cache/agent-repl/metrics/scrape.yml" ] && [ -x "$CASE/stubs/svcd" ] \
+     && [ ! -e "$CASE/home/Library/LaunchAgents/com.example.svcd.plist" ]; then
+    pass "uninstall removes a command service's plist and files and leaves the installed command alone"
+  else fail "command service uninstall" "rc=$RC" "$OUT"; fi
+}
+
+test_a_service_with_both_a_command_and_a_build_is_refused() {
+  new_case
+  manifest '[{"id": "x", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "plist": "p", "command": "c", "build_target": "b", "binary": "b"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'x: launchd_service needs either "command" or both "build_target" and "binary"'; then pass "a service naming both a command and a build is refused"; else fail "command and build" "rc=$RC" "$OUT"; fi
+}
+
+test_a_service_with_neither_a_command_nor_a_build_is_refused() {
+  new_case
+  manifest '[{"id": "x", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "plist": "p", "binary": "b"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'x: launchd_service needs either "command" or both "build_target" and "binary"'; then pass "a service naming neither a command nor a whole build is refused"; else fail "neither command nor build" "rc=$RC" "$OUT"; fi
+}
+
+test_a_service_file_without_a_destination_is_refused() {
+  new_case
+  manifest '[{"id": "x", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "plist": "p", "command": "c", "files": [{"from": "a"}]}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'x: every launchd_service file needs "from" and "to"'; then pass "a service file without a destination is refused"; else fail "file without to" "rc=$RC" "$OUT"; fi
+}
+
 # ---------------------------------------------------------------------------
 # download.
 # ---------------------------------------------------------------------------
