@@ -23,6 +23,7 @@ import {
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
 import {
+  STATUS_COLOR_CYCLE_MS,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
   WAVING_STATUS_ARMS,
@@ -912,13 +913,24 @@ describe("the footer status word's whole-word colour sweep", () => {
     expect(style).not.toMatch(/color:\s*transparent/);
   });
 
-  it("renders the first letter's delay on the word holder, so the sweep shares the wave's clock", () => {
-    // Arrange / Act
-    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
-    const holder = row.querySelector(".footer-status .pfooter-status-word");
+  it("renders the colour sweep's own delay on the word holder, on the slower colour cycle", () => {
+    // Arrange — a first draw, then the clock passes one whole letter-wave cycle.
+    const delays = (row: HTMLElement): { holder: number; head: number } => {
+      const holder = row.querySelector(".footer-status .pfooter-status-word");
+      const head = statusLetters(row)[0];
+      if (holder === null || head === undefined) throw new Error("no status word drawn");
+      return { holder: inlineDelayMs(holder), head: inlineDelayMs(head) };
+    };
+    const before = delays(drawStrip({ status: withSubStatus("working", "thinking") }).row);
+    vi.setSystemTime(NOW + STATUS_WAVE_CYCLE_MS + 900);
 
-    // Assert
-    expect(holder?.getAttribute("style")).toBe(statusLetters(row)[0]?.getAttribute("style"));
+    // Act
+    const after = delays(drawStrip({ status: withSubStatus("working", "thinking") }).row);
+
+    // Assert — the head letter wraps its cycle while the holder's colour
+    // cycle, 40% longer per pass, carries the full elapsed time.
+    expect(after.head).toBe((before.head + 900) % STATUS_WAVE_CYCLE_MS);
+    expect(after.holder).toBe((before.holder + STATUS_WAVE_CYCLE_MS + 900) % STATUS_COLOR_CYCLE_MS);
   });
 
   it("continues the word's colour phase across a redraw rather than restarting at zero", () => {
@@ -935,7 +947,7 @@ describe("the footer status word's whole-word colour sweep", () => {
     const after = holderDelay(drawStrip({ status: withSubStatus("working", "thinking") }).row);
 
     // Assert
-    expect(after).toBe((before + 900) % STATUS_WAVE_CYCLE_MS);
+    expect(after).toBe((before + 900) % STATUS_COLOR_CYCLE_MS);
   });
 
   it("sets no colour of its own on any letter, so every letter wears the word's hue", () => {

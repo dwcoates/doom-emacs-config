@@ -21,6 +21,8 @@ import {
   bubbleWaveStyle,
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
+  STATUS_COLOR_CYCLE_MS,
+  STATUS_COLOR_PERIOD_MS,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
   STATUS_WAVE_PERIOD_MS,
@@ -29,6 +31,8 @@ import {
   armPromptWave,
   promptWaves,
   setPromptWave,
+  statusColorStyle,
+  statusWaveStyle,
   statusWordWaves,
 } from "../src/breathing.js";
 import { drawFeedAgentPrompt } from "../src/feed/rows/agent-prompt.js";
@@ -681,6 +685,76 @@ describe("StatusWave: the footer status word's travelling letter bulge", () => {
 
     // Assert
     expect(got).toBe(0);
+  });
+});
+
+describe("StatusWave: the footer status word's slower colour sweep", () => {
+  it("runs the colour period 40% slower than the letter wave, in whole milliseconds", () => {
+    // Arrange / Act / Assert — exactly 3640, matching the CSS's 3.64s.
+    expect(STATUS_COLOR_PERIOD_MS).toBe(3640);
+    expect(STATUS_COLOR_PERIOD_MS / STATUS_WAVE_PERIOD_MS).toBeCloseTo(1.4);
+  });
+
+  it("reduces the colour delay modulo TWO colour periods, because the rule alternates", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.colorDelayMs(NOW);
+
+    // Act
+    const got = wave.colorDelayMs(NOW + STATUS_COLOR_PERIOD_MS + 500);
+
+    // Assert — still on the backward pass, not folded onto the forward one.
+    expect(got).toBe(STATUS_COLOR_PERIOD_MS + 500);
+  });
+
+  it("wraps at the end of the colour sweep's forward-and-back cycle", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.colorDelayMs(NOW);
+
+    // Act
+    const got = wave.colorDelayMs(NOW + STATUS_COLOR_CYCLE_MS);
+
+    // Assert
+    expect(got).toBe(0);
+  });
+
+  it("shares the letter wave's epoch, whichever of the two is read first", () => {
+    // Arrange — the colour sweep stamps the epoch.
+    const wave = new StatusWave();
+    wave.colorDelayMs(NOW);
+
+    // Act
+    const got = wave.delayMs(NOW + 900, 0);
+
+    // Assert
+    expect(got).toBe(900);
+  });
+
+  it("floors the colour delay at zero when the clock goes backwards", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.colorDelayMs(NOW);
+
+    // Act
+    const got = wave.colorDelayMs(NOW - 5000);
+
+    // Assert
+    expect(got).toBe(0);
+  });
+});
+
+describe("bubbleWaveStyle, statusColorStyle and statusWaveStyle: the inline delays", () => {
+  it.each([
+    ["the prompt bubble's wave", () => bubbleWaveStyle(NOW)],
+    ["the colour sweep", () => statusColorStyle(NOW)],
+    ["a letter's bulge", () => statusWaveStyle(3, NOW)],
+  ])("renders %s as one whole-millisecond negative animation-delay", (_name, style) => {
+    // Arrange / Act
+    const got = style();
+
+    // Assert — both share one style shape.
+    expect(got).toMatch(/^animation-delay:-\d+ms$/);
   });
 });
 

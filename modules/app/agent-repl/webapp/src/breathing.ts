@@ -256,7 +256,7 @@ export const PROMPT_WAVE_WORKING = "working";
  * it, which is one more thing to get wrong for no gain.
  */
 export function bubbleWaveStyle(nowMs: number = Date.now()): string {
-  return `animation-delay:-${Math.round(bubbleWave.delayMs(nowMs))}ms`;
+  return animationDelayStyle(bubbleWave.delayMs(nowMs));
 }
 
 /**
@@ -348,6 +348,22 @@ export const STATUS_WAVE_CYCLE_MS = STATUS_WAVE_PERIOD_MS * 2;
  */
 export const STATUS_WAVE_LETTER_OFFSET_MS = STATUS_WAVE_PERIOD_MS / 10;
 
+/**
+ * The status word's COLOUR SWEEP period: 40% slower than the letter wave
+ * (owner ruling, 2026-10-18), so the hues drift past more calmly than the
+ * bulge travels. Must stay in step with the `pfooter-status-color` duration.
+ *
+ * It is its own period on the SAME epoch, so the sweep still continues across a
+ * push; only the modulus differs from the bulge's.
+ */
+export const STATUS_COLOR_PERIOD_MS = (STATUS_WAVE_PERIOD_MS * 14) / 10;
+
+/**
+ * The smallest interval the colour sweep repeats over, two periods for the same
+ * `alternate` reason as {@link STATUS_WAVE_CYCLE_MS}.
+ */
+export const STATUS_COLOR_CYCLE_MS = STATUS_COLOR_PERIOD_MS * 2;
+
 /** The page-global wave every footer status word renders against. */
 export class StatusWave {
   private epoch = new AnimationEpoch();
@@ -356,6 +372,11 @@ export class StatusWave {
   delayMs(nowMs: number, index: number): number {
     const elapsed = this.epoch.elapsedMs(nowMs) + index * STATUS_WAVE_LETTER_OFFSET_MS;
     return elapsed % STATUS_WAVE_CYCLE_MS;
+  }
+
+  /** The word's colour sweep offset, in `[0, STATUS_COLOR_CYCLE_MS)`. */
+  colorDelayMs(nowMs: number): number {
+    return this.epoch.elapsedMs(nowMs) % STATUS_COLOR_CYCLE_MS;
   }
 }
 
@@ -404,5 +425,19 @@ export function statusWordWaves(armCase: string): boolean {
  * seeks to 0% and the wave restarts at the word's head on each push.
  */
 export function statusWaveStyle(index: number, nowMs: number = Date.now()): string {
-  return `animation-delay:-${Math.round(statusWave.delayMs(nowMs, index))}ms`;
+  return animationDelayStyle(statusWave.delayMs(nowMs, index));
+}
+
+/**
+ * The inline style the status word's holder renders with: its colour sweep's
+ * own negative delay, on the slower colour period, emitted at every draw so the
+ * sweep continues across a push.
+ */
+export function statusColorStyle(nowMs: number = Date.now()): string {
+  return animationDelayStyle(statusWave.colorDelayMs(nowMs));
+}
+
+/** A negative `animation-delay` of DELAY ms, as a whole inline style value. */
+function animationDelayStyle(delayMs: number): string {
+  return `animation-delay:-${Math.round(delayMs)}ms`;
 }

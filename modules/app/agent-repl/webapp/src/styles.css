@@ -4227,12 +4227,14 @@ html[data-page-unshown] *::after {
    NO `animation-delay` HERE, on purpose: each letter renders its own negative
    one inline, which is what carries the wave's phase across a footer push, and a
    delay declared in this rule would be the value that inline style exists to
-   override. The word holder likewise renders the FIRST letter's delay inline
-   for its colour sweep, so the sweep shares the bulge's epoch and period and
-   continues across a push the same way; there is no second clock. */
+   override. The word holder likewise renders its own delay inline for its
+   colour sweep, on the bulge's epoch, so the sweep continues across a push the
+   same way; there is no second clock. The sweep runs 40% SLOWER than the bulge
+   (owner ruling, 2026-10-18): its 3.64s duration must stay in step with
+   STATUS_COLOR_PERIOD_MS (breathing.ts). */
 .pfooter-status-word {
   white-space: pre;
-  animation: pfooter-status-color 2.6s ease-in-out infinite alternate;
+  animation: pfooter-status-color 3.64s ease-in-out infinite alternate;
 }
 .pfooter-wave-letter {
   display: inline-block;

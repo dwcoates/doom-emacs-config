@@ -66,6 +66,7 @@ import {
   STATUS_WAVE_LETTER_CLASS,
   STATUS_WAVE_PROGRESS,
   STATUS_WAVE_WORD_CLASS,
+  statusColorStyle,
   statusWaveStyle,
   statusWordWaves,
 } from "../breathing.js";
@@ -296,9 +297,9 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * (`pfooter-status-color`) that sweeps its `color` through a pastel rainbow hue
  * cycle from the arm tone and back, and the letters inherit it, so the word as
  * a whole changes hue rather than each letter on its own stagger (owner ruling,
- * 2026-10-17). The holder renders the FIRST letter's inline delay, so the sweep
- * rides the bulge's epoch and period and continues across a push with no second
- * clock. The colour is the holder's plain `color` — never a `background-clip:
+ * 2026-10-17). The holder renders its own inline delay on the bulge's epoch
+ * but the 40% slower colour period (owner ruling, 2026-10-18), so the sweep
+ * continues across a push with no second clock. The colour is the holder's plain `color` — never a `background-clip:
  * text` gradient, which blanked the word once because the transparent
  * text-fill inherited into these split letters. Every keyframe stop is opaque
  * and the rest stop is the arm tone, so a stopped word is always legible and
@@ -326,7 +327,7 @@ function drawStatusWord(word: HTMLElement, armCase: string): void {
   word.setAttribute(STATUS_WAVE_ATTRIBUTE, STATUS_WAVE_PROGRESS);
   const holder = document.createElement("span");
   holder.className = STATUS_WAVE_WORD_CLASS;
-  holder.setAttribute("style", statusWaveStyle(0));
+  holder.setAttribute("style", statusColorStyle());
   [...text].forEach((character, index) => {
     if (character === " ") {
       holder.appendChild(document.createTextNode(" "));
