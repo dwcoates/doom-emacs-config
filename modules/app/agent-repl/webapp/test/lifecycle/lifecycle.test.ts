@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createRevealRelay } from "../../src/lifecycle/reveal-relay.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -438,6 +439,7 @@ function lifecycleClient(script: {
 
 type WatchWebWorkspaceResponseInit =
   | { push: { case: "transferred"; value: { address: string } } }
+  | { push: { case: "revealRow"; value: { row: { value: string } } } }
   | {
       push: {
         case: "sessionIdentity";
@@ -461,6 +463,36 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
 }
 
+describe("startLifecycle: a row the daemon asks the page to reveal", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("hands the web stream's reveal_row to the reveal relay", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const revealed: string[] = [];
+    const reveal = async function* (): AsyncIterable<WatchWebWorkspaceResponseInit> {
+      yield { push: { case: "revealRow", value: { row: { value: "row-merge-head" } } } };
+    };
+    const { client } = lifecycleClient({ web: reveal });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, {
+      drainBannerHost: host,
+      newsDigest: NO_DIGEST,
+      reveals: { request: (row) => revealed.push(row.value) },
+    });
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(revealed).toEqual(["row-merge-head"]);
+  });
+});
+
 describe("startLifecycle: the handover", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -479,7 +511,7 @@ describe("startLifecycle: the handover", () => {
     const { client } = lifecycleClient({ web: transferred });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     // ASSERT (before dispose: disposing takes the banner down by design)
     expect(host.textContent).toBe("workspace moved to 127.0.0.1:8123");
@@ -492,7 +524,7 @@ describe("startLifecycle: the handover", () => {
     const { client, state } = lifecycleClient({ web: transferred });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT: read off the entry tag `beforeEach` above wrote into the document.
@@ -505,7 +537,7 @@ describe("startLifecycle: the handover", () => {
     const { client } = lifecycleClient({ web: transferred });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT
@@ -519,7 +551,7 @@ describe("startLifecycle: the handover", () => {
     const first = client;
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT: the client the page holds is untouched — no transport was built.
@@ -533,7 +565,7 @@ describe("startLifecycle: the handover", () => {
     const { client } = lifecycleClient({ web: transferred });
     const ctx = lifecycleContext(client, sink, fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     await vi.advanceTimersByTimeAsync(10_000);
     handle.dispose();
@@ -548,7 +580,7 @@ describe("startLifecycle: the handover", () => {
     const { client, state } = lifecycleClient({ web: transferred });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT + ASSERT
-    expect(() => startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST })).toThrow(WebappBuildUnknown);
+    expect(() => startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() })).toThrow(WebappBuildUnknown);
     await settle();
     expect(state.webRequests).toEqual([]);
   });
@@ -564,7 +596,7 @@ describe("startLifecycle: the handover", () => {
     });
     const ctx = lifecycleContext(client, sink, fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT: the core files the unreadable frame rather than tearing down.
@@ -592,7 +624,7 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     // ASSERT (before dispose: disposing takes the banner down by design)
     expect(host.textContent).toContain("daemon restart scheduled · deploy");
@@ -615,6 +647,7 @@ describe("startLifecycle: the daemon stream", () => {
     const handle = startLifecycle(ctx, {
       drainBannerHost: host,
       newsDigest: { apply: (standing) => applied.push(standing) },
+      reveals: createRevealRelay(),
     });
     await settle();
     handle.dispose();
@@ -628,7 +661,7 @@ describe("startLifecycle: the daemon stream", () => {
     const { client, state } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT: the daemon refuses a WatchDaemon naming no client (REQUIRED oneof).
@@ -655,7 +688,7 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, sink, fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT
@@ -682,7 +715,7 @@ describe("startLifecycle: the daemon stream", () => {
       },
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     // ACT
     ctx.noteLinkRestored();
@@ -710,7 +743,7 @@ describe("startLifecycle: the daemon stream", () => {
       },
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     // ACT
     ctx.notePush();
@@ -724,7 +757,7 @@ describe("startLifecycle: the daemon stream", () => {
     const host = document.createElement("div");
     const { client } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ACT / ASSERT: the banner is gone with the mount, and a late frame or a
@@ -754,7 +787,7 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     // ASSERT (before dispose: disposing takes the banner down by design)
     expect(host.textContent).toContain("daemon restarting · rollout");
@@ -776,7 +809,7 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT
@@ -794,7 +827,7 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, sink, fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     handle.dispose();
     // ASSERT
@@ -815,7 +848,7 @@ describe("workspaceMoved", () => {
     const host = document.createElement("div");
     const { client } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     // ACT
     const handled = workspaceMoved("127.0.0.1:7");
@@ -1249,7 +1282,7 @@ describe("startLifecycle: the daemon answering again", () => {
       new RecordingSink(),
       fakeTicker(),
     );
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     expect(host.textContent).toContain("daemon restarting");
     // ACT: wait out the reopen backoff.
@@ -1407,7 +1440,7 @@ describe("startLifecycle: the session identity", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
-    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST });
+    const handle = startLifecycle(ctx, { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay() });
     await settle();
     log.info("after the push", { operation: "test.after-push" });
     // ASSERT

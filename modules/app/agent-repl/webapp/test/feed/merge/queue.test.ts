@@ -17,6 +17,7 @@ import {
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import {
   FeedMergeQueueSchema,
+  FeedMergeQueueBubbleSchema,
   FeedMergeQueueEntrySchema,
   type FeedMergeQueue,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -281,6 +282,53 @@ describe("the entry click is SelectWorkspace and nothing else (R8)", () => {
     el.querySelector<HTMLElement>('[data-queue-place="behind"] [data-select]')?.click();
     await settle();
     expect(el.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("an async merge's entry opens its bubble in the requester (owner ruling, 2026-10-17)", () => {
+  /** A snapshot whose one entry ahead is an async merge, carrying its bubble. */
+  function asyncSnapshot(row: string | undefined): FeedMergeQueue {
+    const front = entry("land-sidebar-palette", { case: "merging", activeTab: { text: "tests", round: 1 } });
+    front.bubble = create(FeedMergeQueueBubbleSchema, {
+      requester: create(WorkspaceRefSchema, { id: "requester", dir: "/w/requester" }),
+      ...(row === undefined ? {} : { row: { value: row } }),
+    });
+    return create(FeedMergeQueueSchema, { ahead: [front], current: entry("mine", { case: "waiting" }) });
+  }
+
+  /** Click the async entry and answer what SelectWorkspace was asked. */
+  async function clickAsync(row: string | undefined): Promise<SelectWorkspaceRequest[]> {
+    const { el, s } = draw(SELECTED, asyncSnapshot(row));
+    el.querySelector<HTMLElement>('[data-queue-place="ahead"] [data-select]')?.click();
+    await settle();
+    return s.calls;
+  }
+
+  it("names the entry for the merge itself", () => {
+    const { el } = draw(SELECTED, asyncSnapshot("row-head"));
+    expect(el.querySelector('[data-queue-place="ahead"] .merge-queue-label')?.textContent).toBe("land-sidebar-palette");
+  });
+
+  it("selects the requester, never the hidden merge workspace", async () => {
+    const calls = await clickAsync("row-head");
+    expect(calls.map((c) => c.workspace?.id)).toEqual(["requester"]);
+  });
+
+  it("asks the requester's page to reveal the merge's bubble", async () => {
+    const calls = await clickAsync("row-head");
+    expect(calls.map((c) => c.reveal?.value)).toEqual(["row-head"]);
+  });
+
+  it("selects the requester alone when the merge has no bubble row", async () => {
+    const calls = await clickAsync(undefined);
+    expect(calls.map((c) => [c.workspace?.id, c.reveal])).toEqual([["requester", undefined]]);
+  });
+
+  it("asks a sync merge's entry to reveal nothing", async () => {
+    const { el, s } = draw();
+    el.querySelector<HTMLElement>('[data-queue-place="ahead"] [data-select]')?.click();
+    await settle();
+    expect(s.calls.map((c) => c.reveal)).toEqual([undefined]);
   });
 });
 
