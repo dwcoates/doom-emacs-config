@@ -16,6 +16,8 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { QUIESCED_MESSAGE, callUnary, type UnaryContext } from "../../src/rpc/unary.js";
+import { beginPage, endPage } from "../../src/page-teardown.js";
+import { settledByNextTask } from "../settled.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const UNKNOWN = [{ no: 999, wireType: 0, data: new Uint8Array([1]) }];
@@ -142,6 +144,34 @@ describe("callUnary", () => {
     const ctx = ctxThrowing(new ConnectError("gone", Code.Unavailable));
     await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
     expect(lines.some(([, line]) => line.includes("rpc.unary-answered"))).toBe(false);
+  });
+});
+
+describe("callUnary when the page has ended", () => {
+  afterEach(() => beginPage());
+
+  it("never settles a call the page's end cut off", async () => {
+    // Arrange
+    const ctx = ctxThrowing(new ConnectError("the page was unloaded", Code.Canceled));
+    endPage();
+    // Act
+    const settled = await settledByNextTask(call(ctx));
+    // Assert
+    expect(settled).toBe(false);
+  });
+
+  it("files no transport failure and tells the footer nothing", async () => {
+    // Arrange
+    const lines = captureLog();
+    const ctx = ctxThrowing(new ConnectError("the page was unloaded", Code.Canceled));
+    endPage();
+    // Act
+    await settledByNextTask(call(ctx));
+    // Assert
+    expect([lines.some(([, line]) => line.includes("rpc.unary-transport-failure")), standingClientFailure()]).toEqual([
+      false,
+      null,
+    ]);
   });
 });
 

@@ -254,8 +254,7 @@ export function pageMutationObserver(doc: Document, callback: MutationCallback):
     });
     throw new Error(`pageMutationObserver: ${doc.URL} has no window`);
   }
-  // The page's own constructor, so anything wrapping it (busy-probe.ts) sees
-  // every observer the page makes.
+  // The constructor of the document's own window, which is the page's.
   const observer = new win.MutationObserver(callback);
   let watched: Watched[] = [];
   let hidden = false;

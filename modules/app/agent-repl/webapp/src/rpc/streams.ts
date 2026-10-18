@@ -51,6 +51,7 @@ import { clearClientFailure, clearClientFailures, reportClientFailure } from "./
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
+import { pageEnded } from "../page-teardown.js";
 
 /** How a stream's run finished. `cancelled` is the only legitimate one. */
 export type StreamEnd =
@@ -302,6 +303,9 @@ export function watchStream<Res extends Message>(
         }
         end = cancelled ? { kind: "cancelled" } : { kind: "producer_ended" };
       } catch (err) {
+        // THE PAGE ENDED with the stream open (page-teardown.ts): nothing is
+        // left to reopen it for.
+        if (pageEnded()) return;
         end = cancelled ? { kind: "cancelled" } : { kind: "transport_failure", error: err };
       }
       opts.onEnd?.(end);

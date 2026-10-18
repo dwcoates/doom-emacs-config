@@ -84,7 +84,7 @@ export function drawFeedAgentPromptAddress(address: FeedAgentPromptAddress): HTM
       el.append(drawPeerArrow("in"), name);
       return el;
     default:
-      throw unreachableArm(`${PATH}.address.direction`, String(address.direction.case));
+      return unreachableArm(`${PATH}.address.direction`, String(address.direction.case));
   }
 }
 

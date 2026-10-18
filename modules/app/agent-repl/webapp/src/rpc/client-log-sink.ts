@@ -11,6 +11,7 @@ import type { ClientLogRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import type { ClientLogSink } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 import { reportClientFailure } from "./link.js";
+import { abandonedAtPageEnd, pageEnded } from "../page-teardown.js";
 
 /** Whose records these are: `ClientLogRequest.source`, as a caller writes it. */
 export type ClientLogSource = NonNullable<MessageInitShape<typeof ClientLogRequestSchema>["source"]>;
@@ -30,6 +31,9 @@ export function clientLogSink(getClient: () => AgentReplClient, source: ClientLo
     try {
       response = await getClient().clientLog({ source, record });
     } catch (err) {
+      // THE PAGE ENDED with the record in flight (page-teardown.ts): no page is
+      // left to say the sink is down to.
+      if (pageEnded()) return abandonedAtPageEnd();
       // THE SINK ITSELF IS DOWN. `ForwardingLogger` counts the rejection and
       // says so on the console exactly once, and nothing else knew (the
       // audit's N2 row 10) -- so the footer is told, with a FIXED line. The

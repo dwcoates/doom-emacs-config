@@ -1,7 +1,19 @@
 // The stops of the boot's page-lifetime installs. See src/page-teardown.ts.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { stopAtPageTeardown, tearDownPage } from "../src/page-teardown.js";
+import {
+  abandonedAtPageEnd,
+  beginPage,
+  endPage,
+  endPageAtPagehide,
+  pageEnded,
+  pageEnding,
+  stopAtPageTeardown,
+  tearDownPage,
+} from "../src/page-teardown.js";
+import { settledByNextTask } from "./settled.js";
+
+afterEach(() => beginPage());
 
 describe("tearDownPage", () => {
   it("runs every registered stop, the latest first", () => {
@@ -28,5 +40,73 @@ describe("tearDownPage", () => {
 
   it("does nothing when nothing was registered", () => {
     expect(() => tearDownPage()).not.toThrow();
+  });
+});
+
+describe("the page's end", () => {
+  it("aborts the signal every request of the page carries", () => {
+    // Arrange
+    beginPage();
+    const signal = pageEnding();
+    // Act
+    endPage();
+    // Assert
+    expect([signal.aborted, pageEnded()]).toEqual([true, true]);
+  });
+
+  it("runs the page's stops", () => {
+    // Arrange
+    beginPage();
+    let ran = false;
+    stopAtPageTeardown(() => (ran = true));
+    // Act
+    endPage();
+    // Assert
+    expect(ran).toBe(true);
+  });
+
+  it("begins the next page with a signal of its own", () => {
+    // Arrange
+    beginPage();
+    const ended = pageEnding();
+    endPage();
+    // Act
+    beginPage();
+    // Assert
+    expect([ended.aborted, pageEnding().aborted, pageEnded()]).toEqual([true, false, false]);
+  });
+
+  it.each([
+    { persisted: false, ends: true },
+    { persisted: true, ends: false },
+  ])("ends at a pagehide unless the page is kept to come back (persisted $persisted)", ({ persisted, ends }) => {
+    // Arrange
+    beginPage();
+    const win = new EventTarget() as Window;
+    endPageAtPagehide(win);
+    const pagehide = Object.assign(new Event("pagehide"), { persisted });
+    // Act
+    win.dispatchEvent(pagehide);
+    // Assert
+    expect(pageEnded()).toBe(ends);
+  });
+
+  it("stops ending the page at a pagehide once the page is torn down", () => {
+    // Arrange
+    beginPage();
+    const win = new EventTarget() as Window;
+    endPageAtPagehide(win);
+    tearDownPage();
+    // Act
+    win.dispatchEvent(Object.assign(new Event("pagehide"), { persisted: false }));
+    // Assert
+    expect(pageEnded()).toBe(false);
+  });
+
+  it("answers a cut-off call with a promise that never settles", async () => {
+    // Act
+    const settled = await settledByNextTask(abandonedAtPageEnd<number>());
+    // Assert
+    expect(settled).toBe(false);
   });
 });
