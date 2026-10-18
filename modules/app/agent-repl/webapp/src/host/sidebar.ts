@@ -28,7 +28,7 @@ import { mintConnectionId } from "../connection-id.js";
 import { createLocalFailures } from "../failure/local.js";
 import { bootFailed } from "../failure/sink.js";
 import { bindLogContext, log, setLogger, type ForwardingLogger } from "../log.js";
-import { installForwardingLogger, installTextAffordances } from "../document-runtime.js";
+import { installForwardingLogger, installTextAffordances, quietAtUnload } from "../document-runtime.js";
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
 import { createDaemonTransport } from "../rpc/transport.js";
@@ -89,6 +89,9 @@ export function startWebhostSidebar(
     // Text in the sidebar copies and selects exactly as it does in a page.
     installTextAffordances(doc);
     const ctx = createDaemonContext({ client, ticker: createTicker(), failures, page: connectionId });
+    // An unloaded webhost stops at once (document-runtime.ts): its streams,
+    // its calls, and its census.
+    const unquiet = quietAtUnload(win, ctx, () => census.stop());
     const sidebar = (deps.mount ?? mountWebhostSidebar)(nav, ctx, {
       // THE PAGES RESERVE THE COLUMN ONLY ONCE THERE IS A SIDEBAR TO FILL IT,
       // so a webhost whose sidebar never draws leaves the pages' layout as a
@@ -107,6 +110,7 @@ export function startWebhostSidebar(
       sidebar.markShown(id);
     });
     stop = () => {
+      unquiet();
       stopShown();
       sidebar.dispose();
       ctx.quiesce();

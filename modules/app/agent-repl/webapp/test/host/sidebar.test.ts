@@ -11,6 +11,7 @@ import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
+import { dispatchPageTransition } from "../page-transition.js";
 
 let stop: { dispose(): void } | null = null;
 
@@ -215,6 +216,26 @@ describe("startWebhostSidebar", () => {
 
     // Assert
     expect(installedOn).toEqual([document]);
+  });
+
+  it("goes quiet and stops the load census when the webhost unloads for good", () => {
+    // Arrange
+    const { host } = recordingHost();
+    let stopped = 0;
+    let quiet: (() => boolean) | null = null;
+    start(host, {
+      mount: (_nav, ctx) => {
+        quiet = () => ctx.isQuiesced();
+        return { dispose: () => undefined, markShown: () => undefined };
+      },
+      installCensus: () => ({ stop: () => void stopped++ }),
+    });
+
+    // Act
+    dispatchPageTransition("pagehide", false);
+
+    // Assert
+    expect([(quiet as (() => boolean) | null)?.(), stopped]).toEqual([true, 1]);
   });
 
   it("stops the load census when stopped", () => {

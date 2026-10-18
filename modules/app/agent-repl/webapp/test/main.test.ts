@@ -36,6 +36,7 @@ import { resolve } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { ClientLogResponseSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { dispatchPageTransition } from "./page-transition.js";
 
 /** One `ClientLog` call the installed logger forwarded. */
 type ClientLogCall = { record: { message: string; context?: Record<string, unknown> } };
@@ -477,6 +478,18 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
       armed.mockRestore();
       cleared.mockRestore();
     }
+  });
+
+  test("takes its timers down when the page unloads for good", async () => {
+    // Arrange: the timers as they stood before the boot wrapped them.
+    const before = (window as { setTimeout: unknown }).setTimeout;
+    await bootMain();
+
+    // Act: the boot ends the page at its pagehide (page-teardown.ts).
+    dispatchPageTransition("pagehide", false);
+
+    // Assert
+    expect(window.setTimeout === before).toBe(true);
   });
 
   test("mounts the news digest overlay before the lifecycle whose stream feeds it", async () => {
