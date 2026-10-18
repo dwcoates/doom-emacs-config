@@ -262,10 +262,14 @@ func text(u *conversationv1.UserSaid) string {
 	return out
 }
 
-// promptText reads back a drawn user-prompt row's text.
+// promptText reads back a drawn prompt row's text: a user prompt's or an
+// agent prompt's, whichever the row is.
 func promptText(row *frontendv1.FeedRow) string {
 	out := ""
 	for _, b := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
+		out += b.GetText().GetText()
+	}
+	for _, b := range row.GetAgentPrompt().GetBody().GetBlocks() {
 		out += b.GetText().GetText()
 	}
 	return out

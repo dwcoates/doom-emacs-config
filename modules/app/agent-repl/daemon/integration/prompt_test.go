@@ -1950,18 +1950,7 @@ func TestAnAgentSentPromptIsDrawnInTheSendersFeedUnderTheRecipient(t *testing.T)
 	row := awaitRow(t, sender, feed, "the sent row headed by the recipient", func(r *frontendv1.FeedRow) bool {
 		return r.GetAgentPrompt().GetAddress().GetSent().GetPeerSession().GetWorkspace() != nil
 	})
-	if got := promptBody(row); got != "please review the parser" {
+	if got := promptText(row); got != "please review the parser" {
 		t.Fatalf("sent row body = %q, want the prompt's text", got)
 	}
-}
-
-// promptBody joins an agent prompt row's text blocks.
-func promptBody(row *frontendv1.FeedRow) string {
-	var parts []string
-	for _, block := range row.GetAgentPrompt().GetBody().GetBlocks() {
-		if text := block.GetText(); text != nil {
-			parts = append(parts, text.GetText())
-		}
-	}
-	return strings.Join(parts, "\n")
 }
