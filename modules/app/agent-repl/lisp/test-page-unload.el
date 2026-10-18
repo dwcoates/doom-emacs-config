@@ -42,9 +42,9 @@
            (agent-repl-page-unload--shown-since nil)
            (agent-repl-page-unload-after 500)
            (agent-repl-page-unload-idle-after 300)
-           ;; IN USE unless a test says otherwise: a turn started just now,
-           ;; in a spell of use as old as the harness's clock.
-           (agent-repl-page-unload--last-turn-at 1000)
+           ;; IN USE unless a test says otherwise: a switch just now, in a
+           ;; spell of use as old as the harness's clock.
+           (agent-repl-page-unload--last-switch-at 1000)
            (agent-repl-page-unload--in-use-since 0)
            (agent-repl-page-unload-dwell 2)
            (buffers nil))
@@ -151,22 +151,22 @@
 ;;;; ---- The clock runs only while the system is in use ----
 
 (ert-deftest agent-repl-test-pu-an-idle-system-unloads-no-unlooked-page ()
-  "With no turn anywhere for the idle span, an unlooked page is held."
+  "With no switch for the idle span, an unlooked page is held."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (agent-repl--ws-put "alpha" :page-looked-at 0)
-    (setq agent-repl-page-unload--last-turn-at 699)
+    (setq agent-repl-page-unload--last-switch-at 699)
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--detached)))
 
-(ert-deftest agent-repl-test-pu-a-system-that-never-ran-a-turn-is-idle ()
-  "Before the first turn anywhere, nothing goes unlooked."
+(ert-deftest agent-repl-test-pu-a-system-never-switched-in-is-idle ()
+  "Before the first switch, nothing goes unlooked."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (agent-repl--ws-put "alpha" :page-looked-at 0)
-    (setq agent-repl-page-unload--last-turn-at nil)
+    (setq agent-repl-page-unload--last-switch-at nil)
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
@@ -177,57 +177,66 @@
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (agent-repl--ws-put "alpha" :page-looked-at 900)
-    (setq agent-repl-page-unload--last-turn-at nil)
+    (setq agent-repl-page-unload--last-switch-at nil)
     (push "alpha" agent-repl-test-pu--hidden)
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
     (should (equal agent-repl-test-pu--detached '("alpha")))))
 
-(ert-deftest agent-repl-test-pu-a-turn-after-idle-starts-every-hold-afresh ()
-  "The first turn after idle starts the clock: a page unlooked for ages is held until the hold passes from it."
+(ert-deftest agent-repl-test-pu-a-switch-after-idle-starts-every-hold-afresh ()
+  "The first switch after idle starts the clock: a page unlooked for ages is held until the hold passes from it."
   ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
+  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
     (agent-repl--ws-put "alpha" :page-looked-at 0)
-    (setq agent-repl-page-unload--last-turn-at 100)
-    (agent-repl-page-unload-note-turn)
+    (setq agent-repl-page-unload--last-switch-at 100)
+    (agent-repl-page-unload-note-shown "beta")
     ;; Act
     (agent-repl-page-unload-pass)
-    (let ((held-at-the-turn (null agent-repl-test-pu--detached)))
-      ;; Turns keep coming, each within the idle span of the last.
-      (dolist (at '(1250 1501))
-        (setq agent-repl-test-pu--now at)
-        (agent-repl-page-unload-note-turn))
+    (let ((held-at-the-switch (null agent-repl-test-pu--detached)))
+      ;; Switches keep coming, each within the idle span of the last.
+      (cl-loop for at in '(1250 1501) for ws in '("gamma" "beta")
+               do (setq agent-repl-test-pu--now at)
+                  (agent-repl-page-unload-note-shown ws))
       (agent-repl-page-unload-pass)
       ;; Assert
-      (should (equal (list held-at-the-turn agent-repl-test-pu--detached) '(t ("alpha")))))))
+      (should (equal (list held-at-the-switch agent-repl-test-pu--detached) '(t ("alpha")))))))
 
-(ert-deftest agent-repl-test-pu-a-turn-in-use-keeps-the-spell-going ()
-  "A turn while the system is in use moves the last turn, not the spell's start."
+(ert-deftest agent-repl-test-pu-a-switch-in-use-keeps-the-spell-going ()
+  "A switch while the system is in use moves the last switch, not the spell's start."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-page-unload--last-turn-at 900
+    (setq agent-repl-page-unload--last-switch-at 900
           agent-repl-page-unload--in-use-since 400)
     ;; Act
-    (agent-repl-page-unload-note-turn)
+    (agent-repl-page-unload-note-shown "alpha")
     ;; Assert
-    (should (equal (list agent-repl-page-unload--in-use-since agent-repl-page-unload--last-turn-at)
+    (should (equal (list agent-repl-page-unload--in-use-since agent-repl-page-unload--last-switch-at)
                    '(400 1000)))))
 
-(ert-deftest agent-repl-test-pu-only-a-move-into-the-running-set-is-a-turn ()
-  "A status change notes a turn only when a workspace starts running."
-  (dolist (case '((:done :submitting t) (:idle :thinking t)
-                  (:thinking :permission nil) (:thinking :done nil) (:done :idle nil)))
-    ;; Arrange
-    (agent-repl-test-pu--with '("alpha")
-      (let ((agent-repl-roster-running-statuses
-             '(:submitting :thinking :clearing :compacting :permission :question :waiting))
-            (noted nil))
-        (cl-letf (((symbol-function 'agent-repl-page-unload-note-turn) (lambda () (setq noted t))))
-          ;; Act
-          (agent-repl-page-unload-on-status-change "alpha" (nth 0 case) (nth 1 case)))
-        ;; Assert
-        (should (eq noted (nth 2 case)))))))
+(ert-deftest agent-repl-test-pu-showing-the-same-page-again-is-no-use ()
+  "Only a switch to another page is use: the page already shown, shown again, is not."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--now 1400)
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should (equal agent-repl-page-unload--last-switch-at 1000))))
+
+(ert-deftest agent-repl-test-pu-the-start-of-a-spell-of-use-is-recorded ()
+  "The first switch after idle records how long the system sat idle."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-page-unload--last-switch-at 100)
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-page-unload-note-shown "alpha"))
+      ;; Assert
+      (should (member "elisp.page-unload.in-use since-idle-s=900" logged)))))
 
 (ert-deftest agent-repl-test-pu-a-hidden-workspace-page-is-unloaded-at-once ()
   "A hidden workspace's page is unloaded however lately it was looked at."
