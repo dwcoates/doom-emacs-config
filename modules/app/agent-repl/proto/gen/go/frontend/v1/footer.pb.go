@@ -25,8 +25,9 @@
 //   Tokens cell    how much the in-flight turn has added to the MAIN agent's
 //                  context window (`--` with no turn in flight), with two
 //                  glyphs; a click target opening the token panel.
-//   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells —
-//                  each a click target opening its panel.
+//   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells ·
+//                  ⇄ async merges in flight — each a click target opening its
+//                  panel.
 //
 // THE EXPANDED SECTION opens above the strip when a selectable element (the
 // tokens cell or a chip) is selected. The selection is WEBVIEW-LOCAL, so the
@@ -13339,7 +13340,13 @@ type FooterLiveWorkChips struct {
 	Monitors *FooterChipMonitors `protobuf:"bytes,4,opt,name=monitors,proto3,oneof" json:"monitors,omitempty"`
 	// ⏱ — live scheduled jobs (cron/wakeup schedules). Set iff at least one
 	// job is scheduled.
-	Crons         *FooterChipCrons `protobuf:"bytes,5,opt,name=crons,proto3,oneof" json:"crons,omitempty"`
+	Crons *FooterChipCrons `protobuf:"bytes,5,opt,name=crons,proto3,oneof" json:"crons,omitempty"`
+	// ⇄ — the ASYNC merges this workspace requested that are still in flight:
+	// queued or merging in their hidden merge workspaces, each drawn as a
+	// bubble in this workspace's feed. Set iff the merges panel holds at least
+	// one row. A SYNC merge has no chip: it is this workspace's own merge, and
+	// the strip's merging status already narrates it.
+	Merges        *FooterChipMerges `protobuf:"bytes,7,opt,name=merges,proto3,oneof" json:"merges,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -13409,6 +13416,118 @@ func (x *FooterLiveWorkChips) GetCrons() *FooterChipCrons {
 	return nil
 }
 
+func (x *FooterLiveWorkChips) GetMerges() *FooterChipMerges {
+	if x != nil {
+		return x.Merges
+	}
+	return nil
+}
+
+// The merges chip's props.
+type FooterChipMerges struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many merge rows the merges panel holds. At least 1 when this chip is
+	// set (a zero-count chip is expressed by leaving the chip unset).
+	Count uint32 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
+	// The waiting-on-you glyph, drawn beside the count. SET iff at least one
+	// merges-panel row is waiting on the user, so a merge held on a question in
+	// its hidden workspace is visible on the strip without opening the panel.
+	WaitingOnUser *FooterChipMergesWaitingOnUser `protobuf:"bytes,2,opt,name=waiting_on_user,json=waitingOnUser,proto3,oneof" json:"waiting_on_user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterChipMerges) Reset() {
+	*x = FooterChipMerges{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[192]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterChipMerges) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterChipMerges) ProtoMessage() {}
+
+func (x *FooterChipMerges) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[192]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterChipMerges.ProtoReflect.Descriptor instead.
+func (*FooterChipMerges) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{192}
+}
+
+func (x *FooterChipMerges) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *FooterChipMerges) GetWaitingOnUser() *FooterChipMergesWaitingOnUser {
+	if x != nil {
+		return x.WaitingOnUser
+	}
+	return nil
+}
+
+// The merges chip's waiting-on-you glyph.
+type FooterChipMergesWaitingOnUser struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many of the panel's rows are waiting on the user. At least 1 when
+	// the glyph is set.
+	Count         uint32 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterChipMergesWaitingOnUser) Reset() {
+	*x = FooterChipMergesWaitingOnUser{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[193]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterChipMergesWaitingOnUser) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterChipMergesWaitingOnUser) ProtoMessage() {}
+
+func (x *FooterChipMergesWaitingOnUser) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[193]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterChipMergesWaitingOnUser.ProtoReflect.Descriptor instead.
+func (*FooterChipMergesWaitingOnUser) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{193}
+}
+
+func (x *FooterChipMergesWaitingOnUser) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
 // The crons chip's props.
 type FooterChipCrons struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -13422,7 +13541,7 @@ type FooterChipCrons struct {
 
 func (x *FooterChipCrons) Reset() {
 	*x = FooterChipCrons{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[192]
+	mi := &file_frontend_v1_footer_proto_msgTypes[194]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13434,7 +13553,7 @@ func (x *FooterChipCrons) String() string {
 func (*FooterChipCrons) ProtoMessage() {}
 
 func (x *FooterChipCrons) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[192]
+	mi := &file_frontend_v1_footer_proto_msgTypes[194]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13447,7 +13566,7 @@ func (x *FooterChipCrons) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterChipCrons.ProtoReflect.Descriptor instead.
 func (*FooterChipCrons) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{192}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{194}
 }
 
 func (x *FooterChipCrons) GetCount() uint32 {
@@ -13469,7 +13588,7 @@ type FooterChipMonitors struct {
 
 func (x *FooterChipMonitors) Reset() {
 	*x = FooterChipMonitors{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[193]
+	mi := &file_frontend_v1_footer_proto_msgTypes[195]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13481,7 +13600,7 @@ func (x *FooterChipMonitors) String() string {
 func (*FooterChipMonitors) ProtoMessage() {}
 
 func (x *FooterChipMonitors) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[193]
+	mi := &file_frontend_v1_footer_proto_msgTypes[195]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13494,7 +13613,7 @@ func (x *FooterChipMonitors) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterChipMonitors.ProtoReflect.Descriptor instead.
 func (*FooterChipMonitors) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{193}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{195}
 }
 
 func (x *FooterChipMonitors) GetCount() uint32 {
@@ -13522,7 +13641,7 @@ type FooterChipAgents struct {
 
 func (x *FooterChipAgents) Reset() {
 	*x = FooterChipAgents{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[194]
+	mi := &file_frontend_v1_footer_proto_msgTypes[196]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13534,7 +13653,7 @@ func (x *FooterChipAgents) String() string {
 func (*FooterChipAgents) ProtoMessage() {}
 
 func (x *FooterChipAgents) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[194]
+	mi := &file_frontend_v1_footer_proto_msgTypes[196]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13547,7 +13666,7 @@ func (x *FooterChipAgents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterChipAgents.ProtoReflect.Descriptor instead.
 func (*FooterChipAgents) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{194}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{196}
 }
 
 func (x *FooterChipAgents) GetCount() uint32 {
@@ -13576,7 +13695,7 @@ type FooterChipAgentsWaitingForApi struct {
 
 func (x *FooterChipAgentsWaitingForApi) Reset() {
 	*x = FooterChipAgentsWaitingForApi{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[195]
+	mi := &file_frontend_v1_footer_proto_msgTypes[197]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13588,7 +13707,7 @@ func (x *FooterChipAgentsWaitingForApi) String() string {
 func (*FooterChipAgentsWaitingForApi) ProtoMessage() {}
 
 func (x *FooterChipAgentsWaitingForApi) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[195]
+	mi := &file_frontend_v1_footer_proto_msgTypes[197]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13601,7 +13720,7 @@ func (x *FooterChipAgentsWaitingForApi) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterChipAgentsWaitingForApi.ProtoReflect.Descriptor instead.
 func (*FooterChipAgentsWaitingForApi) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{195}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{197}
 }
 
 func (x *FooterChipAgentsWaitingForApi) GetCount() uint32 {
@@ -13626,7 +13745,7 @@ type FooterChipTasks struct {
 
 func (x *FooterChipTasks) Reset() {
 	*x = FooterChipTasks{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[196]
+	mi := &file_frontend_v1_footer_proto_msgTypes[198]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13638,7 +13757,7 @@ func (x *FooterChipTasks) String() string {
 func (*FooterChipTasks) ProtoMessage() {}
 
 func (x *FooterChipTasks) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[196]
+	mi := &file_frontend_v1_footer_proto_msgTypes[198]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13651,7 +13770,7 @@ func (x *FooterChipTasks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterChipTasks.ProtoReflect.Descriptor instead.
 func (*FooterChipTasks) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{196}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{198}
 }
 
 func (x *FooterChipTasks) GetDone() uint32 {
@@ -13679,7 +13798,7 @@ type FooterChipShells struct {
 
 func (x *FooterChipShells) Reset() {
 	*x = FooterChipShells{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[197]
+	mi := &file_frontend_v1_footer_proto_msgTypes[199]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13691,7 +13810,7 @@ func (x *FooterChipShells) String() string {
 func (*FooterChipShells) ProtoMessage() {}
 
 func (x *FooterChipShells) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[197]
+	mi := &file_frontend_v1_footer_proto_msgTypes[199]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13704,7 +13823,7 @@ func (x *FooterChipShells) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterChipShells.ProtoReflect.Descriptor instead.
 func (*FooterChipShells) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{197}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{199}
 }
 
 func (x *FooterChipShells) GetCount() uint32 {
@@ -13731,14 +13850,16 @@ type FooterExpanded struct {
 	// The live background monitors — the 👁 chip's expansion.
 	Monitors *FooterExpandedMonitors `protobuf:"bytes,5,opt,name=monitors,proto3" json:"monitors,omitempty"`
 	// The scheduled jobs — the ⏱ chip's expansion.
-	Crons         *FooterExpandedCrons `protobuf:"bytes,6,opt,name=crons,proto3" json:"crons,omitempty"`
+	Crons *FooterExpandedCrons `protobuf:"bytes,6,opt,name=crons,proto3" json:"crons,omitempty"`
+	// The async merges in flight — the ⇄ chip's expansion.
+	Merges        *FooterExpandedMerges `protobuf:"bytes,8,opt,name=merges,proto3" json:"merges,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FooterExpanded) Reset() {
 	*x = FooterExpanded{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[198]
+	mi := &file_frontend_v1_footer_proto_msgTypes[200]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13750,7 +13871,7 @@ func (x *FooterExpanded) String() string {
 func (*FooterExpanded) ProtoMessage() {}
 
 func (x *FooterExpanded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[198]
+	mi := &file_frontend_v1_footer_proto_msgTypes[200]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13763,7 +13884,7 @@ func (x *FooterExpanded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpanded.ProtoReflect.Descriptor instead.
 func (*FooterExpanded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{198}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{200}
 }
 
 func (x *FooterExpanded) GetTokens() *FooterExpandedTokens {
@@ -13804,6 +13925,13 @@ func (x *FooterExpanded) GetMonitors() *FooterExpandedMonitors {
 func (x *FooterExpanded) GetCrons() *FooterExpandedCrons {
 	if x != nil {
 		return x.Crons
+	}
+	return nil
+}
+
+func (x *FooterExpanded) GetMerges() *FooterExpandedMerges {
+	if x != nil {
+		return x.Merges
 	}
 	return nil
 }
@@ -13849,7 +13977,7 @@ type FooterExpandedFocus struct {
 
 func (x *FooterExpandedFocus) Reset() {
 	*x = FooterExpandedFocus{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[199]
+	mi := &file_frontend_v1_footer_proto_msgTypes[201]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13861,7 +13989,7 @@ func (x *FooterExpandedFocus) String() string {
 func (*FooterExpandedFocus) ProtoMessage() {}
 
 func (x *FooterExpandedFocus) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[199]
+	mi := &file_frontend_v1_footer_proto_msgTypes[201]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13874,7 +14002,7 @@ func (x *FooterExpandedFocus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedFocus.ProtoReflect.Descriptor instead.
 func (*FooterExpandedFocus) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{199}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{201}
 }
 
 func (x *FooterExpandedFocus) GetPanel() isFooterExpandedFocus_Panel {
@@ -13949,7 +14077,7 @@ type FooterFocusAgents struct {
 
 func (x *FooterFocusAgents) Reset() {
 	*x = FooterFocusAgents{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[200]
+	mi := &file_frontend_v1_footer_proto_msgTypes[202]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13961,7 +14089,7 @@ func (x *FooterFocusAgents) String() string {
 func (*FooterFocusAgents) ProtoMessage() {}
 
 func (x *FooterFocusAgents) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[200]
+	mi := &file_frontend_v1_footer_proto_msgTypes[202]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13974,7 +14102,7 @@ func (x *FooterFocusAgents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterFocusAgents.ProtoReflect.Descriptor instead.
 func (*FooterFocusAgents) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{200}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{202}
 }
 
 // The shells panel (the $ chip's expansion) is the focus.
@@ -13986,7 +14114,7 @@ type FooterFocusShells struct {
 
 func (x *FooterFocusShells) Reset() {
 	*x = FooterFocusShells{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[201]
+	mi := &file_frontend_v1_footer_proto_msgTypes[203]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13998,7 +14126,7 @@ func (x *FooterFocusShells) String() string {
 func (*FooterFocusShells) ProtoMessage() {}
 
 func (x *FooterFocusShells) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[201]
+	mi := &file_frontend_v1_footer_proto_msgTypes[203]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14011,7 +14139,7 @@ func (x *FooterFocusShells) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterFocusShells.ProtoReflect.Descriptor instead.
 func (*FooterFocusShells) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{201}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{203}
 }
 
 // The monitors panel (the 👁 chip's expansion) is the focus.
@@ -14023,7 +14151,7 @@ type FooterFocusMonitors struct {
 
 func (x *FooterFocusMonitors) Reset() {
 	*x = FooterFocusMonitors{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[202]
+	mi := &file_frontend_v1_footer_proto_msgTypes[204]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14035,7 +14163,7 @@ func (x *FooterFocusMonitors) String() string {
 func (*FooterFocusMonitors) ProtoMessage() {}
 
 func (x *FooterFocusMonitors) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[202]
+	mi := &file_frontend_v1_footer_proto_msgTypes[204]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14048,7 +14176,7 @@ func (x *FooterFocusMonitors) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterFocusMonitors.ProtoReflect.Descriptor instead.
 func (*FooterFocusMonitors) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{202}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{204}
 }
 
 // The ⏱ panel: one row per live scheduled job. A TRUE LIST, like the agents
@@ -14075,7 +14203,7 @@ type FooterExpandedCrons struct {
 
 func (x *FooterExpandedCrons) Reset() {
 	*x = FooterExpandedCrons{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[203]
+	mi := &file_frontend_v1_footer_proto_msgTypes[205]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14087,7 +14215,7 @@ func (x *FooterExpandedCrons) String() string {
 func (*FooterExpandedCrons) ProtoMessage() {}
 
 func (x *FooterExpandedCrons) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[203]
+	mi := &file_frontend_v1_footer_proto_msgTypes[205]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14100,7 +14228,7 @@ func (x *FooterExpandedCrons) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedCrons.ProtoReflect.Descriptor instead.
 func (*FooterExpandedCrons) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{203}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{205}
 }
 
 func (x *FooterExpandedCrons) GetRows() []*FooterCronRow {
@@ -14142,7 +14270,7 @@ type FooterCronRow struct {
 
 func (x *FooterCronRow) Reset() {
 	*x = FooterCronRow{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[204]
+	mi := &file_frontend_v1_footer_proto_msgTypes[206]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14154,7 +14282,7 @@ func (x *FooterCronRow) String() string {
 func (*FooterCronRow) ProtoMessage() {}
 
 func (x *FooterCronRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[204]
+	mi := &file_frontend_v1_footer_proto_msgTypes[206]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14167,7 +14295,7 @@ func (x *FooterCronRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterCronRow.ProtoReflect.Descriptor instead.
 func (*FooterCronRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{204}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{206}
 }
 
 func (x *FooterCronRow) GetSchedule() *FooterCronRowSchedule {
@@ -14216,7 +14344,7 @@ type FooterCronRowSchedule struct {
 
 func (x *FooterCronRowSchedule) Reset() {
 	*x = FooterCronRowSchedule{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[205]
+	mi := &file_frontend_v1_footer_proto_msgTypes[207]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14228,7 +14356,7 @@ func (x *FooterCronRowSchedule) String() string {
 func (*FooterCronRowSchedule) ProtoMessage() {}
 
 func (x *FooterCronRowSchedule) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[205]
+	mi := &file_frontend_v1_footer_proto_msgTypes[207]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14241,7 +14369,7 @@ func (x *FooterCronRowSchedule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterCronRowSchedule.ProtoReflect.Descriptor instead.
 func (*FooterCronRowSchedule) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{205}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{207}
 }
 
 func (x *FooterCronRowSchedule) GetText() string {
@@ -14262,7 +14390,7 @@ type FooterCronRowPrompt struct {
 
 func (x *FooterCronRowPrompt) Reset() {
 	*x = FooterCronRowPrompt{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[206]
+	mi := &file_frontend_v1_footer_proto_msgTypes[208]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14274,7 +14402,7 @@ func (x *FooterCronRowPrompt) String() string {
 func (*FooterCronRowPrompt) ProtoMessage() {}
 
 func (x *FooterCronRowPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[206]
+	mi := &file_frontend_v1_footer_proto_msgTypes[208]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14287,7 +14415,7 @@ func (x *FooterCronRowPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterCronRowPrompt.ProtoReflect.Descriptor instead.
 func (*FooterCronRowPrompt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{206}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{208}
 }
 
 func (x *FooterCronRowPrompt) GetText() string {
@@ -14308,7 +14436,7 @@ type FooterCronRowNextFire struct {
 
 func (x *FooterCronRowNextFire) Reset() {
 	*x = FooterCronRowNextFire{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[207]
+	mi := &file_frontend_v1_footer_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14320,7 +14448,7 @@ func (x *FooterCronRowNextFire) String() string {
 func (*FooterCronRowNextFire) ProtoMessage() {}
 
 func (x *FooterCronRowNextFire) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[207]
+	mi := &file_frontend_v1_footer_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14333,7 +14461,7 @@ func (x *FooterCronRowNextFire) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterCronRowNextFire.ProtoReflect.Descriptor instead.
 func (*FooterCronRowNextFire) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{207}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{209}
 }
 
 func (x *FooterCronRowNextFire) GetFireAtMs() int64 {
@@ -14352,7 +14480,7 @@ type FooterCronRowRecurring struct {
 
 func (x *FooterCronRowRecurring) Reset() {
 	*x = FooterCronRowRecurring{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[208]
+	mi := &file_frontend_v1_footer_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14364,7 +14492,7 @@ func (x *FooterCronRowRecurring) String() string {
 func (*FooterCronRowRecurring) ProtoMessage() {}
 
 func (x *FooterCronRowRecurring) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[208]
+	mi := &file_frontend_v1_footer_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14377,7 +14505,7 @@ func (x *FooterCronRowRecurring) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterCronRowRecurring.ProtoReflect.Descriptor instead.
 func (*FooterCronRowRecurring) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{208}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{210}
 }
 
 // The durable marker. Empty: presence is the fact.
@@ -14389,7 +14517,7 @@ type FooterCronRowDurable struct {
 
 func (x *FooterCronRowDurable) Reset() {
 	*x = FooterCronRowDurable{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[209]
+	mi := &file_frontend_v1_footer_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14401,7 +14529,7 @@ func (x *FooterCronRowDurable) String() string {
 func (*FooterCronRowDurable) ProtoMessage() {}
 
 func (x *FooterCronRowDurable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[209]
+	mi := &file_frontend_v1_footer_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14414,7 +14542,7 @@ func (x *FooterCronRowDurable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterCronRowDurable.ProtoReflect.Descriptor instead.
 func (*FooterCronRowDurable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{209}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{211}
 }
 
 // The pending wakeup's line: ⏱ · "wakeup" · reason · countdown. A wakeup is
@@ -14435,7 +14563,7 @@ type FooterWakeupRow struct {
 
 func (x *FooterWakeupRow) Reset() {
 	*x = FooterWakeupRow{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[210]
+	mi := &file_frontend_v1_footer_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14447,7 +14575,7 @@ func (x *FooterWakeupRow) String() string {
 func (*FooterWakeupRow) ProtoMessage() {}
 
 func (x *FooterWakeupRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[210]
+	mi := &file_frontend_v1_footer_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14460,7 +14588,7 @@ func (x *FooterWakeupRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterWakeupRow.ProtoReflect.Descriptor instead.
 func (*FooterWakeupRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{210}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *FooterWakeupRow) GetReason() *FooterWakeupRowReason {
@@ -14488,7 +14616,7 @@ type FooterWakeupRowReason struct {
 
 func (x *FooterWakeupRowReason) Reset() {
 	*x = FooterWakeupRowReason{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[211]
+	mi := &file_frontend_v1_footer_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14500,7 +14628,7 @@ func (x *FooterWakeupRowReason) String() string {
 func (*FooterWakeupRowReason) ProtoMessage() {}
 
 func (x *FooterWakeupRowReason) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[211]
+	mi := &file_frontend_v1_footer_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14513,7 +14641,7 @@ func (x *FooterWakeupRowReason) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterWakeupRowReason.ProtoReflect.Descriptor instead.
 func (*FooterWakeupRowReason) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{211}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *FooterWakeupRowReason) GetText() string {
@@ -14536,7 +14664,7 @@ type FooterWakeupRowWakeAt struct {
 
 func (x *FooterWakeupRowWakeAt) Reset() {
 	*x = FooterWakeupRowWakeAt{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[212]
+	mi := &file_frontend_v1_footer_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14548,7 +14676,7 @@ func (x *FooterWakeupRowWakeAt) String() string {
 func (*FooterWakeupRowWakeAt) ProtoMessage() {}
 
 func (x *FooterWakeupRowWakeAt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[212]
+	mi := &file_frontend_v1_footer_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14561,7 +14689,7 @@ func (x *FooterWakeupRowWakeAt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterWakeupRowWakeAt.ProtoReflect.Descriptor instead.
 func (*FooterWakeupRowWakeAt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{212}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *FooterWakeupRowWakeAt) GetWakeAtMs() int64 {
@@ -14569,6 +14697,342 @@ func (x *FooterWakeupRowWakeAt) GetWakeAtMs() int64 {
 		return x.WakeAtMs
 	}
 	return 0
+}
+
+// The ⇄ panel: one row per ASYNC merge this workspace requested that is still
+// in flight. Each row is a jump row (`FooterJump`) to the merge's bubble head
+// in this workspace's feed. A TRUE LIST, like the agents panel.
+//
+// THE ROWS ARE THE FEED'S MERGE BUBBLES, READ BACK. The daemon resolves them
+// from the very rows the feed draws for each async merge — its head on the
+// root feed and the top-level tabs on its sub-feed (frontend.v1.FeedMerge,
+// frontend.v1.FeedMergeTab) — so the panel and the bubbles can never
+// disagree. A row JOINS when the feed draws an async head still in flight
+// (`frontend.v1.FeedMerge.update`), and LEAVES when that head carries a result
+// (landed, failed or abandoned) or the feed retires it. Nothing here focuses
+// the expanded section (FooterExpandedFocus): a merge is not detached work the
+// agent launched into this turn.
+type FooterExpandedMerges struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The rows, in the order the feed first drew each merge's head. Empty when
+	// no async merge is in flight — the chip is then unset and the panel
+	// unreachable.
+	Rows          []*FooterMergeRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterExpandedMerges) Reset() {
+	*x = FooterExpandedMerges{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[215]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterExpandedMerges) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterExpandedMerges) ProtoMessage() {}
+
+func (x *FooterExpandedMerges) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[215]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterExpandedMerges.ProtoReflect.Descriptor instead.
+func (*FooterExpandedMerges) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{215}
+}
+
+func (x *FooterExpandedMerges) GetRows() []*FooterMergeRow {
+	if x != nil {
+		return x.Rows
+	}
+	return nil
+}
+
+// One async merge's line: ⇄ · branch line · step · (waiting on you) · clock · ▸.
+type FooterMergeRow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The bubble head's branch line ("fix-flaky → master"), drawn verbatim
+	// (frontend.v1.FeedMergeLabel).
+	Label *FooterMergeRowLabel `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	// The step the merge stands on: the bubble's CURRENT top-level tab — the
+	// newest one still live, else the newest one drawn. UNSET while the bubble
+	// has drawn no tab yet; the row then draws without a step.
+	Step *FooterMergeRowStep `protobuf:"bytes,2,opt,name=step,proto3,oneof" json:"step,omitempty"`
+	// The row's clock, the bubble head's own (frontend.v1.FeedMergeRuntime):
+	// from the enqueue while the merge waits in the queue, from its admission
+	// once it runs. The client ticks from the instant.
+	Runtime *FooterMergeRowRuntime `protobuf:"bytes,3,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	// Which merge this row is: the merge's ledger id, the key of its bubble's
+	// head row and sub-feed. NOT DRAWN in the footer; see FooterWorkId.
+	Work *FooterWorkId `protobuf:"bytes,4,opt,name=work,proto3" json:"work,omitempty"`
+	// Where a click on the row lands: always the bubble head's `entry`, since
+	// the row is resolved from the head the feed drew. See FooterJump.
+	Jump *FooterJump `protobuf:"bytes,5,opt,name=jump,proto3" json:"jump,omitempty"`
+	// The waiting-on-you marker. PRESENT iff the current tab is drawn waiting
+	// on the user (frontend.v1.FeedMergeTabWaitingOnUser): the merge
+	// workspace's session has a permission ask or a question batch open.
+	WaitingOnUser *FooterMergeRowWaitingOnUser `protobuf:"bytes,6,opt,name=waiting_on_user,json=waitingOnUser,proto3,oneof" json:"waiting_on_user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeRow) Reset() {
+	*x = FooterMergeRow{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[216]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeRow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeRow) ProtoMessage() {}
+
+func (x *FooterMergeRow) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[216]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeRow.ProtoReflect.Descriptor instead.
+func (*FooterMergeRow) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{216}
+}
+
+func (x *FooterMergeRow) GetLabel() *FooterMergeRowLabel {
+	if x != nil {
+		return x.Label
+	}
+	return nil
+}
+
+func (x *FooterMergeRow) GetStep() *FooterMergeRowStep {
+	if x != nil {
+		return x.Step
+	}
+	return nil
+}
+
+func (x *FooterMergeRow) GetRuntime() *FooterMergeRowRuntime {
+	if x != nil {
+		return x.Runtime
+	}
+	return nil
+}
+
+func (x *FooterMergeRow) GetWork() *FooterWorkId {
+	if x != nil {
+		return x.Work
+	}
+	return nil
+}
+
+func (x *FooterMergeRow) GetJump() *FooterJump {
+	if x != nil {
+		return x.Jump
+	}
+	return nil
+}
+
+func (x *FooterMergeRow) GetWaitingOnUser() *FooterMergeRowWaitingOnUser {
+	if x != nil {
+		return x.WaitingOnUser
+	}
+	return nil
+}
+
+// The row's branch line element.
+type FooterMergeRowLabel struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The text, drawn verbatim.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeRowLabel) Reset() {
+	*x = FooterMergeRowLabel{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[217]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeRowLabel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeRowLabel) ProtoMessage() {}
+
+func (x *FooterMergeRowLabel) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[217]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeRowLabel.ProtoReflect.Descriptor instead.
+func (*FooterMergeRowLabel) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{217}
+}
+
+func (x *FooterMergeRowLabel) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+// The row's step element.
+type FooterMergeRowStep struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The current tab's words with its round, daemon-composed ("queue",
+	// "tests", "committing (2)"), drawn verbatim.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeRowStep) Reset() {
+	*x = FooterMergeRowStep{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[218]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeRowStep) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeRowStep) ProtoMessage() {}
+
+func (x *FooterMergeRowStep) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[218]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeRowStep.ProtoReflect.Descriptor instead.
+func (*FooterMergeRowStep) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{218}
+}
+
+func (x *FooterMergeRowStep) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+// The row's clock element.
+type FooterMergeRowRuntime struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The bubble head's clock instant, epoch ms.
+	StartedAtMs   int64 `protobuf:"varint,1,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeRowRuntime) Reset() {
+	*x = FooterMergeRowRuntime{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[219]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeRowRuntime) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeRowRuntime) ProtoMessage() {}
+
+func (x *FooterMergeRowRuntime) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[219]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeRowRuntime.ProtoReflect.Descriptor instead.
+func (*FooterMergeRowRuntime) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{219}
+}
+
+func (x *FooterMergeRowRuntime) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
+}
+
+// The waiting-on-you marker. Empty: presence is the marker.
+type FooterMergeRowWaitingOnUser struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeRowWaitingOnUser) Reset() {
+	*x = FooterMergeRowWaitingOnUser{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[220]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeRowWaitingOnUser) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeRowWaitingOnUser) ProtoMessage() {}
+
+func (x *FooterMergeRowWaitingOnUser) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[220]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeRowWaitingOnUser.ProtoReflect.Descriptor instead.
+func (*FooterMergeRowWaitingOnUser) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{220}
 }
 
 // The 👁 panel: one row per live monitor.
@@ -14583,7 +15047,7 @@ type FooterExpandedMonitors struct {
 
 func (x *FooterExpandedMonitors) Reset() {
 	*x = FooterExpandedMonitors{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[213]
+	mi := &file_frontend_v1_footer_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14595,7 +15059,7 @@ func (x *FooterExpandedMonitors) String() string {
 func (*FooterExpandedMonitors) ProtoMessage() {}
 
 func (x *FooterExpandedMonitors) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[213]
+	mi := &file_frontend_v1_footer_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14608,7 +15072,7 @@ func (x *FooterExpandedMonitors) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedMonitors.ProtoReflect.Descriptor instead.
 func (*FooterExpandedMonitors) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{213}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{221}
 }
 
 func (x *FooterExpandedMonitors) GetRows() []*FooterMonitorRow {
@@ -14640,7 +15104,7 @@ type FooterMonitorRow struct {
 
 func (x *FooterMonitorRow) Reset() {
 	*x = FooterMonitorRow{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[214]
+	mi := &file_frontend_v1_footer_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14652,7 +15116,7 @@ func (x *FooterMonitorRow) String() string {
 func (*FooterMonitorRow) ProtoMessage() {}
 
 func (x *FooterMonitorRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[214]
+	mi := &file_frontend_v1_footer_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14665,7 +15129,7 @@ func (x *FooterMonitorRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMonitorRow.ProtoReflect.Descriptor instead.
 func (*FooterMonitorRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{214}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{222}
 }
 
 func (x *FooterMonitorRow) GetDescription() *FooterMonitorRowDescription {
@@ -14714,7 +15178,7 @@ type FooterMonitorRowDescription struct {
 
 func (x *FooterMonitorRowDescription) Reset() {
 	*x = FooterMonitorRowDescription{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[215]
+	mi := &file_frontend_v1_footer_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14726,7 +15190,7 @@ func (x *FooterMonitorRowDescription) String() string {
 func (*FooterMonitorRowDescription) ProtoMessage() {}
 
 func (x *FooterMonitorRowDescription) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[215]
+	mi := &file_frontend_v1_footer_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14739,7 +15203,7 @@ func (x *FooterMonitorRowDescription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMonitorRowDescription.ProtoReflect.Descriptor instead.
 func (*FooterMonitorRowDescription) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{215}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *FooterMonitorRowDescription) GetText() string {
@@ -14760,7 +15224,7 @@ type FooterMonitorRowRuntime struct {
 
 func (x *FooterMonitorRowRuntime) Reset() {
 	*x = FooterMonitorRowRuntime{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[216]
+	mi := &file_frontend_v1_footer_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14772,7 +15236,7 @@ func (x *FooterMonitorRowRuntime) String() string {
 func (*FooterMonitorRowRuntime) ProtoMessage() {}
 
 func (x *FooterMonitorRowRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[216]
+	mi := &file_frontend_v1_footer_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14785,7 +15249,7 @@ func (x *FooterMonitorRowRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMonitorRowRuntime.ProtoReflect.Descriptor instead.
 func (*FooterMonitorRowRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{216}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{224}
 }
 
 func (x *FooterMonitorRowRuntime) GetStartedAtMs() int64 {
@@ -14804,7 +15268,7 @@ type FooterMonitorRowPersistent struct {
 
 func (x *FooterMonitorRowPersistent) Reset() {
 	*x = FooterMonitorRowPersistent{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[217]
+	mi := &file_frontend_v1_footer_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14816,7 +15280,7 @@ func (x *FooterMonitorRowPersistent) String() string {
 func (*FooterMonitorRowPersistent) ProtoMessage() {}
 
 func (x *FooterMonitorRowPersistent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[217]
+	mi := &file_frontend_v1_footer_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14829,7 +15293,7 @@ func (x *FooterMonitorRowPersistent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMonitorRowPersistent.ProtoReflect.Descriptor instead.
 func (*FooterMonitorRowPersistent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{217}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{225}
 }
 
 // The TURN's token accounting (distinct from the topbar's SESSION breakdown
@@ -14894,7 +15358,7 @@ type FooterExpandedTokens struct {
 
 func (x *FooterExpandedTokens) Reset() {
 	*x = FooterExpandedTokens{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[218]
+	mi := &file_frontend_v1_footer_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14906,7 +15370,7 @@ func (x *FooterExpandedTokens) String() string {
 func (*FooterExpandedTokens) ProtoMessage() {}
 
 func (x *FooterExpandedTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[218]
+	mi := &file_frontend_v1_footer_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14919,7 +15383,7 @@ func (x *FooterExpandedTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedTokens.ProtoReflect.Descriptor instead.
 func (*FooterExpandedTokens) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{218}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{226}
 }
 
 func (x *FooterExpandedTokens) GetInput() *FooterTokensLineInput {
@@ -15008,7 +15472,7 @@ type FooterTokensLineContextGrowth struct {
 
 func (x *FooterTokensLineContextGrowth) Reset() {
 	*x = FooterTokensLineContextGrowth{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[219]
+	mi := &file_frontend_v1_footer_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15020,7 +15484,7 @@ func (x *FooterTokensLineContextGrowth) String() string {
 func (*FooterTokensLineContextGrowth) ProtoMessage() {}
 
 func (x *FooterTokensLineContextGrowth) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[219]
+	mi := &file_frontend_v1_footer_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15033,7 +15497,7 @@ func (x *FooterTokensLineContextGrowth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineContextGrowth.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineContextGrowth) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{219}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{227}
 }
 
 func (x *FooterTokensLineContextGrowth) GetValue() string {
@@ -15059,7 +15523,7 @@ type FooterTokensLineContextGrowthSinceCut struct {
 
 func (x *FooterTokensLineContextGrowthSinceCut) Reset() {
 	*x = FooterTokensLineContextGrowthSinceCut{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[220]
+	mi := &file_frontend_v1_footer_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15071,7 +15535,7 @@ func (x *FooterTokensLineContextGrowthSinceCut) String() string {
 func (*FooterTokensLineContextGrowthSinceCut) ProtoMessage() {}
 
 func (x *FooterTokensLineContextGrowthSinceCut) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[220]
+	mi := &file_frontend_v1_footer_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15084,7 +15548,7 @@ func (x *FooterTokensLineContextGrowthSinceCut) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use FooterTokensLineContextGrowthSinceCut.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineContextGrowthSinceCut) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{220}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{228}
 }
 
 // One agent's share of the accounting: its daemon-composed name, then the
@@ -15109,7 +15573,7 @@ type FooterTokensAgent struct {
 
 func (x *FooterTokensAgent) Reset() {
 	*x = FooterTokensAgent{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[221]
+	mi := &file_frontend_v1_footer_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15121,7 +15585,7 @@ func (x *FooterTokensAgent) String() string {
 func (*FooterTokensAgent) ProtoMessage() {}
 
 func (x *FooterTokensAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[221]
+	mi := &file_frontend_v1_footer_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15134,7 +15598,7 @@ func (x *FooterTokensAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensAgent.ProtoReflect.Descriptor instead.
 func (*FooterTokensAgent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{221}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *FooterTokensAgent) GetLabel() string {
@@ -15184,7 +15648,7 @@ type FooterTokensLineInput struct {
 
 func (x *FooterTokensLineInput) Reset() {
 	*x = FooterTokensLineInput{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[222]
+	mi := &file_frontend_v1_footer_proto_msgTypes[230]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15196,7 +15660,7 @@ func (x *FooterTokensLineInput) String() string {
 func (*FooterTokensLineInput) ProtoMessage() {}
 
 func (x *FooterTokensLineInput) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[222]
+	mi := &file_frontend_v1_footer_proto_msgTypes[230]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15209,7 +15673,7 @@ func (x *FooterTokensLineInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineInput.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineInput) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{222}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{230}
 }
 
 func (x *FooterTokensLineInput) GetValue() string {
@@ -15230,7 +15694,7 @@ type FooterTokensLineCacheRead struct {
 
 func (x *FooterTokensLineCacheRead) Reset() {
 	*x = FooterTokensLineCacheRead{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[223]
+	mi := &file_frontend_v1_footer_proto_msgTypes[231]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15242,7 +15706,7 @@ func (x *FooterTokensLineCacheRead) String() string {
 func (*FooterTokensLineCacheRead) ProtoMessage() {}
 
 func (x *FooterTokensLineCacheRead) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[223]
+	mi := &file_frontend_v1_footer_proto_msgTypes[231]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15255,7 +15719,7 @@ func (x *FooterTokensLineCacheRead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineCacheRead.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineCacheRead) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{223}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{231}
 }
 
 func (x *FooterTokensLineCacheRead) GetValue() string {
@@ -15276,7 +15740,7 @@ type FooterTokensLineCacheWrite struct {
 
 func (x *FooterTokensLineCacheWrite) Reset() {
 	*x = FooterTokensLineCacheWrite{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[224]
+	mi := &file_frontend_v1_footer_proto_msgTypes[232]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15288,7 +15752,7 @@ func (x *FooterTokensLineCacheWrite) String() string {
 func (*FooterTokensLineCacheWrite) ProtoMessage() {}
 
 func (x *FooterTokensLineCacheWrite) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[224]
+	mi := &file_frontend_v1_footer_proto_msgTypes[232]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15301,7 +15765,7 @@ func (x *FooterTokensLineCacheWrite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineCacheWrite.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineCacheWrite) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{224}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{232}
 }
 
 func (x *FooterTokensLineCacheWrite) GetValue() string {
@@ -15322,7 +15786,7 @@ type FooterTokensLineOutput struct {
 
 func (x *FooterTokensLineOutput) Reset() {
 	*x = FooterTokensLineOutput{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[225]
+	mi := &file_frontend_v1_footer_proto_msgTypes[233]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15334,7 +15798,7 @@ func (x *FooterTokensLineOutput) String() string {
 func (*FooterTokensLineOutput) ProtoMessage() {}
 
 func (x *FooterTokensLineOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[225]
+	mi := &file_frontend_v1_footer_proto_msgTypes[233]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15347,7 +15811,7 @@ func (x *FooterTokensLineOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineOutput.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineOutput) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{225}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{233}
 }
 
 func (x *FooterTokensLineOutput) GetValue() string {
@@ -15368,7 +15832,7 @@ type FooterTokensLineThinking struct {
 
 func (x *FooterTokensLineThinking) Reset() {
 	*x = FooterTokensLineThinking{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[226]
+	mi := &file_frontend_v1_footer_proto_msgTypes[234]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15380,7 +15844,7 @@ func (x *FooterTokensLineThinking) String() string {
 func (*FooterTokensLineThinking) ProtoMessage() {}
 
 func (x *FooterTokensLineThinking) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[226]
+	mi := &file_frontend_v1_footer_proto_msgTypes[234]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15393,7 +15857,7 @@ func (x *FooterTokensLineThinking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineThinking.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineThinking) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{226}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{234}
 }
 
 func (x *FooterTokensLineThinking) GetValue() string {
@@ -15415,7 +15879,7 @@ type FooterTokensLineFirstToken struct {
 
 func (x *FooterTokensLineFirstToken) Reset() {
 	*x = FooterTokensLineFirstToken{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[227]
+	mi := &file_frontend_v1_footer_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15427,7 +15891,7 @@ func (x *FooterTokensLineFirstToken) String() string {
 func (*FooterTokensLineFirstToken) ProtoMessage() {}
 
 func (x *FooterTokensLineFirstToken) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[227]
+	mi := &file_frontend_v1_footer_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15440,7 +15904,7 @@ func (x *FooterTokensLineFirstToken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineFirstToken.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineFirstToken) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{227}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{235}
 }
 
 func (x *FooterTokensLineFirstToken) GetValue() string {
@@ -15462,7 +15926,7 @@ type FooterTokensLineAlarm struct {
 
 func (x *FooterTokensLineAlarm) Reset() {
 	*x = FooterTokensLineAlarm{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[228]
+	mi := &file_frontend_v1_footer_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15474,7 +15938,7 @@ func (x *FooterTokensLineAlarm) String() string {
 func (*FooterTokensLineAlarm) ProtoMessage() {}
 
 func (x *FooterTokensLineAlarm) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[228]
+	mi := &file_frontend_v1_footer_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15487,7 +15951,7 @@ func (x *FooterTokensLineAlarm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineAlarm.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineAlarm) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{228}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{236}
 }
 
 func (x *FooterTokensLineAlarm) GetText() string {
@@ -15516,7 +15980,7 @@ type FooterTokensLineVerdict struct {
 
 func (x *FooterTokensLineVerdict) Reset() {
 	*x = FooterTokensLineVerdict{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[229]
+	mi := &file_frontend_v1_footer_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15528,7 +15992,7 @@ func (x *FooterTokensLineVerdict) String() string {
 func (*FooterTokensLineVerdict) ProtoMessage() {}
 
 func (x *FooterTokensLineVerdict) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[229]
+	mi := &file_frontend_v1_footer_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15541,7 +16005,7 @@ func (x *FooterTokensLineVerdict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineVerdict.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineVerdict) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{229}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{237}
 }
 
 func (x *FooterTokensLineVerdict) GetVerdict() isFooterTokensLineVerdict_Verdict {
@@ -15612,7 +16076,7 @@ type FooterTokensLineVerdictComplete struct {
 
 func (x *FooterTokensLineVerdictComplete) Reset() {
 	*x = FooterTokensLineVerdictComplete{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[230]
+	mi := &file_frontend_v1_footer_proto_msgTypes[238]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15624,7 +16088,7 @@ func (x *FooterTokensLineVerdictComplete) String() string {
 func (*FooterTokensLineVerdictComplete) ProtoMessage() {}
 
 func (x *FooterTokensLineVerdictComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[230]
+	mi := &file_frontend_v1_footer_proto_msgTypes[238]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15637,7 +16101,7 @@ func (x *FooterTokensLineVerdictComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineVerdictComplete.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineVerdictComplete) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{230}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{238}
 }
 
 // The floor verdict's evidence.
@@ -15651,7 +16115,7 @@ type FooterTokensLineVerdictIncomplete struct {
 
 func (x *FooterTokensLineVerdictIncomplete) Reset() {
 	*x = FooterTokensLineVerdictIncomplete{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[231]
+	mi := &file_frontend_v1_footer_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15663,7 +16127,7 @@ func (x *FooterTokensLineVerdictIncomplete) String() string {
 func (*FooterTokensLineVerdictIncomplete) ProtoMessage() {}
 
 func (x *FooterTokensLineVerdictIncomplete) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[231]
+	mi := &file_frontend_v1_footer_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15676,7 +16140,7 @@ func (x *FooterTokensLineVerdictIncomplete) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FooterTokensLineVerdictIncomplete.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineVerdictIncomplete) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{231}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{239}
 }
 
 func (x *FooterTokensLineVerdictIncomplete) GetText() string {
@@ -15697,7 +16161,7 @@ type FooterTokensLineVerdictInvalid struct {
 
 func (x *FooterTokensLineVerdictInvalid) Reset() {
 	*x = FooterTokensLineVerdictInvalid{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[232]
+	mi := &file_frontend_v1_footer_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15709,7 +16173,7 @@ func (x *FooterTokensLineVerdictInvalid) String() string {
 func (*FooterTokensLineVerdictInvalid) ProtoMessage() {}
 
 func (x *FooterTokensLineVerdictInvalid) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[232]
+	mi := &file_frontend_v1_footer_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15722,7 +16186,7 @@ func (x *FooterTokensLineVerdictInvalid) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTokensLineVerdictInvalid.ProtoReflect.Descriptor instead.
 func (*FooterTokensLineVerdictInvalid) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{232}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{240}
 }
 
 func (x *FooterTokensLineVerdictInvalid) GetText() string {
@@ -15747,7 +16211,7 @@ type FooterExpandedAgents struct {
 
 func (x *FooterExpandedAgents) Reset() {
 	*x = FooterExpandedAgents{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[233]
+	mi := &file_frontend_v1_footer_proto_msgTypes[241]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15759,7 +16223,7 @@ func (x *FooterExpandedAgents) String() string {
 func (*FooterExpandedAgents) ProtoMessage() {}
 
 func (x *FooterExpandedAgents) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[233]
+	mi := &file_frontend_v1_footer_proto_msgTypes[241]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15772,7 +16236,7 @@ func (x *FooterExpandedAgents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedAgents.ProtoReflect.Descriptor instead.
 func (*FooterExpandedAgents) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{233}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{241}
 }
 
 func (x *FooterExpandedAgents) GetRows() []*FooterAgentRow {
@@ -15815,7 +16279,7 @@ type FooterAgentRow struct {
 
 func (x *FooterAgentRow) Reset() {
 	*x = FooterAgentRow{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[234]
+	mi := &file_frontend_v1_footer_proto_msgTypes[242]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15827,7 +16291,7 @@ func (x *FooterAgentRow) String() string {
 func (*FooterAgentRow) ProtoMessage() {}
 
 func (x *FooterAgentRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[234]
+	mi := &file_frontend_v1_footer_proto_msgTypes[242]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15840,7 +16304,7 @@ func (x *FooterAgentRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRow.ProtoReflect.Descriptor instead.
 func (*FooterAgentRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{234}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{242}
 }
 
 func (x *FooterAgentRow) GetLabel() *FooterAgentRowLabel {
@@ -15938,7 +16402,7 @@ type FooterAgentRowRunning struct {
 
 func (x *FooterAgentRowRunning) Reset() {
 	*x = FooterAgentRowRunning{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[235]
+	mi := &file_frontend_v1_footer_proto_msgTypes[243]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15950,7 +16414,7 @@ func (x *FooterAgentRowRunning) String() string {
 func (*FooterAgentRowRunning) ProtoMessage() {}
 
 func (x *FooterAgentRowRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[235]
+	mi := &file_frontend_v1_footer_proto_msgTypes[243]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15963,7 +16427,7 @@ func (x *FooterAgentRowRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRowRunning.ProtoReflect.Descriptor instead.
 func (*FooterAgentRowRunning) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{235}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{243}
 }
 
 // The agent is waiting for the API, drawn as "waiting for the API · gives up
@@ -15986,7 +16450,7 @@ type FooterAgentRowWaitingForApi struct {
 
 func (x *FooterAgentRowWaitingForApi) Reset() {
 	*x = FooterAgentRowWaitingForApi{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[236]
+	mi := &file_frontend_v1_footer_proto_msgTypes[244]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15998,7 +16462,7 @@ func (x *FooterAgentRowWaitingForApi) String() string {
 func (*FooterAgentRowWaitingForApi) ProtoMessage() {}
 
 func (x *FooterAgentRowWaitingForApi) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[236]
+	mi := &file_frontend_v1_footer_proto_msgTypes[244]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16011,7 +16475,7 @@ func (x *FooterAgentRowWaitingForApi) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRowWaitingForApi.ProtoReflect.Descriptor instead.
 func (*FooterAgentRowWaitingForApi) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{236}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{244}
 }
 
 func (x *FooterAgentRowWaitingForApi) GetFailedAtMs() int64 {
@@ -16046,7 +16510,7 @@ type FooterAgentRowLabel struct {
 
 func (x *FooterAgentRowLabel) Reset() {
 	*x = FooterAgentRowLabel{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[237]
+	mi := &file_frontend_v1_footer_proto_msgTypes[245]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16058,7 +16522,7 @@ func (x *FooterAgentRowLabel) String() string {
 func (*FooterAgentRowLabel) ProtoMessage() {}
 
 func (x *FooterAgentRowLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[237]
+	mi := &file_frontend_v1_footer_proto_msgTypes[245]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16071,7 +16535,7 @@ func (x *FooterAgentRowLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRowLabel.ProtoReflect.Descriptor instead.
 func (*FooterAgentRowLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{237}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{245}
 }
 
 func (x *FooterAgentRowLabel) GetText() string {
@@ -16092,7 +16556,7 @@ type FooterAgentRowDescription struct {
 
 func (x *FooterAgentRowDescription) Reset() {
 	*x = FooterAgentRowDescription{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[238]
+	mi := &file_frontend_v1_footer_proto_msgTypes[246]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16104,7 +16568,7 @@ func (x *FooterAgentRowDescription) String() string {
 func (*FooterAgentRowDescription) ProtoMessage() {}
 
 func (x *FooterAgentRowDescription) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[238]
+	mi := &file_frontend_v1_footer_proto_msgTypes[246]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16117,7 +16581,7 @@ func (x *FooterAgentRowDescription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRowDescription.ProtoReflect.Descriptor instead.
 func (*FooterAgentRowDescription) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{238}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{246}
 }
 
 func (x *FooterAgentRowDescription) GetText() string {
@@ -16138,7 +16602,7 @@ type FooterAgentRowTokens struct {
 
 func (x *FooterAgentRowTokens) Reset() {
 	*x = FooterAgentRowTokens{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[239]
+	mi := &file_frontend_v1_footer_proto_msgTypes[247]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16150,7 +16614,7 @@ func (x *FooterAgentRowTokens) String() string {
 func (*FooterAgentRowTokens) ProtoMessage() {}
 
 func (x *FooterAgentRowTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[239]
+	mi := &file_frontend_v1_footer_proto_msgTypes[247]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16163,7 +16627,7 @@ func (x *FooterAgentRowTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRowTokens.ProtoReflect.Descriptor instead.
 func (*FooterAgentRowTokens) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{239}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{247}
 }
 
 func (x *FooterAgentRowTokens) GetText() string {
@@ -16186,7 +16650,7 @@ type FooterAgentRowRuntime struct {
 
 func (x *FooterAgentRowRuntime) Reset() {
 	*x = FooterAgentRowRuntime{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[240]
+	mi := &file_frontend_v1_footer_proto_msgTypes[248]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16198,7 +16662,7 @@ func (x *FooterAgentRowRuntime) String() string {
 func (*FooterAgentRowRuntime) ProtoMessage() {}
 
 func (x *FooterAgentRowRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[240]
+	mi := &file_frontend_v1_footer_proto_msgTypes[248]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16211,7 +16675,7 @@ func (x *FooterAgentRowRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterAgentRowRuntime.ProtoReflect.Descriptor instead.
 func (*FooterAgentRowRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{240}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{248}
 }
 
 func (x *FooterAgentRowRuntime) GetStartedAtMs() int64 {
@@ -16236,7 +16700,7 @@ type FooterExpandedTasks struct {
 
 func (x *FooterExpandedTasks) Reset() {
 	*x = FooterExpandedTasks{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[241]
+	mi := &file_frontend_v1_footer_proto_msgTypes[249]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16248,7 +16712,7 @@ func (x *FooterExpandedTasks) String() string {
 func (*FooterExpandedTasks) ProtoMessage() {}
 
 func (x *FooterExpandedTasks) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[241]
+	mi := &file_frontend_v1_footer_proto_msgTypes[249]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16261,7 +16725,7 @@ func (x *FooterExpandedTasks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedTasks.ProtoReflect.Descriptor instead.
 func (*FooterExpandedTasks) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{241}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{249}
 }
 
 func (x *FooterExpandedTasks) GetRows() []*FooterTaskRow {
@@ -16286,7 +16750,7 @@ type FooterTaskRow struct {
 
 func (x *FooterTaskRow) Reset() {
 	*x = FooterTaskRow{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[242]
+	mi := &file_frontend_v1_footer_proto_msgTypes[250]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16298,7 +16762,7 @@ func (x *FooterTaskRow) String() string {
 func (*FooterTaskRow) ProtoMessage() {}
 
 func (x *FooterTaskRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[242]
+	mi := &file_frontend_v1_footer_proto_msgTypes[250]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16311,7 +16775,7 @@ func (x *FooterTaskRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRow.ProtoReflect.Descriptor instead.
 func (*FooterTaskRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{242}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{250}
 }
 
 func (x *FooterTaskRow) GetStatus() *FooterTaskRowStatus {
@@ -16339,7 +16803,7 @@ type FooterTaskRowSubject struct {
 
 func (x *FooterTaskRowSubject) Reset() {
 	*x = FooterTaskRowSubject{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[243]
+	mi := &file_frontend_v1_footer_proto_msgTypes[251]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16351,7 +16815,7 @@ func (x *FooterTaskRowSubject) String() string {
 func (*FooterTaskRowSubject) ProtoMessage() {}
 
 func (x *FooterTaskRowSubject) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[243]
+	mi := &file_frontend_v1_footer_proto_msgTypes[251]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16364,7 +16828,7 @@ func (x *FooterTaskRowSubject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRowSubject.ProtoReflect.Descriptor instead.
 func (*FooterTaskRowSubject) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{243}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{251}
 }
 
 func (x *FooterTaskRowSubject) GetText() string {
@@ -16393,7 +16857,7 @@ type FooterTaskRowStatus struct {
 
 func (x *FooterTaskRowStatus) Reset() {
 	*x = FooterTaskRowStatus{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[244]
+	mi := &file_frontend_v1_footer_proto_msgTypes[252]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16405,7 +16869,7 @@ func (x *FooterTaskRowStatus) String() string {
 func (*FooterTaskRowStatus) ProtoMessage() {}
 
 func (x *FooterTaskRowStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[244]
+	mi := &file_frontend_v1_footer_proto_msgTypes[252]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16418,7 +16882,7 @@ func (x *FooterTaskRowStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRowStatus.ProtoReflect.Descriptor instead.
 func (*FooterTaskRowStatus) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{244}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{252}
 }
 
 func (x *FooterTaskRowStatus) GetStatus() isFooterTaskRowStatus_Status {
@@ -16490,7 +16954,7 @@ type FooterTaskRowPending struct {
 
 func (x *FooterTaskRowPending) Reset() {
 	*x = FooterTaskRowPending{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[245]
+	mi := &file_frontend_v1_footer_proto_msgTypes[253]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16502,7 +16966,7 @@ func (x *FooterTaskRowPending) String() string {
 func (*FooterTaskRowPending) ProtoMessage() {}
 
 func (x *FooterTaskRowPending) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[245]
+	mi := &file_frontend_v1_footer_proto_msgTypes[253]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16515,7 +16979,7 @@ func (x *FooterTaskRowPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRowPending.ProtoReflect.Descriptor instead.
 func (*FooterTaskRowPending) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{245}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{253}
 }
 
 // In progress.
@@ -16530,7 +16994,7 @@ type FooterTaskRowRunning struct {
 
 func (x *FooterTaskRowRunning) Reset() {
 	*x = FooterTaskRowRunning{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[246]
+	mi := &file_frontend_v1_footer_proto_msgTypes[254]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16542,7 +17006,7 @@ func (x *FooterTaskRowRunning) String() string {
 func (*FooterTaskRowRunning) ProtoMessage() {}
 
 func (x *FooterTaskRowRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[246]
+	mi := &file_frontend_v1_footer_proto_msgTypes[254]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16555,7 +17019,7 @@ func (x *FooterTaskRowRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRowRunning.ProtoReflect.Descriptor instead.
 func (*FooterTaskRowRunning) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{246}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{254}
 }
 
 func (x *FooterTaskRowRunning) GetActiveForm() *FooterTaskRowActiveForm {
@@ -16576,7 +17040,7 @@ type FooterTaskRowActiveForm struct {
 
 func (x *FooterTaskRowActiveForm) Reset() {
 	*x = FooterTaskRowActiveForm{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[247]
+	mi := &file_frontend_v1_footer_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16588,7 +17052,7 @@ func (x *FooterTaskRowActiveForm) String() string {
 func (*FooterTaskRowActiveForm) ProtoMessage() {}
 
 func (x *FooterTaskRowActiveForm) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[247]
+	mi := &file_frontend_v1_footer_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16601,7 +17065,7 @@ func (x *FooterTaskRowActiveForm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRowActiveForm.ProtoReflect.Descriptor instead.
 func (*FooterTaskRowActiveForm) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{247}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{255}
 }
 
 func (x *FooterTaskRowActiveForm) GetText() string {
@@ -16620,7 +17084,7 @@ type FooterTaskRowCompleted struct {
 
 func (x *FooterTaskRowCompleted) Reset() {
 	*x = FooterTaskRowCompleted{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[248]
+	mi := &file_frontend_v1_footer_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16632,7 +17096,7 @@ func (x *FooterTaskRowCompleted) String() string {
 func (*FooterTaskRowCompleted) ProtoMessage() {}
 
 func (x *FooterTaskRowCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[248]
+	mi := &file_frontend_v1_footer_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16645,7 +17109,7 @@ func (x *FooterTaskRowCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterTaskRowCompleted.ProtoReflect.Descriptor instead.
 func (*FooterTaskRowCompleted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{248}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{256}
 }
 
 // The live detached shells. One row per running background command; each
@@ -16661,7 +17125,7 @@ type FooterExpandedShells struct {
 
 func (x *FooterExpandedShells) Reset() {
 	*x = FooterExpandedShells{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[249]
+	mi := &file_frontend_v1_footer_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16673,7 +17137,7 @@ func (x *FooterExpandedShells) String() string {
 func (*FooterExpandedShells) ProtoMessage() {}
 
 func (x *FooterExpandedShells) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[249]
+	mi := &file_frontend_v1_footer_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16686,7 +17150,7 @@ func (x *FooterExpandedShells) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterExpandedShells.ProtoReflect.Descriptor instead.
 func (*FooterExpandedShells) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{249}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *FooterExpandedShells) GetRows() []*FooterShellRow {
@@ -16713,7 +17177,7 @@ type FooterShellRow struct {
 
 func (x *FooterShellRow) Reset() {
 	*x = FooterShellRow{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[250]
+	mi := &file_frontend_v1_footer_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16725,7 +17189,7 @@ func (x *FooterShellRow) String() string {
 func (*FooterShellRow) ProtoMessage() {}
 
 func (x *FooterShellRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[250]
+	mi := &file_frontend_v1_footer_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16738,7 +17202,7 @@ func (x *FooterShellRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRow.ProtoReflect.Descriptor instead.
 func (*FooterShellRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{250}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *FooterShellRow) GetCommand() *FooterShellRowCommand {
@@ -16769,7 +17233,8 @@ func (x *FooterShellRow) GetJump() *FooterJump {
 	return nil
 }
 
-// WHICH WORK A ROW IS: the run's `conversation.v1.DetachedWorkId` value — the
+// WHICH WORK A ROW IS: for a merge row, the merge's ledger id (FooterMergeRow
+// .work). For every other row, the run's `conversation.v1.DetachedWorkId` value — the
 // same string the daemon keys it by and the feed bubble's head draws
 // (`FeedDetachedWorkId`). For an IN-TURN subagent, which is not detached work
 // yet, it is the spawn unit's `AgentActivityId` value: the contract makes the
@@ -16789,7 +17254,7 @@ type FooterWorkId struct {
 
 func (x *FooterWorkId) Reset() {
 	*x = FooterWorkId{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[251]
+	mi := &file_frontend_v1_footer_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16801,7 +17266,7 @@ func (x *FooterWorkId) String() string {
 func (*FooterWorkId) ProtoMessage() {}
 
 func (x *FooterWorkId) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[251]
+	mi := &file_frontend_v1_footer_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16814,7 +17279,7 @@ func (x *FooterWorkId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterWorkId.ProtoReflect.Descriptor instead.
 func (*FooterWorkId) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{251}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *FooterWorkId) GetValue() string {
@@ -16850,7 +17315,7 @@ type FooterJump struct {
 
 func (x *FooterJump) Reset() {
 	*x = FooterJump{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[252]
+	mi := &file_frontend_v1_footer_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16862,7 +17327,7 @@ func (x *FooterJump) String() string {
 func (*FooterJump) ProtoMessage() {}
 
 func (x *FooterJump) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[252]
+	mi := &file_frontend_v1_footer_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16875,7 +17340,7 @@ func (x *FooterJump) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterJump.ProtoReflect.Descriptor instead.
 func (*FooterJump) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{252}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{260}
 }
 
 func (x *FooterJump) GetTarget() isFooterJump_Target {
@@ -16936,7 +17401,7 @@ type FooterJumpUnresolved struct {
 
 func (x *FooterJumpUnresolved) Reset() {
 	*x = FooterJumpUnresolved{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[253]
+	mi := &file_frontend_v1_footer_proto_msgTypes[261]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16948,7 +17413,7 @@ func (x *FooterJumpUnresolved) String() string {
 func (*FooterJumpUnresolved) ProtoMessage() {}
 
 func (x *FooterJumpUnresolved) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[253]
+	mi := &file_frontend_v1_footer_proto_msgTypes[261]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16961,7 +17426,7 @@ func (x *FooterJumpUnresolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterJumpUnresolved.ProtoReflect.Descriptor instead.
 func (*FooterJumpUnresolved) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{253}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{261}
 }
 
 func (x *FooterJumpUnresolved) GetReason() isFooterJumpUnresolved_Reason {
@@ -17002,7 +17467,7 @@ type FooterJumpNotDrawn struct {
 
 func (x *FooterJumpNotDrawn) Reset() {
 	*x = FooterJumpNotDrawn{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[254]
+	mi := &file_frontend_v1_footer_proto_msgTypes[262]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17014,7 +17479,7 @@ func (x *FooterJumpNotDrawn) String() string {
 func (*FooterJumpNotDrawn) ProtoMessage() {}
 
 func (x *FooterJumpNotDrawn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[254]
+	mi := &file_frontend_v1_footer_proto_msgTypes[262]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17027,7 +17492,7 @@ func (x *FooterJumpNotDrawn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterJumpNotDrawn.ProtoReflect.Descriptor instead.
 func (*FooterJumpNotDrawn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{254}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{262}
 }
 
 // The row's command element.
@@ -17042,7 +17507,7 @@ type FooterShellRowCommand struct {
 
 func (x *FooterShellRowCommand) Reset() {
 	*x = FooterShellRowCommand{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[255]
+	mi := &file_frontend_v1_footer_proto_msgTypes[263]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17054,7 +17519,7 @@ func (x *FooterShellRowCommand) String() string {
 func (*FooterShellRowCommand) ProtoMessage() {}
 
 func (x *FooterShellRowCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[255]
+	mi := &file_frontend_v1_footer_proto_msgTypes[263]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17067,7 +17532,7 @@ func (x *FooterShellRowCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRowCommand.ProtoReflect.Descriptor instead.
 func (*FooterShellRowCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{255}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{263}
 }
 
 func (x *FooterShellRowCommand) GetText() string {
@@ -17089,7 +17554,7 @@ type FooterShellRowRuntime struct {
 
 func (x *FooterShellRowRuntime) Reset() {
 	*x = FooterShellRowRuntime{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[256]
+	mi := &file_frontend_v1_footer_proto_msgTypes[264]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17101,7 +17566,7 @@ func (x *FooterShellRowRuntime) String() string {
 func (*FooterShellRowRuntime) ProtoMessage() {}
 
 func (x *FooterShellRowRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[256]
+	mi := &file_frontend_v1_footer_proto_msgTypes[264]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17114,7 +17579,7 @@ func (x *FooterShellRowRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRowRuntime.ProtoReflect.Descriptor instead.
 func (*FooterShellRowRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{256}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{264}
 }
 
 func (x *FooterShellRowRuntime) GetStartedAtMs() int64 {
@@ -17141,7 +17606,7 @@ type FooterStatusNetworkFault struct {
 
 func (x *FooterStatusNetworkFault) Reset() {
 	*x = FooterStatusNetworkFault{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[257]
+	mi := &file_frontend_v1_footer_proto_msgTypes[265]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17153,7 +17618,7 @@ func (x *FooterStatusNetworkFault) String() string {
 func (*FooterStatusNetworkFault) ProtoMessage() {}
 
 func (x *FooterStatusNetworkFault) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[257]
+	mi := &file_frontend_v1_footer_proto_msgTypes[265]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17166,7 +17631,7 @@ func (x *FooterStatusNetworkFault) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusNetworkFault.ProtoReflect.Descriptor instead.
 func (*FooterStatusNetworkFault) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{257}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{265}
 }
 
 func (x *FooterStatusNetworkFault) GetSubstatus() isFooterStatusNetworkFault_Substatus {
@@ -17212,7 +17677,7 @@ type FooterSubStatusNetworkFaultOffline struct {
 
 func (x *FooterSubStatusNetworkFaultOffline) Reset() {
 	*x = FooterSubStatusNetworkFaultOffline{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[258]
+	mi := &file_frontend_v1_footer_proto_msgTypes[266]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17224,7 +17689,7 @@ func (x *FooterSubStatusNetworkFaultOffline) String() string {
 func (*FooterSubStatusNetworkFaultOffline) ProtoMessage() {}
 
 func (x *FooterSubStatusNetworkFaultOffline) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[258]
+	mi := &file_frontend_v1_footer_proto_msgTypes[266]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17237,7 +17702,7 @@ func (x *FooterSubStatusNetworkFaultOffline) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use FooterSubStatusNetworkFaultOffline.ProtoReflect.Descriptor instead.
 func (*FooterSubStatusNetworkFaultOffline) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{258}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{266}
 }
 
 // The activity cell while the network is down: the salient line, or the
@@ -17257,7 +17722,7 @@ type FooterStatusNetworkFaultActivity struct {
 
 func (x *FooterStatusNetworkFaultActivity) Reset() {
 	*x = FooterStatusNetworkFaultActivity{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[259]
+	mi := &file_frontend_v1_footer_proto_msgTypes[267]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17269,7 +17734,7 @@ func (x *FooterStatusNetworkFaultActivity) String() string {
 func (*FooterStatusNetworkFaultActivity) ProtoMessage() {}
 
 func (x *FooterStatusNetworkFaultActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[259]
+	mi := &file_frontend_v1_footer_proto_msgTypes[267]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17282,7 +17747,7 @@ func (x *FooterStatusNetworkFaultActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusNetworkFaultActivity.ProtoReflect.Descriptor instead.
 func (*FooterStatusNetworkFaultActivity) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{259}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{267}
 }
 
 func (x *FooterStatusNetworkFaultActivity) GetTier() isFooterStatusNetworkFaultActivity_Tier {
@@ -17348,7 +17813,7 @@ type FooterStatusNetworkFaultSalient struct {
 
 func (x *FooterStatusNetworkFaultSalient) Reset() {
 	*x = FooterStatusNetworkFaultSalient{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[260]
+	mi := &file_frontend_v1_footer_proto_msgTypes[268]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17360,7 +17825,7 @@ func (x *FooterStatusNetworkFaultSalient) String() string {
 func (*FooterStatusNetworkFaultSalient) ProtoMessage() {}
 
 func (x *FooterStatusNetworkFaultSalient) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[260]
+	mi := &file_frontend_v1_footer_proto_msgTypes[268]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17373,7 +17838,7 @@ func (x *FooterStatusNetworkFaultSalient) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusNetworkFaultSalient.ProtoReflect.Descriptor instead.
 func (*FooterStatusNetworkFaultSalient) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{260}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{268}
 }
 
 func (x *FooterStatusNetworkFaultSalient) GetAt() *FooterStatusActivityAt {
@@ -17454,7 +17919,7 @@ type FooterStatusActivityNetworkOffline struct {
 
 func (x *FooterStatusActivityNetworkOffline) Reset() {
 	*x = FooterStatusActivityNetworkOffline{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[261]
+	mi := &file_frontend_v1_footer_proto_msgTypes[269]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17466,7 +17931,7 @@ func (x *FooterStatusActivityNetworkOffline) String() string {
 func (*FooterStatusActivityNetworkOffline) ProtoMessage() {}
 
 func (x *FooterStatusActivityNetworkOffline) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[261]
+	mi := &file_frontend_v1_footer_proto_msgTypes[269]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17479,7 +17944,7 @@ func (x *FooterStatusActivityNetworkOffline) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use FooterStatusActivityNetworkOffline.ProtoReflect.Descriptor instead.
 func (*FooterStatusActivityNetworkOffline) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{261}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{269}
 }
 
 func (x *FooterStatusActivityNetworkOffline) GetText() string {
@@ -18167,18 +18632,26 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\averdict\"!\n" +
 	"\x1fFooterTokensCellVerdictComplete\"#\n" +
 	"!FooterTokensCellVerdictIncomplete\" \n" +
-	"\x1eFooterTokensCellVerdictInvalid\"\x8b\x03\n" +
+	"\x1eFooterTokensCellVerdictInvalid\"\xd2\x03\n" +
 	"\x13FooterLiveWorkChips\x12:\n" +
 	"\x06agents\x18\x01 \x01(\v2\x1d.frontend.v1.FooterChipAgentsH\x00R\x06agents\x88\x01\x01\x127\n" +
 	"\x05tasks\x18\x02 \x01(\v2\x1c.frontend.v1.FooterChipTasksH\x01R\x05tasks\x88\x01\x01\x12:\n" +
 	"\x06shells\x18\x03 \x01(\v2\x1d.frontend.v1.FooterChipShellsH\x02R\x06shells\x88\x01\x01\x12@\n" +
 	"\bmonitors\x18\x04 \x01(\v2\x1f.frontend.v1.FooterChipMonitorsH\x03R\bmonitors\x88\x01\x01\x127\n" +
-	"\x05crons\x18\x05 \x01(\v2\x1c.frontend.v1.FooterChipCronsH\x04R\x05crons\x88\x01\x01B\t\n" +
+	"\x05crons\x18\x05 \x01(\v2\x1c.frontend.v1.FooterChipCronsH\x04R\x05crons\x88\x01\x01\x12:\n" +
+	"\x06merges\x18\a \x01(\v2\x1d.frontend.v1.FooterChipMergesH\x05R\x06merges\x88\x01\x01B\t\n" +
 	"\a_agentsB\b\n" +
 	"\x06_tasksB\t\n" +
 	"\a_shellsB\v\n" +
 	"\t_monitorsB\b\n" +
-	"\x06_cronsJ\x04\b\x06\x10\aR\vmerge_tests\"'\n" +
+	"\x06_cronsB\t\n" +
+	"\a_mergesJ\x04\b\x06\x10\aR\vmerge_tests\"\x95\x01\n" +
+	"\x10FooterChipMerges\x12\x14\n" +
+	"\x05count\x18\x01 \x01(\rR\x05count\x12W\n" +
+	"\x0fwaiting_on_user\x18\x02 \x01(\v2*.frontend.v1.FooterChipMergesWaitingOnUserH\x00R\rwaitingOnUser\x88\x01\x01B\x12\n" +
+	"\x10_waiting_on_user\"5\n" +
+	"\x1dFooterChipMergesWaitingOnUser\x12\x14\n" +
+	"\x05count\x18\x01 \x01(\rR\x05count\"'\n" +
 	"\x0fFooterChipCrons\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\rR\x05count\"*\n" +
 	"\x12FooterChipMonitors\x12\x14\n" +
@@ -18193,14 +18666,15 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x04done\x18\x01 \x01(\rR\x04done\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\rR\x05total\"(\n" +
 	"\x10FooterChipShells\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\rR\x05count\"\x85\x03\n" +
+	"\x05count\x18\x01 \x01(\rR\x05count\"\xc0\x03\n" +
 	"\x0eFooterExpanded\x129\n" +
 	"\x06tokens\x18\x01 \x01(\v2!.frontend.v1.FooterExpandedTokensR\x06tokens\x129\n" +
 	"\x06agents\x18\x02 \x01(\v2!.frontend.v1.FooterExpandedAgentsR\x06agents\x126\n" +
 	"\x05tasks\x18\x03 \x01(\v2 .frontend.v1.FooterExpandedTasksR\x05tasks\x129\n" +
 	"\x06shells\x18\x04 \x01(\v2!.frontend.v1.FooterExpandedShellsR\x06shells\x12?\n" +
 	"\bmonitors\x18\x05 \x01(\v2#.frontend.v1.FooterExpandedMonitorsR\bmonitors\x126\n" +
-	"\x05crons\x18\x06 \x01(\v2 .frontend.v1.FooterExpandedCronsR\x05cronsJ\x04\b\a\x10\bR\vmerge_tests\"\x85\x02\n" +
+	"\x05crons\x18\x06 \x01(\v2 .frontend.v1.FooterExpandedCronsR\x05crons\x129\n" +
+	"\x06merges\x18\b \x01(\v2!.frontend.v1.FooterExpandedMergesR\x06mergesJ\x04\b\a\x10\bR\vmerge_tests\"\x85\x02\n" +
 	"\x13FooterExpandedFocus\x128\n" +
 	"\x06agents\x18\x01 \x01(\v2\x1e.frontend.v1.FooterFocusAgentsH\x00R\x06agents\x128\n" +
 	"\x06shells\x18\x02 \x01(\v2\x1e.frontend.v1.FooterFocusShellsH\x00R\x06shells\x12>\n" +
@@ -18247,7 +18721,25 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"5\n" +
 	"\x15FooterWakeupRowWakeAt\x12\x1c\n" +
 	"\n" +
-	"wake_at_ms\x18\x01 \x01(\x03R\bwakeAtMs\"K\n" +
+	"wake_at_ms\x18\x01 \x01(\x03R\bwakeAtMs\"G\n" +
+	"\x14FooterExpandedMerges\x12/\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterMergeRowR\x04rows\"\x90\x03\n" +
+	"\x0eFooterMergeRow\x126\n" +
+	"\x05label\x18\x01 \x01(\v2 .frontend.v1.FooterMergeRowLabelR\x05label\x128\n" +
+	"\x04step\x18\x02 \x01(\v2\x1f.frontend.v1.FooterMergeRowStepH\x00R\x04step\x88\x01\x01\x12<\n" +
+	"\aruntime\x18\x03 \x01(\v2\".frontend.v1.FooterMergeRowRuntimeR\aruntime\x12-\n" +
+	"\x04work\x18\x04 \x01(\v2\x19.frontend.v1.FooterWorkIdR\x04work\x12+\n" +
+	"\x04jump\x18\x05 \x01(\v2\x17.frontend.v1.FooterJumpR\x04jump\x12U\n" +
+	"\x0fwaiting_on_user\x18\x06 \x01(\v2(.frontend.v1.FooterMergeRowWaitingOnUserH\x01R\rwaitingOnUser\x88\x01\x01B\a\n" +
+	"\x05_stepB\x12\n" +
+	"\x10_waiting_on_user\")\n" +
+	"\x13FooterMergeRowLabel\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"(\n" +
+	"\x12FooterMergeRowStep\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\";\n" +
+	"\x15FooterMergeRowRuntime\x12\"\n" +
+	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\x1d\n" +
+	"\x1bFooterMergeRowWaitingOnUser\"K\n" +
 	"\x16FooterExpandedMonitors\x121\n" +
 	"\x04rows\x18\x01 \x03(\v2\x1d.frontend.v1.FooterMonitorRowR\x04rows\"\xd7\x02\n" +
 	"\x10FooterMonitorRow\x12J\n" +
@@ -18430,7 +18922,7 @@ func file_frontend_v1_footer_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_footer_proto_rawDescData
 }
 
-var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 262)
+var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 270)
 var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterView)(nil),                                    // 0: frontend.v1.FooterView
 	(*FooterStrip)(nil),                                   // 1: frontend.v1.FooterStrip
@@ -18624,83 +19116,91 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterTokensCellVerdictIncomplete)(nil),             // 189: frontend.v1.FooterTokensCellVerdictIncomplete
 	(*FooterTokensCellVerdictInvalid)(nil),                // 190: frontend.v1.FooterTokensCellVerdictInvalid
 	(*FooterLiveWorkChips)(nil),                           // 191: frontend.v1.FooterLiveWorkChips
-	(*FooterChipCrons)(nil),                               // 192: frontend.v1.FooterChipCrons
-	(*FooterChipMonitors)(nil),                            // 193: frontend.v1.FooterChipMonitors
-	(*FooterChipAgents)(nil),                              // 194: frontend.v1.FooterChipAgents
-	(*FooterChipAgentsWaitingForApi)(nil),                 // 195: frontend.v1.FooterChipAgentsWaitingForApi
-	(*FooterChipTasks)(nil),                               // 196: frontend.v1.FooterChipTasks
-	(*FooterChipShells)(nil),                              // 197: frontend.v1.FooterChipShells
-	(*FooterExpanded)(nil),                                // 198: frontend.v1.FooterExpanded
-	(*FooterExpandedFocus)(nil),                           // 199: frontend.v1.FooterExpandedFocus
-	(*FooterFocusAgents)(nil),                             // 200: frontend.v1.FooterFocusAgents
-	(*FooterFocusShells)(nil),                             // 201: frontend.v1.FooterFocusShells
-	(*FooterFocusMonitors)(nil),                           // 202: frontend.v1.FooterFocusMonitors
-	(*FooterExpandedCrons)(nil),                           // 203: frontend.v1.FooterExpandedCrons
-	(*FooterCronRow)(nil),                                 // 204: frontend.v1.FooterCronRow
-	(*FooterCronRowSchedule)(nil),                         // 205: frontend.v1.FooterCronRowSchedule
-	(*FooterCronRowPrompt)(nil),                           // 206: frontend.v1.FooterCronRowPrompt
-	(*FooterCronRowNextFire)(nil),                         // 207: frontend.v1.FooterCronRowNextFire
-	(*FooterCronRowRecurring)(nil),                        // 208: frontend.v1.FooterCronRowRecurring
-	(*FooterCronRowDurable)(nil),                          // 209: frontend.v1.FooterCronRowDurable
-	(*FooterWakeupRow)(nil),                               // 210: frontend.v1.FooterWakeupRow
-	(*FooterWakeupRowReason)(nil),                         // 211: frontend.v1.FooterWakeupRowReason
-	(*FooterWakeupRowWakeAt)(nil),                         // 212: frontend.v1.FooterWakeupRowWakeAt
-	(*FooterExpandedMonitors)(nil),                        // 213: frontend.v1.FooterExpandedMonitors
-	(*FooterMonitorRow)(nil),                              // 214: frontend.v1.FooterMonitorRow
-	(*FooterMonitorRowDescription)(nil),                   // 215: frontend.v1.FooterMonitorRowDescription
-	(*FooterMonitorRowRuntime)(nil),                       // 216: frontend.v1.FooterMonitorRowRuntime
-	(*FooterMonitorRowPersistent)(nil),                    // 217: frontend.v1.FooterMonitorRowPersistent
-	(*FooterExpandedTokens)(nil),                          // 218: frontend.v1.FooterExpandedTokens
-	(*FooterTokensLineContextGrowth)(nil),                 // 219: frontend.v1.FooterTokensLineContextGrowth
-	(*FooterTokensLineContextGrowthSinceCut)(nil),         // 220: frontend.v1.FooterTokensLineContextGrowthSinceCut
-	(*FooterTokensAgent)(nil),                             // 221: frontend.v1.FooterTokensAgent
-	(*FooterTokensLineInput)(nil),                         // 222: frontend.v1.FooterTokensLineInput
-	(*FooterTokensLineCacheRead)(nil),                     // 223: frontend.v1.FooterTokensLineCacheRead
-	(*FooterTokensLineCacheWrite)(nil),                    // 224: frontend.v1.FooterTokensLineCacheWrite
-	(*FooterTokensLineOutput)(nil),                        // 225: frontend.v1.FooterTokensLineOutput
-	(*FooterTokensLineThinking)(nil),                      // 226: frontend.v1.FooterTokensLineThinking
-	(*FooterTokensLineFirstToken)(nil),                    // 227: frontend.v1.FooterTokensLineFirstToken
-	(*FooterTokensLineAlarm)(nil),                         // 228: frontend.v1.FooterTokensLineAlarm
-	(*FooterTokensLineVerdict)(nil),                       // 229: frontend.v1.FooterTokensLineVerdict
-	(*FooterTokensLineVerdictComplete)(nil),               // 230: frontend.v1.FooterTokensLineVerdictComplete
-	(*FooterTokensLineVerdictIncomplete)(nil),             // 231: frontend.v1.FooterTokensLineVerdictIncomplete
-	(*FooterTokensLineVerdictInvalid)(nil),                // 232: frontend.v1.FooterTokensLineVerdictInvalid
-	(*FooterExpandedAgents)(nil),                          // 233: frontend.v1.FooterExpandedAgents
-	(*FooterAgentRow)(nil),                                // 234: frontend.v1.FooterAgentRow
-	(*FooterAgentRowRunning)(nil),                         // 235: frontend.v1.FooterAgentRowRunning
-	(*FooterAgentRowWaitingForApi)(nil),                   // 236: frontend.v1.FooterAgentRowWaitingForApi
-	(*FooterAgentRowLabel)(nil),                           // 237: frontend.v1.FooterAgentRowLabel
-	(*FooterAgentRowDescription)(nil),                     // 238: frontend.v1.FooterAgentRowDescription
-	(*FooterAgentRowTokens)(nil),                          // 239: frontend.v1.FooterAgentRowTokens
-	(*FooterAgentRowRuntime)(nil),                         // 240: frontend.v1.FooterAgentRowRuntime
-	(*FooterExpandedTasks)(nil),                           // 241: frontend.v1.FooterExpandedTasks
-	(*FooterTaskRow)(nil),                                 // 242: frontend.v1.FooterTaskRow
-	(*FooterTaskRowSubject)(nil),                          // 243: frontend.v1.FooterTaskRowSubject
-	(*FooterTaskRowStatus)(nil),                           // 244: frontend.v1.FooterTaskRowStatus
-	(*FooterTaskRowPending)(nil),                          // 245: frontend.v1.FooterTaskRowPending
-	(*FooterTaskRowRunning)(nil),                          // 246: frontend.v1.FooterTaskRowRunning
-	(*FooterTaskRowActiveForm)(nil),                       // 247: frontend.v1.FooterTaskRowActiveForm
-	(*FooterTaskRowCompleted)(nil),                        // 248: frontend.v1.FooterTaskRowCompleted
-	(*FooterExpandedShells)(nil),                          // 249: frontend.v1.FooterExpandedShells
-	(*FooterShellRow)(nil),                                // 250: frontend.v1.FooterShellRow
-	(*FooterWorkId)(nil),                                  // 251: frontend.v1.FooterWorkId
-	(*FooterJump)(nil),                                    // 252: frontend.v1.FooterJump
-	(*FooterJumpUnresolved)(nil),                          // 253: frontend.v1.FooterJumpUnresolved
-	(*FooterJumpNotDrawn)(nil),                            // 254: frontend.v1.FooterJumpNotDrawn
-	(*FooterShellRowCommand)(nil),                         // 255: frontend.v1.FooterShellRowCommand
-	(*FooterShellRowRuntime)(nil),                         // 256: frontend.v1.FooterShellRowRuntime
-	(*FooterStatusNetworkFault)(nil),                      // 257: frontend.v1.FooterStatusNetworkFault
-	(*FooterSubStatusNetworkFaultOffline)(nil),            // 258: frontend.v1.FooterSubStatusNetworkFaultOffline
-	(*FooterStatusNetworkFaultActivity)(nil),              // 259: frontend.v1.FooterStatusNetworkFaultActivity
-	(*FooterStatusNetworkFaultSalient)(nil),               // 260: frontend.v1.FooterStatusNetworkFaultSalient
-	(*FooterStatusActivityNetworkOffline)(nil),            // 261: frontend.v1.FooterStatusActivityNetworkOffline
-	(*TokenHeat)(nil),                                     // 262: frontend.v1.TokenHeat
-	(*FeedId)(nil),                                        // 263: frontend.v1.FeedId
+	(*FooterChipMerges)(nil),                              // 192: frontend.v1.FooterChipMerges
+	(*FooterChipMergesWaitingOnUser)(nil),                 // 193: frontend.v1.FooterChipMergesWaitingOnUser
+	(*FooterChipCrons)(nil),                               // 194: frontend.v1.FooterChipCrons
+	(*FooterChipMonitors)(nil),                            // 195: frontend.v1.FooterChipMonitors
+	(*FooterChipAgents)(nil),                              // 196: frontend.v1.FooterChipAgents
+	(*FooterChipAgentsWaitingForApi)(nil),                 // 197: frontend.v1.FooterChipAgentsWaitingForApi
+	(*FooterChipTasks)(nil),                               // 198: frontend.v1.FooterChipTasks
+	(*FooterChipShells)(nil),                              // 199: frontend.v1.FooterChipShells
+	(*FooterExpanded)(nil),                                // 200: frontend.v1.FooterExpanded
+	(*FooterExpandedFocus)(nil),                           // 201: frontend.v1.FooterExpandedFocus
+	(*FooterFocusAgents)(nil),                             // 202: frontend.v1.FooterFocusAgents
+	(*FooterFocusShells)(nil),                             // 203: frontend.v1.FooterFocusShells
+	(*FooterFocusMonitors)(nil),                           // 204: frontend.v1.FooterFocusMonitors
+	(*FooterExpandedCrons)(nil),                           // 205: frontend.v1.FooterExpandedCrons
+	(*FooterCronRow)(nil),                                 // 206: frontend.v1.FooterCronRow
+	(*FooterCronRowSchedule)(nil),                         // 207: frontend.v1.FooterCronRowSchedule
+	(*FooterCronRowPrompt)(nil),                           // 208: frontend.v1.FooterCronRowPrompt
+	(*FooterCronRowNextFire)(nil),                         // 209: frontend.v1.FooterCronRowNextFire
+	(*FooterCronRowRecurring)(nil),                        // 210: frontend.v1.FooterCronRowRecurring
+	(*FooterCronRowDurable)(nil),                          // 211: frontend.v1.FooterCronRowDurable
+	(*FooterWakeupRow)(nil),                               // 212: frontend.v1.FooterWakeupRow
+	(*FooterWakeupRowReason)(nil),                         // 213: frontend.v1.FooterWakeupRowReason
+	(*FooterWakeupRowWakeAt)(nil),                         // 214: frontend.v1.FooterWakeupRowWakeAt
+	(*FooterExpandedMerges)(nil),                          // 215: frontend.v1.FooterExpandedMerges
+	(*FooterMergeRow)(nil),                                // 216: frontend.v1.FooterMergeRow
+	(*FooterMergeRowLabel)(nil),                           // 217: frontend.v1.FooterMergeRowLabel
+	(*FooterMergeRowStep)(nil),                            // 218: frontend.v1.FooterMergeRowStep
+	(*FooterMergeRowRuntime)(nil),                         // 219: frontend.v1.FooterMergeRowRuntime
+	(*FooterMergeRowWaitingOnUser)(nil),                   // 220: frontend.v1.FooterMergeRowWaitingOnUser
+	(*FooterExpandedMonitors)(nil),                        // 221: frontend.v1.FooterExpandedMonitors
+	(*FooterMonitorRow)(nil),                              // 222: frontend.v1.FooterMonitorRow
+	(*FooterMonitorRowDescription)(nil),                   // 223: frontend.v1.FooterMonitorRowDescription
+	(*FooterMonitorRowRuntime)(nil),                       // 224: frontend.v1.FooterMonitorRowRuntime
+	(*FooterMonitorRowPersistent)(nil),                    // 225: frontend.v1.FooterMonitorRowPersistent
+	(*FooterExpandedTokens)(nil),                          // 226: frontend.v1.FooterExpandedTokens
+	(*FooterTokensLineContextGrowth)(nil),                 // 227: frontend.v1.FooterTokensLineContextGrowth
+	(*FooterTokensLineContextGrowthSinceCut)(nil),         // 228: frontend.v1.FooterTokensLineContextGrowthSinceCut
+	(*FooterTokensAgent)(nil),                             // 229: frontend.v1.FooterTokensAgent
+	(*FooterTokensLineInput)(nil),                         // 230: frontend.v1.FooterTokensLineInput
+	(*FooterTokensLineCacheRead)(nil),                     // 231: frontend.v1.FooterTokensLineCacheRead
+	(*FooterTokensLineCacheWrite)(nil),                    // 232: frontend.v1.FooterTokensLineCacheWrite
+	(*FooterTokensLineOutput)(nil),                        // 233: frontend.v1.FooterTokensLineOutput
+	(*FooterTokensLineThinking)(nil),                      // 234: frontend.v1.FooterTokensLineThinking
+	(*FooterTokensLineFirstToken)(nil),                    // 235: frontend.v1.FooterTokensLineFirstToken
+	(*FooterTokensLineAlarm)(nil),                         // 236: frontend.v1.FooterTokensLineAlarm
+	(*FooterTokensLineVerdict)(nil),                       // 237: frontend.v1.FooterTokensLineVerdict
+	(*FooterTokensLineVerdictComplete)(nil),               // 238: frontend.v1.FooterTokensLineVerdictComplete
+	(*FooterTokensLineVerdictIncomplete)(nil),             // 239: frontend.v1.FooterTokensLineVerdictIncomplete
+	(*FooterTokensLineVerdictInvalid)(nil),                // 240: frontend.v1.FooterTokensLineVerdictInvalid
+	(*FooterExpandedAgents)(nil),                          // 241: frontend.v1.FooterExpandedAgents
+	(*FooterAgentRow)(nil),                                // 242: frontend.v1.FooterAgentRow
+	(*FooterAgentRowRunning)(nil),                         // 243: frontend.v1.FooterAgentRowRunning
+	(*FooterAgentRowWaitingForApi)(nil),                   // 244: frontend.v1.FooterAgentRowWaitingForApi
+	(*FooterAgentRowLabel)(nil),                           // 245: frontend.v1.FooterAgentRowLabel
+	(*FooterAgentRowDescription)(nil),                     // 246: frontend.v1.FooterAgentRowDescription
+	(*FooterAgentRowTokens)(nil),                          // 247: frontend.v1.FooterAgentRowTokens
+	(*FooterAgentRowRuntime)(nil),                         // 248: frontend.v1.FooterAgentRowRuntime
+	(*FooterExpandedTasks)(nil),                           // 249: frontend.v1.FooterExpandedTasks
+	(*FooterTaskRow)(nil),                                 // 250: frontend.v1.FooterTaskRow
+	(*FooterTaskRowSubject)(nil),                          // 251: frontend.v1.FooterTaskRowSubject
+	(*FooterTaskRowStatus)(nil),                           // 252: frontend.v1.FooterTaskRowStatus
+	(*FooterTaskRowPending)(nil),                          // 253: frontend.v1.FooterTaskRowPending
+	(*FooterTaskRowRunning)(nil),                          // 254: frontend.v1.FooterTaskRowRunning
+	(*FooterTaskRowActiveForm)(nil),                       // 255: frontend.v1.FooterTaskRowActiveForm
+	(*FooterTaskRowCompleted)(nil),                        // 256: frontend.v1.FooterTaskRowCompleted
+	(*FooterExpandedShells)(nil),                          // 257: frontend.v1.FooterExpandedShells
+	(*FooterShellRow)(nil),                                // 258: frontend.v1.FooterShellRow
+	(*FooterWorkId)(nil),                                  // 259: frontend.v1.FooterWorkId
+	(*FooterJump)(nil),                                    // 260: frontend.v1.FooterJump
+	(*FooterJumpUnresolved)(nil),                          // 261: frontend.v1.FooterJumpUnresolved
+	(*FooterJumpNotDrawn)(nil),                            // 262: frontend.v1.FooterJumpNotDrawn
+	(*FooterShellRowCommand)(nil),                         // 263: frontend.v1.FooterShellRowCommand
+	(*FooterShellRowRuntime)(nil),                         // 264: frontend.v1.FooterShellRowRuntime
+	(*FooterStatusNetworkFault)(nil),                      // 265: frontend.v1.FooterStatusNetworkFault
+	(*FooterSubStatusNetworkFaultOffline)(nil),            // 266: frontend.v1.FooterSubStatusNetworkFaultOffline
+	(*FooterStatusNetworkFaultActivity)(nil),              // 267: frontend.v1.FooterStatusNetworkFaultActivity
+	(*FooterStatusNetworkFaultSalient)(nil),               // 268: frontend.v1.FooterStatusNetworkFaultSalient
+	(*FooterStatusActivityNetworkOffline)(nil),            // 269: frontend.v1.FooterStatusActivityNetworkOffline
+	(*TokenHeat)(nil),                                     // 270: frontend.v1.TokenHeat
+	(*FeedId)(nil),                                        // 271: frontend.v1.FeedId
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	1,   // 0: frontend.v1.FooterView.strip:type_name -> frontend.v1.FooterStrip
-	198, // 1: frontend.v1.FooterView.expanded:type_name -> frontend.v1.FooterExpanded
-	199, // 2: frontend.v1.FooterView.focus:type_name -> frontend.v1.FooterExpandedFocus
+	200, // 1: frontend.v1.FooterView.expanded:type_name -> frontend.v1.FooterExpanded
+	201, // 2: frontend.v1.FooterView.focus:type_name -> frontend.v1.FooterExpandedFocus
 	2,   // 3: frontend.v1.FooterStrip.status:type_name -> frontend.v1.FooterStatus
 	183, // 4: frontend.v1.FooterStrip.clock:type_name -> frontend.v1.FooterClock
 	184, // 5: frontend.v1.FooterStrip.tokens:type_name -> frontend.v1.FooterTokensCell
@@ -18719,7 +19219,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	66,  // 18: frontend.v1.FooterStatus.merged:type_name -> frontend.v1.FooterStatusMerged
 	9,   // 19: frontend.v1.FooterStatus.turn_failed:type_name -> frontend.v1.FooterStatusTurnFailed
 	10,  // 20: frontend.v1.FooterStatus.degraded:type_name -> frontend.v1.FooterStatusDegraded
-	257, // 21: frontend.v1.FooterStatus.network_fault:type_name -> frontend.v1.FooterStatusNetworkFault
+	265, // 21: frontend.v1.FooterStatus.network_fault:type_name -> frontend.v1.FooterStatusNetworkFault
 	27,  // 22: frontend.v1.FooterStatus.permission:type_name -> frontend.v1.FooterStatusPermission
 	30,  // 23: frontend.v1.FooterStatus.question:type_name -> frontend.v1.FooterStatusQuestion
 	130, // 24: frontend.v1.FooterStatus.starting:type_name -> frontend.v1.FooterStatusStarting
@@ -18957,95 +19457,105 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	185, // 256: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
 	186, // 257: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
 	187, // 258: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
-	262, // 259: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
+	270, // 259: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
 	188, // 260: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
 	189, // 261: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
 	190, // 262: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
-	194, // 263: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
-	196, // 264: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
-	197, // 265: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
-	193, // 266: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
-	192, // 267: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
-	195, // 268: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
-	218, // 269: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
-	233, // 270: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
-	241, // 271: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
-	249, // 272: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
-	213, // 273: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
-	203, // 274: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
-	200, // 275: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
-	201, // 276: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
-	202, // 277: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
-	204, // 278: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
-	210, // 279: frontend.v1.FooterExpandedCrons.wakeup:type_name -> frontend.v1.FooterWakeupRow
-	205, // 280: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
-	206, // 281: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
-	207, // 282: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
-	208, // 283: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
-	209, // 284: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
-	211, // 285: frontend.v1.FooterWakeupRow.reason:type_name -> frontend.v1.FooterWakeupRowReason
-	212, // 286: frontend.v1.FooterWakeupRow.wake_at:type_name -> frontend.v1.FooterWakeupRowWakeAt
-	214, // 287: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
-	215, // 288: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
-	216, // 289: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
-	217, // 290: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
-	251, // 291: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
-	252, // 292: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
-	222, // 293: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
-	223, // 294: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	224, // 295: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	225, // 296: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
-	226, // 297: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
-	227, // 298: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
-	228, // 299: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
-	229, // 300: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
-	219, // 301: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
-	221, // 302: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
-	220, // 303: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
-	222, // 304: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
-	223, // 305: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	224, // 306: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	225, // 307: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
-	230, // 308: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
-	231, // 309: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
-	232, // 310: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
-	234, // 311: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
-	237, // 312: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
-	238, // 313: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
-	239, // 314: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
-	240, // 315: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
-	251, // 316: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
-	252, // 317: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
-	235, // 318: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
-	236, // 319: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
-	242, // 320: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
-	244, // 321: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
-	243, // 322: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
-	245, // 323: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
-	246, // 324: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
-	248, // 325: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
-	247, // 326: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
-	250, // 327: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	255, // 328: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	256, // 329: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
-	251, // 330: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
-	252, // 331: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
-	263, // 332: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
-	253, // 333: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
-	254, // 334: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
-	258, // 335: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
-	259, // 336: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
-	260, // 337: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
-	151, // 338: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	142, // 339: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	261, // 340: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
-	102, // 341: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	150, // 342: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	343, // [343:343] is the sub-list for method output_type
-	343, // [343:343] is the sub-list for method input_type
-	343, // [343:343] is the sub-list for extension type_name
-	343, // [343:343] is the sub-list for extension extendee
-	0,   // [0:343] is the sub-list for field type_name
+	196, // 263: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
+	198, // 264: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
+	199, // 265: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
+	195, // 266: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
+	194, // 267: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
+	192, // 268: frontend.v1.FooterLiveWorkChips.merges:type_name -> frontend.v1.FooterChipMerges
+	193, // 269: frontend.v1.FooterChipMerges.waiting_on_user:type_name -> frontend.v1.FooterChipMergesWaitingOnUser
+	197, // 270: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
+	226, // 271: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
+	241, // 272: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
+	249, // 273: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
+	257, // 274: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
+	221, // 275: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
+	205, // 276: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
+	215, // 277: frontend.v1.FooterExpanded.merges:type_name -> frontend.v1.FooterExpandedMerges
+	202, // 278: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
+	203, // 279: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
+	204, // 280: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
+	206, // 281: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
+	212, // 282: frontend.v1.FooterExpandedCrons.wakeup:type_name -> frontend.v1.FooterWakeupRow
+	207, // 283: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
+	208, // 284: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
+	209, // 285: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
+	210, // 286: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
+	211, // 287: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
+	213, // 288: frontend.v1.FooterWakeupRow.reason:type_name -> frontend.v1.FooterWakeupRowReason
+	214, // 289: frontend.v1.FooterWakeupRow.wake_at:type_name -> frontend.v1.FooterWakeupRowWakeAt
+	216, // 290: frontend.v1.FooterExpandedMerges.rows:type_name -> frontend.v1.FooterMergeRow
+	217, // 291: frontend.v1.FooterMergeRow.label:type_name -> frontend.v1.FooterMergeRowLabel
+	218, // 292: frontend.v1.FooterMergeRow.step:type_name -> frontend.v1.FooterMergeRowStep
+	219, // 293: frontend.v1.FooterMergeRow.runtime:type_name -> frontend.v1.FooterMergeRowRuntime
+	259, // 294: frontend.v1.FooterMergeRow.work:type_name -> frontend.v1.FooterWorkId
+	260, // 295: frontend.v1.FooterMergeRow.jump:type_name -> frontend.v1.FooterJump
+	220, // 296: frontend.v1.FooterMergeRow.waiting_on_user:type_name -> frontend.v1.FooterMergeRowWaitingOnUser
+	222, // 297: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
+	223, // 298: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
+	224, // 299: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
+	225, // 300: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
+	259, // 301: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
+	260, // 302: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
+	230, // 303: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
+	231, // 304: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	232, // 305: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	233, // 306: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
+	234, // 307: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
+	235, // 308: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
+	236, // 309: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
+	237, // 310: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
+	227, // 311: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
+	229, // 312: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
+	228, // 313: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
+	230, // 314: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
+	231, // 315: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	232, // 316: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	233, // 317: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
+	238, // 318: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
+	239, // 319: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
+	240, // 320: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
+	242, // 321: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
+	245, // 322: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
+	246, // 323: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
+	247, // 324: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
+	248, // 325: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
+	259, // 326: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
+	260, // 327: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
+	243, // 328: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
+	244, // 329: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
+	250, // 330: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
+	252, // 331: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
+	251, // 332: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
+	253, // 333: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
+	254, // 334: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
+	256, // 335: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
+	255, // 336: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
+	258, // 337: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
+	263, // 338: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	264, // 339: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	259, // 340: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
+	260, // 341: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
+	271, // 342: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	261, // 343: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
+	262, // 344: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
+	266, // 345: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
+	267, // 346: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
+	268, // 347: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
+	151, // 348: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	142, // 349: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	269, // 350: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
+	102, // 351: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	150, // 352: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	353, // [353:353] is the sub-list for method output_type
+	353, // [353:353] is the sub-list for method input_type
+	353, // [353:353] is the sub-list for extension type_name
+	353, // [353:353] is the sub-list for extension extendee
+	0,   // [0:353] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -19361,54 +19871,56 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterTokensCellVerdict_Invalid)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[191].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[194].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[199].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[192].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[196].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[201].OneofWrappers = []any{
 		(*FooterExpandedFocus_Agents)(nil),
 		(*FooterExpandedFocus_Shells)(nil),
 		(*FooterExpandedFocus_Monitors)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[203].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[204].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[210].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[214].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[218].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[219].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[205].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[206].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[212].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[216].OneofWrappers = []any{}
 	file_frontend_v1_footer_proto_msgTypes[222].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[223].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[224].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[225].OneofWrappers = []any{}
 	file_frontend_v1_footer_proto_msgTypes[226].OneofWrappers = []any{}
 	file_frontend_v1_footer_proto_msgTypes[227].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[229].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[230].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[231].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[232].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[233].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[234].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[235].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[237].OneofWrappers = []any{
 		(*FooterTokensLineVerdict_Complete)(nil),
 		(*FooterTokensLineVerdict_Incomplete)(nil),
 		(*FooterTokensLineVerdict_Invalid)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[234].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[242].OneofWrappers = []any{
 		(*FooterAgentRow_Running)(nil),
 		(*FooterAgentRow_WaitingForApi)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[244].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[252].OneofWrappers = []any{
 		(*FooterTaskRowStatus_Pending)(nil),
 		(*FooterTaskRowStatus_Running)(nil),
 		(*FooterTaskRowStatus_Completed)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[246].OneofWrappers = []any{}
-	file_frontend_v1_footer_proto_msgTypes[252].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[254].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[260].OneofWrappers = []any{
 		(*FooterJump_Entry)(nil),
 		(*FooterJump_Unresolved)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[253].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[261].OneofWrappers = []any{
 		(*FooterJumpUnresolved_NotDrawn)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[257].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[265].OneofWrappers = []any{
 		(*FooterStatusNetworkFault_Offline)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[259].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[267].OneofWrappers = []any{
 		(*FooterStatusNetworkFaultActivity_Salient)(nil),
 		(*FooterStatusNetworkFaultActivity_Unpinned)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[260].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[268].OneofWrappers = []any{
 		(*FooterStatusNetworkFaultSalient_Offline)(nil),
 		(*FooterStatusNetworkFaultSalient_Update)(nil),
 		(*FooterStatusNetworkFaultSalient_Notification)(nil),
@@ -19419,7 +19931,7 @@ func file_frontend_v1_footer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_footer_proto_rawDesc), len(file_frontend_v1_footer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   262,
+			NumMessages:   270,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

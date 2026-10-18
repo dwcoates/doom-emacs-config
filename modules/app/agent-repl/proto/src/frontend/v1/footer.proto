@@ -25,8 +25,9 @@
 //   Tokens cell    how much the in-flight turn has added to the MAIN agent's
 //                  context window (`--` with no turn in flight), with two
 //                  glyphs; a click target opening the token panel.
-//   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells —
-//                  each a click target opening its panel.
+//   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells ·
+//                  ⇄ async merges in flight — each a click target opening its
+//                  panel.
 //
 // THE EXPANDED SECTION opens above the strip when a selectable element (the
 // tokens cell or a chip) is selected. The selection is WEBVIEW-LOCAL, so the
@@ -2424,11 +2425,33 @@ message FooterLiveWorkChips {
   // ⏱ — live scheduled jobs (cron/wakeup schedules). Set iff at least one
   // job is scheduled.
   optional FooterChipCrons crons = 5;
-  // Tag 6 (`merge_tests`, the 🧪 chip) is RETIRED: a merge has no
-  // expanded-footer panel, so it has no chip to open one. The merge bubble's
-  // tests tab carries the test gate's suites.
+  // Tag 6 (`merge_tests`, the 🧪 chip) is RETIRED: the workspace's OWN merge
+  // has no expanded-footer panel, so it has no chip to open one. The merge
+  // bubble's tests tab carries the test gate's suites.
   reserved 6;
   reserved "merge_tests";
+  // ⇄ — the ASYNC merges this workspace requested that are still in flight:
+  // queued or merging in their hidden merge workspaces, each drawn as a
+  // bubble in this workspace's feed. Set iff the merges panel holds at least
+  // one row. A SYNC merge has no chip: it is this workspace's own merge, and
+  // the strip's merging status already narrates it.
+  optional FooterChipMerges merges = 7;
+}
+// The merges chip's props.
+message FooterChipMerges {
+  // How many merge rows the merges panel holds. At least 1 when this chip is
+  // set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
+  // The waiting-on-you glyph, drawn beside the count. SET iff at least one
+  // merges-panel row is waiting on the user, so a merge held on a question in
+  // its hidden workspace is visible on the strip without opening the panel.
+  optional FooterChipMergesWaitingOnUser waiting_on_user = 2;
+}
+// The merges chip's waiting-on-you glyph.
+message FooterChipMergesWaitingOnUser {
+  // How many of the panel's rows are waiting on the user. At least 1 when
+  // the glyph is set.
+  uint32 count = 1;
 }
 // The crons chip's props.
 message FooterChipCrons {
@@ -2497,12 +2520,14 @@ message FooterExpanded {
   FooterExpandedMonitors monitors = 5;
   // The scheduled jobs — the ⏱ chip's expansion.
   FooterExpandedCrons crons = 6;
-  // Tag 7 (`merge_tests`, the merge tests panel) is RETIRED: a merge draws
-  // nothing in the expanded footer. Its test gate's suites are the merge
-  // bubble's tests tab, and the strip's merging status, substatus and
-  // activity line are unchanged.
+  // Tag 7 (`merge_tests`, the merge tests panel) is RETIRED: the workspace's
+  // OWN merge draws nothing in the expanded footer. Its test gate's suites are
+  // the merge bubble's tests tab, and the strip's merging status, substatus
+  // and activity line are unchanged.
   reserved 7;
   reserved "merge_tests";
+  // The async merges in flight — the ⇄ chip's expansion.
+  FooterExpandedMerges merges = 8;
 }
 
 // ---- The daemon's focus ----------------------------------------------------
@@ -2635,6 +2660,71 @@ message FooterWakeupRowWakeAt {
   // drawn).
   int64 wake_at_ms = 1;
 }
+
+// ---- The merges panel ------------------------------------------------------
+
+// The ⇄ panel: one row per ASYNC merge this workspace requested that is still
+// in flight. Each row is a jump row (`FooterJump`) to the merge's bubble head
+// in this workspace's feed. A TRUE LIST, like the agents panel.
+//
+// THE ROWS ARE THE FEED'S MERGE BUBBLES, READ BACK. The daemon resolves them
+// from the very rows the feed draws for each async merge — its head on the
+// root feed and the top-level tabs on its sub-feed (frontend.v1.FeedMerge,
+// frontend.v1.FeedMergeTab) — so the panel and the bubbles can never
+// disagree. A row JOINS when the feed draws an async head still in flight
+// (`frontend.v1.FeedMerge.update`), and LEAVES when that head carries a result
+// (landed, failed or abandoned) or the feed retires it. Nothing here focuses
+// the expanded section (FooterExpandedFocus): a merge is not detached work the
+// agent launched into this turn.
+message FooterExpandedMerges {
+  // The rows, in the order the feed first drew each merge's head. Empty when
+  // no async merge is in flight — the chip is then unset and the panel
+  // unreachable.
+  repeated FooterMergeRow rows = 1;
+}
+
+// One async merge's line: ⇄ · branch line · step · (waiting on you) · clock · ▸.
+message FooterMergeRow {
+  // The bubble head's branch line ("fix-flaky → master"), drawn verbatim
+  // (frontend.v1.FeedMergeLabel).
+  FooterMergeRowLabel label = 1;
+  // The step the merge stands on: the bubble's CURRENT top-level tab — the
+  // newest one still live, else the newest one drawn. UNSET while the bubble
+  // has drawn no tab yet; the row then draws without a step.
+  optional FooterMergeRowStep step = 2;
+  // The row's clock, the bubble head's own (frontend.v1.FeedMergeRuntime):
+  // from the enqueue while the merge waits in the queue, from its admission
+  // once it runs. The client ticks from the instant.
+  FooterMergeRowRuntime runtime = 3;
+  // Which merge this row is: the merge's ledger id, the key of its bubble's
+  // head row and sub-feed. NOT DRAWN in the footer; see FooterWorkId.
+  FooterWorkId work = 4;
+  // Where a click on the row lands: always the bubble head's `entry`, since
+  // the row is resolved from the head the feed drew. See FooterJump.
+  FooterJump jump = 5;
+  // The waiting-on-you marker. PRESENT iff the current tab is drawn waiting
+  // on the user (frontend.v1.FeedMergeTabWaitingOnUser): the merge
+  // workspace's session has a permission ask or a question batch open.
+  optional FooterMergeRowWaitingOnUser waiting_on_user = 6;
+}
+// The row's branch line element.
+message FooterMergeRowLabel {
+  // The text, drawn verbatim.
+  string text = 1;
+}
+// The row's step element.
+message FooterMergeRowStep {
+  // The current tab's words with its round, daemon-composed ("queue",
+  // "tests", "committing (2)"), drawn verbatim.
+  string text = 1;
+}
+// The row's clock element.
+message FooterMergeRowRuntime {
+  // The bubble head's clock instant, epoch ms.
+  int64 started_at_ms = 1;
+}
+// The waiting-on-you marker. Empty: presence is the marker.
+message FooterMergeRowWaitingOnUser {}
 
 // ---- The monitors panel ----------------------------------------------------
 
@@ -2995,7 +3085,8 @@ message FooterShellRow {
 
 // ---- The detached-work rows' identity and jump ------------------------------
 
-// WHICH WORK A ROW IS: the run's `conversation.v1.DetachedWorkId` value — the
+// WHICH WORK A ROW IS: for a merge row, the merge's ledger id (FooterMergeRow
+// .work). For every other row, the run's `conversation.v1.DetachedWorkId` value — the
 // same string the daemon keys it by and the feed bubble's head draws
 // (`FeedDetachedWorkId`). For an IN-TURN subagent, which is not detached work
 // yet, it is the spawn unit's `AgentActivityId` value: the contract makes the
