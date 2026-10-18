@@ -777,6 +777,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     emit: (update) => {
       pushes.push(update);
     },
+    // THE SAME LOOP RESOLVES THE NETWORK FAULT once the API answers it, so an
+    // idle session whose last request failed is not faulted until its next.
+    recovered: () => pushes.resolveComponent(NETWORK_COMPONENT, 0),
     ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
     ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
   });
@@ -5386,13 +5389,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /**
    * THE NETWORK FAULT'S ONE DOOR: an outage opens (or restates) it, and the
-   * first request that reaches the vendor resolves it.
+   * first request that reaches the vendor resolves it -- or, when no request
+   * comes, the network-resume loop's first "reachable" answer does.
    */
   function noteNetworkReach(reach: NetworkReach): void {
     if (reach.kind === "unreachable") {
       pushes.fault(sessionFault({ kind: "networkUnreachable" }, NETWORK_COMPONENT, reach.detail));
+      networkResume.faultOpened();
       return;
     }
+    networkResume.faultResolved();
     pushes.resolveComponent(NETWORK_COMPONENT, 0);
   }
 

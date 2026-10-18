@@ -19,6 +19,16 @@
  *   shares one fixed-interval timer ({@link NETWORK_RESUME_PROBE_INTERVAL_MS},
  *   no backoff); the timer exists only while something waits, and
  *   {@link NetworkResume.stop} cancels it at stand-down.
+ * - THE SAME LOOP RESOLVES THE SESSION'S NETWORK FAULT (2026-10-17). A DNS
+ *   outage failed an idle workspace's keep-alive after its cache had lapsed, so
+ *   no further request was scheduled, and the fault -- resolved only by a
+ *   request that reaches the vendor (engine/network-reach.ts) -- stood until a
+ *   person prompted it. So while the fault stands ({@link
+ *   NetworkResume.faultOpened}) the loop runs too, and its first "reachable"
+ *   answer resolves the fault through {@link NetworkResumeDeps.recovered}. A
+ *   request that reaches the vendor first resolves it itself ({@link
+ *   NetworkResume.faultResolved}). The fault has no window: it stands for as
+ *   long as the API is unreachable.
  * - THE WAIT IS BOUNDED. {@link NETWORK_RESUME_WINDOW_MS} from the failure,
  *   after which the wait gives up at ERROR and the agent keeps its failure.
  * - ONE RESUME PER FAILURE EVENT, and the window restarts only when the resumed
@@ -223,6 +233,8 @@ export interface NetworkResumeDeps {
    * `network_resume_outcome` per wait that ends.
    */
   readonly emit: (update: conversationv1.SessionUpdate) => void;
+  /** Resolves the session's standing network fault, once the API answers a probe while it stands. */
+  readonly recovered: (detail: string) => void;
   readonly intervalMs?: number;
   readonly windowMs?: number;
 }
@@ -304,6 +316,8 @@ export class NetworkResume {
   private handle: unknown;
   private probing = false;
   private stopped = false;
+  /** Whether the session's network fault stands, so the loop runs until the API answers. */
+  private faultStanding = false;
 
   constructor(private readonly deps: NetworkResumeDeps) {
     this.intervalMs = deps.intervalMs ?? NETWORK_RESUME_PROBE_INTERVAL_MS;
@@ -318,6 +332,32 @@ export class NetworkResume {
   /** Whether the one probe loop is scheduled. */
   looping(): boolean {
     return this.handle !== undefined;
+  }
+
+  /** Whether the session's network fault stands. */
+  faultStands(): boolean {
+    return this.faultStanding;
+  }
+
+  /** The session's network fault opened (or was restated): probe until the API answers. */
+  faultOpened(): void {
+    if (this.stopped) return;
+    if (!this.faultStanding) {
+      this.faultStanding = true;
+      LOGGER.info(
+        { probe_interval_ms: this.intervalMs },
+        "the network fault stands; the API is probed until it answers, so the fault resolves without waiting for a request",
+      );
+    }
+    this.ensureLoop();
+  }
+
+  /** A request reached the vendor, which resolved the fault itself. */
+  faultResolved(): void {
+    if (!this.faultStanding) return;
+    this.faultStanding = false;
+    LOGGER.debug({}, "a request reached the vendor while the network fault stood; the probe no longer waits on it");
+    this.cancelLoopIfIdle();
   }
 
   /** Read one SDK message for what it says about an agent run. */
@@ -538,7 +578,7 @@ export class NetworkResume {
   async tick(): Promise<void> {
     if (this.stopped) return;
     this.expire();
-    if (this.waiting.size === 0) {
+    if (this.waiting.size === 0 && !this.faultStanding) {
       this.cancelLoop();
       return;
     }
@@ -565,6 +605,15 @@ export class NetworkResume {
     if (this.stopped) return;
     if (!answer.reachable) {
       LOGGER.logVerbose({ waiting: this.waiting.size, detail: answer.detail }, "the API is still unreachable");
+      return;
+    }
+    if (this.faultStanding) {
+      this.faultStanding = false;
+      LOGGER.info({ detail: answer.detail }, "the API answered the reachability probe; the network fault resolves");
+      this.deps.recovered(answer.detail);
+    }
+    if (this.waiting.size === 0) {
+      this.cancelLoop();
       return;
     }
     await this.resumeDue(answer);
@@ -811,7 +860,7 @@ export class NetworkResume {
   }
 
   private cancelLoopIfIdle(): void {
-    if (this.waiting.size === 0) this.cancelLoop();
+    if (this.waiting.size === 0 && !this.faultStanding) this.cancelLoop();
   }
 
   /** Drop the run joins and evidence of an agent nothing will resume. */

@@ -96,6 +96,8 @@ interface Harness {
   /** Every update the seam stated on the session stream, in order. */
   readonly emitted: conversationv1.SessionUpdate[];
   delivery: ResumeDelivery | Error;
+  /** Every network-fault recovery the seam resolved, by the probe's detail. */
+  readonly recovered: string[];
 }
 
 function harness(): Harness {
@@ -111,6 +113,7 @@ function harness(): Harness {
     clock,
     emitted,
     delivery: { kind: "delivered" },
+    recovered: [],
     resume: new NetworkResume({
       probe: probe.probe,
       deliver: (prompt) => {
@@ -121,6 +124,7 @@ function harness(): Harness {
       nowMs: () => clock.now,
       scheduler,
       emit: (update) => emitted.push(update),
+      recovered: (detail) => h.recovered.push(detail),
     }),
   };
   return h;
@@ -455,6 +459,7 @@ describe("the probe loop", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => Date.now(),
       scheduler: REAL_SCHEDULER,
+      recovered: () => undefined,
       emit: () => undefined,
     });
     const start = Date.now();
@@ -485,6 +490,7 @@ describe("the probe loop", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: () => undefined,
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_spawn");
@@ -521,6 +527,7 @@ describe("the probe loop", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: () => undefined,
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_spawn");
@@ -1034,6 +1041,7 @@ describe("a wait's outcome on the session stream", () => {
         }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_1");
@@ -1245,6 +1253,7 @@ describe("a delivery that completes after its wait was given up", () => {
         }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     const held = { ...h, resume };
@@ -1337,6 +1346,7 @@ describe("a delivery that completes late, after a newer wait of the same agent o
       },
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     const held = { ...h, resume };
@@ -1507,6 +1517,7 @@ describe("a newer failure of an agent whose wait still stands", () => {
         }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     const held = { ...h, resume };
@@ -1620,6 +1631,7 @@ describe("a session stream that cannot take the statement", () => {
       deliver: () => Promise.resolve({ kind: "delivered" }),
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
+      recovered: () => undefined,
       emit: () => {
         throw new Error("the fan-out is broken");
       },
@@ -1667,5 +1679,162 @@ describe("a session stream that cannot take the statement", () => {
 
     // Assert
     expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
+  });
+});
+
+describe("the session's network fault on the one probe loop", () => {
+  it("starts the loop on the network-resume interval when the fault opens", () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    h.resume.faultOpened();
+
+    // Assert.
+    expect(h.scheduler.intervals).toEqual([NETWORK_RESUME_PROBE_INTERVAL_MS]);
+  });
+
+  it("schedules one loop however often the fault is restated", () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    h.resume.faultOpened();
+    h.resume.faultOpened();
+
+    // Assert.
+    expect(h.scheduler.handlers).toHaveLength(1);
+  });
+
+  it("resolves the fault on the first reachable answer", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(h.recovered).toEqual(["scripted"]);
+  });
+
+  it("stops the loop once the resolved fault left nothing waiting", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(h.resume.looping()).toBe(false);
+  });
+
+  it("keeps the fault while the API stays unreachable", async () => {
+    // Arrange.
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.faultOpened();
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(h.recovered).toEqual([]);
+  });
+
+  it("keeps looping while the API stays unreachable", async () => {
+    // Arrange.
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.faultOpened();
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(h.resume.looping()).toBe(true);
+  });
+
+  it("keeps looping past the network-resume window, since the fault has none", async () => {
+    // Arrange.
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.faultOpened();
+    h.clock.now += NETWORK_RESUME_WINDOW_MS * 2;
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(h.resume.looping()).toBe(true);
+  });
+
+  it("stops the loop when a request reaches the vendor first", () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+
+    // Act.
+    h.resume.faultResolved();
+
+    // Assert.
+    expect(h.resume.looping()).toBe(false);
+  });
+
+  it("does not resolve again after a request reached the vendor first", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+    h.resume.faultResolved();
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(h.recovered).toEqual([]);
+  });
+
+  it("never starts after the session stood down", () => {
+    // Arrange.
+    const h = harness();
+    h.resume.stop("stood down");
+
+    // Act.
+    h.resume.faultOpened();
+
+    // Assert.
+    expect(h.scheduler.handlers).toHaveLength(0);
+  });
+
+  it("does not resolve from a probe that answers after the session stood down", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+    const beat = h.resume.tick();
+
+    // Act.
+    h.resume.stop("stood down");
+    await beat;
+
+    // Assert.
+    expect(h.recovered).toEqual([]);
+  });
+
+  it("states the recovery once at info", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+    const mark = logSinkMark();
+
+    // Act.
+    await h.resume.tick();
+
+    // Assert.
+    expect(
+      logRecordsSince(mark)
+        .filter((r) => r.message === "the API answered the reachability probe; the network fault resolves")
+        .map((r) => r.level),
+    ).toEqual(["info"]);
   });
 });

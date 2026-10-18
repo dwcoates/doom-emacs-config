@@ -15969,6 +15969,36 @@ describe("the network fault and the start's cause", () => {
     expect(networkFault(h)).toBe("TypeError: fetch failed");
   });
 
+  it("resolves the network fault from the probe loop when no further request comes", async () => {
+    // Arrange: the last request failed below an answer, and nothing else is sent.
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+    expect(networkFault(h)).toBeDefined();
+
+    // Act: the API answers the loop's probe.
+    h.networkScheduler.fire(0);
+    await settledUntil(() => networkFault(h) === undefined);
+
+    // Assert.
+    expect(networkFault(h)).toBeUndefined();
+  });
+
+  it("keeps the network fault while the probe loop finds the API unreachable", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+    h.probe.reachable = false;
+
+    // Act.
+    h.networkScheduler.fire(0);
+    await settledUntil(() => h.probe.calls > 0);
+
+    // Assert.
+    expect(networkFault(h)).toBe("TypeError: fetch failed");
+  });
+
   it("leaves a mid-session failure the vendor answered off the network fault", async () => {
     // Arrange.
     const h = harness();
