@@ -586,9 +586,19 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	return nil
 }
 
-// queueView is what every drawing of one repository's queue reads: each
-// in-line workspace's name and directory, and each entry's standing.
+// queueView is what every drawing of one repository's queue reads: the
+// workspace each in-line entry is drawn as, its name and directory, and each
+// entry's standing, all keyed by the entry's own workspace.
+//
+// AN ASYNC MERGE IS DRAWN AS ITS REQUESTER (owner ruling, 2026-10-17). Its
+// entry's workspace is the hidden merge workspace the daemon forked to carry
+// it, which the user never asked for and the roster shows nowhere; the
+// workspace the user knows as merging -- the one the sidebar marks -- is the
+// requester. So an entry whose workspace is a merge workspace names, and jumps
+// to, its requester: a workspace marked merging in the sidebar is the one every
+// queue tab lists, and clicking the entry never reveals the merge workspace.
 type queueView struct {
+	shown     map[ids.WorkspaceID]ids.WorkspaceID
 	names     map[ids.WorkspaceID]string
 	dirs      map[ids.WorkspaceID]string
 	standings []*frontendv1.FeedMergeQueueEntry
@@ -596,12 +606,23 @@ type queueView struct {
 
 // viewQueue resolves the queue view of one repository's in-line entries.
 func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) (queueView, error) {
-	view := queueView{names: map[ids.WorkspaceID]string{}, dirs: map[ids.WorkspaceID]string{}}
+	view := queueView{
+		shown: map[ids.WorkspaceID]ids.WorkspaceID{},
+		names: map[ids.WorkspaceID]string{},
+		dirs:  map[ids.WorkspaceID]string{},
+	}
 	for _, entry := range entries {
 		record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
 		if err != nil {
 			return queueView{}, err
 		}
+		if record.MergeOf != nil {
+			record, err = o.deps.DB.Workspace(ctx, record.MergeOf.Requester)
+			if err != nil {
+				return queueView{}, fmt.Errorf("read the requester of merge workspace %s: %w", entry.Workspace, err)
+			}
+		}
+		view.shown[entry.Workspace] = record.ID
 		view.names[entry.Workspace] = record.Name
 		view.dirs[entry.Workspace] = record.Dir
 	}
@@ -617,7 +638,7 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 
 // snapshot is the queue as self sees it.
 func (v queueView) snapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID) *frontendv1.FeedMergeQueue {
-	return queueSnapshot(entries, self, v.names, v.dirs, v.standings)
+	return queueSnapshot(entries, self, v.shown, v.names, v.dirs, v.standings)
 }
 
 // settleLeavingQueueTab draws a merge's own queue tab ONE LAST TIME as it

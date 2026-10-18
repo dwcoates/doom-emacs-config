@@ -499,6 +499,7 @@ func TestInterruptRaisesNothingWithoutAQueuedMerge(t *testing.T) {
 func TestInterruptRaisesNothingForAnAsyncMerge(t *testing.T) {
 	// Arrange: the queued workspace is a merge workspace forked from another.
 	h := newHarness(t)
+	h.register(otherWorkspace, "requester")
 	h.db.mu.Lock()
 	record := h.db.workspaces[theWorkspace]
 	record.MergeOf = &wsm.MergeOrigin{Requester: otherWorkspace}

@@ -115,7 +115,7 @@ func TestQueueSnapshotPlacesEachEntrysStanding(t *testing.T) {
 	}
 
 	// Act.
-	snap := queueSnapshot(entries, "ws-2", map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]string{}, standings)
+	snap := queueSnapshot(entries, "ws-2", map[ids.WorkspaceID]ids.WorkspaceID{}, map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]string{}, standings)
 
 	// Assert.
 	if got := snap.GetAhead()[0].GetMerging(); got != front {
