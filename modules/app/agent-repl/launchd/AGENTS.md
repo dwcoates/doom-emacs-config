@@ -1,9 +1,12 @@
 # launchd/
 
-launchd user-agent plists for the two OS-managed shim-ecosystem services:
-`com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar` (both
-`RunAtLoad` + `KeepAlive`, so they are always available at login and
-recreated on failure). Installed idempotently by `.claude/install.sh`, which runs
+launchd user-agent plists for the two OS-managed shim-ecosystem services,
+`com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar`, and for
+the metrics store, `com.agentrepl.victoriametrics` (all `RunAtLoad` +
+`KeepAlive`, so they are always available at login and recreated on
+failure). The metrics store's program is Homebrew's `victoria-metrics`, not
+a binary built here; its flags and why are in the plist's header and
+`metrics/AGENTS.md`. Installed idempotently by `.claude/install.sh`, which runs
 `bin/requirements.sh install`: each service is a `launchd_service` entry in its
 system's `requirements.json` (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`).
 
