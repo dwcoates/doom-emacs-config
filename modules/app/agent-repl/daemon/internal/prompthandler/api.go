@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
@@ -45,7 +46,7 @@ var (
 	// origin: a sender on a prompt no agent sent, or an agent-sent prompt
 	// naming none. The rpc's validation refuses both before this, so reaching
 	// it is a defect.
-	ErrSenderMismatch = wsm.ErrSenderMismatch
+	ErrSenderMismatch = promptorigin.ErrSenderMismatch
 	// ErrFeedNotInWorkspace is an echoed FeedId belonging to another workspace.
 	ErrFeedNotInWorkspace = errors.New("prompthandler: the addressed feed belongs to another workspace")
 	// ErrDuplicateSubmission is a retried request whose idempotency key is

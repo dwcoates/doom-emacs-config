@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/promptorigin"
 )
 
 // heldPromptColumns is the one select list every held-prompt read shares, so a
@@ -175,7 +176,7 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		s.log.Error(op, "refused an inconsistent hold", withError(fields, err))
 		return err
 	}
-	if err := checkSender(h.Origin, h.SentBy); err != nil {
+	if err := promptorigin.CheckSenderNamed(h.Origin, h.SentBy != nil); err != nil {
 		s.log.Error(op, "refused a held prompt whose sender and origin disagree", withError(fields, err))
 		return err
 	}

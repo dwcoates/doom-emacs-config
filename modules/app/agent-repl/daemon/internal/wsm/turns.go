@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/promptorigin"
 )
 
 // turnColumns is the one select list every turn read shares.
@@ -121,7 +122,7 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		s.log.Error(op, "refused a turn record carrying a close", withError(fields, err))
 		return err
 	}
-	if err := checkSender(t.Origin, t.SentBy); err != nil {
+	if err := promptorigin.CheckSenderNamed(t.Origin, t.SentBy != nil); err != nil {
 		s.log.Error(op, "refused a turn record whose sender and origin disagree", withError(fields, err))
 		return err
 	}
@@ -226,11 +227,22 @@ func (s *store) TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) 
 // workspace, all-or-nothing. A recorded turn whose output went to the root feed
 // answers nil; a turn this workspace never recorded is absent.
 func (s *store) TurnAddresses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*OutputAddress, error) {
-	out := make(map[TurnID]*OutputAddress, len(turns))
+	return turnFacts(ctx, s, "daemon.wsm.turn_addresses", id, turns, func(t Turn) (*OutputAddress, bool) {
+		return t.Address, true
+	})
+}
+
+// turnFacts answers one fact of each named turn of workspace ID, read under
+// operation OP, all-or-nothing: PICK says what the fact is and whether the turn
+// has one. A turn with none, or one this workspace never recorded, is absent
+// from the answer. It is the one body every per-turn replay read shares
+// (TurnAddresses, TurnMirrors, TurnSenders).
+func turnFacts[T any](ctx context.Context, s *store, op string, id WorkspaceID, turns []TurnID, pick func(Turn) (T, bool)) (map[TurnID]T, error) {
+	out := make(map[TurnID]T, len(turns))
 	if len(turns) == 0 {
 		return out, nil
 	}
-	err := s.read(ctx, "daemon.wsm.turn_addresses", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
+	err := s.read(ctx, op, dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
 		for _, turn := range turns {
 			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
 			if errors.Is(err, sql.ErrNoRows) {
@@ -239,7 +251,9 @@ func (s *store) TurnAddresses(ctx context.Context, id WorkspaceID, turns []TurnI
 			if err != nil {
 				return err
 			}
-			out[turn] = t.Address
+			if fact, ok := pick(t); ok {
+				out[turn] = fact
+			}
 		}
 		return nil
 	})

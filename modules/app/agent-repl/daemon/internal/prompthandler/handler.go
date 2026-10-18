@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 )
@@ -80,9 +81,9 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		log.Warn(opSubmit, "the submission carries no origin", nil)
 		return Outcome{}, ErrOriginRequired
 	}
-	if (origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT) != (sentBy != nil) {
+	if err := promptorigin.CheckSender(origin, sentBy != nil); err != nil {
 		log.Error(opSubmit, "the submission's sender disagrees with its origin", dlog.Context{"sender_named": sentBy != nil})
-		return Outcome{}, ErrSenderMismatch
+		return Outcome{}, err
 	}
 	if target != nil && target.WS != ws {
 		log.Warn(opSubmit, "the addressed feed belongs to another workspace",

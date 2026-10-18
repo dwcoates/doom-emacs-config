@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -1503,7 +1504,7 @@ func TestSubmitRefusesASenderThatDisagreesWithTheOrigin(t *testing.T) {
 			_, err := h.q.Submit(context.Background(), tt.sub)
 
 			// Assert
-			if !errors.Is(err, wsm.ErrSenderMismatch) {
+			if !errors.Is(err, promptorigin.ErrSenderMismatch) {
 				t.Fatalf("Submit = %v, want ErrSenderMismatch", err)
 			}
 			if started := h.sender.started(); len(started) != 0 {

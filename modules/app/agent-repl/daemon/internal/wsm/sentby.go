@@ -3,12 +3,8 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
-
-	"agent-repld/internal/dlog"
+	"agent-repld/internal/promptorigin"
 )
 
 // THE WORKSPACE WHOSE AGENT SENT A PROMPT (agentrepl.v1
@@ -30,22 +26,6 @@ ALTER TABLE turns ADD COLUMN sent_by TEXT;
 ALTER TABLE held_prompts ADD COLUMN sent_by TEXT;
 `
 
-// agentSentOrigin is PROMPT_ORIGIN_AGENT_SENT as the origin columns spell it.
-var agentSentOrigin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT.String()
-
-// ErrSenderMismatch is a record whose sender and origin disagree: a sender on
-// a prompt no agent sent, or an agent-sent prompt naming no sender.
-var ErrSenderMismatch = errors.New("wsm: a prompt names its sender exactly when its origin is PROMPT_ORIGIN_AGENT_SENT")
-
-// checkSender answers ErrSenderMismatch, wrapped with the origin, when ORIGIN
-// and SENTBY disagree.
-func checkSender(origin string, sentBy *WorkspaceID) error {
-	if (origin == agentSentOrigin) != (sentBy != nil) {
-		return fmt.Errorf("%w (origin %s, sender named: %t)", ErrSenderMismatch, origin, sentBy != nil)
-	}
-	return nil
-}
-
 // sentByColumn is the column value of SENTBY, NULL for none.
 func sentByColumn(sentBy *WorkspaceID) any {
 	if sentBy == nil {
@@ -62,7 +42,7 @@ func decodeSentBy(table, row, origin string, column sql.NullString) (*WorkspaceI
 		id := WorkspaceID(column.String)
 		sentBy = &id
 	}
-	if err := checkSender(origin, sentBy); err != nil {
+	if err := promptorigin.CheckSenderNamed(origin, sentBy != nil); err != nil {
 		return nil, &DecodeError{Table: table, Row: row, Field: "sent_by", Err: err}
 	}
 	return sentBy, nil
@@ -72,27 +52,10 @@ func decodeSentBy(table, row, origin string, column sql.NullString) (*WorkspaceI
 // that has one, all-or-nothing; a turn with none, or one this workspace never
 // recorded, is absent from the answer.
 func (s *store) TurnSenders(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]WorkspaceID, error) {
-	out := make(map[TurnID]WorkspaceID, len(turns))
-	if len(turns) == 0 {
-		return out, nil
-	}
-	err := s.read(ctx, "daemon.wsm.turn_senders", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
-		for _, turn := range turns {
-			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if t.SentBy != nil {
-				out[turn] = *t.SentBy
-			}
+	return turnFacts(ctx, s, "daemon.wsm.turn_senders", id, turns, func(t Turn) (WorkspaceID, bool) {
+		if t.SentBy == nil {
+			return "", false
 		}
-		return nil
+		return *t.SentBy, true
 	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }

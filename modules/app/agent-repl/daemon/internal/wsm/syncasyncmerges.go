@@ -221,27 +221,7 @@ func decodeMirror(table, row string, raw string) (*MirrorAddress, error) {
 // workspace that has one, all-or-nothing; a turn with none, or one this
 // workspace never recorded, is absent from the answer.
 func (s *store) TurnMirrors(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*MirrorAddress, error) {
-	out := make(map[TurnID]*MirrorAddress, len(turns))
-	if len(turns) == 0 {
-		return out, nil
-	}
-	err := s.read(ctx, "daemon.wsm.turn_mirrors", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
-		for _, turn := range turns {
-			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if t.Mirror != nil {
-				out[turn] = t.Mirror
-			}
-		}
-		return nil
+	return turnFacts(ctx, s, "daemon.wsm.turn_mirrors", id, turns, func(t Turn) (*MirrorAddress, bool) {
+		return t.Mirror, t.Mirror != nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }

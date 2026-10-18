@@ -224,8 +224,8 @@ func PromptRow(origin conversationv1.PromptOrigin, header *frontendv1.FeedAgentP
 			Label: &frontendv1.FeedMergeHandbackBadgeLabel{Text: MergeHandbackLabel(said)},
 		}}}
 	}
-	if (origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT) != (header != nil) {
-		panic(fmt.Sprintf("feed.PromptRow: a prompt of origin %s drawn with a header: %t; an agent-sent prompt is headed by its sender and no other prompt is", origin, header != nil))
+	if err := promptorigin.CheckSender(origin, header != nil); err != nil {
+		panic(fmt.Sprintf("feed.PromptRow: a prompt drawn under the wrong header: %v", err))
 	}
 	if header != nil {
 		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{

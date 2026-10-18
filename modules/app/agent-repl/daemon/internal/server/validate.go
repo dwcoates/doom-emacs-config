@@ -12,6 +12,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptorigin"
 )
 
 // THE VALIDATION INVARIANT (ARCHITECTURE.md "Cross-cutting conventions"): one
@@ -175,13 +176,10 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 		return invalid("origin", "the prompt origin is required")
 	}
 	// THE SENDER IS NAMED EXACTLY WHEN AN AGENT SENT THE PROMPT.
-	agentSent := req.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
-	switch {
-	case agentSent && req.SentBy == nil:
-		return invalid("sent_by", "an agent-sent prompt names the workspace that sent it")
-	case !agentSent && req.SentBy != nil:
-		return invalid("sent_by", "only an agent-sent prompt names the workspace that sent it")
-	case agentSent:
+	if err := promptorigin.CheckSender(req.GetOrigin(), req.SentBy != nil); err != nil {
+		return invalid("sent_by", err.Error())
+	}
+	if req.SentBy != nil {
 		if err := validateWorkspaceRef("sent_by", req.GetSentBy()); err != nil {
 			return err
 		}

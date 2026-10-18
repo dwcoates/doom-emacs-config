@@ -4,36 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"agent-repld/internal/promptorigin"
 )
 
 // agentSent is PROMPT_ORIGIN_AGENT_SENT as the origin columns spell it.
 const agentSent = "PROMPT_ORIGIN_AGENT_SENT"
-
-func TestCheckSender(t *testing.T) {
-	sender := WorkspaceID("ws-sender")
-	tests := []struct {
-		name   string
-		origin string
-		sentBy *WorkspaceID
-		want   error
-	}{
-		{name: "an agent-sent prompt naming its sender", origin: agentSent, sentBy: &sender},
-		{name: "a user's prompt naming none", origin: "PROMPT_ORIGIN_USER_SENT"},
-		{name: "an agent-sent prompt naming none", origin: agentSent, want: ErrSenderMismatch},
-		{name: "a user's prompt naming a sender", origin: "PROMPT_ORIGIN_USER_SENT", sentBy: &sender, want: ErrSenderMismatch},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			err := checkSender(tt.origin, tt.sentBy)
-
-			// Assert
-			if !errors.Is(err, tt.want) || (tt.want == nil && err != nil) {
-				t.Fatalf("checkSender = %v, want %v", err, tt.want)
-			}
-		})
-	}
-}
 
 func TestPutTurnRoundTripsTheSender(t *testing.T) {
 	// Arrange
@@ -65,8 +41,8 @@ func TestPutTurnRefusesASenderThatDisagreesWithTheOrigin(t *testing.T) {
 	recorded, _ := s.RecordedTurns(context.Background(), ws.ID, []TurnID{turn})
 
 	// Assert
-	if !errors.Is(err, ErrSenderMismatch) {
-		t.Fatalf("PutTurn = %v, want ErrSenderMismatch", err)
+	if !errors.Is(err, promptorigin.ErrSenderMismatch) {
+		t.Fatalf("PutTurn = %v, want promptorigin.ErrSenderMismatch", err)
 	}
 	if recorded[turn] {
 		t.Fatal("the refused turn was recorded")
@@ -90,7 +66,7 @@ func TestATurnStoredWithASenderThatDisagreesWithItsOriginFailsTheRead(t *testing
 
 	// Assert
 	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "sent_by" || !errors.Is(err, ErrSenderMismatch) {
+	if !errors.As(err, &decode) || decode.Field != "sent_by" || !errors.Is(err, promptorigin.ErrSenderMismatch) {
 		t.Fatalf("Turn = %v, want a sent_by decode error", err)
 	}
 }
@@ -130,8 +106,8 @@ func TestPutHeldPromptRefusesASenderThatDisagreesWithTheOrigin(t *testing.T) {
 	_, found, _ := s.HeldPromptByTurn(context.Background(), turn)
 
 	// Assert
-	if !errors.Is(err, ErrSenderMismatch) {
-		t.Fatalf("PutHeldPrompt = %v, want ErrSenderMismatch", err)
+	if !errors.Is(err, promptorigin.ErrSenderMismatch) {
+		t.Fatalf("PutHeldPrompt = %v, want promptorigin.ErrSenderMismatch", err)
 	}
 	if found {
 		t.Fatal("the refused hold was recorded")
@@ -181,7 +157,7 @@ func TestTurnSendersSurfacesAFailedRead(t *testing.T) {
 	got, err := s.TurnSenders(context.Background(), ws.ID, []TurnID{turn})
 
 	// Assert
-	if !errors.Is(err, ErrSenderMismatch) || got != nil {
+	if !errors.Is(err, promptorigin.ErrSenderMismatch) || got != nil {
 		t.Fatalf("TurnSenders = (%v, %v), want the decode failure and no answer", got, err)
 	}
 	if !loggedAt(logs, "daemon.wsm.turn_senders") {

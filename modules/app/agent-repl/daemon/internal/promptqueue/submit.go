@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -31,9 +32,9 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		log.Error(opSubmit, "a submission reached the queue with no origin", nil)
 		return Disposition{}, fmt.Errorf("submit to %q: the prompt origin is required", sub.WS)
 	}
-	if (sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT) != (sub.SentBy != nil) {
+	if err := promptorigin.CheckSender(sub.Origin, sub.SentBy != nil); err != nil {
 		log.Error(opSubmit, "a submission reached the queue with a sender that disagrees with its origin", dlog.Context{"sender_named": sub.SentBy != nil})
-		return Disposition{}, fmt.Errorf("submit to %q: %w", sub.WS, wsm.ErrSenderMismatch)
+		return Disposition{}, fmt.Errorf("submit to %q: %w", sub.WS, err)
 	}
 
 	disposition, handled, err := q.applyLeasePolicy(ctx, sub, log)

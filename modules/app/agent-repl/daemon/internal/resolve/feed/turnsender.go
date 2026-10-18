@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"context"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -85,15 +83,6 @@ func (r *resolver) promptHeader(s *wsState, turn ids.TurnID, origin conversation
 // SWALLOWED, and the page still draws: an agent-sent prompt of the page is
 // headed by a workspace the daemon cannot name until the next replay.
 func (r *resolver) recordedSenders(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]ids.WorkspaceID {
-	if r.deps.TurnSenders == nil || len(turns) == 0 {
-		return nil
-	}
-	senders, err := r.deps.TurnSenders(context.Background(), ws, turns)
-	if err != nil {
-		r.logger(ws).Error("daemon.feed.turn_senders_unreadable",
-			"the replayed turns' recorded senders could not be read; their agent-sent prompts are headed by a workspace the daemon cannot name",
-			dlog.Context{"turns": len(turns), "cause": err.Error()})
-		return nil
-	}
-	return senders
+	return readRecorded(r, ws, turns, r.deps.TurnSenders, "daemon.feed.turn_senders_unreadable",
+		"the replayed turns' recorded senders could not be read; their agent-sent prompts are headed by a workspace the daemon cannot name")
 }

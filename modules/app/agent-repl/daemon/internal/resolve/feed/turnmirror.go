@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"context"
-
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -92,17 +90,8 @@ func copyMirror(m *wsm.MirrorAddress) *wsm.MirrorAddress {
 // SWALLOWED, and the page still draws: the turns' own rows are drawn, and only
 // their mirrored copies wait for the next publication.
 func (r *resolver) recordedMirrors(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]*wsm.MirrorAddress {
-	if r.deps.TurnMirrors == nil || len(turns) == 0 {
-		return nil
-	}
-	mirrors, err := r.deps.TurnMirrors(context.Background(), ws, turns)
-	if err != nil {
-		r.logger(ws).Error("daemon.feed.turn_mirrors_unreadable",
-			"the replayed turns' recorded mirrors could not be read; their rows are drawn in this workspace only",
-			dlog.Context{"turns": len(turns), "cause": err.Error()})
-		return nil
-	}
-	return mirrors
+	return readRecorded(r, ws, turns, r.deps.TurnMirrors, "daemon.feed.turn_mirrors_unreadable",
+		"the replayed turns' recorded mirrors could not be read; their rows are drawn in this workspace only")
 }
 
 // mirrorRow draws ROW, just published in S's feed, again at its turn's mirror,

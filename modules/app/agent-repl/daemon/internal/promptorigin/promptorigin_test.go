@@ -1,6 +1,12 @@
 package promptorigin
 
 import (
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -48,5 +54,88 @@ func TestUnseenNamedReadsTheStoredSpelling(t *testing.T) {
 				t.Fatalf("UnseenNamed(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCheckSender(t *testing.T) {
+	agentSent := conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+	userSent := conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		named  bool
+		want   error
+	}{
+		{name: "an agent-sent prompt naming its sender", origin: agentSent, named: true},
+		{name: "a user's prompt naming none", origin: userSent},
+		{name: "an agent-sent prompt naming none", origin: agentSent, want: ErrSenderMismatch},
+		{name: "a user's prompt naming a sender", origin: userSent, named: true, want: ErrSenderMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := CheckSender(tt.origin, tt.named)
+
+			// Assert
+			if !errors.Is(err, tt.want) || (tt.want == nil && err != nil) {
+				t.Fatalf("CheckSender = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckSenderNamedReadsTheStoredSpelling(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		named  bool
+		want   error
+	}{
+		{name: "the agent-sent spelling naming its sender", origin: "PROMPT_ORIGIN_AGENT_SENT", named: true},
+		{name: "the agent-sent spelling naming none", origin: "PROMPT_ORIGIN_AGENT_SENT", want: ErrSenderMismatch},
+		{name: "an origin no vocabulary holds, naming a sender", origin: "NO_SUCH_ORIGIN", named: true, want: ErrSenderMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := CheckSenderNamed(tt.origin, tt.named)
+
+			// Assert
+			if !errors.Is(err, tt.want) || (tt.want == nil && err != nil) {
+				t.Fatalf("CheckSenderNamed = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+// THE SENDER RULE IS WRITTEN ONCE: every layer carrying a prompt's sender asks
+// CheckSender, so a hand-rolled comparison of an origin against
+// PROMPT_ORIGIN_AGENT_SENT beside a sender fails here.
+func TestEverySenderCheckIsCheckSender(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`PROMPT_ORIGIN_AGENT_SENT\)\s*!=\s*\(`)
+	var found []string
+
+	// Act
+	err := filepath.WalkDir("../..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if handRolled.Match(raw) && !strings.HasSuffix(path, "promptorigin.go") {
+			found = append(found, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the daemon's source: %v", err)
+	}
+	if len(found) > 0 {
+		t.Fatalf("these files compare an origin to PROMPT_ORIGIN_AGENT_SENT by hand instead of asking CheckSender: %v", found)
 	}
 }

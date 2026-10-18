@@ -390,21 +390,31 @@ func boundaryName(page *conversationv1.HistoryPage) string {
 // pre-contract entry, or a page whose addresses could not be read) is drawn on
 // the root feed, as every unaddressed turn is.
 
+// readRecorded reads one durable per-turn fact of the turns a history page
+// names, BEFORE the resolver's lock is taken, through READ (a Deps reader). A
+// nil reader or no turns reads nothing. A FAILED READ IS RECORDED at ERROR
+// under OP with MESSAGE, NEVER SWALLOWED, and answers nothing: the page still
+// draws, without the fact. It is the one body every replayed per-turn read
+// shares (recordedAddresses, recordedMirrors, recordedSenders,
+// recordedCloses).
+func readRecorded[T any](r *resolver, ws ids.WorkspaceID, turns []ids.TurnID, read func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]T, error), op, message string) map[ids.TurnID]T {
+	if read == nil || len(turns) == 0 {
+		return nil
+	}
+	facts, err := read(context.Background(), ws, turns)
+	if err != nil {
+		r.logger(ws).Error(op, message, dlog.Context{"turns": len(turns), "cause": err.Error()})
+		return nil
+	}
+	return facts
+}
+
 // recordedAddresses reads the recorded output address of every turn a history
 // page names, BEFORE the resolver's lock is taken. A FAILED READ IS RECORDED,
 // NEVER SWALLOWED, and the page still draws, at the addresses the feed already
 // holds: refusing the page would hide the whole conversation for want of where
 // part of it goes.
 func (r *resolver) recordedAddresses(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]*wsm.OutputAddress {
-	if r.deps.TurnAddresses == nil || len(turns) == 0 {
-		return nil
-	}
-	addresses, err := r.deps.TurnAddresses(context.Background(), ws, turns)
-	if err != nil {
-		r.logger(ws).Error("daemon.feed.turn_addresses_unreadable",
-			"the replayed turns' recorded output addresses could not be read; the page is drawn at the addresses the feed already holds",
-			dlog.Context{"turns": len(turns), "cause": err.Error()})
-		return nil
-	}
-	return addresses
+	return readRecorded(r, ws, turns, r.deps.TurnAddresses, "daemon.feed.turn_addresses_unreadable",
+		"the replayed turns' recorded output addresses could not be read; the page is drawn at the addresses the feed already holds")
 }

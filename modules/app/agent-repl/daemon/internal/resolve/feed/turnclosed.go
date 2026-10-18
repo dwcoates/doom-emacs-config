@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"context"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -151,26 +150,14 @@ func (r *resolver) closedEnding(s *wsState, turn ids.TurnID, close wsm.RecordedC
 // turns' own terminals are drawn either way, and refusing the page because the
 // fallback could not be read would hide the whole conversation.
 func (r *resolver) recordedCloses(ws ids.WorkspaceID, page *conversationv1.HistoryPage) map[ids.TurnID]wsm.RecordedClose {
-	if r.deps.TurnCloses == nil {
-		return nil
-	}
 	var turns []ids.TurnID
 	for _, at := range page.GetEntries() {
 		if turn := at.GetEntry().GetUserPrompt().GetId().GetValue(); turn != "" {
 			turns = append(turns, ids.TurnID(turn))
 		}
 	}
-	if len(turns) == 0 {
-		return nil
-	}
-	closes, err := r.deps.TurnCloses(context.Background(), ws, turns)
-	if err != nil {
-		r.logger(ws).Error("daemon.feed.turn_closes_unreadable",
-			"the replayed turns' recorded closes could not be read; a turn with no terminal on the page replays as running",
-			dlog.Context{"turns": len(turns), "cause": err.Error()})
-		return nil
-	}
-	return closes
+	return readRecorded(r, ws, turns, r.deps.TurnCloses, "daemon.feed.turn_closes_unreadable",
+		"the replayed turns' recorded closes could not be read; a turn with no terminal on the page replays as running")
 }
 
 // endReplayedTurn ends the turn the replay stood in, when its page carried no
