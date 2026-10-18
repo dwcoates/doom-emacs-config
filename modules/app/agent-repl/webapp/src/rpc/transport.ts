@@ -12,6 +12,7 @@
  */
 import { createConnectTransport } from "@connectrpc/connect-web";
 import type { Transport } from "@connectrpc/connect";
+import { createLinkedAbortController } from "@connectrpc/connect/protocol";
 
 export interface DaemonTransportOptions {
   /**
@@ -43,7 +44,12 @@ export function createDaemonTransport(baseUrl: string, opts: DaemonTransportOpti
         : (input, init) =>
             fetch(input, {
               ...init,
-              signal: init?.signal == null ? signal : AbortSignal.any([init.signal, signal]),
+              // LINKED, NOT `AbortSignal.any`, which WebKitGTK 2.40 (the e2e
+              // sandbox's engine) lacks: every fetch threw there, and no page
+              // reached its daemon. Connect aborts each call's own signal when
+              // the call completes, and the link then drops its listeners, so
+              // none collects on the page's long-lived signal.
+              signal: init?.signal == null ? signal : createLinkedAbortController(init.signal, signal).signal,
             }),
   });
 }
