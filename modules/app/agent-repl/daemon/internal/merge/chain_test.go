@@ -264,11 +264,27 @@ func (g *chainGit) TreeOf(_ context.Context, dir, ref string) (string, error) {
 // holdRebase parks the next rebase started in dir until release closes;
 // entered closes once it is parked.
 func (g *chainGit) holdRebase(dir string) (entered, release chan struct{}) {
+	return g.arm(g.rebaseHolds, dir)
+}
+
+// arm sets the next call in dir to park on a fresh hold in holds, one of
+// chainGit's per-worktree hold maps, and answers the hold's channels.
+func (g *chainGit) arm(holds map[string]chainHold, dir string) (entered, release chan struct{}) {
 	g.cmu.Lock()
 	defer g.cmu.Unlock()
 	h := chainHold{entered: make(chan struct{}), release: make(chan struct{})}
-	g.rebaseHolds[dir] = h
+	holds[dir] = h
 	return h.entered, h.release
+}
+
+// claimHold takes the hold armed in holds for dir, if any, so it parks
+// exactly one call.
+func (g *chainGit) claimHold(holds map[string]chainHold, dir string) (chainHold, bool) {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	h, ok := holds[dir]
+	delete(holds, dir)
+	return h, ok
 }
 
 // holdRebaseStubbornly is holdRebase for a rebase that ignores its caller's
@@ -285,19 +301,11 @@ func (g *chainGit) holdRebaseStubbornly(dir string) (entered, release chan struc
 // entered closes once it is parked. A rebase reads it first, so a held read
 // stands the run after it read the target's tip and before its rebase began.
 func (g *chainGit) holdClean(dir string) (entered, release chan struct{}) {
-	g.cmu.Lock()
-	defer g.cmu.Unlock()
-	h := chainHold{entered: make(chan struct{}), release: make(chan struct{})}
-	g.cleanHolds[dir] = h
-	return h.entered, h.release
+	return g.arm(g.cleanHolds, dir)
 }
 
 func (g *chainGit) IsClean(ctx context.Context, dir string) (bool, error) {
-	g.cmu.Lock()
-	hold, held := g.cleanHolds[dir]
-	delete(g.cleanHolds, dir)
-	g.cmu.Unlock()
-	if held {
+	if hold, held := g.claimHold(g.cleanHolds, dir); held {
 		close(hold.entered)
 		<-hold.release
 	}
@@ -305,10 +313,9 @@ func (g *chainGit) IsClean(ctx context.Context, dir string) (bool, error) {
 }
 
 func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
+	hold, held := g.claimHold(g.rebaseHolds, dir)
 	g.cmu.Lock()
-	hold, held := g.rebaseHolds[dir]
 	stubborn := g.stubborn[dir]
-	delete(g.rebaseHolds, dir)
 	delete(g.stubborn, dir)
 	g.cmu.Unlock()
 	if held && stubborn {
@@ -844,6 +851,77 @@ var broken = scriptedRun{Output: "bash: test-all.sh: command not found\n", Code:
 
 // failing scripts a failing gate.
 var failing = scriptedRun{Output: "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", Code: 1}
+
+func TestChainGitClaimsAnArmedHoldOnceAndOnlyInItsWorktree(t *testing.T) {
+	// Arrange.
+	g := newChainGit(newFakeGit(func() int { return 0 }))
+	holds := map[string]chainHold{}
+	entered, release := g.arm(holds, "dir-a")
+
+	// Act.
+	other, otherHeld := g.claimHold(holds, "dir-b")
+	first, firstHeld := g.claimHold(holds, "dir-a")
+	_, againHeld := g.claimHold(holds, "dir-a")
+
+	// Assert.
+	if otherHeld || other.entered != nil {
+		t.Fatal("a hold armed in dir-a parked a call in dir-b")
+	}
+	if !firstHeld || first.entered != entered || first.release != release {
+		t.Fatal("the call in dir-a did not claim the hold armed there")
+	}
+	if againHeld {
+		t.Fatal("a hold parked a second call")
+	}
+}
+
+func TestEveryChainGitHoldParksItsCallThroughTheOneArmedShape(t *testing.T) {
+	// Each hold a test arms parks exactly the call it names, in its worktree,
+	// through arm and claimHold: a hold hand-rolled outside them fails here.
+	cases := []struct {
+		name  string
+		holds func(g *chainGit) map[string]chainHold
+		hold  func(g *chainGit, dir string) (entered, release chan struct{})
+		call  func(g *chainGit, dir string)
+	}{
+		{"rebase", func(g *chainGit) map[string]chainHold { return g.rebaseHolds }, (*chainGit).holdRebase,
+			func(g *chainGit, dir string) {
+				g.branch("feature", "a1")
+				_, _ = g.StartRebase(context.Background(), dir, "master", []string{g.ref("feature")})
+			}},
+		{"clean", func(g *chainGit) map[string]chainHold { return g.cleanHolds }, (*chainGit).holdClean,
+			func(g *chainGit, dir string) { _, _ = g.IsClean(context.Background(), dir) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			g := newChainGit(newFakeGit(func() int { return 0 }))
+			entered, release := tc.hold(g, "dir-a")
+			armed, ok := tc.holds(g)["dir-a"]
+			if !ok || armed.entered != entered || armed.release != release {
+				t.Fatal("the hold was not armed in its call's hold map")
+			}
+			ended := make(chan struct{})
+
+			// Act.
+			go func() { defer close(ended); tc.call(g, "dir-a") }()
+			<-entered
+			select {
+			case <-ended:
+				t.Fatal("the held call ended before its release")
+			default:
+			}
+			close(release)
+			<-ended
+			tc.call(g, "dir-a")
+
+			// Assert.
+			if _, left := tc.holds(g)["dir-a"]; left {
+				t.Fatal("the hold outlived the one call it parks")
+			}
+		})
+	}
+}
 
 func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
 	// Arrange: the head holds in its gate; the merge behind it, rebased,
