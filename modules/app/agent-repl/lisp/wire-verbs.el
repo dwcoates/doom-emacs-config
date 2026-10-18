@@ -2998,6 +2998,12 @@ Every arm's message is all strings, so FIELDS is its whole schema.")
     (failed :failed ((detail :detail))))
   "UpdatePersistentWifiModeDisplay's outcome arms: (WIRE KEYWORD FIELDS).")
 
+(defconst agent-repl-wire-persistent-wifi-energy-mode-arms
+  '((lowPower :low-power nil)
+    (highPower :high-power nil)
+    (failed :failed ((detail :detail))))
+  "UpdatePersistentWifiModeEnergyMode's outcome arms: (WIRE KEYWORD FIELDS).")
+
 (defconst agent-repl-wire-persistent-wifi-error-arms
   '((powerSettingsRefused :power-settings-refused ((detail :detail)))
     (modeUnreadable :mode-unreadable ((detail :detail))))
@@ -3019,29 +3025,36 @@ ARMS is a list of (WIRE KEYWORD FIELDS) as in
                        (agent-repl-wire-verbs--decode-string-fields arm-name value fields)))))
            arms)))
 
+(defun agent-repl-wire-verbs--decode-step-outcome (message field json step arms)
+  "Decode MESSAGE's required step FIELD from JSON.
+The step is a STEP message whose required `outcome' oneof is over the
+string-only ARMS, as in `agent-repl-wire-persistent-wifi-hotspot-arms'."
+  (agent-repl-wire--decode-message
+   message field json
+   (lambda (value)
+     (agent-repl-wire-verbs--decode-string-arms step "outcome" value arms))))
+
 (defun agent-repl-wire-decode-update-persistent-wifi-mode-success (json)
   "Decode UpdatePersistentWifiModeSuccess from JSON.
-Returns (:state STATE :hotspot ONEOF :display ONEOF): the standing re-read
-after the change, and how the hotspot and display steps went."
+Returns (:state STATE :hotspot ONEOF :energy-mode ONEOF :display ONEOF):
+the standing re-read after the change, and how the hotspot, energy mode
+and display steps went."
   (let ((message "UpdatePersistentWifiModeSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(state hotspot display))
+    (agent-repl-wire-verbs--check-keys message json '(state hotspot energyMode display))
     ;; Presence, not value: protojson spells a message with nothing set as
     ;; `{}', which parses to nil, and a standing with both facts unread is
     ;; exactly that.
     (list :state (agent-repl-wire--decode-message
                   message 'state json #'agent-repl-wire-decode-persistent-wifi-state)
-          :hotspot (agent-repl-wire--decode-message
-                    message 'hotspot json
-                    (lambda (value)
-                      (agent-repl-wire-verbs--decode-string-arms
-                       "UpdatePersistentWifiModeHotspot" "outcome" value
-                       agent-repl-wire-persistent-wifi-hotspot-arms)))
-          :display (agent-repl-wire--decode-message
-                    message 'display json
-                    (lambda (value)
-                      (agent-repl-wire-verbs--decode-string-arms
-                       "UpdatePersistentWifiModeDisplay" "outcome" value
-                       agent-repl-wire-persistent-wifi-display-arms))))))
+          :hotspot (agent-repl-wire-verbs--decode-step-outcome
+                    message 'hotspot json "UpdatePersistentWifiModeHotspot"
+                    agent-repl-wire-persistent-wifi-hotspot-arms)
+          :energy-mode (agent-repl-wire-verbs--decode-step-outcome
+                        message 'energyMode json "UpdatePersistentWifiModeEnergyMode"
+                        agent-repl-wire-persistent-wifi-energy-mode-arms)
+          :display (agent-repl-wire-verbs--decode-step-outcome
+                    message 'display json "UpdatePersistentWifiModeDisplay"
+                    agent-repl-wire-persistent-wifi-display-arms))))
 
 (defun agent-repl-wire-decode-update-persistent-wifi-mode-error (json)
   "Decode UpdatePersistentWifiModeError from JSON into (:cause ONEOF)."

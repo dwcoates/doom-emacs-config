@@ -47,7 +47,8 @@ that every protobuf decision be made without their input (2026-10-01).
   one stale reading (structurally impossible, not merely unlikely).
 - Consequences:
   - The step order (hotspot, power, display) and the "only the power step can
-    fail the request" rule are the script's, kept as the contract.
+    fail the request" rule are the script's, kept as the contract. The energy
+    mode step (5) slots in before the display under the same rule.
   - Because network names are withheld on this host, turning OFF cannot tell
     whether the joined network is the hotspot: it answers
     `network_unreadable` and leaves nothing. Turning ON with an unreadable name
@@ -83,3 +84,23 @@ that every protobuf decision be made without their input (2026-10-01).
 - Consequence: the chip's red and green are its own paints, not the
   render-colors status vocabulary (whose red means "agent working"); the chip
   is not a workspace status.
+
+### 5. `UpdatePersistentWifiModeSuccess.energy_mode = 4` (2026-10-17)
+
+- WHAT: a fourth step between the power settings and the display. Turning the
+  mode on runs `pmset -a powermode 1` (Low Power Mode). Turning it off runs
+  `pmset -a powermode 2` (High Power Mode). The outcome oneof is
+  `low_power | high_power | failed`.
+- WHY: the owner asked that lid-closed operation also save battery, and that
+  leaving it restore full speed.
+- Consequences:
+  - The energy step runs only after the power step took, so a refused power
+    step still leaves everything as it was.
+  - A failed energy step never fails the request: the machine stays awake
+    whichever energy mode it runs in. It is reported inside the success and
+    recorded at WARN, exactly like a failed display step.
+  - The write goes through the same `sudo -n pmset -a` helper as the power
+    settings, so the sudoers grant needs `powermode 1` and `powermode 2` lines
+    (see the Setup section of `docs/USER-GUIDE.md`).
+  - The energy mode is written, never read back, so the standing does not
+    carry it.

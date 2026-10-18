@@ -68,6 +68,17 @@ written inside BODY after the act."
                    . "hotspot: P did not take (gone)")))
     (should (equal (agent-repl-persistent-wifi--hotspot-text (car case)) (cdr case)))))
 
+(ert-deftest agent-repl-test-pwifi-energy-mode-text-words-every-arm ()
+  "Every energy mode outcome arm has its own words."
+  (dolist (case '(((:arm :low-power :value nil) . "energy: low power")
+                  ((:arm :high-power :value nil) . "energy: high power")
+                  ((:arm :failed :value (:detail "refused")) . "energy: failed (refused)")))
+    (should (equal (agent-repl-persistent-wifi--energy-mode-text (car case)) (cdr case)))))
+
+(ert-deftest agent-repl-test-pwifi-energy-mode-text-refuses-an-unworded-arm ()
+  "An energy mode arm with no wording is a bug, signalled."
+  (should-error (agent-repl-persistent-wifi--energy-mode-text '(:arm :turbo :value nil))))
+
 (ert-deftest agent-repl-test-pwifi-display-text-words-every-arm ()
   "Every display outcome arm has its own words."
   (dolist (case '(((:arm :dimmed :value nil) . "display: dimmed")
@@ -133,16 +144,17 @@ written inside BODY after the act."
   (should (commandp #'agent-repl-persistent-wifi-mode-toggle)))
 
 (ert-deftest agent-repl-test-pwifi-a-success-is-echoed-whole ()
-  "A success echoes the standing and both steps in one line."
+  "A success echoes the standing and every step in one line."
   (agent-repl-test-pwifi--capturing
     ;; Act
     (agent-repl-persistent-wifi--on-success
      (list :state (agent-repl-test-pwifi--state :joined :on "Phone")
            :hotspot '(:arm :joined :value (:network-name "Phone"))
+           :energy-mode '(:arm :low-power :value nil)
            :display '(:arm :dimmed :value nil)))
     ;; Assert
     (should (equal (echoed)
-                   '("agent-repl: persistent wifi on: the lid can close · Wi-Fi joined to Phone · hotspot: joined Phone · display: dimmed")))))
+                   '("agent-repl: persistent wifi on: the lid can close · Wi-Fi joined to Phone · hotspot: joined Phone · energy: low power · display: dimmed")))))
 
 (ert-deftest agent-repl-test-pwifi-a-success-is-not-echoed-again-by-its-push ()
   "The success adopts its standing, so the daemon's push of it is silent."
@@ -152,6 +164,7 @@ written inside BODY after the act."
     (agent-repl-persistent-wifi--on-success
      (list :state (agent-repl-test-pwifi--state :joined :on)
            :hotspot '(:arm :not-on-hotspot :value nil)
+           :energy-mode '(:arm :low-power :value nil)
            :display '(:arm :dimmed :value nil)))
     ;; Act
     (agent-repl-persistent-wifi-handle (agent-repl-test-pwifi--state :joined :on))

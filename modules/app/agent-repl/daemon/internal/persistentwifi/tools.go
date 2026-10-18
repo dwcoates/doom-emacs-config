@@ -4,7 +4,8 @@
 //
 // It is the daemon-side port of the owner's `laptop_keep_alive` script, and it
 // keeps that script's behavior and step order (hotspot, power settings,
-// display; see endpoint_update_persistent_wifi_mode.proto). It also READS the
+// display; see endpoint_update_persistent_wifi_mode.proto), with an energy
+// mode step (Low Power Mode on, High Power Mode off) before the display. It also READS the
 // standing, which the script only half did: whether the Wi-Fi interface is
 // joined to a network, and whether sleep is disabled. The controller re-reads
 // both on a fixed cadence and after every change, and publishes the standing

@@ -286,9 +286,87 @@ func TestUpdateOnJoinsTheHotspotDisablesSleepAndDims(t *testing.T) {
 		t.Fatalf("state = %v, want on and joined to the hotspot", s.GetState())
 	}
 	calls := h.r.ran()
-	join, power, dim := slices.Index(calls, argJoin), slices.Index(calls, argPower("disablesleep", "1")), slices.Index(calls, argDim)
-	if !(join < power && power < dim) {
-		t.Fatalf("step order = %v, want hotspot, power, display", calls)
+	join, power, energy, dim := slices.Index(calls, argJoin), slices.Index(calls, argPower("disablesleep", "1")),
+		slices.Index(calls, argEnergy(true)), slices.Index(calls, argDim)
+	if !(join < power && power < energy && energy < dim) {
+		t.Fatalf("step order = %v, want hotspot, power, energy mode, display", calls)
+	}
+}
+
+func TestUpdateSetsTheEnergyModeForTheDirection(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+		pmset  string
+		want   func(*agentreplv1.UpdatePersistentWifiModeEnergyMode) bool
+		arm    string
+	}{
+		{name: "on is low power", action: "on", pmset: pmsetOff, arm: "low_power",
+			want: func(e *agentreplv1.UpdatePersistentWifiModeEnergyMode) bool { return e.GetLowPower() != nil }},
+		{name: "off is high power", action: "off", pmset: pmsetOn, arm: "high_power",
+			want: func(e *agentreplv1.UpdatePersistentWifiModeEnergyMode) bool { return e.GetHighPower() != nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			on := tc.action == "on"
+			h := newHarness(t).standing(tc.pmset, summary(true, "Home"))
+			h.r.on(argJoin, answer{})
+			value := "0"
+			if on {
+				value = "1"
+			}
+			scriptPower(h.r, value)
+			h.r.on(argDim, answer{})
+			h.r.on(argRestore, answer{})
+
+			// Act.
+			resp := h.c.Update(context.Background(), update(tc.action))
+
+			// Assert.
+			if resp.GetSuccess() == nil || !tc.want(resp.GetSuccess().GetEnergyMode()) {
+				t.Fatalf("Update() = %v, want energy mode %s", resp, tc.arm)
+			}
+			if h.r.count(argEnergy(on)) != 1 {
+				t.Fatalf("calls = %v, want one %q", h.r.ran(), argEnergy(on))
+			}
+			infos := h.records("info", opUpdate)
+			if len(infos) != 1 || infos[0].Context["energy_mode_outcome"] != tc.arm {
+				t.Fatalf("update INFO records = %+v, want one naming energy mode %s", infos, tc.arm)
+			}
+			if warns := h.records("warn", opUpdate); len(warns) != 0 {
+				t.Fatalf("update WARN records = %+v, want none", warns)
+			}
+		})
+	}
+}
+
+func TestUpdateReportsAFailedEnergyModeWithoutFailingTheRequest(t *testing.T) {
+	// Arrange.
+	h := newHarness(t).standing(pmsetOff, summary(true, hotspot))
+	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
+	scriptPower(h.r, "1")
+	h.r.on(argEnergy(true), answer{out: "sudo: a password is required", code: 1})
+	h.r.on(argDim, answer{})
+
+	// Act.
+	resp := h.c.Update(context.Background(), update("on"))
+
+	// Assert.
+	s := resp.GetSuccess()
+	if s == nil {
+		t.Fatalf("Update() = %v, want success", resp)
+	}
+	failed := s.GetEnergyMode().GetFailed()
+	if failed == nil || !strings.HasPrefix(failed.GetDetail(), "pmset -a powermode 1: ") {
+		t.Fatalf("energy mode = %v, want failed naming the invocation", s.GetEnergyMode())
+	}
+	if s.GetDisplay().GetDimmed() == nil || modeArm(s.GetState()) != "on" {
+		t.Fatalf("display = %v, mode = %s, want dimmed and on", s.GetDisplay(), modeArm(s.GetState()))
+	}
+	warns := h.records("warn", opUpdate)
+	if len(warns) != 1 || warns[0].Context["cause"] != failed.GetDetail() || warns[0].Context["on"] != true {
+		t.Fatalf("update WARN records = %+v, want one carrying the energy mode cause", warns)
 	}
 }
 
@@ -506,7 +584,7 @@ func TestUpdateAnswersARefusedPowerStepAsAnErrorAndSkipsTheDisplay(t *testing.T)
 	if refused == nil {
 		t.Fatalf("Update() = %v, want power_settings_refused", resp)
 	}
-	if h.r.count(argDim)+h.r.count(argPower("networkoversleep", "1")) != 0 {
+	if h.r.count(argDim)+h.r.count(argEnergy(true))+h.r.count(argPower("networkoversleep", "1")) != 0 {
 		t.Fatalf("a step ran after the refusal: %v", h.r.ran())
 	}
 	errs := h.records("error", opUpdate)

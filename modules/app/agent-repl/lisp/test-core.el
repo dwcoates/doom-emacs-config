@@ -465,7 +465,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the interactive tab reorder")
     ("persistent-wifi.el" agent-repl-persistent-wifi-handle "agent-repl: %s"
      "tells the user the machine's persistent-wifi standing changed")
-    ("persistent-wifi.el" agent-repl-persistent-wifi--on-success "agent-repl: %s · %s · %s"
+    ("persistent-wifi.el" agent-repl-persistent-wifi--on-success "agent-repl: %s · %s · %s · %s"
      "reports what the user's persistent-wifi toggle left, step by step")
     ("prompt-queue.el" agent-repl-queue-deferred-prompt
      "agent-repl: no input to queue"

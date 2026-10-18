@@ -142,9 +142,20 @@ func argPower(setting, value string) string {
 	return "/t/sudo -n /t/pmset -a " + setting + " " + value
 }
 
-// scriptPower answers every power setting call with success.
+// argEnergy is the energy mode step's `sudo -n pmset -a powermode <mode>`
+// call for a mode turned on (Low Power Mode) or off (High Power Mode).
+func argEnergy(on bool) string {
+	if on {
+		return argPower("powermode", energyModeLowPower)
+	}
+	return argPower("powermode", energyModeHighPower)
+}
+
+// scriptPower answers every privileged write of a change turning the mode to
+// value -- each power setting and the energy mode -- with success.
 func scriptPower(r *fakeRunner, value string) {
 	for _, s := range powerSettings {
 		r.on(argPower(s, value), answer{})
 	}
+	r.on(argEnergy(value == "1"), answer{})
 }

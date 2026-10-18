@@ -13,11 +13,12 @@ import {
 import {
   UpdatePersistentWifiModeErrorSchema,
   UpdatePersistentWifiModeResponseSchema,
+  UpdatePersistentWifiModeSuccessSchema,
   type UpdatePersistentWifiModeRequest,
   type UpdatePersistentWifiModeResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { DISC_RADIUS, drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
+import { DISC_RADIUS, drawTopbarPersistentWifi, stepOutcomeArm } from "../../src/topbar/persistent-wifi.js";
 import { oneofArms } from "../arms.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { RecordingSink, appContext, topbarContext } from "./fixtures.js";
@@ -104,6 +105,7 @@ const success = (): UpdatePersistentWifiModeResponse =>
       value: {
         state: { wifi: { case: "joined", value: { networkName: "phone" } }, mode: { case: "on", value: {} } },
         hotspot: { outcome: { case: "joined", value: { networkName: "phone" } } },
+        energyMode: { outcome: { case: "lowPower", value: {} } },
         display: { outcome: { case: "dimmed", value: {} } },
       },
     },
@@ -164,8 +166,22 @@ describe("clicking the persistent-wifi chip", () => {
     const record = await forwardedRecord(capture, "topbar.persistent-wifi-toggled");
     expect([record.level.case, record.context]).toEqual([
       "info",
-      expect.objectContaining({ mode: "on", wifi: "joined", hotspot: "joined", display: "dimmed" }),
+      expect.objectContaining({ mode: "on", wifi: "joined", hotspot: "joined", energyMode: "lowPower", display: "dimmed" }),
     ]);
+  });
+
+  it("logs every step the success carries, each through stepOutcomeArm", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const steps = UpdatePersistentWifiModeSuccessSchema.fields
+      .map((f) => f.localName)
+      .filter((name) => name !== "state");
+    // Act
+    await clickWith(() => success());
+    // Assert
+    const record = await forwardedRecord(capture, "topbar.persistent-wifi-toggled");
+    if (record.context === undefined) throw new Error("the toggled record carries no context");
+    expect(Object.keys(record.context).filter((k) => steps.includes(k)).sort()).toEqual([...steps].sort());
   });
 
   it("draws nothing on success, because the new standing arrives on the push", async () => {
@@ -306,5 +322,23 @@ describe("clicking the persistent-wifi chip", () => {
     await settle();
     // Assert
     expect(host.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("stepOutcomeArm", () => {
+  it("answers the set arm's name", () => {
+    expect(stepOutcomeArm({ outcome: { case: "dimmed" } }, "display", "UpdatePersistentWifiModeDisplay")).toBe("dimmed");
+  });
+
+  it("throws naming the success field when the step is absent", () => {
+    expect(() => stepOutcomeArm(undefined, "display", "UpdatePersistentWifiModeDisplay")).toThrow(
+      "malformed view at UpdatePersistentWifiModeSuccess.display:",
+    );
+  });
+
+  it("throws naming the oneof when the outcome sets no arm", () => {
+    expect(() => stepOutcomeArm({ outcome: { case: undefined } }, "display", "UpdatePersistentWifiModeDisplay")).toThrow(
+      "malformed view at UpdatePersistentWifiModeDisplay.outcome:",
+    );
   });
 });

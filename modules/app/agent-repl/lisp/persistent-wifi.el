@@ -87,6 +87,15 @@ daemon has stated any.")
                        (plist-get v :network-name) (plist-get v :detail)))
       (arm (error "agent-repl-persistent-wifi: hotspot arm %S has no wording" arm)))))
 
+(defun agent-repl-persistent-wifi--energy-mode-text (energy-mode)
+  "Return the words for the decoded ENERGY-MODE step outcome."
+  (pcase (plist-get energy-mode :arm)
+    (:low-power "energy: low power")
+    (:high-power "energy: high power")
+    (:failed (format "energy: failed (%s)"
+                     (plist-get (plist-get energy-mode :value) :detail)))
+    (arm (error "agent-repl-persistent-wifi: energy mode arm %S has no wording" arm))))
+
 (defun agent-repl-persistent-wifi--display-text (display)
   "Return the words for the decoded DISPLAY step outcome."
   (let ((v (plist-get display :value)))
@@ -126,17 +135,20 @@ push of the same standing then reads as unchanged."
   (let ((state (plist-get value :state)))
     (setq agent-repl-persistent-wifi-state state)
     (agent-repl--info agent-repl-persistent-wifi--log-scope
-                      "elisp.persistent-wifi.toggled standing=%S hotspot=%S display=%S"
-                      state (plist-get value :hotspot) (plist-get value :display))
-    (message "agent-repl: %s · %s · %s"
+                      "elisp.persistent-wifi.toggled standing=%S hotspot=%S energy-mode=%S display=%S"
+                      state (plist-get value :hotspot) (plist-get value :energy-mode)
+                      (plist-get value :display))
+    (message "agent-repl: %s · %s · %s · %s"
              (agent-repl-persistent-wifi-describe state)
              (agent-repl-persistent-wifi--hotspot-text (plist-get value :hotspot))
+             (agent-repl-persistent-wifi--energy-mode-text (plist-get value :energy-mode))
              (agent-repl-persistent-wifi--display-text (plist-get value :display)))))
 
 (defun agent-repl-persistent-wifi-mode-toggle ()
   "Turn the machine's persistent wifi mode (lid-closed operation) over.
-On: join the phone hotspot, disable system sleep, dim the display.  Off:
-leave the hotspot, enable sleep, restore the display.  The daemon reads
+On: join the phone hotspot, disable system sleep, switch to Low Power
+Mode, dim the display.  Off: leave the hotspot, enable sleep, switch to
+High Power Mode, restore the display.  The daemon reads
 the mode and turns it; a refusal (no sudo grant for pmset) is reported as
 the daemon's refusal."
   (interactive)

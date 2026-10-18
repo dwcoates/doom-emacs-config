@@ -226,6 +226,12 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 		})
 	}
 
+	energy := c.setEnergyMode(ctx, on)
+	if failed := energy.GetFailed(); failed != nil {
+		c.log.Warn(opUpdate, "the energy mode step failed; the mode change stands",
+			dlog.Context{"on": on, "cause": failed.GetDetail()})
+	}
+
 	display := c.setDisplay(ctx, on)
 	switch {
 	case display.GetFailed() != nil:
@@ -238,12 +244,15 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 
 	after := c.readLocked(ctx)
 	c.log.Info(opUpdate, "persistent wifi mode was changed", dlog.Context{
-		"on": on, "hotspot_outcome": hotspotArm(hotspotOutcome), "display_outcome": displayArm(display),
+		"on": on, "hotspot_outcome": hotspotArm(hotspotOutcome),
+		"energy_mode_outcome": energyModeArm(energy), "display_outcome": displayArm(display),
 		"wifi": wifiArm(after.state), "mode": modeArm(after.state),
 	})
 	return &agentreplv1.UpdatePersistentWifiModeResponse{
 		Result: &agentreplv1.UpdatePersistentWifiModeResponse_Success{
-			Success: &agentreplv1.UpdatePersistentWifiModeSuccess{State: after.state, Hotspot: hotspotOutcome, Display: display},
+			Success: &agentreplv1.UpdatePersistentWifiModeSuccess{
+				State: after.state, Hotspot: hotspotOutcome, Display: display, EnergyMode: energy,
+			},
 		},
 	}
 }
@@ -255,7 +264,7 @@ func errorResponse(e *agentreplv1.UpdatePersistentWifiModeError) *agentreplv1.Up
 	}
 }
 
-// wifiArm, modeArm, hotspotArm and displayArm name a oneof's set arm for a
+// wifiArm, modeArm, hotspotArm, energyModeArm and displayArm name a oneof's set arm for a
 // record; "unknown" is an unassigned one.
 func wifiArm(s *agentreplv1.PersistentWifiState) string {
 	switch {
@@ -278,6 +287,8 @@ func modeArm(s *agentreplv1.PersistentWifiState) string {
 }
 
 func hotspotArm(h *agentreplv1.UpdatePersistentWifiModeHotspot) string { return outcomeArm(h) }
+
+func energyModeArm(e *agentreplv1.UpdatePersistentWifiModeEnergyMode) string { return outcomeArm(e) }
 
 func displayArm(d *agentreplv1.UpdatePersistentWifiModeDisplay) string { return outcomeArm(d) }
 
