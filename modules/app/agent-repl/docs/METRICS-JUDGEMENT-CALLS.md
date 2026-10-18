@@ -65,3 +65,27 @@ Each entry says what was decided, why, and what it departs from.
   extended, and a table someone forgets reads as "fully deployed".
 - Consequence: the module's `go` directive moved to 1.24.0 (client_golang's
   floor), and `shim-lock` followed.
+
+## 5. VictoriaMetrics: Homebrew, launchd, port 8428, no minimum version
+
+- Installed by its own `program` entry (`brew install victoriametrics`) and
+  run by a `launchd_service` whose program is that installed command
+  (`bin/requirements.sh` learned the `command` and `files` shapes for it).
+- It listens on `127.0.0.1:8428`, the one fixed port in the design: no test
+  ever starts it, so nothing can collide with it, and the skill needs one
+  address to query.
+- The entry carries no minimum version. The installer reads the first number
+  in a program's version output, and `victoria-metrics -version` begins with
+  its build date (`victoria-metrics-20260925-134715-tags-v1.153.0`), so any
+  minimum would always pass. A check that cannot fail is worse than none.
+- Its log goes to `~/.cache/agent-repl/log/victoriametrics.log` through
+  launchd's standard out and error. launchd does not rotate it; VictoriaMetrics
+  logs little at its default level, but the file is unbounded.
+- Verified against the real v1.153.0 binary (outside the repo, in a temporary
+  directory): the `%{AGENT_REPL_METRICS_ROOT}` placeholder resolves, the file
+  targets are discovered, and a scraped series is queryable. That run found
+  the target files' `program` label colliding with the build info's own
+  (`exported_program`), so targets now carry `instance` alone.
+- Not done on the owner's machine: installing VictoriaMetrics and loading the
+  service. Both are outside the repository; `bin/requirements.sh install` (or
+  `/install-agent-repl`) does them.

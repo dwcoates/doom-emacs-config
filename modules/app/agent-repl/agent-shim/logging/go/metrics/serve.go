@@ -114,11 +114,12 @@ type target struct {
 // Advertise atomically writes the target file naming this surface, replacing
 // whatever an earlier instance wrote. `instance` is the program rather than
 // the port, so a restart continues the same series instead of minting new
-// ones.
+// ones. It is the only target label: a `program` target label would collide
+// with the build info's own and push it aside as `exported_program`.
 func (s *Server) Advertise() error {
 	body, err := json.Marshal([]target{{
 		Targets: []string{s.addr},
-		Labels:  map[string]string{"instance": s.program, "program": s.program},
+		Labels:  map[string]string{"instance": s.program},
 	}})
 	if err != nil {
 		return fmt.Errorf("metrics: encode the target for %q: %w", s.program, err)

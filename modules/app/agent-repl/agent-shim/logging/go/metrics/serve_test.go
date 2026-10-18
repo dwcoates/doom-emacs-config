@@ -191,8 +191,8 @@ func TestAdvertiseWritesTheTargetFile(t *testing.T) {
 	if len(got) != 1 || len(got[0].Targets) != 1 || got[0].Targets[0] != s.Addr() {
 		t.Fatalf("targets = %+v, want only %s (an earlier instance's target replaced)", got, s.Addr())
 	}
-	if got[0].Labels["instance"] != "daemon" || got[0].Labels["program"] != "daemon" {
-		t.Fatalf("labels = %v, want instance and program both daemon", got[0].Labels)
+	if len(got[0].Labels) != 1 || got[0].Labels["instance"] != "daemon" {
+		t.Fatalf("labels = %v, want only instance=daemon", got[0].Labels)
 	}
 	leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(s.TargetPath()), ".*.tmp"))
 	if len(leftovers) != 0 {

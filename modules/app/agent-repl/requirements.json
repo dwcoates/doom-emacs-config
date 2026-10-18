@@ -10,7 +10,8 @@
     "agent-shim/claude/shim-sidecar/requirements.json",
     "webapp/requirements.json",
     "e2e/requirements.json",
-    "lisp/requirements.json"
+    "lisp/requirements.json",
+    "metrics/requirements.json"
   ],
   "requirements": [
     {
