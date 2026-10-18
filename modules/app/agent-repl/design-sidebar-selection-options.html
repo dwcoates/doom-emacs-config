@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>agent-repl: the open sidebar's selected-workspace highlight</title>
+<script>
+// ===================== OPTIONS (edited by the agent on request) =====================
+// Each option: the selected row's gutter bar, its row tint, and the blink's peak wash.
+// Hover is --card in every option, as it is today.
+const OPTIONS = [
+  { name: "A · today (master)", note: "--accent #2563eb: gutter mixed 78% with white, 8% tint",
+    gutter: "color-mix(in srgb, #2563eb 78%, white)", tint: "color-mix(in srgb, #2563eb 8%, transparent)",
+    blink: "color-mix(in srgb, #2563eb 22%, transparent)" },
+  { name: "B · pastel blue (what land-pastel-accents gives)", note: "the same rule on the pastel --accent #97bafe",
+    gutter: "color-mix(in srgb, #97bafe 78%, white)", tint: "color-mix(in srgb, #97bafe 8%, transparent)",
+    blink: "color-mix(in srgb, #97bafe 22%, transparent)" },
+  { name: "C · Claude: neutral fill, no gutter", note: "the row takes --card #232322, as Claude's selected row #232323",
+    gutter: "transparent", tint: "#232322", blink: "#313130" },
+  { name: "D · neutral fill, warm-white gutter", note: "--card fill, gutter the body text --fg #f1efe9 at 70%",
+    gutter: "color-mix(in srgb, #f1efe9 70%, transparent)", tint: "#232322", blink: "#313130" },
+  { name: "E · neutral fill, muted gutter", note: "--card fill, gutter the muted grey --muted #898782",
+    gutter: "#898782", tint: "#232322", blink: "#313130" },
+  { name: "F · faint neutral tint, warm-white gutter", note: "a 5% white wash (lighter than hover), gutter --fg at 70%",
+    gutter: "color-mix(in srgb, #f1efe9 70%, transparent)", tint: "color-mix(in srgb, #f1efe9 5%, transparent)",
+    blink: "color-mix(in srgb, #f1efe9 14%, transparent)" },
+];
+// =====================================================================================
+</script>
+<style>
+  body { margin:0; background:#000; color:#ddd; font:13px -apple-system,system-ui,sans-serif; padding:20px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 4px; }
+  p { color:#888; margin:0 0 16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:18px; }
+  h2 { font-size:13px; margin:0 0 2px; }
+  .note { color:#888; font-size:11px; margin-bottom:6px; font-family:ui-monospace,Menlo,monospace; }
+  .stage { background:#151514; padding:10px; border-radius:10px; }
+  aside { background:#111110; border-radius:10px; padding:6px 0; color:#f1efe9; box-shadow:0 2px 14px rgba(0,0,0,.48); }
+  .repo { padding:6px 12px 2px; font-size:11px; color:#898782; text-transform:uppercase; letter-spacing:.05em; }
+  .row { display:flex; align-items:center; gap:7px; padding:5px 11px 5px 14px; cursor:pointer; border-left:3px solid transparent; }
+  .row:hover { background:#232322; }
+  .row .n { color:#898782; width:1em; font-size:12px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:currentColor; flex:none; }
+  .row .when { margin-left:auto; color:#898782; font-size:11px; }
+  .row.cur { background:var(--tint); border-left-color:var(--gutter); }
+  .row.cur .n { color:#fff; }
+  .row.blink { animation:blink .9s ease-in-out 1; }
+  @keyframes blink { 50% { background-color:var(--blink); } }
+  button { background:#222; color:#ddd; border:1px solid #333; border-radius:5px; padding:3px 9px; cursor:pointer; margin-top:6px; font-size:12px; }
+</style>
+<h1>The open sidebar's selected-workspace highlight</h1>
+<p>Each panel is the same rail on the shipped neutral grounds. Hover a row for the --card hover; "Blink" replays the click blink on the selected row.</p>
+<div class="grid" id="grid"></div>
+<script>
+const ROWS = [
+  ["doom", null],
+  ["1", "dark-theme-brown-palette", "#5dd87c", "2m", true],
+  ["2", "footer-activity-updates", "#ee6d69", "14s"],
+  ["3", "land-pastel-accents", "#9f74f4", "1m"],
+  ["explanation-engine", null],
+  ["4", "criticality-axis", "#eab00b", "6m"],
+  ["5", "queen-model", "#898782", ""],
+];
+const grid = document.getElementById("grid");
+for (const o of OPTIONS) {
+  const cell = document.createElement("div");
+  cell.innerHTML = `<h2>${o.name}</h2><div class="note">${o.note}</div><div class="stage"><aside></aside></div><button>Blink</button>`;
+  cell.style.setProperty("--gutter", o.gutter);
+  cell.style.setProperty("--tint", o.tint);
+  cell.style.setProperty("--blink", o.blink);
+  const aside = cell.querySelector("aside");
+  for (const [a, b, dot, when, cur] of ROWS) {
+    const row = document.createElement("div");
+    if (b === null) { row.className = "repo"; row.textContent = a; }
+    else {
+      row.className = "row" + (cur ? " cur" : "");
+      row.innerHTML = `<span class="n">${a}</span><span class="dot" style="color:${dot}"></span>${b}<span class="when">${when}</span>`;
+    }
+    aside.append(row);
+  }
+  cell.querySelector("button").onclick = () => {
+    const r = cell.querySelector(".row.cur"); r.classList.remove("blink"); void r.offsetWidth; r.classList.add("blink");
+  };
+  grid.append(cell);
+}
+</script>

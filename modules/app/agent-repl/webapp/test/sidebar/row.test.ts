@@ -267,25 +267,27 @@ describe("the highlight and the receded styling", () => {
       .filter((rule) => rule.selectors.some((sel) => sel.includes(".ws.current")))
       .map((rule) => rule.declarations);
 
-  it("marks the current row with the brighter accent gutter bar", () => {
+  it("marks the current row with the muted gutter bar", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
     expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--row-current-gutter\)/.test(d))).toBe(true);
   });
 
-  it("tints the current row's line slightly with the accent", () => {
+  it("fills the current row's line with the neutral --card grey and gutters it in --muted", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
-    const tint = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.includes("#ws-sidebar"))
-      .map((rule) => /--row-current-tint:\s*([^;]+);/.exec(rule.declarations)?.[1])
-      .find((value) => value !== undefined);
+    const token = (name: string): string | undefined =>
+      rulesOf(stylesheet)
+        .filter((rule) => rule.selectors.includes("#ws-sidebar"))
+        .map((rule) => new RegExp(`${name}:\\s*([^;]+);`).exec(rule.declarations)?.[1])
+        .find((value) => value !== undefined);
     // Assert
     expect([
       declarations.some((d) => /background-color:\s*var\(--row-current-tint\)/.test(d)),
-      tint,
-    ]).toEqual([true, "color-mix(in srgb, var(--accent) 8%, transparent)"]);
+      token("--row-current-tint"),
+      token("--row-current-gutter"),
+    ]).toEqual([true, "var(--card)", "var(--muted)"]);
   });
 
   it("paints the current row's tint through the cascade", () => {
@@ -491,6 +493,30 @@ describe("the when-column", () => {
     ticker.tick(NOW + 60_000);
     const when = drawn.querySelector(".when") as HTMLElement;
     expect([when.textContent, when.hasAttribute("data-cache-cold")]).toEqual(["cold cache", true]);
+  });
+
+  it("draws a hidden row's cold cache clear of the row's recession, at full opacity", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        when: { case: "hidden", value: { atMs: BigInt(NOW), cache: { lapsesAtMs: BigInt(NOW + 60_000) } } },
+      }),
+      sc,
+      "R",
+      "hidden",
+    );
+    ticker.tick(NOW + 60_000);
+    // Act
+    const opacities = inRail(drawn, () => [
+      cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity") || "1",
+      cascadedValue(drawn.querySelector(":scope > .row > .when") as HTMLElement, "opacity") || "1",
+      cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "opacity"),
+    ]);
+    // Assert
+    expect(opacities).toEqual(["1", "1", "var(--receded-opacity)"]);
   });
 
   it("marks a warm countdown as not yet cold", () => {
@@ -2246,7 +2272,7 @@ describe("the hidden section's rows", () => {
   it("draws a hidden row at the receded opacity a merged row wears", () => {
     const opacityOf = (place: "hidden" | "merged", closed: boolean): string => {
       const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);
-      return inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row") as HTMLElement, "opacity"));
+      return inRail(drawn, () => cascadedValue(drawn.querySelector(":scope > .row > .name") as HTMLElement, "opacity"));
     };
     expect([opacityOf("hidden", false), opacityOf("merged", true)]).toEqual(["var(--receded-opacity)", "var(--receded-opacity)"]);
   });
@@ -2258,8 +2284,8 @@ describe("the hidden section's rows", () => {
 
   it.each([
     { name: "an open grouping row", place: "grouping", closed: false, row: "1", when: "var(--receded-opacity)" },
-    { name: "a hidden row", place: "hidden", closed: false, row: "var(--receded-opacity)", when: "1" },
-    { name: "a merged row", place: "merged", closed: true, row: "var(--receded-opacity)", when: "1" },
+    { name: "a hidden row", place: "hidden", closed: false, row: "1", when: "var(--receded-opacity)" },
+    { name: "a merged row", place: "merged", closed: true, row: "1", when: "var(--receded-opacity)" },
   ] as const)("draws $name's when-column at the one receded grey", ({ place, closed, row: rowOpacity, when }) => {
     // Arrange
     const drawn = drawRosterRow(row({ id: "ws-1", closed }), sidebarContext(), "R", place);

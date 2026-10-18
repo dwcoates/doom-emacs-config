@@ -147,6 +147,11 @@ type graph struct {
 	// raise another banner then) and BEFORE the state client closes: a banner
 	// reads that client for the workspace's name.
 	CloseBanners func()
+	// CloseTitleSynthesis refuses further title runs, cancels the ones in
+	// flight and joins them. `run` calls it AFTER the watchers close (their
+	// sinks are what dispatch a run) and BEFORE the state client closes: a
+	// run reads and writes the persisted workspace summary.
+	CloseTitleSynthesis func()
 	// DrainQueue is the BOUNDED wait for the prompt queue's own background
 	// goroutines — the asynchronous classification verdicts and the background
 	// revivals. `run` calls it BEFORE the state client closes, for the reason
@@ -1477,16 +1482,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			clicks.bind(srv)
 			clients.bind(srv)
 		},
-		Background:    background,
-		CloseWatchers: fleet.CloseWatchers,
-		CloseBanners:  notifier.Close,
-		DrainQueue:    queue.Drain,
-		DrainStarts:   fleet.DrainStarts,
-		DrainLandings: deployer.DrainLandings,
-		DrainMerges:   mergeOrchestrator.Drain,
-		Notices:       newNoticeLifetime(func(ctx context.Context) { queueNotices.Run(ctx, handler) }),
-		StopShims:     stopEveryShim(fleet, supervisor, rootLossShimStopBound),
-		SettleBoot:    freshBootSettle(p.Opts.joining != "", rolloutController),
+		Background:          background,
+		CloseWatchers:       fleet.CloseWatchers,
+		CloseBanners:        notifier.Close,
+		CloseTitleSynthesis: titleSynth.Close,
+		DrainQueue:          queue.Drain,
+		DrainStarts:         fleet.DrainStarts,
+		DrainLandings:       deployer.DrainLandings,
+		DrainMerges:         mergeOrchestrator.Drain,
+		Notices:             newNoticeLifetime(func(ctx context.Context) { queueNotices.Run(ctx, handler) }),
+		StopShims:           stopEveryShim(fleet, supervisor, rootLossShimStopBound),
+		SettleBoot:          freshBootSettle(p.Opts.joining != "", rolloutController),
 	}, nil
 }
 

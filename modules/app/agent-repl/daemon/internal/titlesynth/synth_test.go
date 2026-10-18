@@ -1080,3 +1080,113 @@ func TestNewRefusesAMissingStore(t *testing.T) {
 	// Act.
 	New(deps)
 }
+
+// ---- teardown ---------------------------------------------------------------
+
+// blockingDigester holds every gather until its context ends, then answers the
+// context's error, so a test can hold a run in flight across Close.
+type blockingDigester struct {
+	started chan struct{}
+	ended   chan error
+}
+
+func (d *blockingDigester) GatherTitleDigest(ctx context.Context, _ ids.WorkspaceID) (*shimv1.GatherTitleDigestResponse, error) {
+	close(d.started)
+	<-ctx.Done()
+	d.ended <- ctx.Err()
+	return nil, ctx.Err()
+}
+
+func TestCloseCancelsTheRunInFlightAndJoinsIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+	digest := &blockingDigester{started: make(chan struct{}), ended: make(chan error, 1)}
+	h.synth.deps.Digester = digest
+	h.synth.OnTurnEnded(testWS)
+	<-digest.started
+
+	// Act.
+	h.synth.Close()
+
+	// Assert: the run saw its context cancelled, and had ended when Close returned.
+	select {
+	case err := <-digest.ended:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the run's context ended with %v, want context.Canceled", err)
+		}
+	default:
+		t.Fatal("Close returned while the run was still in flight")
+	}
+}
+
+func TestCloseRefusesEveryLaterTrigger(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger func(s *Synthesizer)
+	}{
+		{"a session start", func(s *Synthesizer) { s.OnSessionStarted(testWS) }},
+		{"a prompt", func(s *Synthesizer) { s.OnPrompt(testWS) }},
+		{"a turn end", func(s *Synthesizer) { s.OnTurnEnded(testWS) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
+			h.synth.Close()
+
+			// Act.
+			tc.trigger(h.synth)
+			h.synth.Wait()
+
+			// Assert.
+			if h.digest.calls != 0 || h.store.reads != 0 {
+				t.Fatalf("a closed synthesizer ran: digest calls = %d, store reads = %d, want 0 and 0", h.digest.calls, h.store.reads)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+				Level: "debug", Operation: opSynth, Message: "title synthesis is closed; the trigger starts no run",
+			}); !ok {
+				t.Fatalf("no record of the refused trigger: %+v", h.log.Records())
+			}
+		})
+	}
+}
+
+func TestAStoreFailureUnderAClosedRunIsTheShutdownNotAFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
+	h.store.readErr = errors.New("sql: database is closed")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.synth.synthesizeOnce(ctx, testWS)
+
+	// Assert.
+	if rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error"}); ok {
+		t.Fatalf("a cancelled run logged an error: %+v", rec)
+	}
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+		Level: "info", Operation: opSynth, Message: "the daemon's shutdown cut a title run short",
+	})
+	if !ok {
+		t.Fatalf("no shutdown record: %+v", h.log.Records())
+	}
+	if rec.Context["step"] != "the persisted workspace summary could not be read" || rec.Context["workspace"] != string(testWS) {
+		t.Fatalf("shutdown record context = %+v, want the failed step and the workspace", rec.Context)
+	}
+}
+
+func TestAStoreFailureUnderALiveRunIsStillAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "a prompt"))
+	h.store.readErr = errors.New("database is locked")
+
+	// Act.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	rec := h.errorRecord(t)
+	if rec.Message != "the persisted workspace summary could not be read" || rec.Context["cause"] != "database is locked" {
+		t.Fatalf("error record = %+v, want the failed read and its cause", rec)
+	}
+}
