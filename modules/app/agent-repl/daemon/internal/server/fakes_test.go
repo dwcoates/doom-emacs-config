@@ -1153,6 +1153,9 @@ func (f *fakeLogin) Close(context.Context, ids.WorkspaceID) error { return f.clo
 // fakeFeed answers the page and tail seams.
 type fakeFeed struct {
 	feed.Resolver
+	// sent are the sent rows SentPrompt drew, in order.
+	sentMu sync.Mutex
+	sent   []sentRow
 	// hostAsks is each workspace's standing ask HostAsk answers, and
 	// askMoves the stream WatchHostAsks hands the server.
 	hostAsksMu sync.Mutex
@@ -2242,4 +2245,25 @@ func (h *harness) reconnects() *restarttiming.Reconnects {
 		h.Reconnects = restarttiming.NewReconnects(h.ReconnectRecords, time.Now)
 	}
 	return h.Reconnects
+}
+
+// sentRow is one SentPrompt the server asked the feed for.
+type sentRow struct {
+	sender    ids.WorkspaceID
+	recipient string
+	key       string
+	fate      feed.SentFate
+}
+
+func (f *fakeFeed) SentPrompt(sender ids.WorkspaceID, recipient, key string, _ *conversationv1.UserSaid, fate feed.SentFate) {
+	f.sentMu.Lock()
+	defer f.sentMu.Unlock()
+	f.sent = append(f.sent, sentRow{sender: sender, recipient: recipient, key: key, fate: fate})
+}
+
+// sentRows answers the sent rows drawn so far.
+func (f *fakeFeed) sentRows() []sentRow {
+	f.sentMu.Lock()
+	defer f.sentMu.Unlock()
+	return append([]sentRow(nil), f.sent...)
 }

@@ -218,7 +218,13 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     cannot name a sender it recorded). The sender is a daemon fact, recorded
     on the hold and the turn (`wsm` layout 62), so a replay heads the prompt
     as the live draw did; the shim is untouched. A held prompt is never folded
-    by the classifier into one with another author.
+    by the classifier into one with another author. THE SENDER'S FEED draws
+    the send too, since the daemon takes it: a durable `FeedAgentPrompt`
+    headed by the recipient workspace's name then a right arrow
+    (`sent.peer_session.workspace`), with `queued_to_live` when the prompt was
+    held and `refused` (the daemon's sentence) when it was refused. It carries
+    no turn, so a restart never draws it working. The Bash call that ran the
+    command still draws as its tool card.
 
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules

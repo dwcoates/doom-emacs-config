@@ -75,12 +75,12 @@ func agentSlashCommand(origin conversationv1.PromptOrigin, said *conversationv1.
 	return parsed.Name, parsed.Slash
 }
 
-// refuseAgentSlashCommand answers SubmitPrompt's slash_command_from_agent
-// refusal for COMMAND.
-func (s *server) refuseAgentSlashCommand(log dlog.Logger, rpc string, resp *agentreplv1.SubmitPromptResponse, command string) *connect.Error {
-	return s.refuse(log, rpc, resp, submitRefusal(s.fill(refusal{
+// agentSlashRefusal is SubmitPrompt's slash_command_from_agent refusal for
+// COMMAND.
+func (s *server) agentSlashRefusal(command string) refusal {
+	return submitRefusal(s.fill(refusal{
 		Arm:    "slash_command_from_agent",
 		Reason: fmt.Sprintf("an agent-sent prompt began with the slash command %s; an agent compacts through CompactWorkspace and never clears", command),
 		Fields: map[string]any{"command": command},
-	})))
+	}))
 }

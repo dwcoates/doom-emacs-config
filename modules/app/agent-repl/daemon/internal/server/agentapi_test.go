@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -572,6 +576,69 @@ func TestSubmitPromptHandsTheSenderToTheHandler(t *testing.T) {
 	}
 	if got := h.Prompts.lastSentBy; got == nil || *got != senderWorkspaceID {
 		t.Fatalf("the handler was handed sender %v, want %s", got, senderWorkspaceID)
+	}
+}
+
+func TestSubmitPromptDrawsTheSendersRowWithHowTheSendFared(t *testing.T) {
+	refusedWhy := func(fate feed.SentFate) string {
+		if fate.Refused == nil {
+			return ""
+		}
+		return *fate.Refused
+	}
+	tests := []struct {
+		name        string
+		text        string
+		outcome     prompthandler.Outcome
+		err         error
+		wantQueued  bool
+		wantRefused string
+	}{
+		{name: "delivered at once", text: "hello", outcome: prompthandler.Outcome{Turn: "t1", Disposition: promptqueue.Disposition{Delivered: true}}},
+		{name: "held behind the recipient's work", text: "hello", outcome: prompthandler.Outcome{Turn: "t1", Disposition: promptqueue.Disposition{Held: func() *wsm.HoldKind { k := wsm.HoldMerge; return &k }()}}, wantQueued: true},
+		{name: "refused by the queue", text: "hello", err: &promptqueue.ColdGateRefusal{Detail: "the conversation is cold"}, wantRefused: "cold"},
+		{name: "refused as an agent's slash command", text: "/clear", wantRefused: "/clear"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			sentBy := registerSender(h)
+			h.Prompts.outcome, h.Prompts.err = tt.outcome, tt.err
+
+			// Act
+			_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+				Workspace: ref(), Said: workspace.SaidText(tt.text), IdempotencyKey: "k-1",
+				Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sentBy}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			rows := h.Feed.sentRows()
+			if len(rows) != 1 || rows[0].sender != senderWorkspaceID || rows[0].recipient != "test" || rows[0].key != "k-1" {
+				t.Fatalf("sent rows = %+v, want one in the sender's feed naming the recipient", rows)
+			}
+			if rows[0].fate.Queued != tt.wantQueued || !strings.Contains(refusedWhy(rows[0].fate), tt.wantRefused) || (tt.wantRefused == "") != (rows[0].fate.Refused == nil) {
+				t.Fatalf("fate = %+v, want queued %v and refused %q", rows[0].fate, tt.wantQueued, tt.wantRefused)
+			}
+		})
+	}
+}
+
+func TestSubmitPromptDrawsNoSentRowForAUsersPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Prompts.outcome = prompthandler.Outcome{Turn: "t1", Disposition: promptqueue.Disposition{Delivered: true}}
+
+	// Act
+	if _, err := submitAgentPrompt(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert
+	if rows := h.Feed.sentRows(); len(rows) != 0 {
+		t.Fatalf("sent rows = %+v, want none", rows)
 	}
 }
 

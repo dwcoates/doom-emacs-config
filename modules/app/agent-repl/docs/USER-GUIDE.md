@@ -159,6 +159,7 @@ Agents work with agent-repl through the `agent-repld` command line and four skil
 
 - `/agent-repl-workspaces` creates workspaces, prompts them, reads their status, closes and compacts them, and follows them.
   - A prompt one workspace's agent sends another is drawn in the receiving feed with a left arrow, then the sending workspace's name, as every agent-to-agent prompt is.
+  - The sending feed draws it too, with the receiving workspace's name, then a right arrow, and says when the prompt was held or refused.
   - Every create states where the new workspace is cut from and lands, and whether it starts fresh or forks a conversation.
   - A child that does not fork its parent's conversation is announced to the parent, and only the parent lands it.
   - An agent kills a workspace, or answers its cold gate, only when you asked for it or approved it.

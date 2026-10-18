@@ -179,6 +179,11 @@ type Resolver interface {
 	// The prompt queue's mirror of an accepted prompt draws PromptRow with it,
 	// as the resolver's own draw does (turnsender.go).
 	PromptHeader(ws ids.WorkspaceID, turn ids.TurnID, origin conversationv1.PromptOrigin) *frontendv1.FeedAgentPromptAddress
+	// SentPrompt draws, durably, the row a workspace's feed shows for a prompt
+	// its agent sent another workspace (the daemon takes the send itself):
+	// headed by the recipient's name then a right arrow, with how it fared
+	// (turnsender.go).
+	SentPrompt(sender ids.WorkspaceID, recipient, key string, said *conversationv1.UserSaid, fate SentFate)
 
 	// ResetWorkspace empties one workspace's feed whole: every row of every
 	// feed is retired on the wire and every accumulation is dropped, so the

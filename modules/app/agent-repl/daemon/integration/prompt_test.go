@@ -1932,3 +1932,36 @@ func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
 		t.Fatalf("SubmitPrompt = %v, want unknown_sender naming the workspace itself", resp)
 	}
 }
+
+func TestAnAgentSentPromptIsDrawnInTheSendersFeedUnderTheRecipient(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	sender := &fixture{d: f.d, repo: f.repo, ws: harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix")), t: t}
+	feed := sender.watchRootFeed()
+
+	// Act
+	f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-sent",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender.ws,
+	})
+
+	// Assert
+	row := awaitRow(t, sender, feed, "the sent row headed by the recipient", func(r *frontendv1.FeedRow) bool {
+		return r.GetAgentPrompt().GetAddress().GetSent().GetPeerSession().GetWorkspace() != nil
+	})
+	if got := promptBody(row); got != "please review the parser" {
+		t.Fatalf("sent row body = %q, want the prompt's text", got)
+	}
+}
+
+// promptBody joins an agent prompt row's text blocks.
+func promptBody(row *frontendv1.FeedRow) string {
+	var parts []string
+	for _, block := range row.GetAgentPrompt().GetBody().GetBlocks() {
+		if text := block.GetText(); text != nil {
+			parts = append(parts, text.GetText())
+		}
+	}
+	return strings.Join(parts, "\n")
+}

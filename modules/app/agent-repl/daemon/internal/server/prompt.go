@@ -15,7 +15,9 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/replyquote"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -39,15 +41,22 @@ func (s *server) SubmitPrompt(
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, submitRefusal(*r)))
 	}
-	if command, refused := agentSlashCommand(req.Msg.GetOrigin(), req.Msg.GetSaid()); refused {
-		return answer(resp, s.refuseAgentSlashCommand(subject.Log, rpc, resp, command))
-	}
 	sentBy, senderRefused, err := s.submitSender(ctx, subject, req.Msg.GetSentBy())
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
 	if senderRefused != nil {
 		return answer(resp, s.refuse(subject.Log, rpc, resp, *senderRefused))
+	}
+	// EVERY ANSWER FROM HERE ON IS ALSO THE SENDER'S ROW, for a prompt an agent
+	// sent: refuse and accept draw how the send fared in the sender's feed.
+	sent := sentPrompt{sentBy: sentBy, recipient: subject.Record.Name, key: req.Msg.GetIdempotencyKey(), said: req.Msg.GetSaid()}
+	refuse := func(r refusal) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
+		s.drawSent(sent, feed.SentFate{Refused: &r.Reason})
+		return answer(resp, s.refuse(subject.Log, rpc, resp, r))
+	}
+	if command, refused := agentSlashCommand(req.Msg.GetOrigin(), req.Msg.GetSaid()); refused {
+		return refuse(s.agentSlashRefusal(command))
 	}
 
 	// The FeedId is decoded HERE, before the handler is called: a value that
@@ -57,18 +66,18 @@ func (s *server) SubmitPrompt(
 	if req.Msg.Feed != nil {
 		ref, decodeErr := feedid.Decode(req.Msg.GetFeed())
 		if decodeErr != nil {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
+			return refuse(submitRefusal(s.fill(refusal{
 				Arm: "feed_undecodable",
 				Reason: fmt.Sprintf("the feed id %q does not decode: %v",
 					req.Msg.GetFeed().GetValue(), decodeErr),
-			}))))
+			})))
 		}
 		if ref.WS != subject.Record.ID {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
+			return refuse(submitRefusal(s.fill(refusal{
 				Arm: "feed_not_in_workspace",
 				Reason: fmt.Sprintf("the feed id %q belongs to workspace %q",
 					req.Msg.GetFeed().GetValue(), ref.WS),
-			}))))
+			})))
 		}
 		target = &ref
 	}
@@ -93,12 +102,12 @@ func (s *server) SubmitPrompt(
 	if ref := sentWith; sentWithSelection {
 		quoted, ok := s.deps.Feed.BubbleText(subject.Record.ID, ref)
 		if !ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
+			return refuse(submitRefusal(s.fill(refusal{
 				Arm: "reference_response_unresolvable",
 				Reason: fmt.Sprintf("the referenced row %q is not a landed bubble of this workspace's root feed",
 					ref.GetValue()),
 				NotFound: true,
-			}))))
+			})))
 		}
 		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt)
 	}
@@ -113,7 +122,7 @@ func (s *server) SubmitPrompt(
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), sentBy, delivery, target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(askRefused(refused))))))
+			return refuse(submitRefusal(modelActRefused(err, bubbleRefused(askRefused(refused)))))
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -122,6 +131,9 @@ func (s *server) SubmitPrompt(
 	// once its row is drawn.
 	if echo, ok := promptEchoOf(req.Msg, outcome); ok && cerr == nil && resp.GetError() == nil {
 		s.pushPromptEcho(subject.Log, subject.Record.ID, echo)
+	}
+	if cerr == nil {
+		s.drawSent(sent, sentFateOf(outcome.Disposition))
 	}
 	// AN ACCEPTED PROMPT ENDS THE SELECTION it was sent with, a reply target
 	// or a prompt alike (a genuine success — a minted turn, a hold, a command
@@ -133,6 +145,34 @@ func (s *server) SubmitPrompt(
 		s.endSelection(subject.Log, subject.Record.ID, sentWith, returnToTail(), "prompt_sent")
 	}
 	return answer(resp, cerr)
+}
+
+// sentPrompt is an agent-sent prompt as its sender's row draws it: no sender
+// for a prompt no agent sent.
+type sentPrompt struct {
+	sentBy    *ids.WorkspaceID
+	recipient string
+	key       string
+	said      *conversationv1.UserSaid
+}
+
+// drawSent draws SENT's row in its sender's feed with FATE, and nothing for a
+// prompt no agent sent.
+func (s *server) drawSent(sent sentPrompt, fate feed.SentFate) {
+	if sent.sentBy == nil {
+		return
+	}
+	s.deps.Feed.SentPrompt(*sent.sentBy, sent.recipient, sent.key, sent.said, fate)
+}
+
+// sentFateOf is how an accepted send fared: held behind the recipient's work,
+// or refused outright by a merge's refusing lease (RefusedArm), or delivered.
+func sentFateOf(d promptqueue.Disposition) feed.SentFate {
+	if d.RefusedArm != "" {
+		why := fmt.Sprintf("the workspace refused the prompt (%s)", d.RefusedArm)
+		return feed.SentFate{Refused: &why}
+	}
+	return feed.SentFate{Queued: d.Parked()}
 }
 
 // submitSender resolves the workspace an agent-sent prompt names as its

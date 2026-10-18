@@ -5,6 +5,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
@@ -85,4 +86,53 @@ func (r *resolver) promptHeader(s *wsState, turn ids.TurnID, origin conversation
 func (r *resolver) recordedSenders(ws ids.WorkspaceID, turns []ids.TurnID) map[ids.TurnID]ids.WorkspaceID {
 	return readRecorded(r, ws, turns, r.deps.TurnSenders, "daemon.feed.turn_senders_unreadable",
 		"the replayed turns' recorded senders could not be read; their agent-sent prompts are headed by a workspace the daemon cannot name")
+}
+
+// THE SENDER'S END OF A PROMPT ITS AGENT SENT ANOTHER WORKSPACE. The daemon
+// takes the send itself (agentrepl.v1.SubmitPrompt naming `sent_by`), so it
+// draws the sent row in the sender's root feed at that moment, headed by the
+// recipient workspace's name then a right arrow, as a send reaching another
+// workspace is (sentToPeerSession). The row is DURABLE, so a restart draws it
+// where it stood, and it carries NO turn: it is the daemon's record of the
+// send, and a durable row stamped with a turn would keep that turn's working
+// wave after the turn ended.
+
+// SentFate is how an agent-sent prompt fared, as the sender's row states it.
+type SentFate struct {
+	// Queued reports the prompt was held behind the recipient's running work.
+	Queued bool
+	// Refused, when set, is the daemon's sentence for why the send was
+	// refused; nothing reached the recipient.
+	Refused *string
+}
+
+// SentPrompt draws the row SENDER's feed shows for a prompt its agent sent
+// to the workspace named RECIPIENT, under the send's idempotency KEY.
+func (r *resolver) SentPrompt(sender ids.WorkspaceID, recipient, key string, said *conversationv1.UserSaid, fate SentFate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(sender)
+	root := feedid.Feed{Root: true}
+	prompt := &frontendv1.FeedAgentPrompt{
+		Address: sentToPeerSession(recipient, &frontendv1.FeedAgentPromptAddressPeerSession{
+			Recipient: &frontendv1.FeedAgentPromptAddressPeerSession_Workspace{Workspace: &frontendv1.FeedAgentPromptAddressPeerSessionWorkspace{}},
+		}),
+		Body: &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(r.drawUserBlocks(s, said.GetContent()))},
+	}
+	switch {
+	case fate.Refused != nil:
+		prompt.Delivery = &frontendv1.FeedAgentPrompt_Refused{Refused: &frontendv1.FeedAgentPromptRefused{
+			Reason: &frontendv1.FeedAgentPromptRefusalReason{Text: *fate.Refused},
+		}}
+	case fate.Queued:
+		prompt.Delivery = &frontendv1.FeedAgentPrompt_QueuedToLive{QueuedToLive: &frontendv1.FeedAgentPromptQueuedToLive{}}
+	}
+	row := &frontendv1.FeedRow{
+		Id:  r.rowID(sender, root, feedid.RowKey{Kind: feedid.KindPrompt, ID: key, Sub: "sent"}),
+		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: prompt},
+	}
+	r.logger(sender).Debug("daemon.feed.sent_prompt",
+		"a prompt this workspace's agent sent another workspace was drawn as its sent row",
+		dlog.Context{"recipient": recipient, "idempotency_key": key, "queued": fate.Queued, "refused": fate.Refused != nil})
+	r.upsertDurable(s, placement{feed: root, pin: pinSettle}, row)
 }

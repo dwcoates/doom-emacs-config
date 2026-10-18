@@ -85,7 +85,8 @@ Choose the combination from what the work needs:
 
 - `workspace prompt WS TEXT` submits TEXT to WS as this agent's prompt, from
   this workspace: WS's feed heads it with a left arrow, then this workspace's
-  name. A prompt that begins with a slash command is refused: an agent never
+  name, and this workspace's feed shows it sent, with WS's name then a right
+  arrow, and whether it was held or refused. A prompt that begins with a slash command is refused: an agent never
   clears another workspace's conversation.
 - **A REQUESTED UPDATE IS SENT WHEN ITS CONDITION IS MET, unasked.** When
   another workspace asks to be told once something happens ("tell me when
