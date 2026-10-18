@@ -480,20 +480,20 @@ func branchLabel(source, target string) string {
 // queued. The front workspace itself is shown nothing about the queue: its
 // bubble is busy merging.
 //
-// shown, names and dirs are keyed by each entry's own workspace and answer
-// the workspace it is drawn as (queueView: an async merge is drawn as its
-// requester). "You are here" still compares the entry's own workspace.
-func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, shown map[ids.WorkspaceID]ids.WorkspaceID, names map[ids.WorkspaceID]string, dirs map[ids.WorkspaceID]string, standings []*frontendv1.FeedMergeQueueEntry) *frontendv1.FeedMergeQueue {
+// bubbles carries an async merge's bubble (queueView), keyed by the entry's
+// own workspace; a sync merge has none.
+func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, names map[ids.WorkspaceID]string, dirs map[ids.WorkspaceID]string, bubbles map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble, standings []*frontendv1.FeedMergeQueueEntry) *frontendv1.FeedMergeQueue {
 	snap := &frontendv1.FeedMergeQueue{}
 	seenSelf := false
 	for i, entry := range entries {
 		row := &frontendv1.FeedMergeQueueEntry{
 			Workspace: &frontendv1.FeedMergeQueueWorkspace{Ref: &workspacev1.WorkspaceRef{
-				Id:  string(shown[entry.Workspace]),
+				Id:  string(entry.Workspace),
 				Dir: dirs[entry.Workspace],
 			}},
 			Label:  &frontendv1.FeedMergeQueueLabel{Text: names[entry.Workspace]},
 			Status: standings[i].Status,
+			Bubble: bubbles[entry.Workspace],
 		}
 		switch {
 		case entry.Workspace == self:

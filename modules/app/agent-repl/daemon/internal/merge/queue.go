@@ -11,8 +11,10 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
@@ -586,45 +588,46 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	return nil
 }
 
-// queueView is what every drawing of one repository's queue reads: the
-// workspace each in-line entry is drawn as, its name and directory, and each
+// queueView is what every drawing of one repository's queue reads: each
+// in-line workspace's name and directory, an async merge's bubble, and each
 // entry's standing, all keyed by the entry's own workspace.
 //
-// AN ASYNC MERGE IS DRAWN AS ITS REQUESTER (owner ruling, 2026-10-17). Its
-// entry's workspace is the hidden merge workspace the daemon forked to carry
-// it, which the user never asked for and the roster shows nowhere; the
-// workspace the user knows as merging -- the one the sidebar marks -- is the
-// requester. So an entry whose workspace is a merge workspace names, and jumps
-// to, its requester: a workspace marked merging in the sidebar is the one every
-// queue tab lists, and clicking the entry never reveals the merge workspace.
+// AN ASYNC MERGE IS NAMED FOR ITSELF AND OPENS ITS BUBBLE (owner ruling,
+// 2026-10-17). Its entry's workspace is the hidden merge workspace the daemon
+// forked to carry it: the entry carries that workspace's own name (the merge's
+// name, `land-...`), and its BUBBLE -- the requester and the merge's head row
+// on the requester's feed -- which is what a click selects and opens, so the
+// hidden merge workspace is never selected or revealed from the queue. A sync
+// merge's entry is the requesting workspace itself and carries no bubble.
 type queueView struct {
-	shown     map[ids.WorkspaceID]ids.WorkspaceID
 	names     map[ids.WorkspaceID]string
 	dirs      map[ids.WorkspaceID]string
+	bubbles   map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble
 	standings []*frontendv1.FeedMergeQueueEntry
 }
 
 // viewQueue resolves the queue view of one repository's in-line entries.
 func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) (queueView, error) {
 	view := queueView{
-		shown: map[ids.WorkspaceID]ids.WorkspaceID{},
-		names: map[ids.WorkspaceID]string{},
-		dirs:  map[ids.WorkspaceID]string{},
+		names:   map[ids.WorkspaceID]string{},
+		dirs:    map[ids.WorkspaceID]string{},
+		bubbles: map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble{},
 	}
 	for _, entry := range entries {
 		record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
 		if err != nil {
 			return queueView{}, err
 		}
-		if record.MergeOf != nil {
-			record, err = o.deps.DB.Workspace(ctx, record.MergeOf.Requester)
-			if err != nil {
-				return queueView{}, fmt.Errorf("read the requester of merge workspace %s: %w", entry.Workspace, err)
-			}
-		}
-		view.shown[entry.Workspace] = record.ID
 		view.names[entry.Workspace] = record.Name
 		view.dirs[entry.Workspace] = record.Dir
+		if record.MergeOf == nil {
+			continue
+		}
+		bubble, err := o.asyncMergeBubble(ctx, entry.Workspace, record.MergeOf.Requester)
+		if err != nil {
+			return queueView{}, err
+		}
+		view.bubbles[entry.Workspace] = bubble
 	}
 	standings, err := o.queueStandings(entries)
 	if err != nil {
@@ -636,9 +639,32 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 	return view, nil
 }
 
+// asyncMergeBubble answers where merge workspace WS's bubble stands: its
+// requester, and the bubble's head row on the requester's root feed. A merge
+// with no bubble identity in this daemon (no ledger entry) answers the
+// requester alone, so its click still selects the requester and never the
+// hidden merge workspace; it is recorded, since there is no bubble to open.
+func (o *orchestrator) asyncMergeBubble(ctx context.Context, ws, requester ids.WorkspaceID) (*frontendv1.FeedMergeQueueBubble, error) {
+	record, err := o.deps.DB.Workspace(ctx, requester)
+	if err != nil {
+		return nil, fmt.Errorf("read the requester of merge workspace %s: %w", ws, err)
+	}
+	bubble := &frontendv1.FeedMergeQueueBubble{
+		Requester: &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir},
+	}
+	lease, ok := o.leaseOf(ws)
+	if !ok {
+		o.log(ctx, ws).Info("daemon.merge.queue", "an async merge in line has no bubble identity in this daemon; its queue entry selects the requester and opens no bubble",
+			dlog.Context{"workspace": string(ws), "requester": string(requester)})
+		return bubble, nil
+	}
+	bubble.Row = feedid.Encode(headRef(requester, lease))
+	return bubble, nil
+}
+
 // snapshot is the queue as self sees it.
 func (v queueView) snapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID) *frontendv1.FeedMergeQueue {
-	return queueSnapshot(entries, self, v.shown, v.names, v.dirs, v.standings)
+	return queueSnapshot(entries, self, v.names, v.dirs, v.bubbles, v.standings)
 }
 
 // settleLeavingQueueTab draws a merge's own queue tab ONE LAST TIME as it
