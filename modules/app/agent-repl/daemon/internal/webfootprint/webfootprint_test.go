@@ -3,115 +3,80 @@ package webfootprint
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/procmetrics"
 )
 
-const webContent = "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent"
+// now is the sampler's clock; every fixture process started relative to it.
+var now = time.Unix(1_000_000, 0)
 
-// fakeRunner answers each tool by its name.
-type fakeRunner struct {
-	answers map[string]answer
+// fakeReader is a scripted kernel.
+type fakeReader struct {
+	ids      map[int]procmetrics.Identity
+	usage    map[int]procmetrics.Usage
+	pidsErr  error
+	idErr    map[int]error
+	usageErr map[int]error
 }
 
-type answer struct {
-	out  string
-	code int
-	err  error
-}
-
-func (f *fakeRunner) Run(_ context.Context, _ string, argv []string) (string, int, error) {
-	key := argv[0]
-	if argv[0] == "footprint" {
-		key = "footprint " + argv[len(argv)-1]
+func (f *fakeReader) PIDs() ([]int, error) {
+	if f.pidsErr != nil {
+		return nil, f.pidsErr
 	}
-	a, ok := f.answers[key]
-	if !ok {
-		return "", 0, errors.New("unexpected tool " + strings.Join(argv, " "))
+	var out []int
+	for pid := range f.ids {
+		out = append(out, pid)
 	}
-	return a.out, a.code, a.err
+	return out, nil
 }
 
-func newSampler(t *testing.T, answers map[string]answer) (*Sampler, *dlog.TestLogger) {
+func (f *fakeReader) Identity(pid int) (procmetrics.Identity, error) {
+	if err := f.idErr[pid]; err != nil {
+		return procmetrics.Identity{}, err
+	}
+	return f.ids[pid], nil
+}
+
+func (f *fakeReader) Usage(pid int) (procmetrics.Usage, error) {
+	if err := f.usageErr[pid]; err != nil {
+		return procmetrics.Usage{}, err
+	}
+	return f.usage[pid], nil
+}
+
+func (f *fakeReader) Args(int) ([]string, error)            { return nil, procmetrics.ErrGone }
+func (f *fakeReader) Host(string) (procmetrics.Host, error) { return procmetrics.Host{}, nil }
+
+func webContent(pid int, age time.Duration) procmetrics.Identity {
+	return procmetrics.Identity{PID: pid, Name: processName, StartUnixMicros: now.Add(-age).UnixMicro()}
+}
+
+func newSampler(t *testing.T, r *fakeReader) (*Sampler, *dlog.TestLogger) {
 	t.Helper()
 	log := dlog.NewTestLogger()
-	s, err := New(Deps{Runner: &fakeRunner{answers: answers}, Clock: clocktest.New(time.Unix(0, 0)), Log: log})
+	s, err := New(Deps{Reader: r, Clock: clocktest.New(now), Log: log})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return s, log
 }
 
-func footprintOut(bytes string) string {
-	return "    49152 B   0 B   0 B   1   Owned physical footprint (unmapped)\n    phys_footprint: " + bytes + " B\n    phys_footprint_peak: 99 B\n"
-}
-
-func TestParsePS(t *testing.T) {
-	tests := []struct {
-		name    string
-		out     string
-		want    []Process
-		wantErr bool
-	}{
-		{
-			name: "keeps only web content processes",
-			out:  "83365 5496384 01-01:01:56 " + webContent + "\n  412 1024 10:00 /usr/sbin/cfprefsd\n",
-			want: []Process{{PID: 83365, ResidentBytes: 5496384 << 10, Elapsed: "01-01:01:56"}},
-		},
-		{name: "answers none for no web content process", out: "  412 1024 10:00 /usr/sbin/cfprefsd\n"},
-		{name: "refuses a web content line whose pid does not parse", out: "x 1 1:00 " + webContent, wantErr: true},
-		{name: "refuses a web content line whose rss does not parse", out: "1 x 1:00 " + webContent, wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got, err := ParsePS(tt.out)
-
-			// Assert
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("err = %v, want error %v", err, tt.wantErr)
-			}
-			if len(got) != len(tt.want) || (len(got) == 1 && got[0] != tt.want[0]) {
-				t.Fatalf("got %+v, want %+v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseFootprint(t *testing.T) {
-	tests := []struct {
-		name    string
-		out     string
-		want    int64
-		wantErr bool
-	}{
-		{name: "reads phys_footprint, never its peak", out: footprintOut("10869950440"), want: 10869950440},
-		{name: "refuses output with no phys_footprint", out: "nothing here\n", wantErr: true},
-		{name: "refuses a phys_footprint not in bytes", out: "phys_footprint: 10 GB\n", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got, err := ParseFootprint(tt.out)
-
-			// Assert
-			if (err != nil) != tt.wantErr || got != tt.want {
-				t.Fatalf("ParseFootprint = (%d, %v), want (%d, error %v)", got, err, tt.want, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestSampleRecordsEveryProcessLargestFirst(t *testing.T) {
 	// Arrange
-	s, log := newSampler(t, map[string]answer{
-		"ps":          {out: "1 1024 1:00 " + webContent + "\n2 2048 2:00 " + webContent + "\n"},
-		"footprint 1": {out: footprintOut("1048576")},
-		"footprint 2": {out: footprintOut("10737418240")},
+	s, log := newSampler(t, &fakeReader{
+		ids: map[int]procmetrics.Identity{
+			1: webContent(1, time.Minute),
+			2: webContent(2, 2*time.Minute),
+			3: {PID: 3, Name: "cfprefsd"},
+		},
+		usage: map[int]procmetrics.Usage{
+			1: {FootprintBytes: 1 << 20, ResidentBytes: 1 << 20},
+			2: {FootprintBytes: 10 << 30, ResidentBytes: 2 << 20},
+		},
 	})
 
 	// Act
@@ -126,11 +91,14 @@ func TestSampleRecordsEveryProcessLargestFirst(t *testing.T) {
 	if r.Context["largest_footprint_mb"] != int64(10240) || len(procs) != 2 || procs[0]["pid"] != 2 {
 		t.Fatalf("context = %+v, want pid 2 first at 10240 MB", r.Context)
 	}
+	if procs[0]["resident_mb"] != int64(2) || procs[0]["elapsed"] != "02:00" {
+		t.Fatalf("pid 2 = %+v, want 2 MB resident and 02:00 elapsed", procs[0])
+	}
 }
 
 func TestSampleWithNoWebContentProcessRecordsAnEmptySample(t *testing.T) {
 	// Arrange
-	s, log := newSampler(t, map[string]answer{"ps": {out: "  412 1024 10:00 /usr/sbin/cfprefsd\n"}})
+	s, log := newSampler(t, &fakeReader{ids: map[int]procmetrics.Identity{412: {PID: 412, Name: "cfprefsd"}}})
 
 	// Act
 	s.Sample(context.Background())
@@ -142,29 +110,53 @@ func TestSampleWithNoWebContentProcessRecordsAnEmptySample(t *testing.T) {
 	}
 }
 
-func TestSampleRecordsAToolFailureAtErrorAndSkipsTheSample(t *testing.T) {
+func TestSampleLeavesOutAProcessThatExitedWhileRead(t *testing.T) {
+	// Arrange
+	s, log := newSampler(t, &fakeReader{
+		ids:      map[int]procmetrics.Identity{1: webContent(1, time.Minute), 2: webContent(2, time.Minute)},
+		usage:    map[int]procmetrics.Usage{1: {FootprintBytes: 1 << 20}},
+		usageErr: map[int]error{2: procmetrics.ErrGone},
+	})
+
+	// Act
+	s.Sample(context.Background())
+
+	// Assert
+	r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: op})
+	if !ok {
+		t.Fatalf("records = %+v, want the sample at INFO", log.Records())
+	}
+	if _, failed := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: op}); failed {
+		t.Fatalf("an exited process was recorded as a failure")
+	}
+	if procs := r.Context["processes"].([]map[string]any); len(procs) != 1 || procs[0]["pid"] != 1 {
+		t.Fatalf("processes = %+v, want only the live one", procs)
+	}
+}
+
+func TestSampleRecordsAReadFailureAtErrorAndSkipsTheSample(t *testing.T) {
+	denied := errors.New("operation not permitted")
 	tests := []struct {
 		name    string
-		answers map[string]answer
+		reader  *fakeReader
 		message string
 	}{
-		{name: "ps cannot run", answers: map[string]answer{"ps": {err: errors.New("spawn failed")}}, message: "could not list the web content processes"},
-		{name: "ps exits non-zero", answers: map[string]answer{"ps": {out: "denied", code: 1}}, message: "could not list the web content processes"},
+		{name: "the listing fails", reader: &fakeReader{pidsErr: denied}, message: "could not list the web content processes"},
 		{
-			name:    "footprint cannot run",
-			answers: map[string]answer{"ps": {out: "1 1 1:00 " + webContent}, "footprint 1": {err: errors.New("spawn failed")}},
-			message: "could not read a web content process's footprint",
+			name:    "an identity read fails",
+			reader:  &fakeReader{ids: map[int]procmetrics.Identity{1: webContent(1, time.Minute)}, idErr: map[int]error{1: denied}},
+			message: "could not list the web content processes",
 		},
 		{
-			name:    "footprint exits non-zero",
-			answers: map[string]answer{"ps": {out: "1 1 1:00 " + webContent}, "footprint 1": {out: "no such process", code: 1}},
+			name:    "a footprint read fails",
+			reader:  &fakeReader{ids: map[int]procmetrics.Identity{1: webContent(1, time.Minute)}, usageErr: map[int]error{1: denied}},
 			message: "could not read a web content process's footprint",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			s, log := newSampler(t, tt.answers)
+			s, log := newSampler(t, tt.reader)
 
 			// Act
 			s.Sample(context.Background())
@@ -181,12 +173,32 @@ func TestSampleRecordsAToolFailureAtErrorAndSkipsTheSample(t *testing.T) {
 	}
 }
 
+func TestFormatElapsed(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{d: 59 * time.Second, want: "00:59"},
+		{d: time.Hour + 2*time.Minute + 3*time.Second, want: "01:02:03"},
+		{d: 25*time.Hour + 30*time.Second, want: "1-01:00:30"},
+		{d: -time.Second, want: "00:00"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act / Assert
+			if got := FormatElapsed(tt.d); got != tt.want {
+				t.Fatalf("FormatElapsed(%v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	// Act
-	_, err := New(Deps{Clock: clocktest.New(time.Unix(0, 0)), Log: dlog.NewTestLogger()})
+	_, err := New(Deps{Clock: clocktest.New(now), Log: dlog.NewTestLogger()})
 
 	// Assert
 	if err == nil {
-		t.Fatalf("New accepted a sampler with no runner")
+		t.Fatalf("New accepted a sampler with no reader")
 	}
 }

@@ -1,0 +1,37 @@
+{
+  "system": "metrics",
+  "about": "The always-on metrics store: VictoriaMetrics scraping the daemon, the store and the sidecar (docs/PLAN-runtime-metrics.md).",
+  "requirements": [
+    {
+      "id": "victoria-metrics",
+      "kind": "program",
+      "why": "stores 30 days of agent-repl's runtime metrics for agents to query (the metrics-agent-repl skill)",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "victoria-metrics",
+      "install": {
+        "brew": "victoriametrics"
+      }
+    },
+    {
+      "id": "service-victoriametrics",
+      "kind": "launchd_service",
+      "why": "keeps VictoriaMetrics scraping every 15 seconds, kept running by launchd",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "label": "com.agentrepl.victoriametrics",
+      "plist": "launchd/com.agentrepl.victoriametrics.plist",
+      "command": "victoria-metrics",
+      "files": [
+        {
+          "from": "metrics/scrape.yml",
+          "to": "metrics/scrape.yml"
+        }
+      ]
+    }
+  ]
+}

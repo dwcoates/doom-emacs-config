@@ -16,6 +16,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -552,10 +553,21 @@ type Sinks struct {
 	// flight under, and it is the lock that held a workspace for eighteen
 	// minutes on 2026-09-27 without a record.
 	Stalls lockwatch.Registry
+	// Measurements takes the shim's performance counters (the session
+	// stream's measurements arm) into the daemon's metrics
+	// (runtimemetrics.Surface). OPTIONAL: nil drops them, which is what every
+	// test that does not exercise them leaves it. Production always wires it.
+	// Its call takes only its own lock, never the watcher's.
+	Measurements MeasurementsSink
 	// Clock is NOT A SINK but rides the same wiring: the one view of time the
 	// watcher waits on, for a refused watch's re-open (reopen.go). REQUIRED:
 	// production wires clock.System, and a test a clock it fires by hand.
 	Clock clock.Clock
+}
+
+// MeasurementsSink folds one shim measurements frame for a workspace.
+type MeasurementsSink interface {
+	FoldShimMeasurements(ws ids.WorkspaceID, m *shimv1.ShimMeasurements)
 }
 
 // CommandCatalogSink is the slash-command catalog table, seen from the

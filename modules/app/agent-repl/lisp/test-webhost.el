@@ -255,6 +255,59 @@ so stubbing the accessor would not reach the code under test."
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
+;;;; ---- A switch's instant rides its show ----
+
+(ert-deftest agent-repl-test-wh-a-noted-switch-rides-its-show ()
+  "The switch's wall-clock instant, in Unix ms, is the show's second argument."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-switch-started nil))
+      (cl-letf (((symbol-function 'float-time) (lambda (&rest _) 1700000000.123)))
+        (agent-repl-webhost-note-switch "alpha"))
+      ;; Act
+      (agent-repl-webhost-show "alpha")
+      ;; Assert
+      (should (string-search "h.show(\"id-alpha\",1700000000123)"
+                             (car (agent-repl-test-wh--sent "show")))))))
+
+(ert-deftest agent-repl-test-wh-a-show-no-switch-made-carries-no-instant ()
+  "A show nothing noted (a follow, a startup landing) sends null."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-switch-started nil))
+      ;; Act
+      (agent-repl-webhost-show "alpha")
+      ;; Assert
+      (should (string-search "h.show(\"id-alpha\",null)"
+                             (car (agent-repl-test-wh--sent "show")))))))
+
+(ert-deftest agent-repl-test-wh-a-switch-is-never-charged-to-another-workspace-s-show ()
+  "A show of another workspace takes the noted switch and drops it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-switch-started nil))
+      (agent-repl-webhost-note-switch "beta")
+      ;; Act
+      (agent-repl-webhost-show "alpha")
+      (agent-repl-webhost-show "beta")
+      ;; Assert
+      (should (equal (mapcar (lambda (script) (and (string-search ",null)" script) t))
+                             (agent-repl-test-wh--sent "show"))
+                     '(t t))))))
+
+(ert-deftest agent-repl-test-wh-a-switch-to-the-shown-page-is-forgotten ()
+  "A switch to the page already shown sends nothing and leaves nothing noted."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-switch-started nil))
+      (agent-repl-webhost-show "alpha")
+      (agent-repl-webhost-note-switch "alpha")
+      ;; Act
+      (agent-repl-webhost-show "alpha")
+      ;; Assert
+      (should-not agent-repl--webhost-switch-started)
+      (should (= 1 (length (agent-repl-test-wh--sent "show")))))))
+
 (ert-deftest agent-repl-test-wh-removing-a-page-forgets-it ()
   "A removed page is no longer held, nor its state kept."
   ;; Arrange

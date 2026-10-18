@@ -1,0 +1,131 @@
+// endpoint_report_latencies.proto — ReportLatencies. DIAGNOSTICS section.
+//
+// A CLIENT REPORTS HOW LONG ITS INTERACTIONS TOOK. Emacs and the webapp each
+// see the end of some user-facing interaction (a workspace switch shown, a
+// page booted) and measure its duration themselves, from a start instant
+// handed to them through the channel that already carried the interaction.
+// They send finished durations here in batches; the daemon records them in
+// the always-on metrics it exposes for VictoriaMetrics to scrape.
+//
+// A REPORT CARRIES FINISHED DURATIONS, NEVER EDGES. The daemon pairs nothing:
+// the runtime that saw the interaction end is the one that measured it, so a
+// start can never be paired with the wrong end.
+//
+// A CLIENT KEEPS A BATCH UNTIL IT IS ACKNOWLEDGED. The success arm is the
+// acknowledgment; a client whose call failed (transport error, daemon
+// restarting) sends the same latencies again with its next batch, so a
+// measurement survives a daemon handover.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Which interaction a reported latency measured. Each value names one entry
+// of proto/vocab/latencies.json, which states where the interaction starts
+// and ends, which runtime measures it, its perceptibility threshold and its
+// histogram buckets; the daemon refuses to start if the two disagree.
+enum ReportedLatencyKind {
+  // Never sent: a request carrying it is refused as InvalidArgument.
+  REPORTED_LATENCY_KIND_UNSPECIFIED = 0;
+  // A switch to a workspace already shown in this Emacs, from the keystroke
+  // to the page's first frame shown. Measured by the webapp from the
+  // keystroke instant Emacs hands the page when it shows it.
+  REPORTED_LATENCY_KIND_SWITCH_REPEAT = 1;
+  // The first switch to a workspace never shown in this Emacs, from the
+  // keystroke to the page painted. Measured like SWITCH_REPEAT.
+  REPORTED_LATENCY_KIND_SWITCH_FIRST = 2;
+  // A page's boot, from the page starting to its feed first painted.
+  // Measured by the webapp alone.
+  REPORTED_LATENCY_KIND_PAGE_BOOT = 3;
+}
+
+// One finished interaction.
+message ReportedLatency {
+  // Which interaction this measured. Required; UNSPECIFIED is
+  // InvalidArgument.
+  ReportedLatencyKind kind = 1;
+  // The workspace the interaction happened in. Required; an unset ref is
+  // InvalidArgument.
+  workspace.v1.WorkspaceRef workspace = 2;
+  // How long it took, in seconds. Finite and not negative; anything else is
+  // InvalidArgument.
+  double seconds = 3;
+}
+
+message ReportLatenciesRequest {
+  // The finished interactions since the client's last acknowledged report,
+  // oldest first. An empty batch is valid and records nothing.
+  repeated ReportedLatency latencies = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportLatenciesResponse {
+  oneof result {
+    ReportLatenciesSuccess success = 1;
+    ReportLatenciesError error = 2;
+  }
+}
+
+// The report was received: the client drops the batch. Which of the arms is
+// set says what the daemon did with it; every one is an answer to a valid
+// report, so none is an error.
+message ReportLatenciesSuccess {
+  // What the daemon did with the batch.
+  oneof outcome {
+    // Every latency was recorded.
+    ReportLatenciesRecorded recorded = 1;
+    // Some latencies named a workspace the daemon no longer knows and were
+    // dropped; the rest were recorded.
+    ReportLatenciesPartlyRecorded partly_recorded = 2;
+    // The daemon runs without a metrics surface, so nothing was recorded.
+    ReportLatenciesMetricsOff metrics_off = 3;
+  }
+}
+
+// Every latency in the batch was recorded.
+message ReportLatenciesRecorded {
+  // How many were recorded: the batch's length.
+  uint32 recorded = 1;
+}
+
+// Part of the batch named workspaces the daemon's registry no longer holds:
+// a workspace closed between the interaction and its report, which is an
+// ordinary schedule. Those latencies are dropped rather than recreating the
+// series the daemon deleted when the workspace closed.
+message ReportLatenciesPartlyRecorded {
+  // How many were recorded.
+  uint32 recorded = 1;
+  // How many were dropped because their workspace is unknown.
+  uint32 dropped_unknown_workspace = 2;
+}
+
+// The daemon was started without a metrics root, so it records no metrics.
+// The client keeps reporting as usual: a later daemon may record them.
+// DELIBERATELY EMPTY.
+message ReportLatenciesMetricsOff {}
+
+// The daemon's refusals. Validation failures (an unspecified kind, an unset
+// ref, a negative or non-finite duration) are Connect InvalidArgument, never
+// an arm. A refused batch is not recorded at all, and the client drops it:
+// sending it again would be refused again.
+message ReportLatenciesError {
+  // Why the batch was refused.
+  oneof cause {
+    // A ref's dir disagrees with the registry's dir for its id: the client
+    // holds a stale or wrong address for a workspace.
+    ReportLatenciesWorkspaceRefMismatch workspace_ref_mismatch = 1;
+  }
+}
+
+// A ref in the batch named a known workspace id with the wrong dir.
+message ReportLatenciesWorkspaceRefMismatch {
+  // The id the client sent.
+  string workspace_id = 1;
+  // The dir the client sent for it.
+  string reported_dir = 2;
+  // The dir the registry holds for that id.
+  string registry_dir = 3;
+}

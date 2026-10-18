@@ -165,6 +165,9 @@ type Deps struct {
 	// load without a second host. It is REQUIRED like every other dependency:
 	// a daemon that cannot draw an attached image is not one to start.
 	ImageOrigin http.Handler
+	// Latencies records what ReportLatencies accepts: the daemon's metrics
+	// surface, whose off value records nothing.
+	Latencies LatencyRecorder
 	// ChessBoards answers a feed chess board's square clicks
 	// (chessboard.Boards). REQUIRED, like every dependency.
 	ChessBoards ChessSquares
@@ -430,6 +433,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:
 		return nil, missing("Emacs's focus")
+	case deps.Latencies == nil:
+		return nil, missing("a latency recorder")
 	case deps.Banners == nil:
 		return nil, missing("the desktop banners")
 	case deps.PersistentWifi == nil:

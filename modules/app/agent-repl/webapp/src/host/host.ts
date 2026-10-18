@@ -82,6 +82,17 @@ interface Frame {
   editing: boolean;
   /** How tall the page's docked gate band is, as it last reported. */
   gateBand: number;
+  /**
+   * Whether the page now in the frame has said hello, so a message posted to
+   * it is heard. False from a load or navigation until its hello.
+   */
+  attached: boolean;
+  /**
+   * The start of the user's switch to this page (switchStartedAtMs) while
+   * the page that must measure it has not said hello yet: handed over with
+   * the presence its hello replays, then forgotten.
+   */
+  pendingSwitchStartedAtMs: number | null;
 }
 
 /** The host's API, as Emacs calls it through `window.agentReplHost`. */
@@ -93,8 +104,12 @@ export interface Host {
    * if it is shown first. Without one it loads at once.
    */
   ensure(id: string, url: string, lane?: string): string;
-  /** Show workspace ID's page and hide every other. */
-  show(id: string): string;
+  /**
+   * Show workspace ID's page and hide every other. SWITCH_STARTED_AT_MS is
+   * when the user's switch that asked for it began (the presence message's
+   * switchStartedAtMs), null when the show is not a switch the user made.
+   */
+  show(id: string, switchStartedAtMs?: number | null): string;
   /** Tell LISTENER the id of every page shown from now on; answers the stop. */
   onShown(listener: (id: string) => void): () => void;
   /** Drop workspace ID's page. */
@@ -210,10 +225,11 @@ export function createHost(env: HostEnv): Host {
     target.postMessage(message, "*");
   };
 
-  const presenceOf = (frame: Frame): HostToPage => ({
+  const presenceOf = (frame: Frame, switchStartedAtMs: number | null = null): HostToPage => ({
     channel: HOST_CHANNEL,
     kind: "presence",
     shown: frame.id === shownId,
+    ...(switchStartedAtMs === null ? {} : { switchStartedAtMs }),
   });
 
   /** Whether the sidebar is docked over the pages, as every page is told. */
@@ -232,7 +248,10 @@ export function createHost(env: HostEnv): Host {
   };
 
   const sendState = (frame: Frame): void => {
-    post(frame, presenceOf(frame));
+    // A SWITCH THE PAGE MISSED WHILE IT LOADED is handed over once, here.
+    const switchStartedAtMs = frame.id === shownId ? frame.pendingSwitchStartedAtMs : null;
+    frame.pendingSwitchStartedAtMs = null;
+    post(frame, presenceOf(frame, switchStartedAtMs));
     post(frame, dockMessage());
     post(frame, failuresMessage());
     if (frame.inputBackground !== null) {
@@ -334,6 +353,7 @@ export function createHost(env: HostEnv): Host {
     switch (message.kind) {
       case "hello":
         resetFacts(frame);
+        frame.attached = true;
         sendState(frame);
         return;
       case "drawn":
@@ -418,6 +438,8 @@ export function createHost(env: HostEnv): Host {
       selection: { text: "", focused: false },
       editing: false,
       gateBand: 0,
+      attached: false,
+      pendingSwitchStartedAtMs: null,
     };
     frames.set(id, frame);
     frameParent.append(iframe);
@@ -449,10 +471,11 @@ export function createHost(env: HostEnv): Host {
       if (frame.url === url) return answer("ensure", id, "unchanged");
       frame.url = url;
       resetFacts(frame);
+      frame.attached = false;
       frame.iframe.src = url;
       return answer("ensure", id, "navigated");
     },
-    show(id) {
+    show(id, switchStartedAtMs = null) {
       const next = frames.get(id);
       if (next === undefined) return answer("show", id, "absent");
       if (shownId === id) return answer("show", id, "unchanged");
@@ -462,10 +485,18 @@ export function createHost(env: HostEnv): Host {
       const jumped = loadNow(next);
       if (previous !== undefined) {
         applyShown(previous, false);
+        previous.pendingSwitchStartedAtMs = null;
         post(previous, presenceOf(previous));
       }
       applyShown(next, true);
-      post(next, presenceOf(next));
+      // A LISTENING PAGE IS TOLD THE SWITCH NOW; one still loading is told
+      // with the presence its hello replays.
+      if (next.attached) {
+        post(next, presenceOf(next, switchStartedAtMs));
+      } else {
+        next.pendingSwitchStartedAtMs = switchStartedAtMs;
+        post(next, presenceOf(next));
+      }
       placeSidebar();
       // THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same turn.
       for (const listener of shownListeners) listener(id);
@@ -494,6 +525,8 @@ export function createHost(env: HostEnv): Host {
     reload(id) {
       return withFrame("reload", id, (frame) => {
         resetFacts(frame);
+        frame.attached = false;
+        frame.pendingSwitchStartedAtMs = null;
         frame.iframe.src = frame.url;
         return "reloaded";
       });

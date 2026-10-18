@@ -26,7 +26,10 @@
 #   skill_link               a Claude Code skill linked into ~/.claude/skills
 #                            (`"retired": true`: our link is removed instead)
 #   git_hook                 a managed git hook in the repository's hooks dir
-#   launchd_service          a launchd user agent built, installed and running
+#   launchd_service          a launchd user agent installed and running: its
+#                            program built here (`build_target` + `binary`) or
+#                            an installed command (`command`), with any
+#                            `files` copied from the module into the cache
 #   download                 files unpacked from a zip at a URL into the cache,
 #                            each pinned by its sha256
 #
@@ -153,7 +156,12 @@ validate_entries() {
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
        elif $e.kind == "git_hook" then need($e; ["hook", "source", "markers"])
-       elif $e.kind == "launchd_service" then need($e; ["label", "plist", "build_target", "binary", "platforms"])
+       elif $e.kind == "launchd_service" then need($e; ["label", "plist", "platforms"]),
+         (select((($e.command != null) and (($e.build_target != null) or ($e.binary != null)))
+                 or (($e.command == null) and (($e.build_target == null) or ($e.binary == null))))
+           | "\($e._file): \($e.id): launchd_service needs either \"command\" or both \"build_target\" and \"binary\""),
+         ($e.files // [] | .[] | select(.from == null or .to == null)
+           | "\($e._file): \($e.id): every launchd_service file needs \"from\" and \"to\"")
        elif $e.kind == "download" then need($e; ["url", "archive", "dest", "files"]),
          (select($e.archive != null and $e.archive != "zip") | "\($e._file): \($e.id): download archive must be zip, not \($e.archive)"),
          ($e.files // [] | .[] | select(.from == null or .to == null or .sha256 == null)
@@ -420,18 +428,35 @@ check_git_hook() {
 # (launchd does not expand ~).
 rendered_plist() { sed "s|~/|$HOME/|g" "$MODULE_DIR/$(field "$1" .plist)"; }
 
+# service_files ENTRY: one "FROM<tab>TO" line per file a service copies from
+# the module into the cache.
+service_files() { printf '%s\n' "$1" | jq -r '(.files // [])[] | "\(.from)\t\(.to)"'; }
+
 check_launchd_service() {
-  local e="$1" label binary dest
+  local e="$1" label command binary dest from to stale=""
   label="$(field "$e" .label)"
-  binary="$CACHE_ROOT/bin/$(field "$e" .binary)"
+  command="$(field "$e" .command)"
   dest="$LAUNCH_AGENTS_DIR/$label.plist"
-  FIX="build $(field "$e" .build_target) with bin/build-frontend.sh, install $dest, and bootstrap $label"
-  if [ ! -x "$binary" ]; then
+  if [ -n "$command" ]; then
+    FIX="install $command, install $dest, and bootstrap $label"
+  else
+    binary="$CACHE_ROOT/bin/$(field "$e" .binary)"
+    FIX="build $(field "$e" .build_target) with bin/build-frontend.sh, install $dest, and bootstrap $label"
+  fi
+  while IFS=$'\t' read -r from to; do
+    [ -n "$from" ] || continue
+    cmp -s "$MODULE_DIR/$from" "$CACHE_ROOT/$to" || stale="$stale $to"
+  done < <(service_files "$e")
+  if [ -n "$command" ] && ! command -v "$command" >/dev/null 2>&1; then
+    STATUS=missing; DETAIL="$command is not on PATH"
+  elif [ -z "$command" ] && [ ! -x "$binary" ]; then
     STATUS=missing; DETAIL="$binary is not built"
   elif [ ! -f "$dest" ]; then
     STATUS=missing; DETAIL="$dest is not installed"
   elif ! rendered_plist "$e" | cmp -s - "$dest"; then
     STATUS=outdated; DETAIL="$dest differs from $(field "$e" .plist)"
+  elif [ -n "$stale" ]; then
+    STATUS=outdated; DETAIL="$CACHE_ROOT lacks the module's copy of$stale"
   elif ! "$LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1; then
     STATUS=missing; DETAIL="$label is not loaded"
   else
@@ -546,7 +571,19 @@ install_launchd_service() {
   # launchd creates none of these, and the services bind sockets and open
   # their logs and databases in them.
   mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$LAUNCH_AGENTS_DIR"
-  "$BUILD_FRONTEND" "$(field "$e" .build_target)"
+  if [ -n "$(field "$e" .command)" ]; then
+    if ! command -v "$(field "$e" .command)" >/dev/null 2>&1; then
+      err "install: $(field "$e" .id): $(field "$e" .command) is not on PATH; install it first"; return 1
+    fi
+  else
+    "$BUILD_FRONTEND" "$(field "$e" .build_target)"
+  fi
+  local from to
+  while IFS=$'\t' read -r from to; do
+    [ -n "$from" ] || continue
+    mkdir -p "$(dirname "$CACHE_ROOT/$to")"
+    cp "$MODULE_DIR/$from" "$CACHE_ROOT/$to"
+  done < <(service_files "$e")
   rendered_plist "$e" >"$dest"
   if "$LAUNCHCTL" print "gui/$uid/$label" >/dev/null 2>&1; then
     "$LAUNCHCTL" bootout "gui/$uid" "$dest"
@@ -626,9 +663,13 @@ uninstall_entry() {
         "$LAUNCHCTL" bootout "gui/$uid" "$dest"; say "uninstall: booted out $label"
       fi
       if [ -f "$dest" ]; then rm -f "$dest"; say "uninstall: removed $dest"; fi
-      if [ -f "$CACHE_ROOT/bin/$(field "$e" .binary)" ]; then
+      if [ -n "$(field "$e" .binary)" ] && [ -f "$CACHE_ROOT/bin/$(field "$e" .binary)" ]; then
         rm -f "$CACHE_ROOT/bin/$(field "$e" .binary)"; say "uninstall: removed $CACHE_ROOT/bin/$(field "$e" .binary)"
-      fi ;;
+      fi
+      while IFS=$'\t' read -r from to; do
+        [ -n "$from" ] || continue
+        if [ -f "$CACHE_ROOT/$to" ]; then rm -f "$CACHE_ROOT/$to"; say "uninstall: removed $CACHE_ROOT/$to"; fi
+      done < <(service_files "$e") ;;
     download)
       dir="$(download_dir "$e")"
       while IFS=$'\t' read -r from to want; do

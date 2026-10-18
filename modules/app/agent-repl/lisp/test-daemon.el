@@ -364,6 +364,50 @@ workspace's path, so every path must have an answer."
       (should (equal (cadr (member "--multi-repo-config-dir" argv))
                      (expand-file-name "~/.claude-chesscom"))))))
 
+(ert-deftest agent-repl-test-daemon-argv-carries-the-metrics-root ()
+  "The argv states `--metrics-root', expanded, when a metrics root is set."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b")
+        (agent-repl-daemon-metrics-root "~/.cache/agent-repl/metrics"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should (equal (cadr (member "--metrics-root" argv))
+                     (expand-file-name "~/.cache/agent-repl/metrics"))))))
+
+(ert-deftest agent-repl-test-daemon-argv-omits-a-nil-metrics-root ()
+  "A nil metrics root passes no flag: the daemon runs with metrics off."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b")
+        (agent-repl-daemon-metrics-root nil))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should-not (member "--metrics-root" argv)))))
+
+(ert-deftest agent-repl-test-daemon-argv-omits-a-blank-metrics-root ()
+  "A blank metrics root is no root: it passes no flag rather than an empty path."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b")
+        (agent-repl-daemon-metrics-root "  "))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should-not (member "--metrics-root" argv)))))
+
+(ert-deftest agent-repl-test-daemon-metrics-root-defaults-to-the-cache ()
+  "The default metrics root sits beside the services\=' cache."
+  ;; Arrange / Act
+  (let ((default (default-value 'agent-repl-daemon-metrics-root)))
+    ;; Assert
+    (should (equal default (expand-file-name ".cache/agent-repl/metrics" "~")))))
+
 (ert-deftest agent-repl-test-daemon-argv-keeps-the-binary-first ()
   "The base argv leads: the flags are APPENDED, never interleaved."
   ;; Arrange

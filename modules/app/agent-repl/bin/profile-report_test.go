@@ -4,6 +4,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,5 +95,47 @@ func TestNextForNeverAnswersAnEdgeBeforeItsStart(t *testing.T) {
 	// Assert
 	if !ok || !got.at.Equal(base.Add(10*time.Millisecond)) {
 		t.Fatalf("nextFor = %v at %v, want the edge at +10ms", ok, got.at)
+	}
+}
+
+func TestLoadBudgetsReadsEveryProfileKindFromTheVocabulary(t *testing.T) {
+	// Act
+	budgets, err := loadBudgets("../proto/vocab/latencies.json")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("loadBudgets: %v", err)
+	}
+	if len(budgets) != len(profileKinds) {
+		t.Fatalf("budgets = %d, want one per profile kind (%d)", len(budgets), len(profileKinds))
+	}
+	if b := budgets["switch_repeat"]; b.limit != 100*time.Millisecond || b.name == "" || b.reason == "" {
+		t.Fatalf("switch_repeat = %+v, want a 100ms budget with its name and reason", b)
+	}
+}
+
+func TestLoadBudgetsRefusesAVocabularyMissingAKind(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "latencies.json")
+	if err := os.WriteFile(path, []byte(`{"latencies":[{"name":"switch_repeat","threshold_ms":100}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := loadBudgets(path)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "has no budget for prompt_echo") {
+		t.Fatalf("err = %v, want the missing kind named", err)
+	}
+}
+
+func TestLoadBudgetsRefusesAnUnreadableVocabulary(t *testing.T) {
+	// Act
+	_, err := loadBudgets(filepath.Join(t.TempDir(), "absent.json"))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "read the latency vocabulary") {
+		t.Fatalf("err = %v, want the read refused", err)
 	}
 }

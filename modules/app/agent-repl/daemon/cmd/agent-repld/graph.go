@@ -50,6 +50,7 @@ import (
 	"agent-repld/internal/pagesupersede"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/persistentwifi"
+	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
@@ -713,7 +714,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Commands:   slashCommands,
 			CacheLapse: cacheKeeper,
 			Stalls:     stalls,
-			Clock:      clock.System{},
+			// The shim's measurements frames land in the metrics surface.
+			Measurements: p.Metrics,
+			Clock:        clock.System{},
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,
@@ -880,7 +883,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	// THE WEB CONTENT PROCESS'S FOOTPRINT, once a minute: every workspace
 	// page lives in it, and its size is what its main-thread stalls follow.
-	footprints, err := webfootprint.New(webfootprint.Deps{Runner: scripts, Clock: clock.System{}, Log: log})
+	footprints, err := webfootprint.New(webfootprint.Deps{Reader: procmetrics.Kernel{}, Clock: clock.System{}, Log: log})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the web footprint sampler: %w", err)
 	}
@@ -966,7 +969,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
 		},
-		WriteDaemonAddr: func(context.Context) error { return p.Claim.Publish() },
+		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
+		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
 		ShimBuild:       shimBundle.Build,
 		ColdGate:        fleet.RaiseColdGate,
@@ -985,6 +989,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the deploy ----
 
 	clients := &deployClientsForwarder{}
+	// THE DEPLOYED VERSION is resolved by its own background loop, off the
+	// boot path and off the deploy's: once at start, again after each deploy.
+	deployedVersion := p.Metrics.DeployedVersionLoop(git, paths.Checkout)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
@@ -1003,6 +1010,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Faults:     p.DB,
 		Joining:    p.Opts.joining != "",
 		Getenv:     os.Getenv,
+		Deployed:   deployedVersion.Kick,
 	})
 	if err != nil {
 		return nil, err
@@ -1365,6 +1373,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
+		{Name: "deployed_version", Run: deployedVersion.Run},
 		{Name: "gate_governor", Run: func(ctx context.Context) error {
 			gateGovernor.Run(ctx)
 			return nil
@@ -1437,6 +1446,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Opens:             opens,
 			StallBeat:         stallBeat,
 			Pages:             supersededPages,
+			Latencies:         p.Metrics,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,

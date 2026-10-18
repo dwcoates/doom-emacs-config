@@ -978,3 +978,69 @@ describe("a hidden page keeps the size it was hidden at", () => {
     expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual(["", ""]);
   });
 });
+
+describe("show with a switch's start", () => {
+  const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
+  const presenceIn = (posted: HostToPage[]) => posted.filter((m) => m.kind === "presence");
+
+  it("tells a listening page when the switch that showed it began", () => {
+    // Arrange
+    pages(host, "a");
+    fromPage("a", hello);
+    const posted = postsTo("a");
+
+    // Act
+    host.show("a", 1_700_000_000_123);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([
+      { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 },
+    ]);
+  });
+
+  it("hands a page still loading its switch with the presence its hello replays, once", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a", 1_700_000_000_123);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([
+      { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 },
+      { channel: HOST_CHANNEL, kind: "presence", shown: true },
+    ]);
+  });
+
+  it("forgets the switch of a page reloaded before it said hello", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a", 1_700_000_000_123);
+    host.reload("a");
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([{ channel: HOST_CHANNEL, kind: "presence", shown: true }]);
+  });
+
+  it("forgets the switch of a page hidden again before it said hello", () => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show("a", 1_700_000_000_123);
+    host.show("b");
+    host.show("a");
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([{ channel: HOST_CHANNEL, kind: "presence", shown: true }]);
+  });
+});

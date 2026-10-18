@@ -1121,11 +1121,13 @@ func itoa(n int) string {
 
 // harness is one started watcher plus everything a test drives it with.
 type harness struct {
-	t      *testing.T
-	client *fakeClient
-	rec    *recorder
-	log    *dlog.TestLogger
-	w      *watcher
+	// measurements receives every shim measurements frame the watcher folds.
+	measurements *measurementsSink
+	t            *testing.T
+	client       *fakeClient
+	rec          *recorder
+	log          *dlog.TestLogger
+	w            *watcher
 
 	session *fakeStream[*shimv1.WatchSessionResponse]
 	main    *fakeStream[*shimv1.WatchAgentResponse]
@@ -1217,7 +1219,7 @@ func newHarnessWithMerge(t *testing.T, session Session) *harness {
 // the merge sink, which records into the harness's recorder.
 func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink) *harness {
 	t.Helper()
-	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger(), clock: newManualClock()}
+	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger(), clock: newManualClock(), measurements: &measurementsSink{folded: make(chan foldedMeasurements, 8)}}
 	h.lifecycle = &lifecycleSink{rec: h.rec}
 	if prep != nil {
 		prep(h.client)
@@ -1229,16 +1231,17 @@ func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), st
 	}
 
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{
-		Feed:       &feedSink{rec: h.rec},
-		Footer:     &footerSink{rec: h.rec},
-		Topbar:     &topbarSink{rec: h.rec},
-		Sidebar:    &sidebarSink{rec: h.rec},
-		Lifecycle:  h.lifecycle,
-		Commands:   &commandSink{rec: h.rec},
-		CacheLapse: &cacheLapseSink{rec: h.rec},
-		Merge:      mergeSinkOf(merge, h.rec),
-		Stalls:     stalls,
-		Clock:      h.clock,
+		Feed:         &feedSink{rec: h.rec},
+		Footer:       &footerSink{rec: h.rec},
+		Topbar:       &topbarSink{rec: h.rec},
+		Sidebar:      &sidebarSink{rec: h.rec},
+		Lifecycle:    h.lifecycle,
+		Commands:     &commandSink{rec: h.rec},
+		CacheLapse:   &cacheLapseSink{rec: h.rec},
+		Merge:        mergeSinkOf(merge, h.rec),
+		Stalls:       stalls,
+		Measurements: h.measurementsSink(),
+		Clock:        h.clock,
 	}, h.log)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -2376,4 +2379,36 @@ func (h *harness) noMoreDepartures(t *testing.T) {
 		t.Fatalf("an unexpected departure was told: %+v", d.departure)
 	default:
 	}
+}
+
+// foldedMeasurements is one frame the measurements sink was handed.
+type foldedMeasurements struct {
+	ws ids.WorkspaceID
+	m  *shimv1.ShimMeasurements
+}
+
+// measurementsSink hands every folded frame to its channel.
+type measurementsSink struct {
+	folded chan foldedMeasurements
+}
+
+func (s *measurementsSink) FoldShimMeasurements(ws ids.WorkspaceID, m *shimv1.ShimMeasurements) {
+	s.folded <- foldedMeasurements{ws: ws, m: m}
+}
+
+// measurementsSink answers the harness's sink, or none when a test cleared
+// it before the start.
+func (h *harness) measurementsSink() MeasurementsSink {
+	if h.measurements == nil {
+		return nil
+	}
+	return h.measurements
+}
+
+// sendMeasurements pushes one measurements frame on the session stream.
+func (h *harness) sendMeasurements(t *testing.T, m *shimv1.ShimMeasurements) {
+	t.Helper()
+	h.session.send(t, &shimv1.WatchSessionResponse{
+		Frame: &shimv1.WatchSessionResponse_Measurements{Measurements: m},
+	})
 }

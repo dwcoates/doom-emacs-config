@@ -25,6 +25,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Which interaction a shim-measured latency measured. Each value names one
+// entry of proto/vocab/latencies.json, which states its edges, threshold and
+// histogram buckets.
+type ShimLatencyKind int32
+
+const (
+	// Never sent: a frame carrying it is refused by the daemon, loudly.
+	ShimLatencyKind_SHIM_LATENCY_KIND_UNSPECIFIED ShimLatencyKind = 0
+	// From a prompt handed to the vendor to the first response text arriving:
+	// what the vendor's first token costs, plus the shim's own share.
+	ShimLatencyKind_SHIM_LATENCY_KIND_FIRST_OUTPUT ShimLatencyKind = 1
+)
+
+// Enum value maps for ShimLatencyKind.
+var (
+	ShimLatencyKind_name = map[int32]string{
+		0: "SHIM_LATENCY_KIND_UNSPECIFIED",
+		1: "SHIM_LATENCY_KIND_FIRST_OUTPUT",
+	}
+	ShimLatencyKind_value = map[string]int32{
+		"SHIM_LATENCY_KIND_UNSPECIFIED":  0,
+		"SHIM_LATENCY_KIND_FIRST_OUTPUT": 1,
+	}
+)
+
+func (x ShimLatencyKind) Enum() *ShimLatencyKind {
+	p := new(ShimLatencyKind)
+	*p = x
+	return p
+}
+
+func (x ShimLatencyKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ShimLatencyKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_shim_v1_endpoint_watch_session_proto_enumTypes[0].Descriptor()
+}
+
+func (ShimLatencyKind) Type() protoreflect.EnumType {
+	return &file_shim_v1_endpoint_watch_session_proto_enumTypes[0]
+}
+
+func (x ShimLatencyKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ShimLatencyKind.Descriptor instead.
+func (ShimLatencyKind) EnumDescriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{0}
+}
+
 // Nothing to say: the session is the connection's.
 type WatchSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -70,6 +122,7 @@ type WatchSessionResponse struct {
 	//
 	//	*WatchSessionResponse_Update
 	//	*WatchSessionResponse_SessionStarted
+	//	*WatchSessionResponse_Measurements
 	Frame         isWatchSessionResponse_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -130,6 +183,15 @@ func (x *WatchSessionResponse) GetSessionStarted() *v1.SessionStarted {
 	return nil
 }
 
+func (x *WatchSessionResponse) GetMeasurements() *ShimMeasurements {
+	if x != nil {
+		if x, ok := x.Frame.(*WatchSessionResponse_Measurements); ok {
+			return x.Measurements
+		}
+	}
+	return nil
+}
+
 type isWatchSessionResponse_Frame interface {
 	isWatchSessionResponse_Frame()
 }
@@ -150,20 +212,323 @@ type WatchSessionResponse_SessionStarted struct {
 	SessionStarted *v1.SessionStarted `protobuf:"bytes,2,opt,name=session_started,json=sessionStarted,proto3,oneof"`
 }
 
+type WatchSessionResponse_Measurements struct {
+	// The shim's own performance counters, for the daemon's always-on
+	// metrics. Sent on a 15-second tick that starts when a watch opens,
+	// whenever the figures differ from the last frame this watch carried; a
+	// new watch's first tick sends any figures already counted, so a daemon
+	// that adopted this shim learns its totals within 15 seconds. Never sent
+	// among the opening frames, whose order is the readiness protocol. Every
+	// figure is CUMULATIVE since ShimMeasurements' counting instant, so a
+	// frame lost with a broken stream is subsumed by the next one.
+	Measurements *ShimMeasurements `protobuf:"bytes,3,opt,name=measurements,proto3,oneof"`
+}
+
 func (*WatchSessionResponse_Update) isWatchSessionResponse_Frame() {}
 
 func (*WatchSessionResponse_SessionStarted) isWatchSessionResponse_Frame() {}
+
+func (*WatchSessionResponse_Measurements) isWatchSessionResponse_Frame() {}
+
+// Everything the shim measures that only the shim can see: its traffic with
+// the vendor API and the latencies whose ends it observes. Every figure
+// counts from ONE instant, `counted_since_unix_ms`, the moment this shim
+// process started counting; a frame with a different instant is a new
+// counting run (the shim restarted), whose figures start again from zero.
+// The daemon folds each run into per-workspace monotonic counters, so a
+// restart never reads as a counter going backwards.
+type ShimMeasurements struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When this shim process started counting, Unix milliseconds. The same in
+	// every frame of one process's lifetime.
+	CountedSinceUnixMs int64 `protobuf:"varint,1,opt,name=counted_since_unix_ms,json=countedSinceUnixMs,proto3" json:"counted_since_unix_ms,omitempty"`
+	// Bytes exchanged with the vendor API since `counted_since_unix_ms`. UNSET
+	// when this shim cannot count them: the vendor's HTTP is made by the
+	// agent SDK's own child process, outside the shim, so a shim sets this only
+	// where it carries that traffic itself. The daemon publishes no traffic
+	// series for a workspace whose shim leaves it unset, rather than a zero.
+	VendorTraffic *ShimVendorTraffic `protobuf:"bytes,2,opt,name=vendor_traffic,json=vendorTraffic,proto3,oneof" json:"vendor_traffic,omitempty"`
+	// One cumulative histogram per shim-measured latency kind, each kind at
+	// most once. A kind with no observation yet is absent.
+	Latencies     []*ShimLatencyHistogram `protobuf:"bytes,3,rep,name=latencies,proto3" json:"latencies,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShimMeasurements) Reset() {
+	*x = ShimMeasurements{}
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShimMeasurements) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShimMeasurements) ProtoMessage() {}
+
+func (x *ShimMeasurements) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShimMeasurements.ProtoReflect.Descriptor instead.
+func (*ShimMeasurements) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ShimMeasurements) GetCountedSinceUnixMs() int64 {
+	if x != nil {
+		return x.CountedSinceUnixMs
+	}
+	return 0
+}
+
+func (x *ShimMeasurements) GetVendorTraffic() *ShimVendorTraffic {
+	if x != nil {
+		return x.VendorTraffic
+	}
+	return nil
+}
+
+func (x *ShimMeasurements) GetLatencies() []*ShimLatencyHistogram {
+	if x != nil {
+		return x.Latencies
+	}
+	return nil
+}
+
+// The shim's traffic with the vendor API, counted in memory where the shim
+// carries it: request and response bytes as they pass. It is the vendor
+// traffic of this workspace's session; traffic of processes the agent runs is
+// not in it.
+type ShimVendorTraffic struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Bytes sent to the vendor since the counting instant.
+	BytesSent uint64 `protobuf:"varint,1,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`
+	// Bytes received from the vendor since the counting instant.
+	BytesReceived uint64 `protobuf:"varint,2,opt,name=bytes_received,json=bytesReceived,proto3" json:"bytes_received,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShimVendorTraffic) Reset() {
+	*x = ShimVendorTraffic{}
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShimVendorTraffic) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShimVendorTraffic) ProtoMessage() {}
+
+func (x *ShimVendorTraffic) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShimVendorTraffic.ProtoReflect.Descriptor instead.
+func (*ShimVendorTraffic) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ShimVendorTraffic) GetBytesSent() uint64 {
+	if x != nil {
+		return x.BytesSent
+	}
+	return 0
+}
+
+func (x *ShimVendorTraffic) GetBytesReceived() uint64 {
+	if x != nil {
+		return x.BytesReceived
+	}
+	return 0
+}
+
+// One latency kind's distribution since the counting instant, in the shape of
+// a Prometheus histogram so the daemon exposes it without re-bucketing.
+type ShimLatencyHistogram struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which interaction this histogram measures. Never UNSPECIFIED.
+	Kind ShimLatencyKind `protobuf:"varint,1,opt,name=kind,proto3,enum=shim.v1.ShimLatencyKind" json:"kind,omitempty"`
+	// The buckets in ascending upper-bound order, the last ending below +Inf
+	// (the +Inf bucket is `count`). The bounds must equal the kind's buckets
+	// in proto/vocab/latencies.json; the daemon refuses a histogram whose
+	// bounds differ rather than summing it into the wrong buckets.
+	Buckets []*ShimLatencyBucket `protobuf:"bytes,2,rep,name=buckets,proto3" json:"buckets,omitempty"`
+	// How many observations in total, the +Inf bucket.
+	Count uint64 `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	// The sum of every observation, in seconds.
+	SumSeconds    float64 `protobuf:"fixed64,4,opt,name=sum_seconds,json=sumSeconds,proto3" json:"sum_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShimLatencyHistogram) Reset() {
+	*x = ShimLatencyHistogram{}
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShimLatencyHistogram) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShimLatencyHistogram) ProtoMessage() {}
+
+func (x *ShimLatencyHistogram) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShimLatencyHistogram.ProtoReflect.Descriptor instead.
+func (*ShimLatencyHistogram) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ShimLatencyHistogram) GetKind() ShimLatencyKind {
+	if x != nil {
+		return x.Kind
+	}
+	return ShimLatencyKind_SHIM_LATENCY_KIND_UNSPECIFIED
+}
+
+func (x *ShimLatencyHistogram) GetBuckets() []*ShimLatencyBucket {
+	if x != nil {
+		return x.Buckets
+	}
+	return nil
+}
+
+func (x *ShimLatencyHistogram) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *ShimLatencyHistogram) GetSumSeconds() float64 {
+	if x != nil {
+		return x.SumSeconds
+	}
+	return 0
+}
+
+// One histogram bucket: how many observations were at or below its bound.
+type ShimLatencyBucket struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The bucket's inclusive upper bound, in seconds.
+	UpperBoundSeconds float64 `protobuf:"fixed64,1,opt,name=upper_bound_seconds,json=upperBoundSeconds,proto3" json:"upper_bound_seconds,omitempty"`
+	// How many observations were at or below the bound since the counting
+	// instant (cumulative across buckets, as Prometheus counts them).
+	CumulativeCount uint64 `protobuf:"varint,2,opt,name=cumulative_count,json=cumulativeCount,proto3" json:"cumulative_count,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ShimLatencyBucket) Reset() {
+	*x = ShimLatencyBucket{}
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShimLatencyBucket) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShimLatencyBucket) ProtoMessage() {}
+
+func (x *ShimLatencyBucket) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShimLatencyBucket.ProtoReflect.Descriptor instead.
+func (*ShimLatencyBucket) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ShimLatencyBucket) GetUpperBoundSeconds() float64 {
+	if x != nil {
+		return x.UpperBoundSeconds
+	}
+	return 0
+}
+
+func (x *ShimLatencyBucket) GetCumulativeCount() uint64 {
+	if x != nil {
+		return x.CumulativeCount
+	}
+	return 0
+}
 
 var File_shim_v1_endpoint_watch_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"\n" +
 	"$shim/v1/endpoint_watch_session.proto\x12\ashim.v1\x1a\x1dconversation/v1/session.proto\"\x15\n" +
-	"\x13WatchSessionRequest\"\xa5\x01\n" +
+	"\x13WatchSessionRequest\"\xe6\x01\n" +
 	"\x14WatchSessionResponse\x128\n" +
 	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\x06update\x12J\n" +
-	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStartedB\a\n" +
-	"\x05frameB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStarted\x12?\n" +
+	"\fmeasurements\x18\x03 \x01(\v2\x19.shim.v1.ShimMeasurementsH\x00R\fmeasurementsB\a\n" +
+	"\x05frame\"\xdd\x01\n" +
+	"\x10ShimMeasurements\x121\n" +
+	"\x15counted_since_unix_ms\x18\x01 \x01(\x03R\x12countedSinceUnixMs\x12F\n" +
+	"\x0evendor_traffic\x18\x02 \x01(\v2\x1a.shim.v1.ShimVendorTrafficH\x00R\rvendorTraffic\x88\x01\x01\x12;\n" +
+	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatenciesB\x11\n" +
+	"\x0f_vendor_traffic\"Y\n" +
+	"\x11ShimVendorTraffic\x12\x1d\n" +
+	"\n" +
+	"bytes_sent\x18\x01 \x01(\x04R\tbytesSent\x12%\n" +
+	"\x0ebytes_received\x18\x02 \x01(\x04R\rbytesReceived\"\xb1\x01\n" +
+	"\x14ShimLatencyHistogram\x12,\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x18.shim.v1.ShimLatencyKindR\x04kind\x124\n" +
+	"\abuckets\x18\x02 \x03(\v2\x1a.shim.v1.ShimLatencyBucketR\abuckets\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x04R\x05count\x12\x1f\n" +
+	"\vsum_seconds\x18\x04 \x01(\x01R\n" +
+	"sumSeconds\"n\n" +
+	"\x11ShimLatencyBucket\x12.\n" +
+	"\x13upper_bound_seconds\x18\x01 \x01(\x01R\x11upperBoundSeconds\x12)\n" +
+	"\x10cumulative_count\x18\x02 \x01(\x04R\x0fcumulativeCount*X\n" +
+	"\x0fShimLatencyKind\x12!\n" +
+	"\x1dSHIM_LATENCY_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eSHIM_LATENCY_KIND_FIRST_OUTPUT\x10\x01B Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_watch_session_proto_rawDescOnce sync.Once
@@ -177,21 +542,32 @@ func file_shim_v1_endpoint_watch_session_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_watch_session_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_watch_session_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_shim_v1_endpoint_watch_session_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_shim_v1_endpoint_watch_session_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_shim_v1_endpoint_watch_session_proto_goTypes = []any{
-	(*WatchSessionRequest)(nil),  // 0: shim.v1.WatchSessionRequest
-	(*WatchSessionResponse)(nil), // 1: shim.v1.WatchSessionResponse
-	(*v1.SessionUpdate)(nil),     // 2: conversation.v1.SessionUpdate
-	(*v1.SessionStarted)(nil),    // 3: conversation.v1.SessionStarted
+	(ShimLatencyKind)(0),         // 0: shim.v1.ShimLatencyKind
+	(*WatchSessionRequest)(nil),  // 1: shim.v1.WatchSessionRequest
+	(*WatchSessionResponse)(nil), // 2: shim.v1.WatchSessionResponse
+	(*ShimMeasurements)(nil),     // 3: shim.v1.ShimMeasurements
+	(*ShimVendorTraffic)(nil),    // 4: shim.v1.ShimVendorTraffic
+	(*ShimLatencyHistogram)(nil), // 5: shim.v1.ShimLatencyHistogram
+	(*ShimLatencyBucket)(nil),    // 6: shim.v1.ShimLatencyBucket
+	(*v1.SessionUpdate)(nil),     // 7: conversation.v1.SessionUpdate
+	(*v1.SessionStarted)(nil),    // 8: conversation.v1.SessionStarted
 }
 var file_shim_v1_endpoint_watch_session_proto_depIdxs = []int32{
-	2, // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
-	3, // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	7, // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
+	8, // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
+	3, // 2: shim.v1.WatchSessionResponse.measurements:type_name -> shim.v1.ShimMeasurements
+	4, // 3: shim.v1.ShimMeasurements.vendor_traffic:type_name -> shim.v1.ShimVendorTraffic
+	5, // 4: shim.v1.ShimMeasurements.latencies:type_name -> shim.v1.ShimLatencyHistogram
+	0, // 5: shim.v1.ShimLatencyHistogram.kind:type_name -> shim.v1.ShimLatencyKind
+	6, // 6: shim.v1.ShimLatencyHistogram.buckets:type_name -> shim.v1.ShimLatencyBucket
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_watch_session_proto_init() }
@@ -202,19 +578,22 @@ func file_shim_v1_endpoint_watch_session_proto_init() {
 	file_shim_v1_endpoint_watch_session_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchSessionResponse_Update)(nil),
 		(*WatchSessionResponse_SessionStarted)(nil),
+		(*WatchSessionResponse_Measurements)(nil),
 	}
+	file_shim_v1_endpoint_watch_session_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_watch_session_proto_rawDesc), len(file_shim_v1_endpoint_watch_session_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      1,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_shim_v1_endpoint_watch_session_proto_goTypes,
 		DependencyIndexes: file_shim_v1_endpoint_watch_session_proto_depIdxs,
+		EnumInfos:         file_shim_v1_endpoint_watch_session_proto_enumTypes,
 		MessageInfos:      file_shim_v1_endpoint_watch_session_proto_msgTypes,
 	}.Build()
 	File_shim_v1_endpoint_watch_session_proto = out.File

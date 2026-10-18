@@ -9,9 +9,12 @@
 // with the day, and whether the stalls follow it, could not be read from
 // the logs.
 //
-// The footprint is `footprint`'s phys_footprint: what the kernel charges
-// the process, compressed and swapped pages included, which resident size
-// alone misses by a factor of five here.
+// The footprint is the kernel's phys_footprint: what it charges the
+// process, compressed and swapped pages included, which resident size alone
+// misses by a factor of five here. It is read through the metrics
+// collector's kernel reader (procmetrics), so the log record and the
+// agentrepl_process_footprint_bytes series read the same figure, and no tool
+// is spawned to read it.
 package webfootprint
 
 import (
@@ -19,33 +22,24 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/procmetrics"
 )
 
 // Every is how often the footprints are sampled.
 const Every = time.Minute
 
-// processName is the web content process's command name.
+// processName is the web content process's name.
 const processName = "com.apple.WebKit.WebContent"
-
-// runDir is the directory both tools run in; neither reads it.
-const runDir = "/"
 
 const op = "daemon.webfootprint"
 
-// Runner runs one tool and answers its combined output and exit code.
-type Runner interface {
-	Run(ctx context.Context, dir string, argv []string) (string, int, error)
-}
-
 // Deps are the sampler's collaborators, every one required.
 type Deps struct {
-	Runner Runner
+	Reader procmetrics.Reader
 	Clock  clock.Clock
 	Log    dlog.Logger
 }
@@ -57,8 +51,8 @@ type Sampler struct {
 
 // New builds a sampler.
 func New(deps Deps) (*Sampler, error) {
-	if deps.Runner == nil || deps.Clock == nil || deps.Log == nil {
-		return nil, errors.New("webfootprint: a runner, a clock and a logger are required")
+	if deps.Reader == nil || deps.Clock == nil || deps.Log == nil {
+		return nil, errors.New("webfootprint: a reader, a clock and a logger are required")
 	}
 	return &Sampler{deps: deps}, nil
 }
@@ -77,24 +71,30 @@ func (s *Sampler) Run(ctx context.Context) {
 }
 
 // Sample records one sample: every web content process's footprint, the
-// largest first, in one record. A tool that cannot be run or read is
-// recorded at ERROR and the sample is skipped.
-func (s *Sampler) Sample(ctx context.Context) {
-	procs, err := s.list(ctx)
+// largest first, in one record. A read that fails is recorded at ERROR and
+// the sample is skipped; a process that exits while it is read is left out.
+func (s *Sampler) Sample(context.Context) {
+	procs, err := s.list()
 	if err != nil {
 		s.deps.Log.Error(op, "could not list the web content processes", dlog.Context{"cause": err.Error()})
 		return
 	}
-	for i := range procs {
-		bytes, err := s.footprint(ctx, procs[i].PID)
+	read := procs[:0]
+	for _, p := range procs {
+		u, err := s.deps.Reader.Usage(p.PID)
+		if errors.Is(err, procmetrics.ErrGone) {
+			continue
+		}
 		if err != nil {
 			s.deps.Log.Error(op, "could not read a web content process's footprint", dlog.Context{
-				"pid": procs[i].PID, "cause": err.Error(),
+				"pid": p.PID, "cause": err.Error(),
 			})
 			return
 		}
-		procs[i].FootprintBytes = bytes
+		p.FootprintBytes, p.ResidentBytes = int64(u.FootprintBytes), int64(u.ResidentBytes)
+		read = append(read, p)
 	}
+	procs = read
 	sort.Slice(procs, func(i, j int) bool { return procs[i].FootprintBytes > procs[j].FootprintBytes })
 	listed := make([]map[string]any, 0, len(procs))
 	for _, p := range procs {
@@ -111,65 +111,47 @@ func (s *Sampler) Sample(ctx context.Context) {
 	})
 }
 
-// list answers every web content process with its resident size and age.
-func (s *Sampler) list(ctx context.Context) ([]Process, error) {
-	out, code, err := s.deps.Runner.Run(ctx, runDir, []string{"ps", "-A", "-o", "pid=,rss=,etime=,comm="})
+// list answers every web content process on the host with its age.
+func (s *Sampler) list() ([]Process, error) {
+	pids, err := s.deps.Reader.PIDs()
 	if err != nil {
-		return nil, fmt.Errorf("run ps: %w", err)
+		return nil, err
 	}
-	if code != 0 {
-		return nil, fmt.Errorf("ps exited %d: %s", code, strings.TrimSpace(out))
-	}
-	return ParsePS(out)
-}
-
-// footprint answers PID's phys_footprint in bytes.
-func (s *Sampler) footprint(ctx context.Context, pid int) (int64, error) {
-	out, code, err := s.deps.Runner.Run(ctx, runDir, []string{"footprint", "-f", "bytes", "-p", strconv.Itoa(pid)})
-	if err != nil {
-		return 0, fmt.Errorf("run footprint: %w", err)
-	}
-	if code != 0 {
-		return 0, fmt.Errorf("footprint exited %d: %s", code, strings.TrimSpace(out))
-	}
-	return ParseFootprint(out)
-}
-
-// ParsePS answers the web content processes in `ps -o pid=,rss=,etime=,comm=`
-// output; rss is in KiB. A line that names a web content process but does not
-// parse is an error, never a skipped process.
-func ParsePS(out string) ([]Process, error) {
+	now := s.deps.Clock.Now()
 	var procs []Process
-	for line := range strings.SplitSeq(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 4 || !strings.HasSuffix(strings.Join(fields[3:], " "), processName) {
+	for _, pid := range pids {
+		id, err := s.deps.Reader.Identity(pid)
+		if errors.Is(err, procmetrics.ErrGone) {
 			continue
 		}
-		pid, err := strconv.Atoi(fields[0])
 		if err != nil {
-			return nil, fmt.Errorf("ps line %q: pid: %w", line, err)
+			return nil, err
 		}
-		rss, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("ps line %q: rss: %w", line, err)
+		if id.Name != processName {
+			continue
 		}
-		procs = append(procs, Process{PID: pid, ResidentBytes: rss << 10, Elapsed: fields[2]})
+		started := time.UnixMicro(id.StartUnixMicros)
+		procs = append(procs, Process{PID: pid, Elapsed: FormatElapsed(now.Sub(started))})
 	}
 	return procs, nil
 }
 
-// ParseFootprint answers the phys_footprint in `footprint -f bytes` output.
-func ParseFootprint(out string) (int64, error) {
-	for line := range strings.SplitSeq(out, "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "phys_footprint:")
-		if !ok {
-			continue
-		}
-		fields := strings.Fields(rest)
-		if len(fields) != 2 || fields[1] != "B" {
-			return 0, fmt.Errorf("footprint line %q is not a byte count", line)
-		}
-		return strconv.ParseInt(fields[0], 10, 64)
+// FormatElapsed renders an age the way `ps -o etime` does, which is how
+// these records have always spelled it: [[dd-]hh:]mm:ss.
+func FormatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
 	}
-	return 0, errors.New("footprint output names no phys_footprint")
+	total := int64(d / time.Second)
+	days, rem := total/86400, total%86400
+	hours, rem := rem/3600, rem%3600
+	minutes, seconds := rem/60, rem%60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%d-%02d:%02d:%02d", days, hours, minutes, seconds)
+	case hours > 0:
+		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+	default:
+		return fmt.Sprintf("%02d:%02d", minutes, seconds)
+	}
 }

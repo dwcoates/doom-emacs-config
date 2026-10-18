@@ -106,10 +106,11 @@ reference merely because it exists.
 
 Use `/runtime-eval-code` when the needed fact exists only inside the live Emacs
 process or in third-party `*Messages*` output. For latency, stalls, or
-hitching, enter through `references/performance-investigation.md`, which
-decides between log-derived history and live sampling and hands off to
-`/profile-agent-repl` as the sampling authority. Neither handoff replaces the evidence
-already collected here.
+hitching, first read the stored metrics with `/metrics-agent-repl` (which
+version or day a latency or a process's CPU changed), then enter through
+`references/performance-investigation.md`, which decides between log-derived
+history and live sampling and hands off to `/profile-agent-repl` as the
+sampling authority. No handoff replaces the evidence already collected here.
 
 ### 5. Audit observability before concluding
 

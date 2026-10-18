@@ -410,6 +410,13 @@ func (s *requestLoggingServer) SessionHealth(
 	return serveUnary(s, ctx, "SessionHealth", req, s.server.SessionHealth)
 }
 
+func (s *requestLoggingServer) ReportLatencies(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportLatenciesRequest],
+) (*connect.Response[agentreplv1.ReportLatenciesResponse], error) {
+	return serveUnary(s, ctx, "ReportLatencies", req, s.server.ReportLatencies)
+}
+
 func (s *requestLoggingServer) ClientLog(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ClientLogRequest],

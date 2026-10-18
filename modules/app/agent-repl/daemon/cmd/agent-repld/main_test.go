@@ -126,6 +126,7 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		"--multi-repo-config-dir", "/home/tester/.claude-multi",
 		"--idle-cutoff", "45m",
 		"--pprof", "/tmp/pprof.sock",
+		"--metrics-root", "/tmp/metrics",
 		"--self-repo", "/checkout",
 		"--feed-tail-retention", "16",
 		"--footer-momentary-dwell", "120ms",
@@ -161,6 +162,8 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		t.Fatalf("opts.idleCutoff = %v", opts.idleCutoff)
 	case opts.pprof != "/tmp/pprof.sock":
 		t.Fatalf("opts.pprof = %q", opts.pprof)
+	case opts.metricsRoot != "/tmp/metrics":
+		t.Fatalf("opts.metricsRoot = %q", opts.metricsRoot)
 	case opts.selfRepo != "/checkout":
 		t.Fatalf("opts.selfRepo = %q", opts.selfRepo)
 	case opts.feedTailRetention != 16:

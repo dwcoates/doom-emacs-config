@@ -462,3 +462,81 @@ describe("the send ledger", () => {
     expect(() => ledger.sent(SECOND)).toThrow(/cannot open another/);
   });
 });
+
+describe("SendLedger first-reply timing", () => {
+  /** A ledger on a clock the test sets, recording every first reply. */
+  function timedLedger(): { ledger: SendLedger; at: (ms: number) => void; replies: [string, number][] } {
+    let now = 0;
+    const replies: [string, number][] = [];
+    const ledger = new SendLedger(
+      (send, seconds) => replies.push([send.turnId, seconds]),
+      () => now,
+    );
+    return { ledger, at: (ms) => (now = ms), replies };
+  }
+
+  it("times a prompt from its registration to the first reply that names it, once", () => {
+    // Arrange
+    const { ledger, at, replies } = timedLedger();
+    at(1_000);
+    ledger.sent(FIRST);
+
+    // Act
+    at(3_500);
+    ledger.attribute(streamEvent(stamp(FIRST.uuid)));
+    at(4_000);
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+
+    // Assert
+    expect(replies).toEqual([["turn-1", 2.5]]);
+  });
+
+  it("never times the shim's own keep-alive", () => {
+    // Arrange
+    const { ledger, replies } = timedLedger();
+    ledger.sent(KEEPALIVE);
+
+    // Act
+    ledger.attribute(reply(stamp(KEEPALIVE.uuid)));
+
+    // Assert
+    expect(replies).toEqual([]);
+  });
+
+  it("never times a prompt whose turn ended before any reply", () => {
+    // Arrange
+    const { ledger, replies } = timedLedger();
+    ledger.sent(FIRST);
+
+    // Act: the turn is killed, and a late reply still names its send.
+    ledger.forget("turn-1", "killed");
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+
+    // Assert
+    expect(replies).toEqual([]);
+  });
+
+  it("never times a result, which is no reply", () => {
+    // Arrange
+    const { ledger, replies } = timedLedger();
+    ledger.sent(FIRST);
+
+    // Act
+    ledger.attribute(result(stamp(FIRST.uuid)));
+
+    // Assert
+    expect(replies).toEqual([]);
+  });
+
+  it("never charges a vendor-started turn's unstamped reply to an open prompt", () => {
+    // Arrange
+    const { ledger, replies } = timedLedger();
+    ledger.sent(FIRST);
+
+    // Act
+    ledger.attribute(reply());
+
+    // Assert
+    expect(replies).toEqual([]);
+  });
+});

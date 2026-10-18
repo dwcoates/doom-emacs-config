@@ -1,0 +1,105 @@
+{
+  "_comment": [
+    "THE cross-runtime latency vocabulary (docs/PLAN-runtime-metrics.md,",
+    "docs/protobuf-design/runtime-metrics.md). Every user-facing latency",
+    "agent-repl measures is named here once, with where it starts and ends,",
+    "which runtime measures it, how soon it is felt, and how it is bucketed.",
+    "",
+    "Readers, each of which asserts its own table against this file:",
+    "  - bin/profile-report.go reads the budgets (threshold and reason) for",
+    "    its latency table, so the profile and the metrics share one",
+    "    threshold per latency;",
+    "  - the daemon (daemon/internal/runtimemetrics) holds the reported kinds",
+    "    and their buckets, and its tests compare them with this file;",
+    "  - the webapp and the shim hold the kinds they measure, and their tests",
+    "    compare them with this file.",
+    "",
+    "reported_as names the wire enum value a runtime reports the latency",
+    "with: agentrepl.v1.ReportedLatencyKind for Emacs and the webapp,",
+    "shim.v1.ShimLatencyKind for the shim. null is a latency only the",
+    "profile report measures (from log edges), not yet reported live.",
+    "",
+    "buckets_seconds are the histogram's inclusive upper bounds, ascending,",
+    "+Inf implied. A latency reported live MUST carry them; the shim states",
+    "them in every frame and the daemon refuses any that differ."
+  ],
+  "latencies": [
+    {
+      "name": "prompt_echo",
+      "description": "prompt echo (submit to the prompt drawn)",
+      "start": "Emacs submits a prompt (elisp.input.submit)",
+      "end": "the webapp draws the user prompt (feed.draw-user-prompt)",
+      "measured_by": "profile",
+      "threshold_ms": 100,
+      "reason": "a keystroke's echo; anything past ~100ms reads as lag",
+      "reported_as": null,
+      "buckets_seconds": null
+    },
+    {
+      "name": "switch_repeat",
+      "description": "switch to a shown workspace (keystroke to the page's first shown frame)",
+      "start": "Emacs takes the switch keystroke (elisp.host.editor-switch)",
+      "end": "the page's first frame shown (page.shown-frame)",
+      "measured_by": "webapp",
+      "threshold_ms": 100,
+      "reason": "a navigation the user is waiting on",
+      "reported_as": "REPORTED_LATENCY_KIND_SWITCH_REPEAT",
+      "buckets_seconds": [0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5]
+    },
+    {
+      "name": "switch_first",
+      "description": "first switch to a never-shown workspace (keystroke to page painted)",
+      "start": "Emacs takes the switch keystroke (elisp.host.editor-switch)",
+      "end": "the page's feed painted (feed.page-placed)",
+      "measured_by": "webapp",
+      "threshold_ms": 100,
+      "reason": "the same navigation; a blank page is the worst case of it",
+      "reported_as": "REPORTED_LATENCY_KIND_SWITCH_FIRST",
+      "buckets_seconds": [0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5]
+    },
+    {
+      "name": "page_boot",
+      "description": "page boot to first feed paint",
+      "start": "the page starts (main.boot)",
+      "end": "the page's feed painted (feed.page-placed)",
+      "measured_by": "webapp",
+      "threshold_ms": 300,
+      "reason": "the page is on screen and empty meanwhile",
+      "reported_as": "REPORTED_LATENCY_KIND_PAGE_BOOT",
+      "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
+    },
+    {
+      "name": "workspace_open",
+      "description": "workspace open (tab opened to session up)",
+      "start": "Emacs opens the tab (elisp.roster.tab-open)",
+      "end": "the daemon's session is up (daemon.workspace.bring_up)",
+      "measured_by": "profile",
+      "threshold_ms": 300,
+      "reason": "the workspace is visible but not usable meanwhile",
+      "reported_as": null,
+      "buckets_seconds": null
+    },
+    {
+      "name": "prompt_first_output",
+      "description": "prompt to first response text (vendor-bound)",
+      "start": "Emacs submits a prompt (elisp.input.submit)",
+      "end": "the webapp draws the first response text",
+      "measured_by": "profile",
+      "threshold_ms": 1000,
+      "reason": "the vendor's first token dominates; our share is the rest",
+      "reported_as": null,
+      "buckets_seconds": null
+    },
+    {
+      "name": "vendor_first_output",
+      "description": "prompt handed to the vendor to first response text",
+      "start": "the shim hands a prompt to the vendor SDK",
+      "end": "the shim receives the first response text",
+      "measured_by": "shim",
+      "threshold_ms": 1000,
+      "reason": "the vendor's first token; the part of prompt_first_output the vendor owns",
+      "reported_as": "SHIM_LATENCY_KIND_FIRST_OUTPUT",
+      "buckets_seconds": [0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60]
+    }
+  ]
+}

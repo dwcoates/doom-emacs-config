@@ -195,6 +195,7 @@ var Suites = []Suite{
 	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true},
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
 	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true},
+	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/metrics-agent-repl/test-run.sh"},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
@@ -314,6 +315,9 @@ var Suites = []Suite{
 var AlwaysRunRegions = []string{
 	// The module's scripts and what their harnesses and the e2e suites read.
 	"bin/", "scripts/", "skills/", "hooks/", "launchd/", "images/", "testdata/",
+	// The metrics store's manifest and scrape config, which the requirements
+	// harness reads and installs, as it does launchd/'s plists.
+	"metrics/",
 	// The proto suite (bin/report-nonlisp-coverage.sh proto) reads the
 	// contract's sources; the keyed suites read what they import of
 	// proto/gen through their build graph, and proto/vocab as declared data.

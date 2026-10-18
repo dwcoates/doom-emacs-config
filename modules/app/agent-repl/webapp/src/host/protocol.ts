@@ -42,6 +42,14 @@ interface PresenceMessage {
   readonly channel: typeof HOST_CHANNEL;
   readonly kind: "presence";
   readonly shown: boolean;
+  /**
+   * When the user's switch that made this show began: the wall-clock instant
+   * (Unix milliseconds) Emacs took the switch keystroke. The page measures the
+   * switch from it (switch-latency.ts). ABSENT when the show was not a switch
+   * the user made in Emacs, and on every message but the one first telling a
+   * listening page it is shown; a host from a build before it never sends it.
+   */
+  readonly switchStartedAtMs?: number;
 }
 
 /** host -> page: the background the workspace's Emacs input window paints. */
@@ -179,8 +187,10 @@ export function parseHostToPage(data: unknown): HostToPage | null {
   if (!isRecord(data) || data.channel !== HOST_CHANNEL) return null;
   switch (data.kind) {
     case "presence":
-      return typeof data.shown === "boolean"
-        ? { channel: HOST_CHANNEL, kind: "presence", shown: data.shown }
+      if (typeof data.shown !== "boolean") return null;
+      if (data.switchStartedAtMs === undefined) return { channel: HOST_CHANNEL, kind: "presence", shown: data.shown };
+      return typeof data.switchStartedAtMs === "number" && Number.isFinite(data.switchStartedAtMs)
+        ? { channel: HOST_CHANNEL, kind: "presence", shown: data.shown, switchStartedAtMs: data.switchStartedAtMs }
         : null;
     case "inputBackground":
       return typeof data.background === "string"

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.agentrepl.victoriametrics — launchd user agent for the always-on metrics
+  store (docs/PLAN-runtime-metrics.md). VictoriaMetrics scrapes the daemon,
+  the store and the sidecar every 15 seconds through the targets they
+  advertise under ~/.cache/agent-repl/metrics/targets/, keeps 30 days, and
+  answers PromQL on 127.0.0.1:8428 (the metrics-agent-repl skill).
+
+  TEMPLATE: like the store's and the sidecar's, this copy uses ~-relative
+  paths that bin/requirements.sh (rendered_plist) makes absolute when it
+  installs it into ~/Library/LaunchAgents/.
+
+  THE PROGRAM IS AN INSTALLED COMMAND (metrics/requirements.json: brew's
+  victoriametrics), reached through /usr/bin/env because launchd's own PATH
+  holds neither Homebrew prefix.
+
+  Flags:
+    -storageDataPath   ~/.cache/agent-repl/metrics/data
+    -retentionPeriod   30d (owner ruling 2026-10-17)
+    -httpListenAddr    127.0.0.1:8428, loopback only, the one fixed port: no
+                       test ever starts this service
+    -promscrape.config ~/.cache/agent-repl/metrics/scrape.yml, copied from
+                       metrics/scrape.yml by the installer
+    -promscrape.fileSDCheckInterval 15s, so a restarted runtime's new port
+                       is scraped within one interval
+    -search.latencyOffset 5s: the default 30s would hide the last half
+                       minute from a query, and every sample here comes from
+                       one scraper, so there is no late writer to wait for
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentrepl.victoriametrics</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>victoria-metrics</string>
+        <string>-storageDataPath=~/.cache/agent-repl/metrics/data</string>
+        <string>-retentionPeriod=30d</string>
+        <string>-httpListenAddr=127.0.0.1:8428</string>
+        <string>-promscrape.config=~/.cache/agent-repl/metrics/scrape.yml</string>
+        <string>-promscrape.fileSDCheckInterval=15s</string>
+        <string>-search.latencyOffset=5s</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>AGENT_REPL_METRICS_ROOT</key>
+        <string>~/.cache/agent-repl/metrics</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Do not respawn faster than once per 10s if the binary crash-loops. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ExitTimeOut</key>
+    <integer>20</integer>
+
+    <!-- Standard, never Background: see launchd/AGENTS.md. -->
+    <key>ProcessType</key>
+    <string>Standard</string>
+
+    <key>StandardOutPath</key>
+    <string>~/.cache/agent-repl/log/victoriametrics.log</string>
+    <key>StandardErrorPath</key>
+    <string>~/.cache/agent-repl/log/victoriametrics.log</string>
+</dict>
+</plist>

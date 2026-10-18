@@ -26,5 +26,85 @@ message WatchSessionResponse {
     // membership from the shim rather than from a durable record. (Landing
     // 7, 2026-09-02.)
     conversation.v1.SessionStarted session_started = 2;
+    // The shim's own performance counters, for the daemon's always-on
+    // metrics. Sent on a 15-second tick that starts when a watch opens,
+    // whenever the figures differ from the last frame this watch carried; a
+    // new watch's first tick sends any figures already counted, so a daemon
+    // that adopted this shim learns its totals within 15 seconds. Never sent
+    // among the opening frames, whose order is the readiness protocol. Every
+    // figure is CUMULATIVE since ShimMeasurements' counting instant, so a
+    // frame lost with a broken stream is subsumed by the next one.
+    ShimMeasurements measurements = 3;
   }
+}
+
+// ---- Measurements: the shim's performance counters for the daemon's metrics ----
+
+// Everything the shim measures that only the shim can see: its traffic with
+// the vendor API and the latencies whose ends it observes. Every figure
+// counts from ONE instant, `counted_since_unix_ms`, the moment this shim
+// process started counting; a frame with a different instant is a new
+// counting run (the shim restarted), whose figures start again from zero.
+// The daemon folds each run into per-workspace monotonic counters, so a
+// restart never reads as a counter going backwards.
+message ShimMeasurements {
+  // When this shim process started counting, Unix milliseconds. The same in
+  // every frame of one process's lifetime.
+  int64 counted_since_unix_ms = 1;
+  // Bytes exchanged with the vendor API since `counted_since_unix_ms`. UNSET
+  // when this shim cannot count them: the vendor's HTTP is made by the
+  // agent SDK's own child process, outside the shim, so a shim sets this only
+  // where it carries that traffic itself. The daemon publishes no traffic
+  // series for a workspace whose shim leaves it unset, rather than a zero.
+  optional ShimVendorTraffic vendor_traffic = 2;
+  // One cumulative histogram per shim-measured latency kind, each kind at
+  // most once. A kind with no observation yet is absent.
+  repeated ShimLatencyHistogram latencies = 3;
+}
+
+// The shim's traffic with the vendor API, counted in memory where the shim
+// carries it: request and response bytes as they pass. It is the vendor
+// traffic of this workspace's session; traffic of processes the agent runs is
+// not in it.
+message ShimVendorTraffic {
+  // Bytes sent to the vendor since the counting instant.
+  uint64 bytes_sent = 1;
+  // Bytes received from the vendor since the counting instant.
+  uint64 bytes_received = 2;
+}
+
+// Which interaction a shim-measured latency measured. Each value names one
+// entry of proto/vocab/latencies.json, which states its edges, threshold and
+// histogram buckets.
+enum ShimLatencyKind {
+  // Never sent: a frame carrying it is refused by the daemon, loudly.
+  SHIM_LATENCY_KIND_UNSPECIFIED = 0;
+  // From a prompt handed to the vendor to the first response text arriving:
+  // what the vendor's first token costs, plus the shim's own share.
+  SHIM_LATENCY_KIND_FIRST_OUTPUT = 1;
+}
+
+// One latency kind's distribution since the counting instant, in the shape of
+// a Prometheus histogram so the daemon exposes it without re-bucketing.
+message ShimLatencyHistogram {
+  // Which interaction this histogram measures. Never UNSPECIFIED.
+  ShimLatencyKind kind = 1;
+  // The buckets in ascending upper-bound order, the last ending below +Inf
+  // (the +Inf bucket is `count`). The bounds must equal the kind's buckets
+  // in proto/vocab/latencies.json; the daemon refuses a histogram whose
+  // bounds differ rather than summing it into the wrong buckets.
+  repeated ShimLatencyBucket buckets = 2;
+  // How many observations in total, the +Inf bucket.
+  uint64 count = 3;
+  // The sum of every observation, in seconds.
+  double sum_seconds = 4;
+}
+
+// One histogram bucket: how many observations were at or below its bound.
+message ShimLatencyBucket {
+  // The bucket's inclusive upper bound, in seconds.
+  double upper_bound_seconds = 1;
+  // How many observations were at or below the bound since the counting
+  // instant (cumulative across buckets, as Prometheus counts them).
+  uint64 cumulative_count = 2;
 }

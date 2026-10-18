@@ -46,6 +46,7 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -1475,6 +1476,8 @@ type harness struct {
 	Pages       *fakeSupersededPages
 	OpenWorld   *fakeOpenWorld
 	ChessBoards *fakeChessSquares
+	// Latencies records what ReportLatencies accepts.
+	Latencies *fakeLatencies
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
 	Surfaces      *fakeSurfaces
@@ -1552,6 +1555,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 
 		PersistentWifi:   &fakePersistentWifi{},
 		HiddenKeepalives: &fakeHiddenKeepalives{},
+		Latencies:        &fakeLatencies{enabled: true},
 		NewsDigest:       &fakeNewsDigest{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
@@ -1602,6 +1606,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		WebappDist:        dist,
 		ImageOrigin:       http.NotFoundHandler(),
 		ChessBoards:       h.ChessBoards,
+		Latencies:         h.Latencies,
 		ChessWidgetBundle: http.NotFoundHandler(),
 		Log:               h.Surfaces,
 	}
@@ -1973,4 +1978,32 @@ func (f *fakeSupersededPages) pages() []servedPage {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]servedPage(nil), f.served...)
+}
+
+// observedLatency is one latency ReportLatencies recorded.
+type observedLatency struct {
+	workspace ids.WorkspaceID
+	kind      string
+	seconds   float64
+}
+
+// fakeLatencies is a metrics surface that records what it is given.
+type fakeLatencies struct {
+	mu       sync.Mutex
+	enabled  bool
+	observed []observedLatency
+}
+
+func (f *fakeLatencies) Enabled() bool { return f.enabled }
+
+func (f *fakeLatencies) ObserveLatency(ws ids.WorkspaceID, kind runtimemetrics.LatencyKind, seconds float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.observed = append(f.observed, observedLatency{workspace: ws, kind: kind.Name, seconds: seconds})
+}
+
+func (f *fakeLatencies) all() []observedLatency {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]observedLatency(nil), f.observed...)
 }

@@ -1,0 +1,20 @@
+# VictoriaMetrics scrape config for agent-repl's always-on metrics
+# (docs/PLAN-runtime-metrics.md). Installed by bin/requirements.sh into
+# ~/.cache/agent-repl/metrics/scrape.yml (metrics/requirements.json `files`).
+#
+# THE TARGETS ARE FILES, NOT PORTS. The daemon, the store and the sidecar each
+# listen on an ephemeral loopback port and advertise it in
+# <metrics root>/targets/<program>.json (agentrepl/logging/metrics), the
+# daemon at the moment it publishes daemon.addr. A target whose runtime is
+# down keeps naming its last port and reads as down (up == 0).
+#
+# %{AGENT_REPL_METRICS_ROOT} is set by the launchd plist.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: agent-repl
+    file_sd_configs:
+      - files:
+          - "%{AGENT_REPL_METRICS_ROOT}/targets/*.json"

@@ -322,7 +322,7 @@ cmd_report() {
     local args=(--all --json --level "$level" --since "$since")
     [ -z "$until" ] || args+=(--until "$until")
     "${AGENT_REPL_PROFILE_LOGS_SH:-$THIS_DIR/logs.sh}" "${args[@]}" >"$logs" 2>"$dir/logs.err" || die "bin/logs.sh failed; see $dir/logs.err"
-    local report_args=(--session "$dir" --logs "$logs")
+    local report_args=(--session "$dir" --logs "$logs" --latencies "$THIS_DIR/../proto/vocab/latencies.json")
     [ -z "$startup" ] || report_args+=(--startup "$startup")
     "$helper" "${report_args[@]}" | tee "$dir/summary.md"
 }

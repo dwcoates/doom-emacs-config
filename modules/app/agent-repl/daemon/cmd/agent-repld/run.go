@@ -12,13 +12,16 @@ import (
 	"time"
 
 	"agent-repld/internal/boot"
+	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/pprofsurface"
+	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/server"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
@@ -45,6 +48,9 @@ type process struct {
 	// Claim is the bound loopback listener and the advertisement it may
 	// publish.
 	Claim daemonaddr.Claim
+	// Metrics is the always-on metrics surface, nil when it is off. Its
+	// target is advertised exactly when daemon.addr is published.
+	Metrics *runtimemetrics.Surface
 	// Instance identifies this daemon process for serving ownership. It is
 	// minted once per process: an instance id that changed mid-run would let a
 	// daemon fail to recognize the workspaces it claimed itself.
@@ -178,6 +184,23 @@ func run(ctx context.Context, opts options, h hooks) error {
 		defer profiling.Close()
 	}
 
+	// THE METRICS SURFACE LISTENS FROM BOOT and advertises only when this
+	// daemon owns its role: with daemon.addr below for an incumbent, through
+	// the rollout's WriteDaemonAddr hook for a joining successor.
+	metricsSurface, err := runtimemetrics.Open(log, opts.metricsRoot)
+	if err != nil {
+		log.Error(runtimemetrics.Operation, "the metrics surface was refused", dlog.Context{
+			"metrics_root": opts.metricsRoot,
+			"error":        err.Error(),
+		})
+		return fmt.Errorf("agent-repld: open the metrics surface: %w", err)
+	}
+	defer metricsSurface.Close()
+	if err := metricsSurface.RegisterProcesses(procmetrics.Kernel{}, layout.SockDir(), layout.Dir(), hostOnBattery); err != nil {
+		log.Error(runtimemetrics.Operation, "the process collector was refused", dlog.Context{"error": err.Error()})
+		return fmt.Errorf("agent-repld: %w", err)
+	}
+
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(log, levelWindow, os.Getenv, os.UserHomeDir)
@@ -285,12 +308,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 				"addr_path":     layout.DaemonAddr(),
 			})
 		}
-		if err := claim.Publish(); err != nil {
-			log.Error("daemon.cmd.claim", "daemon.addr could not be published", dlog.Context{
-				"address": claim.Address(),
-				"error":   err.Error(),
+		if err := publishOwnership(claim, metricsSurface); err != nil {
+			log.Error("daemon.cmd.claim", "the daemon's advertisement could not be published", dlog.Context{
+				"address":      claim.Address(),
+				"metrics_root": opts.metricsRoot,
+				"error":        err.Error(),
 			})
-			return fmt.Errorf("agent-repld: publish daemon.addr: %w", err)
+			return fmt.Errorf("agent-repld: %w", err)
 		}
 		log.Debug("daemon.cmd.claim", "the incumbent published its address", dlog.Context{
 			"address": claim.Address(),
@@ -371,6 +395,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return err
 	}
+	// A FORGOTTEN WORKSPACE TAKES ITS SERIES WITH IT: every way a workspace
+	// leaves the registry is this client's Forget.
+	db = metricsSurface.ObserveForgets(db)
 	// THE CLOSE RELEASES EVERY LEASE THIS PROCESS STILL OWNS (wsm Close), so
 	// its failure is a lease left behind and is said at ERROR, never dropped.
 	defer teardown.step("state_close", func() {
@@ -410,6 +437,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		Surfaces:  surfaces,
 		DB:        db,
 		Claim:     claim,
+		Metrics:   metricsSurface,
 		Instance:  wsm.NewInstanceID(),
 		Exit: func(reason standDownReason) {
 			ended.record(reason, nil)
@@ -991,6 +1019,35 @@ func bootModeFor(opts options) daemonaddr.BootMode {
 		return daemonaddr.BootReplacing
 	}
 	return daemonaddr.BootOrdinary
+}
+
+// hostOnBattery answers whether the host runs on battery, through the same
+// power source the merge queue's governor reads (cpugov.HostPowerSource), so
+// a harness's fixed source reads the same in both.
+func hostOnBattery() (bool, error) {
+	source, err := cpugov.HostPowerSource(os.Getenv(cpugov.FixedPowerEnv))
+	if err != nil {
+		return false, err
+	}
+	power, err := source.Power()
+	if err != nil {
+		return false, err
+	}
+	return power == cpugov.PowerBattery, nil
+}
+
+// publishOwnership publishes the two advertisements of a daemon that owns
+// its workspaces, daemon.addr and then the metrics target, always together and
+// in that order: an incumbent at boot, a successor through the rollout's
+// WriteDaemonAddr hook once it owns every workspace.
+func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface) error {
+	if err := claim.Publish(); err != nil {
+		return fmt.Errorf("publish daemon.addr: %w", err)
+	}
+	if err := surface.Advertise(); err != nil {
+		return fmt.Errorf("advertise the metrics target: %w", err)
+	}
+	return nil
 }
 
 // joiningVerdict is the claim record's verdict for a joining successor, which

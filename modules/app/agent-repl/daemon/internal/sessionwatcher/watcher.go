@@ -1955,6 +1955,15 @@ func (w *watcher) runSession(gen, openedAt uint64, stream shimclient.Stream[*shi
 			w.streamEnded(gen, "session", "watch_session", "", nil, err)
 			return
 		}
+		// THE SHIM'S MEASUREMENTS ARE FOLDED OUTSIDE THE WATCHER'S LOCK: they
+		// touch no session state, and every figure is cumulative, so a frame
+		// from a watch that has since gone stale is as true as any other.
+		if m := frame.GetMeasurements(); m != nil {
+			if w.sinks.Measurements != nil {
+				w.sinks.Measurements.FoldShimMeasurements(w.ws, m)
+			}
+			continue
+		}
 		w.mu.Lock()
 		if w.stale(gen) {
 			w.mu.Unlock()

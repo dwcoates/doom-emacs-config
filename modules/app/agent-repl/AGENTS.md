@@ -1719,6 +1719,10 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
 - **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `git_hook`, `launchd_service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
   - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
+- **A `launchd_service` names where its program comes from.**
+  - `build_target` and `binary`: built here by `bin/build-frontend.sh` into the cache (the store, the sidecar).
+  - `command`: an installed program, declared by its own `program` entry that installs it (VictoriaMetrics, `victoria-metrics`). The plist reaches it through `/usr/bin/env` with a `PATH` that includes Homebrew's prefixes, since launchd's own `PATH` does not.
+  - `files`: config copied from the module into the cache (`from` module-relative, `to` cache-relative). A copy that differs reads as `outdated`, and install copies it again and restarts the service.
 - **A retired skill stays in the manifest, marked `"retired": true`.**
   - Install then removes the link it once made on every machine, and leaves a file of the user's at that name alone.
   - Deleting the entry instead would leave every other machine with a dangling link.

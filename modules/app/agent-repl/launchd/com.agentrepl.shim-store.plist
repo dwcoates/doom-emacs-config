@@ -14,6 +14,9 @@
   Flag contract (must match agent-shim/shim-store/main.go):
     --socket  Connect-over-UDS server path (~/.cache/agent-repl/sock/store.sock)
     --db      SQLite/WAL event db          (~/.cache/agent-repl/store/events.db)
+    --metrics-root  always-on metrics root  (~/.cache/agent-repl/metrics):
+              the store advertises its loopback /metrics in
+              targets/store.json under it (docs/PLAN-runtime-metrics.md)
 
   Nothing else is passed: --log, --pprof and --watch-buffer keep their
   defaults, and this service needs no other flag.
@@ -36,6 +39,8 @@
         <string>~/.cache/agent-repl/sock/store.sock</string>
         <string>--db</string>
         <string>~/.cache/agent-repl/store/events.db</string>
+        <string>--metrics-root</string>
+        <string>~/.cache/agent-repl/metrics</string>
     </array>
 
     <key>RunAtLoad</key>

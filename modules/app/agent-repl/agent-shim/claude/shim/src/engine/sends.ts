@@ -190,13 +190,31 @@ export function isTopLevelReply(message: SdkMessage): boolean {
  * ONE CALL PER MESSAGE ({@link attribute}), in the order the vendor emits them,
  * before anything else reads the message, so every consumer sees one answer.
  */
+/**
+ * Told when the vendor's first top-level reply to one of the shim's prompts
+ * arrives: the send, and the seconds since it was registered on the ledger's
+ * monotonic clock. The shim's keep-alive sends are never reported.
+ */
+export type FirstReply = (send: Send, seconds: number) => void;
+
 export class SendLedger {
   private readonly open = new Map<string, Send>();
+  /** When each prompt still awaiting its first reply was registered, monotonic ms. */
+  private readonly awaitingFirstReply = new Map<string, number>();
   /** Answered or forgotten sends, oldest first, bounded by {@link RETIRED_SENDS_REMEMBERED}. */
   private readonly retired = new Map<string, Send>();
   /** A batch member's uuid -> the uuid of the batch's first send ({@link batched}). */
   private readonly batchedUnder = new Map<string, string>();
   private running: VendorTurn = UNSTATED;
+
+  /**
+   * `firstReply` hears each prompt's first reply (engine/measurements.ts);
+   * `monoMs` is the monotonic clock it is timed on.
+   */
+  constructor(
+    private readonly firstReply: FirstReply = () => undefined,
+    private readonly monoMs: () => number = () => performance.now(),
+  ) {}
 
   /**
    * A send is about to be pushed. Registered BEFORE the push, so the vendor
@@ -217,6 +235,7 @@ export class SendLedger {
     }
     this.retired.delete(send.uuid);
     this.open.set(send.uuid, send);
+    if (!send.keepalive) this.awaitingFirstReply.set(send.uuid, this.monoMs());
     LOGGER.debug(
       { turn_id: send.turnId, client_uuid: send.uuid, keepalive: send.keepalive, open_sends: this.open.size },
       "a send was registered under the client uuid the vendor will echo",
@@ -337,6 +356,7 @@ export class SendLedger {
         );
       }
       this.running = next;
+      if (next.kind === "send" && isTopLevelReply(message)) this.repliedTo(next.send);
     } else if (this.running.kind === "unstated" && (isTopLevelReply(message) || message.type === "result")) {
       // THE FIRST REPLY OF A TURN A STAMPED SEND STARTED IS ALWAYS STAMPED
       // (sdk.d.ts). One that names nothing opens a turn no send of ours
@@ -388,7 +408,17 @@ export class SendLedger {
     return { kind: "send", send: retired, retired: true };
   }
 
+  /** The first top-level reply to `send` arrived: it is timed, once. */
+  private repliedTo(send: Send): void {
+    const sentAt = this.awaitingFirstReply.get(send.uuid);
+    if (sentAt === undefined) return;
+    this.awaitingFirstReply.delete(send.uuid);
+    this.firstReply(send, (this.monoMs() - sentAt) / 1000);
+  }
+
   private retire(send: Send): void {
+    // A send that ended without a reply is never timed.
+    this.awaitingFirstReply.delete(send.uuid);
     this.retired.delete(send.uuid);
     this.retired.set(send.uuid, send);
     while (this.retired.size > RETIRED_SENDS_REMEMBERED) {
