@@ -34,13 +34,24 @@ Each entry says what was decided, why, and what it departs from.
   service for nothing.
 - Decided:
   - `agentrepl_build_info{program, build}` carries the content hash only.
-  - The build writes the checkout's version (`git describe --tags --match
-    '[0-9]*.[0-9]*.[0-9]*'`) to `<metrics root>/deployed-version` on every
-    run, and the daemon exposes it as
-    `agentrepl_deployed_version_info{version}`, read at scrape time.
+  - The daemon resolves its checkout's version itself and exposes
+    `agentrepl_deployed_version_info{version}`:
+    - the greatest version tag on HEAD (`0.129.0`), or, when HEAD carries
+      none, the greatest reachable one with HEAD as semver build metadata
+      (`0.129.0+0123456789ab`);
+    - resolved by the `deployed_version` background loop once at start and
+      again whenever a deploy gets all the way through (`deploy.Deps.Deployed`
+      kicks it), so git never runs on the boot path, the deploy path or a
+      scrape;
+    - withdrawn, with one ERROR record per cause, when it cannot be
+      resolved, because a stale version would misattribute everything after
+      it.
   - A version is a property of the deployed source tree, which is what a
     regression hunt groups by; the content hashes say which programs
     actually changed between two versions.
+- A first cut had `bin/build-frontend.sh` write a version file; it was
+  dropped because the daemon's own deploy builds in staging and installs,
+  so the daemon is the one place that knows when a version is deployed.
 
 ## 4. The shared package lives in the shared logging module
 

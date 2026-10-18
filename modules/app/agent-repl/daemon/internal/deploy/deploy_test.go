@@ -1395,3 +1395,31 @@ func TestNewRefusesADeployWithNoOwedReports(t *testing.T) {
 		t.Fatalf("New = %v, want the missing reports refused", err)
 	}
 }
+
+func TestTheDeployedHookHearsOnlyADeployThatGotThrough(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    int
+	}{
+		{name: "a deploy that got all the way through", arrange: func(*harness) {}, want: 1},
+		{name: "a failed build", arrange: func(h *harness) {
+			h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc: 3 errors", Log: "/logs/build.log"}
+		}, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			_, _ = h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if h.deployed != tc.want {
+				t.Fatalf("Deployed heard %d deploys, want %d", h.deployed, tc.want)
+			}
+		})
+	}
+}

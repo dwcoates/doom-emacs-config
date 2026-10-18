@@ -255,7 +255,11 @@ type Deps struct {
 	// through which a step a later deploy gets through closes it. It must be
 	// the OBSERVED client (health.ObserveFaults), so the footer draws it.
 	Faults Faults
-	Log    dlog.Surfaces
+	// Deployed is told, without blocking, each time a deploy gets all the
+	// way through: the metrics surface re-resolves the deployed version
+	// (runtimemetrics.VersionLoop.Kick). Nil tells nobody.
+	Deployed func()
+	Log      dlog.Surfaces
 }
 
 // Deployer runs deploys, one at a time.
@@ -452,6 +456,9 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// component, so no earlier rollback's partial state stands.
 	d.stepSucceeded(ctx, health.DeployStepRollback)
 	d.log.Info(opDeploy, "deployed: every component decided", dlog.Merge(fields, dlog.Context{"decisions": summarize(result)}))
+	if d.deps.Deployed != nil {
+		d.deps.Deployed()
+	}
 	if !movesDaemon(result) {
 		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
 		// leaves `updated` to its successor, whose streams are the ones left.

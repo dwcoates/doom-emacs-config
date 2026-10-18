@@ -986,6 +986,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the deploy ----
 
 	clients := &deployClientsForwarder{}
+	// THE DEPLOYED VERSION is resolved by its own background loop, off the
+	// boot path and off the deploy's: once at start, again after each deploy.
+	deployedVersion := p.Metrics.DeployedVersionLoop(git, paths.Checkout)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
@@ -1004,6 +1007,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Faults:     p.DB,
 		Joining:    p.Opts.joining != "",
 		Getenv:     os.Getenv,
+		Deployed:   deployedVersion.Kick,
 	})
 	if err != nil {
 		return nil, err
@@ -1366,6 +1370,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
+		{Name: "deployed_version", Run: deployedVersion.Run},
 		{Name: "gate_governor", Run: func(ctx context.Context) error {
 			gateGovernor.Run(ctx)
 			return nil

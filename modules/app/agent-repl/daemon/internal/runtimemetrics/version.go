@@ -1,99 +1,156 @@
 package runtimemetrics
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
 	"sync"
+	"sync/atomic"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/semver"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// DeployedVersionFile is the file, under the metrics root, the build writes
-// the deployed checkout's version into on every run
-// (docs/METRICS-JUDGEMENT-CALLS.md, call 3).
-const DeployedVersionFile = "deployed-version"
-
 // DeployedVersionName is the series naming the deployed version, value 1.
 const DeployedVersionName = "agentrepl_deployed_version_info"
 
-// DeployedVersionPath answers the deployed-version file under root.
-func DeployedVersionPath(root string) string { return filepath.Join(root, DeployedVersionFile) }
+// VersionGit is the git the deployed version is read through.
+type VersionGit interface {
+	ResolveRef(ctx context.Context, repoDir, ref string) (string, error)
+	TagsAt(ctx context.Context, dir, commit string) ([]string, error)
+	TagsMerged(ctx context.Context, dir, commit string) ([]string, error)
+}
 
-// versionPattern is `git describe --tags --match '[0-9]*.[0-9]*.[0-9]*'
-// --dirty`'s output: a release tag, optionally the commits past it and the
-// abbreviated commit, optionally dirty.
-var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+-g[0-9a-f]+)?(-dirty)?$`)
+// deployedVersion is the version the daemon last resolved for its checkout,
+// exposed as DeployedVersionName (docs/METRICS-JUDGEMENT-CALLS.md, call 3).
+// It is resolved off every hot path, by DeployedVersionLoop, and only read
+// here, so a scrape runs no git.
+type deployedVersion struct {
+	desc    *prometheus.Desc
+	current atomic.Pointer[string]
+}
 
-// deployedVersionCollector reads the deployed-version file at every scrape,
-// so a deploy that changed only the webapp or the shim still moves the
-// version without restarting the daemon.
-//
-// A file it cannot read or that holds no version is an expected condition (a
-// build that predates the file, a hand-edited root), so it does not fail the
-// scrape: the version series is omitted and the failure is recorded once
-// per change of cause, never once per scrape.
-type deployedVersionCollector struct {
-	log  dlog.Logger
-	path string
-	desc *prometheus.Desc
+func newDeployedVersion() *deployedVersion {
+	return &deployedVersion{
+		desc: prometheus.NewDesc(DeployedVersionName, "Always 1. The version label is the version of the checkout the daemon deploys from.", []string{"version"}, nil),
+	}
+}
+
+func (d *deployedVersion) Describe(ch chan<- *prometheus.Desc) { ch <- d.desc }
+
+func (d *deployedVersion) Collect(ch chan<- prometheus.Metric) {
+	if v := d.current.Load(); v != nil {
+		ch <- prometheus.MustNewConstMetric(d.desc, prometheus.GaugeValue, 1, *v)
+	}
+}
+
+// ResolveDeployedVersion answers dir's version: the greatest version tag on
+// HEAD, or, when HEAD carries none, the greatest one reachable from it with
+// HEAD's commit as semver build metadata (`0.129.0+<12 hex>`), so a build
+// between landings is never mistaken for the landing.
+func ResolveDeployedVersion(ctx context.Context, git VersionGit, dir string) (string, error) {
+	head, err := git.ResolveRef(ctx, dir, "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve HEAD of %s: %w", dir, err)
+	}
+	at, err := git.TagsAt(ctx, dir, head)
+	if err != nil {
+		return "", fmt.Errorf("read the tags on %s's HEAD %s: %w", dir, head, err)
+	}
+	if v, ok := semver.Highest(at); ok {
+		return v.String(), nil
+	}
+	reachable, err := git.TagsMerged(ctx, dir, head)
+	if err != nil {
+		return "", fmt.Errorf("read the tags reachable from %s's HEAD %s: %w", dir, head, err)
+	}
+	v, ok := semver.Highest(reachable)
+	if !ok {
+		return "", errors.New("no version tag is reachable from HEAD of " + dir)
+	}
+	short := head
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	return v.String() + "+" + short, nil
+}
+
+// VersionLoop resolves the deployed version once when it starts and again
+// on every Kick, until its context ends.
+type VersionLoop struct {
+	version *deployedVersion
+	git     VersionGit
+	dir     string
+	log     dlog.Logger
+	kick    chan struct{}
 
 	mu        sync.Mutex
 	lastCause string
+	lastValue string
 }
 
-func newDeployedVersionCollector(log dlog.Logger, path string) *deployedVersionCollector {
-	return &deployedVersionCollector{
-		log:  log,
-		path: path,
-		desc: prometheus.NewDesc(DeployedVersionName, "Always 1. The version label is the version of the deployed checkout.", []string{"version"}, nil),
+// DeployedVersionLoop answers the loop that keeps the deployed version
+// current for dir. On the off surface the loop resolves nothing and only
+// waits for its context.
+func (s *Surface) DeployedVersionLoop(git VersionGit, dir string) *VersionLoop {
+	l := &VersionLoop{git: git, dir: dir, kick: make(chan struct{}, 1)}
+	if s != nil {
+		l.version, l.log = s.version, s.log
+	}
+	return l
+}
+
+// Kick asks for a fresh resolution: a deploy finished. It never blocks; kicks
+// that arrive while one is pending collapse into it.
+func (l *VersionLoop) Kick() {
+	select {
+	case l.kick <- struct{}{}:
+	default:
 	}
 }
 
-func (c *deployedVersionCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+// Run drives the loop until ctx ends.
+func (l *VersionLoop) Run(ctx context.Context) error {
+	if l.version == nil {
+		<-ctx.Done()
+		return nil
+	}
+	l.resolve(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-l.kick:
+			l.resolve(ctx)
+		}
+	}
+}
 
-func (c *deployedVersionCollector) Collect(ch chan<- prometheus.Metric) {
-	version, err := readDeployedVersion(c.path)
-	c.note(version, err)
-	if err != nil {
+// resolve reads the version and records a change of outcome: a new cause of
+// failure at ERROR (the series is withdrawn, because a stale version would
+// misattribute everything measured after it), a new version at INFO.
+func (l *VersionLoop) resolve(ctx context.Context) {
+	v, err := ResolveDeployedVersion(ctx, l.git, l.dir)
+	if err != nil && ctx.Err() != nil {
 		return
 	}
-	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 1, version)
-}
-
-// note records a change of outcome: a new cause of failure at ERROR, a
-// recovery at INFO.
-func (c *deployedVersionCollector) note(version string, err error) {
-	cause := ""
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if err != nil {
-		cause = err.Error()
+		l.version.current.Store(nil)
+		l.lastValue = ""
+		if cause := err.Error(); cause != l.lastCause {
+			l.lastCause = cause
+			l.log.Error(Operation, "the deployed version could not be resolved; the version series is withdrawn until it can", dlog.Context{"checkout": l.dir, "error": cause})
+		}
+		return
 	}
-	c.mu.Lock()
-	changed := cause != c.lastCause
-	recovered := changed && cause == "" && c.lastCause != ""
-	c.lastCause = cause
-	c.mu.Unlock()
-	switch {
-	case changed && err != nil:
-		c.log.Error(Operation, "the deployed version could not be read; the version series is omitted until it can", dlog.Context{"path": c.path, "error": cause})
-	case recovered:
-		c.log.Info(Operation, "the deployed version is readable again", dlog.Context{"path": c.path, "version": version})
+	l.lastCause = ""
+	l.version.current.Store(&v)
+	if v != l.lastValue {
+		l.lastValue = v
+		l.log.Info(Operation, "the deployed version is resolved", dlog.Context{"checkout": l.dir, "version": v})
 	}
-}
-
-// readDeployedVersion reads and validates the version file.
-func readDeployedVersion(path string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read the deployed version: %w", err)
-	}
-	version := strings.TrimSpace(string(raw))
-	if !versionPattern.MatchString(version) {
-		return "", fmt.Errorf("the deployed version file holds %q, which is not a `git describe` version", version)
-	}
-	return version, nil
 }

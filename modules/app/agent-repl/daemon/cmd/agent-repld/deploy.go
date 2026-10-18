@@ -67,6 +67,8 @@ type deployerParams struct {
 	// it leaves the standing deploy faults alone.
 	Joining bool
 	Getenv  func(string) string
+	// Deployed is told each time a deploy gets all the way through.
+	Deployed func()
 }
 
 // deployPaths are the host locations a deploy works against.
@@ -153,6 +155,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Lifetime:  ctx,
 		Progress:  p.Progress,
 		Faults:    p.Faults,
+		Deployed:  p.Deployed,
 		Log:       p.Surfaces,
 	})
 	if err != nil {

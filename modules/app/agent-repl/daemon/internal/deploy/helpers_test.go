@@ -373,6 +373,8 @@ type harness struct {
 	progress       *fakeProgress
 	faults         *fakeFaults
 	reports        *fakeReports
+	// deployed counts the Deployed hook's calls.
+	deployed int
 }
 
 // fakeReports records every cover and payment of the owed landing reports, in
@@ -593,6 +595,7 @@ func newHarness(t *testing.T) *harness {
 			return h.migrationKind, h.migrationErr
 		},
 		RunningLayout: runningLayout,
+		Deployed:      func() { h.deployed++ },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
