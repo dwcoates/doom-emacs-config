@@ -5423,20 +5423,21 @@ describe("the stylesheet's real-height contract", () => {
  * compaction summary keep the base. An interim's gap then shrinks on every side
  * by as much as its narrower text did (owner request, 2026-10-14). Only a
  * prompt's and an interim's rungs move the horizontal token, so no other
- * bubble's sides move with the vertical ladder.
+ * bubble's sides move with the vertical ladder. Every prompt and the green
+ * answer then sit 30% wider top and bottom (owner request, 2026-10-17).
  */
 describe("the padding ladder", () => {
   const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
-  const TIGHT = "calc(var(--bubble-pad-y-base)*0.49)";
+  const PROMPT_Y = "calc(var(--bubble-pad-y-base)*0.49*1.3)";
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
-  const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15)";
+  const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15*1.3)";
   const USER_X = "calc(var(--bubble-pad-x-base)*0.7*1.15)";
   const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const BASE_X = "var(--bubble-pad-x-base)";
-  const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25)";
+  const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25*1.3)";
 
   /** The PROPERTY the cascade hands a bubble of VARIANT, wearing CLASSES. */
   function tokenOf(property: string, variant: string, classes: readonly string[] = []): string {
@@ -5450,9 +5451,9 @@ describe("the padding ladder", () => {
   const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; y: string; x: string }[] = [
     { variant: "response", y: RESPONSE, x: BASE_X },
     { variant: "user", y: USER_Y, x: USER_X },
-    { variant: "agent", y: TIGHT, x: PROMPT_X },
-    { variant: "peer", y: TIGHT, x: PROMPT_X },
-    { variant: "held", y: TIGHT, x: PROMPT_X },
+    { variant: "agent", y: PROMPT_Y, x: PROMPT_X },
+    { variant: "peer", y: PROMPT_Y, x: PROMPT_X },
+    { variant: "held", y: PROMPT_Y, x: PROMPT_X },
     { variant: "thinking", y: THINKING, x: BASE_X },
     { variant: "agentic", y: BASE, x: BASE_X },
     { variant: "compaction", y: BASE, x: BASE_X },
@@ -5479,10 +5480,10 @@ describe("the padding ladder", () => {
     const got = [tokenOf("--bubble-pad-y", "user"), tokenOf("--bubble-pad-x", "user"), tokenOf("--bubble-pad-y", "agent"), tokenOf("--bubble-pad-x", "agent")];
 
     // Assert
-    expect(got).toEqual([USER_Y, USER_X, TIGHT, PROMPT_X]);
+    expect(got).toEqual([USER_Y, USER_X, PROMPT_Y, PROMPT_X]);
   });
 
-  it("gives the green answer 25% more top and bottom than a plain response", () => {
+  it("gives the green answer 1.25 then 1.3 times a plain response's top and bottom", () => {
     // Arrange / Act
     const got = [tokenOf("--bubble-pad-y", "response", ["final-response"]), tokenOf("--bubble-pad-y", "response")];
 
