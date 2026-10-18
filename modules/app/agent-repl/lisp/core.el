@@ -4284,12 +4284,6 @@ BUF may be a buffer object or a name string."
 ;; only for the vterm hide-overlay / font-scale / color-advice machinery.
 ;; This survives because `agent-repl-input-mode' (input.el) calls
 ;; `agent-repl--set-buffer-background' to tint the input composer.
-;; `agent-repl--grey-hex' (its only production caller) was deleted as
-;; dead code, so `agent-repl--rgb-hex' is now used directly.
-
-(defun agent-repl--rgb-hex (r g b)
-  "Return a #rrggbb hex color string for channel values R, G, B (0-255 each)."
-  (format "#%02x%02x%02x" r g b))
 
 (defun agent-repl--set-buffer-background (color)
   "Set default and fringe background to COLOR in the current buffer.

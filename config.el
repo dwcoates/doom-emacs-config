@@ -56,7 +56,7 @@
 
 ;; Load the theme (doom-one, doom-molokai, etc); keep in mind that each
 ;; theme may have their own settings.
-(load-theme 'doom-tomorrow-night-warm t)
+(load-theme 'doom-tomorrow-night t)
 
 ;; Enable custom neotree theme
 (doom-themes-neotree-config)  ; all-the-icons fonts must be installed!
