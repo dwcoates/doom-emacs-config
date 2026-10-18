@@ -1923,7 +1923,7 @@ describe("the open rows' tab numbers", () => {
 
 describe("the tab number's stylesheet", () => {
   it.each([
-    ["color", "color-mix(in srgb, var(--muted) 75%, black)"],
+    ["color", "var(--tab-number-color)"],
     ["font-size", "0.62rem"],
     ["margin-left", "-0.4rem"],
     ["margin-right", "0.1rem"],
@@ -1941,5 +1941,19 @@ describe("the tab number's stylesheet", () => {
 
     // Assert
     expect(value).toBe(want);
+  });
+
+  it("names the number's grey once, on the rail", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })], tabs: [{ id: "x" }] }),
+      sidebarContext(),
+    );
+
+    // Act
+    const value = inRail(drawn, (rail) => cascadedValue(rail, "--tab-number-color"));
+
+    // Assert
+    expect(value.replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--muted)75%,black)");
   });
 });
