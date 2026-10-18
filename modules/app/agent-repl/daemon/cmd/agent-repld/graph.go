@@ -50,6 +50,7 @@ import (
 	"agent-repld/internal/pagesupersede"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/persistentwifi"
+	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
@@ -880,7 +881,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	// THE WEB CONTENT PROCESS'S FOOTPRINT, once a minute: every workspace
 	// page lives in it, and its size is what its main-thread stalls follow.
-	footprints, err := webfootprint.New(webfootprint.Deps{Runner: scripts, Clock: clock.System{}, Log: log})
+	footprints, err := webfootprint.New(webfootprint.Deps{Reader: procmetrics.Kernel{}, Clock: clock.System{}, Log: log})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the web footprint sampler: %w", err)
 	}
