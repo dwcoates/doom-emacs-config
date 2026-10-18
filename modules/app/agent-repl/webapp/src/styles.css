@@ -354,10 +354,13 @@
   --bubble-base-font-rem: 0.9;
   --bubble-font-rem: var(--bubble-base-font-rem);
   /* THE SMALLER PROSE SIZE: a thinking bubble's and an interim response's
-     text (they narrow `--bubble-font-rem` to it), and a tool card head's
-     text, the title and a Bash card's `$ <command>` alike (owner request,
-     2026-10-17: the same size as the thinking bubble's text). */
+     text (they narrow `--bubble-font-rem` to it). */
   --small-prose-font-rem: 0.8;
+  /* THE TOOL CARD HEAD SIZE: a tool card head's text, the title and a Bash
+     card's `$ <command>` alike, a touch below the thinking bubble's text
+     (owner requests, 2026-10-17: at the thinking size the head still read
+     bigger than the thinking prose). */
+  --tool-head-font-rem: 0.75;
   --tree-font-rem: 0.85;
   --tree-line-h: 1.45;
   /* THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the one source of the
@@ -2360,15 +2363,15 @@ html[data-page-unshown] *::after {
   background: var(--merge-card);
   border-color: var(--merge-border);
 }
-/* A tool card head is set at the thinking bubble's size (owner request,
-   2026-10-17), from the one shared `--small-prose-font-rem`, below the card
-   body's 0.85rem. */
+/* A tool card head is set at `--tool-head-font-rem`, a touch below the
+   thinking bubble's size (owner requests, 2026-10-17) and the card body's
+   0.85rem. */
 .tool-head {
   display: flex;
   gap: 0.5rem;
   align-items: center;
   margin-bottom: 0.25rem;
-  font-size: calc(var(--small-prose-font-rem) * 1rem * var(--feed-text-scale));
+  font-size: calc(var(--tool-head-font-rem) * 1rem * var(--feed-text-scale));
 }
 .tool-name { font-weight: 600; color: var(--tool-title); }
 .badge { font-size: calc(0.7rem * var(--feed-text-scale)); padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }

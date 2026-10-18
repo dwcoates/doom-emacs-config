@@ -3297,11 +3297,19 @@ describe("the one bubble rule set", () => {
     expect(others.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("sets a tool card head at the thinking bubble's smaller prose size", () => {
+  it("sets a tool card head from its own head size token", () => {
     // Arrange / Act
     const head = ownDeclarationsOf(".tool-head") ?? "";
     // Assert
-    expect(head).toMatch(/font-size:\s*calc\(var\(--small-prose-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+    expect(head).toMatch(/font-size:\s*calc\(var\(--tool-head-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it("sizes a tool card head below the thinking bubble's prose", () => {
+    // Arrange / Act
+    const head = Number(rootToken("--tool-head-font-rem"));
+    const thinking = Number(rootToken("--small-prose-font-rem"));
+    // Assert
+    expect([head, head < thinking]).toEqual([0.75, true]);
   });
 
   it("carries no second leading token for prompts", () => {
