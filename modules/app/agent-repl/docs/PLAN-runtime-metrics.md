@@ -1,6 +1,10 @@
 # Plan: always-on runtime performance metrics
 
-Status: agreed with the owner 2026-10-17, unbuilt. Branch `metrics-o11y`.
+Status: agreed with the owner 2026-10-17; built 2026-10-18 on branch
+`metrics-o11y`. Where the build departed from this plan, the reason is in
+`docs/METRICS-JUDGEMENT-CALLS.md`, and the reporting contract's record is
+`docs/protobuf-design/runtime-metrics.md`. The built catalog is the last
+section below.
 
 ## Goal
 
@@ -218,3 +222,35 @@ Authored through the `create-or-update-skill` skill. It covers:
 - A test that each of the three Go programs serves `/metrics` through the
   shared package rather than its own copy.
 - e2e reads `/metrics` directly. VictoriaMetrics never runs in tests.
+
+## Built catalog
+
+Every series below is queryable through `/metrics-agent-repl`.
+
+| Series | Type | Labels | Source |
+|---|---|---|---|
+| `agentrepl_build_info` | gauge, 1 | `program`, `build` | every Go runtime (`agentrepl/logging/metrics`) |
+| `go_*`, `process_*` (Go runtime) | various | `instance` | every Go runtime |
+| `agentrepl_deployed_version_info` | gauge, 1 | `version` | daemon (`runtimemetrics`), at start and after each deploy |
+| `agentrepl_latency_seconds` | histogram | `latency`, `workspace` | daemon: `switch_repeat`, `switch_first`, `page_boot` reported by pages; `vendor_first_output` folded from shims |
+| `agentrepl_process_cpu_seconds_total` | counter | `process`, `workspace` | daemon (`procmetrics`), per group, monotonic across churn |
+| `agentrepl_process_disk_read_bytes_total`, `..._written_bytes_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
+| `agentrepl_process_energy_joules_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
+| `agentrepl_process_resident_bytes`, `..._footprint_bytes` | gauge | `process`, `workspace` | daemon (`procmetrics`) |
+| `agentrepl_process_threads`, `..._open_fds`, `..._count` | gauge | `process`, `workspace` | daemon (`procmetrics`) |
+| `agentrepl_host_cpu_seconds_total` | counter | `mode` | daemon (`procmetrics`) |
+| `agentrepl_host_memory_bytes`, `..._memory_total_bytes`, `..._memory_pressure` | gauge | `state` | daemon (`procmetrics`) |
+| `agentrepl_host_disk_free_bytes`, `..._disk_total_bytes` | gauge | | daemon (`procmetrics`) |
+| `agentrepl_host_on_battery` | gauge, 0 or 1 | | daemon (`procmetrics`) |
+| `agentrepl_vendor_bytes_sent_total`, `..._received_total` | counter | `workspace` | daemon, folded from shims; published by no shim yet (judgement call 6) |
+
+Process groups (`process`): `daemon`, `daemon_tools`, `store`, `sidecar`,
+`shim` and `shim_tools` (by `workspace`), `emacs`, `webkit_webcontent`,
+`webkit_networking`, `webkit_gpu`.
+
+Not built, each recorded with its reason:
+
+- `prompt_echo`, `workspace_open`, `prompt_first_output` stay profile-only
+  (`docs/protobuf-design/runtime-metrics.md`, entry 3).
+- Vendor bytes: no shim counts them (judgement call 6).
+- Emacs reports no latency of its own (judgement call 8).
