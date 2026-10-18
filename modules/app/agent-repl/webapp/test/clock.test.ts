@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_TICK_MS, createTicker } from "../src/clock.js";
+import { DEFAULT_TICK_MS, createTicker, sameLocalDate } from "../src/clock.js";
+import { mergedToday } from "../src/sidebar/row.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -140,5 +141,31 @@ describe("createTicker", () => {
     ticker.subscribe(fn);
     vi.advanceTimersByTime(DEFAULT_TICK_MS);
     expect(fn).toHaveBeenCalledOnce();
+  });
+});
+
+describe("sameLocalDate", () => {
+  /** Local midnight beginning 2023-11-14, whatever zone the suite runs in. */
+  const midnight = new Date(2023, 10, 14).getTime();
+
+  it.each([
+    { name: "the same instant", a: midnight + 5, b: midnight + 5, want: true },
+    { name: "midnight and the last millisecond of its day", a: midnight, b: midnight + 86_400_000 - 1, want: true },
+    { name: "the last millisecond of yesterday", a: midnight - 1, b: midnight, want: false },
+    { name: "the same day of another month", a: midnight, b: new Date(2023, 9, 14).getTime(), want: false },
+    { name: "the same day of another year", a: midnight, b: new Date(2022, 10, 14).getTime(), want: false },
+  ])("decides $name by the local calendar date", ({ a, b, want }) => {
+    // Act + Assert
+    expect(sameLocalDate(a, b)).toBe(want);
+  });
+
+  it("is the test a merge of today is decided by", () => {
+    // Arrange
+    const pairs = [
+      [midnight, midnight + 3_600_000],
+      [midnight - 1, midnight],
+    ];
+    // Act + Assert
+    expect(pairs.map(([a, b]) => mergedToday(a, b))).toEqual(pairs.map(([a, b]) => sameLocalDate(a, b)));
   });
 });

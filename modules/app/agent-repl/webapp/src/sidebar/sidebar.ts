@@ -231,10 +231,10 @@ function mountSidebarIn(
     selectionFade: createSelectionFade(body),
     shownAhead: () => shownAhead,
   };
-  // THE BAND FIT (band-fit.ts): the Hidden Workspaces and Recently Merged
-  // viewports, re-fitted after every draw and on every resize of the rail or
-  // a pane.
-  const bandFit = installBandFit(body);
+  // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
+  // Merged viewports, re-fitted after every draw, on every resize of the rail
+  // or a pane, and when the local date turns over.
+  const bandFit = installBandFit(body, ctx.ticker);
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
   // again after every push and every row drawn as it came into view, since
   // either draws rows the query has not narrowed.

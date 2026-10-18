@@ -56,6 +56,7 @@ import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
+import { sameLocalDate } from "../clock.js";
 import { liveElapsedReading, settledElapsedClock } from "../elapsed-clock.js";
 import { heatColor } from "../heat.js";
 import { cacheLapseHeat, cacheLapseText } from "./cache-lapse.js";
@@ -1113,11 +1114,5 @@ export const MERGED_TODAY_CLASS = "merged-today";
 
 /** Whether MERGED_AT_MS falls on the same LOCAL calendar date as NOW_MS. */
 export function mergedToday(mergedAtMs: number, nowMs: number): boolean {
-  const merged = new Date(mergedAtMs);
-  const now = new Date(nowMs);
-  return (
-    merged.getFullYear() === now.getFullYear() &&
-    merged.getMonth() === now.getMonth() &&
-    merged.getDate() === now.getDate()
-  );
+  return sameLocalDate(mergedAtMs, nowMs);
 }

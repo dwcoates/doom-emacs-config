@@ -440,6 +440,10 @@ The top bar's effort selector sits between the model selector and the permission
   - The open workspaces section, headed "OPEN", holds the grouping you picked (repositories, tasks or stages).
   - "HIDDEN" holds the workspaces you hid.
   - "RECENTLY MERGED" holds the merges of the last week.
+- **The sidebar itself never scrolls; a section too long for its room scrolls its own rows.**
+  - "OPEN" takes the room first, down to four rows each for "HIDDEN" and "RECENTLY MERGED".
+  - "HIDDEN" and "RECENTLY MERGED" share those eight rows, so one merge today leaves "HIDDEN" seven.
+  - Only today's merges claim that room; older merges show only in room the other sections leave.
 - **`SPC j R` sends every hidden workspace one keep-alive.**
   - A hidden workspace's cache is otherwise left to lapse, and its session stops when it does.
   - The keep-alive moves each lapse later, so the "HIDDEN" countdowns grow back.
