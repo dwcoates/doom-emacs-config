@@ -9,6 +9,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -97,8 +98,17 @@ func (s *server) SubmitPrompt(
 	// A selected row the daemon cannot resolve to a landed bubble is REFUSED,
 	// never dropped: delivering the user's message shorn of the reference they
 	// saw would silently change what they said.
+	// AN AGENT'S PROMPT TAKES NO SELECTION: the selection is the user's, in
+	// the composer they are reading, so an agent's prompt neither quotes it nor
+	// ends it.
 	said := req.Msg.GetSaid()
-	sentWith, _, sentWithSelection := s.currentSelection(subject.Record.ID)
+	var (
+		sentWith          *frontendv1.FeedId
+		sentWithSelection bool
+	)
+	if sentBy == nil {
+		sentWith, _, sentWithSelection = s.currentSelection(subject.Record.ID)
+	}
 	if ref := sentWith; sentWithSelection {
 		quoted, ok := s.deps.Feed.BubbleText(subject.Record.ID, ref)
 		if !ok {

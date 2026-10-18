@@ -910,3 +910,33 @@ func TestSetWorkspaceCorrespondenceWithNoMarkIsInvalid(t *testing.T) {
 		t.Fatalf("SetWorkspaceCorrespondence = %v, awaits %+v; want invalid_argument and none", err, h.Verbs.api.awaits)
 	}
 }
+
+func TestAnAgentSentPromptNeitherQuotesNorEndsTheUsersSelection(t *testing.T) {
+	// Arrange: the user has a response selected in the recipient's feed.
+	h := newHarness(t)
+	sentBy := registerSender(h)
+	h.Feed.finals = feedIDs("resp-1-old", "resp-2-new")
+	h.Feed.markdown = map[string]string{"resp-2-new": "prior answer"}
+	h.Prompts.outcome = prompthandler.Outcome{Turn: "t1", Disposition: promptqueue.Disposition{Delivered: true}}
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older))); err != nil {
+		t.Fatalf("seed selection: %v", err)
+	}
+
+	// Act
+	if _, err := submitAgentPrompt(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert: the prompt went as the agent wrote it, and the selection stands,
+	// so an OLDER steps on from it to the older response.
+	if got := promptText(h.Prompts.lastSaid); got != "hello" {
+		t.Fatalf("submitted = %q, want the agent's text with no quote", got)
+	}
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(older)))
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-1-old" {
+		t.Fatalf("selected = %q, want resp-1-old (the user's selection survived)", got)
+	}
+}
