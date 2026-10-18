@@ -191,6 +191,9 @@ const (
 	AgentReplSessionHealthProcedure = "/agentrepl.v1.AgentRepl/SessionHealth"
 	// AgentReplClientLogProcedure is the fully-qualified name of the AgentRepl's ClientLog RPC.
 	AgentReplClientLogProcedure = "/agentrepl.v1.AgentRepl/ClientLog"
+	// AgentReplReportLatenciesProcedure is the fully-qualified name of the AgentRepl's ReportLatencies
+	// RPC.
+	AgentReplReportLatenciesProcedure = "/agentrepl.v1.AgentRepl/ReportLatencies"
 	// AgentReplUpdatePersistentWifiModeProcedure is the fully-qualified name of the AgentRepl's
 	// UpdatePersistentWifiMode RPC.
 	AgentReplUpdatePersistentWifiModeProcedure = "/agentrepl.v1.AgentRepl/UpdatePersistentWifiMode"
@@ -320,6 +323,7 @@ var (
 	agentReplDaemonHealthMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ClientLog")
+	agentReplReportLatenciesMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
 	agentReplUpdatePersistentWifiModeMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
 	agentReplRegisterWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplSelectWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
@@ -526,6 +530,9 @@ type AgentReplClient interface {
 	// A console-less client's diagnostic record, into the durable log. See
 	// endpoint_client_log.proto.
 	ClientLog(context.Context, *connect.Request[v1.ClientLogRequest]) (*connect.Response[v1.ClientLogResponse], error)
+	// A client's finished interaction latencies, into the always-on metrics.
+	// See endpoint_report_latencies.proto.
+	ReportLatencies(context.Context, *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error)
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
@@ -961,6 +968,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplClientLogMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportLatencies: connect.NewClient[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse](
+			httpClient,
+			baseURL+AgentReplReportLatenciesProcedure,
+			connect.WithSchema(agentReplReportLatenciesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		updatePersistentWifiMode: connect.NewClient[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](
 			httpClient,
 			baseURL+AgentReplUpdatePersistentWifiModeProcedure,
@@ -1173,6 +1186,7 @@ type agentReplClient struct {
 	daemonHealth             *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth            *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
+	reportLatencies          *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
 	updatePersistentWifiMode *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
 	registerWorkspace        *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	selectWorkspace          *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
@@ -1485,6 +1499,11 @@ func (c *agentReplClient) ClientLog(ctx context.Context, req *connect.Request[v1
 	return c.clientLog.CallUnary(ctx, req)
 }
 
+// ReportLatencies calls agentrepl.v1.AgentRepl.ReportLatencies.
+func (c *agentReplClient) ReportLatencies(ctx context.Context, req *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error) {
+	return c.reportLatencies.CallUnary(ctx, req)
+}
+
 // UpdatePersistentWifiMode calls agentrepl.v1.AgentRepl.UpdatePersistentWifiMode.
 func (c *agentReplClient) UpdatePersistentWifiMode(ctx context.Context, req *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
 	return c.updatePersistentWifiMode.CallUnary(ctx, req)
@@ -1789,6 +1808,9 @@ type AgentReplHandler interface {
 	// A console-less client's diagnostic record, into the durable log. See
 	// endpoint_client_log.proto.
 	ClientLog(context.Context, *connect.Request[v1.ClientLogRequest]) (*connect.Response[v1.ClientLogResponse], error)
+	// A client's finished interaction latencies, into the always-on metrics.
+	// See endpoint_report_latencies.proto.
+	ReportLatencies(context.Context, *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error)
 	// Turn persistent wifi mode (lid-closed operation) on, off, or over. See
 	// endpoint_update_persistent_wifi_mode.proto.
 	UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error)
@@ -2220,6 +2242,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplClientLogMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportLatenciesHandler := connect.NewUnaryHandler(
+		AgentReplReportLatenciesProcedure,
+		svc.ReportLatencies,
+		connect.WithSchema(agentReplReportLatenciesMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplUpdatePersistentWifiModeHandler := connect.NewUnaryHandler(
 		AgentReplUpdatePersistentWifiModeProcedure,
 		svc.UpdatePersistentWifiMode,
@@ -2486,6 +2514,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSessionHealthHandler.ServeHTTP(w, r)
 		case AgentReplClientLogProcedure:
 			agentReplClientLogHandler.ServeHTTP(w, r)
+		case AgentReplReportLatenciesProcedure:
+			agentReplReportLatenciesHandler.ServeHTTP(w, r)
 		case AgentReplUpdatePersistentWifiModeProcedure:
 			agentReplUpdatePersistentWifiModeHandler.ServeHTTP(w, r)
 		case AgentReplRegisterWorkspaceProcedure:
@@ -2771,6 +2801,10 @@ func (UnimplementedAgentReplHandler) SessionHealth(context.Context, *connect.Req
 
 func (UnimplementedAgentReplHandler) ClientLog(context.Context, *connect.Request[v1.ClientLogRequest]) (*connect.Response[v1.ClientLogResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ClientLog is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportLatencies(context.Context, *connect.Request[v1.ReportLatenciesRequest]) (*connect.Response[v1.ReportLatenciesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportLatencies is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) UpdatePersistentWifiMode(context.Context, *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {

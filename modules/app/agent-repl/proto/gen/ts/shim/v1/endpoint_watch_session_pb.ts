@@ -5,8 +5,8 @@
 // @generated from file shim/v1/endpoint_watch_session.proto (package shim.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SessionStarted, SessionUpdate } from "../../conversation/v1/session_pb";
 import { file_conversation_v1_session } from "../../conversation/v1/session_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_session.proto.
  */
 export const file_shim_v1_endpoint_watch_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCKNAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIAEIHCgVmcmFtZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSKXAQoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSMgoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljEjAKCWxhdGVuY2llcxgDIAMoCzIdLnNoaW0udjEuU2hpbUxhdGVuY3lIaXN0b2dyYW0iPwoRU2hpbVZlbmRvclRyYWZmaWMSEgoKYnl0ZXNfc2VudBgBIAEoBBIWCg5ieXRlc19yZWNlaXZlZBgCIAEoBCKPAQoUU2hpbUxhdGVuY3lIaXN0b2dyYW0SJgoEa2luZBgBIAEoDjIYLnNoaW0udjEuU2hpbUxhdGVuY3lLaW5kEisKB2J1Y2tldHMYAiADKAsyGi5zaGltLnYxLlNoaW1MYXRlbmN5QnVja2V0Eg0KBWNvdW50GAMgASgEEhMKC3N1bV9zZWNvbmRzGAQgASgBIkoKEVNoaW1MYXRlbmN5QnVja2V0EhsKE3VwcGVyX2JvdW5kX3NlY29uZHMYASABKAESGAoQY3VtdWxhdGl2ZV9jb3VudBgCIAEoBCpYCg9TaGltTGF0ZW5jeUtpbmQSIQodU0hJTV9MQVRFTkNZX0tJTkRfVU5TUEVDSUZJRUQQABIiCh5TSElNX0xBVEVOQ1lfS0lORF9GSVJTVF9PVVRQVVQQAUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
 
 /**
  * Nothing to say: the session is the connection's.
@@ -64,6 +64,19 @@ export type WatchSessionResponse = Message<"shim.v1.WatchSessionResponse"> & {
      */
     value: SessionStarted;
     case: "sessionStarted";
+  } | {
+    /**
+     * The shim's own performance counters, for the daemon's always-on
+     * metrics. Sent once right after every new watch attaches, so a daemon
+     * that adopted this shim learns its totals at once, then whenever any
+     * counter changed, at most once per 15 seconds. Every figure is
+     * CUMULATIVE since ShimMeasurements' counting instant, so a frame lost
+     * with a broken stream is subsumed by the next one.
+     *
+     * @generated from field: shim.v1.ShimMeasurements measurements = 3;
+     */
+    value: ShimMeasurements;
+    case: "measurements";
   } | { case: undefined; value?: undefined };
 };
 
@@ -73,4 +86,183 @@ export type WatchSessionResponse = Message<"shim.v1.WatchSessionResponse"> & {
  */
 export const WatchSessionResponseSchema: GenMessage<WatchSessionResponse> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_watch_session, 1);
+
+/**
+ * Everything the shim measures that only the shim can see: its traffic with
+ * the vendor API and the latencies whose ends it observes. Every figure
+ * counts from ONE instant, `counted_since_unix_ms`, the moment this shim
+ * process started counting; a frame with a different instant is a new
+ * counting run (the shim restarted), whose figures start again from zero.
+ * The daemon folds each run into per-workspace monotonic counters, so a
+ * restart never reads as a counter going backwards.
+ *
+ * @generated from message shim.v1.ShimMeasurements
+ */
+export type ShimMeasurements = Message<"shim.v1.ShimMeasurements"> & {
+  /**
+   * When this shim process started counting, Unix milliseconds. The same in
+   * every frame of one process's lifetime.
+   *
+   * @generated from field: int64 counted_since_unix_ms = 1;
+   */
+  countedSinceUnixMs: bigint;
+
+  /**
+   * Bytes exchanged with the vendor API since `counted_since_unix_ms`.
+   *
+   * @generated from field: shim.v1.ShimVendorTraffic vendor_traffic = 2;
+   */
+  vendorTraffic?: ShimVendorTraffic | undefined;
+
+  /**
+   * One cumulative histogram per shim-measured latency kind, each kind at
+   * most once. A kind with no observation yet is absent.
+   *
+   * @generated from field: repeated shim.v1.ShimLatencyHistogram latencies = 3;
+   */
+  latencies: ShimLatencyHistogram[];
+};
+
+/**
+ * Describes the message shim.v1.ShimMeasurements.
+ * Use `create(ShimMeasurementsSchema)` to create a new message.
+ */
+export const ShimMeasurementsSchema: GenMessage<ShimMeasurements> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_watch_session, 2);
+
+/**
+ * The shim's traffic with the vendor API, counted in memory at the shim's
+ * own HTTP layer: request and response bodies and headers as the shim sends
+ * and receives them. It is the vendor traffic of this workspace's session;
+ * traffic of processes the agent runs is not in it.
+ *
+ * @generated from message shim.v1.ShimVendorTraffic
+ */
+export type ShimVendorTraffic = Message<"shim.v1.ShimVendorTraffic"> & {
+  /**
+   * Bytes sent to the vendor since the counting instant.
+   *
+   * @generated from field: uint64 bytes_sent = 1;
+   */
+  bytesSent: bigint;
+
+  /**
+   * Bytes received from the vendor since the counting instant.
+   *
+   * @generated from field: uint64 bytes_received = 2;
+   */
+  bytesReceived: bigint;
+};
+
+/**
+ * Describes the message shim.v1.ShimVendorTraffic.
+ * Use `create(ShimVendorTrafficSchema)` to create a new message.
+ */
+export const ShimVendorTrafficSchema: GenMessage<ShimVendorTraffic> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_watch_session, 3);
+
+/**
+ * One latency kind's distribution since the counting instant, in the shape of
+ * a Prometheus histogram so the daemon exposes it without re-bucketing.
+ *
+ * @generated from message shim.v1.ShimLatencyHistogram
+ */
+export type ShimLatencyHistogram = Message<"shim.v1.ShimLatencyHistogram"> & {
+  /**
+   * Which interaction this histogram measures. Never UNSPECIFIED.
+   *
+   * @generated from field: shim.v1.ShimLatencyKind kind = 1;
+   */
+  kind: ShimLatencyKind;
+
+  /**
+   * The buckets in ascending upper-bound order, the last ending below +Inf
+   * (the +Inf bucket is `count`). The bounds must equal the kind's buckets
+   * in proto/vocab/latencies.json; the daemon refuses a histogram whose
+   * bounds differ rather than summing it into the wrong buckets.
+   *
+   * @generated from field: repeated shim.v1.ShimLatencyBucket buckets = 2;
+   */
+  buckets: ShimLatencyBucket[];
+
+  /**
+   * How many observations in total, the +Inf bucket.
+   *
+   * @generated from field: uint64 count = 3;
+   */
+  count: bigint;
+
+  /**
+   * The sum of every observation, in seconds.
+   *
+   * @generated from field: double sum_seconds = 4;
+   */
+  sumSeconds: number;
+};
+
+/**
+ * Describes the message shim.v1.ShimLatencyHistogram.
+ * Use `create(ShimLatencyHistogramSchema)` to create a new message.
+ */
+export const ShimLatencyHistogramSchema: GenMessage<ShimLatencyHistogram> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_watch_session, 4);
+
+/**
+ * One histogram bucket: how many observations were at or below its bound.
+ *
+ * @generated from message shim.v1.ShimLatencyBucket
+ */
+export type ShimLatencyBucket = Message<"shim.v1.ShimLatencyBucket"> & {
+  /**
+   * The bucket's inclusive upper bound, in seconds.
+   *
+   * @generated from field: double upper_bound_seconds = 1;
+   */
+  upperBoundSeconds: number;
+
+  /**
+   * How many observations were at or below the bound since the counting
+   * instant (cumulative across buckets, as Prometheus counts them).
+   *
+   * @generated from field: uint64 cumulative_count = 2;
+   */
+  cumulativeCount: bigint;
+};
+
+/**
+ * Describes the message shim.v1.ShimLatencyBucket.
+ * Use `create(ShimLatencyBucketSchema)` to create a new message.
+ */
+export const ShimLatencyBucketSchema: GenMessage<ShimLatencyBucket> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_watch_session, 5);
+
+/**
+ * Which interaction a shim-measured latency measured. Each value names one
+ * entry of proto/vocab/latencies.json, which states its edges, threshold and
+ * histogram buckets.
+ *
+ * @generated from enum shim.v1.ShimLatencyKind
+ */
+export enum ShimLatencyKind {
+  /**
+   * Never sent: a frame carrying it is refused by the daemon, loudly.
+   *
+   * @generated from enum value: SHIM_LATENCY_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * From a prompt handed to the vendor to the first response text arriving:
+   * what the vendor's first token costs, plus the shim's own share.
+   *
+   * @generated from enum value: SHIM_LATENCY_KIND_FIRST_OUTPUT = 1;
+   */
+  FIRST_OUTPUT = 1,
+}
+
+/**
+ * Describes the enum shim.v1.ShimLatencyKind.
+ */
+export const ShimLatencyKindSchema: GenEnum<ShimLatencyKind> = /*@__PURE__*/
+  enumDesc(file_shim_v1_endpoint_watch_session, 0);
 
