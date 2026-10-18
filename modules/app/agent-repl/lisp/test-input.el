@@ -1458,18 +1458,13 @@ workspace's dwell clear another composer's badge."
         (should (equal remapped "#123456"))))))
 
 (ert-deftest agent-repl-input-background-is-the-webapp-composer-color ()
-  "The composer's default background is the webapp's dark `--composer-bg'."
-  ;; Arrange.
-  (let* ((css (with-temp-buffer
-                (insert-file-contents
-                 (expand-file-name "webapp/src/styles.css" agent-repl-test--module-root))
-                (buffer-string)))
-         (dark (substring css (string-match "@media (prefers-color-scheme: dark)" css))))
-    ;; Act.
-    (string-match "--composer-bg: \\(#[0-9a-f]\\{6\\}\\);" dark)
+  "The composer's default background is the webapp's dark `--composer-bg'.
+The ert suite may not read webapp/src/styles.css, so the shared value is
+pinned on both sides: here, and in webapp/test/styles.test.ts."
+  ;; Arrange / Act.
+  (let ((background (eval (car (get 'agent-repl-input-background 'standard-value)))))
     ;; Assert.
-    (should (equal (eval (car (get 'agent-repl-input-background 'standard-value)))
-                   (match-string 1 dark)))))
+    (should (equal background "#20201f"))))
 
 (ert-deftest agent-repl-input-mode-wraps-at-word-boundaries ()
   "The composer soft-wraps long lines at word boundaries."
