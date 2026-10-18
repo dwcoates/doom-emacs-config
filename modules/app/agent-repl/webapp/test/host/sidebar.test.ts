@@ -12,12 +12,15 @@ import type { DaemonContext } from "../../src/rpc/context.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
 import { dispatchPageTransition } from "../page-transition.js";
+import { beginPage, pageEnded, pageEnding, tearDownPage } from "../../src/page-teardown.js";
 
 let stop: { dispose(): void } | null = null;
 
 afterEach(() => {
   stop?.dispose();
   stop = null;
+  tearDownPage();
+  beginPage();
 });
 
 /** A webhost that records what the sidebar tells it. */
@@ -218,24 +221,47 @@ describe("startWebhostSidebar", () => {
     expect(installedOn).toEqual([document]);
   });
 
-  it("goes quiet and stops the load census when the webhost unloads for good", () => {
+  it("ends the webhost, its requests aborted and its load census stopped, when it unloads for good", () => {
     // Arrange
     const { host } = recordingHost();
     let stopped = 0;
-    let quiet: (() => boolean) | null = null;
     start(host, {
-      mount: (_nav, ctx) => {
-        quiet = () => ctx.isQuiesced();
-        return { dispose: () => undefined, markShown: () => undefined };
-      },
+      mount: () => ({ dispose: () => undefined, markShown: () => undefined }),
       installCensus: () => ({ stop: () => void stopped++ }),
     });
+    const requests = pageEnding();
 
     // Act
     dispatchPageTransition("pagehide", false);
 
     // Assert
-    expect([(quiet as (() => boolean) | null)?.(), stopped]).toEqual([true, 1]);
+    expect([requests.aborted, stopped]).toEqual([true, 1]);
+  });
+
+  it("leaves the webhost running when it is kept for the back/forward cache", () => {
+    // Arrange
+    const { host } = recordingHost();
+    start(host, { mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+
+    // Act
+    dispatchPageTransition("pagehide", true);
+
+    // Assert
+    expect(pageEnded()).toBe(false);
+  });
+
+  it("no longer ends the page at an unload once stopped", () => {
+    // Arrange
+    const { host } = recordingHost();
+    start(host, { mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+    stop?.dispose();
+    stop = null;
+
+    // Act
+    dispatchPageTransition("pagehide", false);
+
+    // Assert
+    expect(pageEnded()).toBe(false);
   });
 
   it("stops the load census when stopped", () => {
