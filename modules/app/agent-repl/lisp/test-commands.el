@@ -1060,6 +1060,9 @@ scope, never nil: a nil scope is refused by the ladder as a routing error
                       (agent-repl-test-commands--info-messages))))))
 
 ;;;; ---- SPC TAB p: swap with a drawn tab ----
+;;
+;; The slot checks live in `agent-repl--act-on-tab-slot', which the swap and
+;; the move (SPC TAB P) share; the swap's tests exercise it through the swap.
 
 (defvar agent-repl-test-commands--swapped nil
   "The (WS TARGET) pair a swap command requested, bound by `--placing'.")
@@ -1076,25 +1079,26 @@ of the daemon, nil when none was."
                ((symbol-function 'message) (lambda (&rest _) nil)))
        (agent-repl-test-commands--with-hidden-bar ,tabs ,hidden ,current ,@body))))
 
-(ert-deftest agent-repl-test-commands-swap-slot-maps-digits ()
+(ert-deftest agent-repl-test-commands-tab-slot-maps-digits ()
   "Digits 1-9 name slots 1-9 and 0 names slot 10."
-  (should (equal (mapcar #'agent-repl--swap-slot '(?1 ?5 ?9 ?0))
+  (should (equal (mapcar #'agent-repl--tab-slot '(?1 ?5 ?9 ?0))
                  '(1 5 9 10))))
 
-(ert-deftest agent-repl-test-commands-read-swap-slot-reads-one-digit-key ()
+(ert-deftest agent-repl-test-commands-read-tab-slot-reads-one-digit-key ()
   "The slot is read as ONE keystroke among the ten digits, needing no RET."
   ;; Arrange.
-  (let (offered)
+  (let (offered asked)
     (cl-letf (((symbol-function 'read-char-choice)
-               (lambda (_prompt chars &rest _) (setq offered chars) ?0)))
+               (lambda (prompt chars &rest _) (setq offered chars asked prompt) ?0)))
       ;; Act / Assert.
-      (should (= (agent-repl--read-swap-slot) 10))
-      (should (equal offered (number-sequence ?0 ?9))))))
+      (should (= (agent-repl--read-tab-slot "Swap with tab") 10))
+      (should (equal offered (number-sequence ?0 ?9)))
+      (should (equal asked "Swap with tab (1-9, 0 = 10): ")))))
 
 (ert-deftest agent-repl-test-commands-swap-reads-its-slot-interactively ()
   "The command's interactive spec is the one-digit reader."
   (should (equal (cadr (interactive-form 'agent-repl-workspace-swap))
-                 '(list (agent-repl--read-swap-slot)))))
+                 '(list (agent-repl--read-tab-slot "Swap with tab")))))
 
 (ert-deftest agent-repl-test-commands-swap-targets-the-nth-drawn-tab ()
   "Slot N counts the DRAWN tabs, and the current workspace swaps with it."
@@ -2040,3 +2044,12 @@ order, which is why commands.el still defines no tab ordering of its own."
 (ert-deftest agent-repl-test-commands-cycle-target-is-nil-when-nothing-is-drawn ()
   "Every tab hidden leaves no landing."
   (should-not (agent-repl--cycle-target '("a" "b") nil "a" 1)))
+
+(ert-deftest agent-repl-test-commands-tab-slot-gestures-share-one-helper ()
+  "Every tab-slot gesture command goes through `agent-repl--act-on-tab-slot'.
+A command that re-implemented the slot checks would drift from the others."
+  ;; Arrange.
+  (let ((body (lambda (fn) (format "%S" (symbol-function fn)))))
+    ;; Act / Assert.
+    (dolist (command '(agent-repl-workspace-swap))
+      (should (string-match-p "agent-repl--act-on-tab-slot" (funcall body command))))))

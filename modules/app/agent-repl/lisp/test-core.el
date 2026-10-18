@@ -317,15 +317,15 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("commands.el" agent-repl-switch-to-workspace
      "[agent-repl] No workspace tab %d -- the bar draws %d"
      "explains why the requested interactive switch did nothing")
-    ("commands.el" agent-repl-workspace-swap
-     "[agent-repl] The current workspace has no tab to swap"
-     "explains why the requested interactive swap did nothing")
-    ("commands.el" agent-repl-workspace-swap
+    ("commands.el" agent-repl--act-on-tab-slot
+     "[agent-repl] The current workspace has no tab to %s"
+     "explains why the requested interactive swap or move did nothing")
+    ("commands.el" agent-repl--act-on-tab-slot
      "[agent-repl] No workspace tab %d -- the bar draws %d"
-     "explains why the requested interactive swap did nothing")
-    ("commands.el" agent-repl-workspace-swap
+     "explains why the requested interactive swap or move did nothing")
+    ("commands.el" agent-repl--act-on-tab-slot
      "[agent-repl] %s is already tab %d"
-     "explains why the requested interactive swap did nothing")
+     "explains why the requested interactive swap or move did nothing")
     ("core.el" agent-repl--migrate-legacy-state
      "[agent-repl] migrated state %s -> %s"
      "announces an on-disk state migration")
