@@ -236,7 +236,7 @@ if out="$(cd "$THIS_DIR" && go test profile-report.go profile-report_test.go 2>&
 else
     fail "the report's Go unit tests pass" "$out"
 fi
-report="$("$HELPER" --session "$R/sess" --logs "$R/logs.jsonl" --startup 2026-10-12T15:59:59Z)"
+report="$("$HELPER" --latencies "$THIS_DIR/../proto/vocab/latencies.json" --session "$R/sess" --logs "$R/logs.jsonl" --startup 2026-10-12T15:59:59Z)"
 
 if grep -q '| daemon | 101 | 3.50 | 150 | 200 | 2 |' <<<"$report"; then
     pass "the report gives a process its CPU-seconds and its average and peak RSS"
@@ -312,7 +312,7 @@ cat >"$R/overlap-logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:02:01.810-04:00","runtime":"emacs","operation":"x","message":"elisp.host.editor-switch ws=a origin=cycle count=2","workspace_id":"A"}
 {"timestamp":"2026-10-12T12:02:02.100-04:00","runtime":"emacs","operation":"x","message":"profiling.switch-tour-done label=fast switches=1","workspace_id":""}
 EOF
-tour_report="$("$HELPER" --session "$R/sess" --logs "$R/tour-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
+tour_report="$("$HELPER" --latencies "$THIS_DIR/../proto/vocab/latencies.json" --session "$R/sess" --logs "$R/tour-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
 fast="$(sed -n '/^## Switch tour fast/,/^## Switch tour slow/p' <<<"$tour_report")"
 if grep -q '^## Switch tour fast (2 each way, 0.25s apart)' <<<"$fast" && grep -q '| 2 | 2 | 1 | 1 | 1 | 1 |' <<<"$fast"; then
     pass "a switch tour's section counts its keys, switches, passes run and superseded, and pages shown"
@@ -340,7 +340,7 @@ if grep -q '| Emacs, from the key to the webhost told to show the page (its redi
 else
     fail "a switch tour's section splits its own switches into phases" "$tour_report"
 fi
-overlap_report="$("$HELPER" --session "$R/sess" --logs "$R/overlap-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
+overlap_report="$("$HELPER" --latencies "$THIS_DIR/../proto/vocab/latencies.json" --session "$R/sess" --logs "$R/overlap-logs.jsonl" --startup 2026-10-12T15:59:59Z)"
 overlap_slow="$(sed -n '/^## Switch tour slow/,/^## Switch tour fast/p' <<<"$overlap_report")"
 if grep -q '| 0 | 1 | 0 | 0 | 0 | 0 |' <<<"$overlap_slow"; then
     pass "a tour's window ends where the next tour starts, inside its settle margin"
@@ -379,7 +379,7 @@ else
 fi
 
 set +e
-bad="$("$HELPER" --session "$R/sess" --logs <(printf 'not json\n') 2>&1)"
+bad="$("$HELPER" --latencies "$THIS_DIR/../proto/vocab/latencies.json" --session "$R/sess" --logs <(printf 'not json\n') 2>&1)"
 rc=$?
 set -e
 if [ "$rc" -ne 0 ] && grep -q 'logs line 1' <<<"$bad"; then

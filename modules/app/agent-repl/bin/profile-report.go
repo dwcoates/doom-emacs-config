@@ -35,14 +35,43 @@ type budget struct {
 	reason string
 }
 
-// The perceptibility budgets, one per interaction the latency table measures.
-var budgets = map[string]budget{
-	"prompt_echo":         {"prompt echo (submit to the prompt drawn)", 100 * time.Millisecond, "a keystroke's echo; anything past ~100ms reads as lag"},
-	"switch_repeat":       {"switch to a shown workspace (keystroke to the page's first shown frame)", 100 * time.Millisecond, "a navigation the user is waiting on"},
-	"switch_first":        {"first switch to a never-shown workspace (keystroke to page painted)", 100 * time.Millisecond, "the same navigation; a blank page is the worst case of it"},
-	"page_boot":           {"page boot to first feed paint", 300 * time.Millisecond, "the page is on screen and empty meanwhile"},
-	"workspace_open":      {"workspace open (tab opened to session up)", 300 * time.Millisecond, "the workspace is visible but not usable meanwhile"},
-	"prompt_first_output": {"prompt to first response text (vendor-bound)", time.Second, "the vendor's first token dominates; our share is the rest"},
+// profileKinds are the interactions pairLatencies measures from log edges.
+// Each one's budget is read from proto/vocab/latencies.json (--latencies), the
+// vocabulary the always-on metrics share, so the profile and the metrics hold
+// one threshold per latency.
+var profileKinds = []string{"prompt_echo", "switch_repeat", "switch_first", "page_boot", "workspace_open", "prompt_first_output"}
+
+// loadBudgets reads every profile kind's budget from the latency vocabulary.
+// A kind the vocabulary lacks is an error, never a missing row.
+func loadBudgets(path string) (map[string]budget, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the latency vocabulary: %w", err)
+	}
+	var vocab struct {
+		Latencies []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			ThresholdMs int64  `json:"threshold_ms"`
+			Reason      string `json:"reason"`
+		} `json:"latencies"`
+	}
+	if err := json.Unmarshal(raw, &vocab); err != nil {
+		return nil, fmt.Errorf("decode the latency vocabulary %s: %w", path, err)
+	}
+	byName := map[string]budget{}
+	for _, l := range vocab.Latencies {
+		byName[l.Name] = budget{l.Description, time.Duration(l.ThresholdMs) * time.Millisecond, l.Reason}
+	}
+	out := make(map[string]budget, len(profileKinds))
+	for _, kind := range profileKinds {
+		b, ok := byName[kind]
+		if !ok || b.limit <= 0 {
+			return nil, fmt.Errorf("the latency vocabulary %s has no budget for %s", path, kind)
+		}
+		out[kind] = b
+	}
+	return out, nil
 }
 
 // record is the part of a log record the latency table reads.
@@ -69,13 +98,21 @@ func main() {
 	session := flag.String("session", "", "the session directory")
 	logs := flag.String("logs", "", "the session's logs as JSONL (- is stdin)")
 	startup := flag.String("startup", "", "RFC3339 instant the editor was launched at: add the startup assessment")
+	latencies := flag.String("latencies", "", "proto/vocab/latencies.json: every interaction's budget")
 	flag.Parse()
 	if *session == "" {
 		fail(errors.New("--session is required"))
 	}
+	if *latencies == "" {
+		fail(errors.New("--latencies is required"))
+	}
+	budgets, err := loadBudgets(*latencies)
+	if err != nil {
+		fail(err)
+	}
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
-	if err := report(out, *session, *logs, *startup); err != nil {
+	if err := report(out, *session, *logs, *startup, budgets); err != nil {
 		out.Flush()
 		fail(err)
 	}
@@ -86,7 +123,7 @@ func fail(err error) {
 	os.Exit(1)
 }
 
-func report(w io.Writer, session, logs, startup string) error {
+func report(w io.Writer, session, logs, startup string, budgets map[string]budget) error {
 	fmt.Fprintf(w, "# Profile session %s\n\n", filepath.Base(session))
 	if err := processTable(w, session); err != nil {
 		return err
@@ -101,7 +138,7 @@ func report(w io.Writer, session, logs, startup string) error {
 	if err != nil {
 		return err
 	}
-	latencyTable(w, records)
+	latencyTable(w, records, budgets)
 	switchPhaseTable(w, records)
 	switchTourTables(w, records)
 	if startup != "" {
@@ -563,7 +600,7 @@ func spreadOf(ds []time.Duration) spread {
 
 // latencyTable prints each interaction's latencies ranked by how far its p90
 // is over budget.
-func latencyTable(w io.Writer, records []record) {
+func latencyTable(w io.Writer, records []record, budgets map[string]budget) {
 	byKind := map[string][]time.Duration{}
 	for _, l := range pairLatencies(records) {
 		byKind[l.kind] = append(byKind[l.kind], l.took)
