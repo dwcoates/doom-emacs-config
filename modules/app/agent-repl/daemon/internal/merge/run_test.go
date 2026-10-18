@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -988,5 +989,78 @@ func TestTheMergeAsksWhetherAContextEndedOnlyThroughItsTwoHelpers(t *testing.T) 
 	// Assert: one in cutUnder (process.go), one in recordFailed (run.go).
 	if len(sites) != 2 || !strings.HasPrefix(sites[0], "process.go:") || !strings.HasPrefix(sites[1], "run.go:") {
 		t.Fatalf("ctxend is asked at %v, want only inside cutUnder and recordFailed", sites)
+	}
+}
+
+// TestNewRunTellsOnRunStartOfEveryRunThatMayTest covers the run builders: a
+// run that may ask for its test turn is told to onRunStart as it is built,
+// and a waiting member's rebase, which never tests, is built background and
+// untold.
+func TestNewRunTellsOnRunStartOfEveryRunThatMayTest(t *testing.T) {
+	cases := []struct {
+		name           string
+		build          func(o *orchestrator, ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run
+		wantTold       bool
+		wantBackground bool
+	}{
+		{name: "a run that may test is told", build: (*orchestrator).newRun, wantTold: true},
+		{name: "a waiting member's rebase is background and untold", build: (*orchestrator).newBackgroundRun, wantBackground: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			var told []*run
+			h.o.onRunStart = func(r *run) { told = append(told, r) }
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+
+			// Act.
+			r := tc.build(h.o, ctx, cancel, h.repoKey(), theWorkspace, 1)
+
+			// Assert.
+			want := []*run{}
+			if tc.wantTold {
+				want = []*run{r}
+			}
+			if !slices.Equal(append([]*run{}, told...), want) {
+				t.Fatalf("onRunStart told %v, want %v", told, want)
+			}
+			if r.background != tc.wantBackground || r.ws != theWorkspace || r.repo != h.repoKey() || r.finished == nil || r.atBoundary == nil {
+				t.Fatalf("built run = %+v, want background %v and the shape buildRun makes", r, tc.wantBackground)
+			}
+		})
+	}
+}
+
+// TestEveryRunIsBuiltByBuildRun holds the package to its one run shape: only
+// buildRun spells a run, and only newBackgroundRun marks one background.
+func TestEveryRunIsBuiltByBuildRun(t *testing.T) {
+	// Arrange.
+	cases := []struct{ pattern, wantSite string }{
+		{pattern: "&run{", wantSite: "func (o *orchestrator) buildRun("},
+		{pattern: ".background = true", wantSite: "func (o *orchestrator) newBackgroundRun("},
+	}
+	for _, tc := range cases {
+		t.Run(tc.pattern, func(t *testing.T) {
+			// Act: each occurrence's enclosing top-level func.
+			var sites []string
+			for _, f := range sourcescan.Production(t) {
+				enclosing := ""
+				for _, line := range strings.Split(string(f.Source), "\n") {
+					if strings.HasPrefix(line, "func ") {
+						enclosing = line
+					}
+					if strings.Contains(line, tc.pattern) {
+						sites = append(sites, enclosing)
+					}
+				}
+			}
+
+			// Assert.
+			if len(sites) != 1 || !strings.HasPrefix(sites[0], tc.wantSite) {
+				t.Fatalf("%q appears in %v, want only in %s", tc.pattern, sites, tc.wantSite)
+			}
+		})
 	}
 }

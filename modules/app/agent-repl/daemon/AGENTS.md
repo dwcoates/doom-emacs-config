@@ -1427,6 +1427,11 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
     `next` holder), and a stopped run leaving the line.
   - Tests order two merges' gates through the TEST-ONLY seams
     `onTestTurnAsk` (hold a gate before it asks) and `onTestTurnLine`.
+  - A park holds ONE RUN, never a workspace: `onRunStart` names each run
+    that may test as it is built, and `chain.parkTurn` binds its park to
+    the first such run of the workspace. A run stopped before it asked
+    takes the park with it, so its resumed run can never wait on a park
+    whose release comes only at the test's end.
 - **SPECULATIVE GATES.** A member whose rebase settled runs its gate (and its
   fixing attempts, under the merge's one `MaxFixAttempts` bound) against its
   chained base once it holds the test turn and the governor admits it,
