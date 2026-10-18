@@ -620,10 +620,12 @@ hand any more:
   it. `TailFollow.readerClicked` ends the follow, the latest-visible latch
   waits for the reader's next input, and until then the anchoring holds the
   clicked root row still, wherever its top sits. THE ONE EXCEPTION (owner
-  request, 2026-10-17): the reader's expansion of a ROOT bubble whose row is
-  the feed's last row that draws a box parks the feed at its tail under
-  `lastBubbleExpanded` once the open succeeds (`TailFollow.lastBubbleExpanded`),
-  so the sub-feed opening below the reader is followed into view. THE BOX'S OWN CLAMP CANNOT
+  requests, 2026-10-17): the reader's fold of a ROOT bubble whose row is the
+  feed's last row that draws a box parks the feed at its tail
+  (`TailFollow.lastBubbleFolded`): under `lastBubbleExpanded` once the open
+  succeeds, so the sub-feed opening below the reader is followed into view,
+  and under `lastBubbleCollapsed` once the collapse has hidden the sub-feed,
+  so the space it left below is filled. THE BOX'S OWN CLAMP CANNOT
   MOVE A HELD VIEW: content shrinking below it, or the box growing under it
   (the gate dock hiding), would make the box clamp `scrollTop` upward, so the
   scroll floor (`ScrollFloor`, `scrollFloor`) holds the box's scrollable

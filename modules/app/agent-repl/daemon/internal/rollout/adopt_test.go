@@ -1817,3 +1817,112 @@ func TestTookOverClosesOnlyAtTheTakeover(t *testing.T) {
 	}
 	h.registry.wait()
 }
+
+// tookOverClosed reports whether the takeover signal has closed.
+func tookOverClosed(h *harness) bool {
+	select {
+	case <-h.c.TookOver():
+		return true
+	default:
+		return false
+	}
+}
+
+func TestBecomeIncumbentHasOneOwner(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange puts the controller in the state the call meets.
+		arrange func(t *testing.T, h *harness)
+		// wantClosed is whether TookOver has closed once the call returns.
+		wantClosed bool
+		// wantOwned is the takeover_owned field of the no-takeover record.
+		wantOwned bool
+	}{
+		{
+			name:       "a daemon that never joined closes the signal at once",
+			arrange:    func(*testing.T, *harness) {},
+			wantClosed: true,
+			wantOwned:  false,
+		},
+		{
+			name: "a second caller during the owner's takeover leaves the signal to the owner",
+			arrange: func(t *testing.T, h *harness) {
+				joinedWithOneOfTwo(t, h)
+				h.c.mu.Lock()
+				h.c.joiningMode = false
+				h.c.takeoverOwned = true
+				h.c.mu.Unlock()
+			},
+			wantClosed: false,
+			wantOwned:  true,
+		},
+		{
+			name: "a second caller after the owner's takeover changes nothing",
+			arrange: func(t *testing.T, h *harness) {
+				joinedWithOneOfTwo(t, h)
+				h.c.becomeIncumbent(nil)
+				h.registry.wait()
+			},
+			wantClosed: true,
+			wantOwned:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(t, h)
+
+			// Act
+			h.c.becomeIncumbent(nil)
+
+			// Assert
+			if got := tookOverClosed(h); got != tt.wantClosed {
+				t.Fatalf("TookOver closed = %v, want %v", got, tt.wantClosed)
+			}
+			rec, ok := dlog.FindRecord(records(h.log, opAdopt), dlog.RecordQuery{Level: "debug", Message: "this daemon is already the incumbent; there is no takeover to run"})
+			if !ok {
+				t.Fatalf("records = %+v, want the no-takeover record", h.log.Records())
+			}
+			if got := rec.Context["takeover_owned"]; got != tt.wantOwned {
+				t.Fatalf("takeover_owned = %v, want %v", got, tt.wantOwned)
+			}
+		})
+	}
+}
+
+func TestConcurrentBootClaimWaitersTakeOverOnce(t *testing.T) {
+	// Arrange: a joined successor, and two callers released together, as the
+	// two boot-claim waiters are when the incumbent exits.
+	h := newHarness(t)
+	joinedWithOneOfTwo(t, h)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			h.c.becomeIncumbent(nil)
+		}()
+	}
+
+	// Act
+	close(start)
+	wg.Wait()
+	h.registry.wait()
+
+	// Assert: the signal closed, and the takeover ran exactly once.
+	if !tookOverClosed(h) {
+		t.Fatal("TookOver still open after both callers returned")
+	}
+	ran := 0
+	for _, r := range records(h.log, opAdopt) {
+		if r.Message == "the outgoing daemon is gone; this daemon now serves every workspace it was not handed" {
+			ran++
+		}
+	}
+	if ran != 1 {
+		t.Fatalf("takeovers run = %d, want 1", ran)
+	}
+}

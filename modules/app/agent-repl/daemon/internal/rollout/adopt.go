@@ -1017,22 +1017,36 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 //
 // A workspace still mid-rendezvous stays governed by its own `joining` entry:
 // its adoption is a separate, per-workspace fact this does not overrule.
+//
+// ONE CALLER OWNS THE TAKEOVER. Both boot-claim waiters (awaitIncumbentExit,
+// retryAdvertise) land here once the claim frees, concurrently. The caller
+// that flips joining mode off owns it (takeoverOwned): it runs the takeover
+// and then closes TookOver. Any other caller returns at once, closing the
+// signal only for a daemon that never joined. Every close is made under mu,
+// so the signal cannot be closed twice (a second waiter once panicked on
+// `close of closed channel`, merge gate 2026-10-17,
+// TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace).
 func (c *controller) becomeIncumbent(fields dlog.Context) {
 	c.mu.Lock()
 	was := c.joiningMode
 	c.joiningMode = false
-	signal := c.tookOverSignalLocked()
-	c.mu.Unlock()
-	defer func() {
-		select {
-		case <-signal:
-		default:
-			close(signal)
-		}
-	}()
 	if !was {
+		owned := c.takeoverOwned
+		if !owned {
+			c.closeTookOverLocked()
+		}
+		c.mu.Unlock()
+		c.log.Debug(opAdopt, "this daemon is already the incumbent; there is no takeover to run",
+			dlog.Merge(fields, dlog.Context{"takeover_owned": owned}))
 		return
 	}
+	c.takeoverOwned = true
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.closeTookOverLocked()
+		c.mu.Unlock()
+	}()
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		dlog.Merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
 	// THE HANDLE BECOMES A WRITING ONE AT THE TAKEOVER, whatever was handed
@@ -1128,6 +1142,18 @@ func (c *controller) tookOverSignalLocked() chan struct{} {
 		c.tookOver = make(chan struct{})
 	}
 	return c.tookOver
+}
+
+// closeTookOverLocked closes the takeover signal unless it is already closed.
+// Every close goes through here under mu, so the check and the close cannot
+// interleave with another's. Callers hold c.mu.
+func (c *controller) closeTookOverLocked() {
+	signal := c.tookOverSignalLocked()
+	select {
+	case <-signal:
+	default:
+		close(signal)
+	}
 }
 
 // TookOver answers the channel that closes when this daemon has taken over
