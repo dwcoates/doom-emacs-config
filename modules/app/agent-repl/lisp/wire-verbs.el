@@ -3025,6 +3025,15 @@ ARMS is a list of (WIRE KEYWORD FIELDS) as in
                        (agent-repl-wire-verbs--decode-string-fields arm-name value fields)))))
            arms)))
 
+(defun agent-repl-wire-verbs--decode-step-outcome (message field json step arms)
+  "Decode MESSAGE's required step FIELD from JSON.
+The step is a STEP message whose required `outcome' oneof is over the
+string-only ARMS, as in `agent-repl-wire-persistent-wifi-hotspot-arms'."
+  (agent-repl-wire--decode-message
+   message field json
+   (lambda (value)
+     (agent-repl-wire-verbs--decode-string-arms step "outcome" value arms))))
+
 (defun agent-repl-wire-decode-update-persistent-wifi-mode-success (json)
   "Decode UpdatePersistentWifiModeSuccess from JSON.
 Returns (:state STATE :hotspot ONEOF :energy-mode ONEOF :display ONEOF):
@@ -3037,24 +3046,15 @@ and display steps went."
     ;; exactly that.
     (list :state (agent-repl-wire--decode-message
                   message 'state json #'agent-repl-wire-decode-persistent-wifi-state)
-          :hotspot (agent-repl-wire--decode-message
-                    message 'hotspot json
-                    (lambda (value)
-                      (agent-repl-wire-verbs--decode-string-arms
-                       "UpdatePersistentWifiModeHotspot" "outcome" value
-                       agent-repl-wire-persistent-wifi-hotspot-arms)))
-          :energy-mode (agent-repl-wire--decode-message
-                        message 'energyMode json
-                        (lambda (value)
-                          (agent-repl-wire-verbs--decode-string-arms
-                           "UpdatePersistentWifiModeEnergyMode" "outcome" value
-                           agent-repl-wire-persistent-wifi-energy-mode-arms)))
-          :display (agent-repl-wire--decode-message
-                    message 'display json
-                    (lambda (value)
-                      (agent-repl-wire-verbs--decode-string-arms
-                       "UpdatePersistentWifiModeDisplay" "outcome" value
-                       agent-repl-wire-persistent-wifi-display-arms))))))
+          :hotspot (agent-repl-wire-verbs--decode-step-outcome
+                    message 'hotspot json "UpdatePersistentWifiModeHotspot"
+                    agent-repl-wire-persistent-wifi-hotspot-arms)
+          :energy-mode (agent-repl-wire-verbs--decode-step-outcome
+                        message 'energyMode json "UpdatePersistentWifiModeEnergyMode"
+                        agent-repl-wire-persistent-wifi-energy-mode-arms)
+          :display (agent-repl-wire-verbs--decode-step-outcome
+                    message 'display json "UpdatePersistentWifiModeDisplay"
+                    agent-repl-wire-persistent-wifi-display-arms))))
 
 (defun agent-repl-wire-decode-update-persistent-wifi-mode-error (json)
   "Decode UpdatePersistentWifiModeError from JSON into (:cause ONEOF)."

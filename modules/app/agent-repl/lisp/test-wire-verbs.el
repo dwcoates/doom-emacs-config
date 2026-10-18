@@ -5167,6 +5167,43 @@ instead diverges from it unseen."
                   "{\"modeUnreadable\":{\"detail\":\"x\",\"code\":1}}")
                  '("UpdatePersistentWifiModeError.modeUnreadable" "code" "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-verbs-decode-step-outcome-reads-the-set-arm ()
+  "A step's outcome decodes to its arm and string fields."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-step-outcome
+                    "M" 'step (agent-repl-test-wire-verbs--parse "{\"step\":{\"failed\":{\"detail\":\"x\"}}}")
+                    "S" '((ok :ok nil) (failed :failed ((detail :detail)))))
+                   '(:arm :failed :value (:detail "x"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-step-outcome-refuses-an-absent-step ()
+  "An absent step is a breach naming the parent message and field."
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
+                  (lambda (json)
+                    (agent-repl-wire-verbs--decode-step-outcome
+                     "M" 'step json "S" '((ok :ok nil))))
+                  "{}")
+                 '("M" step "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-step-outcome-refuses-an-unset-outcome ()
+  "A step whose outcome sets no arm is a breach naming the step message."
+  (should (equal (car (agent-repl-test-wire-verbs--decode-breach
+                       (lambda (json)
+                         (agent-repl-wire-verbs--decode-step-outcome
+                          "M" 'step json "S" '((ok :ok nil))))
+                       "{\"step\":{\"other\":{}}}"))
+                 "S")))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-reads-steps-through-one-helper ()
+  "Every step field of the success decoder reads through the shared helper."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl-wire-verbs--decode-step-outcome)
+               (lambda (_message field &rest _) (push field calls) nil))
+              ((symbol-function 'agent-repl-wire--decode-message) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-wire-verbs--check-keys) #'ignore))
+      (agent-repl-wire-decode-update-persistent-wifi-mode-success nil))
+    (should (equal (sort (mapcar #'symbol-name calls) #'string<)
+                   '("display" "energyMode" "hotspot")))))
+
 (ert-deftest agent-repl-test-wire-verbs-decode-string-fields-reads-every-named-string ()
   "The all-strings decoder answers each named field, absent ones as empty."
   (agent-repl-test-wire-verbs--with-common
