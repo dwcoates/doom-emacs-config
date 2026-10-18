@@ -2391,6 +2391,22 @@ html[data-page-unshown] *::after {
   margin-bottom: 0.25rem;
   font-size: calc(var(--tool-head-font-rem) * 1rem * var(--feed-text-scale));
 }
+/* A TOOL CARD'S CONTENTS ARE SET AT THE THINKING BUBBLE'S SIZE (owner
+   request, 2026-10-17): the command line, every input and output preview,
+   collapsed and expanded alike, a Skill's content and a diagnostic row. The
+   card's own size is the inherited one, and the monospace previews and a
+   Skill's markdown code and tables, which set their own, are matched here.
+   The head (title, duration, badge) keeps `--tool-head-font-rem` and the
+   badge its own size, and the small annotations (an omitted-lines note, a
+   Skill's allowances) keep theirs. Only tool calls and Skills: the merge and
+   subagent folds wear the card shell but are not tool cards. */
+.tool-card.tool-fold, .tool-card.tool-skill,
+.tool-card.tool-fold pre, .tool-card.tool-skill pre,
+.tool-card.tool-fold .md pre.md-code code, .tool-card.tool-skill .md pre.md-code code,
+.tool-card.tool-fold .md table, .tool-card.tool-skill .md table,
+.tool-card.tool-fold .tool-diagnostic {
+  font-size: calc(var(--small-prose-font-rem) * 1rem * var(--feed-text-scale));
+}
 .tool-name { font-weight: 600; color: var(--tool-title); }
 /* EVERY HEAD'S CLOCK CLOSES ITS HEAD at the right end (owner request,
    2026-10-18; asHeadClock in src/feed/cards/tool-head.ts): a tool card's, a

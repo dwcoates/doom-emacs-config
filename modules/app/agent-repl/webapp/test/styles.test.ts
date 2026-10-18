@@ -3338,6 +3338,38 @@ describe("the one bubble rule set", () => {
     expect(head).toMatch(/font-size:\s*calc\(var\(--tool-head-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
   });
 
+  it.each([
+    [".tool-card.tool-fold"],
+    [".tool-card.tool-fold pre"],
+    [".tool-card.tool-fold .tool-diagnostic"],
+    [".tool-card.tool-skill"],
+    [".tool-card.tool-skill pre"],
+    [".tool-card.tool-skill .md pre.md-code code"],
+    [".tool-card.tool-skill .md table"],
+  ])("sets %s at the thinking bubble's size", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(decls).toMatch(/font-size:\s*calc\(var\(--small-prose-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it("keeps the tool card's head and badge out of its contents' size", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".tool-card.tool-fold pre"));
+
+    // Assert
+    expect(rule?.selectors.some((sel) => /tool-head|badge|tool-name/.test(sel))).toBe(false);
+  });
+
+  it("leaves the merge and subagent folds that wear the card shell at the card's size", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".tool-card.tool-fold pre"));
+
+    // Assert
+    expect(rule?.selectors.some((sel) => sel.includes("bubble-fold"))).toBe(false);
+  });
+
   it("sizes a tool card head below the thinking bubble's prose", () => {
     // Arrange / Act
     const head = Number(rootToken("--tool-head-font-rem"));
