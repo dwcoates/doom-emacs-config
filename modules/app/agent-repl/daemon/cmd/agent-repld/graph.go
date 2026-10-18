@@ -47,6 +47,7 @@ import (
 	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/opentabs"
+	"agent-repld/internal/pagesupersede"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/prompthandler"
@@ -67,6 +68,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/signin"
+	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
@@ -882,6 +884,19 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the web footprint sampler: %w", err)
 	}
+	// THE WEB CONTENT PROCESS UNDER MEMORY PRESSURE, read from the webhost's
+	// stalls: a stall on every beat of WebKit's 30-second memory-pressure poll
+	// is raised as an error (internal/stallbeat).
+	stallBeat, err := stallbeat.New(stallbeat.Deps{Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the stall beat detector: %w", err)
+	}
+	// A REPLACED PAGE STILL SUBSCRIBING is an unloaded page's script running,
+	// raised as an error (internal/pagesupersede).
+	supersededPages, err := pagesupersede.New(pagesupersede.Deps{Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the superseded-page tracker: %w", err)
+	}
 	// ---- agent-repl's session ----
 	//
 	// The span the connectivity indicator's dropdown reports (owner ruling,
@@ -1420,6 +1435,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			ClassifierPrompt:  classifierPrompt,
 			EditorInstances:   editors,
 			Opens:             opens,
+			StallBeat:         stallBeat,
+			Pages:             supersededPages,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,
