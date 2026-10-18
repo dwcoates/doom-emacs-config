@@ -36,6 +36,7 @@ import { resolve } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { ClientLogResponseSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { dispatchPageTransition } from "./page-transition.js";
 
 /** One `ClientLog` call the installed logger forwarded. */
 type ClientLogCall = { record: { message: string; context?: Record<string, unknown> } };
@@ -483,10 +484,9 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     // Arrange: the timers as they stood before the boot wrapped them.
     const before = (window as { setTimeout: unknown }).setTimeout;
     await bootMain();
-    const win = document.defaultView!;
 
     // Act: the boot ends the page at its pagehide (page-teardown.ts).
-    win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted: false }));
+    dispatchPageTransition("pagehide", false);
 
     // Assert
     expect(window.setTimeout === before).toBe(true);

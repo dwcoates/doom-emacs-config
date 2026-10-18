@@ -19,6 +19,7 @@ import {
 } from "../src/dom.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeUnder, filesUnder } from "./files-under.js";
+import { dispatchPageTransition } from "./page-transition.js";
 
 describe("scrollbarWidthPx", () => {
   it("answers a classic bar's width", () => {
@@ -610,19 +611,11 @@ describe("querySelectorAll", () => {
 /** Let queued mutation records reach their observers. */
 const records = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** Dispatch a page transition of TYPE, persisted or not, on the window the document belongs to. */
-const transition = (type: "pagehide" | "pageshow", persisted: boolean): void => {
-  // The document's own window, which the observers are keyed by: in the
-  // un-isolated unit run the global `window` need not be it.
-  const win = document.defaultView;
-  if (win === null) throw new Error("the test document has no window");
-  win.dispatchEvent(new win.PageTransitionEvent(type, { persisted }));
-};
 
 describe("pageMutationObserver", () => {
   afterEach(() => {
     // Every test ends with the page shown, as the next one expects it.
-    transition("pageshow", true);
+    dispatchPageTransition("pageshow", true);
     document.body.replaceChildren();
   });
 
@@ -667,7 +660,7 @@ describe("pageMutationObserver", () => {
     pageMutationObserver(document, callback).observe(box, { childList: true, subtree: true });
     pageMutationObserver(document, callback).observe(document.documentElement, { attributes: true, subtree: true });
     // Act
-    transition("pagehide", false);
+    dispatchPageTransition("pagehide", false);
     box.append(document.createElement("span"));
     document.documentElement.setAttribute("data-teardown", "");
     await records();
@@ -683,9 +676,9 @@ describe("pageMutationObserver", () => {
     const callback = vi.fn();
     const watch = pageMutationObserver(document, callback);
     watch.observe(box, { childList: true });
-    transition("pagehide", true);
+    dispatchPageTransition("pagehide", true);
     // Act
-    transition("pageshow", true);
+    dispatchPageTransition("pageshow", true);
     box.append(document.createElement("span"));
     await records();
     // Assert
@@ -700,9 +693,9 @@ describe("pageMutationObserver", () => {
     const callback = vi.fn();
     const watch = pageMutationObserver(document, callback);
     watch.observe(box, { childList: true });
-    transition("pagehide", false);
+    dispatchPageTransition("pagehide", false);
     // Act
-    transition("pageshow", false);
+    dispatchPageTransition("pageshow", false);
     box.append(document.createElement("span"));
     await records();
     // Assert
@@ -716,13 +709,13 @@ describe("pageMutationObserver", () => {
     document.body.append(box);
     const callback = vi.fn();
     const watch = pageMutationObserver(document, callback);
-    transition("pagehide", true);
+    dispatchPageTransition("pagehide", true);
     watch.observe(box, { childList: true });
     box.append(document.createElement("span"));
     await records();
     expect(callback).not.toHaveBeenCalled();
     // Act
-    transition("pageshow", true);
+    dispatchPageTransition("pageshow", true);
     box.append(document.createElement("span"));
     await records();
     // Assert
@@ -739,8 +732,8 @@ describe("pageMutationObserver", () => {
     watch.observe(box, { childList: true });
     watch.disconnect();
     // Act
-    transition("pagehide", true);
-    transition("pageshow", true);
+    dispatchPageTransition("pagehide", true);
+    dispatchPageTransition("pageshow", true);
     box.append(document.createElement("span"));
     await records();
     // Assert

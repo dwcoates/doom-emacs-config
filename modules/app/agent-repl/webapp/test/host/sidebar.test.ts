@@ -11,6 +11,7 @@ import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
+import { dispatchPageTransition } from "../page-transition.js";
 
 let stop: { dispose(): void } | null = null;
 
@@ -229,10 +230,9 @@ describe("startWebhostSidebar", () => {
       },
       installCensus: () => ({ stop: () => void stopped++ }),
     });
-    const win = document.defaultView!;
 
     // Act
-    win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted: false }));
+    dispatchPageTransition("pagehide", false);
 
     // Assert
     expect([(quiet as (() => boolean) | null)?.(), stopped]).toEqual([true, 1]);

@@ -11,6 +11,7 @@ import { installForwardingLogger, installTextAffordances, quietAtUnload } from "
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { clientLogRecorder } from "./rpc/client-log-recorder.js";
 import { setLogger, log, type ForwardingLogger } from "../src/log.js";
+import { dispatchPageTransition } from "./page-transition.js";
 
 /** Install a forwarding logger as SOURCE at THRESHOLD, log at LEVEL, and answer what reached the daemon. */
 async function forwardOne(threshold: "info" | "warn", level: "info" | "warn"): Promise<ClientLogRequest[]> {
@@ -133,12 +134,6 @@ describe("installTextAffordances", () => {
   });
 });
 
-/** Dispatch a pagehide, persisted or not, on the window the document belongs to. */
-function pagehide(persisted: boolean): void {
-  const win = document.defaultView;
-  if (win === null) throw new Error("the test document has no window");
-  win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted }));
-}
 
 /** A context and a teardown that count what they were asked to do. */
 function counted() {
@@ -152,7 +147,7 @@ describe("quietAtUnload", () => {
     const { seen, ctx, teardown } = counted();
     const stop = quietAtUnload(document.defaultView!, ctx, teardown);
     // Act
-    pagehide(false);
+    dispatchPageTransition("pagehide", false);
     stop();
     // Assert
     expect(seen).toEqual({ quiesced: 1, torn: 1 });
@@ -163,7 +158,7 @@ describe("quietAtUnload", () => {
     const { seen, ctx, teardown } = counted();
     const stop = quietAtUnload(document.defaultView!, ctx, teardown);
     // Act
-    pagehide(true);
+    dispatchPageTransition("pagehide", true);
     stop();
     // Assert
     expect(seen).toEqual({ quiesced: 0, torn: 0 });
@@ -174,7 +169,7 @@ describe("quietAtUnload", () => {
     const { seen, ctx, teardown } = counted();
     quietAtUnload(document.defaultView!, ctx, teardown)();
     // Act
-    pagehide(false);
+    dispatchPageTransition("pagehide", false);
     // Assert
     expect(seen).toEqual({ quiesced: 0, torn: 0 });
   });
@@ -185,7 +180,7 @@ describe("quietAtUnload", () => {
     const { ctx, teardown } = counted();
     const stop = quietAtUnload(document.defaultView!, ctx, teardown);
     // Act
-    pagehide(false);
+    dispatchPageTransition("pagehide", false);
     stop();
     // Assert
     const record = await forwardedRecord(capture, "document.unload-quiet");
