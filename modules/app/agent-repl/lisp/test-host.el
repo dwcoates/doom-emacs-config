@@ -1076,6 +1076,32 @@ an echo would race a newer request and take the frame back."
     ;; Assert
     (should (= (agent-repl-host-editor-switch-count) 1))))
 
+(ert-deftest agent-repl-test-host-a-counted-switch-notes-its-instant-for-the-page ()
+  "A counted switch notes its start with the webhost, for the page to measure."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-note-switch)
+                 (lambda (ws) (push ws noted))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-1" 'picker))
+      ;; Assert
+      (should (equal noted '("ws-1"))))))
+
+(ert-deftest agent-repl-test-host-the-startup-selection-notes-no-switch ()
+  "The startup's own selection is no switch the user made, so nothing is noted."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-note-switch)
+                 (lambda (ws) (push ws noted))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-1" 'startup))
+      ;; Assert
+      (should-not noted))))
+
 (ert-deftest agent-repl-test-host-the-startup-selection-is-not-counted ()
   "The startup selecting its first tab is Emacs's own, not the user's."
   (agent-repl-test-host--with-harness

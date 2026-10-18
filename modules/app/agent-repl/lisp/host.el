@@ -535,6 +535,7 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
+(declare-function agent-repl-webhost-note-switch "webhost" (ws))
 (declare-function agent-repl--frontend-fit-webviews "frontend" (&optional frame))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl-link-up-p "daemon-link" ())
@@ -772,6 +773,9 @@ See `agent-repl-host--editor-switches'."
   "Count a workspace switch to WS the user made in Emacs, through ORIGIN.
 ORIGIN is the request trigger or `activation', for the record."
   (setq agent-repl-host--editor-switches (1+ agent-repl-host--editor-switches))
+  ;; The switch's own instant rides the webhost's show, so the page measures
+  ;; the switch the user felt (webhost.el).
+  (when ws (agent-repl-webhost-note-switch ws))
   (agent-repl--info (or ws '(:agent-repl-central "a switch to a perspective without a workspace has no workspace sink"))
                     "elisp.host.editor-switch ws=%s origin=%s count=%d"
                     ws origin agent-repl-host--editor-switches))

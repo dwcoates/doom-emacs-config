@@ -331,15 +331,39 @@ be built (`agent-repl-frontend-webview-url')."
     (agent-repl--webhost-call "ensure" id url)
     id))
 
+(defvar agent-repl--webhost-switch-started nil
+  "The user\='s latest switch not yet handed to a show: (WS . UNIX-MS), or nil.
+Set by `agent-repl-webhost-note-switch\=' at the switch keystroke, taken by
+the next `agent-repl-webhost-show\=' whatever workspace it shows, so an
+instant can never be charged to a later show it did not cause.")
+
+(defun agent-repl-webhost-note-switch (ws)
+  "Note that the user\='s switch to WS began now, for the page to measure.
+The page times the switch from this instant to its first shown frame, or to
+its conversation drawn on a first show (webapp/src/switch-latency.ts), and
+reports it to the daemon\='s metrics.  The instant is the host\='s wall
+clock in Unix milliseconds, the clock the page reads too."
+  (setq agent-repl--webhost-switch-started
+        (cons ws (truncate (* 1000 (float-time))))))
+
+(defun agent-repl--webhost-take-switch-start (ws)
+  "The noted switch start for WS in Unix milliseconds, or nil; always cleared."
+  (let ((noted agent-repl--webhost-switch-started))
+    (setq agent-repl--webhost-switch-started nil)
+    (and noted (equal (car noted) ws) (cdr noted))))
+
 (defun agent-repl-webhost-show (ws)
-  "Show WS's page in the host.  Nothing is sent when it is already the one shown."
-  (let ((id (agent-repl--webhost-id ws)))
+  "Show WS's page in the host.  Nothing is sent when it is already the one shown.
+A switch the user began to WS (`agent-repl-webhost-note-switch\=') rides the
+show, so the page can measure it."
+  (let ((id (agent-repl--webhost-id ws))
+        (switch-started (agent-repl--webhost-take-switch-start ws)))
     (when (fboundp 'agent-repl-page-unload-note-shown)
       (agent-repl-page-unload-note-shown ws))
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
       (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
-      (agent-repl--webhost-call "show" id))))
+      (agent-repl--webhost-call "show" id switch-started))))
 
 (defun agent-repl-webhost-remove (ws)
   "Drop WS's page from the host, and everything held for it."
