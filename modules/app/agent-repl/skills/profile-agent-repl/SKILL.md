@@ -214,6 +214,7 @@ which every runtime stops by itself.
 
 ## Notes
 
+- **CRITICAL: Read the stored metrics first.** `/metrics-agent-repl` says from 30 days of history which version or day a latency or a process's CPU and memory changed; a profile session then finds the code responsible.
 - **CRITICAL: Never leave a session open.** Stop it when the interaction is done.
 - **CRITICAL: Only the lead session runs the startup assessment** or otherwise launches, quits or drives Emacs.
 - **IMPORTANT: Profile with rollouts held,** so a landing cannot replace the profiled build mid-session.

@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# run.sh — the metrics-agent-repl skill's driver: reading agent-repl's
+# always-on runtime metrics.
+#
+# Verbs:
+#   --status                         Say whether the metrics store answers and
+#                                    which runtimes it scrapes, up or down.
+#   --catalog                        Print every agentrepl_* metric each
+#                                    running runtime exposes, with its help.
+#   --query <promql>                 Evaluate PromQL now; print one line per
+#                                    series: labels, then value.
+#   --range <promql> <hours> <step>  Evaluate PromQL over the last <hours>
+#                                    every <step> (e.g. 1h); print one line per
+#                                    sample: labels, time, value.
+#   --latency-by-version <latency> [days]
+#                                    The latency's p95 per deployed version
+#                                    over the last [days] (default 30): one
+#                                    line per version, oldest first, with the
+#                                    first time it was deployed.
+#   --first-version-over <latency> [seconds] [days]
+#                                    The first deployed version whose p95 rose
+#                                    over [seconds] (default: the latency's
+#                                    threshold) within [days] (default 30).
+#   --process-trend <process> [days] One line per day: the process group's
+#                                    mean CPU (cores) and mean footprint.
+#
+# Exit codes:
+#   0  printed what the verb answers
+#   1  --status: the metrics store does not answer
+#      --catalog: no runtime advertises a metrics surface
+#      --query / --range / --latency-by-version / --process-trend: no series
+#      --first-version-over: no version went over (the versions seen are
+#      printed)
+#   2  script/usage error, or the metrics store refused the query
+#   3  --status: the store answers but scrapes no runtime, or a runtime it
+#      scrapes is down (printed)
+
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+STORE="${AGENT_REPL_METRICS_URL:-http://127.0.0.1:8428}"
+ROOT="${AGENT_REPL_METRICS_ROOT:-$HOME/.cache/agent-repl/metrics}"
+VOCAB="$SELF_DIR/../../proto/vocab/latencies.json"
+
+die() {
+  printf 'metrics-agent-repl: %s\n' "$*" >&2
+  exit 2
+}
+
+log() {
+  printf 'metrics-agent-repl: %s\n' "$*"
+}
+
+command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
+command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
+
+# get PATH [curl args...] — GET a store endpoint; prints the body.
+get() {
+  local path="$1"
+  shift
+  curl -fsS --max-time 20 "$@" "$STORE$path"
+}
+
+# promql_data ENDPOINT PROMQL [extra --data-urlencode args...] — the result
+# array of a successful query, dying on a refusal.
+promql_data() {
+  local endpoint="$1" promql="$2" body
+  shift 2
+  body="$(curl -sS --max-time 60 "$STORE/api/v1/$endpoint" --data-urlencode "query=$promql" "$@" 2>&1)" ||
+    die "the metrics store at $STORE did not answer: $body"
+  [ "$(printf '%s' "$body" | jq -r '.status // empty' 2>/dev/null)" = "success" ] ||
+    die "the metrics store refused the query: $(printf '%s' "$body" | jq -r '.error // .' 2>/dev/null)"
+  printf '%s' "$body" | jq -c '.data.result'
+}
+
+# range_args HOURS STEP — set RANGE_ARGS to the start/end/step of a range
+# ending now.
+RANGE_ARGS=()
+range_args() {
+  local now start
+  now="$(date +%s)"
+  start=$((now - $1 * 3600))
+  RANGE_ARGS=(--data-urlencode "start=$start" --data-urlencode "end=$now" --data-urlencode "step=$2")
+}
+
+# p95_by_version LATENCY DAYS — one JSON line per hourly sample with its version.
+p95_by_version() {
+  local latency="$1" days="$2" promql args
+  promql="histogram_quantile(0.95, sum by (le, version) (rate(agentrepl_latency_seconds_bucket{latency=\"$latency\"}[1h]) * on() group_left(version) agentrepl_deployed_version_info))"
+  range_args $((days * 24)) 1h
+  promql_data query_range "$promql" "${RANGE_ARGS[@]}"
+}
+
+# per_version RESULT — versions oldest first: version, first seen, p95 of the
+# hourly p95s (seconds), hours sampled.
+per_version() {
+  jq -r '
+    [ .[] | .metric.version as $v | .values[] | select(.[1] != "NaN") | {v: $v, t: .[0], p: (.[1] | tonumber)} ]
+    | group_by(.v)
+    | map({v: .[0].v, first: (map(.t) | min), ps: (map(.p) | sort)})
+    | sort_by(.first)
+    | .[]
+    | (.ps | length) as $n
+    | (($n * 0.95 | floor) as $i | if $i >= $n then $n - 1 else $i end) as $j
+    | [.v, (.first | floor | todate), .ps[$j], $n]
+    | @tsv'
+}
+
+case "${1:-}" in
+  --status)
+    [ -z "${2:-}" ] || die "--status takes no argument, not $2"
+    if ! get /health >/dev/null 2>&1; then
+      log "the metrics store at $STORE does not answer; bin/requirements.sh install sets it up"
+      exit 1
+    fi
+    targets="$(get /api/v1/targets 2>&1)" || die "the metrics store did not list its targets: $targets"
+    printf '%s' "$targets" | jq -r '.data.activeTargets[] | [.labels.instance, .health, .lastScrape, .lastError] | @tsv' ||
+      die "could not read the targets: $targets"
+    if [ "$(printf '%s' "$targets" | jq '.data.activeTargets | length')" -eq 0 ]; then
+      log "the metrics store scrapes no runtime: none has advertised a target under $ROOT/targets"
+      exit 3
+    fi
+    down="$(printf '%s' "$targets" | jq -r '[.data.activeTargets[] | select(.health != "up") | .labels.instance] | join(" ")')"
+    if [ -n "$down" ]; then
+      log "down: $down"
+      exit 3
+    fi
+    ;;
+  --catalog)
+    [ -z "${2:-}" ] || die "--catalog takes no argument, not $2"
+    shopt -s nullglob
+    files=("$ROOT"/targets/*.json)
+    [ "${#files[@]}" -gt 0 ] || {
+      log "no runtime advertises a metrics surface under $ROOT/targets"
+      exit 1
+    }
+    for f in "${files[@]}"; do
+      program="$(jq -r '.[0].labels.instance' "$f")" || die "could not read $f"
+      address="$(jq -r '.[0].targets[0]' "$f")" || die "could not read $f"
+      printf '## %s\n' "$program"
+      if ! body="$(curl -fsS --max-time 10 "http://$address/metrics" 2>&1)"; then
+        log "$program is down (its target names $address)"
+        continue
+      fi
+      printf '%s\n' "$body" | sed -n 's/^# HELP \(agentrepl_[^ ]*\) /\1\t/p' | sort -u
+    done
+    ;;
+  --query)
+    [ -n "${2:-}" ] || die "--query needs a PromQL expression"
+    result="$(promql_data query "$2")" || exit 2
+    [ "$(printf '%s' "$result" | jq 'length')" -gt 0 ] || exit 1
+    printf '%s' "$result" | jq -r '.[] | [(.metric | to_entries | map("\(.key)=\(.value)") | join(",")), .value[1]] | @tsv'
+    ;;
+  --range)
+    [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] || die "--range needs a PromQL expression, hours and a step"
+    [[ "$3" =~ ^[0-9]+$ ]] || die "--range hours must be a whole number, not $3"
+    range_args "$3" "$4"
+    result="$(promql_data query_range "$2" "${RANGE_ARGS[@]}")" || exit 2
+    [ "$(printf '%s' "$result" | jq 'length')" -gt 0 ] || exit 1
+    printf '%s' "$result" | jq -r '.[] | (.metric | to_entries | map("\(.key)=\(.value)") | join(",")) as $l | .values[] | [$l, (.[0] | todate), .[1]] | @tsv'
+    ;;
+  --latency-by-version)
+    [ -n "${2:-}" ] || die "--latency-by-version needs a latency name"
+    days="${3:-30}"
+    [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
+    result="$(p95_by_version "$2" "$days")" || exit 2
+    lines="$(printf '%s' "$result" | per_version)" || die "could not read the latency's samples"
+    [ -n "$lines" ] || exit 1
+    printf 'version\tfirst_deployed\tp95_seconds\thours\n%s\n' "$lines"
+    ;;
+  --first-version-over)
+    [ -n "${2:-}" ] || die "--first-version-over needs a latency name"
+    latency="$2"
+    threshold="${3:-}"
+    days="${4:-30}"
+    if [ -z "$threshold" ]; then
+      [ -f "$VOCAB" ] || die "no latency vocabulary at $VOCAB to read $latency's threshold from"
+      threshold="$(jq -r --arg n "$latency" '.latencies[] | select(.name == $n) | .threshold_ms / 1000' "$VOCAB")" ||
+        die "could not read $VOCAB"
+      [ -n "$threshold" ] || die "the latency vocabulary names no latency $latency"
+    fi
+    [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
+    result="$(p95_by_version "$latency" "$days")" || exit 2
+    lines="$(printf '%s' "$result" | per_version)" || die "could not read the latency's samples"
+    over="$(printf '%s\n' "$lines" | awk -F'\t' -v t="$threshold" '$3 != "" && $3 + 0 > t + 0 { print; exit }')"
+    if [ -z "$over" ]; then
+      log "no version's p95 of $latency went over ${threshold}s in the last $days days"
+      [ -z "$lines" ] || printf 'version\tfirst_deployed\tp95_seconds\thours\n%s\n' "$lines"
+      exit 1
+    fi
+    printf 'version\tfirst_deployed\tp95_seconds\thours\n%s\n' "$over"
+    ;;
+  --process-trend)
+    [ -n "${2:-}" ] || die "--process-trend needs a process group (daemon, shim, emacs, webkit_webcontent, ...)"
+    days="${3:-30}"
+    [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
+    range_args $((days * 24)) 1d
+    cpu="$(promql_data query_range "sum(rate(agentrepl_process_cpu_seconds_total{process=\"$2\"}[1d]))" "${RANGE_ARGS[@]}")" || exit 2
+    mem="$(promql_data query_range "sum(avg_over_time(agentrepl_process_footprint_bytes{process=\"$2\"}[1d]))" "${RANGE_ARGS[@]}")" || exit 2
+    lines="$(jq -rn --argjson cpu "$cpu" --argjson mem "$mem" '
+      ([$cpu[0].values // [] | .[] | {key: (.[0] | tostring), value: .[1]}] | from_entries) as $c
+      | ([$mem[0].values // [] | .[] | {key: (.[0] | tostring), value: .[1]}] | from_entries) as $m
+      | ($c + $m | keys | map(tonumber) | sort)[]
+      | tostring as $k
+      | [(tonumber | todate | .[0:10]), ($c[$k] // "-"), (if $m[$k] then ($m[$k] | tonumber / 1048576 | floor | tostring) else "-" end)]
+      | @tsv')" || die "could not read the trend"
+    [ -n "$lines" ] || exit 1
+    printf 'day\tcpu_cores\tfootprint_mb\n%s\n' "$lines"
+    ;;
+  *)
+    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days]\n' >&2
+    exit 1
+    ;;
+esac
