@@ -5273,3 +5273,33 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
   (let ((err (should-error (agent-repl-status--color-value "chartreuse"))))
     ;; Assert
     (should (string-match-p "no dark value for \"chartreuse\"" (cadr err)))))
+
+;;;; ---- Tests: the tab faces derive from the palette ----
+
+(ert-deftest agent-repl-test-tab-face-spec-fills-with-the-color-and-its-legible-ink ()
+  "A tab face spec fills with COLOR and inks with the legible ink against it."
+  ;; Arrange / Act
+  (let ((attrs (cdar (agent-repl--tab-face-spec "#1a7a1a"))))
+    ;; Assert
+    (should (equal (list (plist-get attrs :background) (plist-get attrs :foreground))
+                   (list "#1a7a1a" (agent-repl--tab-bar-legible-fg "#1a7a1a"))))))
+
+(ert-deftest agent-repl-test-every-colored-tab-face-matches-its-palette-row ()
+  "Each colored tab face\\='s ground and ink are the palette row\\='s own."
+  ;; Arrange / Act / Assert
+  (dolist (pair agent-repl--tab-state-faces)
+    (let ((attrs (cdar (face-default-spec (car pair))))
+          (row (agent-repl--tab-palette-row (car pair) (cdr pair))))
+      (should (equal (list (plist-get attrs :background) (plist-get attrs :foreground))
+                     (list (plist-get (plist-get row :unselected) :bg)
+                           (plist-get (plist-get row :unselected) :fg)))))))
+
+(ert-deftest agent-repl-test-respec-tab-faces-replaces-a-stale-spec ()
+  "A face left on an old color by an earlier load takes its color again."
+  ;; Arrange
+  (face-spec-set 'agent-repl-tab-done (agent-repl--tab-face-spec "#000001") 'face-defface-spec)
+  ;; Act
+  (agent-repl--respec-tab-faces)
+  ;; Assert
+  (should (equal (plist-get (cdar (face-default-spec 'agent-repl-tab-done)) :background)
+                 agent-repl--color-done-green)))
