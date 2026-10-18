@@ -919,11 +919,12 @@ look no longer shares COLOR/FG with the unselected one: it paints
 foreground `agent-repl--tab-bar-legible-fg' chooses against that grey so
 `agent-repl-tab-contrast-floor' still holds — dark ink on this light
 grey, in practice.  The bracket numeral matches that same foreground,
-as the unselected numeral matches the unselected text.  `:underline t' is kept alongside the grey as a secondary,
-belt-and-suspenders marker; it draws in the run's own foreground so it
-still reads on the grey.  The full-vs-bracket background EXTENT still
-belongs to panel visibility (`agent-repl--ws-display-state') for an
-UNSELECTED tab — this override is scoped to `:selected' alone.
+as the unselected numeral matches the unselected text.  `:underline t'
+is kept alongside the grey as a secondary, belt-and-suspenders marker;
+it draws in the run's own foreground so it still reads on the grey.
+The full-vs-bracket background EXTENT still belongs to panel visibility
+\(`agent-repl--ws-display-state') for an UNSELECTED tab — this override
+is scoped to `:selected' alone.
 
 The invariant parts are the ones no row has ever varied:
 `agent-repl--tab-weight' throughout, and each half\='s numeral in its own
