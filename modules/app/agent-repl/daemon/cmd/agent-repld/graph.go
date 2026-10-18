@@ -67,6 +67,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/signin"
+	"agent-repld/internal/startslots"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/webfootprint"
@@ -679,7 +680,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ones built above never close or reopen a workspace.
 	p.DB = cachelapse.ObserveClosures(p.DB, cacheKeeper)
 
+	// THE ONE CAP ON VENDOR STARTS IN FLIGHT, shared by the fleet's starts and
+	// the prompt queue's shim restarts (startslots): a restart takes its slot
+	// before it stands its old shim down, and its resume is answered from it.
+	startSlots := startslots.New(startslots.DefaultSize())
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
+		StartSlots:  startSlots,
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
 		Instance:    p.Instance,
@@ -792,6 +799,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the prompt queue ----
 
 	queue, err = promptqueue.New(promptqueue.Deps{
+		RestartSlots:   startSlots,
 		TurnBanners:    turnBanners,
 		Commits:        commitRecounter,
 		StripSentinels: stripSentinels,

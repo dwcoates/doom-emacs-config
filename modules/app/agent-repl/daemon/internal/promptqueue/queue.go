@@ -172,6 +172,11 @@ func (q *queue) runningCut(ws ids.WorkspaceID) (runningCut, bool) {
 type queue struct {
 	deps Deps
 
+	// onSlotHandled, when set, is called once a restart slot the pool handed
+	// a replacement in line has been taken or given back. It is how a test
+	// observes the hand-off without timing it; production leaves it nil.
+	onSlotHandled func()
+
 	// onDrainWait, when set, is called each time an exclusive call starts
 	// waiting out a draining bounce, with the delivery lock released. It is
 	// how a test observes the wait without timing it; production leaves it

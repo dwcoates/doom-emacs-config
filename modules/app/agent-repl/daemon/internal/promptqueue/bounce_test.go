@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
 )
 
@@ -1792,4 +1793,185 @@ func TestABounceDeferredBehindALeaseRunsAgainWhenTheLeaseChanges(t *testing.T) {
 	if got := g.runs.Load(); got != 2 {
 		t.Fatalf("the bounce ran %d times, want twice: deferred, then taken at the lease change", got)
 	}
+}
+
+// fullRestartSlots gives the harness's queue a one-slot restart pool that
+// another workspace already holds, and answers that holder's release and a
+// channel told each time a handed slot was taken or given back.
+func fullRestartSlots(h *harness) (*startslots.Pool, startslots.Release, chan struct{}) {
+	pool := startslots.New(1)
+	release, _ := pool.TryAcquire("ws-other")
+	h.q.deps.RestartSlots = pool
+	handled := make(chan struct{}, 4)
+	h.q.onSlotHandled = func() { handled <- struct{}{} }
+	return pool, release, handled
+}
+
+func TestAShimReplacementWaitsInLineToRestart(t *testing.T) {
+	tests := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, g *gate, decision bounce.Decision)
+	}{
+		{name: "is not started now", assert: func(t *testing.T, _ *harness, _ *gate, decision bounce.Decision) {
+			if decision.Now {
+				t.Fatalf("decision = %+v, want the replacement in line", decision)
+			}
+		}},
+		{name: "leaves the workspace undrained, serving on its shim", assert: func(t *testing.T, h *harness, _ *gate, _ bounce.Decision) {
+			if h.q.isDraining(theWorkspace) {
+				t.Fatal("the workspace drained while its replacement waited in line")
+			}
+		}},
+		{name: "runs nothing", assert: func(t *testing.T, _ *harness, g *gate, _ bounce.Decision) {
+			if g.runs.Load() != 0 {
+				t.Fatalf("the replacement ran %d times while in line", g.runs.Load())
+			}
+		}},
+		{name: "says it waits in line", assert: func(t *testing.T, h *harness, _ *gate, _ bounce.Decision) {
+			if !logged(h.log.Records(), "info", opBounce, "the shim replacement waits in line for a restart slot; the workspace keeps serving on its shim until its turn") {
+				t.Fatalf("records = %+v, want the wait in line", h.log.Records())
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: every restart slot is held.
+			h := newHarness(t)
+			fullRestartSlots(h)
+			g := newGate()
+
+			// Act.
+			decision, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale"))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RequestBounce: %v", err)
+			}
+			tt.assert(t, h, g, decision)
+		})
+	}
+}
+
+func TestAShimReplacementInLineRunsWhenItsTurnComes(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	_, release, handled := fullRestartSlots(h)
+	g := newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+
+	// Act.
+	release()
+	<-handled
+
+	// Assert.
+	g.awaitStart(t)
+	g.finish(h, nil)
+}
+
+func TestARunningShimReplacementHoldsItsRestartSlot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	pool := startslots.New(1)
+	h.q.deps.RestartSlots = pool
+	g := newGate()
+
+	// Act.
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+
+	// Assert.
+	if !pool.Holds(theWorkspace) {
+		t.Fatal("the running replacement holds no restart slot")
+	}
+	g.finish(h, nil)
+}
+
+func TestAShimReplacementGivesBackItsRestartSlotWhenItsStageEnds(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "finished", err: nil},
+		{name: "failed", err: errors.New("the prelaunch failed")},
+		{name: "deferred", err: bounce.ErrDeferred},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			pool := startslots.New(1)
+			h.q.deps.RestartSlots = pool
+			g := newGate()
+			if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+				t.Fatalf("RequestBounce: %v", err)
+			}
+			g.awaitStart(t)
+
+			// Act.
+			g.finish(h, tt.err)
+
+			// Assert.
+			if pool.Holds(theWorkspace) {
+				t.Fatal("the replacement kept its restart slot after its stage ended")
+			}
+		})
+	}
+}
+
+func TestAShimReplacementWhoseTurnComesWhileBusyGivesTheSlotBack(t *testing.T) {
+	// Arrange: in line, then the workspace starts a turn before its turn comes.
+	h := newHarness(t)
+	pool, release, handled := fullRestartSlots(h)
+	g := newGate()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	running(t, h, "running-turn", "the running work")
+
+	// Act.
+	release()
+	<-handled
+
+	// Assert.
+	if pool.Holds(theWorkspace) || g.runs.Load() != 0 {
+		t.Fatalf("holds=%v runs=%d, want the slot given back and nothing run while the workspace is busy",
+			pool.Holds(theWorkspace), g.runs.Load())
+	}
+}
+
+func TestAMoveTakesNoRestartSlot(t *testing.T) {
+	// Arrange: every restart slot is held.
+	h := newHarness(t)
+	fullRestartSlots(h)
+	g := newGate()
+
+	// Act.
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, g.moving("handover"))
+
+	// Assert.
+	if err != nil || !decision.Now {
+		t.Fatalf("RequestBounce = %+v, %v; want the move started at once", decision, err)
+	}
+	g.awaitStart(t)
+	g.releaseStage(nil)
+	h.q.bouncing.Wait()
+}
+
+func TestAShimReplacementWhoseShimDiedIsTakenWithoutWaitingInLine(t *testing.T) {
+	// Arrange: every restart slot is held, and the replacement waits on work.
+	h := newHarness(t)
+	fullRestartSlots(h)
+	g := newGate()
+	registerBehindWork(t, h, g.relaunching("build_stale"))
+
+	// Act.
+	depart(h, h.watcher, departedUnasked)
+
+	// Assert.
+	g.awaitStart(t)
+	g.finish(h, nil)
 }
