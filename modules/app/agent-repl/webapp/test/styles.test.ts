@@ -980,7 +980,7 @@ describe("the footer status wave's stylesheet contract", () => {
     const declarations = ruleFor(baseSheet(), ".pfooter-status-word") ?? "";
 
     // Assert — the word changes hue as one (owner ruling, 2026-10-17).
-    expect(declarations).toMatch(/animation:\s*pfooter-status-color 2\.6s ease-in-out infinite alternate/);
+    expect(declarations).toMatch(/animation:\s*pfooter-status-color 3\.64s ease-in-out infinite alternate/);
   });
 
   it("keeps the colour sweep off the letters, so no letter changes hue on its own stagger", () => {
@@ -992,14 +992,14 @@ describe("the footer status wave's stylesheet contract", () => {
     expect(declarations).not.toMatch(/pfooter-status-color/);
   });
 
-  it("runs the colour sweep at the scale wave's exact 2.6s period, so the two are locked", () => {
+  it("runs the colour sweep 40% slower than the scale wave's 2.6s period", () => {
     // Arrange / Act
     const word = ruleFor(baseSheet(), ".pfooter-status-word") ?? "";
     const letter = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
     const durations = [word, letter].map((rule) => /pfooter-status-\w+ (\d\.\d+)s/.exec(rule)?.[1]);
 
-    // Assert — the bulge and the sweep share one duration.
-    expect(durations).toEqual(["2.6", "2.6"]);
+    // Assert — the sweep's duration is the bulge's times 1.4 (owner ruling, 2026-10-18).
+    expect(durations).toEqual(["3.64", "2.6"]);
   });
 
   it("stops the word's colour sweep outright under prefers-reduced-motion", () => {
