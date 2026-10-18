@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 )
 
 // THE ⇄ CHIP AND ITS PANEL ARE THE FEED'S ASYNC MERGE BUBBLES, READ BACK
@@ -183,24 +184,15 @@ func (r *resolver) OnMergeRowRetired(ws ids.WorkspaceID, lease ids.LeaseID, id s
 // oneof whose arms are the shared badge leaves (frontend.v1.FeedMergeTab:
 // "every state oneof is live, settled, or waiting on the user"), so the set
 // leaf's message type is the answer for every kind, a kind added later
-// included. A tab with no kind, or a kind with no state stated, is a producer
-// defect, and it panics rather than draw a step by a guess.
+// included. Both oneofs are required, so a tab with no kind, a kind with no
+// state oneof, or one that states no state is a producer defect, and
+// protoarm.Must panics rather than draw a step by a guess.
 func mergeTabState(id string, tab *frontendv1.FeedMergeTab) (settled, waiting bool) {
+	by := fmt.Sprintf("the footer's step for merge tab %q", id)
 	msg := tab.ProtoReflect()
-	kindField := msg.WhichOneof(msg.Descriptor().Oneofs().ByName("kind"))
-	if kindField == nil {
-		panic(fmt.Sprintf("footer: merge tab %q carries no kind (frontend.v1.FeedMergeTab.kind)", id))
-	}
-	kind := msg.Get(kindField).Message()
-	states := kind.Descriptor().Oneofs().ByName("state")
-	if states == nil {
-		panic(fmt.Sprintf("footer: merge tab %q's kind %s has no state oneof", id, kindField.Name()))
-	}
-	stateField := kind.WhichOneof(states)
-	if stateField == nil {
-		panic(fmt.Sprintf("footer: merge tab %q's %s states no state", id, kindField.Name()))
-	}
-	leaf := stateField.Message().FullName()
+	kind := msg.Get(msg.Descriptor().Fields().ByName(protoarm.Must(msg, "kind", by))).Message()
+	state := kind.Descriptor().Fields().ByName(protoarm.Must(kind, "state", by))
+	leaf := state.Message().FullName()
 	return leaf == settledLeaf, leaf == waitingLeaf
 }
 
