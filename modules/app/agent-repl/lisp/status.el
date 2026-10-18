@@ -1811,9 +1811,11 @@ between the badge and `[N]\=' carries no background, so the entry\='s
 paint starts at `[N]\='.  A blank IMG-STR is treated as no badge at all.
 
 EXACTLY ONE SPACE SEPARATES [N] FROM THE NAME, always (owner ruling,
-2026-09-13).  The gap is emitted HERE, as one space carrying the name's
-own face, whatever ground the bracket draws (an async merge's purple
-`[N]\=' included, owner request 2026-10-13), and never by
+2026-09-13).  The gap is emitted HERE, as one space ON THE BAR'S OWN
+GROUND, never the bracket's or the name's (owner ruling, 2026-10-18:
+the gap between `[N]\=' and the name is never colored), whatever ground
+the bracket draws (an async merge's purple `[N]\=' included, owner
+request 2026-10-13), and never by
 `agent-repl-tab-name-padding': that format's
 leading whitespace is stripped, so a padding format and a badge run can
 no longer each contribute a space and draw `[3]   ws'.  The name itself
@@ -1863,7 +1865,7 @@ whenever an entry landed at a wrap (or the final row's) end."
             (when badge
               (concat badge (propertize " " 'face separator-face)))
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
-            (propertize " " 'face name-face)
+            (propertize " " 'face separator-face)
             (propertize text 'face name-face*)
             (propertize fill 'face name-face)
             " ")))
