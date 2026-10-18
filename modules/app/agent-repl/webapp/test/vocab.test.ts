@@ -519,7 +519,7 @@ describe("color_values, each color's one value per theme", () => {
     const got = colorValue(theme, color);
 
     // Assert
-    expect(got).toBe(values[theme]![color]);
+    expect(got).toBe(values[theme][color]);
   });
 
   it("refuses a color the file gives no value", () => {
