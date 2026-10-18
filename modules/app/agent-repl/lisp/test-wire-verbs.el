@@ -5111,16 +5111,18 @@ instead diverges from it unseen."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-decodes-every-step ()
-  "A success decodes the re-read standing and both steps' outcomes."
+  "A success decodes the re-read standing and every step's outcome."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                   (concat "{\"success\":{\"state\":{\"joined\":{},\"on\":{}},"
                           "\"hotspot\":{\"failed\":{\"networkName\":\"Phone\",\"detail\":\"not visible\"}},"
+                          "\"energyMode\":{\"failed\":{\"detail\":\"refused\"}},"
                           "\"display\":{\"toolMissing\":{\"toolPath\":\"/b/mac-brightness\"}}}}"))
                  '(:arm :success
                    :value (:state (:wifi (:arm :joined :value (:network-name nil))
                                    :mode (:arm :on :value nil))
                            :hotspot (:arm :failed :value (:network-name "Phone" :detail "not visible"))
+                           :energy-mode (:arm :failed :value (:detail "refused"))
                            :display (:arm :tool-missing :value (:tool-path "/b/mac-brightness")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-with-an-unread-state ()
@@ -5129,6 +5131,7 @@ instead diverges from it unseen."
                                         #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                                         (concat "{\"success\":{\"state\":{},"
                                                 "\"hotspot\":{\"notOnHotspot\":{}},"
+                                                "\"energyMode\":{\"highPower\":{}},"
                                                 "\"display\":{\"restored\":{}}}}"))
                                        :value)
                             :state)
@@ -5140,6 +5143,13 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                   "{\"success\":{\"state\":{},\"display\":{\"dimmed\":{}}}}")
                  '("UpdatePersistentWifiModeSuccess" hotspot "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-without-energy-mode-refused ()
+  "A success missing its required energy mode outcome is a breach."
+  (should (equal (agent-repl-test-wire-verbs--decode-breach
+                  #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                  "{\"success\":{\"state\":{},\"hotspot\":{\"notOnHotspot\":{}},\"display\":{\"dimmed\":{}}}}")
+                 '("UpdatePersistentWifiModeSuccess" energyMode "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-error-decodes-its-cause ()
   "A refused power step decodes its cause and the refusal's words."
@@ -5169,6 +5179,7 @@ instead diverges from it unseen."
   "Each outcome table names exactly the arms the frozen schema declares."
   (dolist (case `(("UpdatePersistentWifiModeHotspot" . ,agent-repl-wire-persistent-wifi-hotspot-arms)
                   ("UpdatePersistentWifiModeDisplay" . ,agent-repl-wire-persistent-wifi-display-arms)
+                  ("UpdatePersistentWifiModeEnergyMode" . ,agent-repl-wire-persistent-wifi-energy-mode-arms)
                   ("UpdatePersistentWifiModeError" . ,agent-repl-wire-persistent-wifi-error-arms)))
     (should (equal (sort (agent-repl-test--generated-oneof-arms
                           "agentrepl/v1/endpoint_update_persistent_wifi_mode.pb.go" (car case))

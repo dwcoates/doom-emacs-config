@@ -13,6 +13,7 @@ import {
 import {
   UpdatePersistentWifiModeErrorSchema,
   UpdatePersistentWifiModeResponseSchema,
+  UpdatePersistentWifiModeSuccessSchema,
   type UpdatePersistentWifiModeRequest,
   type UpdatePersistentWifiModeResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
@@ -104,6 +105,7 @@ const success = (): UpdatePersistentWifiModeResponse =>
       value: {
         state: { wifi: { case: "joined", value: { networkName: "phone" } }, mode: { case: "on", value: {} } },
         hotspot: { outcome: { case: "joined", value: { networkName: "phone" } } },
+        energyMode: { outcome: { case: "lowPower", value: {} } },
         display: { outcome: { case: "dimmed", value: {} } },
       },
     },
@@ -164,8 +166,22 @@ describe("clicking the persistent-wifi chip", () => {
     const record = await forwardedRecord(capture, "topbar.persistent-wifi-toggled");
     expect([record.level.case, record.context]).toEqual([
       "info",
-      expect.objectContaining({ mode: "on", wifi: "joined", hotspot: "joined", display: "dimmed" }),
+      expect.objectContaining({ mode: "on", wifi: "joined", hotspot: "joined", energyMode: "lowPower", display: "dimmed" }),
     ]);
+  });
+
+  it("logs every step the success carries, each through stepOutcomeArm", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const steps = UpdatePersistentWifiModeSuccessSchema.fields
+      .map((f) => f.localName)
+      .filter((name) => name !== "state");
+    // Act
+    await clickWith(() => success());
+    // Assert
+    const record = await forwardedRecord(capture, "topbar.persistent-wifi-toggled");
+    if (record.context === undefined) throw new Error("the toggled record carries no context");
+    expect(Object.keys(record.context).filter((k) => steps.includes(k)).sort()).toEqual([...steps].sort());
   });
 
   it("draws nothing on success, because the new standing arrives on the push", async () => {

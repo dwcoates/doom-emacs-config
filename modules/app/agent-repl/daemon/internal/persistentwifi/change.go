@@ -18,6 +18,15 @@ const (
 	brightnessRestored = "1.0"
 )
 
+// Energy modes the energy mode step sets through `pmset -a powermode`: macOS's
+// Low Power Mode when the mode goes on, so a lid-closed machine draws as little
+// as it can, and High Power Mode when it goes off. The sudoers grant names both
+// invocations.
+const (
+	energyModeLowPower  = "1"
+	energyModeHighPower = "2"
+)
+
 // powerSettings are the three `pmset -a` settings the mode writes, in order:
 // sleep disabled outright, the network kept up over sleep, and wake on network
 // access. The sudoers grant names each of these exact invocations.
@@ -227,6 +236,31 @@ func (c *Controller) pmsetAll(ctx context.Context, setting, value string) error 
 		return fmt.Errorf("pmset -a %s %s: %w", setting, value, err)
 	}
 	return nil
+}
+
+// setEnergyMode is the energy mode step. No outcome of it fails the request:
+// the machine stays awake whichever energy mode it runs in.
+func (c *Controller) setEnergyMode(ctx context.Context, on bool) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
+	mode := energyModeHighPower
+	if on {
+		mode = energyModeLowPower
+	}
+	e := &agentreplv1.UpdatePersistentWifiModeEnergyMode{}
+	switch err := c.pmsetAll(ctx, "powermode", mode); {
+	case err != nil:
+		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_Failed{
+			Failed: &agentreplv1.UpdatePersistentWifiModeEnergyModeFailed{Detail: err.Error()},
+		}
+	case on:
+		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_LowPower{
+			LowPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeLowPower{},
+		}
+	default:
+		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_HighPower{
+			HighPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeHighPower{},
+		}
+	}
+	return e
 }
 
 // setDisplay is the display step. Cosmetic: no outcome of it fails the

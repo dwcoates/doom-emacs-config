@@ -2998,6 +2998,12 @@ Every arm's message is all strings, so FIELDS is its whole schema.")
     (failed :failed ((detail :detail))))
   "UpdatePersistentWifiModeDisplay's outcome arms: (WIRE KEYWORD FIELDS).")
 
+(defconst agent-repl-wire-persistent-wifi-energy-mode-arms
+  '((lowPower :low-power nil)
+    (highPower :high-power nil)
+    (failed :failed ((detail :detail))))
+  "UpdatePersistentWifiModeEnergyMode's outcome arms: (WIRE KEYWORD FIELDS).")
+
 (defconst agent-repl-wire-persistent-wifi-error-arms
   '((powerSettingsRefused :power-settings-refused ((detail :detail)))
     (modeUnreadable :mode-unreadable ((detail :detail))))
@@ -3021,10 +3027,11 @@ ARMS is a list of (WIRE KEYWORD FIELDS) as in
 
 (defun agent-repl-wire-decode-update-persistent-wifi-mode-success (json)
   "Decode UpdatePersistentWifiModeSuccess from JSON.
-Returns (:state STATE :hotspot ONEOF :display ONEOF): the standing re-read
-after the change, and how the hotspot and display steps went."
+Returns (:state STATE :hotspot ONEOF :energy-mode ONEOF :display ONEOF):
+the standing re-read after the change, and how the hotspot, energy mode
+and display steps went."
   (let ((message "UpdatePersistentWifiModeSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(state hotspot display))
+    (agent-repl-wire-verbs--check-keys message json '(state hotspot energyMode display))
     ;; Presence, not value: protojson spells a message with nothing set as
     ;; `{}', which parses to nil, and a standing with both facts unread is
     ;; exactly that.
@@ -3036,6 +3043,12 @@ after the change, and how the hotspot and display steps went."
                       (agent-repl-wire-verbs--decode-string-arms
                        "UpdatePersistentWifiModeHotspot" "outcome" value
                        agent-repl-wire-persistent-wifi-hotspot-arms)))
+          :energy-mode (agent-repl-wire--decode-message
+                        message 'energyMode json
+                        (lambda (value)
+                          (agent-repl-wire-verbs--decode-string-arms
+                           "UpdatePersistentWifiModeEnergyMode" "outcome" value
+                           agent-repl-wire-persistent-wifi-energy-mode-arms)))
           :display (agent-repl-wire--decode-message
                     message 'display json
                     (lambda (value)

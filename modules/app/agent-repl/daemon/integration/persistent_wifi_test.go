@@ -43,8 +43,8 @@ func TestAnEmacsStreamIsToldTheStandingAndAToggleTurnsItOver(t *testing.T) {
 	}
 	success := resp.Msg.GetSuccess()
 	if success.GetState().GetOn() == nil || success.GetHotspot().GetJoined().GetNetworkName() != harness.FakeHotspot ||
-		success.GetDisplay().GetDimmed() == nil {
-		t.Fatalf("response = %v, want on, the hotspot joined and the display dimmed", resp.Msg)
+		success.GetEnergyMode().GetLowPower() == nil || success.GetDisplay().GetDimmed() == nil {
+		t.Fatalf("response = %v, want on, the hotspot joined, low power and the display dimmed", resp.Msg)
 	}
 	harness.AwaitView(t, ctx, stream, "the toggled standing", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetPersistentWifi().GetOn() != nil

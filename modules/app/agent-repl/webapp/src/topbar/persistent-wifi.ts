@@ -16,7 +16,8 @@
  * glyph turns the mode over through `agentrepl.v1.UpdatePersistentWifiMode`'s
  * `toggle` arm, the same endpoint and arm `agent-repl-persistent-wifi-mode-toggle`
  * sends from Emacs. The DAEMON resolves the toggle from the mode it reads at
- * that moment and runs the whole change (hotspot, power settings, display), so
+ * that moment and runs the whole change (hotspot, power settings, energy mode,
+ * display), so
  * this end decides nothing: it sends the arm, states a refusal at the chip, and
  * the chip redraws from the push the change causes.
  */
@@ -221,6 +222,7 @@ export async function togglePersistentWifiMode(
             mode: state.mode.case ?? "unknown",
             wifi: state.wifi.case ?? "unknown",
             hotspot: stepOutcomeArm(success.hotspot, "hotspot", "UpdatePersistentWifiModeHotspot"),
+            energyMode: stepOutcomeArm(success.energyMode, "energyMode", "UpdatePersistentWifiModeEnergyMode"),
             display: stepOutcomeArm(success.display, "display", "UpdatePersistentWifiModeDisplay"),
           },
         });

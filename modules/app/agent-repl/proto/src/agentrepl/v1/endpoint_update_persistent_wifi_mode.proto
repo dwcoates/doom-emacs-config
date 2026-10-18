@@ -9,12 +9,15 @@
 //   2. the power settings — sleep disabled (on) or enabled (off), together
 //      with network-over-sleep and wake-on-network — the one step that
 //      decides whether the change happened at all;
-//   3. the display — dimmed (on) or restored (off) — LAST, as the visible
+//   3. the energy mode — low power (on) or high power (off) — once the
+//      machine is known to stay awake, so a lid-closed machine draws as
+//      little as it can and an open one runs at full speed again;
+//   4. the display — dimmed (on) or restored (off) — LAST, as the visible
 //      sign that the machine is in its final state and the lid may close.
-// A failed hotspot or display step never stops the power step: staying awake
-// on whatever network is present is still the outcome asked for, so those two
-// steps report how they went inside the SUCCESS, and only a refused power step
-// is a failure.
+// A failed hotspot, energy mode or display step never stops the change:
+// staying awake on whatever network is present is still the outcome asked
+// for, so those three steps report how they went inside the SUCCESS, and only
+// a refused power step is a failure.
 
 syntax = "proto3";
 
@@ -64,6 +67,8 @@ message UpdatePersistentWifiModeSuccess {
   UpdatePersistentWifiModeHotspot hotspot = 2;
   // How the display step went.
   UpdatePersistentWifiModeDisplay display = 3;
+  // How the energy mode step went.
+  UpdatePersistentWifiModeEnergyMode energy_mode = 4;
 }
 
 // The hotspot step's outcome. THE ARM IS THE OUTCOME. None of these is a
@@ -116,6 +121,30 @@ message UpdatePersistentWifiModeHotspotFailed {
   // ("the hotspot is not visible", "still joined after a disconnect and a
   // radio restart").
   string detail = 2;
+}
+
+// The energy mode step's outcome: macOS's Low Power Mode and High Power Mode
+// (`pmset -a powermode 1` and `2`), set for battery and power adapter alike.
+// THE ARM IS THE OUTCOME, and none of these is a failure of the request.
+message UpdatePersistentWifiModeEnergyMode {
+  oneof outcome {
+    // Turning on: the machine was put in Low Power Mode.
+    UpdatePersistentWifiModeEnergyModeLowPower low_power = 1;
+    // Turning off: the machine was put in High Power Mode.
+    UpdatePersistentWifiModeEnergyModeHighPower high_power = 2;
+    // The energy mode change was refused or failed; the machine's energy
+    // mode is as it was.
+    UpdatePersistentWifiModeEnergyModeFailed failed = 3;
+  }
+}
+// Low Power Mode.
+message UpdatePersistentWifiModeEnergyModeLowPower {}
+// High Power Mode.
+message UpdatePersistentWifiModeEnergyModeHighPower {}
+// The energy mode change failed.
+message UpdatePersistentWifiModeEnergyModeFailed {
+  // The refusal or failure, verbatim from sudo or pmset.
+  string detail = 1;
 }
 
 // The display step's outcome. THE ARM IS THE OUTCOME, and none of these is a
