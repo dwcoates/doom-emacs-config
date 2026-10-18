@@ -443,30 +443,30 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #151413;
-    --fg: #ece9e2;
+    --bg: #151514;
+    --fg: #f1efe9;
     --diff-add-bg: #12351f;
     --diff-del-bg: #3d1a1a;
-    --muted: #a8a29e;
-    --repo-head-expanded: #ece9e2;
-    --repo-head-collapsed: #78716c;
+    --muted: #898782;
+    --repo-head-expanded: #f1efe9;
+    --repo-head-collapsed: #898782;
     --merged-today-gutter: #ece8df;
-    --border: #302e2b;
-    --card: #1b1a18;
-    /* The dark theme's shared panel fill (owner ruling, 2026-09-27): a notch
-       darker than --card, still lighter than the feed's #151413. The
-       response bubble's --assistant is this same fill (owner ruling,
-       2026-10-11). */
-    --panel-bg: #191816;
-    /* The dark theme's tool card, a touch darker than --panel-bg (owner
-       request, 2026-10-14, "halfway closer to the background color of the
-       feed"): each channel the midpoint of --panel-bg's #191816 and the
-       feed's #151413, rounded down, so a card still lifts off the feed. */
-    --tool-card-bg: #171614;
-    /* Lighter than the feed's #151413, darker than --card, so the rail lifts
-       off the conversation while its --card hover/detail washes still lift
-       off the rail. */
-    --sidebar-bg: #191816;
+    --border: #2c2c2b;
+    --card: #232322;
+    /* THE DARK NEUTRALS FOLLOW THE CLAUDE DESKTOP APP'S DARK THEME (owner
+       ruling, 2026-10-17), sampled from a screenshot of it: near-pure gray
+       grounds, with the warmth carried by the text at a yellow-leaning hue.
+       Each token takes the lightness of its Claude counterpart, named on it.
+       design-dark-palette-tuner.html beside this module tunes the set. */
+    /* The shared panel fill, Claude's code block. The response bubble's
+       --assistant is this same fill (owner ruling, 2026-10-11). */
+    --panel-bg: #1a1a19;
+    /* The tool card, Claude's code block too, so it shares --panel-bg's
+       fill and still lifts off the feed. */
+    --tool-card-bg: #1a1a19;
+    /* Claude's sidebar, darker than the feed, so the rail recedes behind the
+       conversation while its --card hover/detail washes lift off it. */
+    --sidebar-bg: #111110;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
        nothing against the dark feed, so the rail's lift needs a heavier black
        to still register. */
@@ -501,7 +501,7 @@
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
     --thinking: #fb923c;
-    --tool-command: #a8a29e;
+    --tool-command: #898782;
     --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -511,7 +511,7 @@
     --info-tasks: #fda4af;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    --composer-bg: #0f0e0d;
+    --composer-bg: #20201f;
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg
@@ -529,8 +529,8 @@
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #60a5fa;
     /* A moderate grey a little lighter than the dark --assistant (the dark
-       --panel-bg, #191816). */
-    --selected-bubble-bg: #33312d;
+       --panel-bg, #1a1a19). */
+    --selected-bubble-bg: #313130;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
@@ -614,11 +614,11 @@
 }
 @media (prefers-color-scheme: dark) {
   :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
-    background-color: #57534e;
+    background-color: #545453;
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
   :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
-    background-color: #3b3835;
+    background-color: #393938;
   }
 }
 
@@ -3432,7 +3432,7 @@ html[data-page-unshown] *::after {
     --hl-keyword: #c084fc;
     --hl-string: #4ade80;
     --hl-number: #fbbf24;
-    --hl-comment: #969087;
+    --hl-comment: #838897;
     --hl-title: #60a5fa;
     --hl-attr: #22d3ee;
     --hl-meta: #fbbf24;

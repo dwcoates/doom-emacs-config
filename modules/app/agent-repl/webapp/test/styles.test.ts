@@ -3549,7 +3549,7 @@ describe("the response bubble's fill", () => {
     expect(response).toEqual(card);
   });
 
-  it("keeps the dark theme's response on its pre-2026-10-14 fill while the tool card darkens", () => {
+  it("paints the dark theme's response Claude's code-block fill (owner ruling, 2026-10-17)", () => {
     // Arrange
     const css = darkThemeBlock();
 
@@ -3557,7 +3557,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x19, 0x18, 0x16]);
+    expect(response).toEqual([0x1a, 0x1a, 0x19]);
   });
 
   it("is what a response bubble paints", () => {
@@ -3785,7 +3785,6 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it.each([
     ["the tool card sits lighter than the feed", "--bg", "--tool-card-bg"],
-    ["the tool card sits darker than the shared panel fill", "--tool-card-bg", "--panel-bg"],
     ["the shared panel fill sits darker than the old card grey", "--panel-bg", "--card"],
   ])("%s", (_name, darker, lighter) => {
     // Arrange
@@ -3811,16 +3810,26 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
   });
 
-  it("takes the tool card halfway from the shared panel fill to the feed (owner request, 2026-10-14)", () => {
+  it("gives the tool card the shared panel fill, as Claude's code block (owner ruling, 2026-10-17)", () => {
     // Arrange
     const block = darkThemeBlock();
-    const [panel, feed] = [rgbOf(block, "--panel-bg"), rgbOf(block, "--bg")];
 
     // Act
     const card = rgbOf(block, "--tool-card-bg");
 
-    // Assert — each channel the midpoint, rounded down.
-    expect(card).toEqual(panel.map((c, i) => Math.floor((c + feed[i]) / 2)));
+    // Assert
+    expect(card).toEqual(rgbOf(block, "--panel-bg"));
+  });
+
+  it("sits the rail darker than the feed, as Claude's sidebar (owner ruling, 2026-10-17)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const [rail, feed] = [luminance(rgbOf(block, "--sidebar-bg")), luminance(rgbOf(block, "--bg"))];
+
+    // Assert
+    expect(rail).toBeLessThan(feed);
   });
 
   it.each([
@@ -4166,7 +4175,7 @@ describe("the tool card's command grey", () => {
 
   it.each([
     ["light", "#4b5563"],
-    ["dark", "#a8a29e"],
+    ["dark", "#898782"],
   ] as const)("defines the %s theme's command grey as %s", (theme, want) => {
     // Arrange
     const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
@@ -4994,7 +5003,7 @@ describe("washOf, a token's transparent wash", () => {
 describe("THEME_BLOCKS, the per-theme token table", () => {
   it.each([
     ["light", "#ffffff"],
-    ["dark", "#151413"],
+    ["dark", "#151514"],
   ] as const)("hands the %s theme its own token block", (theme, bg) => {
     // Arrange
     const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
