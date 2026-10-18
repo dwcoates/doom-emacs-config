@@ -735,14 +735,36 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
 
 // ---- the status word's letter wave ----------------------------------------
 
+/** The negative inline `animation-delay` ELEMENT renders with, in ms. */
+function inlineDelayMs(element: Element): number {
+  const got = /animation-delay:\s*-(\d+)ms/.exec(element.getAttribute("style") ?? "");
+  if (got === null) throw new Error(`no negative delay on ${element.outerHTML}`);
+  return Number(got[1]);
+}
+
+describe("inlineDelayMs", () => {
+  it("reads the negative delay off the inline style", () => {
+    // Arrange
+    const element = document.createElement("span");
+    element.setAttribute("style", "animation-delay:-1234ms");
+
+    // Act / Assert
+    expect(inlineDelayMs(element)).toBe(1234);
+  });
+
+  it("throws on an element with no negative delay", () => {
+    // Arrange
+    const element = document.createElement("span");
+
+    // Act / Assert
+    expect(() => inlineDelayMs(element)).toThrow(/no negative delay/);
+  });
+});
+
 describe("the footer status word's letter wave", () => {
   /** The delay each `.pfooter-wave-letter` of the drawn status word renders with. */
   function letterDelays(row: HTMLElement): number[] {
-    return [...row.querySelectorAll(".footer-status .pfooter-wave-letter")].map((letter) => {
-      const got = /animation-delay:\s*-(\d+)ms/.exec(letter.getAttribute("style") ?? "");
-      if (got === null) throw new Error(`no negative delay on ${letter.outerHTML}`);
-      return Number(got[1]);
-    });
+    return [...row.querySelectorAll(".footer-status .pfooter-wave-letter")].map(inlineDelayMs);
   }
 
   /** The arm's fixture, with its first substatus where the arm declares one. */
@@ -847,7 +869,7 @@ describe("the footer status word's letter wave", () => {
 
 // ---- the status word's colour sweep (the blanking-bug regression lock) -----
 
-describe("the footer status word's per-letter colour sweep", () => {
+describe("the footer status word's whole-word colour sweep", () => {
   /** Every drawn `.pfooter-wave-letter` of the status word. */
   function statusLetters(row: HTMLElement): HTMLElement[] {
     return [...row.querySelectorAll<HTMLElement>(".footer-status .pfooter-wave-letter")];
@@ -890,12 +912,48 @@ describe("the footer status word's per-letter colour sweep", () => {
     expect(style).not.toMatch(/color:\s*transparent/);
   });
 
-  it("carries no colour-swept letters at all under a non-progress arm", () => {
+  it("renders the first letter's delay on the word holder, so the sweep shares the wave's clock", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
+    const holder = row.querySelector(".footer-status .pfooter-status-word");
+
+    // Assert
+    expect(holder?.getAttribute("style")).toBe(statusLetters(row)[0]?.getAttribute("style"));
+  });
+
+  it("continues the word's colour phase across a redraw rather than restarting at zero", () => {
+    // Arrange
+    const holderDelay = (row: HTMLElement): number => {
+      const holder = row.querySelector(".footer-status .pfooter-status-word");
+      if (holder === null) throw new Error("no status word holder drawn");
+      return inlineDelayMs(holder);
+    };
+    const before = holderDelay(drawStrip({ status: withSubStatus("working", "thinking") }).row);
+    vi.setSystemTime(NOW + 900);
+
+    // Act
+    const after = holderDelay(drawStrip({ status: withSubStatus("working", "thinking") }).row);
+
+    // Assert
+    expect(after).toBe((before + 900) % STATUS_WAVE_CYCLE_MS);
+  });
+
+  it("sets no colour of its own on any letter, so every letter wears the word's hue", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
+
+    // Assert — a letter's inline style is its bulge delay alone.
+    for (const letter of statusLetters(row)) {
+      expect(letter.getAttribute("style")).toMatch(/^animation-delay:-\d+ms$/);
+    }
+  });
+
+  it("carries no colour-swept word at all under a non-progress arm", () => {
     // Arrange — a settled status stands still and hosts no colour sweep.
     const { row } = drawStrip({ status: status("idle", {}) });
 
-    // Assert — the sweep lives only on `.pfooter-wave-letter`, absent here.
-    expect(statusLetters(row)).toHaveLength(0);
+    // Assert — the sweep lives only on `.pfooter-status-word`, absent here.
+    expect(row.querySelectorAll(".footer-status .pfooter-status-word")).toHaveLength(0);
   });
 });
 
