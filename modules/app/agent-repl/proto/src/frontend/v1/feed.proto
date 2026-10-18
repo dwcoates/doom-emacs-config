@@ -3954,7 +3954,7 @@ message FeedMergeQueueEntry {
   // the requester instead and reveals this bubble in its feed
   // (SelectWorkspaceRequest.reveal). Unset for a sync merge, whose entry is
   // the requesting workspace itself and whose click selects it.
-  FeedMergeQueueBubble bubble = 5;
+  optional FeedMergeQueueBubble bubble = 5;
 }
 // Where an async merge's bubble stands: the requester's workspace and the
 // bubble's head row on its root feed.

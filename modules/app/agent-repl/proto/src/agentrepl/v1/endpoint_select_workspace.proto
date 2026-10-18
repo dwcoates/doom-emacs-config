@@ -20,7 +20,7 @@ message SelectWorkspaceRequest {
   // entry for an async merge sets it to the merge's bubble in its requester's
   // feed (FeedMergeQueueBubble), so the click opens that bubble rather than
   // the hidden merge workspace (owner ruling, 2026-10-17).
-  frontend.v1.FeedId reveal = 2;
+  optional frontend.v1.FeedId reveal = 2;
 }
 
 // THE ARM IS THE OUTCOME.

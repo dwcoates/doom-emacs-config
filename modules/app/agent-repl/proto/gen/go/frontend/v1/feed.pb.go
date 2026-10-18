@@ -24613,7 +24613,7 @@ type FeedMergeQueueEntry struct {
 	// the requester instead and reveals this bubble in its feed
 	// (SelectWorkspaceRequest.reveal). Unset for a sync merge, whose entry is
 	// the requesting workspace itself and whose click selects it.
-	Bubble        *FeedMergeQueueBubble `protobuf:"bytes,5,opt,name=bubble,proto3" json:"bubble,omitempty"`
+	Bubble        *FeedMergeQueueBubble `protobuf:"bytes,5,opt,name=bubble,proto3,oneof" json:"bubble,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -26251,14 +26251,15 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0eFeedMergeQueue\x126\n" +
 	"\x05ahead\x18\x01 \x03(\v2 .frontend.v1.FeedMergeQueueEntryR\x05ahead\x12:\n" +
 	"\acurrent\x18\x02 \x01(\v2 .frontend.v1.FeedMergeQueueEntryR\acurrent\x128\n" +
-	"\x06behind\x18\x03 \x03(\v2 .frontend.v1.FeedMergeQueueEntryR\x06behind\"\xd6\x02\n" +
+	"\x06behind\x18\x03 \x03(\v2 .frontend.v1.FeedMergeQueueEntryR\x06behind\"\xe6\x02\n" +
 	"\x13FeedMergeQueueEntry\x12B\n" +
 	"\tworkspace\x18\x01 \x01(\v2$.frontend.v1.FeedMergeQueueWorkspaceR\tworkspace\x126\n" +
 	"\x05label\x18\x02 \x01(\v2 .frontend.v1.FeedMergeQueueLabelR\x05label\x12>\n" +
 	"\amerging\x18\x03 \x01(\v2\".frontend.v1.FeedMergeQueueMergingH\x00R\amerging\x12>\n" +
-	"\awaiting\x18\x04 \x01(\v2\".frontend.v1.FeedMergeQueueWaitingH\x00R\awaiting\x129\n" +
-	"\x06bubble\x18\x05 \x01(\v2!.frontend.v1.FeedMergeQueueBubbleR\x06bubbleB\b\n" +
-	"\x06status\"w\n" +
+	"\awaiting\x18\x04 \x01(\v2\".frontend.v1.FeedMergeQueueWaitingH\x00R\awaiting\x12>\n" +
+	"\x06bubble\x18\x05 \x01(\v2!.frontend.v1.FeedMergeQueueBubbleH\x01R\x06bubble\x88\x01\x01B\b\n" +
+	"\x06statusB\t\n" +
+	"\a_bubble\"w\n" +
 	"\x14FeedMergeQueueBubble\x128\n" +
 	"\trequester\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\trequester\x12%\n" +
 	"\x03row\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"G\n" +

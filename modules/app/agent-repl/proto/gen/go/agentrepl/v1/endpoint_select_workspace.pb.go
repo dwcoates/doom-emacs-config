@@ -37,7 +37,7 @@ type SelectWorkspaceRequest struct {
 	// entry for an async merge sets it to the merge's bubble in its requester's
 	// feed (FeedMergeQueueBubble), so the click opens that bubble rather than
 	// the hidden merge workspace (owner ruling, 2026-10-17).
-	Reveal        *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3" json:"reveal,omitempty"`
+	Reveal        *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -567,10 +567,11 @@ var File_agentrepl_v1_endpoint_select_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x7f\n" +
+	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8f\x01\n" +
 	"\x16SelectWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12+\n" +
-	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdR\x06reveal\"\xa1\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x120\n" +
+	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01B\t\n" +
+	"\a_reveal\"\xa1\x01\n" +
 	"\x17SelectWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.SelectWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.SelectWorkspaceErrorH\x00R\x05errorB\b\n" +
@@ -640,6 +641,7 @@ func file_agentrepl_v1_endpoint_select_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_select_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*SelectWorkspaceResponse_Success)(nil),
 		(*SelectWorkspaceResponse_Error)(nil),
