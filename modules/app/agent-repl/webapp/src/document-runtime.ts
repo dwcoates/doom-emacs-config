@@ -8,7 +8,7 @@
  */
 import { installCopyChords, installCopyFallback } from "./copy.js";
 import type { LevelWindow } from "../../agent-shim/logging/ts/level-window.js";
-import { ForwardingLogger, log, setLogger, type ClientLogLevel } from "./log.js";
+import { ForwardingLogger, setLogger, type ClientLogLevel } from "./log.js";
 import type { AgentReplClient } from "./rpc/client.js";
 import { clientLogSink, type ClientLogSource } from "./rpc/client-log-sink.js";
 import { installSelectionClickGuard } from "./selection.js";
@@ -43,34 +43,4 @@ export function installTextAffordances(doc: Document): () => void {
     removeChords();
     removeGuard();
   };
-}
-
-/**
- * When WIN's document unloads for good (a `pagehide` that is not `persisted`),
- * quiet CTX and run TEARDOWN. Answers the stop. The webhost's end; a workspace
- * page ends through page-teardown.ts (`endPageAtPagehide`), which aborts every
- * request its transport made.
- *
- * WHY (2026-10-17). An unloaded document's script went on running in WebKit:
- * a workspace page whose iframe had been replaced redialled its WatchFeed
- * every few seconds for ten minutes beside its successor, failing every time
- * (`d.onConnect is not a function`: an unloaded document no longer upgrades
- * its custom elements). The webhost holds standing streams of its own (the
- * sidebar's roster), so at its unload it quiets its context, which cancels
- * every stream with no reconnect and refuses every call (rpc/context.ts), and
- * TEARDOWN stops its own timers. A document kept for the back/forward cache
- * (`persisted`) is left running, since it can be shown again.
- */
-export function quietAtUnload(win: Window, ctx: { quiesce(): void }, teardown: () => void): () => void {
-  const onHide = (event: PageTransitionEvent): void => {
-    if (event.persisted) return;
-    log.info("the document is unloading; it stops talking to the daemon", {
-      operation: "document.unload-quiet",
-      context: {},
-    });
-    ctx.quiesce();
-    teardown();
-  };
-  win.addEventListener("pagehide", onHide);
-  return () => win.removeEventListener("pagehide", onHide);
 }

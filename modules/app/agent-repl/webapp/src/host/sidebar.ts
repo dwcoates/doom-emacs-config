@@ -28,7 +28,8 @@ import { mintConnectionId } from "../connection-id.js";
 import { createLocalFailures } from "../failure/local.js";
 import { bootFailed } from "../failure/sink.js";
 import { bindLogContext, log, setLogger, type ForwardingLogger } from "../log.js";
-import { installForwardingLogger, installTextAffordances, quietAtUnload } from "../document-runtime.js";
+import { installForwardingLogger, installTextAffordances } from "../document-runtime.js";
+import { beginPage, endPageAtPagehide, pageEnding, stopAtPageTeardown } from "../page-teardown.js";
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
 import { createDaemonTransport } from "../rpc/transport.js";
@@ -67,7 +68,12 @@ export function startWebhostSidebar(
   nav: HTMLElement,
   deps: WebhostSidebarStartDeps = {},
 ): { dispose(): void } {
-  const client = deps.client ?? createAgentReplClient(createDaemonTransport(win.location.origin));
+  // THE WEBHOST ENDS AT ITS UNLOAD as a workspace page does (page-teardown.ts):
+  // every request its transport made is aborted, so its standing streams (the
+  // sidebar's roster) neither answer nor reopen into a document that is gone.
+  beginPage();
+  const client =
+    deps.client ?? createAgentReplClient(createDaemonTransport(win.location.origin, { signal: pageEnding() }));
   const connectionId = mintConnectionId();
   bindLogContext({ connection_id: connectionId });
   installForwardingLogger(() => client, { case: "webhost", value: {} }, deps.level ?? "info", deps.installLogger ?? setLogger);
@@ -89,9 +95,9 @@ export function startWebhostSidebar(
     // Text in the sidebar copies and selects exactly as it does in a page.
     installTextAffordances(doc);
     const ctx = createDaemonContext({ client, ticker: createTicker(), failures, page: connectionId });
-    // An unloaded webhost stops at once (document-runtime.ts): its streams,
-    // its calls, and its census.
-    const unquiet = quietAtUnload(win, ctx, () => census.stop());
+    // An unloaded webhost stops at once: its requests, and its census.
+    const unwatch = endPageAtPagehide(win);
+    stopAtPageTeardown(() => census.stop());
     const sidebar = (deps.mount ?? mountWebhostSidebar)(nav, ctx, {
       // THE PAGES RESERVE THE COLUMN ONLY ONCE THERE IS A SIDEBAR TO FILL IT,
       // so a webhost whose sidebar never draws leaves the pages' layout as a
@@ -110,7 +116,7 @@ export function startWebhostSidebar(
       sidebar.markShown(id);
     });
     stop = () => {
-      unquiet();
+      unwatch();
       stopShown();
       sidebar.dispose();
       ctx.quiesce();

@@ -56,15 +56,19 @@ export function endPage(): void {
 
 /**
  * End the page at WIN's `pagehide`, unless it is kept in the back/forward
- * cache (`persisted`), from which it can come back. The listener goes with the
- * page's stops, so a test's teardown takes it off a window its suites share.
+ * cache (`persisted`), from which it can come back. Both of the webapp's
+ * documents end this way: a workspace page and the webhost. The listener goes
+ * with the page's stops, so a test's teardown takes it off a window its suites
+ * share; answers its removal too, for an owner that stops before the page ends.
  */
-export function endPageAtPagehide(win: Window): void {
+export function endPageAtPagehide(win: Window): () => void {
   const end = (event: PageTransitionEvent): void => {
     if (!event.persisted) endPage();
   };
+  const unwatch = (): void => win.removeEventListener("pagehide", end);
   win.addEventListener("pagehide", end);
-  stopAtPageTeardown(() => win.removeEventListener("pagehide", end));
+  stopAtPageTeardown(unwatch);
+  return unwatch;
 }
 
 /** Register STOP, run when the page is torn down. */

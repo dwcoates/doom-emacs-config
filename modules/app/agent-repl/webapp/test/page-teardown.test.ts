@@ -12,6 +12,8 @@ import {
   tearDownPage,
 } from "../src/page-teardown.js";
 import { settledByNextTask } from "./settled.js";
+import path from "node:path";
+import { codeUnder } from "./files-under.js";
 
 afterEach(() => beginPage());
 
@@ -108,5 +110,20 @@ describe("the page's end", () => {
     const settled = await settledByNextTask(abandonedAtPageEnd<number>());
     // Assert
     expect(settled).toBe(false);
+  });
+});
+
+describe("who ends a document at its unload", () => {
+  it("is page-teardown.ts alone, besides the observers dom.ts disconnects", () => {
+    // Arrange
+    const owners = new Set(["page-teardown.ts", "dom.ts"]);
+
+    // Act
+    const others = [...codeUnder(path.join(__dirname, "..", "src"))]
+      .filter(([file, code]) => !owners.has(file) && code.includes('"pagehide"'))
+      .map(([file]) => file);
+
+    // Assert
+    expect(others).toEqual([]);
   });
 });
