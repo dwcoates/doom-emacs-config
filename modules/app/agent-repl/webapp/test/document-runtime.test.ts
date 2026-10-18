@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import type { ClientLogRequest } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
-import { installForwardingLogger, installTextAffordances } from "../src/document-runtime.js";
+import { installForwardingLogger, installTextAffordances, quietAtUnload } from "../src/document-runtime.js";
+import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { clientLogRecorder } from "./rpc/client-log-recorder.js";
 import { setLogger, log, type ForwardingLogger } from "../src/log.js";
 
@@ -129,5 +130,65 @@ describe("installTextAffordances", () => {
       [true, true, false, false, false],
       [true, true, false, false, false],
     ]);
+  });
+});
+
+/** Dispatch a pagehide, persisted or not, on the window the document belongs to. */
+function pagehide(persisted: boolean): void {
+  const win = document.defaultView;
+  if (win === null) throw new Error("the test document has no window");
+  win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted }));
+}
+
+/** A context and a teardown that count what they were asked to do. */
+function counted() {
+  const seen = { quiesced: 0, torn: 0 };
+  return { seen, ctx: { quiesce: () => void seen.quiesced++ }, teardown: () => void seen.torn++ };
+}
+
+describe("quietAtUnload", () => {
+  it("quiets the context and runs the teardown when the document unloads for good", () => {
+    // Arrange
+    const { seen, ctx, teardown } = counted();
+    const stop = quietAtUnload(document.defaultView!, ctx, teardown);
+    // Act
+    pagehide(false);
+    stop();
+    // Assert
+    expect(seen).toEqual({ quiesced: 1, torn: 1 });
+  });
+
+  it("leaves a page kept for the back/forward cache running", () => {
+    // Arrange
+    const { seen, ctx, teardown } = counted();
+    const stop = quietAtUnload(document.defaultView!, ctx, teardown);
+    // Act
+    pagehide(true);
+    stop();
+    // Assert
+    expect(seen).toEqual({ quiesced: 0, torn: 0 });
+  });
+
+  it("does nothing at an unload once its stop has run", () => {
+    // Arrange
+    const { seen, ctx, teardown } = counted();
+    quietAtUnload(document.defaultView!, ctx, teardown)();
+    // Act
+    pagehide(false);
+    // Assert
+    expect(seen).toEqual({ quiesced: 0, torn: 0 });
+  });
+
+  it("records the unload through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { ctx, teardown } = counted();
+    const stop = quietAtUnload(document.defaultView!, ctx, teardown);
+    // Act
+    pagehide(false);
+    stop();
+    // Assert
+    const record = await forwardedRecord(capture, "document.unload-quiet");
+    expect(record.level.case).toBe("info");
   });
 });

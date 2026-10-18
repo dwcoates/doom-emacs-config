@@ -217,6 +217,27 @@ describe("startWebhostSidebar", () => {
     expect(installedOn).toEqual([document]);
   });
 
+  it("goes quiet and stops the load census when the webhost unloads for good", () => {
+    // Arrange
+    const { host } = recordingHost();
+    let stopped = 0;
+    let quiet: (() => boolean) | null = null;
+    start(host, {
+      mount: (_nav, ctx) => {
+        quiet = () => ctx.isQuiesced();
+        return { dispose: () => undefined, markShown: () => undefined };
+      },
+      installCensus: () => ({ stop: () => void stopped++ }),
+    });
+    const win = document.defaultView!;
+
+    // Act
+    win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted: false }));
+
+    // Assert
+    expect([(quiet as (() => boolean) | null)?.(), stopped]).toEqual([true, 1]);
+  });
+
   it("stops the load census when stopped", () => {
     // Arrange
     const { host } = recordingHost();

@@ -479,6 +479,19 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     }
   });
 
+  test("takes its timers down when the page unloads for good", async () => {
+    // Arrange: the timers as they stood before the boot wrapped them.
+    const before = (window as { setTimeout: unknown }).setTimeout;
+    await bootMain();
+    const win = document.defaultView!;
+
+    // Act: the boot ends the page at its pagehide (page-teardown.ts).
+    win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted: false }));
+
+    // Assert
+    expect(window.setTimeout === before).toBe(true);
+  });
+
   test("mounts the news digest overlay before the lifecycle whose stream feeds it", async () => {
     await bootMain();
 
