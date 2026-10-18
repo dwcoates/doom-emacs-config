@@ -5,7 +5,7 @@ Status: agreed with the owner 2026-10-17, unbuilt. Branch `metrics-o11y`.
 ## Goal
 
 Every agent-repl runtime records its performance all the time, so an agent can
-answer questions like "on which commit did workspace switching start to slow"
+answer questions like "in which version did workspace switching start to slow"
 or "when did the daemon's CPU start to climb" from stored history alone, with
 no profile session open and no reproduction.
 
@@ -71,18 +71,25 @@ same data.
   with its config in the repo. `install-agent-repl` and the deploy flow
   install and keep it running.
 
-## Tracing a number to a commit
+## Tracing a number to a version
 
-- Every runtime exposes `agentrepl_build_info{program, commit, build}` with
-  value 1. `build` is the content hash from `daemon/internal/buildid`;
-  `commit` is the git commit.
-- `buildid` hashes content and records no commit today, so the build stamps
-  the commit in (`-ldflags -X` for Go, a build-time constant for the shim and
-  webapp, the elisp build for Emacs).
-- The commit rides on this one series only. Latency series never carry it,
-  because deploys happen many times a day and a commit label on every series
-  would mint a whole new set of series per deploy. Queries join
-  `agentrepl_build_info` to group by commit.
+- Every runtime exposes `agentrepl_build_info{program, version, build}` with
+  value 1. `version` is the semver the merge queue tags each landing on
+  master with (`daemon/internal/semver`,
+  `docs/protobuf-design/merge-version-increment.md`); `build` is the content
+  hash from `daemon/internal/buildid`.
+- The version is `git describe --tags --match '[0-9]*.[0-9]*.[0-9]*'` at
+  build time. A build of a landing reads exactly `0.109.0`; a build between
+  landings (a feature branch, a worktree) reads `0.109.0-3-gabc1234`, so it
+  is never mistaken for the tagged release. The match pattern excludes the
+  `agent-repl-test-checkpoint-*` tags.
+- `buildid` records no version today, so the build stamps it in
+  (`-ldflags -X` for Go, a build-time constant for the shim and webapp, the
+  elisp build for Emacs).
+- The version rides on this one series only. Latency series never carry it,
+  because landings happen many times a day and a version label on every
+  series would mint a whole new set of series per landing. Queries join
+  `agentrepl_build_info` to group by version.
 
 ## What is measured
 
@@ -118,8 +125,16 @@ same data.
 
 ### Network
 
-- Each runtime counts the bytes it sends and receives in memory: Connect
-  streams, vendor API traffic, store traffic.
+- Only traffic that leaves the machine is counted; the store, sidecar,
+  daemon and webapp talk over loopback, which costs CPU (already measured)
+  but no network.
+- The shim counts the bytes it sends to and receives from the vendor API, in
+  memory, per workspace. That is nearly all of agent-repl's external traffic.
+- The daemon's remaining external callers are left uncounted unless a
+  question needs them: the news digest's HTTP fetches
+  (`daemon/internal/newsdigest/fetch.go`), the headless model calls, which
+  run in a `claude` subprocess (`daemon/internal/headless/client.go`), and
+  git fetches.
 - Never through `com.apple.network.statistics` kernel-control sockets: the
   removed vendor-traffic sampler leaked those sockets and is the inferred
   cause of the kernel mbuf exhaustion recorded in
@@ -133,8 +148,33 @@ same data.
 ### Cardinality
 
 - Allowed labels: `program`, `workspace`, `method`, `outcome`, `model`.
-- Never labels: prompt text, paths, session ids, commits (see above).
+- Never labels: prompt text, paths, session ids, versions (see above).
 - Expected size: a few thousand active series, mostly latency histograms.
+
+## Collection never runs on a hot path
+
+- Recording an observation on a hot path is a `client_golang` atomic
+  update (or the shim's equivalent) and nothing more: no lock shared with
+  the daemon's request handling, no I/O, no allocation per call.
+- The process collector runs only inside the `/metrics` handler, on that
+  listener's own goroutine, when VictoriaMetrics scrapes. It reads the set of
+  processes to sample from a published snapshot (`daemon/internal/publish`),
+  never by taking a workspace lock, so a slow `proc_pid_rusage` cannot stall
+  a prompt or a switch.
+- Reports from the shims, Emacs and the webapp are handled on their RPC's
+  own goroutine and only update series.
+- In the webapp and Emacs, the report is batched and sent off the
+  interaction it measures (after paint, on an idle timer), so measuring a
+  switch never lengthens it.
+- A test drives a scrape whose process reader blocks and asserts a prompt
+  and a switch still complete.
+
+## Proto design ownership
+
+The owner delegated the proto design (step 5) entirely: the reporting
+messages and the edge-pairing design point are decided and landed without
+owner input, through the `create-or-update-protobufs` skill, and reported
+after.
 
 ## The `metrics-agent-repl` skill
 
@@ -142,8 +182,8 @@ Authored through the `create-or-update-skill` skill. It covers:
 
 - Checking metrics: the VictoriaMetrics query endpoint, the metric catalog,
   and ready-made queries:
-  - p95 of each latency, grouped by commit;
-  - the first commit where a latency's p95 crossed its threshold;
+  - p95 of each latency, grouped by version;
+  - the first version where a latency's p95 crossed its threshold;
   - CPU and memory trend changes per process.
 - Adding a metric: where to register it, naming, allowed labels, adding a
   latency to `proto/vocab/latencies.json`, and the tests every new metric
@@ -158,7 +198,7 @@ Authored through the `create-or-update-skill` skill. It covers:
 
 1. Shared metrics package and the always-on loopback `/metrics` listener in
    the daemon, store and sidecar, with the Go runtime collector.
-2. `agentrepl_build_info` in every runtime, with the commit stamped at build.
+2. `agentrepl_build_info` in every runtime, with the version stamped at build.
 3. The daemon's process collector (per-process and host figures), replacing
    the `ps` sampler in `bin/profile-agent-repl.sh`.
 4. VictoriaMetrics under `launchd`, its scrape config, the fixed ports, and
@@ -167,7 +207,7 @@ Authored through the `create-or-update-skill` skill. It covers:
    daemon, and the edge-pairing design point above.
 6. `proto/vocab/latencies.json` and the end-user latency histograms, with
    `profile-report.go` reading the same file.
-7. Network byte counters in each runtime.
+7. Vendor API byte counters in the shim.
 8. The `metrics-agent-repl` skill, and the pointers from the other skills.
 
 ## Testing
