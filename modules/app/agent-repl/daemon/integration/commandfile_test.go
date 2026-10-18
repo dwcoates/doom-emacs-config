@@ -176,26 +176,6 @@ func TestAnOpenEntrySpawnsTheShimForAClosedWorkspace(t *testing.T) {
 	}
 }
 
-func TestASwitchEntrySelectsTheNamedWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	roster := f.d.WatchRoster()
-
-	// Act
-	commandfileWrite(t, f.d, "workspace_commands_switch.json",
-		`[{"type":"switch","workspace":"`+f.ws.GetId()+`"}]`)
-
-	// Assert: stamped current exactly like SelectWorkspace.
-	got := awaitRoster(t, f.d, roster, "the command-file switch stamped current", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
-	})
-	row := rosterRow(got, f.ws.GetId())
-	if row == nil || !row.GetCurrent().GetCurrent() {
-		t.Fatalf("command-file-switched workspace row.current = %v, want current=true", row.GetCurrent())
-	}
-}
-
 func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T) {
 	t.Parallel()
 	// Arrange

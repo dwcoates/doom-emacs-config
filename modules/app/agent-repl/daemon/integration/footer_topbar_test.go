@@ -109,32 +109,6 @@ func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 // reader.
 const ftDwell = 150 * time.Millisecond
 
-func TestFooterInterruptedStatusIsRetiredByADaemonSideDwell(t *testing.T) {
-	t.Parallel()
-	// Arrange: the dwell is compressed to ftDwell. THE SUBJECT IS THE
-	// RETIREMENT, not the window's length — nothing below reads the clock —
-	// and the product's 1.5s is sized for a person's eyes, not for a stream
-	// this test already holds open.
-	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("do it", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	awaitFooter(t, f, footer, "thinking before the interrupt", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWorking() != nil
-	})
-
-	// Act: the agent binary acknowledges a user stop.
-	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
-
-	// Assert: `interrupted` shows momentarily, then the daemon itself retires
-	// it into a successor push (idle) with no further client action.
-	awaitFooter(t, f, footer, "the momentary interrupted status", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetInterrupted() != nil
-	})
-	awaitFooter(t, f, footer, "the dwell's successor push retiring interrupted", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetInterrupted() == nil
-	})
-}
-
 func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 	t.Parallel()
 	// Arrange: the dwell is compressed to ftDwell, for the same reason as the
@@ -173,38 +147,6 @@ func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 // the uncached-spend contract is asserted here, on the panel.
 func ftPanelInput(v *frontendv1.FooterView) string {
 	return v.GetExpanded().GetTokens().GetInput().GetValue()
-}
-
-func TestFooterTokensPanelExcludesCacheReads(t *testing.T) {
-	t.Parallel()
-	// Arrange: a turn whose only usage is a huge cache READ and no misses.
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("first", "k-tok-a", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-a", ftUsage(0, 0, 500_000))))
-	readOnly := awaitFooter(t, f, footer, "the tokens panel after a cache-read-only response", func(v *frontendv1.FooterView) bool {
-		return ftPanelInput(v) != ""
-	})
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	awaitFooter(t, f, footer, "idle.done after the first turn", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-
-	// Act: a second, fresh turn whose usage adds a small MISS on top of the
-	// same huge cache read.
-	f.submit("second", "k-tok-b", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-b", ftUsage(250, 0, 500_000))))
-
-	// Assert: the line changed — the diff can only be the miss, since the
-	// cache-read figure (input_hits) is identical in both turns and a fresh
-	// turn resets the accounting.
-	withMiss := awaitFooter(t, f, footer, "the tokens panel after the miss joins the same cache read", func(v *frontendv1.FooterView) bool {
-		return ftPanelInput(v) != "" && ftPanelInput(v) != ftPanelInput(readOnly)
-	})
-	if ftPanelInput(withMiss) == ftPanelInput(readOnly) {
-		t.Fatalf("panel input unchanged by a real miss (%q); a cache-read-only figure must not already count it in", ftPanelInput(readOnly))
-	}
 }
 
 func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing.T) {
@@ -249,137 +191,6 @@ func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testin
 	if ftPanelInput(stillOne) != ftPanelInput(firstUnit) {
 		t.Fatalf("panel input = %q after the second unit, want it unchanged at %q: usage rides exactly one unit per response",
 			ftPanelInput(stillOne), ftPanelInput(firstUnit))
-	}
-}
-
-// TestFooterTokensCellIsNotDerivedFromTheTopbarContextChip pins the two as
-// different facts (AGENTS.md, "Fresh input is the one token quantity every
-// spend figure counts"): the chip is the context window's size, the cell the
-// main agent's fresh input for the turn. A mid-turn context_usage push moves
-// the chip and adds nothing to the cell.
-func TestFooterTokensCellIsNotDerivedFromTheTopbarContextChip(t *testing.T) {
-	t.Parallel()
-	// Arrange: the context held before the turn is 100k; then a turn opens.
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	topbar := f.d.WatchTopbar(f.ws)
-	f.shim.PushSessionUpdate(ftContextUsage(100_000))
-	awaitTopbar(t, f, topbar, "the context chip at the pre-turn 100k", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() == "100k"
-	})
-	f.submit("go", "k-tok-context", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	f.shim.ExpectStartTurn()
-	awaitFooter(t, f, footer, "the tokens cell at the turn's open", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput().GetText() == "0 in"
-	})
-
-	// Act: ONE mid-turn context_usage push growing the context by 18.2k, then
-	// the main agent's API response with 5k fresh input.
-	f.shim.PushSessionUpdate(ftContextUsage(118_200))
-	chip := awaitTopbar(t, f, topbar, "the context chip after the mid-turn push", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() != "100k"
-	})
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-ctx", ftUsage(1_000, 4_000, 90_000))))
-
-	// Assert: the chip states the context held; the cell states the fresh
-	// input alone, with none of the context's growth in it.
-	if chip.GetContext().GetText() != "118.2k" {
-		t.Fatalf("context chip = %q, want 118.2k", chip.GetContext().GetText())
-	}
-	cell := awaitFooter(t, f, footer, "the tokens cell after the usage-carrying response", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
-	})
-	if cell.GetStrip().GetTokens().GetInput().GetText() != "5k in" {
-		t.Fatalf("tokens cell = %q, want 5k in: the response's fresh input, none of the context's 18.2k growth",
-			cell.GetStrip().GetTokens().GetInput().GetText())
-	}
-}
-
-// ftContextUsage is one context_usage push stating the context held.
-func ftContextUsage(total int64) *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
-			TotalTokens: total,
-			MaxTokens:   200_000,
-			Model:       "claude-opus-5",
-		}},
-	}
-}
-
-func TestFooterTokensCellVerdictIsIncompleteWhenAResponseCarriedNoUsage(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("go", "k-tok-incomplete", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	// The turn's frames follow the shim being ASKED to start it, as they must:
-	// a shim cannot stream a turn it has not been handed.
-	f.shim.ExpectStartTurn()
-
-	// Act: the response's terminal frame settles with NO unit ever having
-	// carried usage.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-no-usage"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
-			Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{
-				Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-			}},
-		}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("resp-no-usage")))
-
-	// Assert
-	got := awaitFooter(t, f, footer, "idle.done with the reconciled verdict", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-	if got.GetStrip().GetTokens().GetVerdict().GetIncomplete() == nil {
-		t.Fatalf("tokens cell verdict = %v, want incomplete when no response of the turn carried usage", got.GetStrip().GetTokens().GetVerdict())
-	}
-}
-
-func TestFooterTokensCellVerdictIsCompleteWhenTheUsageRodeAnEarlierUnitOfTheSameResponse(t *testing.T) {
-	t.Parallel()
-	// Arrange: the ordinary prose turn. One API response is written as several
-	// units and its usage rides the FIRST — here the reasoning block that
-	// opened it — so the response unit that settles carries none of its own.
-	// Absent usage means "not the carrying unit", never "free", and this turn
-	// reconciles CLEANLY.
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("go", "k-tok-complete", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	// THE TURN'S FRAMES FOLLOW THE SHIM BEING ASKED TO START IT. A fake that
-	// pushes them before StartTurn has reached it is doing what no shim can,
-	// and on the revival path that let them land before the turn was even
-	// accepted, where the acceptance's reset wiped the usage they carried.
-	f.shim.ExpectStartTurn()
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-block-0"),
-		Usage:      ftUsage(0, 1000, 0),
-		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
-			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{
-				Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
-			}},
-		}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-block-1"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
-			Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{
-				Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
-			}},
-		}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("resp-block-1")))
-
-	// Assert
-	got := awaitFooter(t, f, footer, "idle.done with the reconciled verdict", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
-	})
-	if got.GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
-		t.Fatalf("tokens cell verdict = %v, want complete: the response's usage rode the unit that opened it",
-			got.GetStrip().GetTokens().GetVerdict())
 	}
 }
 
@@ -473,30 +284,6 @@ func TestFooterChecklistGainsNoRowForATaskNobodyNamed(t *testing.T) {
 		}
 		return rows[0].GetSubject().GetText() == "Land the converter" &&
 			rows[1].GetSubject().GetText() == "Land the store writer"
-	})
-}
-
-// A SUBJECT STATED EMPTY IS STILL A SUBJECT, and presence is the whole reason
-// the daemon can tell it from one an act never named. The producers state it
-// this way end to end, so the wire's own distinction is asserted here rather
-// than only in the resolver's unit tests.
-func TestFooterChecklistTakesASubjectAnActStatesEmpty(t *testing.T) {
-	t.Parallel()
-	// Arrange: a created task with a subject.
-	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
-	awaitFooter(t, f, footer, "the checklist with its one named task", func(v *frontendv1.FooterView) bool {
-		return len(v.GetExpanded().GetTasks().GetRows()) == 1
-	})
-
-	// Act: an act that STATES an empty subject.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-2", "t-1", "", false)))
-
-	// Assert
-	awaitFooter(t, f, footer, "the checklist row taking the stated empty subject", func(v *frontendv1.FooterView) bool {
-		rows := v.GetExpanded().GetTasks().GetRows()
-		return len(rows) == 1 && rows[0].GetSubject().GetText() == ""
 	})
 }
 

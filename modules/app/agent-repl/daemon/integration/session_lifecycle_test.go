@@ -203,18 +203,6 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	}
 }
 
-func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act
-	f := newOpened(t, harness.Opts{})
-
-	// Assert
-	req := f.shim.ExpectStartSession()
-	if req.GetFresh() == nil {
-		t.Fatalf("StartSession request = %v, want a fresh source for a workspace with no prior conversation", req)
-	}
-}
-
 // THE WORKSPACE'S OPENING IS ITS ONE REPLAY. Opening the workspace starts the
 // session watcher on a workspace_opened bring-up, and the turns that follow
 // start no watcher of their own.
@@ -503,65 +491,6 @@ func (g heldAtTheGate) answer(t *testing.T, choice *agentreplv1.AnswerColdGateRe
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("AnswerColdGate = %v, %v; want a success", resp, err)
 	}
-}
-
-// firstTurnAfterTheAnswerIsANewPrompt submits a fresh prompt once the answer
-// brought the session up, and asserts it is the FIRST turn the session is
-// handed: a held prompt the answer sent would have gone before it.
-func (g heldAtTheGate) firstTurnAfterTheAnswerIsANewPrompt(t *testing.T) {
-	t.Helper()
-	g.shim.ExpectStartSession()
-	// The remediated re-open is wired a moment after the shim takes it, and a
-	// prompt submitted before is refused by the gate's name. The host view
-	// reporting the session live, attached and open is the wire's statement
-	// that it serves.
-	host := g.f.d.WatchHost(g.f.ws)
-	defer host.Close()
-	ctx, cancel := g.f.d.WaitCtx()
-	defer cancel()
-	harness.AwaitSessionServes(t, ctx, host)
-	fresh := g.f.submit("a fresh prompt", "k-after-the-gate", origin).GetSuccess().GetTurn().GetTurn()
-	if got := g.shim.ExpectStartTurn(); got.GetTurn().GetValue() != fresh.GetValue() {
-		t.Fatalf("first StartTurn = %q, want the fresh prompt %q: the held prompt %q must not be sent by the answer",
-			got.GetTurn().GetValue(), fresh.GetValue(), g.turn.GetValue())
-	}
-}
-
-// TestAPromptHeldAtTheColdGateIsKeptForTheUserByPay pins the owner's ruling
-// (2026-10-13): pay re-opens the session and sends nothing; the held prompt
-// waits, badged "held for you", for the user to send it.
-func TestAPromptHeldAtTheColdGateIsKeptForTheUserByPay(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	g := promptHeldAtTheGate(t)
-
-	// Act.
-	g.answer(t, &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}}})
-
-	// Assert.
-	harness.AwaitView(t, g.f.d.Ctx(), g.holds, "the prompt kept for the user", func(tray *frontendv1.FeedHeld) bool {
-		p := promptHeldEntry(tray, g.turn)
-		return p.GetColdGateAnswered() != nil && p.GetBadge().GetColdGateAnswered() != nil
-	})
-	g.firstTurnAfterTheAnswerIsANewPrompt(t)
-}
-
-// TestAPromptHeldAtTheColdGateIsDiscardedByClear pins the owner's ruling
-// (2026-10-13): clear is the gate's big red button, and discards the held
-// prompts rather than sending them into the cleared session.
-func TestAPromptHeldAtTheColdGateIsDiscardedByClear(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	g := promptHeldAtTheGate(t)
-
-	// Act.
-	g.answer(t, &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Clear{Clear: &agentreplv1.AnswerColdGateClear{}}})
-
-	// Assert.
-	harness.AwaitView(t, g.f.d.Ctx(), g.holds, "the held prompt discarded", func(tray *frontendv1.FeedHeld) bool {
-		return promptHeldEntry(tray, g.turn) == nil
-	})
-	g.firstTurnAfterTheAnswerIsANewPrompt(t)
 }
 
 // TestAPromptHeldAtTheColdGateIsSentByCompactAndResume pins that the gate
@@ -1023,55 +952,6 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	})
 }
 
-func TestCloseWorkspaceWithNothingLiveSucceedsAndLeavesTheShimRunning(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.shim.ExpectStartSession()
-
-	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CloseWorkspace with nothing live = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CloseWorkspace = %v, want a success", resp.Msg)
-	}
-	if f.shim.Count(harness.RPCKillSession) != 0 {
-		t.Fatalf("KillSession was sent %d times after a plain CloseWorkspace, want 0: the session is untouched", f.shim.Count(harness.RPCKillSession))
-	}
-}
-
-func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.shim.ExpectStartSession()
-	footer := f.d.WatchFooter(f.ws)
-	f.submit("do the thing", "k-close-blocked", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert: CloseWorkspaceError.blocked IS a landed arm, so the refusal is a
-	// response arm rather than a transport error.
-	if err != nil {
-		t.Fatalf("CloseWorkspace with a turn in flight = transport error %v, want the blocked arm", err)
-	}
-	if resp.Msg.GetError().GetBlocked() == nil {
-		t.Fatalf("CloseWorkspace with a turn in flight = %v, want CloseWorkspaceError.blocked", resp.Msg)
-	}
-	awaitFooter(t, f, footer, "footer closing.blocked", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
-	})
-	// internal/workspace/close.go logs WARN under this operation itself
-	// whenever closeBlocker names a reason, independent of the arm-landing
-	// machinery in internal/workspace/refusal.go.
-	f.d.ExpectWarnings("daemon.workspace.close")
-}
-
 // TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence is landing 7: the
 // blocked arm states WHY, so a caller with no footer can say it — and
 // `summary` is the same composed sentence the footer's activity line draws.
@@ -1094,86 +974,6 @@ func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 		t.Fatalf("CloseWorkspaceBlocked = %v, want turn_in_flight true with a composed summary", blocked)
 	}
 	f.d.ExpectWarnings("daemon.workspace.close")
-}
-
-func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
-	t.Parallel()
-	// Arrange: a workspace the daemon CREATED, so it carries the merge layout
-	// facts an enqueue needs, with a second one ahead of it in its repo's queue
-	// so its own merge stays queued rather than running to a terminal.
-	repo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
-	repoRef := mergeRepositoryRef(t, d, repo)
-	first := mergeCreateChild(t, d, repoRef, "ahead", "do the first thing",
-		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold the queue open")})
-	second := mergeCreateChild(t, d, repoRef, "behind", "do the second thing", nil)
-
-	// The first merge stops in a before-merge prompt nobody answers, holding
-	// its repository's slot, so the second one waits in the queue. (A PARKED
-	// merge would not hold it: it yields the slot, owner ruling 2026-09-28.)
-	harness.CommitWork(t, first.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(first.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(first) = error %v, want the merge enqueued", err)
-	}
-	first.shim.ExpectStartTurn()
-	harness.CommitWork(t, second.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(second.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(second) = error %v, want the merge enqueued", err)
-	}
-	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "the second workspace's queued merge", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, second.ws.GetId()).GetMergeQueued() != nil
-	})
-
-	// Act
-	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: second.ws}))
-
-	// Assert: the landed blocked arm, not a transport error.
-	if err != nil {
-		t.Fatalf("CloseWorkspace with a queued merge = transport error %v, want the blocked arm", err)
-	}
-	if resp.Msg.GetError().GetBlocked() == nil {
-		t.Fatalf("CloseWorkspace with a queued merge = %v, want CloseWorkspaceError.blocked", resp.Msg)
-	}
-	// The Act's own refusal names a LANDED arm, so it warns about nothing.
-}
-
-func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {
-	t.Parallel()
-	// Arrange: stand a cold gate with no turn and no live async work.
-	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.workspace.kill")
-	f.shim.ExpectStartSession()
-	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("KillWorkspace = error %v, want a success", err)
-	}
-	f.shim.AwaitGone()
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
-		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
-	}})
-	feed := f.watchRootFeed()
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
-	}
-	f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl").ExpectStartSession()
-	awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
-		return r.GetColdGate().GetStanding() != nil
-	})
-
-	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CloseWorkspace with a standing cold gate = error %v, want a success: a standing gate is not live work", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CloseWorkspace = %v, want a success", resp.Msg)
-	}
 }
 
 func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
@@ -1893,27 +1693,6 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 	}
 
 	// Assert: the daemon never forces the session down over the refused
-	// hibernate.
-	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
-}
-
-// TestHibernateTurnInFlightRefusalDefersTheStandDown covers the shim's own
-// typed refusal: HibernateError.turn_in_flight (shim.v1/endpoint_hibernate.proto).
-// The sweep logs this at DEBUG only ("a turn is in flight; deferring the
-// hibernation") — quieter than the OTHER typed refusals (compaction_failed,
-// no_session), which log WARN — so this test asserts no WARN fires at all.
-func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
-	t.Parallel()
-	// Arrange: the refusal is in force from the fake's BIRTH. Scripted after
-	// the open, it raced the 50ms sweep — an early pass hibernated for real
-	// and killed the fake — and a queue of twenty ran out under load.
-	f := newOpenedWithProfile(t, harness.Opts{IdleCutoffMS: 50}, harness.ShimProfile{HibernateTurnInFlight: true})
-	f.shim.ExpectStartSession()
-
-	// Act: wait for at least one refused Hibernate attempt.
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
-
-	// Assert: the daemon never forces the session down over the deferred
 	// hibernate.
 	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
 }

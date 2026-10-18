@@ -260,28 +260,6 @@ func durableQueueOrder(t *testing.T, d *harness.Daemon) []string {
 	return order
 }
 
-// raiseMergeQueueOffer interrupts F's idle, queued workspace and waits for the
-// question to stand in its pinned merge bubble, answering the root feed's tail
-// it watched.
-func raiseMergeQueueOffer(t *testing.T, f *fixture) *harness.Stream[*frontendv1.FeedRow] {
-	t.Helper()
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, f.ws.GetId()).GetMergeQueued() != nil
-	})
-	feed := f.watchRootFeed()
-	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: f.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	}))
-	if err != nil || resp.Msg.GetSuccess().GetMergeQueueOffered() == nil {
-		t.Fatalf("Interrupt(turn) = %v, %v, want merge_queue_offered", resp, err)
-	}
-	awaitRow(t, f, feed, "the merge head carrying the question", func(r *frontendv1.FeedRow) bool {
-		return mergeQueueOffer(r) != nil
-	})
-	return feed
-}
-
 // ---------------------------------------------------------------------------
 // The FOUR DISTINCT ENDS a queued merge can meet before it ever runs: the
 // user's own evict, the user's release of the dequeue offer, the workspace

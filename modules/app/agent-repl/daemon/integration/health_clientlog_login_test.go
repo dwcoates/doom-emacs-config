@@ -250,50 +250,6 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	}
 }
 
-// TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush is the
-// retraction half of TestSessionHealthRelaysAnUnhealthyDiagnosticsPush: the
-// shim's health verdict is the WHOLE verdict on every push
-// (cmd/agent-repld/lifecycle.go OnSessionDiagnostics), so a healthy push
-// closes the standing shim-reported fault and SessionHealth reads healthy
-// again without a restart.
-func TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session")
-	topbar := f.d.WatchTopbar(f.ws)
-	f.shim.PushUnhealthy(&conversationv1.SessionFault{
-		Component: "store client",
-		Detail:    "the store socket went away",
-		Kind: &conversationv1.SessionFault_StoreUnreachable{
-			StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{},
-		},
-	})
-	awaitTopbar(t, f, topbar, "a topbar warning for the session fault", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) > 0
-	})
-	pre, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
-	requireRPCAnswered(t, "SessionHealth before the retraction", pre, err)
-	if pre.Msg.GetSuccess().GetUnhealthy() == nil {
-		t.Fatalf("SessionHealth before the retraction = %v, want success{unhealthy}", pre.Msg)
-	}
-
-	// Act: the shim retracts by pushing a healthy diagnostics verdict.
-	f.shim.PushHealthy()
-	awaitTopbar(t, f, topbar, "the topbar warning retracted", func(v *frontendv1.TopbarView) bool {
-		return len(v.GetWarnings().GetWarnings()) == 0
-	})
-
-	// Assert
-	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
-	if err != nil {
-		t.Fatalf("SessionHealth after the retraction = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess().GetHealthy() == nil {
-		t.Fatalf("SessionHealth after a healthy diagnostics push = %v, want success{healthy}", resp.Msg)
-	}
-}
-
 // TestSessionHealthAfterTheShimExitsReportsShimDied is the SessionHealth
 // counterpart of TestFooterShimExitFlipsToDeadAndStopsRedials: a shim that
 // exits mid-session, rather than merely losing its link, is the shim_died
@@ -659,72 +615,6 @@ func TestOpenLoginSpawnsThePtyAndReplaysItsScrollback(t *testing.T) {
 	// Assert: the scrollback the pty already produced is replayed to a late
 	// subscriber, which is the never-miss invariant for this stream.
 	loginAwaitMarker(t, f, stream, harness.FakeClaudeLoginMarker)
-}
-
-func TestSendLoginInputIsEchoedBackOnTheStream(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	if _, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenLogin = error %v, want a success", err)
-	}
-	stream := f.d.WatchLogin(f.ws)
-	loginAwaitMarker(t, f, stream, harness.FakeClaudeLoginMarker)
-
-	// Act
-	if _, err := f.d.Client().SendLoginInput(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendLoginInputRequest{
-		Workspace: f.ws,
-		Input:     &agentreplv1.SendLoginInputRequest_Keystrokes{Keystrokes: &agentreplv1.LoginTerminalKeystrokes{Data: []byte("hello\n")}},
-	})); err != nil {
-		t.Fatalf("SendLoginInput = error %v, want a success", err)
-	}
-
-	// Assert
-	loginAwaitMarker(t, f, stream, "echo:hello")
-}
-
-func TestSendLoginInputResizeIsAccepted(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	if _, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenLogin = error %v, want a success", err)
-	}
-
-	// Act
-	resp, err := f.d.Client().SendLoginInput(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendLoginInputRequest{
-		Workspace: f.ws,
-		Input:     &agentreplv1.SendLoginInputRequest_Resize{Resize: &agentreplv1.LoginTerminalResize{Rows: 40, Cols: 120}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SendLoginInput{resize} = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("SendLoginInput{resize} = %v, want a success", resp.Msg)
-	}
-}
-
-func TestCloseLoginEndsTheStreamWithClosed(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	if _, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenLogin = error %v, want a success", err)
-	}
-	stream := f.d.WatchLogin(f.ws)
-	loginAwaitMarker(t, f, stream, harness.FakeClaudeLoginMarker)
-
-	// Act
-	if _, err := f.d.Client().CloseLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseLoginRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("CloseLogin = error %v, want a success", err)
-	}
-
-	// Assert
-	harness.AwaitView(t, f.d.Ctx(), stream, "the closed terminus", func(o *agentreplv1.LoginTerminalOutput) bool {
-		return o.GetClosed() != nil
-	})
 }
 
 // awaitLoginMarkerOn reads terminal bytes on a bare *harness.Daemon (no

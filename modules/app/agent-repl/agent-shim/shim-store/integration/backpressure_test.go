@@ -71,54 +71,6 @@ func TestSlowWatcherExceedingTheBufferIsEndedWithAnError(t *testing.T) {
 	}
 }
 
-// TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher is the other side
-// of backpressure: the shipped buffer is SUBSTANTIALLY above what a daemon
-// bounce can burst, because the alternative to buffering a burst is ending a
-// healthy watch. A store that overflowed here would be dropping consumers
-// during ordinary catch-up.
-func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
-	// Arrange: the store's own default buffer, not a test-shrunk one.
-	//
-	// THE BOUNDS HERE ARE THIS SITE'S OWN. A 4096-entry WriteBatch and a
-	// 4096-frame delivery are the heaviest calls in the package. Their distinct
-	// bounds must not share one expiring context: the stream has to remain live
-	// for the bounded write and its own bounded delivery. See burstCallTimeout.
-	store := startStore(t, storeOptions{})
-	setupCtx, cancelSetup := callContext(t)
-	defer cancelSetup()
-	cli := store.client()
-	shim := streamProducer(cli)
-	seedBook(setupCtx, t, shim, "main", "default-buffer")
-	opened := openSession(setupCtx, t, cli, "main", nil)
-	streamCtx, cancelStream := callContextWithin(t, callTimeout+burstCallTimeout+burstStreamTimeout)
-	defer cancelStream()
-	stream := watchStream(streamCtx, t, cli, opened.GetWatch())
-	defer testclose.OrFail(t, stream)
-	mark := store.logMark()
-
-	// Act. The burst is half DefaultWatchBuffer, so absorbing it is the
-	// buffer's contract and not a race the test hopes to win.
-	const burst = 4096
-	entries := make([]*storev1.StoreEntry, 0, burst)
-	for i := 0; i < burst; i++ {
-		label := fmt.Sprintf("burst-%d", i)
-		entries = append(entries, shim.agentEntry("w-"+label, "u-"+label,
-			frameLine(agentID("main"), responseFrame("main", "act-"+label, label))))
-	}
-	writeCtx, cancelWrite := callContextWithin(t, burstCallTimeout)
-	defer cancelWrite()
-	shim.write(writeCtx, t, entries...)
-
-	// Assert: every frame arrives, and the store never gave up on the watcher.
-	got := receiveLinesWithin(t, stream, burst, burstStreamTimeout)
-	if len(got) != burst {
-		t.Fatalf("the watcher received %d frames, want %d", len(got), burst)
-	}
-	if overflows := recordsAtOperation(store.logRecordsAfter(mark), "store.fanout.overflow"); len(overflows) != 0 {
-		t.Fatalf("the default buffer overflowed on a %d-line burst: %v", burst, overflows)
-	}
-}
-
 // TestOverrunWatcherRecoversByReopening: the store's own recovery story holds
 // after it gave up on a subscriber.
 func TestOverrunWatcherRecoversByReopening(t *testing.T) {

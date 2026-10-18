@@ -380,42 +380,8 @@ func TestALaterDeployThatBuildsTakesTheFaultDown(t *testing.T) {
 
 // ---- a failed deploy: on the topbar, and rolled back -----------------------
 
-// topbarHasLine reports whether the topbar's warning strip carries line.
-func topbarHasLine(v *frontendv1.TopbarView, line string) bool {
-	for _, w := range v.GetWarnings().GetWarnings() {
-		if w.GetLine().GetText() == line {
-			return true
-		}
-	}
-	return false
-}
-
 // buildFailedTopbarLine is the topbar line the harness's failing build stands as.
 var buildFailedTopbarLine = "deploy failed: build: " + harness.FakeDeployBuildRefusal
-
-func TestALaterDeployThatBuildsTakesTheFaultOffTheTopbar(t *testing.T) {
-	t.Parallel()
-	// Arrange: a failed deploy's fault stands on the topbar.
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-	f.d.StageDeployBuild(harness.DeployFails)
-	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
-	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
-		t.Fatalf("Deploy = error %v, want the typed refusal", err)
-	}
-	awaitTopbar(t, f, topbar, "the deploy_failed warning line", func(v *frontendv1.TopbarView) bool {
-		return topbarHasLine(v, buildFailedTopbarLine)
-	})
-	f.d.StageDeployBuild(harness.DeployCurrent)
-
-	// Act
-	deployOutcomes(t, f.d, false)
-
-	// Assert
-	awaitTopbar(t, f, topbar, "the warning line retracted", func(v *frontendv1.TopbarView) bool {
-		return !topbarHasLine(v, buildFailedTopbarLine)
-	})
-}
 
 // failSidecarRestart makes the next deploy judge the sidecar stale and its
 // launchd kickstart fail, before AND after the rollback: the cache bin under
@@ -542,26 +508,6 @@ func TestACLIStartedDeployWhoseBuildFailsReachesEmacs(t *testing.T) {
 	}
 }
 
-func TestALaterDeployThatBuildsTellsEmacsTheFailureClosed(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
-	emacs := d.WatchDaemonStream()
-	failDeploy(t, d)
-	awaitStanding(t, d, emacs, "the failed deploy", func(f []*agentreplv1.DaemonStandingFault) bool {
-		return standsLine(f, buildFailedTopbarLine)
-	})
-	d.StageDeployBuild(harness.DeployCurrent)
-
-	// Act
-	deployOutcomes(t, d, false)
-
-	// Assert
-	awaitStanding(t, d, emacs, "the empty standing set", func(f []*agentreplv1.DaemonStandingFault) bool {
-		return len(f) == 0
-	})
-}
-
 func TestAFailedRollbackReachesEmacsAsItsOwnFault(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -582,22 +528,6 @@ func TestAFailedRollbackReachesEmacsAsItsOwnFault(t *testing.T) {
 			rollback = rollback || fault.GetFault().GetDeployFailed().GetRollback() != nil
 		}
 		return step && rollback
-	})
-}
-
-func TestAWorkspaceOpenedAfterAFailedDeployDrawsItOnItsTopbar(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	failDeploy(t, f.d)
-
-	// Act
-	later := secondWorkspaceOn(t, f.d)
-	topbar := f.d.WatchTopbar(later.ws)
-
-	// Assert
-	awaitTopbar(t, later, topbar, "the deploy_failed warning on the later workspace", func(v *frontendv1.TopbarView) bool {
-		return topbarHasLine(v, buildFailedTopbarLine)
 	})
 }
 

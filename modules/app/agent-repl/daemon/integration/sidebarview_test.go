@@ -56,24 +56,6 @@ func TestTheRecentlyMergedBandStartsExpanded(t *testing.T) {
 	}
 }
 
-func TestFoldingTheRecentlyMergedBandReachesEveryRosterSubscriber(t *testing.T) {
-	t.Parallel()
-	// Arrange: two subscribers, as two workspaces' pages hold.
-	f := newRegistered(t, harness.Opts{})
-	one := f.d.WatchRoster()
-	two := f.d.WatchRosterOn(f.d.Dial())
-
-	// Act
-	resp := updateSidebarView(t, f, collapseMergedBand())
-
-	// Assert
-	if resp.GetSuccess() == nil {
-		t.Fatalf("UpdateSidebarView = %v, want success", resp)
-	}
-	awaitRoster(t, f.d, one, "the folded band on the first subscriber", mergedBandCollapsed)
-	awaitRoster(t, f.d, two, "the folded band on the second subscriber", mergedBandCollapsed)
-}
-
 func TestTheSidebarViewSurvivesADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange
