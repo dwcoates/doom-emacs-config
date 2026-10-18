@@ -705,64 +705,86 @@ func TestSubmitDoesNotReviveAColdGatedWorkspace(t *testing.T) {
 	}
 }
 
-// ---- the merge-revert brief waits out a standing cold gate ---------------
+// ---- the prompts nobody resends wait out a standing cold gate ------------
 
-// mergeRevertSubmission is the merge-revert brief's submission.
-func mergeRevertSubmission(turn ids.TurnID) Submission {
-	sub := submission(turn, "revert the merge")
-	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT
+// gateWaitingOrigins are the origins held at a standing cold gate rather than
+// refused by it.
+var gateWaitingOrigins = []conversationv1.PromptOrigin{
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+}
+
+// gateWaitingSubmission is a deferred submission of ORIGIN.
+func gateWaitingSubmission(turn ids.TurnID, origin conversationv1.PromptOrigin) Submission {
+	sub := submission(turn, "a brief nobody resends")
+	sub.Origin = origin
 	sub.Delivery = wsm.DeliveryDeferred
 	return sub
 }
 
-func TestSubmitHoldsAMergeRevertBriefAtAStandingColdGate(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.coldGate = "the conversation is cold at 101600 context tokens"
-	// Act
-	got, err := h.q.Submit(context.Background(), mergeRevertSubmission("t1"))
-	// Assert
-	if err != nil || !got.Parked() {
-		t.Fatalf("Submit = (%+v, %v), want the brief held, not refused", got, err)
+func TestSubmitHoldsAGateWaitingPromptAtAStandingColdGate(t *testing.T) {
+	for _, origin := range gateWaitingOrigins {
+		t.Run(origin.String(), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.coldGate = "the conversation is cold at 101600 context tokens"
+			// Act
+			got, err := h.q.Submit(context.Background(), gateWaitingSubmission("t1", origin))
+			// Assert
+			if err != nil || !got.Parked() {
+				t.Fatalf("Submit = (%+v, %v), want the prompt held, not refused", got, err)
+			}
+		})
 	}
 }
 
-func TestAMergeRevertBriefHeldAtAColdGateStandsOnTheGatesHold(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.coldGate = "the conversation is cold at 101600 context tokens"
-	// Act
-	if _, err := h.q.Submit(context.Background(), mergeRevertSubmission("t1")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	// Assert
-	held, err := h.db.HeldPrompts(context.Background(), theWorkspace)
-	if err != nil {
-		t.Fatalf("HeldPrompts: %v", err)
-	}
-	if len(held) != 1 || held[0].Hold == nil || *held[0].Hold != wsm.HoldColdGate {
-		t.Fatalf("held = %+v, want the brief on the cold gate's hold", held)
-	}
-}
-
-func TestAMergeRevertBriefHeldAtAColdGateStartsNothing(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.coldGate = "the conversation is cold at 101600 context tokens"
-	// Act
-	_, _ = h.q.Submit(context.Background(), mergeRevertSubmission("t1"))
-	// Assert
-	if started := h.sender.started(); len(started) != 0 {
-		t.Fatalf("started = %v, want nothing delivered into a gated session", started)
+func TestAGateWaitingPromptStandsOnTheGatesHold(t *testing.T) {
+	for _, origin := range gateWaitingOrigins {
+		t.Run(origin.String(), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.coldGate = "the conversation is cold at 101600 context tokens"
+			// Act
+			if _, err := h.q.Submit(context.Background(), gateWaitingSubmission("t1", origin)); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			// Assert
+			held, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+			if err != nil {
+				t.Fatalf("HeldPrompts: %v", err)
+			}
+			if len(held) != 1 || held[0].Hold == nil || *held[0].Hold != wsm.HoldColdGate {
+				t.Fatalf("held = %+v, want the prompt on the cold gate's hold", held)
+			}
+		})
 	}
 }
 
-func TestOnlyTheMergeRevertBriefWaitsOutAColdGate(t *testing.T) {
+func TestAGateWaitingPromptStartsNothing(t *testing.T) {
+	for _, origin := range gateWaitingOrigins {
+		t.Run(origin.String(), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.coldGate = "the conversation is cold at 101600 context tokens"
+			// Act
+			_, _ = h.q.Submit(context.Background(), gateWaitingSubmission("t1", origin))
+			// Assert
+			if started := h.sender.started(); len(started) != 0 {
+				t.Fatalf("started = %v, want nothing delivered into a gated session", started)
+			}
+		})
+	}
+}
+
+func TestWhichPromptsWaitOutAColdGate(t *testing.T) {
 	tests := []struct {
 		origin conversationv1.PromptOrigin
 		want   bool
 	}{
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED, false},

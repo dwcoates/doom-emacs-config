@@ -278,14 +278,27 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 }
 
 // waitsOutColdGate reports whether a prompt of ORIGIN is HELD at a standing
-// cold gate rather than refused by it. Only the merge-revert brief is: it is
-// queued right after the open that brings a reopened merged workspace's
-// session up, and that bring-up is exactly where a large conversation parks
-// at its gate, so refusing it there would drop the revert the user asked
-// for. A prompt the user types is still refused, so the user knows it did
-// not go.
+// cold gate rather than refused by it: a prompt nobody is present to resend,
+// which a refusal would drop. The gate's answer settles it as it settles every
+// prompt held there (gatefate.go), so it spends nothing without the user's say.
+//
+//   - The merge-revert brief is queued right after the open that brings a
+//     reopened merged workspace's session up, and that bring-up is exactly
+//     where a large conversation parks at its gate.
+//   - A detached merge's handback and a merge queue notice tell a requester
+//     what became of its merges. Refused, the handback was retried at every
+//     deploy and the notice was lost, each at ERROR (2026-10-17: the parked
+//     `doom` workspace, every landing for an hour).
+//
+// A prompt the user types is still refused, so the user knows it did not go.
 func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
-	return origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:
+		return true
+	}
+	return false
 }
 
 // mergeOrigin reports whether an origin is one the merge orchestrator submits
