@@ -11,7 +11,16 @@
 ;;   - a HIDDEN workspace (hidden, or in a collapsed repository section) holds
 ;;     no page: one made before it was hidden is unloaded;
 ;;   - a workspace nobody has LOOKED AT for `agent-repl-page-unload-after'
-;;     seconds is unloaded too.
+;;     seconds of USE is unloaded too.
+;;
+;; THE CLOCK RUNS ONLY WHILE THE SYSTEM IS IN USE (owner ruling, 2026-10-17).
+;; In use means some workspace started a turn within the last
+;; `agent-repl-page-unload-idle-after' seconds.  Once that long passes with no
+;; turn anywhere, nobody is using the system, and the clock stops and resets:
+;; the user coming back will certainly reach for a page the idle time would
+;; otherwise have unloaded.  The next turn anywhere starts every page's hold
+;; afresh from that turn, so a page is unloaded only for going unlooked while
+;; the user was working elsewhere.
 ;;
 ;; LOOKED AT MEANS SHOWN FOR A WHILE.  A page shown for less than
 ;; `agent-repl-page-unload-dwell' seconds was passed through, as a held switch
@@ -39,13 +48,21 @@
 (declare-function agent-repl--panels-on-view-created "panels" (ws))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
+(defvar agent-repl-roster-status-change-functions)
+(defvar agent-repl-roster-running-statuses)
 
 (defgroup agent-repl-page-unload nil
   "Unloading the workspace pages nobody looks at."
   :group 'agent-repl)
 
-(defcustom agent-repl-page-unload-after 1800
-  "Seconds a workspace's page is held after it was last looked at."
+(defcustom agent-repl-page-unload-after 600
+  "Seconds of use a workspace's page is held after it was last looked at."
+  :type 'integer
+  :group 'agent-repl-page-unload)
+
+(defcustom agent-repl-page-unload-idle-after 300
+  "Seconds with no turn started anywhere after which the system is not in use.
+The hold's clock stops then, and starts afresh at the next turn."
   :type 'integer
   :group 'agent-repl-page-unload)
 
@@ -75,6 +92,12 @@
 (defvar agent-repl-page-unload--timer nil
   "The repeating timer that runs the pass, while one is running.")
 
+(defvar agent-repl-page-unload--last-turn-at nil
+  "When a turn last started in any workspace, or nil before the first.")
+
+(defvar agent-repl-page-unload--in-use-since nil
+  "When the system's present spell of use began: the first turn after idle.")
+
 (defun agent-repl-page-unload--now ()
   "The current time, in seconds."
   (funcall agent-repl-page-unload--clock))
@@ -99,6 +122,30 @@ The page shown until now was looked at when it was shown for at least
     (agent-repl--ws-put ws :page-unloaded nil)
     (agent-repl--info ws "elisp.page-unload.reloaded ws=%s" ws)))
 
+(defun agent-repl-page-unload--in-use-p (now)
+  "Non-nil when some workspace started a turn within the idle span before NOW."
+  (and agent-repl-page-unload--last-turn-at
+       (<= (- now agent-repl-page-unload--last-turn-at) agent-repl-page-unload-idle-after)))
+
+(defun agent-repl-page-unload-note-turn ()
+  "Record that a turn started in some workspace: the system is in use.
+A turn after an idle spell starts the hold's clock afresh."
+  (let ((now (agent-repl-page-unload--now)))
+    (unless (agent-repl-page-unload--in-use-p now)
+      (setq agent-repl-page-unload--in-use-since now)
+      (agent-repl--log agent-repl--page-unload-central
+                       "elisp.page-unload.in-use since-idle-s=%s"
+                       (if agent-repl-page-unload--last-turn-at
+                           (round (- now agent-repl-page-unload--last-turn-at))
+                         "never")))
+    (setq agent-repl-page-unload--last-turn-at now)))
+
+(defun agent-repl-page-unload-on-status-change (_ws previous current)
+  "Note a turn when a workspace moves from PREVIOUS into the running CURRENT."
+  (when (and (memq current agent-repl-roster-running-statuses)
+             (not (memq previous agent-repl-roster-running-statuses)))
+    (agent-repl-page-unload-note-turn)))
+
 (defun agent-repl-page-unloaded-p (ws)
   "Non-nil when WS's page was unloaded and nobody has switched to it since."
   (and (agent-repl--ws-get ws :page-unloaded) t))
@@ -115,13 +162,18 @@ this makes (panels.el); the restore runs again on the new view."
 (defun agent-repl-page-unload--reason (ws now)
   "Why WS's page should be unloaded at NOW, or nil when it should be held.
 A page with no recorded look (one mounted before this module ran) is
-stamped as looked at now, so a reload of this module unloads nothing."
+stamped as looked at now, so a reload of this module unloads nothing.  A
+page goes unlooked only while the system is in use, and only for the time
+since the later of its look and the start of the present spell of use."
   (cond
    ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws)) 'hidden)
    ((null (agent-repl--ws-get ws :page-looked-at))
     (agent-repl--ws-put ws :page-looked-at now)
     nil)
-   ((> (- now (agent-repl--ws-get ws :page-looked-at)) agent-repl-page-unload-after) 'unlooked)))
+   ((not (agent-repl-page-unload--in-use-p now)) nil)
+   ((> (- now (max (agent-repl--ws-get ws :page-looked-at) agent-repl-page-unload--in-use-since))
+       agent-repl-page-unload-after)
+    'unlooked)))
 
 (defun agent-repl-page-unload-pass ()
   "Unload every held page whose workspace is hidden or not looked at lately.
@@ -154,8 +206,9 @@ Registered on `agent-repl-link-up-functions'; a timer already running is kept."
           (run-with-timer agent-repl-page-unload-interval agent-repl-page-unload-interval
                           #'agent-repl-page-unload-pass))
     (agent-repl--log agent-repl--page-unload-central
-                     "elisp.page-unload.started interval-s=%d after-s=%d"
-                     agent-repl-page-unload-interval agent-repl-page-unload-after)))
+                     "elisp.page-unload.started interval-s=%d after-s=%d idle-after-s=%d"
+                     agent-repl-page-unload-interval agent-repl-page-unload-after
+                     agent-repl-page-unload-idle-after)))
 
 (defun agent-repl-page-unload-on-roster-update (&optional _roster)
   "Unload the pages a roster push hid, without waiting for the next pass."
@@ -163,6 +216,7 @@ Registered on `agent-repl-link-up-functions'; a timer already running is kept."
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-page-unload-start)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
+(add-hook 'agent-repl-roster-status-change-functions #'agent-repl-page-unload-on-status-change)
 
 (provide 'page-unload)
 ;;; page-unload.el ends here

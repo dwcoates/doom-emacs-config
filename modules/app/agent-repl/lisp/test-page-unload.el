@@ -41,6 +41,11 @@
            (agent-repl-page-unload--shown nil)
            (agent-repl-page-unload--shown-since nil)
            (agent-repl-page-unload-after 500)
+           (agent-repl-page-unload-idle-after 300)
+           ;; IN USE unless a test says otherwise: a turn started just now,
+           ;; in a spell of use as old as the harness's clock.
+           (agent-repl-page-unload--last-turn-at 1000)
+           (agent-repl-page-unload--in-use-since 0)
            (agent-repl-page-unload-dwell 2)
            (buffers nil))
        (unwind-protect
@@ -142,6 +147,87 @@
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--detached)))
+
+;;;; ---- The clock runs only while the system is in use ----
+
+(ert-deftest agent-repl-test-pu-an-idle-system-unloads-no-unlooked-page ()
+  "With no turn anywhere for the idle span, an unlooked page is held."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-page-unload--last-turn-at 699)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--detached)))
+
+(ert-deftest agent-repl-test-pu-a-system-that-never-ran-a-turn-is-idle ()
+  "Before the first turn anywhere, nothing goes unlooked."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-page-unload--last-turn-at nil)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--detached)))
+
+(ert-deftest agent-repl-test-pu-an-idle-system-still-unloads-a-hidden-page ()
+  "Idleness stops the unlooked clock only: a hidden workspace's page still goes."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 900)
+    (setq agent-repl-page-unload--last-turn-at nil)
+    (push "alpha" agent-repl-test-pu--hidden)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--detached '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-a-turn-after-idle-starts-every-hold-afresh ()
+  "The first turn after idle starts the clock: a page unlooked for ages is held until the hold passes from it."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-page-unload--last-turn-at 100)
+    (agent-repl-page-unload-note-turn)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    (let ((held-at-the-turn (null agent-repl-test-pu--detached)))
+      ;; Turns keep coming, each within the idle span of the last.
+      (dolist (at '(1250 1501))
+        (setq agent-repl-test-pu--now at)
+        (agent-repl-page-unload-note-turn))
+      (agent-repl-page-unload-pass)
+      ;; Assert
+      (should (equal (list held-at-the-turn agent-repl-test-pu--detached) '(t ("alpha")))))))
+
+(ert-deftest agent-repl-test-pu-a-turn-in-use-keeps-the-spell-going ()
+  "A turn while the system is in use moves the last turn, not the spell's start."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-page-unload--last-turn-at 900
+          agent-repl-page-unload--in-use-since 400)
+    ;; Act
+    (agent-repl-page-unload-note-turn)
+    ;; Assert
+    (should (equal (list agent-repl-page-unload--in-use-since agent-repl-page-unload--last-turn-at)
+                   '(400 1000)))))
+
+(ert-deftest agent-repl-test-pu-only-a-move-into-the-running-set-is-a-turn ()
+  "A status change notes a turn only when a workspace starts running."
+  (dolist (case '((:done :submitting t) (:idle :thinking t)
+                  (:thinking :permission nil) (:thinking :done nil) (:done :idle nil)))
+    ;; Arrange
+    (agent-repl-test-pu--with '("alpha")
+      (let ((agent-repl-roster-running-statuses
+             '(:submitting :thinking :clearing :compacting :permission :question :waiting))
+            (noted nil))
+        (cl-letf (((symbol-function 'agent-repl-page-unload-note-turn) (lambda () (setq noted t))))
+          ;; Act
+          (agent-repl-page-unload-on-status-change "alpha" (nth 0 case) (nth 1 case)))
+        ;; Assert
+        (should (eq noted (nth 2 case)))))))
 
 (ert-deftest agent-repl-test-pu-a-hidden-workspace-page-is-unloaded-at-once ()
   "A hidden workspace's page is unloaded however lately it was looked at."
