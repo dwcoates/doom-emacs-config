@@ -141,6 +141,11 @@ function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly stri
     .map((decl) => decl.replace(/^;?\s*/, "").trim());
 }
 
+/** The value `:root` declares for the custom property NAME. */
+function rootToken(name: string): string | undefined {
+  return new RegExp(`${name}:\\s*([^;]+);`).exec(declarationsOf(":root") ?? "")?.[1]?.trim();
+}
+
 /**
  * The raw text of the `@media (prefers-color-scheme: dark)` block, found by
  * balancing braces from its opening `{` — `rulesOf`'s flat scan cannot tell a
@@ -3292,11 +3297,19 @@ describe("the one bubble rule set", () => {
     expect(others.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("sets a tool card head at the thinking bubble's smaller prose size", () => {
+  it("sets a tool card head from its own head size token", () => {
     // Arrange / Act
     const head = ownDeclarationsOf(".tool-head") ?? "";
     // Assert
-    expect(head).toMatch(/font-size:\s*calc\(var\(--small-prose-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+    expect(head).toMatch(/font-size:\s*calc\(var\(--tool-head-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it("sizes a tool card head below the thinking bubble's prose", () => {
+    // Arrange / Act
+    const head = Number(rootToken("--tool-head-font-rem"));
+    const thinking = Number(rootToken("--small-prose-font-rem"));
+    // Assert
+    expect([head, head < thinking]).toEqual([0.75, true]);
   });
 
   it("carries no second leading token for prompts", () => {
@@ -4660,10 +4673,6 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
 
   /** The `font-style` the cascade hands a response bubble with HOOKS and VARIANT. */
   const fontStyleOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "font-style");
-
-  /** The value `:root` declares for the custom property NAME. */
-  const rootToken = (name: string): string | undefined =>
-    new RegExp(`${name}:\\s*([^;]+);`).exec(declarationsOf(":root") ?? "")?.[1]?.trim();
 
   it("dims a thinking bubble's prose to the thinking grey", () => {
     // Arrange / Act
