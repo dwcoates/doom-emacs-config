@@ -191,7 +191,7 @@ These clicks jump to an entry in the feed:
 - **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
   - It is listed among the closed workspaces, and under Recently Merged once it lands.
   - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its resolving, conflicts and fixes tabs stream the merge workspace's agent.
-  - Every queue tab lists the merge under your workspace's name, the one the sidebar marks as merging, and its entry jumps to your workspace, never to the merge workspace.
+  - Every queue tab lists the merge by its own name; clicking the entry switches to your workspace and opens the merge's bubble there, and never selects or reveals the merge workspace.
 - **The merge workspace is revealed, and stays visible, when:**
   - the merge fails;
   - its agent asks a question or for a permission;
