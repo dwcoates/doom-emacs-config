@@ -15,7 +15,7 @@
  * panel.
  *
  * THE DETACHED-WORK ROWS JUMP; THE REST DO NOT. Agent, shell and monitor rows
- * are detached work, and each carries the daemon's `FooterJump`: EITHER the
+ * are detached work, and a merge row is an async merge's bubble; each carries the daemon's `FooterJump`: EITHER the
  * entry's `FeedId` (the click selects it and the feed scrolls to it) OR the
  * reason the daemon cannot name one (the click shows "not on screen" at the
  * row and records why). Exactly one of the two happens on every click — a
@@ -46,11 +46,16 @@ import type {
   FooterExpanded,
   FooterExpandedAgents,
   FooterExpandedCrons,
+  FooterExpandedMerges,
   FooterExpandedMonitors,
   FooterExpandedShells,
   FooterExpandedTasks,
   FooterExpandedTokens,
   FooterJump,
+  FooterMergeRow,
+  FooterMergeRowLabel,
+  FooterMergeRowRuntime,
+  FooterMergeRowStep,
   FooterTokensAgent,
   FooterTokensLineContextGrowth,
   FooterMonitorRow,
@@ -96,7 +101,8 @@ export type FooterPanel =
   | "tasks"
   | "shells"
   | "monitors"
-  | "crons";
+  | "crons"
+  | "merges";
 
 /** Every panel name, for the suite and for the persisted-selection check. */
 export const FOOTER_PANELS: readonly FooterPanel[] = [
@@ -106,6 +112,7 @@ export const FOOTER_PANELS: readonly FooterPanel[] = [
   "shells",
   "monitors",
   "crons",
+  "merges",
 ];
 
 /**
@@ -257,6 +264,11 @@ export function drawFooterExpanded(
       return panel(
         selection,
         drawFooterExpandedCrons(requireMessage(u.crons, `${path}.crons`), deps, `${path}.crons`),
+      );
+    case "merges":
+      return panel(
+        selection,
+        drawFooterExpandedMerges(requireMessage(u.merges, `${path}.merges`), deps, `${path}.merges`),
       );
     default:
       return unreachableArm(`${path}.selection`, selection);
@@ -806,6 +818,67 @@ export function drawFooterMonitorRowDescription(u: FooterMonitorRowDescription):
 /** The monitor's ticking runtime, from the arm instant. */
 export function drawFooterMonitorRowRuntime(
   u: FooterMonitorRowRuntime,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  return runtimeClock(u.startedAtMs, deps, `${path}.started_at_ms`);
+}
+
+// ---- the merges panel -----------------------------------------------------
+
+/**
+ * The async merges in flight. Each is a jump row, exactly as an agent or shell
+ * row is: its jump names the merge's bubble head in this feed, which a click
+ * centers.
+ */
+export function drawFooterExpandedMerges(
+  u: FooterExpandedMerges,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement[] {
+  if (u.rows.length === 0) return [emptyRow("no merges in flight")];
+  return u.rows.map((row, index) => drawFooterMergeRow(row, deps, `${path}.rows[${index}]`));
+}
+
+/** One async merge: ⇄ · branch line · step · (waiting on you) · clock. */
+export function drawFooterMergeRow(
+  u: FooterMergeRow,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  const row = jumpRow("merges", u.work, u.jump, deps, path);
+  row.appendChild(glyph("merges", "⇄"));
+  row.appendChild(drawFooterMergeRowLabel(requireMessage(u.label, `${path}.label`)));
+  if (u.step !== undefined) row.appendChild(drawFooterMergeRowStep(u.step));
+  if (u.waitingOnUser !== undefined) row.appendChild(drawFooterMergeRowWaitingOnUser());
+  const figures = document.createElement("span");
+  figures.className = "footer-row-figures";
+  figures.appendChild(
+    drawFooterMergeRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
+  );
+  figures.appendChild(caret());
+  row.appendChild(figures);
+  return finishJumpRow(row);
+}
+
+/** The bubble head's branch line, verbatim. */
+export function drawFooterMergeRowLabel(u: FooterMergeRowLabel): HTMLElement {
+  return rowText("footer-row-label", u.text);
+}
+
+/** The step the merge stands on, verbatim. */
+export function drawFooterMergeRowStep(u: FooterMergeRowStep): HTMLElement {
+  return rowText("footer-row-description", u.text);
+}
+
+/** The waiting-on-you state: the merge workspace's session asked something. */
+export function drawFooterMergeRowWaitingOnUser(): HTMLElement {
+  return rowText("footer-row-state", "waiting on you");
+}
+
+/** The merge's ticking clock, from the bubble head's instant. */
+export function drawFooterMergeRowRuntime(
+  u: FooterMergeRowRuntime,
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {

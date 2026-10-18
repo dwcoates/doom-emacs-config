@@ -1015,6 +1015,76 @@ describe("the monitors panel", () => {
   });
 });
 
+// ---- the merges panel ------------------------------------------------------
+
+const MERGE_ROW = {
+  work: { value: "lease-1" },
+  jump: toEntry("merge-head"),
+  label: { text: "fix-flaky → master" },
+  runtime: { startedAtMs: BigInt(NOW - 90_000) },
+};
+
+describe("the merges panel", () => {
+  it("draws the bubble head's branch line verbatim", () => {
+    const { panel } = drawPanel("merges", { merges: [MERGE_ROW] });
+    expect(panel.querySelector(".footer-row-label")?.textContent).toBe("fix-flaky → master");
+  });
+
+  it("draws the merge's step verbatim", () => {
+    const { panel } = drawPanel("merges", { merges: [{ ...MERGE_ROW, step: { text: "committing (2)" } }] });
+    expect(panel.querySelector(".footer-row-description")?.textContent).toBe("committing (2)");
+  });
+
+  it("draws no step while the bubble has drawn no tab", () => {
+    const { panel } = drawPanel("merges", { merges: [MERGE_ROW] });
+    expect(panel.querySelector(".footer-row-description")).toBeNull();
+  });
+
+  it("draws the waiting-on-you state only while the merge waits on the user", () => {
+    const { panel } = drawPanel("merges", { merges: [{ ...MERGE_ROW, waitingOnUser: {} }] });
+    expect(panel.querySelector(".footer-row-state")?.textContent).toBe("waiting on you");
+  });
+
+  it("draws no waiting state for a merge that is not waiting", () => {
+    const { panel } = drawPanel("merges", { merges: [MERGE_ROW] });
+    expect(panel.querySelector(".footer-row-state")).toBeNull();
+  });
+
+  it("ticks the merge's clock from the head's instant", () => {
+    const { panel } = drawPanel("merges", { merges: [MERGE_ROW] });
+    expect(panel.querySelector(".footer-row-clock")?.textContent).toBe("1m 30s");
+  });
+
+  it("is a jump row naming the merge's bubble head", () => {
+    const { panel } = drawPanel("merges", { merges: [MERGE_ROW] });
+    expect(panel.querySelector("[data-jump]")?.getAttribute("data-jump")).toBe("merge-head");
+  });
+
+  it("draws the merge glyph", () => {
+    const { panel } = drawPanel("merges", { merges: [MERGE_ROW] });
+    expect(panel.querySelector('[data-glyph="merges"]')?.textContent).toBe("⇄");
+  });
+
+  it("draws its empty line when no merge is in flight", () => {
+    const { panel } = drawPanel("merges");
+    expect(panel.querySelector("[data-empty]")?.textContent).toBe("no merges in flight");
+  });
+
+  it("refuses a row with no label", () => {
+    const view = expanded({ merges: [MERGE_ROW] });
+    const row = view.merges?.rows[0] as unknown as { label: unknown };
+    row.label = undefined;
+    expect(() => drawPanel("merges", {}, true, view)).toThrow(MalformedView);
+  });
+
+  it("refuses a row with no clock", () => {
+    const view = expanded({ merges: [MERGE_ROW] });
+    const row = view.merges?.rows[0] as unknown as { runtime: unknown };
+    row.runtime = undefined;
+    expect(() => drawPanel("merges", {}, true, view)).toThrow(MalformedView);
+  });
+});
+
 // ---- the crons panel -------------------------------------------------------
 
 const CRON_ROW = {
@@ -1292,7 +1362,7 @@ describe("the click invariant: exactly one outcome, never neither", () => {
   const cases: {
     name: string;
     row: Record<string, unknown>;
-    panel: "agents" | "shells" | "monitors";
+    panel: "agents" | "shells" | "monitors" | "merges";
     select: () => Promise<boolean>;
     reached: boolean;
     want: Outcome;
@@ -1354,6 +1424,22 @@ describe("the click invariant: exactly one outcome, never neither", () => {
       row: { ...MONITOR_ROW, jump: unresolvedFor("notDrawn") },
       panel: "monitors",
       select: async () => true,
+      reached: false,
+      want: { selected: false, notice: true },
+    },
+    {
+      name: "a merge's bubble head that lands is selected and draws no notice",
+      row: MERGE_ROW,
+      panel: "merges",
+      select: async () => true,
+      reached: true,
+      want: { selected: true, notice: false },
+    },
+    {
+      name: "a merge's bubble head the feed cannot bring on screen shows the notice",
+      row: MERGE_ROW,
+      panel: "merges",
+      select: async () => false,
       reached: false,
       want: { selected: false, notice: true },
     },

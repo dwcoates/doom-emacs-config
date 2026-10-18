@@ -28,6 +28,7 @@ import {
   FooterExpandedSchema,
   FooterExpandedTokensSchema,
   FooterLiveWorkChipsSchema,
+  FooterMergeRowSchema,
   FooterMonitorRowSchema,
   FooterShellRowSchema,
   FooterStatusIdleSchema,
@@ -260,6 +261,7 @@ export interface ExpandedInit {
   tasks?: readonly MessageInitShape<typeof FooterTaskRowSchema>[];
   shells?: readonly MessageInitShape<typeof FooterShellRowSchema>[];
   monitors?: readonly MessageInitShape<typeof FooterMonitorRowSchema>[];
+  merges?: readonly MessageInitShape<typeof FooterMergeRowSchema>[];
   crons?: readonly MessageInitShape<typeof FooterCronRowSchema>[];
   wakeup?: MessageInitShape<typeof FooterWakeupRowSchema>;
 }
@@ -285,6 +287,7 @@ export function expanded(init: ExpandedInit = {}): FooterExpanded {
     shells: { rows: [...(init.shells ?? [])] },
     monitors: { rows: [...(init.monitors ?? [])] },
     crons: { rows: [...(init.crons ?? [])], wakeup: init.wakeup },
+    merges: { rows: [...(init.merges ?? [])] },
   });
 }
 
