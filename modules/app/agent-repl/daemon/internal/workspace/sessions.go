@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/startingshim"
+	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
 )
 
@@ -112,6 +113,11 @@ type ShimBundle interface {
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
+	// StartSlots caps the vendor starts in flight. It is the SAME pool the
+	// bounce registry takes a shim restart's slot from, so a restart's resume
+	// is answered from the slot its restart holds. Nil gives the fleet a pool
+	// of its own (startslots.DefaultSize).
+	StartSlots *startslots.Pool
 	// DB holds the session record the fresh-versus-resume decision is made
 	// from.
 	DB wsm.DB
@@ -334,9 +340,9 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
-	// vendorSlots caps the vendor starts in flight across every workspace
-	// (vendorslots.go).
-	vendorSlots vendorSlots
+	// startSlots caps the vendor starts in flight across every workspace,
+	// shared with the bounce registry's shim restarts (startslots).
+	startSlots *startslots.Pool
 	// startsUnderWay names the workspaces whose start is under way, from the gate's
 	// liveness check until the start returns. Guarded by mu. See Serving.
 	startsUnderWay map[ids.WorkspaceID]bool
@@ -559,7 +565,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		reapedAt:       map[ids.WorkspaceID]time.Time{},
 		generation:     map[ids.WorkspaceID]int{},
 		startGates:     map[ids.WorkspaceID]*sync.Mutex{},
-		vendorSlots:    newVendorSlots(vendorStartSlots()),
+		startSlots:     startSlotsOf(deps.StartSlots),
 		startsUnderWay: map[ids.WorkspaceID]bool{},
 		watched:        map[ids.WorkspaceID]sessionwatcher.Watcher{},
 		selected:       map[ids.WorkspaceID]bool{},

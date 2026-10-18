@@ -26,6 +26,7 @@ import (
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
 )
 
@@ -424,6 +425,12 @@ type Deps struct {
 	// Watcher resolves a workspace's session watcher, which is what answers
 	// the in-flight turn and what an accepted turn is handed over to.
 	Watcher WatcherFunc
+	// RestartSlots is the daemon-wide cap on vendor starts in flight, the
+	// SAME pool the fleet's starts take their slot from (startslots). A shim
+	// replacement takes its slot here before it drains anything and holds it
+	// for the whole replacement, so a deploy restarts a few shims at a time.
+	// Nil admits every replacement at once.
+	RestartSlots *startslots.Pool
 	// SessionStarted reports whether the workspace's installed shim holds a
 	// STARTED session. A client is not a session: a relaunch installs its
 	// shim before the resume, and a vendor start being retried (or one that

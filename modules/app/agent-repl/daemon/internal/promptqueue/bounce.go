@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
 )
 
@@ -98,6 +99,18 @@ type pendingBounce struct {
 	// starts draining (startDrainingLocked) and closed once
 	// (endDrainingLocked).
 	drainEnded chan struct{}
+	// restartSlot is the vendor-start slot a shim REPLACEMENT holds from the
+	// moment it is admitted until its stage ends (startslots: a restart waits
+	// in line to restart, not to start), nil while it holds none.
+	restartSlot startslots.Release
+	// inLineForSlot reports that the replacement waits in line for a restart
+	// slot: it is decided, and runs once the pool hands it one.
+	inLineForSlot bool
+	// shimGone reports that the shim the replacement would stand down has
+	// already departed: nothing serves the workspace, so there is no old shim
+	// to keep serving while in line, and the replacement is taken at once.
+	// Its resume's own vendor start still waits for a slot (startslots).
+	shimGone bool
 }
 
 // startDrainingLocked marks the bounce DRAINING and arms the latch its end
@@ -410,7 +423,7 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 		log.Info(opBounce, "a dispatch-quiet move: moving the workspace now; the work in flight runs on through the move", dlog.Context{
 			"turn_in_flight": turn, "detached_work": detached, "overtook_replacement": overtook,
 		})
-		q.startBounceLocked(d, log)
+		decision.Now = q.startBounceLocked(d, log)
 		return decision, nil
 	}
 	if !free && !force {
@@ -430,7 +443,7 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 	} else {
 		log.Info(opBounce, "the workspace is free; bouncing it now", nil)
 	}
-	q.startBounceLocked(d, log)
+	decision.Now = q.startBounceLocked(d, log)
 	return decision, nil
 }
 
@@ -585,6 +598,9 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 	} else {
 		log.Info(opBounce, "the shim departed; the work its registered bounce waited on ended with it, so the bounce is taken now", fields)
 	}
+	q.mu.Lock()
+	pending.shimGone = true
+	q.mu.Unlock()
 	if !q.deferToCall(d, log, "bounce") {
 		q.startBounceLocked(d, log)
 	}
@@ -685,8 +701,7 @@ func (q *queue) checkRegistryLocked(d *delivery, edge freenessEdge, log dlog.Log
 	log.Info(opBounce, "the workspace's work ended; taking its registered bounce now", dlog.Context{
 		"reason": pending.reason(),
 	})
-	q.startBounceLocked(d, log)
-	return true
+	return q.startBounceLocked(d, log)
 }
 
 // decideBounceLocked takes a registered bounce whose decision a shim call
@@ -728,17 +743,28 @@ func (q *queue) decideBounceLocked(d *delivery, log dlog.Logger) bool {
 		})
 		return false
 	}
-	q.startBounceLocked(d, log)
-	return true
+	return q.startBounceLocked(d, log)
 }
 
 // startBounceLocked moves the workspace to DRAINING and runs the bounce's
-// stages on its own goroutine, one after the other, joinable through Drain.
+// stages on its own goroutine, one after the other, joinable through Drain,
+// and answers whether it did.
+//
+// A SHIM REPLACEMENT WAITS IN LINE TO RESTART (owner ruling, 2026-10-17). One
+// whose first stage replaces the shim takes its vendor-start slot FIRST
+// (Deps.RestartSlots), before anything drains or stands down, and holds it
+// for the whole replacement; with no slot free it is put in line and the
+// workspace keeps serving on its old shim, undrained, until the pool hands it
+// one (restartSlotGranted). A deploy then replaces a few shims at a time
+// instead of standing every one down at once and starting them all together.
 // The caller holds the delivery lock (d) and has deferred to any shim call in
 // flight: a bounce never starts beside one, so no delivery runs on a shim the
 // bounce is standing down.
-func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) {
+func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) bool {
 	ws, state := d.ws, d.state
+	if !q.admitRestartLocked(d, log) {
+		return false
+	}
 	q.mu.Lock()
 	if call := state.call; call != nil {
 		q.mu.Unlock()
@@ -767,6 +793,98 @@ func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) {
 			stage = q.finishStage(ws, stage, err, log)
 		}
 	}()
+	return true
+}
+
+// admitRestartLocked answers whether the bounce about to start may: a bounce
+// that replaces no shim, or one whose replacement holds its restart slot now.
+// One that cannot take a slot is put in line for one and answers false; the
+// workspace is left undrained. The caller holds the delivery lock (d).
+func (q *queue) admitRestartLocked(d *delivery, log dlog.Logger) bool {
+	slots := q.deps.RestartSlots
+	if slots == nil {
+		return true
+	}
+	ws, state := d.ws, d.state
+	q.mu.Lock()
+	pending := state.bounce
+	replaces := pending != nil && pending.replace != nil && pending.replace.req.ReplacesShim &&
+		!pending.replace.started && !pending.shimGone
+	held := replaces && pending.restartSlot != nil
+	q.mu.Unlock()
+	if !replaces || held {
+		return true
+	}
+	if release, ok := slots.TryAcquire(ws); ok {
+		q.mu.Lock()
+		pending.restartSlot, pending.inLineForSlot = release, false
+		q.mu.Unlock()
+		return true
+	}
+	q.mu.Lock()
+	already := pending.inLineForSlot
+	pending.inLineForSlot = true
+	q.mu.Unlock()
+	if !already {
+		slots.Notify(ws, func(release startslots.Release) { q.restartSlotGranted(ws, release) })
+	}
+	log.Info(opBounce, "the shim replacement waits in line for a restart slot; the workspace keeps serving on its shim until its turn", dlog.Context{
+		"reason": pending.reason(), "slots": slots.Size(), "waiting": slots.Waiting(), "already_in_line": already,
+	})
+	return false
+}
+
+// restartSlotGranted takes the restart slot the pool handed a replacement
+// waiting in line, and decides the bounce again as it would have been decided
+// with a slot free. A bounce that no longer wants the slot -- gone, already
+// running, or waiting on work again -- gives it straight back, so no slot is
+// held by a restart that is not running.
+func (q *queue) restartSlotGranted(ws ids.WorkspaceID, release startslots.Release) {
+	if q.onSlotHandled != nil {
+		defer q.onSlotHandled()
+	}
+	ctx := context.Background()
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		release()
+		return
+	}
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	q.mu.Lock()
+	pending := d.state.bounce
+	wanted := pending != nil && pending.inLineForSlot && !pending.draining && pending.replace != nil && !pending.replace.started
+	if wanted {
+		pending.restartSlot, pending.inLineForSlot = release, false
+	}
+	q.mu.Unlock()
+	if !wanted {
+		log.Debug(opBounce, "a restart slot came to a workspace whose replacement no longer waits for one; it is given back", nil)
+		release()
+		return
+	}
+	log.Info(opBounce, "the shim replacement's turn came; it holds a restart slot", dlog.Context{"reason": pending.reason()})
+	if q.deferToCall(d, log, "bounce") {
+		// THE CALL'S SETTLE DECIDES the bounce (decideBounceLocked), and the
+		// slot is held for it; a call is short.
+		return
+	}
+	if !q.decideBounceLocked(d, log) {
+		q.giveBackRestartSlotLocked(pending)
+		log.Info(opBounce, "the shim replacement waits on the workspace's work again; its restart slot is given back until the work ends", nil)
+	}
+}
+
+// giveBackRestartSlotLocked releases the restart slot pending holds, if any.
+// The caller holds the delivery lock.
+func (q *queue) giveBackRestartSlotLocked(pending *pendingBounce) {
+	q.mu.Lock()
+	release := pending.restartSlot
+	pending.restartSlot = nil
+	q.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // finishStage ends one stage of a bounce and answers the next one to run, nil
@@ -780,6 +898,11 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 	d := q.lockDelivery(ws)
 	state := d.state
 
+	// THE REPLACEMENT'S STAGE IS OVER, however it ended: its restart slot goes
+	// to the next workspace in line.
+	if pending := state.bounce; pending != nil && stage == pending.replace {
+		q.giveBackRestartSlotLocked(pending)
+	}
 	q.mu.Lock()
 	pending := state.bounce
 	if pending != nil && stage == pending.replace && bounce.OutcomeOf(runErr) == bounce.OutcomeDeferred {
@@ -919,6 +1042,8 @@ func (q *queue) deferReplacementLocked(d *delivery, pending *pendingBounce, edge
 	current, _ := q.deps.Watcher(ws)
 	q.mu.Lock()
 	pending.waitsOn = current
+	// THE SHIM THAT REFUSED SERVES THE WORKSPACE: a rerun waits in line again.
+	pending.shimGone = false
 	reason := pending.reason()
 	quiet := pending.quietMove()
 	overtook := quiet && pending.overtake()
