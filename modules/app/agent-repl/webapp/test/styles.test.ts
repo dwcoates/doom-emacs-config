@@ -141,6 +141,11 @@ function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly stri
     .map((decl) => decl.replace(/^;?\s*/, "").trim());
 }
 
+/** The value `:root` declares for the custom property NAME. */
+function rootToken(name: string): string | undefined {
+  return new RegExp(`${name}:\\s*([^;]+);`).exec(declarationsOf(":root") ?? "")?.[1]?.trim();
+}
+
 /**
  * The raw text of the `@media (prefers-color-scheme: dark)` block, found by
  * balancing braces from its opening `{` — `rulesOf`'s flat scan cannot tell a
@@ -4660,10 +4665,6 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
 
   /** The `font-style` the cascade hands a response bubble with HOOKS and VARIANT. */
   const fontStyleOf = (variant: string, hooks: readonly string[]): string => cascadedOnResponse(variant, hooks, "font-style");
-
-  /** The value `:root` declares for the custom property NAME. */
-  const rootToken = (name: string): string | undefined =>
-    new RegExp(`${name}:\\s*([^;]+);`).exec(declarationsOf(":root") ?? "")?.[1]?.trim();
 
   it("dims a thinking bubble's prose to the thinking grey", () => {
     // Arrange / Act
