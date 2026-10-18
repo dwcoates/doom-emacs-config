@@ -120,6 +120,45 @@ describe("presence", () => {
   });
 });
 
+describe("presence switch start", () => {
+  it("holds the start of the switch that showed it, set before a listener hears the show", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const heard: (number | null)[] = [];
+    const source = presence;
+    source.onChange(() => heard.push(source.switchStartedAt()));
+
+    // Act
+    source.setShown(true, 1_700_000_000_123);
+
+    // Assert
+    expect(heard).toEqual([1_700_000_000_123]);
+  });
+
+  it("holds no switch start for a show no switch made", () => {
+    // Arrange
+    presence = createPresence(document, true);
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(presence.switchStartedAt()).toBeNull();
+  });
+
+  it("forgets the switch start once hidden", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    presence.setShown(true, 1_700_000_000_123);
+
+    // Act
+    presence.setShown(false);
+
+    // Assert
+    expect(presence.switchStartedAt()).toBeNull();
+  });
+});
+
 describe("pageIsEmbedded", () => {
   it("is false for a top-level window", () => {
     expect(pageIsEmbedded(window)).toBe(false);

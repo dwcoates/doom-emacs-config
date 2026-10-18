@@ -123,6 +123,14 @@ describe("presence", () => {
     expect(presence.shown()).toBe(true);
   });
 
+  it("hands the presence the start of the switch that showed it", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 });
+
+    // Assert
+    expect(presence.switchStartedAt()).toBe(1_700_000_000_123);
+  });
+
   it("records the host showing it at info", async () => {
     // Act
     fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });

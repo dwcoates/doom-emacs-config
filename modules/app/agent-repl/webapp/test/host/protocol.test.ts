@@ -7,6 +7,7 @@ import { HOST_CHANNEL, onHostChannel, parseHostToPage, parsePageToHost } from ".
 describe("parseHostToPage", () => {
   it.each([
     ["presence", { channel: HOST_CHANNEL, kind: "presence", shown: true }],
+    ["presence a switch made", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 }],
     ["inputBackground", { channel: HOST_CHANNEL, kind: "inputBackground", background: "#123456" }],
     ["gateDock with a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: "#000" }],
     ["gateDock without a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: null }],
@@ -37,6 +38,8 @@ describe("parseHostToPage", () => {
     ["null", null],
     ["an unknown kind", { channel: HOST_CHANNEL, kind: "teleport" }],
     ["presence without a boolean", { channel: HOST_CHANNEL, kind: "presence", shown: "yes" }],
+    ["presence with a switch start that is not a number", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: "now" }],
+    ["presence with a non-finite switch start", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: NaN }],
     ["an inputBackground without a string", { channel: HOST_CHANNEL, kind: "inputBackground", background: 3 }],
     ["a gateDock with a non-finite height", { channel: HOST_CHANNEL, kind: "gateDock", pixels: Infinity, background: null }],
     ["a sidebarDock without a boolean", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: 1 }],

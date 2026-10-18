@@ -35,12 +35,21 @@ export interface Presence {
   onChange(listener: PresenceListener): () => void;
   /** Whether the page sits in the webhost (its iframe), rather than on its own. */
   readonly embedded: boolean;
+  /**
+   * When the user's switch that made the current show began (wall-clock Unix
+   * milliseconds), or null when it was not a switch the user made in Emacs, or
+   * the page is hidden. Set before listeners hear the show.
+   */
+  switchStartedAt(): number | null;
 }
 
 /** The presence plus the one writer the host link holds. */
 export interface PresenceSource extends Presence {
-  /** The host showed (true) or hid (false) this page. */
-  setShown(shown: boolean): void;
+  /**
+   * The host showed (true) or hid (false) this page; a show the user's switch
+   * made carries when that switch began (switchStartedAt).
+   */
+  setShown(shown: boolean, switchStartedAtMs?: number | null): void;
   /** Stop listening to the document. */
   dispose(): void;
 }
@@ -51,6 +60,7 @@ export interface PresenceSource extends Presence {
  */
 export function createPresence(doc: Document, embedded: boolean): PresenceSource {
   let hostShown = !embedded;
+  let switchStartedAtMs: number | null = null;
   const listeners = new Set<PresenceListener>();
   const visible = (): boolean => doc.visibilityState === "visible";
   const seen = (): boolean => hostShown && visible();
@@ -64,15 +74,17 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
     embedded,
     seen,
     shown: () => hostShown,
+    switchStartedAt: () => switchStartedAtMs,
     onChange(listener) {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    setShown(shown) {
+    setShown(shown, startedAtMs = null) {
       if (shown === hostShown) return;
       hostShown = shown;
+      switchStartedAtMs = shown ? startedAtMs : null;
       tell("host");
     },
     dispose() {

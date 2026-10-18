@@ -69,7 +69,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
             context: { shown: message.shown, visibility: doc.visibilityState },
           });
         }
-        presence.setShown(message.shown);
+        presence.setShown(message.shown, message.switchStartedAtMs ?? null);
         return;
       case "inputBackground":
         root.setProperty(DOCK_BACKGROUND_PROPERTY, message.background);
