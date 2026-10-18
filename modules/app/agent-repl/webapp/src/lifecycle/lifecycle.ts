@@ -72,6 +72,7 @@ import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { registerWorkspaceMoved } from "../rpc/moved.js";
 import { msOf, requireCase, requireMessage, unreachableArm, unreachablePushArm } from "../rpc/strict.js";
+import type { RevealRelay } from "./reveal-relay.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
 import { readWebappBuild } from "../webapp-build.js";
@@ -86,6 +87,8 @@ export interface LifecycleDeps {
   drainBannerHost: HTMLElement;
   /** The news digest overlay the daemon stream's `news_digest` standing is drawn on. */
   newsDigest: Pick<NewsDigestHandle, "apply">;
+  /** Where the web stream's `reveal_row` asks go until the feed reveals them. */
+  reveals: Pick<RevealRelay, "request">;
 }
 
 /** The adoption retry shape, injected by tests running on fake timers. */
@@ -190,6 +193,9 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
           return;
         case "sessionIdentity":
           bindSessionIdentity(push.value);
+          return;
+        case "revealRow":
+          deps.reveals.request(requireMessage(push.value.row, "WebWorkspaceRevealRow.row"));
           return;
         default: {
           const other: { case: string } = push;

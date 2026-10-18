@@ -12,6 +12,7 @@
 package agentreplv1
 
 import (
+	v11 "agentrepl/proto/frontend/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -28,8 +29,15 @@ const (
 )
 
 type SelectWorkspaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Workspace     *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// A ROW OF THE SELECTED WORKSPACE'S ROOT FEED TO REVEAL once it is
+	// selected: its page brings the row on screen, opens it and marks it
+	// (WebWorkspaceRevealRow). Unset selects and reveals nothing. A merge queue
+	// entry for an async merge sets it to the merge's bubble in its requester's
+	// feed (FeedMergeQueueBubble), so the click opens that bubble rather than
+	// the hidden merge workspace (owner ruling, 2026-10-17).
+	Reveal        *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -67,6 +75,13 @@ func (*SelectWorkspaceRequest) Descriptor() ([]byte, []int) {
 func (x *SelectWorkspaceRequest) GetWorkspace() *v1.WorkspaceRef {
 	if x != nil {
 		return x.Workspace
+	}
+	return nil
+}
+
+func (x *SelectWorkspaceRequest) GetReveal() *v11.FeedId {
+	if x != nil {
+		return x.Reveal
 	}
 	return nil
 }
@@ -552,9 +567,11 @@ var File_agentrepl_v1_endpoint_select_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"R\n" +
+	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8f\x01\n" +
 	"\x16SelectWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xa1\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x120\n" +
+	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01B\t\n" +
+	"\a_reveal\"\xa1\x01\n" +
 	"\x17SelectWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.SelectWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.SelectWorkspaceErrorH\x00R\x05errorB\b\n" +
@@ -600,21 +617,23 @@ var file_agentrepl_v1_endpoint_select_workspace_proto_goTypes = []any{
 	(*SelectWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.SelectWorkspaceNotYetAdopted
 	(*SelectWorkspaceStandingDown)(nil),         // 8: agentrepl.v1.SelectWorkspaceStandingDown
 	(*v1.WorkspaceRef)(nil),                     // 9: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                          // 10: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_select_workspace_proto_depIdxs = []int32{
-	9, // 0: agentrepl.v1.SelectWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.SelectWorkspaceResponse.success:type_name -> agentrepl.v1.SelectWorkspaceSuccess
-	3, // 2: agentrepl.v1.SelectWorkspaceResponse.error:type_name -> agentrepl.v1.SelectWorkspaceError
-	4, // 3: agentrepl.v1.SelectWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.SelectWorkspaceUnknownWorkspace
-	5, // 4: agentrepl.v1.SelectWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
-	6, // 5: agentrepl.v1.SelectWorkspaceError.transferring_away:type_name -> agentrepl.v1.SelectWorkspaceTransferringAway
-	7, // 6: agentrepl.v1.SelectWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.SelectWorkspaceNotYetAdopted
-	8, // 7: agentrepl.v1.SelectWorkspaceError.standing_down:type_name -> agentrepl.v1.SelectWorkspaceStandingDown
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	9,  // 0: agentrepl.v1.SelectWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	10, // 1: agentrepl.v1.SelectWorkspaceRequest.reveal:type_name -> frontend.v1.FeedId
+	2,  // 2: agentrepl.v1.SelectWorkspaceResponse.success:type_name -> agentrepl.v1.SelectWorkspaceSuccess
+	3,  // 3: agentrepl.v1.SelectWorkspaceResponse.error:type_name -> agentrepl.v1.SelectWorkspaceError
+	4,  // 4: agentrepl.v1.SelectWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.SelectWorkspaceUnknownWorkspace
+	5,  // 5: agentrepl.v1.SelectWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
+	6,  // 6: agentrepl.v1.SelectWorkspaceError.transferring_away:type_name -> agentrepl.v1.SelectWorkspaceTransferringAway
+	7,  // 7: agentrepl.v1.SelectWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.SelectWorkspaceNotYetAdopted
+	8,  // 8: agentrepl.v1.SelectWorkspaceError.standing_down:type_name -> agentrepl.v1.SelectWorkspaceStandingDown
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_select_workspace_proto_init() }
@@ -622,6 +641,7 @@ func file_agentrepl_v1_endpoint_select_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_select_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_select_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*SelectWorkspaceResponse_Success)(nil),
 		(*SelectWorkspaceResponse_Error)(nil),

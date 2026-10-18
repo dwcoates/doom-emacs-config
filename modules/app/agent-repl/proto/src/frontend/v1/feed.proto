@@ -3948,6 +3948,19 @@ message FeedMergeQueueEntry {
     FeedMergeQueueMerging merging = 3;
     FeedMergeQueueWaiting waiting = 4;
   }
+  // AN ASYNC MERGE'S BUBBLE, set only for an async merge (owner ruling,
+  // 2026-10-17): its entry is the HIDDEN merge workspace the daemon forked to
+  // carry it, which a click must never select or reveal. The click selects
+  // the requester instead and reveals this bubble in its feed
+  // (SelectWorkspaceRequest.reveal). Unset for a sync merge, whose entry is
+  // the requesting workspace itself and whose click selects it.
+  optional FeedMergeQueueBubble bubble = 5;
+}
+// Where an async merge's bubble stands: the requester's workspace and the
+// bubble's head row on its root feed.
+message FeedMergeQueueBubble {
+  workspace.v1.WorkspaceRef requester = 1;
+  FeedId row = 2;
 }
 // The entry's workspace, a jump target across workspaces.
 message FeedMergeQueueWorkspace {

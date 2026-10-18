@@ -825,6 +825,11 @@ func (s *server) SelectWorkspace(
 	// THE USER CHOSE A WORKSPACE (a switch in Emacs, a handed banner's click),
 	// so no banner made before the choice may steer a later return to Emacs.
 	s.deps.Banners.Forget("a workspace was selected")
+	// A ROW THE SELECTION NAMES is revealed on the selected workspace's page
+	// (an async merge's queue entry opening its bubble in the requester).
+	if row := req.Msg.GetReveal(); row.GetValue() != "" {
+		s.revealRow(subject.Log, subject.Record.ID, row)
+	}
 	// THE REVISION IS READ AFTER THE STAMP, whose render published under the
 	// resolver's lock (sidebar.Resolver.Revision): every roster at it or later
 	// carries this selection, so the editor that moved on it is never moved

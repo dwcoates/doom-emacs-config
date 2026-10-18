@@ -163,6 +163,12 @@ export interface FeedHandle extends Handle {
    * closed set of scroll causes).
    */
   readonly workspaceSelected: () => void;
+  /**
+   * The daemon asked this page to reveal a row of its root feed (a queue
+   * entry opening an async merge's bubble here): the one jump to an entry
+   * (`entryJumped`), which brings it on screen, opens it and marks it.
+   */
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
 }
 
 /** Mount the root feed into HOST. */
@@ -336,6 +342,7 @@ export function mountFeed(
 
   return {
     selectDetachedWork,
+    revealRow,
     workspaceSelected,
     dispose,
   };

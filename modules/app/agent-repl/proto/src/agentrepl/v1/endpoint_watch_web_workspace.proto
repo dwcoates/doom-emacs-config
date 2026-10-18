@@ -15,6 +15,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -57,7 +58,18 @@ message WatchWebWorkspaceResponse {
     // rebinds its log context each time, and a restart or a handover that
     // mints a new identity is followed rather than remembered from boot.
     WebWorkspaceSessionIdentity session_identity = 2;
+    // A ROW TO REVEAL: a SelectWorkspace that named one (its `reveal`). The
+    // page brings the row on screen, opens it and marks it, exactly as it
+    // jumps to any entry. A page that attaches after the selection (its page
+    // was not loaded) is sent it first, so the reveal is never lost to the
+    // load; it is sent once.
+    WebWorkspaceRevealRow reveal_row = 3;
   }
+}
+
+// The row a selection asked this workspace's page to reveal.
+message WebWorkspaceRevealRow {
+  frontend.v1.FeedId row = 1;
 }
 
 message WebWorkspaceTransferred {

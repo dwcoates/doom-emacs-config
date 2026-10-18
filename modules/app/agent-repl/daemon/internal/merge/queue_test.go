@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -1608,33 +1609,45 @@ func TestAMergeTakenBackWithNoLeaseRecordedIsADefect(t *testing.T) {
 	_ = h.o.dropPendingResume(context.Background(), theWorkspace, doc, CauseUserDrop)
 }
 
-// TestTheQueueTabDrawsAnAsyncMergeAsItsRequester covers the queue view's
-// naming: an ordinary merge's entry is drawn as its own workspace, and an
-// async merge's -- whose entry is the hidden merge workspace -- as the
-// requester the sidebar marks merging, so its jump never reveals the merge
-// workspace.
-func TestTheQueueTabDrawsAnAsyncMergeAsItsRequester(t *testing.T) {
-	type drawn struct {
-		id, name, dir string
-	}
+// TestTheQueueTabNamesAnAsyncMergeForItselfAndOpensItsBubble covers the queue
+// view: a sync merge's entry is its own workspace and carries no bubble; an
+// async merge's is the hidden merge workspace, named for itself, and carries
+// its bubble -- the requester and the head row on the requester's feed --
+// which is what its click selects and opens.
+func TestTheQueueTabNamesAnAsyncMergeForItselfAndOpensItsBubble(t *testing.T) {
 	tests := []struct {
-		name    string
-		ws      ids.WorkspaceID
-		observe func(drawn) string
-		want    func(h *harness, merge wsm.Workspace) string
+		name     string
+		ws       ids.WorkspaceID
+		ledgered bool
+		observe  func(*frontendv1.FeedMergeQueueEntry) any
+		want     func(merge wsm.Workspace) any
 	}{
-		{name: "an ordinary merge names itself", ws: theWorkspace,
-			observe: func(d drawn) string { return d.name },
-			want:    func(*harness, wsm.Workspace) string { return "requester" }},
-		{name: "an async merge names its requester", ws: theMergeWorkspace,
-			observe: func(d drawn) string { return d.name },
-			want:    func(*harness, wsm.Workspace) string { return "requester" }},
-		{name: "an async merge jumps to its requester", ws: theMergeWorkspace,
-			observe: func(d drawn) string { return d.id },
-			want:    func(*harness, wsm.Workspace) string { return string(theWorkspace) }},
-		{name: "an async merge carries its requester's directory", ws: theMergeWorkspace,
-			observe: func(d drawn) string { return d.dir },
-			want:    func(h *harness, _ wsm.Workspace) string { return h.sourceD }},
+		{name: "a sync merge names its own workspace", ws: theWorkspace,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetLabel().GetText() },
+			want:    func(wsm.Workspace) any { return "requester" }},
+		{name: "a sync merge carries no bubble", ws: theWorkspace,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble() == nil },
+			want:    func(wsm.Workspace) any { return true }},
+		{name: "an async merge names its merge for itself", ws: theMergeWorkspace, ledgered: true,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetLabel().GetText() },
+			want:    func(m wsm.Workspace) any { return m.Name }},
+		{name: "an async merge's entry is its own workspace", ws: theMergeWorkspace, ledgered: true,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetWorkspace().GetRef().GetId() },
+			want:    func(wsm.Workspace) any { return string(theMergeWorkspace) }},
+		{name: "an async merge's bubble stands in its requester", ws: theMergeWorkspace, ledgered: true,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRequester().GetId() },
+			want:    func(wsm.Workspace) any { return string(theWorkspace) }},
+		{name: "an async merge's bubble is its head row on the requester's feed", ws: theMergeWorkspace, ledgered: true,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRow().GetValue() },
+			want: func(wsm.Workspace) any {
+				return feedid.Encode(headRef(theWorkspace, "lease-1")).GetValue()
+			}},
+		{name: "an async merge with no bubble identity still names its requester", ws: theMergeWorkspace,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRequester().GetId() },
+			want:    func(wsm.Workspace) any { return string(theWorkspace) }},
+		{name: "an async merge with no bubble identity opens no row", ws: theMergeWorkspace,
+			observe: func(e *frontendv1.FeedMergeQueueEntry) any { return e.GetBubble().GetRow() == nil },
+			want:    func(wsm.Workspace) any { return true }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1642,6 +1655,11 @@ func TestTheQueueTabDrawsAnAsyncMergeAsItsRequester(t *testing.T) {
 			h := newHarness(t)
 			h.register(theWorkspace, "requester")
 			merge := h.registerMergeWorkspace(theWorkspace, "req-1", "feature")
+			if tt.ledgered {
+				h.o.mu.Lock()
+				h.o.ledgerOf[theMergeWorkspace] = "lease-1"
+				h.o.mu.Unlock()
+			}
 			entries := []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: tt.ws, Position: 1, EnqueuedAt: h.clock()}}
 
 			// Act.
@@ -1651,11 +1669,8 @@ func TestTheQueueTabDrawsAnAsyncMergeAsItsRequester(t *testing.T) {
 			if err != nil {
 				t.Fatalf("viewQueue: %v", err)
 			}
-			entry := view.snapshot(entries, tt.ws).GetCurrent()
-			got := tt.observe(drawn{id: entry.GetWorkspace().GetRef().GetId(), name: entry.GetLabel().GetText(),
-				dir: entry.GetWorkspace().GetRef().GetDir()})
-			if want := tt.want(h, merge); got != want {
-				t.Fatalf("drawn as %q, want %q", got, want)
+			if got, want := tt.observe(view.snapshot(entries, tt.ws).GetCurrent()), tt.want(merge); got != want {
+				t.Fatalf("got %v, want %v", got, want)
 			}
 		})
 	}
@@ -1663,7 +1678,7 @@ func TestTheQueueTabDrawsAnAsyncMergeAsItsRequester(t *testing.T) {
 
 // TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead covers the
 // failure: a requester the store cannot answer fails the drawing, rather than
-// naming the hidden merge workspace in its place.
+// drawing an entry whose click would select the hidden merge workspace.
 func TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead(t *testing.T) {
 	// Arrange: a merge workspace whose requester is not registered.
 	h := newHarness(t)

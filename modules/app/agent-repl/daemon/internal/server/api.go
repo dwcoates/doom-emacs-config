@@ -269,6 +269,10 @@ type server struct {
 	// would be handed the identity instead of the transfer notice, and never
 	// learn the workspace had moved.
 	webStateTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]
+	// webReveals is each workspace's row reveals (webreveal.go), guarded by
+	// webRevealsMu.
+	webRevealsMu sync.Mutex
+	webReveals   map[ids.WorkspaceID]*webReveal
 	// daemonTopic is the one daemon-level push topic, for Emacs and every
 	// webview alike. It carries STATE — the standing drain schedule and the
 	// stand-down announcement — which publish.Topic replays to a late
@@ -463,6 +467,7 @@ func New(deps Deps) (Server, error) {
 		hostStateTopics:     make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
 		webStateTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
 		webTopics:           make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
+		webReveals:          make(map[ids.WorkspaceID]*webReveal),
 		daemonWatchers:      make(map[*daemonWatcher]struct{}),
 		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
 		hostHeld:            make(map[ids.WorkspaceID]int),

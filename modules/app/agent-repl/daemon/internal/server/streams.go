@@ -468,8 +468,18 @@ func (s *server) serveWeb(
 
 	states := s.webStateTopic(ws).Subscribe(streamCtx)
 	events := s.webTopic(ws).Subscribe(streamCtx)
+	reveals, pending := s.subscribeReveals(streamCtx, ws)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
+	// A REVEAL ASKED WHILE NO PAGE LISTENED is this page's first push: the
+	// selection that asked for it is what loaded the page (webreveal.go).
+	if pending != nil {
+		log.Info(rpc, "sending the row reveal asked before the page attached", dlog.Context{"row": pending.GetValue()})
+		if err := out.Send(revealPush(pending)); err != nil {
+			log.Debug(rpc, "the standing stream's client went away", dlog.Context{"cause": err.Error()})
+			return nil
+		}
+	}
 
 	for {
 		var push *agentreplv1.WatchWebWorkspaceResponse
@@ -501,6 +511,12 @@ func (s *server) serveWeb(
 				continue
 			}
 			push = event
+		case row, ok := <-reveals:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			push = revealPush(row)
 		}
 		if err := out.Send(push); err != nil {
 			log.Debug(rpc, "the standing stream's client went away",

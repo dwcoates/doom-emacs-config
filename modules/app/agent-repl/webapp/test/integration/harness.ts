@@ -20,6 +20,7 @@
  * otherwise never complete; `settle()` is how a test waits for the DOM instead
  * of sleeping.
  */
+import { createRevealRelay } from "../../src/lifecycle/reveal-relay.js";
 import { clientLogSink } from "../../src/rpc/client-log-sink.js";
 import { createPageSeen } from "../../src/page-seen.js";
 import { pagePresence } from "../../src/presence.js";
@@ -647,7 +648,7 @@ async function mountApp(
   }
   const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
   handles.push(newsDigest);
-  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest }));
+  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals: createRevealRelay() }));
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),

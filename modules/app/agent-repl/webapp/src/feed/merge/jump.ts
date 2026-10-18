@@ -36,6 +36,7 @@ import {
   type SelectWorkspaceResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { FeedId } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { childrenMatching } from "../../dom.js";
@@ -51,24 +52,32 @@ export interface JumpSite {
   readonly refusalClass: string;
 }
 
-/** Select WORKSPACE from HOST, drawing a refusal inside HOST. */
+/**
+ * Select WORKSPACE from HOST, drawing a refusal inside HOST. REVEAL, when
+ * given, is a row of the workspace's root feed its page brings on screen and
+ * opens once it is selected (`SelectWorkspaceRequest.reveal`).
+ */
 export async function jumpToWorkspace(
   host: HTMLElement,
   rc: RowContext,
   workspace: WorkspaceRef,
   site: JumpSite,
+  reveal?: FeedId,
 ): Promise<void> {
   for (const stale of childrenMatching(host, `.${site.refusalClass}`)) stale.remove();
   log.info(`selecting a workspace from ${site.describe}`, {
     operation: site.operation,
-    context: { workspace: workspace.id },
+    context: { workspace: workspace.id, reveal: reveal?.value ?? "none" },
   });
   let response: SelectWorkspaceResponse;
   try {
     response = await callUnary(
       rc.ctx,
       "SelectWorkspace",
-      (client) => client.selectWorkspace(create(SelectWorkspaceRequestSchema, { workspace })),
+      (client) =>
+        client.selectWorkspace(
+          create(SelectWorkspaceRequestSchema, reveal === undefined ? { workspace } : { workspace, reveal }),
+        ),
       SelectWorkspaceResponseSchema,
     );
   } catch (err) {

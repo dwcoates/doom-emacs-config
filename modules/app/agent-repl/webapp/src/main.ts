@@ -39,6 +39,7 @@ import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
 import { mountFooter } from "./footer/footer.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
+import { createRevealRelay } from "./lifecycle/reveal-relay.js";
 import { mountLoginOverlay } from "./login/login.js";
 import { answerLoginRequests } from "./login/request.js";
 import { mountNewsDigest } from "./news-digest/news-digest.js";
@@ -228,7 +229,11 @@ export async function boot(): Promise<void> {
     // THE NEWS DIGEST OVERLAY IS MOUNTED WITH IT, because the lifecycle's
     // daemon stream is what carries the digest's standing.
     const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
-    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest });
+    // A ROW THE DAEMON ASKS THIS PAGE TO REVEAL (a queue entry opening an async
+    // merge's bubble here) can arrive before the feed below is mounted; the
+    // relay holds it until the feed binds its reveal.
+    const reveals = createRevealRelay();
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals });
 
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.
@@ -270,6 +275,7 @@ export async function boot(): Promise<void> {
             mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
         : undefined,
     });
+    reveals.bind((row) => feed.revealRow(row));
 
     // A SWITCH TO THIS WORKSPACE RETURNS THE FEED TO ITS TAIL (owner ruling,
     // 2026-10-02), whichever path made it. IN THE WEBHOST the sidebar is the
