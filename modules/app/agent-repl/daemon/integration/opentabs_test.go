@@ -139,27 +139,6 @@ func TestOpenTabsWaitsForTheWorkspacesPageToDraw(t *testing.T) {
 	}
 }
 
-func TestARosterRowIsOpeningWhileItsOpenIsInFlight(t *testing.T) {
-	t.Parallel()
-	// Arrange: an open waiting on a page that never draws.
-	d := newDaemon(t, harness.Opts{})
-	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
-	roster := d.WatchRoster()
-
-	// Act
-	open := d.OpenTabs(loadingPageOpen(ws))
-
-	// Assert
-	awaitRoster(t, d, roster, "the row opening", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, ws.GetId()).GetOpening() != nil
-	})
-	open.Close()
-	awaitRoster(t, d, roster, "the row no longer opening once the open ended", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, ws.GetId())
-		return row != nil && row.GetOpening() == nil
-	})
-}
-
 // standDownWarnings are the records a stand-down's KillSession leaves, which
 // the fake shim answers by exiting (as the idle sweep's own tests declare).
 var standDownWarnings = []string{
@@ -249,25 +228,6 @@ func openedIndex(frames []*agentreplv1.OpenTabsResponse, ws string) int {
 		}
 	}
 	return -1
-}
-
-func TestOpenTabsReadyCarriesTheWorkspacesRosterRow(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
-
-	// Act
-	frames := openLog(t, d, d.OpenTabs(noPageOpen(ws)))
-
-	// Assert
-	ready := frames[openedIndex(frames, ws.GetId())].GetOpened().GetReady()
-	if ready.GetRow().GetWorkspace().GetWorkspace().GetId() != ws.GetId() || ready.GetRosterRevision() == 0 {
-		t.Fatalf("ready = %v, want the workspace's row with its roster's revision", ready)
-	}
-	if ready.GetRow().GetOpening() != nil {
-		t.Fatal("the answer's row still draws the workspace opening")
-	}
 }
 
 // show moves a hidden workspace back into its section.

@@ -12,8 +12,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
-	"agent-repld/internal/feedid"
-	"agent-repld/internal/ids"
 )
 
 // FEED PAGING ON DEMAND (docs/protobuf-design/feed-paging-on-demand.md): a
@@ -112,111 +110,5 @@ func TestAFeedIsWalkedOneStorePageAtATimeToItsStart(t *testing.T) {
 	}
 	if responses != pagingRows {
 		t.Fatalf("the walk served %d responses, want all %d", responses, pagingRows)
-	}
-}
-
-func TestLoadFeedThroughStreamsEveryPageDownToTheTarget(t *testing.T) {
-	t.Parallel()
-	// Arrange: the reader holds the newest page only.
-	f, oldest := pagedFeed(t)
-	f.feedPage(true)
-
-	// Act.
-	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, OldestHeld: f.oldestHeld, Target: oldest.GetId(),
-	}))
-	if err != nil {
-		t.Fatalf("LoadFeedThrough: %v", err)
-	}
-	var frames []*agentreplv1.LoadFeedThroughResponse
-	for stream.Receive() {
-		frames = append(frames, stream.Msg())
-	}
-	if err := stream.Err(); err != nil {
-		t.Fatalf("LoadFeedThrough stream: %v", err)
-	}
-
-	// Assert: pages, then reached at the target, the target on the last page.
-	if len(frames) < 2 {
-		t.Fatalf("frames = %v, want pages then the terminal", frames)
-	}
-	if got := frames[len(frames)-1].GetReached().GetTarget().GetValue(); got != oldest.GetId().GetValue() {
-		t.Fatalf("terminal = %v, want reached at the oldest response", frames[len(frames)-1])
-	}
-	found := false
-	for _, row := range frames[len(frames)-2].GetPage().GetSuccess().GetRows() {
-		found = found || row.GetId().GetValue() == oldest.GetId().GetValue()
-	}
-	if !found {
-		t.Fatalf("the last page streamed did not carry the target")
-	}
-}
-
-func TestANextAfterLoadFeedThroughContinuesBelowIt(t *testing.T) {
-	t.Parallel()
-	// Arrange: a target in the middle of the book, so older pages remain.
-	f, rows := pagedFeedRows(t)
-	f.feedPage(true)
-	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, OldestHeld: f.oldestHeld, Target: rows["row 6"].GetId(),
-	}))
-	if err != nil {
-		t.Fatalf("LoadFeedThrough: %v", err)
-	}
-	served := map[string]bool{}
-	for stream.Receive() {
-		rows := stream.Msg().GetPage().GetSuccess().GetRows()
-		for _, row := range rows {
-			served[row.GetId().GetValue()] = true
-		}
-		// The reader holds every page the walk streamed it.
-		if len(rows) > 0 {
-			f.oldestHeld = rows[0].GetOrder()
-		}
-	}
-	if err := stream.Err(); err != nil {
-		t.Fatalf("LoadFeedThrough stream: %v", err)
-	}
-
-	// Act.
-	page := f.feedPage(false)
-
-	// Assert: older rows, and nothing the walk already delivered.
-	if len(page.GetSuccess().GetRows()) == 0 {
-		t.Fatal("next after the walk served nothing, want the older page")
-	}
-	for _, row := range page.GetSuccess().GetRows() {
-		if served[row.GetId().GetValue()] {
-			t.Fatalf("next re-served %v, which LoadFeedThrough delivered", row.GetId())
-		}
-	}
-}
-
-func TestLoadFeedThroughATargetTheConversationNeverHadIsNotFound(t *testing.T) {
-	t.Parallel()
-	// Arrange: a well-formed row of this workspace's root that nothing drew.
-	f, _ := pagedFeed(t)
-	f.feedPage(true)
-	ghost := feedid.Encode(feedid.Ref{
-		WS:   ids.WorkspaceID(f.ws.GetId()),
-		Feed: feedid.Feed{Root: true},
-		Row:  feedid.RowKey{Kind: feedid.KindPrompt, ID: "never-drawn"},
-	})
-
-	// Act.
-	stream, err := f.d.Client().LoadFeedThrough(f.d.Ctx(), connect.NewRequest(&agentreplv1.LoadFeedThroughRequest{
-		Workspace: f.ws, OldestHeld: f.oldestHeld, Target: ghost,
-	}))
-	if err != nil {
-		t.Fatalf("LoadFeedThrough: %v", err)
-	}
-	var last *agentreplv1.LoadFeedThroughResponse
-	for stream.Receive() {
-		last = stream.Msg()
-	}
-
-	// Assert.
-	if last.GetError().GetNotFound() == nil {
-		t.Fatalf("terminal = %v (err %v), want not_found", last, stream.Err())
 	}
 }

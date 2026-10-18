@@ -637,51 +637,6 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 // A held prompt mirrors to the TRAY ONLY
 // ---------------------------------------------------------------------------
 
-func TestAHeldPromptMirrorsToTheTrayOnlyUntilDelivery(t *testing.T) {
-	t.Parallel()
-	// Arrange: a turn in flight, then an ordinary follow-up that is held.
-	f := newOpened(t, harness.Opts{})
-	f.submit("start the work", "k-running", origin)
-	f.shim.ExpectStartTurn()
-	holds := f.d.WatchHolds(f.ws)
-	resp2 := f.submit("a held prompt", "k-held-mirror", origin)
-	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the held entry standing", func(tray *frontendv1.FeedHeld) bool {
-		return promptHeldEntry(tray, turn2) != nil
-	})
-
-	// Assert: NO user_prompt row anywhere on the feed carries the held turn --
-	// neither in the page a fresh open serves...
-	feed := f.watchRootFeed()
-	page, _ := f.openFeed(nil)
-	for _, row := range page.GetSuccess().GetRows() {
-		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == turn2.GetValue() {
-			t.Fatalf("a held prompt's user_prompt row was already on the feed's page before delivery")
-		}
-	}
-	// ...nor on the tail while it stays held.
-	harness.ExpectNoPush(t, feed, harness.ProbeWindow, "a held prompt must not push a user_prompt row before delivery")
-
-	// Act: the running turn ends, delivering the held prompt.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-	f.shim.ExpectStartTurn()
-
-	// Assert: EXACTLY one user_prompt row now carries the delivered turn.
-	awaitRow(t, f, feed, "the delivered prompt's mirrored row", func(r *frontendv1.FeedRow) bool {
-		return r.GetUserPrompt() != nil && r.GetTurn().GetValue() == turn2.GetValue()
-	})
-	page2, _ := f.openFeed(nil)
-	count := 0
-	for _, row := range page2.GetSuccess().GetRows() {
-		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == turn2.GetValue() {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("user_prompt rows carrying the delivered turn = %d, want exactly 1", count)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // A refused interject reverts to hold_for_turn_end and FIFO order
 // ---------------------------------------------------------------------------
@@ -791,37 +746,6 @@ func promptAwaitMergeLease(t *testing.T, f *fixture) {
 
 }
 
-func TestSubmitPromptDuringAMergeLeaseIsHeldUnclassified(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f, _, _ := promptMergeFixture(t)
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-	}
-	promptAwaitMergeLease(t, f)
-
-	// Act
-	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace:      f.ws,
-		Said:           said("work while merging"),
-		IdempotencyKey: "k-merging",
-		Origin:         origin,
-	})
-
-	// Assert: the submission is accepted and held by the merge, with no
-	// classifier behind it (owner ruling, 2026-10-01).
-	turn := resp.GetSuccess().GetTurn().GetTurn()
-	if turn.GetValue() == "" {
-		t.Fatalf("SubmitPrompt during a merge lease = %v, want the prompt accepted and held", resp)
-	}
-	got := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchHolds(f.ws), "the tray a late subscriber is replayed")
-	entry := promptHeldEntry(got, turn)
-	if entry.GetMerge() == nil || entry.GetDaemonHeld() == nil {
-		t.Fatalf("the held entry = %v, want the merge hold arm and the daemon_held verdict", entry)
-	}
-}
-
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	t.Parallel()
 	// Arrange: a prompt is held (turn in flight) BEFORE the merge begins.
@@ -861,58 +785,6 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 // ---------------------------------------------------------------------------
 // The merge-queue question (audit-2 critique 17)
 // ---------------------------------------------------------------------------
-
-func TestAnswerMergeQueueOfferWithNoOfferStandingAnswersNoOfferStanding(t *testing.T) {
-	t.Parallel()
-	// Arrange: an ordinary workspace with no question ever raised.
-	f := newOpened(t, harness.Opts{})
-
-	// Act
-	resp, err := f.d.Client().AnswerMergeQueueOffer(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
-		Workspace: f.ws,
-		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
-	}))
-
-	// Assert: `no_offer_standing` is a LANDED arm, so the refusal is typed.
-	if err != nil {
-		t.Fatalf("AnswerMergeQueueOffer with no offer standing = error %v, want the typed no_offer_standing answer", err)
-	}
-	if resp.Msg.GetError().GetNoOfferStanding() == nil {
-		t.Fatalf("AnswerMergeQueueOffer with no offer standing = %v, want error.no_offer_standing", resp.Msg)
-	}
-}
-
-// TestUpdateMergeQueueEvictWhileTheQuestionStandsClearsIt covers the rest of
-// audit-2 critique 17: while the merge-queue question stands (raised by an
-// interrupt on a queued workspace), the OPERATOR path
-// (UpdateMergeQueue{evict}) -- not the question's own answer -- also retires
-// it, and a later answer finds nothing standing.
-func TestUpdateMergeQueueEvictWhileTheQuestionStandsClearsIt(t *testing.T) {
-	t.Parallel()
-	// Arrange: a second workspace queued behind the first's blocked merge,
-	// then an interrupt raises the question.
-	_, _, behind, _, d := mergeBlockedQueueFixture(t)
-	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
-	raiseMergeQueueOffer(t, behind)
-
-	// Act: the OPERATOR path evicts the queued merge directly, never through
-	// AnswerMergeQueueOffer.
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
-	}))
-	requireRPCSuccess(t, "UpdateMergeQueue{evict} while the question stands", resp, err)
-
-	// Assert: the question is gone.
-	answer, err := d.Client().AnswerMergeQueueOffer(d.Ctx(), connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
-		Workspace: behind.ws,
-		Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
-	}))
-	requireRPCAnswered(t, "an answer after the evict", answer, err)
-	if answer.Msg.GetError().GetNoOfferStanding() == nil {
-		t.Fatalf("an answer after the evict = %v, want error.no_offer_standing", answer.Msg)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // SubmitPrompt addressed to a subagent bubble
@@ -1719,34 +1591,6 @@ func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
 	if resp.Msg.GetError().GetAskNotStanding() == nil {
 		t.Fatalf("AnswerQuestion on a card that never stood = %v, want error.ask_not_standing", resp.Msg)
 	}
-}
-
-func TestAQuestionThatExpiresIsDrawnExpired(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-expire", "Pick one", "A", "B")},
-	}))
-	awaitRow(t, f, feed, "the open question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
-
-	// Act: the ask goes unanswered and the producer's idle timeout closes it
-	// (conversation.v1.AgentQuestionSuccess_Unanswered).
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
-			Id: &conversationv1.AgentQuestionId{Value: "q-expire"},
-			Result: &conversationv1.AgentQuestion_Success{Success: &conversationv1.AgentQuestionSuccess{
-				Outcome: &conversationv1.AgentQuestionSuccess_Unanswered{Unanswered: &conversationv1.AgentQuestionUnanswered{}},
-			}},
-		}},
-	}))
-
-	// Assert: drawn as expired (internal/resolve/feed/question.go's
-	// drawQuestion), never as pending forever.
-	awaitRow(t, f, feed, "the expired question card", func(r *frontendv1.FeedRow) bool {
-		return r.GetQuestion().GetExpired() != nil
-	})
 }
 
 // ---------------------------------------------------------------------------

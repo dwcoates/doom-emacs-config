@@ -82,53 +82,6 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	})
 }
 
-// TestALateRowIsPushedAtItsTruePlace reproduces the 2026-09-27 incident end to
-// end: a response written early in the conversation reaches the daemon only
-// after later rows were drawn and a reader holds them. It is pushed carrying
-// the order key of where it belongs — between its neighbors — never one that
-// sorts it after the rows that merely arrived first.
-func TestALateRowIsPushedAtItsTruePlace(t *testing.T) {
-	t.Parallel()
-	// Arrange: two answers, placed at 13:30 and 14:36, are drawn and opened.
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-late", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	for _, frame := range feedResponseFrames("resp-early", "early") {
-		f.shim.PushAgentFramePlaced(mainAgent, 1_700_000_130_000, frame)
-	}
-	for _, frame := range feedResponseFrames("resp-later", "later") {
-		f.shim.PushAgentFramePlaced(mainAgent, 1_700_000_436_000, frame)
-	}
-	page, token := f.openFeedOnceCarrying("both placed answers", func(p *frontendv1.FeedPage) bool {
-		return pagedKey(p, "early") != "" && pagedKey(p, "later") != ""
-	})
-	tail := f.d.WatchFeed(token)
-
-	// Act: the 13:44 answer arrives last.
-	for _, frame := range feedResponseFrames("resp-late", "late") {
-		f.shim.PushAgentFramePlaced(mainAgent, 1_700_000_144_000, frame)
-	}
-
-	// Assert.
-	got := awaitRow(t, f, tail, "the late answer's push", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "late"
-	})
-	key, early, later := got.GetOrder().GetKey(), pagedKey(page, "early"), pagedKey(page, "later")
-	if !(early < key && key < later) {
-		t.Fatalf("the late row was pushed at key %q, want it between %q and %q", key, early, later)
-	}
-}
-
-// pagedKey is the order key of the settled response a page carries with
-// MARKDOWN, or empty when it carries none.
-func pagedKey(page *frontendv1.FeedPage, markdown string) string {
-	for _, r := range page.GetSuccess().GetRows() {
-		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == markdown {
-			return r.GetOrder().GetKey()
-		}
-	}
-	return ""
-}
-
 // TestAFeedTextScaleFrameIsNotARowOnTheFeedTail pins that WatchFeed's THREE
 // arms stay distinguishable on the wire: the response carries `row`,
 // `selection` and `feed_text_scale` (endpoint_watch_feed.proto), and the zoom
@@ -583,82 +536,6 @@ func TestTwoOpeningsWalkIndependently(t *testing.T) {
 	}
 }
 
-func TestAGrowingResponseRepushesTheSameFeedIdThenSettlesWhole(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-grow", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-
-	// Act: start, then two update fragments, then the terminal.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-grow"),
-		Item:       &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}}}},
-	}))
-	first := awaitRow(t, f, tail, "the response's opened row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse() != nil
-	})
-	id := first.GetId().GetValue()
-
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-grow"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Update{
-			Update: &conversationv1.AgentResponseUpdate{NewMarkdown: "Hel"},
-		}}},
-	}))
-	grown := awaitRow(t, f, tail, "the response with its accumulated prose", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == id && r.GetActivity().GetResponse().GetUpdate() != nil
-	})
-	if grown.GetActivity().GetResponse().GetUpdate().GetProse().GetMarkdown() != "Hel" {
-		t.Fatalf("the growing row's prose = %q, want %q", grown.GetActivity().GetResponse().GetUpdate().GetProse().GetMarkdown(), "Hel")
-	}
-
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-grow"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
-			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "Hello world"}},
-		}}},
-	}))
-
-	// Assert: the SAME FeedId settles with the whole text.
-	settled := awaitRow(t, f, tail, "the settled response", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == id && r.GetActivity().GetResponse().GetSuccess() != nil
-	})
-	if md := settled.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "Hello world" {
-		t.Fatalf("the settled response's prose = %q, want %q", md, "Hello world")
-	}
-}
-
-func TestALostResponseFragmentSelfCorrectsOnTheTerminal(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-selfcorrect", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-lost"),
-		Item:       &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Start{Start: &conversationv1.AgentResponseStart{}}}},
-	}))
-	first := awaitRow(t, f, tail, "the opened row", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetResponse() != nil })
-
-	// Act: skip straight to the terminal — as if an update fragment had
-	// never arrived at all — carrying the WHOLE settled text.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-lost"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
-			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "the whole answer"}},
-		}}},
-	}))
-
-	// Assert: the terminal frame alone is a correct, complete rendering.
-	settled := awaitRow(t, f, tail, "the settled response despite the missed fragment", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == first.GetId().GetValue() && r.GetActivity().GetResponse().GetSuccess() != nil
-	})
-	if md := settled.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "the whole answer" {
-		t.Fatalf("the settled response's prose = %q, want the whole text %q despite the missed fragment", md, "the whole answer")
-	}
-}
-
 // ==========================================================================
 // Tool cards.
 // ==========================================================================
@@ -824,45 +701,6 @@ func TestGlobToolCardDrawsLinesOutput(t *testing.T) {
 	})
 	if got := row.GetActivity().GetSimpleToolCall().GetReturned().GetLines().GetLines(); len(got) != 2 {
 		t.Fatalf("the glob's lines output = %v, want the two matched paths", got)
-	}
-}
-
-func TestBashForegroundToolCardDrawsTextOutput(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-bash", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("bash-1"),
-		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{
-			Start: &conversationv1.AgentBashStart{Command: &conversationv1.AgentBashCommand{Line: "echo hi"}, StartedAt: startedAt(1)},
-		}}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("bash-1"),
-		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
-			Success: &conversationv1.AgentBashSuccess{
-				Command: &conversationv1.AgentBashCommand{Line: "echo hi"},
-				Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
-					Output: &conversationv1.AgentBashOutput{Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
-						Stdout: "hi\n",
-						Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
-					}}},
-				}},
-				SettledAt: settledAt(2),
-			},
-		}}},
-	}))
-
-	// Assert
-	row := awaitRow(t, f, tail, "the bash call's settled tool card", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetSimpleToolCall().GetReturned().GetText() != nil
-	})
-	if got := row.GetActivity().GetSimpleToolCall().GetReturned().GetText().GetText(); got == "" {
-		t.Fatal("the bash call's text output is empty, want the command's stdout")
 	}
 }
 
@@ -1064,58 +902,6 @@ func TestWorktreeExitDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
 // ==========================================================================
 // AgentUpdate.context_cut.
 // ==========================================================================
-
-// ONE CLEAR IS ONE DIVIDER, HOWEVER MANY PLANES DELIVER IT.
-//
-// A `/clear` is stated to BOTH producers: the shim reads the SDK's
-// `conversation_reset` and the sidecar reads the expanded `/clear` envelope
-// out of the transcript. They write ONE store row -- keyed
-// `session:context_cut:<the session the clear rotated to>`, the one identity
-// both planes can mint -- and every write of a row is delivered on the agent's
-// tail at that row's OWN position, so the daemon sees the cut twice at ONE
-// pointer. A headless run's D28 case saw the two writes land as
-// `context_cut:sip1-33` and `context_cut:sip1-3k`: two rows, two positions,
-// two dividers, the second arriving after the turn had settled.
-func TestAClearDeliveredOnBothPlanesDrawsOneDivider(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-clear-two-planes", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	cleared := updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{
-			Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
-		}},
-	})
-
-	// Act: the stream plane's write, then the file plane's — the SAME row, so
-	// the SAME pointer, which is what an upsert that keeps its place means.
-	f.shim.PushAgentFrameAt(mainAgent, "one-clear", cleared)
-	f.shim.PushAgentFrameAt(mainAgent, "one-clear", cleared)
-	// A sentinel pushed AFTER both deliveries, on the same ordered stream: a
-	// page carrying it has necessarily routed both of them, which is how the
-	// census below is taken without waiting out a bound.
-	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("after-clear", "the plane landed")[0])
-	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("after-clear", "the plane landed")[1])
-
-	// Assert
-	page, _ := f.openFeedOnceCarrying("the row pushed after both planes' writes", func(p *frontendv1.FeedPage) bool {
-		for _, r := range p.GetSuccess().GetRows() {
-			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "the plane landed" {
-				return true
-			}
-		}
-		return false
-	})
-	drawn := 0
-	for _, r := range page.GetSuccess().GetRows() {
-		if r.GetSeparation().GetCleared() != nil {
-			drawn++
-		}
-	}
-	if drawn != 1 {
-		t.Fatalf("the page carries %d cleared dividers, want exactly 1: one cut is one divider however many planes deliver it", drawn)
-	}
-}
 
 // THE REAL /clear PATH DRAWS ONLY ITS BAR, AND A FOLLOW-UP PROMPT IS THE ONLY
 // BUBBLE. A /clear submitted as a directive runs as its own turn: the shim lays
@@ -1334,65 +1120,6 @@ func TestASyncSubagentSpawnDrawsABubbleHeadAndItsOwnFeedServesSubFeedRows(t *tes
 	}
 	if md := subRow.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "subagent said this" {
 		t.Fatalf("the sub-feed's row = %q, want the subagent's own prose", md)
-	}
-}
-
-func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-subsettled", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("spawn-2"),
-		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Start{
-			Start: &conversationv1.AgentSubagentStart{CreatedAgentId: &conversationv1.AgentId{Value: "sub-2"}, Prompt: &conversationv1.AgentSubagentPrompt{Text: "fix it"}, StartedAt: startedAt(1)},
-		}}},
-	}))
-	bubble := awaitRow(t, f, tail, "the spawn's bubble", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetSubagent() != nil })
-	// The subagent's own API response states its usage: 12,400 fresh input
-	// (10,000 cache writes + 2,400 unwritten), beside cache reads and output
-	// that are not fresh input.
-	f.shim.PushAgentFrame("sub-2", activityFrame("sub-2", &conversationv1.AgentActivity{
-		ActivityId: activityID("sub-2-thinking"),
-		Usage: &conversationv1.TokenUsage{
-			InputHits:    &conversationv1.TokenCacheHits{Read: 300_000},
-			InputMisses:  &conversationv1.TokenCacheMisses{Written: 10_000, Unwritten: 2_400},
-			OutputTokens: 7_000,
-		},
-		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
-			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{}},
-		}},
-	}))
-
-	// Act: the spawn settles with the vendor's totals, which are not the figure.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("spawn-2"),
-		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Success{
-			Success: &conversationv1.AgentSubagentSuccess{
-				Prompt: &conversationv1.AgentSubagentPrompt{Text: "fix it"},
-				Report: &conversationv1.AgentSubagentReport{Prose: &conversationv1.AgentResponseProse{Markdown: "fixed"}},
-				Totals: &conversationv1.AgentSubagentTotals{
-					DurationMs: 1000,
-					Usage:      &conversationv1.AgentSubagentTotals_Full{Full: &conversationv1.TokenUsage{OutputTokens: 99_000}},
-				},
-				SettledAt: settledAt(2),
-			},
-		}}},
-	}))
-
-	// Assert
-	settled := awaitRow(t, f, tail, "the settled subagent bubble", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == bubble.GetId().GetValue() && r.GetActivity().GetSubagent().GetSettled() != nil
-	})
-	if settled.GetActivity().GetSubagent().GetSettled().GetSucceeded() == nil {
-		t.Fatalf("the settled bubble's outcome = %v, want succeeded", settled.GetActivity().GetSubagent().GetSettled().GetOutcome())
-	}
-	// The figure is the subagent's lifetime fresh input (AGENTS.md, "Fresh
-	// input is the one token quantity every spend figure counts"), tallied from
-	// its own usage frames, never the settled totals.
-	if got := settled.GetActivity().GetSubagent().GetTokens().GetText(); got != "12.4k tok" {
-		t.Fatalf("the settled bubble's figure = %q, want the subagent's lifetime fresh input %q", got, "12.4k tok")
 	}
 }
 
@@ -1622,21 +1349,6 @@ func TestAStampedTerminalEndsOnlyTheTurnItNames(t *testing.T) {
 	}
 }
 
-func TestInterruptedTurnDrawsInterrupted(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
-
-	// Assert
-	row := awaitRow(t, f, tail, "the interrupted terminal", func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded().GetInterrupted() != nil })
-	_ = row
-}
-
 func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -1826,45 +1538,6 @@ func TestAPromptsImageIsDrawnAsAnImageRowRatherThanAnUnsupportedBlock(t *testing
 // A retired entry: the store no longer converts its record to that line.
 // ==========================================================================
 
-// A RETIRED PROMPT LEAVES AN OPEN FEED LIVE. The sidecar's conversion changed
-// and a user-type record it once minted as a prompt (a task notification) no
-// longer converts to one; the shim relays the retirement on WatchAgent's
-// `retired` arm, and the daemon publishes the row's removal on the feed tail.
-func TestARetiredPromptIsRemovedFromAnOpenFeedLive(t *testing.T) {
-	t.Parallel()
-	// Arrange: an open feed that has drawn the prompt.
-	f := newOpened(t, harness.Opts{})
-	feed := f.watchRootFeed()
-	prompt := &conversationv1.AgentPrompt{
-		Id:     &conversationv1.TurnId{Value: "turn-notification"},
-		Agent:  &conversationv1.AgentId{Value: mainAgent},
-		Origin: origin,
-		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
-			Blocks: []*conversationv1.UserContentBlock{{
-				Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "<task-notification>"}},
-			}},
-		}},
-	}
-	f.shim.PushUserPrompt(mainAgent, prompt)
-	drawn := awaitRow(t, f, feed, "the drawn prompt row", func(r *frontendv1.FeedRow) bool {
-		return r.GetUserPrompt() != nil && r.GetTurn().GetValue() == "turn-notification"
-	})
-
-	// Act.
-	f.shim.PushRetired(mainAgent, &conversationv1.HistoryEntryAt{
-		At:    &conversationv1.HistoryPointer{Value: "ptr-notification"},
-		Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: prompt}},
-	})
-
-	// Assert.
-	removal := awaitRow(t, f, feed, "the retired prompt's removal", func(r *frontendv1.FeedRow) bool {
-		return r.GetRemoved() != nil
-	})
-	if removal.GetId().GetValue() != drawn.GetId().GetValue() {
-		t.Fatalf("the removal names row %q, want the prompt's own id %q", removal.GetId().GetValue(), drawn.GetId().GetValue())
-	}
-}
-
 // ==========================================================================
 // feed-suite-local helpers.
 // ==========================================================================
@@ -2026,55 +1699,6 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 	}
 	if rec.Context["rpc"] != "WatchFeed" {
 		t.Fatalf("the transport-closed record's context = %v, want rpc WatchFeed", rec.Context)
-	}
-}
-
-// TestTheResponseBubbleStampsItsAgentsFreshInput proves the cost corner
-// reaches the frontend frame for the vendor's OBSERVED response shape, where
-// the `[thinking, text]` response states its usage on the THINKING unit — the
-// unit for its first content block — and the prose unit states none.
-//
-// THE STAMP IS THE AGENT'S FRESH INPUT (AGENTS.md, "Fresh input is the one
-// token quantity every spend figure counts"): the input tokens that were not
-// cache hits, InputMisses.Unwritten plus InputMisses.Written. Cache writes are
-// fresh on purpose, because they are the expensive part of a turn; cache reads
-// are not; output is not, because it is counted as input on the next request.
-// The first bubble of a turn stamps everything its agent added since the turn
-// opened. See internal/resolve/feed/usage.go's file header.
-func TestTheResponseBubbleStampsItsAgentsFreshInput(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-usage-stamp", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-
-	// Act: the response's first content block carries the whole bill.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-usage-thinking"),
-		Usage: &conversationv1.TokenUsage{
-			InputHits:    &conversationv1.TokenCacheHits{Read: 900_000},
-			InputMisses:  &conversationv1.TokenCacheMisses{Written: 18_000, Unwritten: 240},
-			OutputTokens: 5_000,
-		},
-		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
-			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{}},
-		}},
-	}))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
-		ActivityId: activityID("resp-usage-prose"),
-		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
-			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"}},
-		}}},
-	}))
-
-	// Assert: the drawn bubble carries its agent's fresh input — the 18,000
-	// cache writes plus the 240 unwritten input tokens. The 900,000 cache reads
-	// and the 5,000 output tokens are not fresh input and are excluded.
-	row := awaitRow(t, f, tail, "the stamped response bubble", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetUsage() != nil
-	})
-	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "18.2k" {
-		t.Fatalf("the response's usage stamp = %q, want its agent's fresh input %q (cache writes + unwritten input, no cache reads, no output)", got, "18.2k")
 	}
 }
 

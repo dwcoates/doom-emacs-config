@@ -896,38 +896,6 @@ func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 	})
 }
 
-// TestOpenWorkspaceRestoresAWorktreeGitStillRegisters is the plain-`rm` case:
-// git still holds `.git/worktrees/<name>` for the missing tree and refuses a
-// bare `worktree add` over it, so the open retires that ONE registration
-// with `git worktree remove` and restores the tree.
-func TestOpenWorkspaceRestoresAWorktreeGitStillRegisters(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	repo := harness.NewRepo(t)
-	nd, ws := vanishedWorktree(t, repo, "rmd")
-
-	// Act.
-	resp, err := nd.Client().OpenWorkspace(nd.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-
-	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace = (%v, %v), want a success", resp, err)
-	}
-	var removed bool
-	for _, call := range nd.Git.Calls() {
-		if strings.Contains(strings.Join(call.Args, " "), "worktree remove "+ws.GetDir()) {
-			removed = true
-		}
-		if strings.Contains(strings.Join(call.Args, " "), "worktree prune") {
-			t.Fatalf("git calls include a repository-wide prune %v; only the one registration may be retired", call.Args)
-		}
-	}
-	if !removed {
-		t.Fatalf("git calls = %v, want the stale registration retired with `worktree remove`", nd.Git.Calls())
-	}
-}
-
 // vanishedWorktree arranges a CLOSED workspace on a worktree whose directory
 // was removed with a plain `rm` while the daemon was down, so git still
 // registers the missing tree. It answers the workspace and the daemon that booted

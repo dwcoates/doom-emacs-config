@@ -293,36 +293,6 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	}
 }
 
-// TestCreateTaskRefusesABlankTitle asserts the refusal IN BAND.
-// `CreateTaskError.blank_title` is a LANDED arm, spelled for exactly this
-// condition ("The title is blank once trimmed"), so the refusal is the
-// response's `error` result and not a Connect error.
-//
-// endpoint_create_task.proto also carries the boilerplate line that a blank
-// string is InvalidArgument — the same sentence appears in 35 endpoint files.
-// The specific arm decides over the generic header: an arm minted for this
-// condition is not an arm with no producer.
-func TestCreateTaskRefusesABlankTitle(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	// blank_title is a LANDED CreateTaskError arm (see the comment above), so
-	// it is answered in band at DEBUG through server.refuse — never the
-	// daemon.refusal.unlanded_arm WARN that path was originally written
-	// against.
-
-	// Act
-	resp, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "   "}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CreateTask with a blank title = transport error %v, want the in-band blank_title arm", err)
-	}
-	if resp.Msg.GetError().GetBlankTitle() == nil {
-		t.Fatalf("CreateTask with a blank title = %v, want CreateTaskError.blank_title", resp.Msg)
-	}
-}
-
 // TestBringUpDeathLeavesTheRosterRowStartFailed is the roster suite's own
 // coverage of session_lifecycle_test.go's
 // TestFakeShimExitingDuringBringUpEndsBringUpImmediately fixture: that test

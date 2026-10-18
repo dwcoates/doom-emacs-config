@@ -90,21 +90,6 @@ const (
 	// readyTimeout.
 	streamTimeout = 2 * time.Second
 
-	// burstCallTimeout and burstStreamTimeout are the EXPLICIT per-site bounds
-	// for the one place in this package that moves thousands of items in a
-	// single call: the default-buffer burst test. The package-wide 2s bounds
-	// above are sized off single-item calls, so applying them to a
-	// 4096-entry WriteBatch left this site with no stated basis at all.
-	//
-	// Measured on the burst test at -count=10 under representative contention
-	// (16 cpu burners on 16 cores, matching the 8-parallel full-package run):
-	// worst WriteBatch 0.40s, worst 4096-frame delivery 0.28s. Coverage
-	// instrumentation raises the observed WriteBatch cost to 1.27s. These
-	// bounds retain roughly three times the slowest observed cost while still
-	// failing a stalled call promptly.
-	burstCallTimeout   = 4 * time.Second
-	burstStreamTimeout = 3 * time.Second
-
 	// baseURL is a syntactic placeholder: every transport below dials the
 	// unix socket, so the authority is never resolved.
 	baseURL = "http://store.localhost"
