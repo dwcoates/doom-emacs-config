@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"agent-repld/internal/causelog"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/semver"
 
@@ -86,8 +87,8 @@ type VersionLoop struct {
 	log     dlog.Logger
 	kick    chan struct{}
 
+	causes    causelog.Tracker
 	mu        sync.Mutex
-	lastCause string
 	lastValue string
 }
 
@@ -141,13 +142,12 @@ func (l *VersionLoop) resolve(ctx context.Context) {
 	if err != nil {
 		l.version.current.Store(nil)
 		l.lastValue = ""
-		if cause := err.Error(); cause != l.lastCause {
-			l.lastCause = cause
-			l.log.Error(Operation, "the deployed version could not be resolved; the version series is withdrawn until it can", dlog.Context{"checkout": l.dir, "error": cause})
+		if l.causes.Failed("resolve", err.Error()) {
+			l.log.Error(Operation, "the deployed version could not be resolved; the version series is withdrawn until it can", dlog.Context{"checkout": l.dir, "error": err.Error()})
 		}
 		return
 	}
-	l.lastCause = ""
+	l.causes.Succeeded("resolve")
 	l.version.current.Store(&v)
 	if v != l.lastValue {
 		l.lastValue = v
