@@ -518,7 +518,8 @@
     --thinking: #ffa15a;
     --tool-command: #898782;
     --tool-title: var(--blocked);
-    --accent: #97bafe;
+    /* The accent is the blue status's blue (owner ruling, 2026-10-18). */
+    --accent: var(--init);
     --retry: var(--blocked);
     --info-ws: var(--ok);
     --info-model: #1cd1ec;
