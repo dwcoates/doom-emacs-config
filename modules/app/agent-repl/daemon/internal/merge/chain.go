@@ -224,7 +224,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		return false
 	}
 	runCtx, cancel := context.WithCancelCause(context.Background())
-	r := o.newRun(runCtx, cancel, repo, next.Workspace)
+	r := o.newRun(runCtx, cancel, repo, next.Workspace, next.EnqueuedAt.UnixMilli())
 	// THE RUN JOINS ITS CHAIN NOW AND ITS WORKSPACE ONLY AT ITS REGISTRATION
 	// (register), once what it lands has been read: nothing addresses a run
 	// whose facts are still being filled in.
@@ -312,7 +312,7 @@ func (o *orchestrator) startSpeculative(ctx context.Context, r *run) {
 	r.mu.Lock()
 	r.source, r.job, r.lease = entry.Source, job, lease
 	r.mu.Unlock()
-	r.startedMS, r.queuedMS = o.deps.Now().UnixMilli(), entry.EnqueuedAt.UnixMilli()
+	r.startedMS = o.deps.Now().UnixMilli()
 	log.Info(op, "admitted a merge behind its queue's head; it rebases onto the merge ahead and tests ahead of its turn", dlog.Context{
 		"workspace": string(ws), "repo": string(r.repo), "lease": string(lease.ID)})
 	// THE PUMP MAY BE WAITING ON THIS VERY ADMISSION to promote the merge,

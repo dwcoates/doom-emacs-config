@@ -1399,7 +1399,7 @@ func TestAfterARestartAHeadThatTheChainHoldsLeavesTheResumesBehindIt(t *testing.
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 	h.o.mu.Lock()
-	h.o.chains[h.repoKey()] = []*run{h.o.newRun(ctx, cancel, h.repoKey(), "ws-head")}
+	h.o.chains[h.repoKey()] = []*run{h.o.newRun(ctx, cancel, h.repoKey(), "ws-head", 1)}
 	h.o.mu.Unlock()
 
 	// Act.

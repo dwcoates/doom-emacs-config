@@ -123,9 +123,14 @@ func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey
 		log.Info(op, "a waiting merge's workspace is busy; it keeps its base this round and catches up at a later landing", fields)
 		return
 	}
+	queuedMS, err := enqueuedMS(entry)
+	if err != nil {
+		log.Error(op, "could not read when a waiting merge was queued; it keeps its base this round", withField(fields, "error", err.Error()))
+		return
+	}
 	runCtx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
-	r := o.newRun(runCtx, cancel, repo, ws)
+	r := o.newRun(runCtx, cancel, repo, ws, queuedMS)
 	r.background = true
 	r.source = entry.Source
 	if !o.registerBackground(r) {
