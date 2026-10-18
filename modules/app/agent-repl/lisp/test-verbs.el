@@ -223,6 +223,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :set-hidden))
                 ((symbol-function 'agent-repl-rpc-swap-workspaces)
                  (agent-repl-test-verbs--stub :swap))
+                ((symbol-function 'agent-repl-rpc-move-workspace)
+                 (agent-repl-test-verbs--stub :move))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
@@ -1061,6 +1063,66 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
       (agent-repl-verb-swap "ws-one" "ws-two")
       ;; Assert.
       (should (agent-repl-test-verbs--messaged-p "swap refused: unknown-workspace")))))
+
+;;;; ---- MoveWorkspace ----
+
+(ert-deftest agent-repl-verbs-move-carries-both-refs ()
+  "MoveWorkspace names the moved workspace and the target by ref."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (let ((request (agent-repl-test-verbs--request :move)))
+        (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref "id-ws-one" "/w/ws-one")))
+        (should (equal (plist-get request :target) (agent-repl-test-verbs--ref "id-ws-two" "/w/ws-two")))))))
+
+(ert-deftest agent-repl-verbs-move-success-says-so ()
+  "A move the daemon made is reported to the user."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "moved ws-one onto ws-two's tab")))))
+
+(ert-deftest agent-repl-verbs-move-to-another-repository-is-said-in-words-at-info ()
+  "An `other_repository' answer is an answer: said in words and recorded at INFO."
+  (let (infos warns)
+    (agent-repl-test-verbs--with
+        '((:move . (:response (:arm :error :value (:cause (:arm :other-repository :value nil))))))
+      (agent-repl-test-verbs--with-two-refs
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                  ((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warns))))
+          ;; Act.
+          (agent-repl-verb-move "ws-one" "ws-two")
+          ;; Assert.
+          (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two are in different repositories")))))
+    (should (member "elisp.verbs.move-no-tab ws=ws-one target=ws-two arm=:other-repository" infos))
+    (should-not warns)))
+
+(ert-deftest agent-repl-verbs-move-to-a-non-sibling-is-said-in-words ()
+  "A `not_siblings' answer names why the tab cannot be taken."
+  (agent-repl-test-verbs--with
+      '((:move . (:response (:arm :error :value (:cause (:arm :not-siblings :value nil))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two are not siblings")))))
+
+(ert-deftest agent-repl-verbs-move-other-refusals-take-the-generic-path ()
+  "Any other refused move is reported by the generic refusal path."
+  (agent-repl-test-verbs--with
+      '((:move . (:response (:arm :error :value (:cause (:arm :unknown-workspace
+                                                              :value (:workspace (:id "id-ws-two" :dir "/w/ws-two"))))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "move refused: unknown-workspace")))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 

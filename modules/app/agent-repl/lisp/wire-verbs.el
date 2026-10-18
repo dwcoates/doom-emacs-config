@@ -6,7 +6,7 @@
 ;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
 ;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden,
-;; SwapWorkspaces, SubmitPrompt, UpdateShutdownSchedule, Deploy,
+;; SwapWorkspaces, MoveWorkspace, SubmitPrompt, UpdateShutdownSchedule, Deploy,
 ;; UpdateMergeQueue, DaemonHealth and SessionHealth.
 ;;
 ;; SCOPE.  This file owns exactly the messages declared in those endpoint
@@ -2320,6 +2320,147 @@ arm this codec does not know is refused as an unknown field."
    "SwapWorkspacesResponse" json
    #'agent-repl-wire-decode-swap-workspaces-response-success
    #'agent-repl-wire-decode-swap-workspaces-response-error))
+
+
+;;;; ---- MoveWorkspace ---------------------------------------------
+
+(defun agent-repl-wire-encode-move-workspace-request-workspace (ref)
+  "Encode MoveWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-move-workspace-request-target (ref)
+  "Encode MoveWorkspaceRequest's `target' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-move-workspace-request (request)
+  "Encode MoveWorkspaceRequest from plist REQUEST.
+REQUEST is (:workspace REF :target REF): WORKSPACE moves onto TARGET's tab
+in the sidebar's arrangement, the tabs between shifting over.  Both are
+required."
+  (let ((message "MoveWorkspaceRequest"))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-move-workspace-request")
+    (list (cons 'workspace
+                (agent-repl-wire-encode-move-workspace-request-workspace
+                 (agent-repl-wire-verbs--require
+                  message "workspace" (plist-get request :workspace))))
+          (cons 'target
+                (agent-repl-wire-encode-move-workspace-request-target
+                 (agent-repl-wire-verbs--require
+                  message "target" (plist-get request :target)))))))
+
+(defun agent-repl-wire-decode-move-workspace-success (json)
+  "Decode MoveWorkspaceSuccess from JSON.
+Empty: the roster push carries the new order."
+  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-move-workspace-unknown-workspace-workspace (json)
+  "Decode MoveWorkspaceUnknownWorkspace's `workspace' use site from JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-move-workspace-unknown-workspace (json)
+  "Decode MoveWorkspaceUnknownWorkspace from JSON into (:workspace REF).
+The ref the registry does not hold."
+  (let ((message "MoveWorkspaceUnknownWorkspace"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-verbs--decode-required-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-move-workspace-unknown-workspace-workspace))))
+
+(defun agent-repl-wire-decode-move-workspace-workspace-ref-mismatch-workspace (json)
+  "Decode MoveWorkspaceWorkspaceRefMismatch's `workspace' use site from
+JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-move-workspace-workspace-ref-mismatch (json)
+  "Decode MoveWorkspaceWorkspaceRefMismatch from JSON into a plist
+\(`:workspace' `:registry-dir').
+The mismatched ref and the dir the registry holds for its id."
+  (let ((message "MoveWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace registryDir))
+    (list :workspace (agent-repl-wire-verbs--decode-required-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-move-workspace-workspace-ref-mismatch-workspace)
+          :registry-dir (agent-repl-wire-verbs--decode-string
+                         message 'registryDir json))))
+
+(defun agent-repl-wire-decode-move-workspace-transferring-away (json)
+  "Decode MoveWorkspaceTransferringAway from JSON into (:address).
+This daemon released a workspace to a successor; dial `address'."
+  (let ((message "MoveWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                    message 'address json))))
+
+(defun agent-repl-wire-decode-move-workspace-not-yet-adopted (json)
+  "Decode MoveWorkspaceNotYetAdopted from JSON.  Empty: adoption of a
+named workspace is still in progress."
+  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-move-workspace-other-repository (json)
+  "Decode MoveWorkspaceOtherRepository from JSON.  Empty: the two
+workspaces belong to different repositories, whose tabs never interleave."
+  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceOtherRepository" json))
+
+(defun agent-repl-wire-decode-move-workspace-not-siblings (json)
+  "Decode MoveWorkspaceNotSiblings from JSON.  Empty: the two workspaces
+are neither both top-level nor children of one parent."
+  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceNotSiblings" json))
+
+(defun agent-repl-wire-decode-move-workspace-error-unknown-workspace (json)
+  "Decode MoveWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-move-workspace-error-workspace-ref-mismatch (json)
+  "Decode MoveWorkspaceError's `workspace_ref_mismatch' cause arm from
+JSON."
+  (agent-repl-wire-decode-move-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-move-workspace-error-transferring-away (json)
+  "Decode MoveWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-move-workspace-error-not-yet-adopted (json)
+  "Decode MoveWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-move-workspace-error-other-repository (json)
+  "Decode MoveWorkspaceError's `other_repository' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-other-repository json))
+
+(defun agent-repl-wire-decode-move-workspace-error-not-siblings (json)
+  "Decode MoveWorkspaceError's `not_siblings' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-not-siblings json))
+
+(defun agent-repl-wire-decode-move-workspace-error (json)
+  "Decode MoveWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "MoveWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted otherRepository notSiblings))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-move-workspace-error-unknown-workspace)
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-move-workspace-error-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away #'agent-repl-wire-decode-move-workspace-error-transferring-away)
+                 (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-move-workspace-error-not-yet-adopted)
+                 (list 'otherRepository :other-repository #'agent-repl-wire-decode-move-workspace-error-other-repository)
+                 (list 'notSiblings :not-siblings #'agent-repl-wire-decode-move-workspace-error-not-siblings))))))
+
+(defun agent-repl-wire-decode-move-workspace-response-success (json)
+  "Decode MoveWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-move-workspace-success json))
+
+(defun agent-repl-wire-decode-move-workspace-response-error (json)
+  "Decode MoveWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-move-workspace-error json))
+
+(defun agent-repl-wire-decode-move-workspace-response (json)
+  "Decode MoveWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "MoveWorkspaceResponse" json
+   #'agent-repl-wire-decode-move-workspace-response-success
+   #'agent-repl-wire-decode-move-workspace-response-error))
 
 
 ;;;; ---- RegisterRepository ---------------------------------------------

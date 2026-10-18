@@ -524,6 +524,14 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "reports how the user's keep-alive to the hidden workspaces went")
     ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"
      "confirms the user's swap command")
+    ("verbs.el" agent-repl-verb-move "agent-repl: moved %s onto %s's tab"
+     "confirms the user's move command")
+    ("verbs.el" agent-repl-verb-move
+     "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
+     "explains why the daemon refused the user's move command")
+    ("verbs.el" agent-repl-verb-move
+     "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
+     "explains why the daemon refused the user's move command")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")

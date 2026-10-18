@@ -1111,6 +1111,9 @@ that stores a subsection of its own.
   each family depth-first, so a child always sits right of its parent.
 - `SwapWorkspaces` exchanges any two workspaces' places; two roots of one
   repository also exchange their subsections, so each lands on the other's tab.
+- `MoveWorkspace` (`SPC TAB P`) puts a workspace onto a sibling's tab, the tabs
+  between shifting over; two repositories are `other_repository`, any other
+  non-sibling pair `not_siblings`.
 - Agents read the arrangement with `GetSidebarArrangement` and change it with
   `ArrangeSidebar` (`place_workspaces` files several workspaces at once).
 

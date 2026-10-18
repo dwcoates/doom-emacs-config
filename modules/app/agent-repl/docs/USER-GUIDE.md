@@ -505,6 +505,13 @@ The top bar's effort selector sits between the model selector and the permission
   - Inside a repository, its own workspaces come first, then each subsection's in turn.
   - A child always sits right after its parent.
   - So a workspace dragged into an empty subsection at the bottom of its repository becomes that repository's last tab.
+- **`SPC TAB p` then a digit swaps the current workspace with that tab's workspace.**
+  - `0` names the tenth tab, and only drawn tabs count.
+  - The two exchange places and every other tab stays put.
+- **`SPC TAB P` then a digit moves the current workspace onto that tab.**
+  - The tabs in between shift over by one, so the current workspace takes the pressed tab's number.
+  - The tab must belong to another workspace of the same repository, or to another child of the same parent.
+  - Moving onto a tab in a subsection also files the workspace into that subsection.
 
 ## Searching the sidebar
 

@@ -81,6 +81,7 @@
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
 (declare-function agent-repl-verb-swap "agent-repl-verbs" (ws target))
+(declare-function agent-repl-verb-move "agent-repl-verbs" (ws target))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
@@ -1396,6 +1397,22 @@ The daemon owns the registry order, so the swap is REQUESTED of it
 The sidebar follows the same order within each of its lists."
   (interactive (list (agent-repl--read-tab-slot "Swap with tab")))
   (agent-repl--act-on-tab-slot slot "swap" #'agent-repl-verb-swap))
+
+(defun agent-repl-workspace-move (slot)
+  "Move the current workspace onto tab SLOT, the tabs between shifting over.
+Interactively SLOT is read as one digit, `0' naming slot 10, and counts
+the drawn tabs (`agent-repl--act-on-tab-slot').  Moving right shifts the
+tabs it passes left and moving left shifts them right, so the current
+workspace takes the pressed tab's number; it carries its own children
+with it.
+
+The tab must be a sibling's in the sidebar's arrangement: another top-level
+workspace of the same repository, or another child of the same parent.  A
+top-level workspace also joins that tab's subsection.  The daemon owns the
+arrangement, so the move is REQUESTED of it (`agent-repl-verb-move') and
+the bar redraws from the next roster push."
+  (interactive (list (agent-repl--read-tab-slot "Move onto tab")))
+  (agent-repl--act-on-tab-slot slot "move" #'agent-repl-verb-move))
 
 (eval-and-compile
   ;; The count is needed at EXPANSION time by the macro below and at RUN time

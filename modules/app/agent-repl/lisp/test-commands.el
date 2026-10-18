@@ -2051,5 +2051,37 @@ A command that re-implemented the slot checks would drift from the others."
   ;; Arrange.
   (let ((body (lambda (fn) (format "%S" (symbol-function fn)))))
     ;; Act / Assert.
-    (dolist (command '(agent-repl-workspace-swap))
+    (dolist (command '(agent-repl-workspace-swap agent-repl-workspace-move))
       (should (string-match-p "agent-repl--act-on-tab-slot" (funcall body command))))))
+
+;;;; ---- SPC TAB P: move onto a drawn tab ----
+
+(ert-deftest agent-repl-test-commands-move-reads-its-slot-interactively ()
+  "The move's interactive spec is the one-digit reader, worded for a move."
+  (should (equal (cadr (interactive-form 'agent-repl-workspace-move))
+                 '(list (agent-repl--read-tab-slot "Move onto tab")))))
+
+(ert-deftest agent-repl-test-commands-move-targets-the-nth-drawn-tab ()
+  "Slot N counts the DRAWN tabs, and the current workspace moves onto it."
+  ;; Arrange.
+  (let (moved)
+    (cl-letf (((symbol-function 'agent-repl-verb-move)
+               (lambda (ws target) (setq moved (list ws target))))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (agent-repl-test-commands--with-hidden-bar '("first" "hidden" "third") '("hidden") "first"
+        ;; Act.
+        (agent-repl-workspace-move 2)))
+    ;; Assert.
+    (should (equal moved '("first" "third")))))
+
+(ert-deftest agent-repl-test-commands-move-records-under-its-own-word ()
+  "A move request records `elisp.commands.move slot=N ws=<ws> target=<ws>'."
+  (agent-repl-test-commands--capturing-info
+    (cl-letf (((symbol-function 'agent-repl-verb-move) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (agent-repl-test-commands--with-hidden-bar '("first" "second") nil "first"
+        (agent-repl-workspace-move 2)))
+    (should (member "elisp.commands.move slot=2 ws=first target=second"
+                    (agent-repl-test-commands--info-messages)))))

@@ -118,6 +118,7 @@
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-swap-workspaces "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-move-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -987,6 +988,36 @@ state."
    :on-success
    (lambda (_)
      (message "agent-repl: swapped %s with %s" ws target))))
+
+(defun agent-repl-verb-move (ws target)
+  "Move WS onto TARGET's tab, the tabs between shifting over.
+The daemon places WS just before TARGET when it comes from a later tab and
+just after TARGET's family when it comes from an earlier one; the two must
+be siblings in the sidebar's arrangement, and any other pair is refused.
+The new order arrives on the roster stream, so success changes no editor
+state."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-move-workspace (agent-repl-verbs--conn ws)
+   (list :workspace (agent-repl-verbs--ref ws) :target (agent-repl-verbs--ref target))
+   :ws ws :op "move"
+   :on-success
+   (lambda (_)
+     (message "agent-repl: moved %s onto %s's tab" ws target))
+   :on-error
+   (lambda (value)
+     ;; NO TAB TO TAKE IS AN ANSWER, NOT A FAULT: the user pressed a tab of
+     ;; another repository or another family, and the daemon said why it
+     ;; cannot be taken.  Recorded at INFO and said in words; every other
+     ;; arm falls through to the arm-generic report.
+     (let ((arm (plist-get (agent-repl-verbs--refusal-arm value) :arm)))
+       (when (memq arm '(:other-repository :not-siblings))
+         (agent-repl--info ws "elisp.verbs.move-no-tab ws=%s target=%s arm=%S" ws target arm)
+         (if (eq arm :other-repository)
+             (message "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
+                      ws target ws)
+           (message "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
+                    ws target ws))
+         t)))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
