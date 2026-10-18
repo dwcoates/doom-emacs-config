@@ -36,6 +36,15 @@ type Synthesizer struct {
 
 	mu    sync.Mutex
 	state map[ids.WorkspaceID]*wsState
+	// closed refuses every dispatch once Close has begun, so no run starts
+	// after the daemon's teardown has joined them. Guarded by mu.
+	closed bool
+
+	// life is every run's context: Close cancels it, so a run waiting on the
+	// shim or the model ends at once rather than holding the teardown for its
+	// whole timeout.
+	life context.Context
+	stop context.CancelFunc
 
 	// wg joins every dispatched goroutine so shutdown can wait for them.
 	wg sync.WaitGroup
@@ -76,7 +85,40 @@ func New(deps Deps) *Synthesizer {
 	if deps.SynthesizeTimeout == 0 {
 		deps.SynthesizeTimeout = DefaultSynthesizeTimeout
 	}
-	return &Synthesizer{deps: deps, state: map[ids.WorkspaceID]*wsState{}}
+	life, stop := context.WithCancel(context.Background())
+	return &Synthesizer{deps: deps, state: map[ids.WorkspaceID]*wsState{}, life: life, stop: stop}
+}
+
+// Close ends title synthesis for the daemon's teardown: it refuses every later
+// dispatch, cancels the runs in flight and joins them. The daemon calls it
+// after the session watchers close (no trigger can arrive then) and BEFORE the
+// state client closes, because a run reads and writes the persisted summary:
+// a run left going read a closed database (TestACorruptedHeldPromptRowFails
+// BootLoudlyWithExactlyOneRestoreError, where the adopted session's start
+// dispatched a run as the failed boot tore down).
+func (s *Synthesizer) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.stop()
+	s.wg.Wait()
+	s.deps.Log.Debug(opSynth, "title synthesis closed; every run has ended", dlog.Context{})
+}
+
+// storeFailed records a failed read or write of the persisted summary. A
+// failure under a cancelled run context is Close cutting the run short, which
+// is the daemon shutting down rather than a fault, so it is said at INFO.
+// Every other failure is the ERROR it always was.
+func (s *Synthesizer) storeFailed(ctx context.Context, ws ids.WorkspaceID, message string, err error) {
+	if ctx.Err() != nil {
+		s.deps.Log.Info(opSynth, "the daemon's shutdown cut a title run short", dlog.Context{
+			"workspace": string(ws), "step": message, "cause": err.Error(),
+		})
+		return
+	}
+	s.deps.Log.Error(opSynth, message, dlog.Context{
+		"workspace": string(ws), "cause": err.Error(),
+	})
 }
 
 // ---- sessionwatcher.TitleSink (implemented structurally) ------------------
@@ -142,9 +184,7 @@ func (s *Synthesizer) ensureLoaded(ctx context.Context, ws ids.WorkspaceID) erro
 
 	sum, found, err := s.deps.Store.WorkspaceSummaryOf(ctx, ws)
 	if err != nil {
-		s.deps.Log.Error(opSynth, "the persisted workspace summary could not be read", dlog.Context{
-			"workspace": string(ws), "cause": err.Error(),
-		})
+		s.storeFailed(ctx, ws, "the persisted workspace summary could not be read", err)
 		return err
 	}
 
@@ -190,6 +230,13 @@ func (s *Synthesizer) stateFor(ws ids.WorkspaceID) *wsState {
 // which case it marks the workspace dirty so one more run follows.
 func (s *Synthesizer) dispatch(ws ids.WorkspaceID) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		s.deps.Log.Debug(opSynth, "title synthesis is closed; the trigger starts no run", dlog.Context{
+			"workspace": string(ws),
+		})
+		return
+	}
 	st := s.stateFor(ws)
 	if st.inFlight {
 		st.dirty = true
@@ -208,7 +255,7 @@ func (s *Synthesizer) dispatch(ws ids.WorkspaceID) {
 func (s *Synthesizer) run(ws ids.WorkspaceID) {
 	defer s.wg.Done()
 	for {
-		s.synthesizeOnce(context.Background(), ws)
+		s.synthesizeOnce(s.life, ws)
 
 		s.mu.Lock()
 		st := s.stateFor(ws)
@@ -284,9 +331,7 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 		Title:  title,
 		Digest: &wsm.SummaryDigest{Hash: hash, Prompts: len(prompts), Boundary: digest.GetBoundary()},
 	}); err != nil {
-		s.deps.Log.Error(opSynth, "the synthesized workspace title could not be persisted; it stands only until the daemon restarts", dlog.Context{
-			"workspace": string(ws), "cause": err.Error(),
-		})
+		s.storeFailed(ctx, ws, "the synthesized workspace title could not be persisted; it stands only until the daemon restarts", err)
 	}
 	s.mu.Lock()
 	s.deps.Titles.SetSynthesizedTitle(ws, title)
@@ -407,9 +452,7 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, said []
 // retract drops a stale synthesized title and forgets its hash.
 func (s *Synthesizer) retract(ctx context.Context, ws ids.WorkspaceID) {
 	if err := s.deps.Store.DropWorkspaceSummary(ctx, ws); err != nil {
-		s.deps.Log.Error(opSynth, "the retracted workspace summary could not be deleted; a restart restores it", dlog.Context{
-			"workspace": string(ws), "cause": err.Error(),
-		})
+		s.storeFailed(ctx, ws, "the retracted workspace summary could not be deleted; a restart restores it", err)
 	}
 	s.mu.Lock()
 	s.deps.Titles.SetSynthesizedTitle(ws, "")

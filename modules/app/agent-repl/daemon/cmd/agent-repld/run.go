@@ -439,6 +439,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// feed resolver's next workspace lookup read a closed database. Arming
 	// them here makes the failed boot tear down in exactly the order the
 	// orderly exit does.
+	// TITLE SYNTHESIS CLOSES AFTER THE WATCHERS AND THE BANNERS, and before
+	// the state client: deferred here, before both, so it runs after them. A
+	// watcher's session start dispatches a title run that reads the persisted
+	// summary; on the failed boot above, that run read a closed database.
+	if built.CloseTitleSynthesis != nil {
+		defer teardown.step("close_title_synthesis", built.CloseTitleSynthesis)
+	}
 	// THE BANNERS CLOSE AFTER THE WATCHERS and before the state client:
 	// deferred here, BEFORE CloseWatchers is, so it runs after it.
 	if built.CloseBanners != nil {
