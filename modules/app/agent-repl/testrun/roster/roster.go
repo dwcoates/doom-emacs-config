@@ -355,6 +355,11 @@ var AlwaysRunRegions = []string{
 	// contract's sources; the keyed suites read what they import of
 	// proto/gen through their build graph, and proto/vocab as declared data.
 	"proto/",
+	// The tree-sitter-tldr suite (its own script, always run) reads both
+	// grammars, their generated parsers and their corpora; the daemon reads
+	// tldr's binding through its build graph and the golden answers as
+	// declared data.
+	"tree-sitter-tldr/",
 	// The logging module's TS half is the Vitest suites' import, and they
 	// always run.
 	"agent-shim/logging/",
