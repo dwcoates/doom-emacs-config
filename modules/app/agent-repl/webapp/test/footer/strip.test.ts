@@ -735,14 +735,36 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
 
 // ---- the status word's letter wave ----------------------------------------
 
+/** The negative inline `animation-delay` ELEMENT renders with, in ms. */
+function inlineDelayMs(element: Element): number {
+  const got = /animation-delay:\s*-(\d+)ms/.exec(element.getAttribute("style") ?? "");
+  if (got === null) throw new Error(`no negative delay on ${element.outerHTML}`);
+  return Number(got[1]);
+}
+
+describe("inlineDelayMs", () => {
+  it("reads the negative delay off the inline style", () => {
+    // Arrange
+    const element = document.createElement("span");
+    element.setAttribute("style", "animation-delay:-1234ms");
+
+    // Act / Assert
+    expect(inlineDelayMs(element)).toBe(1234);
+  });
+
+  it("throws on an element with no negative delay", () => {
+    // Arrange
+    const element = document.createElement("span");
+
+    // Act / Assert
+    expect(() => inlineDelayMs(element)).toThrow(/no negative delay/);
+  });
+});
+
 describe("the footer status word's letter wave", () => {
   /** The delay each `.pfooter-wave-letter` of the drawn status word renders with. */
   function letterDelays(row: HTMLElement): number[] {
-    return [...row.querySelectorAll(".footer-status .pfooter-wave-letter")].map((letter) => {
-      const got = /animation-delay:\s*-(\d+)ms/.exec(letter.getAttribute("style") ?? "");
-      if (got === null) throw new Error(`no negative delay on ${letter.outerHTML}`);
-      return Number(got[1]);
-    });
+    return [...row.querySelectorAll(".footer-status .pfooter-wave-letter")].map(inlineDelayMs);
   }
 
   /** The arm's fixture, with its first substatus where the arm declares one. */
@@ -901,8 +923,11 @@ describe("the footer status word's whole-word colour sweep", () => {
 
   it("continues the word's colour phase across a redraw rather than restarting at zero", () => {
     // Arrange
-    const holderDelay = (row: HTMLElement): number =>
-      Number(/animation-delay:-(\d+)ms/.exec(row.querySelector(".pfooter-status-word")?.getAttribute("style") ?? "")?.[1]);
+    const holderDelay = (row: HTMLElement): number => {
+      const holder = row.querySelector(".footer-status .pfooter-status-word");
+      if (holder === null) throw new Error("no status word holder drawn");
+      return inlineDelayMs(holder);
+    };
     const before = holderDelay(drawStrip({ status: withSubStatus("working", "thinking") }).row);
     vi.setSystemTime(NOW + 900);
 
