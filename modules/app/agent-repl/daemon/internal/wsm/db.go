@@ -99,6 +99,9 @@ type DB interface {
 	// registry order, every other workspace keeping its own; an unknown id is
 	// ErrNotFound and nothing is written.
 	SwapPlaces(ctx context.Context, ws, target WorkspaceID) error
+	// MoveWorkspace moves ws onto target's tab in the arrangement's walk,
+	// the two being siblings there (arrange.go).
+	MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 	// ListSubsections loads every subsection, by repository and then in each
 	// repository's stored order (arrange.go).
 	ListSubsections(ctx context.Context) ([]Subsection, error)

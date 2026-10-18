@@ -672,6 +672,21 @@ func validateSwapWorkspacesRequest(req *agentreplv1.SwapWorkspacesRequest) *conn
 	return nil
 }
 
+// validateMoveWorkspaceRequest is MoveWorkspaceRequest's base function: two
+// refs naming two different workspaces.
+func validateMoveWorkspaceRequest(req *agentreplv1.MoveWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateWorkspaceRef("target", req.GetTarget()); err != nil {
+		return err
+	}
+	if req.GetWorkspace().GetId() == req.GetTarget().GetId() {
+		return invalid("target", "a workspace cannot move onto its own tab")
+	}
+	return nil
+}
+
 // validateFoldRepositoryRequest is FoldRepositoryRequest's base function.
 func validateFoldRepositoryRequest(req *agentreplv1.FoldRepositoryRequest) *connect.Error {
 	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {

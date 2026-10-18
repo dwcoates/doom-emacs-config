@@ -398,7 +398,8 @@ the sink interfaces above plus daemon-fact setters:
   root's `.claude.json`.
 - sidebar: every grouping sorted by the registry order (a new workspace lands
   second-to-last, within its priority when it has one; SwapWorkspaces exchanges
-  any two workspaces' places), the tab bar as its own list in that order,
+  any two workspaces' places; MoveWorkspace puts one onto a sibling's tab, the
+  tabs between shifting over), the tab bar as its own list in that order,
   attention marker (set on
   notification, cleared on SelectWorkspace), recently merged, `current`,
   status arm from session/merge/link facts; `SetMerge(ws, MergeFacts)`,

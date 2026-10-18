@@ -171,6 +171,49 @@ func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 	})
 }
 
+func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
+	t.Parallel()
+	// Arrange: the bar is a, c, b.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
+	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), b.GetId()})
+	})
+
+	// Act: a moves onto b's tab, two tabs to its right.
+	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
+		&agentreplv1.MoveWorkspaceRequest{Workspace: a, Target: b}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("MoveWorkspace = (%v, %v), want success", resp, err)
+	}
+
+	// Assert: c and b shift left and a takes the last tab.
+	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
+	})
+}
+
+func TestMoveWorkspaceIsRefusedAcrossRepositories(t *testing.T) {
+	t.Parallel()
+	// Arrange: one workspace in each of two repositories.
+	d := newDaemon(t, harness.Opts{})
+	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
+
+	// Act.
+	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
+		&agentreplv1.MoveWorkspaceRequest{Workspace: two, Target: one}))
+
+	// Assert: the tab bar keeps each repository's workspaces together.
+	if err != nil || resp.Msg.GetError().GetOtherRepository() == nil {
+		t.Fatalf("MoveWorkspace = (%v, %v), want other_repository", resp, err)
+	}
+}
+
 // arrange sends one ArrangeSidebar change and requires its success.
 func arrange(t *testing.T, d *harness.Daemon, req *agentreplv1.ArrangeSidebarRequest) *agentreplv1.ArrangeSidebarSuccess {
 	t.Helper()

@@ -1740,6 +1740,97 @@ func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	}
 }
 
+// ---- MoveWorkspace ---------------------------------------------------------
+
+func TestMoveWorkspaceHandsBothResolvedIdsToTheVerb(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+
+	// Act.
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.moves, want) {
+		t.Fatalf("moves = %v, want %v", h.Verbs.moves, want)
+	}
+}
+
+func TestMoveWorkspaceNamesTheUnknownRef(t *testing.T) {
+	// Arrange.
+	h, _ := swapHarness(t)
+	missing := &workspacev1.WorkspaceRef{Id: "ws-nope"}
+
+	// Act.
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: missing}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	got := resp.Msg.GetError().GetUnknownWorkspace()
+	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.moves) != 0 {
+		t.Fatalf("moves = %v, want none for an unknown workspace", h.Verbs.moves)
+	}
+}
+
+func TestMoveWorkspaceAnswersTheVerbsRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		set  func(*agentreplv1.MoveWorkspaceError) bool
+	}{
+		{name: "other repository", arm: workspace.ArmOtherRepository,
+			set: func(e *agentreplv1.MoveWorkspaceError) bool { return e.GetOtherRepository() != nil }},
+		{name: "not siblings", arm: workspace.ArmNotSiblings,
+			set: func(e *agentreplv1.MoveWorkspaceError) bool { return e.GetNotSiblings() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h, target := swapHarness(t)
+			h.Verbs.moveErr = &workspace.Refusal{Rpc: "MoveWorkspace", Arm: tt.arm, Reason: "no tab to take"}
+
+			// Act.
+			resp, err := h.Client.MoveWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("MoveWorkspace: %v", err)
+			}
+			if !tt.set(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.arm)
+			}
+		})
+	}
+}
+
+func TestMoveWorkspaceFailsAVerbError(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+	h.Verbs.moveErr = errors.New("disk I/O error")
+
+	// Act.
+	_, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("MoveWorkspace = %v, want an internal failure", err)
+	}
+}
+
 func TestCreateWorkspaceMapsAForkSourceToAForkIntoThePrimaryBranch(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

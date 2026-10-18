@@ -59,6 +59,9 @@ type fakeDB struct {
 	// swaps is every SwapPlaces call, in order; swapErr fails it.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
+	// moves is every MoveWorkspace call, in order; moveErr fails it.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
 	// subsections are what ReadArrangement answers beside the workspaces and
 	// repositories; arrangements is every arrangement write, spelled
 	// "<method> <args>", in order; arrangeErr fails each of them.
@@ -558,6 +561,14 @@ func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.Re
 
 func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
 	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
+}
+
+func (d *fakeDB) MoveWorkspace(_ context.Context, ws, target ids.WorkspaceID) error {
+	if d.moveErr != nil {
+		return d.moveErr
+	}
+	d.moves = append(d.moves, [2]ids.WorkspaceID{ws, target})
+	return nil
 }
 
 func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error {

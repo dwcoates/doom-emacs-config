@@ -1240,6 +1240,100 @@ func TestSwapSurfacesAStoreFailure(t *testing.T) {
 	}
 }
 
+func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Move(context.Background(), "w1", "w2"); err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+
+	// Assert.
+	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.moves, want) {
+		t.Fatalf("moves = %v, want %v", f.db.moves, want)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+	if !hasRecord(f, dlog.LevelInfo, opMove) {
+		t.Fatal("the move was not recorded at info")
+	}
+}
+
+func TestMoveRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.owner.standing = StandingTransferringAway
+
+	// Act.
+	err := f.verbs.Move(context.Background(), "w1", "w2")
+
+	// Assert.
+	asRefusal(t, err, ArmTransferringAway)
+	if len(f.db.moves) != 0 {
+		t.Fatalf("a refused move wrote %v", f.db.moves)
+	}
+}
+
+func TestMoveTurnsTheStoresRefusalsIntoArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		store error
+		arm   string
+	}{
+		{name: "two repositories", store: wsm.ErrOtherRepository, arm: ArmOtherRepository},
+		{name: "not siblings", store: wsm.ErrNotSiblings, arm: ArmNotSiblings},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.workspace("w2", t.TempDir())
+			f.db.moveErr = tt.store
+
+			// Act.
+			err := f.verbs.Move(context.Background(), "w1", "w2")
+
+			// Assert.
+			asRefusal(t, err, tt.arm)
+			if len(f.sidebar.registries) != 0 {
+				t.Fatalf("a refused move republished %d times", len(f.sidebar.registries))
+			}
+			if loggedAtError(f, opMove) {
+				t.Fatal("a refused move was logged at error")
+			}
+		})
+	}
+}
+
+func TestMoveSurfacesAStoreFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.db.moveErr = errors.New("disk on fire")
+
+	// Act.
+	err := f.verbs.Move(context.Background(), "w1", "w2")
+
+	// Assert.
+	if err == nil || !errors.Is(err, f.db.moveErr) {
+		t.Fatalf("error = %v, want the store's failure", err)
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("a failed move republished %d times", len(f.sidebar.registries))
+	}
+	if !loggedAtError(f, opMove) {
+		t.Fatal("the store failure was not logged at error")
+	}
+}
+
 func TestSetHiddenTellsTheCacheKeeper(t *testing.T) {
 	tests := []struct {
 		name   string

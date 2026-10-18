@@ -38,6 +38,7 @@ const (
 	opSetHidden            = "daemon.workspace.set_hidden"
 	opRevealMergeWorkspace = "daemon.workspace.reveal_merge_workspace"
 	opSwap                 = "daemon.workspace.swap"
+	opMove                 = "daemon.workspace.move"
 	opCreateTask           = "daemon.workspace.create_task"
 	opUpdateTask           = "daemon.workspace.update_task"
 	opAssignTask           = "daemon.workspace.assign_task"

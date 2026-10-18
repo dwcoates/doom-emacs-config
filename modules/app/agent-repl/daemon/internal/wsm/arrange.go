@@ -139,6 +139,12 @@ var ErrAnchorElsewhere = errors.New("wsm: the workspace to place before is not i
 // sits wherever its parent does, and moves only with it. Nothing is written.
 var ErrHasParent = errors.New("wsm: the workspace has a parent and moves only with it")
 
+// ErrNotSiblings refuses moving a workspace onto the tab of one that is not
+// its sibling: one top-level and the other a child, or children of two
+// parents. A child's tab always follows its parent's family, so there is no
+// such tab to take. Nothing is written.
+var ErrNotSiblings = errors.New("wsm: the two workspaces are not siblings")
+
 // ErrBlankSubsectionName refuses a subsection name that is empty or only
 // whitespace. Nothing is written.
 var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
@@ -148,7 +154,7 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
 	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
-		errors.Is(err, ErrHasParent)
+		errors.Is(err, ErrHasParent) || errors.Is(err, ErrNotSiblings)
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.
@@ -382,6 +388,80 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 	})
 }
 
+// MoveWorkspace moves workspace WS onto TARGET's tab in the arrangement's
+// walk, the tabs between shifting one family toward the tab WS left. The two
+// must be SIBLINGS there: top-level workspaces of one repository, or
+// children of one parent. WS lands just before TARGET when it comes from a
+// later tab and just after TARGET (and so after TARGET's family, which is
+// drawn under it) when it comes from an earlier one. A top-level WS also
+// joins TARGET's subsection, so it lands in TARGET's list; a child stores no
+// subsection and sits wherever its root does.
+//
+// Which side WS comes from is read in the same transaction as the write, so
+// an arrangement landing in between cannot misplace it.
+//
+// Refusals, each writing nothing: WS and TARGET equal is refused as
+// malformed; an unknown workspace is ErrNotFound, two repositories
+// ErrOtherRepository, and any other pairing ErrNotSiblings.
+func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error {
+	const op = "daemon.wsm.move_workspace"
+	fields := dlog.Context{"workspace": ws, "target": target}
+	if ws == target {
+		err := fmt.Errorf("wsm: workspace %s cannot move onto its own tab", ws)
+		s.log.Error(op, "refused a malformed move", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var ownRepo, targetRepo RepoID
+		var ownParent, targetParent, targetSubsection sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, parent_id", &ownRepo, &ownParent); err != nil {
+			return err
+		}
+		if err := scanWorkspaceRow(ctx, tx, target, "repo_id, parent_id, subsection_id", &targetRepo, &targetParent, &targetSubsection); err != nil {
+			return err
+		}
+		if ownRepo != targetRepo {
+			return ErrOtherRepository
+		}
+		if ownParent != targetParent {
+			return ErrNotSiblings
+		}
+		siblings, err := walkSiblings(ctx, tx, ownRepo, ownParent)
+		if err != nil {
+			return err
+		}
+		order, err := placeOrder(ctx, tx)
+		if err != nil {
+			return err
+		}
+		placed := insertBefore(order, []WorkspaceID{ws}, target)
+		if slices.Index(siblings, ws) < slices.Index(siblings, target) {
+			placed = insertAfter(order, []WorkspaceID{ws}, target)
+		}
+		if !ownParent.Valid {
+			if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, targetSubsection, ws); err != nil {
+				return err
+			}
+		}
+		return rewritePlaces(ctx, tx, placed)
+	})
+}
+
+// walkSiblings answers the workspaces under PARENT (invalid: REPO's
+// top-level workspaces) in the order the arrangement walks them: a
+// repository's unsectioned workspaces first, then each subsection's in the
+// subsections' order, each list in registry order; a parent's children in
+// registry order.
+func walkSiblings(ctx context.Context, tx *sql.Tx, repo RepoID, parent sql.NullString) ([]WorkspaceID, error) {
+	if parent.Valid {
+		return idsByPlace[WorkspaceID](ctx, tx, `SELECT id FROM workspaces WHERE parent_id = ? ORDER BY place`, parent.String)
+	}
+	return idsByPlace[WorkspaceID](ctx, tx,
+		`SELECT w.id FROM workspaces w LEFT JOIN subsections s ON s.id = w.subsection_id
+		 WHERE w.repo_id = ? AND w.parent_id IS NULL
+		 ORDER BY s.place IS NOT NULL, s.place, w.place`, repo)
+}
+
 // malformedPlacement refuses a placement of nothing, of one workspace twice,
 // or before one of the workspaces it places.
 func malformedPlacement(ws []WorkspaceID, before *WorkspaceID) error {
@@ -476,6 +556,13 @@ func moveBefore[ID comparable](order []ID, id ID, before *ID) []ID {
 func insertBefore(order, moved []WorkspaceID, anchor WorkspaceID) []WorkspaceID {
 	rest := without(order, moved)
 	return slices.Insert(rest, slices.Index(rest, anchor), moved...)
+}
+
+// insertAfter answers ORDER with MOVED taken out and put back, in their own
+// order, just after ANCHOR, which MOVED must not contain.
+func insertAfter(order, moved []WorkspaceID, anchor WorkspaceID) []WorkspaceID {
+	rest := without(order, moved)
+	return slices.Insert(rest, slices.Index(rest, anchor)+1, moved...)
 }
 
 // insertAfterBucket answers ORDER with MOVED taken out and put back, in their

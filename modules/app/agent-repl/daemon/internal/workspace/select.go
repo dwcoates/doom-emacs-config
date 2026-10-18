@@ -411,3 +411,33 @@ func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
 	v.republishRegistry(ctx, log, opSwap)
 	return nil
 }
+
+// Move puts workspace ws onto target's tab in the arrangement's walk, the
+// tabs between shifting one family toward the tab ws left (wsm's
+// MoveWorkspace). The two must be siblings there: two workspaces of
+// different repositories are refused other_repository, and any other
+// pairing not_siblings.
+func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
+	const rpc = "MoveWorkspace"
+	_, log, err := v.owned(ctx, rpc, ws)
+	if err != nil {
+		return err
+	}
+	if _, _, err := v.owned(ctx, rpc, target); err != nil {
+		return err
+	}
+	log = log.With(dlog.Context{"target": string(target)})
+	if err := v.deps.DB.MoveWorkspace(ctx, ws, target); err != nil {
+		switch {
+		case errors.Is(err, wsm.ErrOtherRepository):
+			return refuse(log, rpc, ArmOtherRepository, err.Error(), false)
+		case errors.Is(err, wsm.ErrNotSiblings):
+			return refuse(log, rpc, ArmNotSiblings, err.Error(), false)
+		}
+		log.Error(opMove, "could not move the workspace onto the target's tab", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("move %q onto %q: %w", ws, target, err)
+	}
+	log.Info(opMove, "moved the workspace onto the target's tab", nil)
+	v.republishRegistry(ctx, log, opMove)
+	return nil
+}

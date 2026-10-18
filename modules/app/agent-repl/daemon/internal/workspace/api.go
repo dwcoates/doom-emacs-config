@@ -365,6 +365,9 @@ type Verbs interface {
 	// Swap exchanges the places of workspaces ws and target in the registry
 	// order, every other workspace keeping its own.
 	Swap(ctx context.Context, ws, target ids.WorkspaceID) error
+	// Move puts workspace ws onto target's tab in the arrangement's walk,
+	// the tabs between shifting over; the two must be siblings there.
+	Move(ctx context.Context, ws, target ids.WorkspaceID) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.

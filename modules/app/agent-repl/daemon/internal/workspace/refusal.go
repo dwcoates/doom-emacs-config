@@ -69,6 +69,9 @@ const (
 	// ArmHasParent is a workspace with a recorded parent placed on its own
 	// (ArrangeSidebarError.has_parent): it sits wherever its parent does.
 	ArmHasParent = "has_parent"
+	// ArmNotSiblings is a move between two workspaces that are not siblings
+	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
+	ArmNotSiblings = "not_siblings"
 	// ArmNotInARepository is a RegisterRepository whose path is readable but
 	// lies inside no git repository with a main worktree. It is DISTINCT from
 	// ArmNotAWorktree, which is about the announced directory being a worktree

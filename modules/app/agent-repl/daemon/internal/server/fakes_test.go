@@ -287,6 +287,9 @@ type fakeVerbs struct {
 	// swaps records every Swap pair; swapErr is what it answers.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
+	// moves records every Move pair; moveErr is what it answers.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
 
 	// editorOpens records every relayed open, a workspace file's path or a
 	// daemon file's.
@@ -1749,6 +1752,11 @@ func receiveHostEvent(
 type repositoryFold struct {
 	repo   ids.RepoID
 	folded bool
+}
+
+func (v *fakeVerbs) Move(_ context.Context, ws, target ids.WorkspaceID) error {
+	v.moves = append(v.moves, [2]ids.WorkspaceID{ws, target})
+	return v.moveErr
 }
 
 func (v *fakeVerbs) Swap(_ context.Context, ws, target ids.WorkspaceID) error {

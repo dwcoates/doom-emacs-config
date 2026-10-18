@@ -2,7 +2,9 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"maps"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -1084,5 +1086,194 @@ func TestPlaceWorkspacesRefusesAMalformedPlacement(t *testing.T) {
 				t.Fatalf("no error record: %v", log.Records())
 			}
 		})
+	}
+}
+
+// namesAmong answers NAMES in ascending stored place, every other name left out.
+func namesAmong(t *testing.T, s *store, names ...string) []string {
+	t.Helper()
+	return slices.DeleteFunc(orderedNames(t, s), func(name string) bool { return !slices.Contains(names, name) })
+}
+
+func TestMoveWorkspaceShiftsTheTabsBetween(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws, target string
+		want       []string
+	}{
+		{name: "from an earlier tab it lands just after the target", ws: "a", target: "c", want: []string{"b", "c", "a", "d"}},
+		{name: "from a later tab it lands just before the target", ws: "d", target: "b", want: []string{"a", "d", "b", "c"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repoDir := arrangeRepo(t, "repo")
+			byName := map[string]WorkspaceID{}
+			for _, name := range []string{"a", "b", "c", "d"} {
+				byName[name] = registerIn(t, s, repoDir, name, nil).ID
+			}
+			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName["a"], byName["b"], byName["c"], byName["d"]}, nil, nil); err != nil {
+				t.Fatalf("PlaceWorkspaces: %v", err)
+			}
+
+			// Act
+			err := s.MoveWorkspace(context.Background(), byName[tt.ws], byName[tt.target])
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MoveWorkspace: %v", err)
+			}
+			if got := namesAmong(t, s, "a", "b", "c", "d"); !slices.Equal(got, tt.want) {
+				t.Fatalf("order = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMoveWorkspaceFromAnEarlierListJoinsTheTargetsSubsectionAfterIt(t *testing.T) {
+	// Arrange -- the unsectioned list is walked before every subsection's.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	ws := registerIn(t, s, repoDir, "w", nil)
+	target := registerIn(t, s, repoDir, "target", nil)
+	after := registerIn(t, s, repoDir, "after", nil)
+	later := mustSubsection(t, s, ws.Repo, "later")
+	mustPlace(t, s, target.ID, &later.ID, nil)
+	mustPlace(t, s, after.ID, &later.ID, nil)
+
+	// Act
+	err := s.MoveWorkspace(context.Background(), ws.ID, target.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if got := subsectionOf(t, s, ws.ID); !sameSubsection(got, &later.ID) {
+		t.Fatalf("w's subsection = %v, want %q", got, later.ID)
+	}
+	if got, want := namesAmong(t, s, "w", "target", "after"), []string{"target", "w", "after"}; !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestMoveWorkspaceFromALaterListLeavesItsSubsectionBeforeTheTarget(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	target := registerIn(t, s, repoDir, "target", nil)
+	ws := registerIn(t, s, repoDir, "w", nil)
+	later := mustSubsection(t, s, ws.Repo, "later")
+	mustPlace(t, s, ws.ID, &later.ID, nil)
+
+	// Act
+	err := s.MoveWorkspace(context.Background(), ws.ID, target.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if got := subsectionOf(t, s, ws.ID); got != nil {
+		t.Fatalf("w's subsection = %q, want none", *got)
+	}
+	if got, want := namesAmong(t, s, "w", "target"), []string{"w", "target"}; !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestMoveWorkspaceMovesAChildAmongItsSiblings(t *testing.T) {
+	// Arrange -- the parent sits in a subsection, which its children follow
+	// without storing one.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	later := mustSubsection(t, s, parent.Repo, "later")
+	mustPlace(t, s, parent.ID, &later.ID, nil)
+	byName := map[string]WorkspaceID{}
+	for _, name := range []string{"one", "two", "three"} {
+		byName[name] = registerChild(t, s, repoDir, name, parent.ID).ID
+	}
+	start := namesAmong(t, s, "one", "two", "three")
+	first, last := start[0], start[2]
+
+	// Act -- the first sibling onto the last one's tab.
+	err := s.MoveWorkspace(context.Background(), byName[first], byName[last])
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if got, want := namesAmong(t, s, "one", "two", "three"), []string{start[1], last, first}; !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+	var stored sql.NullString
+	if err := scanWorkspaceRow(context.Background(), s.db(), byName[first], "subsection_id", &stored); err != nil {
+		t.Fatalf("read one's stored subsection: %v", err)
+	}
+	if stored.Valid {
+		t.Fatalf("the moved child stores subsection %q, want none", stored.String)
+	}
+}
+
+func TestMoveWorkspaceRefusesAPairWithNoTabToTake(t *testing.T) {
+	tests := []struct {
+		name string
+		pick func(t *testing.T, s *store) (ws, target WorkspaceID)
+		want error
+	}{
+		{name: "two repositories", want: ErrOtherRepository, pick: func(t *testing.T, s *store) (WorkspaceID, WorkspaceID) {
+			return registerIn(t, s, arrangeRepo(t, "one"), "a", nil).ID, registerIn(t, s, arrangeRepo(t, "two"), "b", nil).ID
+		}},
+		{name: "a top-level workspace and a child", want: ErrNotSiblings, pick: func(t *testing.T, s *store) (WorkspaceID, WorkspaceID) {
+			repoDir := arrangeRepo(t, "repo")
+			parent := registerIn(t, s, repoDir, "parent", nil)
+			return registerIn(t, s, repoDir, "root", nil).ID, registerChild(t, s, repoDir, "child", parent.ID).ID
+		}},
+		{name: "children of two parents", want: ErrNotSiblings, pick: func(t *testing.T, s *store) (WorkspaceID, WorkspaceID) {
+			repoDir := arrangeRepo(t, "repo")
+			left := registerIn(t, s, repoDir, "left", nil)
+			right := registerIn(t, s, repoDir, "right", nil)
+			return registerChild(t, s, repoDir, "l", left.ID).ID, registerChild(t, s, repoDir, "r", right.ID).ID
+		}},
+		{name: "an unknown workspace", want: ErrNotFound, pick: func(t *testing.T, s *store) (WorkspaceID, WorkspaceID) {
+			return registerIn(t, s, arrangeRepo(t, "repo"), "a", nil).ID, "absent"
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws, target := tt.pick(t, s)
+			before := placesByName(t, s)
+
+			// Act
+			err := s.MoveWorkspace(context.Background(), ws, target)
+
+			// Assert
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("MoveWorkspace = %v, want %v", err, tt.want)
+			}
+			if got := placesByName(t, s); !maps.Equal(got, before) {
+				t.Fatalf("places = %v after a refused move, want %v unchanged", got, before)
+			}
+		})
+	}
+}
+
+func TestMoveWorkspaceRefusesAMoveOntoItsOwnTab(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := registerIn(t, s, arrangeRepo(t, "repo"), "w", nil)
+
+	// Act
+	err := s.MoveWorkspace(context.Background(), ws.ID, ws.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("MoveWorkspace onto its own tab succeeded, want it refused")
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.move_workspace"})
+	if !ok || rec.Context["workspace"] != ws.ID {
+		t.Fatalf("move record = %+v (found %v), want an ERROR naming the workspace", rec, ok)
 	}
 }
