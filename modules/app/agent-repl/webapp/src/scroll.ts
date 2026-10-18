@@ -94,6 +94,10 @@ export interface ScrollPosition {
  *   path (`sidebar/selection-edge.ts`); the feed parks at its tail and
  *   follows (owner ruling, 2026-10-02). Returning to Emacs from another
  *   application is not a switch and moves nothing.
+ * - `lastBubbleExpanded`, `lastBubbleCollapsed`: the reader's click expanded
+ *   or collapsed the bubble of the feed's LAST root row; the feed parks at its
+ *   tail and follows, so the opening sub-feed is brought into view, or the
+ *   space the closing one leaves is filled (`TailFollow.lastBubbleFolded`).
  * - `prependCompensation`: content above the reader changed height, and the
  *   view shifts by exactly that, so the content under the reader stays put.
  *   This is THE FEED'S SCROLL ANCHORING (`TailFollow`, "THE FEED OWNS ITS
@@ -128,6 +132,7 @@ export const SCROLL_CAUSES = [
   "replaceRestore",
   "workspaceSelected",
   "lastBubbleExpanded",
+  "lastBubbleCollapsed",
   "prependCompensation",
   "latestVisible",
 ] as const;
@@ -147,6 +152,7 @@ type ParkCause =
   | "replaceRestore"
   | "workspaceSelected"
   | "lastBubbleExpanded"
+  | "lastBubbleCollapsed"
   | "latestVisible";
 
 /** A named cause that supersedes the reader's click hold (`supersedeClick`). */
@@ -629,24 +635,30 @@ export class TailFollow {
   }
 
   /**
-   * THE ONE CLICK THAT MOVES THE FEED (owner request, 2026-10-17): the reader
-   * expanded the bubble BUBBLE of a ROOT row. When that row is the feed's
-   * last row, the feed parks at its tail and follows it, so the sub-feed
-   * opening below the reader is brought into view as it draws. Any other
-   * bubble's expansion leaves the view the click held (`readerClicked`).
+   * THE CLICKS THAT MOVE THE FEED (owner requests, 2026-10-17): the reader
+   * expanded or collapsed the bubble BUBBLE of a ROOT row, as CAUSE names.
+   * When that row is the feed's last row, the feed parks at its tail and
+   * follows it: an expansion brings the sub-feed opening below the reader into
+   * view as it draws, and a collapse fills the space the closed sub-feed left
+   * below it. Any other bubble's fold leaves the view the click held
+   * (`readerClicked`).
    */
-  lastBubbleExpanded(bubble: Element): void {
+  lastBubbleFolded(bubble: Element, cause: "lastBubbleExpanded" | "lastBubbleCollapsed"): void {
     const row = this.rootRowOf(bubble);
     const last = this.lastDrawnRow();
     if (row === null || row !== last) {
-      log.debug("an expanded bubble is not the feed's last row; the view holds", {
-        operation: "scroll.bubble-expanded-held",
-        context: { row: row === null ? "none" : rowName(row), last: last === null ? "none" : rowName(last) },
+      log.debug("a folded bubble is not the feed's last row; the view holds", {
+        operation: "scroll.bubble-folded-held",
+        context: {
+          cause,
+          row: row === null ? "none" : rowName(row),
+          last: last === null ? "none" : rowName(last),
+        },
       });
       return;
     }
-    this.supersedeClick("lastBubbleExpanded");
-    this.park("lastBubbleExpanded");
+    this.supersedeClick(cause);
+    this.park(cause);
   }
 
   /** The feed's last root row that draws a box, or null with no rows to read. */

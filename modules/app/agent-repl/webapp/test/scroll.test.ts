@@ -400,7 +400,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the eleven causes the owner rules allow", () => {
+  it("names exactly the twelve causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -412,6 +412,7 @@ describe("SCROLL_CAUSES", () => {
       "replaceRestore",
       "workspaceSelected",
       "lastBubbleExpanded",
+      "lastBubbleCollapsed",
       "prependCompensation",
       "latestVisible",
     ]);
@@ -2882,62 +2883,62 @@ function anchoredFeed(
   };
 }
 
-describe("TailFollow.lastBubbleExpanded", () => {
+describe.each(["lastBubbleExpanded", "lastBubbleCollapsed"] as const)("TailFollow.lastBubbleFolded under %s", (cause) => {
   // Rows at content tops 0, 400, 800, 1200; the reader at 500.
   const rows = [400, 400, 400, 400];
 
-  /** The feed after the reader's click expanded a bubble inside row I. */
-  function expandedIn(i: number) {
+  /** The feed after the reader's click folded a bubble inside row I. */
+  function foldedIn(i: number) {
     const f = anchoredFeed(rows, 500);
     f.scroll();
     const bubble = document.createElement("div");
     f.host.children[i].append(bubble);
     f.tail.readerClicked(bubble);
-    f.tail.lastBubbleExpanded(bubble);
+    f.tail.lastBubbleFolded(bubble, cause);
     return f;
   }
 
   it("parks the feed at its tail when the bubble is the feed's last row", () => {
     // Arrange / Act
-    const f = expandedIn(3);
+    const f = foldedIn(3);
     // Assert
     expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([1600, true]);
   });
 
-  it("keeps the opening sub-feed in view as it draws", () => {
-    // Arrange
-    const f = expandedIn(3);
-    // Act -- the sub-feed lands, 300px taller.
-    f.h[3] += 300;
-    f.resize();
-    // Assert
-    expect(f.box.scrollTop).toBe(1900);
-  });
-
-  it("records the move under lastBubbleExpanded", async () => {
+  it("records the move under its cause", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
     // Act
-    expandedIn(3);
+    foldedIn(3);
     // Assert
-    expect(await moves(capture)).toEqual([{ cause: "lastBubbleExpanded", from: 500, to: 1600, follow: false }]);
+    expect(await moves(capture)).toEqual([{ cause, from: 500, to: 1600, follow: false }]);
   });
 
-  it("records the click hold it ends under lastBubbleExpanded", async () => {
+  it("records the click hold it ends under its cause", async () => {
     // Arrange
     const capture = captureLogRecords("info");
     // Act
-    expandedIn(3);
+    foldedIn(3);
     // Assert
     const record = await forwardedRecord(capture, "scroll.click-hold-ended");
-    expect(record.context).toMatchObject({ by: "lastBubbleExpanded", held_top: 500, row: "r3" });
+    expect(record.context).toMatchObject({ by: cause, held_top: 500, row: "r3" });
   });
 
   it("holds the view the click held for any other row's bubble", () => {
     // Arrange / Act
-    const f = expandedIn(2);
+    const f = foldedIn(2);
     // Assert
     expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([500, false]);
+  });
+
+  it("records the held view with its cause for any other row's bubble", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    foldedIn(2);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.bubble-folded-held");
+    expect(record.context).toMatchObject({ cause, row: "r2", last: "r3" });
   });
 
   it("takes the last row that draws a box as the feed's last", () => {
@@ -2947,9 +2948,40 @@ describe("TailFollow.lastBubbleExpanded", () => {
     const bubble = document.createElement("div");
     f.host.children[2].append(bubble);
     // Act
-    f.tail.lastBubbleExpanded(bubble);
+    f.tail.lastBubbleFolded(bubble, cause);
     // Assert
     expect(f.tail.isFollowing()).toBe(true);
+  });
+});
+
+describe("TailFollow.lastBubbleFolded: the fold's own effect on the tail", () => {
+  it("keeps the opening sub-feed in view as it draws", () => {
+    // Arrange
+    const f = anchoredFeed([400, 400, 400, 400], 500);
+    f.scroll();
+    const bubble = document.createElement("div");
+    f.host.children[3].append(bubble);
+    f.tail.readerClicked(bubble);
+    f.tail.lastBubbleFolded(bubble, "lastBubbleExpanded");
+    // Act -- the sub-feed lands, 300px taller.
+    f.h[3] += 300;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1900);
+  });
+
+  it("fills the space the closed sub-feed left below the last bubble", () => {
+    // Arrange -- the reader sees the last row's head at 1200 of a 2100px feed.
+    const f = anchoredFeed([400, 400, 400, 900], 1200, { clamp: true });
+    f.scroll();
+    const bubble = document.createElement("div");
+    f.host.children[3].append(bubble);
+    f.tail.readerClicked(bubble);
+    // Act -- the collapse closes 700px of sub-feed, then asks for the tail.
+    f.h[3] -= 700;
+    f.tail.lastBubbleFolded(bubble, "lastBubbleCollapsed");
+    // Assert -- the feed's end now sits at the viewport's bottom.
+    expect([f.box.scrollTop, f.tail.isFollowing()]).toEqual([1100, true]);
   });
 });
 

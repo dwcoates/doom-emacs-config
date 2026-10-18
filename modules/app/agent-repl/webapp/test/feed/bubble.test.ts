@@ -1788,12 +1788,12 @@ describe("mountBubble: the head's title fold follows the bubble's fold", () => {
   });
 });
 
-describe("mountBubble: the reader's expansion asks the feed to bring a last bubble into view", () => {
+describe("mountBubble: the reader's fold asks the feed to bring a last bubble into view", () => {
   /** A bubble on a scroll box whose tail records what it is asked. */
   function withTail(h: Harness = harness(), feed?: RowContext["feed"]) {
     const box = document.createElement("div");
     const tail = new TailFollow(box);
-    const asked = vi.spyOn(tail, "lastBubbleExpanded");
+    const asked = vi.spyOn(tail, "lastBubbleFolded");
     const { bubble } = mount(subagentRow("b1"), h, { scroll: { box, tail }, feed });
     return { bubble, asked, head: bubble.element.querySelector<HTMLElement>("[data-expand]")! };
   }
@@ -1805,12 +1805,53 @@ describe("mountBubble: the reader's expansion asks the feed to bring a last bubb
     head.click();
     await settle();
     // Assert
-    expect(asked.mock.calls).toEqual([[bubble.element]]);
+    expect(asked.mock.calls).toEqual([[bubble.element, "lastBubbleExpanded"]]);
   });
 
-  it("asks nothing for a bubble of a sub-feed", async () => {
+  it("hands a root bubble the reader closed to the tail", async () => {
+    // Arrange
+    const { bubble, asked, head } = withTail();
+    head.click();
+    await settle();
+    asked.mockClear();
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect(asked.mock.calls).toEqual([[bubble.element, "lastBubbleCollapsed"]]);
+  });
+
+  it("asks only once the closed sub-feed is gone", async () => {
+    // Arrange
+    const { bubble, asked, head } = withTail();
+    head.click();
+    await settle();
+    const panelHidden: boolean[] = [];
+    asked.mockImplementation(() => {
+      panelHidden.push(bubble.element.querySelector<HTMLElement>("[data-subfeed]")!.hidden);
+    });
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect([bubble.element.getAttribute("data-expanded"), panelHidden]).toEqual(["false", [true]]);
+  });
+
+  it("asks nothing for a bubble of a sub-feed opened by the reader", async () => {
     // Arrange
     const { asked, head } = withTail(harness(), create(FeedIdSchema, { value: "outer" }));
+    // Act
+    head.click();
+    await settle();
+    // Assert
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing for a bubble of a sub-feed closed by the reader", async () => {
+    // Arrange
+    const { asked, head } = withTail(harness(), create(FeedIdSchema, { value: "outer" }));
+    head.click();
+    await settle();
     // Act
     head.click();
     await settle();
@@ -1835,19 +1876,6 @@ describe("mountBubble: the reader's expansion asks the feed to bring a last bubb
     const { bubble, asked } = withTail();
     // Act
     await bubble.expand();
-    await settle();
-    // Assert
-    expect(asked).not.toHaveBeenCalled();
-  });
-
-  it("asks nothing when the reader folds the bubble", async () => {
-    // Arrange
-    const { asked, head } = withTail();
-    head.click();
-    await settle();
-    asked.mockClear();
-    // Act
-    head.click();
     await settle();
     // Assert
     expect(asked).not.toHaveBeenCalled();
