@@ -148,6 +148,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"joining":    joining,
 		"state_root": layout.Dir(),
 		"git_binary": gitclient.Binary(),
+		"started_in": opts.startedIn,
 	})
 	defer log.Info("daemon.cmd.exit", "the daemon process ended", dlog.Context{
 		"joining":    joining,
