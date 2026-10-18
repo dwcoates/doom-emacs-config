@@ -143,9 +143,16 @@ func emGHIOpenPanel(t *testing.T, e *Emacs) {
 // workspace with no session (`no_session`), and opening the panel does not
 // wait for the session. A settled roster arm is published only once the
 // session is serving, so awaiting one orders the submit after it.
+//
+// That wait is the workspace's FIRST open being answered, bounded by
+// emacsTabOpenBound rather than DefaultTimeout: the roster draws the open's
+// `inactive` arm over every other until the open's webapp page has drawn
+// (daemon/internal/opentabs), so the wait spans a shim spawn AND a WebKit page
+// boot. Under the merge gate's parallel load a page whose script started late
+// held the arm at `inactive` past DefaultTimeout while the session was long up.
 func emGHISubmit(t *testing.T, e *Emacs, ws, text string) {
 	t.Helper()
-	emGHIAwaitStatus(t, e, ws, "the workspace's session to be up before the submit", emGHISettledArms...)
+	emGHIAwaitStatusFor(t, e, emacsTabOpenBound, ws, "the workspace's session to be up before the submit", emGHISettledArms...)
 	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(ws) + `))`)
 	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(ws) + `)
                  (erase-buffer)
@@ -164,10 +171,17 @@ func emGHIStatusForm(ws string) string {
 	return `(format "%s" (agent-repl-roster-status-for-ws ` + elispString(ws) + `))`
 }
 
-// emGHIAwaitStatus waits until WS's roster arm is one of ARMS.
+// emGHIAwaitStatus waits until WS's roster arm is one of ARMS, within
+// DefaultTimeout.
 func emGHIAwaitStatus(t *testing.T, e *Emacs, ws, what string, arms ...string) string {
 	t.Helper()
-	raw := e.AwaitEval(what, emGHIStatusForm(ws), func(raw json.RawMessage) bool {
+	return emGHIAwaitStatusFor(t, e, DefaultTimeout, ws, what, arms...)
+}
+
+// emGHIAwaitStatusFor is emGHIAwaitStatus with an explicit, named bound.
+func emGHIAwaitStatusFor(t *testing.T, e *Emacs, bound time.Duration, ws, what string, arms ...string) string {
+	t.Helper()
+	raw := e.AwaitEvalFor(bound, what, emGHIStatusForm(ws), func(raw json.RawMessage) bool {
 		var got string
 		if err := json.Unmarshal(raw, &got); err != nil {
 			return false
