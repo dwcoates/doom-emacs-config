@@ -578,10 +578,11 @@ func (o *orchestrator) dropDetached(ctx context.Context, requester ids.Workspace
 	o.mu.Unlock()
 	// A MERGE NEVER FORKED HAS ENDED WITHOUT LANDING: there is no merge
 	// workspace whose terminal would raise its resolved banner (ended), so it
-	// is raised here.
+	// is raised here, after the requester is told (tellThenRaise).
 	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Branch: source.DetachName}
-	o.raiseResolved(requester, out)
-	return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, out)
+	var err error
+	o.tellThenRaise(requester, out, func() { err = o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, out) })
+	return err
 }
 
 // publishOneShot republishes the roster's DURABLE half once a one-shot merge

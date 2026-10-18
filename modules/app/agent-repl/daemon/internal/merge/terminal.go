@@ -127,16 +127,24 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 }
 
 // ended is EVERY MERGE'S RESOLUTION, however it left the queue for good:
-// landed, failed, or abandoned after it was put in line. It raises the
-// merge's second and last desktop banner, on the workspace the merge ran in,
-// and then hands the outcome back to a detached merge's requester (handBack).
-// Every terminal goes through it, so no resolution goes unannounced and none
-// is announced twice.
+// landed, failed, or abandoned after it was put in line. It hands the outcome
+// back to the workspace whose feed carries the bubble (handBack), and then
+// raises the merge's second and last desktop banner, on the workspace the
+// merge ran in (tellThenRaise). Every terminal goes through it, so no
+// resolution goes unannounced and none is announced twice.
 func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	o.log(ctx, ws).Debug("daemon.merge.ended", "a merge left the queue for good; raising its resolved banner", dlog.Context{
+	o.log(ctx, ws).Debug("daemon.merge.ended", "a merge left the queue for good; handing it back and raising its resolved banner", dlog.Context{
 		"workspace": string(ws), "outcome": out.Kind.String()})
+	o.tellThenRaise(ws, out, func() { o.handBack(ctx, ws, out) })
+}
+
+// tellThenRaise is EVERY RESOLUTION'S ORDER: TELL reports the outcome to the
+// workspaces it is handed back to, and the resolved desktop banner and its
+// chime are raised on ws just after, in the same routine. A workspace is
+// told of a merge's end before the banner announces it, never after.
+func (o *orchestrator) tellThenRaise(ws ids.WorkspaceID, out DetachedOutcome, tell func()) {
+	tell()
 	o.raiseResolved(ws, out)
-	o.handBack(ctx, ws, out)
 }
 
 // raiseResolved raises the resolved desktop banner of a merge's outcome on ws.

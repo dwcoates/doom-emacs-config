@@ -25,8 +25,14 @@ type raisedBanner struct {
 
 // fakeBanners records every banner the merge queue raised, in order.
 type fakeBanners struct {
+	// told answers how many handbacks were sent so far; each resolved banner
+	// records it as it is raised (toldAt), so a test asserts the handback
+	// came first on the real order.
+	told func() int
+
 	mu     sync.Mutex
 	raised []raisedBanner
+	toldAt []int
 }
 
 func (b *fakeBanners) Queued(ws ids.WorkspaceID, label string) {
@@ -36,9 +42,19 @@ func (b *fakeBanners) Queued(ws ids.WorkspaceID, label string) {
 }
 
 func (b *fakeBanners) Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string) {
+	told := b.told()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.raised = append(b.raised, raisedBanner{ws: ws, kind: end.String(), text: summary})
+	b.toldAt = append(b.toldAt, told)
+}
+
+// handbacksBeforeResolved answers, for each resolved banner in order, how
+// many handbacks had been sent when it was raised.
+func (b *fakeBanners) handbacksBeforeResolved() []int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]int(nil), b.toldAt...)
 }
 
 // seen answers every banner raised so far.
@@ -331,6 +347,106 @@ func TestDetachedOutcomeKindMergeEnd(t *testing.T) {
 	}
 }
 
+// TestAMergesEndIsHandedBackBeforeItsResolvedBanner pins the order of every
+// resolution that hands its end back: the workspace is told first, and the
+// resolved banner and its chime come just after.
+func TestAMergesEndIsHandedBackBeforeItsResolvedBanner(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		act     func(t *testing.T, h *harness)
+		end     string
+	}{
+		{
+			name: "an async merge that landed",
+			arrange: func(t *testing.T, h *harness) {
+				h.emacsRepo()
+				h.landsCleanly("abc123def4567")
+				h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+				h.gatePasses("daemon")
+				if err := requestDetached(t, h, RequestedByUser); err != nil {
+					t.Fatalf("Enqueue: %v", err)
+				}
+			},
+			act: func(t *testing.T, h *harness) {
+				if err := h.admit(context.Background()); err != nil {
+					t.Fatalf("the merge failed: %v", err)
+				}
+			},
+			end: "landed",
+		},
+		{
+			name: "a sync merge that failed",
+			arrange: func(t *testing.T, h *harness) {
+				h.emacsRepo()
+				h.configureActions([]string{"before"}, nil)
+				h.briefs["before"] = nil
+				h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+				enqueue(t, h)
+			},
+			act: func(t *testing.T, h *harness) {
+				_ = h.admit(context.Background())
+			},
+			end: "failed",
+		},
+		{
+			name: "an async request whose fork failed",
+			arrange: func(t *testing.T, h *harness) {
+				h.detached.forkErr = errors.New("the worktree could not be made")
+			},
+			act: func(t *testing.T, h *harness) {
+				if err := requestDetached(t, h, RequestedByUser); err != nil {
+					t.Fatalf("Enqueue: %v", err)
+				}
+			},
+			end: "abandoned",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(t, h)
+
+			// Act
+			tt.act(t, h)
+
+			// Assert
+			raised := h.banners.seen()
+			if len(raised) == 0 || raised[len(raised)-1].kind != tt.end {
+				t.Fatalf("banners = %+v, want the last one %s", raised, tt.end)
+			}
+			if got := h.banners.handbacksBeforeResolved(); !reflect.DeepEqual(got, []int{1}) {
+				t.Fatalf("handbacks sent before each resolved banner = %v, want [1]: the end handed back first", got)
+			}
+		})
+	}
+}
+
+func TestTellThenRaiseTellsBeforeItRaisesTheResolvedBanner(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	var order []string
+	tell := func() {
+		if len(h.banners.seen()) != 0 {
+			order = append(order, "raised before tell")
+		}
+		order = append(order, "told")
+	}
+
+	// Act
+	h.o.tellThenRaise(theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "the tests failed"}, tell)
+
+	// Assert
+	if !reflect.DeepEqual(order, []string{"told"}) {
+		t.Fatalf("order = %v, want the tell alone, before any banner", order)
+	}
+	want := []raisedBanner{{ws: theWorkspace, kind: "failed", text: "the tests failed"}}
+	if got := h.banners.seen(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("banners = %+v, want %+v", got, want)
+	}
+}
+
 func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 	// Assert
 	defer func() {
@@ -344,16 +460,18 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 }
 
 // TestEveryResolutionIsAnnouncedThroughEnded pins the one funnel: a merge's
-// resolved banner is raised only through raiseResolved, by ended (and by the
-// fork that never made a merge workspace), and a handback skips ended only for
+// resolved banner is raised only through raiseResolved, by tellThenRaise,
+// which ended (and the fork that never made a merge workspace) call, so every
+// end is handed back before its banner rises. A handback skips ended only for
 // a merge never put in line, so no terminal can hand back without announcing
 // its end, and every end's banner is worded by the one bannerLine.
 func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	// Arrange / Act: the package's own production sources.
-	resolved, raised, handBacks := 0, 0, 0
+	resolved, raised, ordered, handBacks := 0, 0, 0, 0
 	for _, file := range sourcescan.Production(t) {
 		resolved += strings.Count(string(file.Source), "Banners.Resolved(")
 		raised += strings.Count(string(file.Source), "o.raiseResolved(")
+		ordered += strings.Count(string(file.Source), "o.tellThenRaise(")
 		handBacks += strings.Count(string(file.Source), "o.handBack(ctx")
 	}
 
@@ -361,8 +479,11 @@ func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	if resolved != 1 {
 		t.Errorf("Banners.Resolved is called at %d sites, want 1: raiseResolved", resolved)
 	}
-	if raised != 2 {
-		t.Errorf("raiseResolved is called at %d sites, want 2: ended and the failed fork", raised)
+	if raised != 1 {
+		t.Errorf("raiseResolved is called at %d sites, want 1: tellThenRaise", raised)
+	}
+	if ordered != 2 {
+		t.Errorf("tellThenRaise is called at %d sites, want 2: ended and the failed fork", ordered)
 	}
 	if handBacks != 2 {
 		t.Errorf("handBack is called at %d sites, want 2: ended and a merge never put in line", handBacks)
