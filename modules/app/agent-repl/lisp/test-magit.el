@@ -202,9 +202,9 @@ metacharacters are never reachable as shell syntax."
         (agent-repl-magit-status-workspace)
         (should (= split-calls 0))))))
 
-(ert-deftest agent-repl-test-magit-status-workspace-clears-fullscreen-config ()
-  "Clears any saved `:fullscreen-config' -- magit replacing the current
-buffer means claude is no longer fullscreen."
+(ert-deftest agent-repl-test-magit-status-workspace-keeps-fullscreen-config ()
+  "Keeps the saved `:fullscreen-config' -- `q' on the status buffer
+brings the panels back, and their later close restores that layout."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
     (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
@@ -212,7 +212,7 @@ buffer means claude is no longer fullscreen."
               ((symbol-function 'window-parameter) (lambda (_w _p) nil))
               ((symbol-function 'magit-status-setup-buffer) #'ignore))
       (agent-repl-magit-status-workspace)
-      (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
+      (should (eq (agent-repl--ws-get "test-ws" :fullscreen-config) 'fake-config)))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-binds-same-window-display-fn ()
   "Let-binds `magit-display-buffer-function' to the same-window helper
@@ -304,18 +304,6 @@ so no STUB-CREATE entry leaks into the workspace state table."
         (agent-repl-magit-status-workspace)
         (should (= ws-put-calls 0))))))
 
-(ert-deftest agent-repl-test-magit-status-workspace-still-clears-fullscreen-when-tracked ()
-  "When the workspace IS tracked, still clears `:fullscreen-config'.
-Guards against the untracked-fallback regressing the tracked path."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :project-dir "/tmp/proj")
-    (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-              ((symbol-function 'magit-status-setup-buffer) #'ignore))
-      (agent-repl-magit-status-workspace)
-      (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
-
 ;;;; ---- Tests: agent-repl-magit-status-main-worktree (SPC g G) ----
 
 (defmacro agent-repl-test-magit--with-common-dir (common-dir &rest body)
@@ -379,8 +367,8 @@ directories need not exist."
           (agent-repl-magit-status-main-worktree)
           (should (eq observed-fn #'agent-repl--magit-display-buffer-same-window)))))))
 
-(ert-deftest agent-repl-test-magit-status-main-worktree-clears-fullscreen-config ()
-  "A tracked workspace's `:fullscreen-config' is cleared, exactly as `SPC g g' does."
+(ert-deftest agent-repl-test-magit-status-main-worktree-keeps-fullscreen-config ()
+  "A tracked workspace's `:fullscreen-config' is kept, exactly as `SPC g g' does."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :project-dir "/repos/doom-worktrees/feat")
     (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
@@ -389,7 +377,7 @@ directories need not exist."
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (agent-repl-magit-status-main-worktree)
-        (should (null (agent-repl--ws-get "test-ws" :fullscreen-config)))))))
+        (should (eq (agent-repl--ws-get "test-ws" :fullscreen-config) 'fake-config))))))
 
 (ert-deftest agent-repl-test-magit-status-main-worktree-refuses-outside-a-repository ()
   "Outside a git repository: a `user-error', an error log, and no magit."
@@ -944,6 +932,89 @@ Pins that the fix did not weaken this refusal."
   (should-error
    (agent-repl-test--magit-commit-url-for-remote
     "git@example.com:someone/repo.git")))
+
+;;;; ---- Tests: agent-repl-magit-status-quit (q on magit-status) ----
+
+(defmacro agent-repl-test-magit--with-status-quit (mode saved &rest body)
+  "Run BODY in a buffer of major MODE whose saved window configuration is SAVED.
+Binds `status' to that buffer, `calls' to magit's quit entry points as
+they ran, newest first, each with the buffer current when it ran, and
+`infos' and `errors' to the recorded `agent-repl--info' and
+`agent-repl--error' lines.  The restore stub leaves another buffer
+current, as magit's does when it restores a configuration."
+  (declare (indent 2))
+  `(let ((status (generate-new-buffer "magit: repo"))
+         (elsewhere (generate-new-buffer " *restored*"))
+         (calls nil) (infos nil) (errors nil))
+     (unwind-protect
+         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-1"))
+                   ((symbol-function 'magit-restore-window-configuration)
+                    (lambda (&rest _)
+                      (push (list :restore (current-buffer)) calls)
+                      (set-buffer elsewhere)))
+                   ((symbol-function '+magit/quit-all)
+                    (lambda () (push (list :quit-all (current-buffer)) calls)))
+                   ((symbol-function 'agent-repl--info)
+                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                   ((symbol-function 'agent-repl--error)
+                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+           (with-current-buffer status
+             (setq major-mode ,mode
+                   default-directory "/repo/")
+             (setq-local magit-previous-window-configuration ,saved)
+             ,@body))
+       (kill-buffer status)
+       (kill-buffer elsewhere))))
+
+(ert-deftest agent-repl-test-magit-status-quit-restores-then-closes-from-the-status-buffer ()
+  "Restores the saved windows, then closes the repository's magit from the status buffer."
+  (agent-repl-test-magit--with-status-quit 'magit-status-mode (current-window-configuration)
+    ;; Act
+    (agent-repl-magit-status-quit)
+    ;; Assert
+    (should (equal (reverse calls) (list (list :restore status) (list :quit-all status))))))
+
+(ert-deftest agent-repl-test-magit-status-quit-logs-the-restore ()
+  "The info record names the workspace, buffer, directory and restore branch."
+  (agent-repl-test-magit--with-status-quit 'magit-status-mode (current-window-configuration)
+    ;; Act
+    (agent-repl-magit-status-quit)
+    ;; Assert
+    (should (equal infos
+                   '("elisp.magit.status-quit ws=ws-1 buffer=magit: repo dir=/repo/ branch=restore-windows")))))
+
+(ert-deftest agent-repl-test-magit-status-quit-closes-magit-without-saved-windows ()
+  "With no saved configuration, magit still closes, and the record says so."
+  (agent-repl-test-magit--with-status-quit 'magit-status-mode nil
+    ;; Act
+    (agent-repl-magit-status-quit)
+    ;; Assert
+    (should (equal (mapcar #'car (reverse calls)) '(:restore :quit-all)))
+    (should (string-suffix-p "branch=no-saved-windows" (car infos)))))
+
+(ert-deftest agent-repl-test-magit-status-quit-refuses-outside-magit-status ()
+  "Outside a magit-status buffer: a `user-error', an error log, and no quit."
+  (agent-repl-test-magit--with-status-quit 'magit-log-mode (current-window-configuration)
+    ;; Act
+    (should-error (agent-repl-magit-status-quit) :type 'user-error)
+    ;; Assert
+    (should (null calls))
+    (should (null infos))
+    (should (equal errors
+                   '("elisp.magit.status-quit ws=ws-1 buffer=magit: repo mode=magit-log-mode cause=not-a-magit-status-buffer")))))
+
+(ert-deftest agent-repl-test-magit-status-quit-branch-names-each-saved-state ()
+  "Each saved configuration state gets its own branch name."
+  (dolist (case `(("nothing saved" nil this "no-saved-windows")
+                  ("this frame" saved this "restore-windows")
+                  ("another frame" saved other "other-frame")))
+    (pcase-let ((`(,name ,saved ,frame ,expected) case))
+      ;; Arrange
+      (cl-letf (((symbol-function 'window-configuration-frame)
+                 (lambda (_c) (if (eq frame 'this) (selected-frame) 'another-frame))))
+        ;; Act + Assert
+        (should (equal (list name (agent-repl--magit-status-quit-branch saved))
+                       (list name expected)))))))
 
 (provide 'test-magit)
 ;;; test-magit.el ends here
