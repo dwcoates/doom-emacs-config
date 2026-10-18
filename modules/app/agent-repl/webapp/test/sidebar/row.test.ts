@@ -274,7 +274,7 @@ describe("the highlight and the receded styling", () => {
     expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--row-current-gutter\)/.test(d))).toBe(true);
   });
 
-  it("fills the current row's line with the neutral --card grey and gutters it in --muted", () => {
+  it("fills the current row's line a quarter back from --card toward the rail and gutters it in --muted", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     const token = (name: string): string | undefined =>
@@ -287,7 +287,7 @@ describe("the highlight and the receded styling", () => {
       declarations.some((d) => /background-color:\s*var\(--row-current-tint\)/.test(d)),
       token("--row-current-tint"),
       token("--row-current-gutter"),
-    ]).toEqual([true, "var(--card)", "var(--muted)"]);
+    ]).toEqual([true, "color-mix(in srgb, var(--card) 75%, var(--sidebar-bg))", "var(--muted)"]);
   });
 
   it("paints the current row's tint through the cascade", () => {
