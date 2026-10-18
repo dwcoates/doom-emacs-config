@@ -212,9 +212,19 @@ func (c *Controller) applyPower(ctx context.Context, on bool) error {
 		value = "1"
 	}
 	for _, setting := range powerSettings {
-		if _, err := run(ctx, c.runner, c.cfg.Tools.Sudo, "-n", c.cfg.Tools.Pmset, "-a", setting, value); err != nil {
-			return fmt.Errorf("pmset -a %s %s: %w", setting, value, err)
+		if err := c.pmsetAll(ctx, setting, value); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// pmsetAll is THE ONE privileged power write: `sudo -n pmset -a <setting>
+// <value>`, the exact shape every line of the sudoers grant names. The error
+// names the invocation.
+func (c *Controller) pmsetAll(ctx context.Context, setting, value string) error {
+	if _, err := run(ctx, c.runner, c.cfg.Tools.Sudo, "-n", c.cfg.Tools.Pmset, "-a", setting, value); err != nil {
+		return fmt.Errorf("pmset -a %s %s: %w", setting, value, err)
 	}
 	return nil
 }
