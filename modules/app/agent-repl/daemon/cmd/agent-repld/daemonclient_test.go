@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -84,14 +83,6 @@ func TestServingAddressWithAnEmptyAdvertisementIsNoDaemonServing(t *testing.T) {
 	}
 }
 
-// standingStreamBound bounds every standing-stream test: just over twice the
-// healthy open, read, and close of one stream on the loopback under the merge
-// gate's load (measured 2026-10-15 at worst 322ms over 400 footer reads at
-// background priority with a load average near 115; ~3ms on an idle host). A
-// Close that drains a standing stream blocks until the bound runs out, so the
-// reader's context ending first is the failure, however loaded the host.
-const standingStreamBound = 750 * time.Millisecond
-
 // standingDaemon is a daemon whose roster and footer streams push one frame
 // and then stand open, never ending and never pushing 4MiB, as the real ones
 // do between changes.
@@ -139,32 +130,24 @@ func serveStandingDaemon(t *testing.T, roster *frontendv1.WorkspaceRoster) (*sta
 	return daemon, server.Listener.Addr().String()
 }
 
-// boundedContext is a context that ends at standingStreamBound.
-func boundedContext(t *testing.T) context.Context {
+// assertStreamEnded fails unless the daemon saw the reader end its stream.
+//
+// NO WALL-CLOCK BOUND DECIDES A DRAIN. A standingDaemon never ends a stream,
+// so a reader whose Close drains one never returns: the test hangs until go
+// test's -timeout, whose goroutine dump names the blocked Close. A bound on the
+// healthy open, read and close instead failed whenever the host was loaded
+// past it (raised twice, then exceeded again at 780ms under the merge gate,
+// 2026-10-19), so it failed healthy readers and decided nothing a hang does
+// not.
+func assertStreamEnded(t *testing.T, daemon *standingDaemon) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), standingStreamBound)
-	t.Cleanup(cancel)
-	return ctx
-}
-
-// assertStreamEnded fails unless the daemon saw the reader end its stream
-// and the reader finished before CTX's bound.
-func assertStreamEnded(t *testing.T, ctx context.Context, daemon *standingDaemon) {
-	t.Helper()
-	if ctx.Err() != nil {
-		t.Fatalf("the reader returned only once its %s bound ran out: it drained a standing stream", standingStreamBound)
-	}
-	select {
-	case <-daemon.ended:
-	case <-ctx.Done():
-		t.Fatalf("the daemon never saw the stream end: %v", ctx.Err())
-	}
+	<-daemon.ended
 }
 
 func TestDaemonStreamCloseEndsAStandingStream(t *testing.T) {
 	// Arrange.
 	daemon, address := serveStandingDaemon(t, roster())
-	ctx := boundedContext(t)
+	ctx := t.Context()
 	stream, err := openDaemonStream(ctx, newDaemonClient(address).WatchWorkspaceRoster, &agentreplv1.WatchWorkspaceRosterRequest{})
 	if err != nil {
 		t.Fatalf("openDaemonStream = %v", err)
@@ -177,7 +160,7 @@ func TestDaemonStreamCloseEndsAStandingStream(t *testing.T) {
 	_ = stream.Close()
 
 	// Assert.
-	assertStreamEnded(t, ctx, daemon)
+	assertStreamEnded(t, daemon)
 }
 
 func TestOpenDaemonStreamAnswersTheOpenError(t *testing.T) {

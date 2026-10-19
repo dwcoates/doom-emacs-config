@@ -1193,7 +1193,7 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 func TestConnectWatchRosterEndsAStandingStreamWhenYieldStops(t *testing.T) {
 	// Arrange.
 	daemon, address := serveStandingDaemon(t, roster())
-	ctx := boundedContext(t)
+	ctx := t.Context()
 	stop := errors.New("stop")
 
 	// Act.
@@ -1203,13 +1203,13 @@ func TestConnectWatchRosterEndsAStandingStreamWhenYieldStops(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("WatchRoster = %v, want the yield's own error", err)
 	}
-	assertStreamEnded(t, ctx, daemon)
+	assertStreamEnded(t, daemon)
 }
 
 func TestConnectFooterEndsAStandingStreamAfterItsFirstFrame(t *testing.T) {
 	// Arrange.
 	daemon, address := serveStandingDaemon(t, roster())
-	ctx := boundedContext(t)
+	ctx := t.Context()
 
 	// Act.
 	footer, err := dialMergeQueueDaemon(address).Footer(ctx, &workspacev1.WorkspaceRef{Id: "ws-1"})
@@ -1218,5 +1218,5 @@ func TestConnectFooterEndsAStandingStreamAfterItsFirstFrame(t *testing.T) {
 	if err != nil || failedArea(footer.GetStrip().GetStatus().GetMergeFailed()) != "tests" {
 		t.Fatalf("Footer = %v, %v; want the first frame's failed footer", footer, err)
 	}
-	assertStreamEnded(t, ctx, daemon)
+	assertStreamEnded(t, daemon)
 }

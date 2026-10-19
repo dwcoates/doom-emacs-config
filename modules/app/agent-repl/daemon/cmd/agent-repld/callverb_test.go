@@ -217,7 +217,7 @@ func TestLookupWorkspaceRefReturnsFromAStandingRosterStream(t *testing.T) {
 	// Arrange.
 	dir := canonicalDir(t.TempDir())
 	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "done", 0)))
-	ctx := boundedContext(t)
+	ctx := t.Context()
 
 	// Act.
 	ref, err := lookupWorkspaceRef(ctx, address, dir)
@@ -226,14 +226,14 @@ func TestLookupWorkspaceRefReturnsFromAStandingRosterStream(t *testing.T) {
 	if err != nil || ref.GetId() != "ws-1" {
 		t.Fatalf("lookupWorkspaceRef = %v, %v; want ws-1", ref, err)
 	}
-	assertStreamEnded(t, ctx, daemon)
+	assertStreamEnded(t, daemon)
 }
 
 func TestCallVerbFillsTheWorkspaceFromAStandingRosterStream(t *testing.T) {
 	// Arrange.
 	dir := canonicalDir(t.TempDir())
 	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "done", 0)))
-	ctx := boundedContext(t)
+	ctx := t.Context()
 	fake := &callFake{answer: `{}`}
 	deps := fake.deps()
 	deps.lookup = lookupWorkspaceRef
@@ -247,5 +247,5 @@ func TestCallVerbFillsTheWorkspaceFromAStandingRosterStream(t *testing.T) {
 	if code != exitSuccess || !strings.Contains(fake.sentJSON, `"id":"ws-1"`) {
 		t.Fatalf("call -workspace = %d, sent %s, stderr %q; want the request sent with ws-1", code, fake.sentJSON, errOut.String())
 	}
-	assertStreamEnded(t, ctx, daemon)
+	assertStreamEnded(t, daemon)
 }
