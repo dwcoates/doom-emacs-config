@@ -171,21 +171,92 @@ func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 	})
 }
 
-func TestSwapWorkspacesCrossesRepositories(t *testing.T) {
+// arrange sends one ArrangeSidebar change and requires its success.
+func arrange(t *testing.T, d *harness.Daemon, req *agentreplv1.ArrangeSidebarRequest) *agentreplv1.ArrangeSidebarSuccess {
+	t.Helper()
+	resp, err := d.Client().ArrangeSidebar(d.Ctx(), connect.NewRequest(req))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ArrangeSidebar = (%v, %v), want success", resp, err)
+	}
+	return resp.Msg.GetSuccess()
+}
+
+func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *testing.T) {
+	t.Parallel()
+	// Arrange: the owner's example, a, b, c in one repository.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
+	first := awaitRoster(t, d, roster, "three tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 3 })
+	head := tabBarIDs(first)[0]
+	section := first.GetRepository().GetSections()[0]
+	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: section.GetKey().GetRepository(), Name: "later"}}}).GetCreated()
+
+	// Act.
+	var headRef *workspacev1.WorkspaceRef
+	for _, ws := range []*workspacev1.WorkspaceRef{a, b, c} {
+		if ws.GetId() == head {
+			headRef = ws
+		}
+	}
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace: headRef,
+			Into:      &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: created},
+			At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		}}})
+
+	// Assert.
+	awaitRoster(t, d, roster, "the first tab now last", func(r *frontendv1.WorkspaceRoster) bool {
+		ids := tabBarIDs(r)
+		return len(ids) == 3 && ids[2] == head && len(r.GetRepository().GetSections()[0].GetSubsections()) == 1
+	})
+}
+
+func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
 	d := newDaemon(t, harness.Opts{})
 	roster := d.WatchRoster()
-	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
-	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
+	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
+	r := awaitRoster(t, d, roster, "two sections", func(r *frontendv1.WorkspaceRoster) bool {
+		return len(r.GetRepository().GetSections()) == 2 && len(tabBarIDs(r)) == 2
+	})
+	firstRepo := r.GetRepository().GetSections()[0].GetKey().GetRepository()
+	before := tabBarIDs(r)
 
 	// Act.
-	swapWorkspaces(t, d, two, one)
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepository{
+		MoveRepository: &agentreplv1.ArrangeMoveRepository{Repository: firstRepo, To: &agentreplv1.ArrangeMoveRepository_End{End: &agentreplv1.ArrangeEnd{}}}}})
 
 	// Assert.
-	awaitRoster(t, d, roster, "the bar two, one", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(tabBarIDs(r), []string{two.GetId(), one.GetId()})
+	awaitRoster(t, d, roster, "the tabs swapped with their repositories", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{before[1], before[0]})
 	})
+}
+
+func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	ws := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+
+	// Act.
+	resp, err := d.Client().GetSidebarArrangement(d.Ctx(), connect.NewRequest(&agentreplv1.GetSidebarArrangementRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidebarArrangement: %v", err)
+	}
+	repos := resp.Msg.GetRepositories()
+	if len(repos) != 1 || len(repos[0].GetWorkspaces()) != 1 || repos[0].GetWorkspaces()[0].GetWorkspace().GetId() != ws.GetId() {
+		t.Fatalf("arrangement = %v, want the one workspace in its repository", resp.Msg)
+	}
 }
 
 func TestClearingAPriorityRemovesTheBadge(t *testing.T) {

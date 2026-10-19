@@ -3,11 +3,10 @@ package wsm
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 func TestListRowsDecodesEveryRowInOrder(t *testing.T) {
@@ -84,24 +83,13 @@ func TestListRowsFailsAQueryThatCannotRun(t *testing.T) {
 // calls a scanX(rows) decoder is a second copy of listRows to drift.
 func TestRowDecodersListThroughListRows(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	handRolled := regexp.MustCompile(`for rows\.Next\(\) \{\s*\w+, err := scan[A-Z]\w*\(rows\)`)
 
 	// Act
 	var offenders []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if handRolled.Match(src) {
-			offenders = append(offenders, file)
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			offenders = append(offenders, file.Name)
 		}
 	}
 
