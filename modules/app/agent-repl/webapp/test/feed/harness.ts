@@ -916,3 +916,11 @@ export function drawnBefore(a: Element | null, b: Element | null): boolean {
   if (a === null || b === null) throw new Error("the drawing lacks an element the order is about");
   return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
+
+/**
+ * The shape of a feed tabline: each child's first class, in order, so a test
+ * can hold a card's tabline to the shared one (`drawFeedTabline`).
+ */
+export function tablineShape(line: Element | null): string[] {
+  return [...(line?.children ?? [])].map((child) => child.classList[0]);
+}

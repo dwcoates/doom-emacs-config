@@ -20,7 +20,7 @@ import {
 } from "../../src/feed/tool-group.js";
 import { FEED_TABLINE_CLASS, FEED_TABLINE_CLOCK_CLASS } from "../../src/feed/tabs.js";
 import { runningClock, stoppedClock } from "./cards/tool-card-head-shape.js";
-import { countingTicker } from "./harness.js";
+import { countingTicker, tablineShape } from "./harness.js";
 import type { FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   feedId,
@@ -463,7 +463,7 @@ describe("the tabline's clock", () => {
     // Assert
     const tabline = wrapper.querySelector(".feed-group-tabline");
     expect(tabline?.classList.contains(FEED_TABLINE_CLASS)).toBe(true);
-    expect([...(tabline?.children ?? [])].map((c) => c.classList[0])).toEqual(["feed-tab-strip", FEED_TABLINE_CLOCK_CLASS]);
+    expect(tablineShape(tabline)).toEqual(["feed-tab-strip", FEED_TABLINE_CLOCK_CLASS]);
   });
 
   it("follows the reader's tab pick to the picked member's clock", () => {

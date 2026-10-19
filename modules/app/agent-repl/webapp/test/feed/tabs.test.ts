@@ -13,7 +13,7 @@ import {
   setFeedTablineClock,
 } from "../../src/feed/tabs.js";
 import { tick } from "../../src/feed/ticking.js";
-import { countingTicker } from "./harness.js";
+import { countingTicker, tablineShape } from "./harness.js";
 import { createToolGroupStore, groupKey } from "../../src/feed/tool-group.js";
 import { isControl } from "../../src/control.js";
 
@@ -164,9 +164,7 @@ describe("every tabbed card draws the shared tabline", () => {
     const wrapper = createToolGroupStore(createTicker()).arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Assert
     const line = wrapper.querySelector(`.${FEED_TABLINE_CLASS}`);
-    expect([...(line?.children ?? [])].map((c) => c.classList[0])).toEqual(
-      [...expected.children].map((c) => c.classList[0]),
-    );
+    expect(tablineShape(line)).toEqual(tablineShape(expected));
   });
 });
 

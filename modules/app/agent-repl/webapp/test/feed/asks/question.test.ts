@@ -45,6 +45,7 @@ import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { ASK_WAITING_WORD } from "../../../src/feed/asks/ask-words.js";
 import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-card-head-shape.js";
 import { orderFor } from "../../feed-order.js";
+import { tablineShape } from "../harness.js";
 import { recordingFailures } from "../../failure-sink.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
@@ -195,9 +196,7 @@ describe("the card's chrome", () => {
 
     // Assert
     const line = el.querySelector(`.${FEED_TABLINE_CLASS}`);
-    expect([...(line?.children ?? [])].map((c) => c.classList[0])).toEqual(
-      [...expected.children].map((c) => c.classList[0]),
-    );
+    expect(tablineShape(line)).toEqual(tablineShape(expected));
   });
 
   it("heads with the answered badge and the stopped clock once answered", () => {
