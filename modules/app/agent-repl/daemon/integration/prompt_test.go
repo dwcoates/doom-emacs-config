@@ -1870,7 +1870,12 @@ func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
 		return promptText(r) == "the reply"
 	})
 	drawn := row.GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	if len(drawn) != 2 || drawn[0].GetQuote().GetText() != blocks[0].GetQuote().GetText() {
-		t.Fatalf("drawn blocks = %v, want the quote arm then the words", drawn)
+	want := &frontendv1.FeedQuoteBlock{
+		Heading: "⟢ Replying to an earlier prompt in this conversation",
+		Quoted:  "the first prompt",
+		Closing: "⟢ My message",
+	}
+	if len(drawn) != 2 || !proto.Equal(drawn[0].GetQuote(), want) {
+		t.Fatalf("drawn blocks = %v, want the quote arm taken apart (%v) then the words", drawn, want)
 	}
 }
