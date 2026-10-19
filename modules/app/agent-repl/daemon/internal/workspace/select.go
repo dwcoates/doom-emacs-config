@@ -418,17 +418,28 @@ func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
 		return err
 	}
 	if err := v.deps.DB.SwapPlaces(ctx, ws, target); err != nil {
-		switch {
-		case errors.Is(err, wsm.ErrOtherRepository):
-			return refuse(log, "SwapWorkspaces", ArmOtherRepository, err.Error(), false)
-		case errors.Is(err, wsm.ErrNotSiblings):
-			return refuse(log, "SwapWorkspaces", ArmNotSiblings, err.Error(), false)
+		if refused := placeRefusal(log, "SwapWorkspaces", err); refused != nil {
+			return refused
 		}
 		log.Error(opSwap, "could not swap the workspaces' places", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("swap %q with %q: %w", ws, target, err)
 	}
 	log.Info(opSwap, "swapped the workspace's place with the target's", nil)
 	v.republishRegistry(ctx, log, opSwap)
+	return nil
+}
+
+// placeRefusal answers RPC's refusal for a store error that refuses taking
+// another workspace's place (two repositories, two workspaces that are not
+// siblings), nil for any other error. Swap and Move share it, so the two
+// verbs answer one condition with one arm.
+func placeRefusal(log dlog.Logger, rpc string, err error) *Refusal {
+	switch {
+	case errors.Is(err, wsm.ErrOtherRepository):
+		return refuse(log, rpc, ArmOtherRepository, err.Error(), false)
+	case errors.Is(err, wsm.ErrNotSiblings):
+		return refuse(log, rpc, ArmNotSiblings, err.Error(), false)
+	}
 	return nil
 }
 
@@ -444,11 +455,8 @@ func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
 		return err
 	}
 	if err := v.deps.DB.MoveWorkspace(ctx, ws, target); err != nil {
-		switch {
-		case errors.Is(err, wsm.ErrOtherRepository):
-			return refuse(log, rpc, ArmOtherRepository, err.Error(), false)
-		case errors.Is(err, wsm.ErrNotSiblings):
-			return refuse(log, rpc, ArmNotSiblings, err.Error(), false)
+		if refused := placeRefusal(log, rpc, err); refused != nil {
+			return refused
 		}
 		log.Error(opMove, "could not move the workspace onto the target's tab", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("move %q onto %q: %w", ws, target, err)

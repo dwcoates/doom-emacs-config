@@ -1711,3 +1711,43 @@ func TestSetHiddenAnswersAFamilyRefusal(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaceRefusal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		arm  string
+	}{
+		{name: "two repositories", err: fmt.Errorf("swap: %w", wsm.ErrOtherRepository), arm: ArmOtherRepository},
+		{name: "not siblings", err: fmt.Errorf("swap: %w", wsm.ErrNotSiblings), arm: ArmNotSiblings},
+		{name: "any other error", err: errors.New("disk I/O error")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := placeRefusal(dlog.NewTestLogger(), "MoveWorkspace", tt.err)
+
+			// Assert.
+			if tt.arm == "" {
+				if got != nil {
+					t.Fatalf("placeRefusal = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.Arm != tt.arm || got.Rpc != "MoveWorkspace" {
+				t.Fatalf("placeRefusal = %+v, want MoveWorkspace's %s", got, tt.arm)
+			}
+		})
+	}
+}
+
+func TestSwapAndMoveShareThePlaceRefusal(t *testing.T) {
+	// Act.
+	shared := sourcescan.Count(t, "placeRefusal(log, ")
+	byHand := sourcescan.Count(t, "ArmNotSiblings, err.Error()")
+
+	// Assert.
+	if shared != 2 || byHand != 1 {
+		t.Fatalf("placeRefusal calls = %d and hand-spelled not_siblings arms = %d, want Swap and Move sharing the one helper", shared, byHand)
+	}
+}
