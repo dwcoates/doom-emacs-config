@@ -379,6 +379,14 @@ type DB interface {
 	// WorkspaceSummaryOf loads a workspace's summary; the bool is false when
 	// none stands.
 	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error)
+	// PutColdReadPayment records the cold read a workspace's user paid for,
+	// replacing any it had (coldreadpayments.go).
+	PutColdReadPayment(ctx context.Context, id WorkspaceID, p ColdReadPayment) error
+	// DropColdReadPayment deletes a workspace's cold read payment.
+	DropColdReadPayment(ctx context.Context, id WorkspaceID) error
+	// ColdReadPaymentOf loads a workspace's cold read payment; the bool is
+	// false when none stands.
+	ColdReadPaymentOf(ctx context.Context, id WorkspaceID) (ColdReadPayment, bool, error)
 	// AdoptMergeLease takes ownership of the merge lease a previous process
 	// left held, for the merge this process resumes under it.
 	AdoptMergeLease(ctx context.Context, id WorkspaceID, lease LeaseID) (Lease, error)

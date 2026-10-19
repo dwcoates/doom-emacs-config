@@ -215,6 +215,59 @@ type fakeDB struct {
 	// write, which the fake's own slice cannot.
 	claims   []servingClaim
 	claimErr error
+
+	// coldMu guards the cold read payments, which a detached re-open writes
+	// off the test's goroutine. coldPayments is each workspace's standing
+	// payment, coldDrops every workspace a drop was asked for, in order; the
+	// errors fail the write, the drop or the read, which the map cannot.
+	coldMu           sync.Mutex
+	coldPayments     map[ids.WorkspaceID]wsm.ColdReadPayment
+	coldDrops        []ids.WorkspaceID
+	putColdErr       error
+	dropColdErr      error
+	coldPaymentOfErr error
+}
+
+func (d *fakeDB) PutColdReadPayment(_ context.Context, id ids.WorkspaceID, p wsm.ColdReadPayment) error {
+	d.coldMu.Lock()
+	defer d.coldMu.Unlock()
+	if d.putColdErr != nil {
+		return d.putColdErr
+	}
+	if d.coldPayments == nil {
+		d.coldPayments = map[ids.WorkspaceID]wsm.ColdReadPayment{}
+	}
+	d.coldPayments[id] = p
+	return nil
+}
+
+func (d *fakeDB) DropColdReadPayment(_ context.Context, id ids.WorkspaceID) error {
+	d.coldMu.Lock()
+	defer d.coldMu.Unlock()
+	d.coldDrops = append(d.coldDrops, id)
+	if d.dropColdErr != nil {
+		return d.dropColdErr
+	}
+	delete(d.coldPayments, id)
+	return nil
+}
+
+func (d *fakeDB) ColdReadPaymentOf(_ context.Context, id ids.WorkspaceID) (wsm.ColdReadPayment, bool, error) {
+	d.coldMu.Lock()
+	defer d.coldMu.Unlock()
+	if d.coldPaymentOfErr != nil {
+		return wsm.ColdReadPayment{}, false, d.coldPaymentOfErr
+	}
+	p, ok := d.coldPayments[id]
+	return p, ok, nil
+}
+
+// coldPayment answers the payment standing on ws.
+func (d *fakeDB) coldPayment(ws ids.WorkspaceID) (wsm.ColdReadPayment, bool) {
+	d.coldMu.Lock()
+	defer d.coldMu.Unlock()
+	p, ok := d.coldPayments[ws]
+	return p, ok
 }
 
 // servingClaim is one recorded ClaimServing.
