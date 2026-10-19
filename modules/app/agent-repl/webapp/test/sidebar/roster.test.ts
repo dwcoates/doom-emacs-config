@@ -27,7 +27,6 @@ import {
   drawFoldHeader,
   drawHeadedSection,
   drawRosterRepoDivergence,
-  drawRosterSectionFold,
   drawSectionLabel,
   drawWorkspaceRoster,
   MERGED_TODAY_COUNT_CLASS,
@@ -81,18 +80,6 @@ function pane(drawn: HTMLElement): HTMLElement {
   return drawn.querySelector(".sb-pane") as HTMLElement;
 }
 
-describe("drawRosterSectionFold", () => {
-  it.each([
-    ["expanded", false],
-    ["collapsed", true],
-  ] as const)("reads the %s arm as folded=%s", (arm, folded) => {
-    expect(drawRosterSectionFold({ case: arm, value: {} }, "fold")).toBe(folded);
-  });
-
-  it("refuses an unset fold as a malformed view", () => {
-    expect(() => drawRosterSectionFold({ case: undefined }, "fold")).toThrow(MalformedView);
-  });
-});
 
 describe("the sections", () => {
   it("draws one section per repository, in the resolver's order", () => {

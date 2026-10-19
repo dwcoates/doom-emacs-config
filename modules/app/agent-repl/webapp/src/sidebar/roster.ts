@@ -50,7 +50,6 @@ import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspac
 import { clone, equals, type MessageInitShape } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
 import { disposeKeyedRows, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
-import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -71,9 +70,17 @@ import {
   REPOSITORY_ATTRIBUTE,
   type ArrangeRefs,
 } from "./subsections.js";
-import { changeView } from "./view-change.js";
+import {
+  drawFoldToggle,
+  drawRosterSectionFold,
+  sectionFold,
+  trackDaemonFold,
+  type FoldGesture,
+  type FoldTarget,
+  type RosterSectionFold,
+} from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { foldViewKey, paintSectionFold, paintTriangle } from "./view.js";
+import { foldViewKey } from "./view.js";
 import {
   drawRosterRow,
   drawRosterRowDetailCommits,
@@ -537,7 +544,7 @@ export interface HeadedBoxShape {
   /** The class naming the section's kind. */
   className: string;
   /** The section UpdateSidebarView folds. */
-  target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"];
+  target: FoldTarget;
   /** Anything the kind adds to its header, after the folded count. */
   decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
   /**
@@ -606,30 +613,6 @@ export function drawHeadedBox(
   section.appendChild(head);
   section.appendChild(drawnBody);
   return section;
-}
-
-/**
- * A section's two-arm fold oneof, as every folding section spells it: the arm
- * IS the fold, each a dedicated empty message.
- */
-export type RosterSectionFold =
-  | { case: "expanded"; value: unknown }
-  | { case: "collapsed"; value: unknown }
-  | { case: undefined; value?: undefined };
-
-/** Whether a section is collapsed. EVERY arm is named; unset is malformed. */
-export function drawRosterSectionFold(fold: RosterSectionFold, path: string): boolean {
-  const arm = requireCase(fold, path);
-  switch (arm.case) {
-    case "expanded":
-      return false;
-    case "collapsed":
-      return true;
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(path, other.case);
-    }
-  }
 }
 
 /** A repository's stable identity — the fold key and the create echo token. */
@@ -961,35 +944,6 @@ export function drawRosterSectionCount(u: RosterSectionCount, path: string): num
   return u.workspaces;
 }
 
-/**
- * What a section header's fold gesture does, handed the section and the
- * control the gesture landed on.
- */
-export type FoldGesture = (section: HTMLElement, control: HTMLElement) => void;
-
-/**
- * A section's fold gesture: the other fold, painted on every copy of the
- * section at once and asked of the daemon, whose push carries it to every
- * page (`view-change.ts`).
- */
-function sectionFold(sc: SidebarContext, foldKey: string, target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"]): FoldGesture {
-  return (section, control) => {
-    const collapse = !section.classList.contains("folded");
-    void changeView(sc, {
-      key: foldViewKey(foldKey),
-      value: collapse,
-      control,
-      change: {
-        case: "foldSection",
-        value: {
-          section: target,
-          fold: collapse ? { case: "collapse", value: {} } : { case: "expand", value: {} },
-        },
-      },
-    });
-  };
-}
-
 /** The class every section header's label is drawn with. */
 export const SECTION_LABEL_CLASS = "sb-label";
 
@@ -1038,8 +992,7 @@ export function drawRosterRows(
  */
 function daemonFoldedBox(foldKey: string, wireFolded: boolean, sc: SidebarContext): HTMLElement {
   const section = foldedBox(foldKey, false);
-  const folded = sc.view.track(foldViewKey(foldKey), wireFolded, (value) => paintSectionFold(section, value));
-  section.classList.toggle("folded", folded);
+  trackDaemonFold(section, foldKey, wireFolded, sc);
   return section;
 }
 
@@ -1052,16 +1005,4 @@ function foldedBox(foldKey: string, folded: boolean): HTMLElement {
   return section;
 }
 
-/** The ▸/▾ fold triangle, drawn the way its section stands. */
-function drawFoldToggle(section: HTMLElement, gesture: FoldGesture): HTMLElement {
-  const triangle = document.createElement("span");
-  triangle.className = "tri";
-  triangle.setAttribute("data-section-fold", "");
-  triangle.addEventListener("click", (event) => {
-    event.stopPropagation();
-    gesture(section, triangle);
-  });
-  paintTriangle(triangle, section.classList.contains("folded"));
-  return triangle;
-}
 
