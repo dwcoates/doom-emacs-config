@@ -3,9 +3,11 @@ package metrics
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -226,7 +228,9 @@ func TestAdvertiseFailsWhenTheTargetsDirectoryCannotExist(t *testing.T) {
 func TestCloseStopsTheListenerAndKeepsTheTarget(t *testing.T) {
 	// Arrange
 	sink := &errSink{}
-	s, err := Open(Config{Program: ProgramStore, Root: t.TempDir(), Registry: newTestRegistry(t, ProgramStore), OnError: sink.record})
+	root := t.TempDir()
+	newFakeStore(t, root, http.StatusNoContent)
+	s, err := Open(Config{Program: ProgramStore, Root: root, Registry: newTestRegistry(t, ProgramStore), OnError: sink.record})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -262,5 +266,111 @@ func TestRunNamesThisProcess(t *testing.T) {
 	}
 	if _, err := strconv.ParseInt(started, 10, 64); err != nil {
 		t.Fatalf("Run's start %q is not nanoseconds: %v", started, err)
+	}
+}
+
+// fakeStore is a metrics store's import endpoint that keeps every push.
+type fakeStore struct {
+	mu     sync.Mutex
+	pushes []*http.Request
+	bodies []string
+}
+
+// newFakeStore stands an import endpoint answering status and names it in
+// root's StoreFile.
+func newFakeStore(t *testing.T, root string, status int) *fakeStore {
+	t.Helper()
+	fs := &fakeStore{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		fs.mu.Lock()
+		fs.pushes = append(fs.pushes, r)
+		fs.bodies = append(fs.bodies, string(body))
+		fs.mu.Unlock()
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	writeStoreFile(t, root, fmt.Sprintf(`{"import_url":%q,"job":"agent-repl"}`, srv.URL+"/api/v1/import/prometheus"))
+	return fs
+}
+
+func writeStoreFile(t *testing.T, root, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, StoreFile), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseImportsTheFinalValuesLabeledAsTheScrapesLabelThem(t *testing.T) {
+	// Arrange
+	sink := &errSink{}
+	root := t.TempDir()
+	store := newFakeStore(t, root, http.StatusNoContent)
+	s, err := Open(Config{Program: ProgramDaemon, Root: root, Registry: newTestRegistry(t, ProgramDaemon), OnError: sink.record})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act
+	err = s.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.pushes) != 1 || store.pushes[0].Method != http.MethodPost || store.pushes[0].URL.Path != "/api/v1/import/prometheus" {
+		t.Fatalf("pushes = %d, want one POST to the import endpoint", len(store.pushes))
+	}
+	labels := store.pushes[0].URL.Query()["extra_label"]
+	want := []string{"job=agent-repl", "instance=daemon", "run=" + Run}
+	if strings.Join(labels, ",") != strings.Join(want, ",") {
+		t.Fatalf("extra labels = %v, want %v", labels, want)
+	}
+	if !strings.Contains(store.bodies[0], "agentrepl_build_info{") {
+		t.Fatalf("the push carries no build info:\n%s", store.bodies[0])
+	}
+	if ops, _ := sink.snapshot(); len(ops) != 0 {
+		t.Fatalf("a successful push reported errors: %v", ops)
+	}
+}
+
+func TestAPushThatCannotHappenIsRecordedAndTheListenerStillStops(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, root string)
+		want    string
+	}{
+		{name: "no store file", arrange: func(*testing.T, string) {}, want: "read the store's address"},
+		{name: "a store file without an address", arrange: func(t *testing.T, root string) { writeStoreFile(t, root, `{"job":"agent-repl"}`) }, want: "names no import_url and job"},
+		{name: "a store that refuses", arrange: func(t *testing.T, root string) { newFakeStore(t, root, http.StatusBadRequest) }, want: "were refused"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			sink := &errSink{}
+			root := t.TempDir()
+			tt.arrange(t, root)
+			s, err := Open(Config{Program: ProgramStore, Root: root, Registry: newTestRegistry(t, ProgramStore), OnError: sink.record})
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+
+			// Act
+			err = s.Close()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Close = %v, want the listener stopped all the same", err)
+			}
+			ops, errs := sink.snapshot()
+			if len(ops) != 1 || ops[0] != "metrics.push" || !strings.Contains(errs[0].Error(), tt.want) {
+				t.Fatalf("recorded %v %v, want one metrics.push failure saying %q", ops, errs, tt.want)
+			}
+			if _, err := http.Get("http://" + s.Addr() + Path); err == nil {
+				t.Fatalf("the listener still answers after Close")
+			}
+		})
 	}
 }

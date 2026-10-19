@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/sourcescan"
 )
@@ -849,5 +850,72 @@ func TestEveryRollbackGoesThroughEndTx(t *testing.T) {
 	// Assert
 	if rollbacks != 1 {
 		t.Fatalf("production source calls Rollback %d times; only endTx may", rollbacks)
+	}
+}
+
+func TestCommittedNamesACommitRefusedAfterItsContextEnded(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	other := errors.New("disk I/O error")
+	tests := []struct {
+		name       string
+		ctx        context.Context
+		err        error
+		wantEnding bool
+		wantIs     error
+	}{
+		{name: "a commit that succeeded", ctx: context.Background(), err: nil},
+		{name: "a done transaction under an ended context is that ending", ctx: cancelled, err: sql.ErrTxDone, wantEnding: true, wantIs: sql.ErrTxDone},
+		{name: "a done transaction under a live context stays a failure", ctx: context.Background(), err: sql.ErrTxDone, wantIs: sql.ErrTxDone},
+		{name: "another failure under an ended context stays that failure", ctx: cancelled, err: other, wantIs: other},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := committed(tt.ctx, tt.err)
+
+			// Assert
+			if (got == nil) != (tt.err == nil) || ctxend.Is(got) != tt.wantEnding {
+				t.Fatalf("committed = %v, ctxend.Is %v; want an error %v, ending %v", got, ctxend.Is(got), tt.err != nil, tt.wantEnding)
+			}
+			if tt.wantIs != nil && !errors.Is(got, tt.wantIs) {
+				t.Fatalf("committed = %v, want it to wrap %v", got, tt.wantIs)
+			}
+		})
+	}
+}
+
+func TestAWriteWhoseContextEndsBeforeItsCommitIsRecordedAsTheEnding(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the context ends after the work, before the commit.
+	err := s.write(ctx, "daemon.wsm.test", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+		cancel()
+		return nil
+	})
+
+	// Assert
+	if !ctxend.Is(err) {
+		t.Fatalf("write = %v, want the context's ending", err)
+	}
+	for _, r := range log.Records() {
+		if r.Operation == "daemon.wsm.test" && r.Level == dlog.LevelError {
+			t.Fatalf("a cancelled commit was recorded at ERROR: %+v", r)
+		}
+	}
+}
+
+// Every commit in this package goes through committed, so no site reads a
+// cancelled caller's commit as a broken store again.
+func TestEveryCommitGoesThroughCommitted(t *testing.T) {
+	// Act
+	commits := sourcescan.Count(t, ".Commit()")
+	wrapped := sourcescan.Count(t, "committed(ctx, tx.Commit())")
+
+	// Assert
+	if commits != wrapped {
+		t.Fatalf("production source calls Commit %d times, %d of them through committed", commits, wrapped)
 	}
 }

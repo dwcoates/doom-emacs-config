@@ -503,7 +503,7 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 	if rows != 1 {
 		return fmt.Errorf("wsm: stamp layout %d in %q touched %d rows, want exactly 1", m.To, s.path, rows)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := committed(ctx, tx.Commit()); err != nil {
 		return fmt.Errorf("wsm: commit migration to layout %d on %q: %w", m.To, s.path, err)
 	}
 	return nil

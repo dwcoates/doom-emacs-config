@@ -1,18 +1,22 @@
 package metrics
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 )
 
 // Path is the one route a metrics surface serves.
@@ -22,9 +26,23 @@ const Path = "/metrics"
 // per program, the directory VictoriaMetrics' file_sd config reads.
 const TargetsDir = "targets"
 
-// shutdownGrace bounds Close: a scrape in flight must not hold up a
-// runtime's exit.
+// shutdownGrace bounds Close: a scrape in flight, or the final push, must not
+// hold up a runtime's exit.
 const shutdownGrace = 2 * time.Second
+
+// StoreFile is the file under the metrics root that names the metrics
+// store's import endpoint and the scrape job its series belong to. The
+// installer writes it beside scrape.yml (metrics/store.json).
+const StoreFile = "store.json"
+
+// store is StoreFile's content.
+type store struct {
+	// ImportURL takes Prometheus text exposition.
+	ImportURL string `json:"import_url"`
+	// Job is the scrape config's job_name, so a pushed sample lands on the
+	// series its scrapes write.
+	Job string `json:"job"`
+}
 
 // Config opens a metrics surface.
 type Config struct {
@@ -49,6 +67,8 @@ type Server struct {
 	registry *prometheus.Registry
 	srv      *http.Server
 	done     chan struct{}
+	onError  func(op string, err error)
+	client   *http.Client
 }
 
 // Open listens on an ephemeral loopback port and serves Path. It does NOT
@@ -80,6 +100,8 @@ func Open(cfg Config) (*Server, error) {
 		registry: cfg.Registry,
 		srv:      &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second},
 		done:     make(chan struct{}),
+		onError:  cfg.OnError,
+		client:   &http.Client{},
 	}
 	go func() {
 		defer close(s.done)
@@ -161,14 +183,72 @@ func (s *Server) Advertise() error {
 	return nil
 }
 
-// Close stops the listener. The target file stays: see the package comment.
+// Close pushes the surface's final values to the metrics store, then stops
+// the listener. The target file stays: see the package comment.
+//
+// THE LAST VALUES ARE PUSHED, NOT LEFT FOR A SCRAPE THAT NEVER COMES. The
+// store scrapes every 15 seconds, and whatever a process records after its
+// last scrape was lost with it: an outgoing daemon times its handover's
+// transfers and its deploy's decision after its target already names the
+// successor, so no scrape ever read them. A push that fails is recorded
+// through OnError and does not hold the exit.
 func (s *Server) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
+	if err := s.push(ctx); err != nil {
+		s.onError("metrics.push", err)
+	}
 	err := s.srv.Shutdown(ctx)
 	<-s.done
 	if err != nil {
 		return fmt.Errorf("metrics: stop the listener for %q at %s: %w", s.program, s.addr, err)
+	}
+	return nil
+}
+
+// push sends every series the registry gathers to the store's import
+// endpoint (StoreFile), labeled as this surface's scrapes label them.
+func (s *Server) push(ctx context.Context) error {
+	raw, err := os.ReadFile(filepath.Join(s.root, StoreFile))
+	if err != nil {
+		return fmt.Errorf("the final values of %q were not pushed: read the store's address: %w", s.program, err)
+	}
+	var st store
+	if err := json.Unmarshal(raw, &st); err != nil || st.ImportURL == "" || st.Job == "" {
+		return fmt.Errorf("the final values of %q were not pushed: %s names no import_url and job (%v)", s.program, StoreFile, err)
+	}
+	families, err := s.registry.Gather()
+	if err != nil {
+		return fmt.Errorf("the final values of %q were not pushed: gather: %w", s.program, err)
+	}
+	var body bytes.Buffer
+	enc := expfmt.NewEncoder(&body, expfmt.NewFormat(expfmt.TypeTextPlain))
+	for _, f := range families {
+		if err := enc.Encode(f); err != nil {
+			return fmt.Errorf("the final values of %q were not pushed: encode %s: %w", s.program, f.GetName(), err)
+		}
+	}
+	target, err := url.Parse(st.ImportURL)
+	if err != nil {
+		return fmt.Errorf("the final values of %q were not pushed: import_url %q: %w", s.program, st.ImportURL, err)
+	}
+	q := target.Query()
+	for _, l := range []string{"job=" + st.Job, "instance=" + s.program, "run=" + Run} {
+		q.Add("extra_label", l)
+	}
+	target.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), &body)
+	if err != nil {
+		return fmt.Errorf("the final values of %q were not pushed: %w", s.program, err)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("the final values of %q were not pushed to %s: %w", s.program, st.ImportURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("the final values of %q were refused by %s: %s %s", s.program, st.ImportURL, resp.Status, bytes.TrimSpace(detail))
 	}
 	return nil
 }

@@ -432,7 +432,7 @@ func (s *store) createSchema(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO layout (id, version) VALUES (1, ?)`, LayoutVersion); err != nil {
 		return fmt.Errorf("wsm: stamp layout version in %q: %w", s.path, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := committed(ctx, tx.Commit()); err != nil {
 		return fmt.Errorf("wsm: commit schema creation on %q: %w", s.path, err)
 	}
 	return nil
@@ -609,13 +609,26 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := committed(ctx, tx.Commit()); err != nil {
 		wrapped := fmt.Errorf("wsm: commit transaction: %w", err)
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not commit the transaction", withError(fields, wrapped))
 		return wrapped
 	}
 	s.log.Debug(op, "wrote durable state", fields)
 	return nil
+}
+
+// committed answers a Commit's error as what it means. A COMMIT REFUSED AS
+// ALREADY DONE AFTER ITS CONTEXT ENDED IS THAT ENDING: database/sql rolls a
+// transaction back the moment its context ends, and Commit then answers
+// sql.ErrTxDone, which read as a broken store: a merge run cancelled by the
+// queue's pause recorded its ledger write at ERROR (2026-10-19). The context's
+// error is joined in, so ctxend.Is names it.
+func committed(ctx context.Context, err error) error {
+	if err != nil && errors.Is(err, sql.ErrTxDone) && ctx.Err() != nil {
+		return fmt.Errorf("%w: %w", ctx.Err(), err)
+	}
+	return err
 }
 
 // read runs fn against the handle and logs a failed load at ERROR. Reads are

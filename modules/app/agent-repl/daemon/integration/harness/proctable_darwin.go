@@ -40,7 +40,8 @@ func readProcArgs2(pid int) ([]byte, error) { return unix.SysctlRaw("kern.procar
 
 // procArgs answers pid's decoded argv, answering live=false for a process
 // that has exited (gone, a zombie, or exiting unreaped): it can no longer
-// run, so it is no stray, and `ps` lists it with no argv either.
+// run, so it is no stray, and `ps` lists it with no argv either. A process
+// stopped before its argv was readable answers live=false too (below).
 //
 // A LIVE PROCESS WITH NO ARGV YET IS WAITED FOR, NEVER SKIPPED. Between a
 // fork and the end of its exec the kernel answers EINVAL, EIO or ESRCH for a
@@ -73,6 +74,16 @@ func procArgs(pid int, read func(int) ([]byte, error), state func(int) (processS
 			return "", false, fmt.Errorf("read the state of pid %d, whose argv is unreadable (%v): %w", pid, err, stateErr)
 		}
 		if st.exited {
+			return "", false, nil
+		}
+		// A STOPPED PROCESS WITH NO ARGV IS NO STRAY OF THIS TEST'S. It was
+		// stopped between its fork and the end of its exec, so its argv never
+		// appears while it stays stopped, and it can run nothing. This harness
+		// stops only processes whose argv it has already read, so another
+		// harness stopped it: a concurrent run's reaper freezing its own
+		// strays. Waiting on it failed every listing of every test that ran
+		// beside that freeze (2026-10-19, a `005.test` of another worktree).
+		if st.frozen {
 			return "", false, nil
 		}
 		select {

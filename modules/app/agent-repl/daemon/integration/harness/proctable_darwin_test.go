@@ -44,6 +44,11 @@ func TestProcArgs(t *testing.T) {
 			states: []processState{{name: "zombie", exited: true}},
 		},
 		{
+			name:   "a process another harness stopped before its argv was readable is no stray",
+			reads:  []func() ([]byte, error){func() ([]byte, error) { return nil, unix.EINVAL }},
+			states: []processState{{name: "stopped", frozen: true}},
+		},
+		{
 			name:      "any other read failure is an error at once",
 			reads:     []func() ([]byte, error){func() ([]byte, error) { return nil, unix.EPERM }},
 			wantError: true,
