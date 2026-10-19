@@ -3,13 +3,14 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/holdfold"
-	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -245,33 +246,6 @@ func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
 	}
 }
 
-func TestSameAuthor(t *testing.T) {
-	sender, other := theSender, ids.WorkspaceID("ws-other")
-	tests := []struct {
-		name  string
-		sub   *ids.WorkspaceID
-		ahead *ids.WorkspaceID
-		want  bool
-	}{
-		{name: "no workspace sent either", want: true},
-		{name: "one workspace sent both", sub: &sender, ahead: &sender, want: true},
-		{name: "two workspaces sent them", sub: &sender, ahead: &other, want: false},
-		{name: "a workspace sent the prompt, the one ahead is not a workspace's", sub: &sender, want: false},
-		{name: "the prompt is not a workspace's, a workspace sent the one ahead", ahead: &sender, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := sameAuthor(Submission{SentBy: tt.sub}, wsm.HeldPrompt{SentBy: tt.ahead})
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("sameAuthor = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
 	// Arrange: the user's prompt is queued, and an agent's prompt is ruled to
 	// interrupt it.
@@ -300,5 +274,25 @@ func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
 	}
 	if !logged(h.log.Records(), "info", opClassify, "the prompt ahead has another author, so the prompt is not folded into it and waits its turn") {
 		t.Fatalf("records = %+v, want the refused fold said at info", h.log.Records())
+	}
+}
+
+// THE CLASSIFIER'S FOLD ASKS holdfold.SameAuthor: no file of the queue
+// compares two prompts' senders by hand.
+func TestTheQueueAsksHoldfoldWhetherTwoPromptsShareAnAuthor(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`SentBy\s*==\s*\*|\*[a-z.]*SentBy\s*==`)
+
+	// Act
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these files compare senders by hand instead of holdfold.SameAuthor: %v", found)
 	}
 }

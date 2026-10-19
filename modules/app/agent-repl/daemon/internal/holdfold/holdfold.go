@@ -72,6 +72,18 @@ var (
 	ErrEdited = errors.New("holdfold: one of the two entries is being edited")
 )
 
+// SameAuthor reports whether two prompts have one author, by the workspace
+// that sent each (wsm.HeldPrompt.SentBy, nil for a prompt no workspace's agent
+// sent): no workspace sent either, or one workspace sent both. A prompt is
+// never folded into another author's, since the merged prompt is drawn under
+// one author.
+func SameAuthor(a, b *wsm.WorkspaceID) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // Ahead answers the standing hold directly ahead of TURN in STANDING, which is
 // in queue order (queued_at, then the turn id). False when TURN is first, or
 // does not stand at all: nothing is ahead of it to fold into.

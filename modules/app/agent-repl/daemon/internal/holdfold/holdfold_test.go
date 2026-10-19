@@ -169,3 +169,29 @@ func quoteBlock() *conversationv1.UserContentBlock {
 		Quote: &conversationv1.UserQuoteBlock{Text: "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n"},
 	}}
 }
+
+func TestSameAuthor(t *testing.T) {
+	sender, other := wsm.WorkspaceID("ws-sender"), wsm.WorkspaceID("ws-other")
+	tests := []struct {
+		name string
+		a, b *wsm.WorkspaceID
+		want bool
+	}{
+		{name: "no workspace sent either", want: true},
+		{name: "one workspace sent both", a: &sender, b: &sender, want: true},
+		{name: "two workspaces sent them", a: &sender, b: &other, want: false},
+		{name: "a workspace sent the first alone", a: &sender, want: false},
+		{name: "a workspace sent the second alone", b: &sender, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := SameAuthor(tt.a, tt.b)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("SameAuthor = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
