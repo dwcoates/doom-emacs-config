@@ -30,6 +30,10 @@
  *     is folded), so no strip of the rail is ever left under it. That
  *     viewport may cut its last line through, scrolling it into view; the
  *     section's rows region stands that tall even when it holds fewer rows.
+ *   - A LINE CUT AT THE FOOT FADES OUT (owner request, 2026-10-19). While the
+ *     stretched viewport has more below its edge, the section is marked
+ *     `BAND_MORE_ATTRIBUTE` and the stylesheet fades the viewport's last
+ *     strip; scrolled to its end, the mark drops and the last row shows whole.
  *
  * A LINE IS ONE `.row`, a nested family member included, or a folded
  * repository's header, and a viewport of K lines is exactly as tall as the
@@ -74,6 +78,12 @@ export const OPEN_REGION_CLASS = "sb-sections";
 
 /** The attribute a fitted section states how many lines its viewport shows on. */
 export const BAND_LINES_ATTRIBUTE = "data-band-lines";
+
+/** The attribute marking the section whose viewport reaches the rail's foot. */
+export const BAND_STRETCHED_ATTRIBUTE = "data-band-stretched";
+
+/** The attribute marking a section whose viewport has rows below its edge. */
+export const BAND_MORE_ATTRIBUTE = "data-band-more";
 
 /** The attribute a merged row states its merged instant (epoch ms) on. */
 export const MERGED_AT_ATTRIBUTE = "data-merged-at";
@@ -286,7 +296,29 @@ function sizeBand(band: Band, stops: BandStops, lines: number, stretch: number |
     band.region.style.height = `${stops[lines] + stretch}px`;
   }
   band.section.setAttribute(BAND_LINES_ATTRIBUTE, String(lines));
+  band.section.toggleAttribute(BAND_STRETCHED_ATTRIBUTE, stretch !== null);
+  paintBandMore(band.region);
 }
+
+/**
+ * Mark REGION's section `BAND_MORE_ATTRIBUTE` while rows lie below its
+ * viewport's edge (half a pixel of rounding is no row), and clear it once
+ * the viewport reaches its end.
+ */
+export function paintBandMore(region: HTMLElement): void {
+  const section = region.parentElement;
+  if (section === null) {
+    log.error("a sidebar band's fade cannot be painted: its rows region hangs in no section", {
+      operation: "sidebar.band-fit.orphan-region",
+      context: { region: region.className },
+    });
+    throw new Error("band fit: a rows region hangs in no section");
+  }
+  section.toggleAttribute(BAND_MORE_ATTRIBUTE, region.scrollTop + region.clientHeight < region.scrollHeight - 0.5);
+}
+
+/** The selector every section's rows region matches. */
+const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => `.${className} > .${regionClass}`).join(", ");
 
 /** One open section's band, its lines, and its stops. */
 interface Measured {
@@ -412,6 +444,13 @@ export function installBandFit(scroller: HTMLElement, ticker: Ticker): BandFit {
   const fitNow = (): void => fitAt(ticker.now());
   const observer = new ResizeObserver(fitNow);
   observer.observe(scroller);
+  // A scroll does not bubble, so the rail captures every section's scroll to
+  // repaint whether rows still lie below its edge.
+  const onScroll = (event: Event): void => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.matches(REGION_SELECTOR)) paintBandMore(target);
+  };
+  scroller.addEventListener("scroll", onScroll, true);
   let watched: HTMLElement[] = [];
   const unsubscribe = ticker.subscribe((nowMs) => {
     if (!sameLocalDate(fittedAtMs, nowMs)) fitAt(nowMs);
@@ -425,6 +464,7 @@ export function installBandFit(scroller: HTMLElement, ticker: Ticker): BandFit {
     },
     dispose(): void {
       observer.disconnect();
+      scroller.removeEventListener("scroll", onScroll, true);
       unsubscribe();
       watched = [];
     },

@@ -2,9 +2,10 @@
 /**
  * THE SECTION FIT (owner requests, 2026-10-11 and 2026-10-18): the rail
  * never scrolls. Once it is out of room, the Open section lengthens until
- * Hidden Workspaces and Recently Merged are left four lines each, the two
- * sharing those eight lines, and each section scrolls the rest. Recently
- * Merged claims room only for today's merges. jsdom lays nothing out, so
+ * Hidden Workspaces and Recently Merged are left three lines each, the two
+ * sharing those six lines, and each section scrolls the rest. Recently
+ * Merged claims room only for today's merges. The lowest open section
+ * reaches the rail's foot, its cut line fading out. jsdom lays nothing out, so
  * `laidOut` states the geometry the engine would give: a rail SCROLLER px
  * tall, a pane whose content other than the sections' rows regions is
  * OTHERS px, and lines of ROW px each.
@@ -13,11 +14,14 @@ import { describe, expect, it } from "vitest";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import {
   BAND_LINES_ATTRIBUTE,
+  BAND_MORE_ATTRIBUTE,
+  BAND_STRETCHED_ATTRIBUTE,
   allocateSectionLines,
   bandShare,
   fitBands,
   installBandFit,
   mergedTodayLines,
+  paintBandMore,
   regionLines,
   regionStops,
 } from "../../src/sidebar/band-fit.js";
@@ -120,6 +124,7 @@ function layRegion(pane: HTMLElement, cls: SectionClass): void {
     line.getBoundingClientRect = () => rect(i * ROW - rows.scrollTop, ROW);
   });
   Object.defineProperty(rows, "scrollHeight", { configurable: true, value: full });
+  Object.defineProperty(rows, "clientHeight", { configurable: true, get: height });
 }
 
 /** The drawn height of PANE's section of CLS's rows region. */
@@ -383,6 +388,48 @@ describe("regionStops", () => {
   });
 });
 
+describe("paintBandMore", () => {
+  /** A section around a rows region scrolled to TOP, CLIENT px tall over SCROLL px of rows. */
+  function scrolled(top: number, client: number, scroll: number): HTMLElement {
+    const section = document.createElement("div");
+    const rows = document.createElement("div");
+    section.appendChild(rows);
+    rows.scrollTop = top;
+    Object.defineProperty(rows, "clientHeight", { configurable: true, value: client });
+    Object.defineProperty(rows, "scrollHeight", { configurable: true, value: scroll });
+    return rows;
+  }
+
+  it.each([
+    { name: "marks a viewport with rows below its edge", top: 0, client: 70, scroll: 200, want: true },
+    { name: "clears a viewport scrolled to its end", top: 130, client: 70, scroll: 200, want: false },
+    { name: "clears a viewport its rows do not fill", top: 0, client: 200, scroll: 200, want: false },
+    { name: "clears a viewport half a pixel short of its end", top: 129.6, client: 70, scroll: 200, want: false },
+  ])("$name", ({ top, client, scroll, want }) => {
+    // Arrange
+    const rows = scrolled(top, client, scroll);
+    // Act
+    paintBandMore(rows);
+    // Assert
+    expect(rows.parentElement?.hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(want);
+  });
+
+  it("refuses a rows region that hangs in no section", () => {
+    // Arrange / Act / Assert
+    expect(() => paintBandMore(document.createElement("div"))).toThrow(/no section/);
+  });
+
+  it("logs a rows region that hangs in no section", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    expect(() => paintBandMore(document.createElement("div"))).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit.orphan-region");
+    expect(record.level.case).toBe("error");
+  });
+});
+
 describe("fitBands", () => {
   it("lengthens the Open section until each band keeps three lines", () => {
     // Arrange — room for twenty lines below 100px of other content.
@@ -465,6 +512,48 @@ describe("fitBands", () => {
     const second = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
     expect([second, heights(rail.pane)[2]]).toEqual([first, "70px"]);
+  });
+
+  it("marks only the lowest open section as reaching the rail's foot", () => {
+    // Arrange
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(SECTIONS.map((cls) => band(rail.pane, cls).hasAttribute(BAND_STRETCHED_ATTRIBUTE))).toEqual([false, false, true]);
+  });
+
+  it("marks a stretched band cutting a line with rows below its edge", () => {
+    // Arrange — half a line of stretch.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(band(rail.pane, "merged-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(true);
+  });
+
+  it("leaves a stretched band whose rows all show unmarked", () => {
+    // Arrange
+    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    laidOut(rail, 1000, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(band(rail.pane, "merged-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("clears the foot mark from a band that is no longer lowest", () => {
+    // Arrange — fitted with Recently Merged folded, Hidden Workspaces lowest.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { merged: true } });
+    laidOut(rail, 1000, 100);
+    fitBands(rail.scroller, rail.pane, NOW);
+    band(rail.pane, "merged-section").classList.remove("folded");
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(band(rail.pane, "hidden-section").hasAttribute(BAND_STRETCHED_ATTRIBUTE)).toBe(false);
   });
 
   it("stretches nothing in a rail shorter than the headers", () => {
@@ -732,6 +821,36 @@ describe("installBandFit", () => {
     // Assert
     expect(maxHeight(rail.pane, "open-section")).toBe("280px");
     fit.dispose();
+  });
+
+  it("repaints a section's foot mark when its rows scroll to their end", () => {
+    // Arrange — fitted with a line cut at the foot.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    const fit = installBandFit(rail.scroller, fakeTicker());
+    fit.refit();
+    const rows = region(rail.pane, "merged-section") as HTMLElement;
+    // Act
+    rows.scrollTop = 200;
+    rows.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(band(rail.pane, "merged-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(false);
+    fit.dispose();
+  });
+
+  it("stops repainting the foot mark once disposed", () => {
+    // Arrange
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    const fit = installBandFit(rail.scroller, fakeTicker());
+    fit.refit();
+    fit.dispose();
+    const rows = region(rail.pane, "merged-section") as HTMLElement;
+    // Act
+    rows.scrollTop = 200;
+    rows.dispatchEvent(new Event("scroll"));
+    // Assert
+    expect(band(rail.pane, "merged-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(true);
   });
 
   it("stops listening to the ticker once disposed", () => {

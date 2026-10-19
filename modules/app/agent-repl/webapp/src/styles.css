@@ -1049,6 +1049,16 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo.merged-section > .rows {
   overflow-y: auto;
 }
+/* THE LINE CUT AT THE RAIL'S FOOT FADES OUT (owner request, 2026-10-19): the
+   lowest section's viewport reaches the rail's bottom edge and may cut its
+   last line through (band-fit.ts). While rows lie below that edge, its last
+   strip, about one row tall, fades to nothing. Pure paint: a mask takes no
+   part in layout or hit testing, so a faded row is still clickable. */
+#ws-sidebar { --band-foot-fade: 1.4rem; }
+#ws-sidebar .repo[data-band-stretched][data-band-more] > .sb-sections,
+#ws-sidebar .repo[data-band-stretched][data-band-more] > .rows {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);
+}
 #ws-sidebar .repo.merged-section {
   /* The row's line box, stated rather than left to the font: `normal`
      line-height varies with whatever font resolves, so the cap could not be
