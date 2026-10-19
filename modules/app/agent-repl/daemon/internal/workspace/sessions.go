@@ -1619,6 +1619,12 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	// every frame it was going to send. The stream is closed the moment
 	// StartSession answers, whichever way it answered.
 	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
+	// THE ANSWER IS DURABLE BEFORE THE SHIM IS ASKED, so no bring-up after
+	// this one can ask the user to pay for the same read again
+	// (recordColdAnswer).
+	if err := f.recordColdAnswer(ctx, log, ws, resume); err != nil {
+		return err
+	}
 	stopPhases := f.relayCompactionPhases(ctx, log, ws, session.client, resume.OnPhase)
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
 	started, err := f.startSession(runCtx, log, ws, session.client, source{
@@ -2441,6 +2447,27 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 	}
 	if failure := response.GetFailure(); failure != nil {
 		if cold := failure.GetCold(); cold != nil {
+			// A READ THE USER ALREADY PAID FOR IS PAID, not asked about
+			// again: the refusal names the read a gate's pay answer recorded,
+			// and only a bounce or a restart stood between that answer and
+			// this resume (recordColdAnswer). A resume that already carries a
+			// remediation was refused cold DESPITE it, which is the gate's to
+			// state again.
+			if src.ColdRemediation == nil {
+				paid, err := f.paidColdRead(ctx, log, ws, src.VendorSessionID, cold)
+				if err != nil {
+					return nil, fmt.Errorf("start session for %q: %w", ws, err)
+				}
+				if paid {
+					log.Info(opBringUp, "the shim refused the resume cold for a read the user already paid for; the resume pays it", dlog.Context{
+						"vendor_session_id":  src.VendorSessionID,
+						"last_request_at_ms": cold.GetLastRequestAtMs(),
+						"context_tokens":     cold.GetContextTokens(),
+					})
+					src.ColdRemediation = payRemediation()
+					return f.askToStartSession(ctx, log, ws, client, src, session, configDir)
+				}
+			}
 			f.raiseColdGate(ws, src.VendorSessionID, cold, configDir)
 			// AN ANSWER, NOT A FAILURE -- as this function's own doc says. The
 			// gate is a designed product state: the shim states the cost of

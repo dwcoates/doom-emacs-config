@@ -189,6 +189,39 @@ func TestRunRefusesAnEnvelopeThatReportsItsOwnError(t *testing.T) {
 	}
 }
 
+func TestEnvelopeAccountWordsItsSubtypeAndTrimmedResult(t *testing.T) {
+	// Arrange.
+	env := envelope{Subtype: "error_during_execution", Result: "  credit balance too low\n", IsError: true}
+
+	// Act.
+	got := env.account()
+
+	// Assert.
+	if want := "(error_during_execution): credit balance too low"; got != want {
+		t.Fatalf("account() = %q, want %q", got, want)
+	}
+}
+
+// TestEveryEnvelopeErrorIsWordedByAccount pins that the two sites reporting an
+// error envelope share one wording: a hand-rolled site would drift from it.
+func TestEveryEnvelopeErrorIsWordedByAccount(t *testing.T) {
+	// Arrange.
+	env := envelope{Subtype: "error_max_turns", Result: "ran out", IsError: true}
+	raw := `{"subtype":"error_max_turns","result":"ran out","is_error":true}`
+
+	// Act.
+	_, parsed := resultOf(raw)
+	exited := exitAccount(FormatJSON, raw)
+
+	// Assert.
+	if parsed == nil || !strings.HasSuffix(parsed.Error(), env.account()) {
+		t.Fatalf("resultOf error = %v, want it to end with %q", parsed, env.account())
+	}
+	if !strings.HasSuffix(exited, env.account()) {
+		t.Fatalf("exitAccount = %q, want it to end with %q", exited, env.account())
+	}
+}
+
 func TestRunReportsAnExitFailureAsAnExitStatus(t *testing.T) {
 	// Arrange.
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "", errors.New("exit status 3"))
@@ -200,6 +233,64 @@ func TestRunReportsAnExitFailureAsAnExitStatus(t *testing.T) {
 	var hErr *Error
 	if !errors.As(err, &hErr) || hErr.Cause != CauseExitStatus {
 		t.Fatalf("err = %v, want the %s cause", err, CauseExitStatus)
+	}
+}
+
+func TestRunCarriesWhatAFailedRunSaidOnStdout(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		stdout string
+		want   string
+	}{
+		{
+			name:   "a json run's error envelope is read for its own account",
+			format: FormatJSON,
+			stdout: `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Failed to authenticate: OAuth session expired"}` + "\n",
+			want:   "exit status 1; the cli said (error_during_execution): Failed to authenticate: OAuth session expired",
+		},
+		{
+			name:   "a json run whose stdout is no envelope is carried as written",
+			format: FormatJSON,
+			stdout: "  not an envelope\n",
+			want:   "exit status 1; the cli said: not an envelope",
+		},
+		{
+			name:   "a json envelope reporting no error is carried as written",
+			format: FormatJSON,
+			stdout: `{"is_error":false,"result":"half"}`,
+			want:   `exit status 1; the cli said: {"is_error":false,"result":"half"}`,
+		},
+		{
+			name:   "a text run's stdout is carried as written",
+			format: FormatText,
+			stdout: "Invalid API key\n",
+			want:   "exit status 1; the cli said: Invalid API key",
+		},
+		{
+			name:   "a run that said nothing adds nothing",
+			format: FormatJSON,
+			stdout: " \n",
+			want:   "exit status 1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c, _ := scripted(t, permissiveGuard(t), "fake-claude", tt.stdout, errors.New("exit status 1"))
+
+			// Act.
+			_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Format: tt.format, Prompt: "q"})
+
+			// Assert.
+			var hErr *Error
+			if !errors.As(err, &hErr) || hErr.Cause != CauseExitStatus {
+				t.Fatalf("err = %v, want the %s cause", err, CauseExitStatus)
+			}
+			if hErr.Detail != tt.want {
+				t.Fatalf("detail = %q, want %q", hErr.Detail, tt.want)
+			}
+		})
 	}
 }
 
@@ -434,6 +525,22 @@ func TestExecCLISurfacesAnAbsentBinary(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), bin) {
 		t.Fatalf("err = %v, want a refusal naming the absent binary %q", err, bin)
+	}
+}
+
+func TestExecCLIAnswersAFailedRunsStdout(t *testing.T) {
+	// Arrange: the CLI states a json run's failure on stdout, then exits.
+	bin := fakeVendor(t, "printf '{\"is_error\":true}'\nexit 1")
+
+	// Act.
+	got, err := execCLI(context.Background(), bin, []string{"-p"}, os.Environ(), "q")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("execCLI() error = nil, want the non-zero exit")
+	}
+	if got != `{"is_error":true}` {
+		t.Fatalf("execCLI() stdout = %q, want what the failed run wrote", got)
 	}
 }
 

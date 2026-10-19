@@ -334,9 +334,7 @@ func coldRemediation(log dlog.Logger, served ServedColdGate, answer *agentreplv1
 	switch choice := answer.GetChoice().(type) {
 	case *agentreplv1.AnswerColdGateRequest_Pay:
 		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "pay"})
-		return &conversationv1.SessionColdRemediation{
-			Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
-		}, nil
+		return payRemediation(), nil
 	case *agentreplv1.AnswerColdGateRequest_Clear:
 		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "clear"})
 		return &conversationv1.SessionColdRemediation{

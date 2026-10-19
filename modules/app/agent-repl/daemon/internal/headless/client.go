@@ -15,7 +15,8 @@ import (
 )
 
 // execFunc is the one exec site, as a seam so the client's own tests never
-// spawn anything.
+// spawn anything. A failed run answers its error AND whatever it wrote to
+// stdout before failing, because a JSON run states its own failure there.
 type execFunc func(ctx context.Context, bin string, args []string, env []string, stdin string) (string, error)
 
 // Client is the daemon's headless vendor runner: one guard, one binary, one
@@ -98,7 +99,7 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			return Response{}, &Error{Cause: CauseTimeout, Detail: err.Error()}
 		}
-		return Response{}, &Error{Cause: CauseExitStatus, Detail: err.Error()}
+		return Response{}, &Error{Cause: CauseExitStatus, Detail: err.Error() + exitAccount(format, stdout)}
 	}
 
 	text := stdout
@@ -164,9 +165,37 @@ func resultOf(stdout string) (string, error) {
 		return "", fmt.Errorf("the json envelope did not parse: %w", err)
 	}
 	if env.IsError {
-		return "", fmt.Errorf("the cli reported an error (%s): %s", env.Subtype, strings.TrimSpace(env.Result))
+		return "", fmt.Errorf("the cli reported an error %s", env.account())
 	}
 	return env.Result, nil
+}
+
+// account words an error envelope's own account of its failure: its subtype
+// and its result. Every site that reports an envelope's error words it here.
+func (env envelope) account() string {
+	return fmt.Sprintf("(%s): %s", env.Subtype, strings.TrimSpace(env.Result))
+}
+
+// exitAccount is what a run that exited non-zero said on stdout, worded to
+// follow the exit's own error, or "" when it said nothing.
+//
+// GROUNDED (2026-10-19). A naming call under an account whose OAuth session
+// had expired exited 1 with an EMPTY stderr: `--output-format json` states its
+// failure in the stdout envelope, and the exit discarded it, so the log read
+// "exit status 1 (stderr: )" and named no cause at all. A JSON envelope is
+// read for its own account; anything else on stdout is carried as written.
+func exitAccount(format, stdout string) string {
+	said := strings.TrimSpace(stdout)
+	if said == "" {
+		return ""
+	}
+	if format == FormatJSON {
+		var env envelope
+		if err := json.Unmarshal([]byte(said), &env); err == nil && env.IsError {
+			return "; the cli said " + env.account()
+		}
+	}
+	return "; the cli said: " + said
 }
 
 // execCLI is the production exec: a headless print run with the composed
@@ -180,7 +209,7 @@ func execCLI(ctx context.Context, bin string, args, env []string, stdin string) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s %s: %w (stderr: %s)", bin, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.String(), fmt.Errorf("%s %s: %w (stderr: %s)", bin, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
 }

@@ -2076,13 +2076,6 @@ func parkedGate(t *testing.T, f *fleetFixture, ws wsm.Workspace) {
 	f.client.response = startedResponse("vendor-2")
 }
 
-// payRemediation is the simplest answered choice: the read is paid for.
-func payRemediation() *conversationv1.SessionColdRemediation {
-	return &conversationv1.SessionColdRemediation{
-		Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
-	}
-}
-
 func TestResumeColdInstallsTheSessionWatcher(t *testing.T) {
 	// Arrange: a parked session has no watcher, which is what refuses the next
 	// prompt `no_session`.
@@ -3055,9 +3048,11 @@ func TestDetachedFleetWorkSharesOneDrain(t *testing.T) {
 	}{
 		{"a detached cold re-open", func(f *fleetFixture, ws ids.WorkspaceID, settled chan<- error) {
 			f.fleet.remember(ws, &live{client: f.client})
-			f.fleet.ResumeColdDetached(ws, ColdResume{VendorSessionID: "vendor-1", Remediation: &conversationv1.SessionColdRemediation{
-				Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
-			}}, func(_ context.Context, err error) { settled <- err })
+			// A re-open answers a RAISED gate: its cold facts name the read
+			// the pay records (recordColdAnswer).
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.ResumeColdDetached(ws, ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()},
+				func(_ context.Context, err error) { settled <- err })
 		}},
 	}
 	for _, tt := range tests {
