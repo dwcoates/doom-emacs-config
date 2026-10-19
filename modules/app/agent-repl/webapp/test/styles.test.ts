@@ -2002,7 +2002,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule).toMatch(/--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important/);
   });
 
-  it("keeps the ring off a selected prompt, whose fill turns grey", () => {
+  it("keeps the ring off a selected prompt, whose fill is its mark", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble user entry-selected";
@@ -2037,6 +2037,68 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
 
     // Assert
     expect(selected).toBeGreaterThan(response);
+  });
+
+  it.each([
+    ["a user prompt", "user", "var(--selected-prompt-bg)"],
+    ["an agent-addressed prompt", "agent", "var(--selected-prompt-bg)"],
+    ["a peer message", "peer", "var(--selected-prompt-bg)"],
+    ["a held prompt", "held", "var(--selected-bubble-bg)"],
+  ])("fills a selected %s with its selection token", (_kind, variant, want) => {
+    // Arrange
+    const restore = installStylesheet();
+    const bubble = document.createElement("div");
+    bubble.className = "bubble entry-selected";
+    bubble.setAttribute("data-role", "prompt");
+    bubble.setAttribute("data-variant", variant);
+    document.body.append(bubble);
+    try {
+      // Act
+      const fill = cascadedValue(bubble, "--bubble-bg");
+      // Assert
+      expect(fill).toBe(want);
+    } finally {
+      bubble.remove();
+      restore();
+    }
+  });
+
+  it("fills a selected response with the grey selection token, never the prompt's blue", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const bubble = document.createElement("div");
+    bubble.className = "bubble final-response entry-selected";
+    bubble.setAttribute("data-role", "response");
+    bubble.setAttribute("data-variant", "response");
+    document.body.append(bubble);
+    try {
+      // Act
+      const fill = cascadedValue(bubble, "--bubble-bg");
+      // Assert
+      expect(fill).toBe("var(--selected-bubble-bg)");
+    } finally {
+      bubble.remove();
+      restore();
+    }
+  });
+
+  it("sets the selected prompt's fill alone, so selecting a prompt never reflows it", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected') ?? "";
+
+    // Assert
+    expect(rule.trim()).toBe("--bubble-bg: var(--selected-prompt-bg) !important;");
+  });
+
+  it.each(THEME_BLOCKS)("fills a selected prompt a darker blue than a user prompt in the %s theme", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [prompt, selected] = [themeRgbOf(css, "--user"), rgbOf(css, "--selected-prompt-bg")];
+
+    // Assert: darker, and still blue (its blue channel leads).
+    expect([luminance(selected) < luminance(prompt), selected[2] > selected[0] && selected[2] > selected[1]]).toEqual([true, true]);
   });
 
   it("defines the --selected-entry token so the blue rule resolves", () => {
@@ -3395,12 +3457,13 @@ describe("the one bubble rule set", () => {
     // Assert — the base rule paints the role's token; the roles choose it, and
     // so do the owner-named fills: the held variant's (2026-09-23), the
     // page-colored thinking and interim fill (2026-10-08), the selected
-    // bubble's grey (2026-10-11) and the agent-to-agent bubbles' final-response
-    // fill (2026-10-17).
+    // bubble's grey (2026-10-11), the agent-to-agent bubbles' final-response
+    // fill (2026-10-17) and the selected prompt's darker blue (2026-10-19).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
         ".bubble.entry-selected",
+        '.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected',
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
         '.bubble[data-variant="agent"]',
