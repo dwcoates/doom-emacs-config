@@ -225,7 +225,9 @@ Authored through the `create-or-update-skill` skill. It covers:
 
 ## Built catalog
 
-Every series below is queryable through `/metrics-agent-repl`.
+Every series below is queryable through `/metrics-agent-repl`. Every series also
+carries the target labels `instance` (the program) and `run` (its process
+run, judgement call 12).
 
 | Series | Type | Labels | Source |
 |---|---|---|---|

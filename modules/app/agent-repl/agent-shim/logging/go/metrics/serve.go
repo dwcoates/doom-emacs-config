@@ -105,6 +105,19 @@ func TargetPath(root, program string) string {
 	return filepath.Join(root, TargetsDir, program+".json")
 }
 
+// Run is this process's run: its pid and the instant the package
+// initialized, in nanoseconds. Every target this process advertises carries
+// it as the `run` label, so each process run is its own set of series.
+//
+// A RUN IS ITS OWN SERIES BECAUSE EVERY COUNTER STARTS FROM ZERO WITH ITS
+// PROCESS. Continuing one series across processes made a restart visible only
+// when a counter went down, and a new process often counts as much as the old
+// one by its first scrape: a handover's successor that booted once and started
+// 17 workspaces read as no boot and a counter dropping from 18 to 17, which no
+// query counts (docs/METRICS-JUDGEMENT-CALLS.md, call 12). Two processes cannot
+// share a run: one pid is never live twice at the same nanosecond.
+var Run = fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+
 // target is one file_sd entry.
 type target struct {
 	Targets []string          `json:"targets"`
@@ -112,14 +125,14 @@ type target struct {
 }
 
 // Advertise atomically writes the target file naming this surface, replacing
-// whatever an earlier instance wrote. `instance` is the program rather than
-// the port, so a restart continues the same series instead of minting new
-// ones. It is the only target label: a `program` target label would collide
-// with the build info's own and push it aside as `exported_program`.
+// whatever an earlier instance wrote. Its labels are `instance`, the program
+// rather than the port, and `run` (Run), so each process run is its own set
+// of series. There is no `program` target label: it would collide with the
+// build info's own and push it aside as `exported_program`.
 func (s *Server) Advertise() error {
 	body, err := json.Marshal([]target{{
 		Targets: []string{s.addr},
-		Labels:  map[string]string{"instance": s.program},
+		Labels:  map[string]string{"instance": s.program, "run": Run},
 	}})
 	if err != nil {
 		return fmt.Errorf("metrics: encode the target for %q: %w", s.program, err)
