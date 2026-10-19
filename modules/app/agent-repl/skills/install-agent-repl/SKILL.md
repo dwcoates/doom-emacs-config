@@ -1,6 +1,6 @@
 ---
 name: install-agent-repl
-description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store and sidecar services, skills, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /install-agent-repl.
+description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /install-agent-repl. Update this skill whenever the installation process is expanded or changed.
 argument-hint: "[check]"
 allowed-tools: Bash(.claude/skills/install-agent-repl/run.sh:*)
 lineage_root: user.dodge.skills.install-agent-repl
