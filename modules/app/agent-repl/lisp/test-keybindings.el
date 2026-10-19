@@ -355,10 +355,20 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "H")
               'agent-repl-show-hidden-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-spc-tab-tab-switches-to-the-last-finished ()
-  "`SPC TAB TAB\=' jumps to the workspace that most recently went from working to done."
+(ert-deftest agent-repl-test-keybindings-spc-tab-tab-switches-to-the-previous ()
+  "`SPC TAB TAB\=' goes back to the workspace selected before the one shown."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "TAB")
+              'agent-repl-switch-to-previous-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-g-switches-to-the-last-finished ()
+  "`SPC TAB g\=' jumps to the workspace that most recently went from working to done."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "g")
               'agent-repl-switch-to-last-finished-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-doom-other-workspace-is-the-previous ()
+  "Doom's `+workspace/other\=' (`SPC TAB `\=') agrees with `SPC TAB TAB\='."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map [remap +workspace/other])
+              'agent-repl-switch-to-previous-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-m-0-switches-to-the-last-tab ()
   "`M-0' runs the last-tab command, not Doom's persp-indexed final switch."

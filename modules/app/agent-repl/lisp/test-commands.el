@@ -666,6 +666,72 @@ order a close lands by."
       (should-not switched)
       (should-not agent-repl--opened-recent-cycle))))
 
+;;;; ---- The jump back to the previously selected workspace ----
+
+(defmacro agent-repl-test-commands--with-previous (shown recent &rest body)
+  "Run BODY standing on SHOWN with RECENT as the selection-recency order.
+Binds `switched' to the requested target and `logged' to the log lines."
+  (declare (indent 2))
+  `(let ((switched nil) (logged nil) (said nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl--roster-recent-names) (lambda () ,recent))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (setq switched (cons ws trigger))))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-previous-requests-the-most-recent-other ()
+  "The jump requests the most recently selected workspace other than the shown one."
+  (agent-repl-test-commands--with-previous "here" '("here" "a" "b")
+    (agent-repl-switch-to-previous-workspace)
+    (should (equal switched '("a" . previous)))))
+
+(ert-deftest agent-repl-test-commands-previous-skips-the-shown-workspace-anywhere-in-the-order ()
+  "The shown workspace is never the target, even when the order does not lead with it."
+  (agent-repl-test-commands--with-previous "here" '("a" "here" "b")
+    (agent-repl-switch-to-previous-workspace)
+    (should (equal switched '("a" . previous)))))
+
+(ert-deftest agent-repl-test-commands-previous-logs-the-switch ()
+  "A jump records where it went from and where to."
+  (agent-repl-test-commands--with-previous "here" '("here" "a")
+    (agent-repl-switch-to-previous-workspace)
+    (should (member "elisp.commands.previous from=here target=a" logged))))
+
+(ert-deftest agent-repl-test-commands-previous-without-another-workspace-is-a-logged-no-op ()
+  "No other open workspace requests nothing, tells the user, and says so in the log."
+  (agent-repl-test-commands--with-previous "here" '("here")
+    (agent-repl-switch-to-previous-workspace)
+    (should-not switched)
+    (should (equal said "[agent-repl] No previous workspace to switch to"))
+    (should (member "elisp.commands.previous-none from=here" logged))))
+
+(ert-deftest agent-repl-test-commands-previous-toggles-with-the-recorded-history ()
+  "A switch by ANY means feeds the history, so two presses come back where they began."
+  (let ((agent-repl--workspace-history '("b" "a"))
+        (shown "b") (requests nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+              ((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-verbs--all-rows) (lambda () '(a b)))
+              ((symbol-function 'agent-repl-roster-row-closed-p) (lambda (_row) nil))
+              ((symbol-function 'agent-repl-roster-row-ref)
+               (lambda (row) (list :id (symbol-name row))))
+              ((symbol-function 'agent-repl--ws-by-ref-id) #'identity)
+              ((symbol-function 'agent-repl--info) #'ignore)
+              ((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws _trigger)
+                 (push ws requests)
+                 (setq shown ws)
+                 (agent-repl--record-workspace-history))))
+      (agent-repl-switch-to-previous-workspace)
+      (agent-repl-switch-to-previous-workspace)
+      (should (equal (nreverse requests) '("a" "b"))))))
+
 ;;;; ---- The jump to the workspace that most recently finished ----
 
 (defmacro agent-repl-test-commands--with-last-finished (shown drawn finished &rest body)

@@ -305,9 +305,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("commands.el" agent-repl-open-most-recent-workspace
      "All workspaces visited -- cycle reset"
      "reports the interactive workspace-cycle boundary")
+    ("commands.el" agent-repl-switch-to-previous-workspace
+     "[agent-repl] No previous workspace to switch to"
+     "tells the user SPC TAB TAB found no other workspace to go back to")
     ("commands.el" agent-repl-switch-to-last-finished-workspace
      "[agent-repl] No other workspace has finished"
-     "tells the user SPC TAB TAB found no other finished workspace to jump to")
+     "tells the user SPC TAB g found no other finished workspace to jump to")
     ("commands.el" agent-repl-switch-to-workspace
      "[agent-repl] No workspace tabs on the bar"
      "explains why the requested interactive switch did nothing")
