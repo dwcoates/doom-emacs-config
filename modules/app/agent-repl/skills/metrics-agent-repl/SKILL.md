@@ -46,6 +46,7 @@ Answers performance questions about agent-repl from stored history: what a laten
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
   - *NOTE*: latency names are the `latency` label: `switch_repeat`, `switch_first`, `page_boot`, `vendor_first_output`. Process groups are the `process` label: `daemon`, `daemon_tools`, `store`, `sidecar`, `shim`, `shim_tools`, `emacs`, `webkit_webcontent`, `webkit_networking`, `webkit_gpu`.
   - *NOTE*: restarts are the `restart` label, each with its `phase` label: `deploy` (`build`, `install`, `restart_services`, `decide`, `handover`, `total`), `daemon_boot` (`claim`, `reconciled`, `serving`, `sessions_up`, each from the process start), `service_restart` (`store`, `sidecar`), `workspace_start` (`start`, `wake`), `shim_restart` (`wait`, `prelaunch`, `stand_down`, `resume`, `run`) and `handover_transfer` (`wait`, `run`). The slowest workspace of the latest restart is `topk(5, agentrepl_workspace_restart_last_seconds{restart="workspace_start"})` through `--query`.
+  - *NOTE*: in a `--query` or `--range` of an `agentrepl_*` counter or histogram, ALWAYS use `increase_pure(...)`, NEVER `rate(...)` or `increase(...)`: those skip a series' first sample, so counts taken before the first scrape (a boot's, a takeover's) read as nothing. For a per-second figure, divide `increase_pure` by the window's seconds.
   - *NOTE*: a version reads `0.129.0` for a landing and `0.129.0+<commit>` for a build between landings; `git log` between two versions names the changes to read.
 
 2. Report.

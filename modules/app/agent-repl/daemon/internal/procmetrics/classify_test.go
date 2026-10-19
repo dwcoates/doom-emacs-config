@@ -133,6 +133,48 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestClassifyFoldsAWebKitDevelopmentBuildIntoItsRole(t *testing.T) {
+	tests := []struct {
+		name string
+		proc string
+		want string
+	}{
+		{"a development GPU process, truncated by the kernel", "com.apple.WebKit.GPU.Developmen", ProcessWebKitGPU},
+		{"a development web content process", "com.apple.WebKit.WebContent.Development", ProcessWebKitWebContent},
+		{"a development networking process, truncated", "com.apple.WebKit.Networking.Dev", ProcessWebKitNetworking},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ids := baseHost(Identity{PID: 20, PPID: 1, Name: tt.proc, Responsible: testEmacs})
+
+			// Act
+			got := classify(ids, testSelf, testSock, argvOf(nil))
+
+			// Assert
+			if got.groups[20] != (Group{Process: tt.want}) || len(got.unknownWebKit) != 0 {
+				t.Fatalf("group = %+v, unknown %v; want %s", got.groups[20], got.unknownWebKit, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyLeavesAWebKitRoleNoGroupNamesOutAndSaysWhich(t *testing.T) {
+	// Arrange
+	ids := baseHost(Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.Model", Responsible: testEmacs})
+
+	// Act
+	got := classify(ids, testSelf, testSock, argvOf(nil))
+
+	// Assert
+	if _, ok := got.groups[20]; ok {
+		t.Fatalf("a WebKit process of an unknown role was classified as %+v", got.groups[20])
+	}
+	if len(got.unknownWebKit) != 1 || got.unknownWebKit[0] != "com.apple.WebKit.Model" {
+		t.Fatalf("unknownWebKit = %v, want the Model process named", got.unknownWebKit)
+	}
+}
+
 func TestClassifyReportsAnArgvReadThatFailedForAnotherReason(t *testing.T) {
 	// Arrange
 	ids := baseHost(Identity{PID: 30, PPID: 1, Name: "node"})
