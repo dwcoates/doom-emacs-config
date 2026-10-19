@@ -23,6 +23,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -71,6 +72,12 @@ message SetWorkspaceHiddenError {
     SetWorkspaceHiddenTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SetWorkspaceHiddenNotYetAdopted not_yet_adopted = 4;
+    // The workspace has open children (hidden ones included), and hiding it
+    // would leave them without their parent in the Open section.
+    WorkspaceHasOpenChildren has_open_children = 5;
+    // The workspace's parent is hidden or closed, and showing it would make an
+    // open child of a parent outside the Open section.
+    WorkspaceParentNotOpen parent_not_open = 6;
   }
 }
 

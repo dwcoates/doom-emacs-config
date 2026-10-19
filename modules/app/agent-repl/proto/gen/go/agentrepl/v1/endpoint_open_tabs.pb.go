@@ -1305,8 +1305,8 @@ type OpenTabsOpened_Failed struct {
 
 type OpenTabsOpened_Hidden struct {
 	// Hidden, or in a collapsed repository section, and not the workspace
-	// the user is looking at: nothing was started, and its tab stays withheld
-	// until it is shown again.
+	// the user is looking at: nothing was started, and it stays off the tab
+	// bar until it is shown again.
 	Hidden *OpenTabsOpenedHidden `protobuf:"bytes,5,opt,name=hidden,proto3,oneof"`
 }
 

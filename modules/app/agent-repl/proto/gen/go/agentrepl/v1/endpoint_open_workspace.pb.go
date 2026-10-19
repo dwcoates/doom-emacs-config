@@ -277,6 +277,7 @@ type OpenWorkspaceError struct {
 	//	*OpenWorkspaceError_WorktreeUnrestorable
 	//	*OpenWorkspaceError_NotMerged
 	//	*OpenWorkspaceError_BriefMissing
+	//	*OpenWorkspaceError_ParentNotOpen
 	Cause         isOpenWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -427,6 +428,15 @@ func (x *OpenWorkspaceError) GetBriefMissing() *OpenWorkspaceBriefMissing {
 	return nil
 }
 
+func (x *OpenWorkspaceError) GetParentNotOpen() *WorkspaceParentNotOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_ParentNotOpen); ok {
+			return x.ParentNotOpen
+		}
+	}
+	return nil
+}
+
 type isOpenWorkspaceError_Cause interface {
 	isOpenWorkspaceError_Cause()
 }
@@ -509,6 +519,12 @@ type OpenWorkspaceError_BriefMissing struct {
 	BriefMissing *OpenWorkspaceBriefMissing `protobuf:"bytes,12,opt,name=brief_missing,json=briefMissing,proto3,oneof"`
 }
 
+type OpenWorkspaceError_ParentNotOpen struct {
+	// The workspace's parent is hidden or closed, and reopening it would make an
+	// open child of a parent outside the Open section.
+	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,13,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
+}
+
 func (*OpenWorkspaceError_UnknownWorkspace) isOpenWorkspaceError_Cause() {}
 
 func (*OpenWorkspaceError_WorkspaceRefMismatch) isOpenWorkspaceError_Cause() {}
@@ -532,6 +548,8 @@ func (*OpenWorkspaceError_WorktreeUnrestorable) isOpenWorkspaceError_Cause() {}
 func (*OpenWorkspaceError_NotMerged) isOpenWorkspaceError_Cause() {}
 
 func (*OpenWorkspaceError_BriefMissing) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_ParentNotOpen) isOpenWorkspaceError_Cause() {}
 
 // The refusal of a revert asked of a workspace with no landed merge. Carries
 // nothing: the workspace's own row already says it is not merged.
@@ -1073,7 +1091,7 @@ var File_agentrepl_v1_endpoint_open_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_open_workspace.proto\x12\fagentrepl.v1\x1a\x1dconversation/v1/session.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc6\x01\n" +
+	"*agentrepl/v1/endpoint_open_workspace.proto\x12\fagentrepl.v1\x1a\x1dconversation/v1/session.proto\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc6\x01\n" +
 	"\x14OpenWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x13\n" +
 	"\x05op_id\x18\x02 \x01(\tR\x04opId\x12N\n" +
@@ -1084,7 +1102,7 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.OpenWorkspaceSuccessH\x00R\asuccess\x128\n" +
 	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.OpenWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x16\n" +
-	"\x14OpenWorkspaceSuccess\"\xdf\b\n" +
+	"\x14OpenWorkspaceSuccess\"\xaf\t\n" +
 	"\x12OpenWorkspaceError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.OpenWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.OpenWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
@@ -1099,7 +1117,8 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	" \x01(\v2/.agentrepl.v1.OpenWorkspaceWorktreeUnrestorableH\x00R\x14worktreeUnrestorable\x12E\n" +
 	"\n" +
 	"not_merged\x18\v \x01(\v2$.agentrepl.v1.OpenWorkspaceNotMergedH\x00R\tnotMerged\x12N\n" +
-	"\rbrief_missing\x18\f \x01(\v2'.agentrepl.v1.OpenWorkspaceBriefMissingH\x00R\fbriefMissingB\a\n" +
+	"\rbrief_missing\x18\f \x01(\v2'.agentrepl.v1.OpenWorkspaceBriefMissingH\x00R\fbriefMissing\x12N\n" +
+	"\x0fparent_not_open\x18\r \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpenB\a\n" +
 	"\x05cause\"\x18\n" +
 	"\x16OpenWorkspaceNotMerged\"3\n" +
 	"\x19OpenWorkspaceBriefMissing\x12\x16\n" +
@@ -1157,7 +1176,8 @@ var file_agentrepl_v1_endpoint_open_workspace_proto_goTypes = []any{
 	(*OpenWorkspaceTranscriptMissing)(nil),     // 15: agentrepl.v1.OpenWorkspaceTranscriptMissing
 	(*OpenWorkspaceSpawnFailed)(nil),           // 16: agentrepl.v1.OpenWorkspaceSpawnFailed
 	(*v1.WorkspaceRef)(nil),                    // 17: workspace.v1.WorkspaceRef
-	(*v11.LockHolderFailure)(nil),              // 18: conversation.v1.LockHolderFailure
+	(*WorkspaceParentNotOpen)(nil),             // 18: agentrepl.v1.WorkspaceParentNotOpen
+	(*v11.LockHolderFailure)(nil),              // 19: conversation.v1.LockHolderFailure
 }
 var file_agentrepl_v1_endpoint_open_workspace_proto_depIdxs = []int32{
 	17, // 0: agentrepl.v1.OpenWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1176,12 +1196,13 @@ var file_agentrepl_v1_endpoint_open_workspace_proto_depIdxs = []int32{
 	7,  // 13: agentrepl.v1.OpenWorkspaceError.worktree_unrestorable:type_name -> agentrepl.v1.OpenWorkspaceWorktreeUnrestorable
 	5,  // 14: agentrepl.v1.OpenWorkspaceError.not_merged:type_name -> agentrepl.v1.OpenWorkspaceNotMerged
 	6,  // 15: agentrepl.v1.OpenWorkspaceError.brief_missing:type_name -> agentrepl.v1.OpenWorkspaceBriefMissing
-	18, // 16: agentrepl.v1.OpenWorkspaceLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	18, // 16: agentrepl.v1.OpenWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	19, // 17: agentrepl.v1.OpenWorkspaceLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_workspace_proto_init() }
@@ -1189,6 +1210,7 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_open_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[2].OneofWrappers = []any{
 		(*OpenWorkspaceResponse_Success)(nil),
@@ -1207,6 +1229,7 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_init() {
 		(*OpenWorkspaceError_WorktreeUnrestorable)(nil),
 		(*OpenWorkspaceError_NotMerged)(nil),
 		(*OpenWorkspaceError_BriefMissing)(nil),
+		(*OpenWorkspaceError_ParentNotOpen)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

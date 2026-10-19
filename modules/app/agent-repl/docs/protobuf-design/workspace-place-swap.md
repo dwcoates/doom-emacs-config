@@ -331,3 +331,60 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
 - **Still open:** a swap of a child with a workspace outside its family
   exchanges places and moves no tab; whether it is refused too (as
   `MoveWorkspace` refuses `not_siblings`) is put to the owner.
+
+## One roster listing, three states, and family rules (owner, 2026-10-19)
+
+### Core design principles
+
+- **The roster is one listing the tab bar and the sidebar share.** Every
+  workspace the roster draws is in exactly one of three lists: OPEN (the
+  repository sections), HIDDEN, MERGED. The tab bar is the Open list's
+  depth-first walk; nothing else orders tabs.
+  - Consequences: `frontend.v1.WorkspaceRoster.tab_bar` is retired; each open
+    row states its own tab (`RosterOpenRow.tab`: numbered or folded).
+  - Does not claim: that a folded repository's workspaces are closed. They
+    stay open, folded out of both the sidebar and the tab bar.
+- **Ordering conditions** (each lives in the implementation's docstrings):
+  numbers match position (tab N immediately before N+1, in both surfaces);
+  the order runs unbroken across sections, repositories and families; a
+  subtree is one unbroken run at every depth; a subsection never spans
+  repositories; a family never splits across subsections; every workspace
+  is in one list; a workspace is in Open iff it has a tab (folding aside);
+  hidden workspaces have no tab and merged workspaces are never open (OPEN
+  BEATS MERGED: a reopened merged workspace returns to Open); numbers run
+  1..N with no gap; only the daemon holds the order and no client reorders
+  locally; only an explicit request changes the order; a request that would
+  break a condition is refused and changes nothing; the order survives
+  restarts.
+- **Family rules.** A workspace with open children (hidden children count as
+  open) cannot be hidden, closed, killed, nuked, or merged by a merge that
+  closes it; the merge refusal names the children, to be resolved and
+  closed first. A workspace cannot be created, re-parented, reopened or
+  shown as the open child of a hidden or closed parent. Families that
+  already break the rule keep drawing by the old rule: an open workspace
+  whose parent is not open takes its parent's place.
+
+### Landed changes (2026-10-19)
+
+- **What:** `RosterOpenRow`/`RosterOpenRows`, `RosterOpenRowTab` (numbered,
+  folded), `RosterHiddenRow`/`RosterHiddenRows`, `RosterMergedRow`/
+  `RosterMergedRows`; the sections' `rows` fields become `open_rows`,
+  `hidden_rows`, `merged_rows` under new field numbers (the old ones
+  reserved); `RosterRow.children` retired (families nest in their list's row
+  type); `RosterRows`, `RosterTabBar`, `RosterTab` and its arms removed.
+  `agentrepl.v1.family.proto`: `WorkspaceHasOpenChildren` (on CloseWorkspace,
+  KillWorkspace, NukeWorkspace, SetWorkspaceHidden, MergeWorkspace) and
+  `WorkspaceParentNotOpen` (on SetWorkspaceHidden, SetWorkspaceParent,
+  CreateWorkspace, OpenWorkspace). `SwapWorkspacesError.not_siblings`.
+- **Why the new field numbers:** a rolling deploy can pair a new daemon with
+  an old client for a moment; a reused number with a new type would decode
+  as garbage, while a new number decodes as an unknown field.
+- **Why shared family messages:** the same two refusals reach nine
+  endpoints; one definition keeps their facts identical.
+- **Kept on RosterRow, deliberately:** `closed` and `closure` (the editor's
+  switcher reads who closed a merged row) and the when-column's `merged` and
+  `hidden` arms; moving them was not needed for any condition.
+- **Consequences:** the daemon hoists (an open workspace whose parent is not
+  open takes its place), which clients used to do; Emacs builds its tabs
+  from the Open walk, plus an undrawn entry per hidden workspace so a hidden
+  workspace keeps its perspective; the webapp paints each row's own number.

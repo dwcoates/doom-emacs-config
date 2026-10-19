@@ -220,6 +220,7 @@ type CloseWorkspaceError struct {
 	//	*CloseWorkspaceError_WorkspaceRefMismatch
 	//	*CloseWorkspaceError_TransferringAway
 	//	*CloseWorkspaceError_NotYetAdopted
+	//	*CloseWorkspaceError_HasOpenChildren
 	Cause         isCloseWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -307,6 +308,15 @@ func (x *CloseWorkspaceError) GetNotYetAdopted() *CloseWorkspaceNotYetAdopted {
 	return nil
 }
 
+func (x *CloseWorkspaceError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseWorkspaceError_HasOpenChildren); ok {
+			return x.HasOpenChildren
+		}
+	}
+	return nil
+}
+
 type isCloseWorkspaceError_Cause interface {
 	isCloseWorkspaceError_Cause()
 }
@@ -337,6 +347,12 @@ type CloseWorkspaceError_NotYetAdopted struct {
 	NotYetAdopted *CloseWorkspaceNotYetAdopted `protobuf:"bytes,5,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type CloseWorkspaceError_HasOpenChildren struct {
+	// The workspace has open children (hidden ones included), and closing it
+	// would leave them without their parent in the Open section.
+	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,6,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
+}
+
 func (*CloseWorkspaceError_Blocked) isCloseWorkspaceError_Cause() {}
 
 func (*CloseWorkspaceError_UnknownWorkspace) isCloseWorkspaceError_Cause() {}
@@ -346,6 +362,8 @@ func (*CloseWorkspaceError_WorkspaceRefMismatch) isCloseWorkspaceError_Cause() {
 func (*CloseWorkspaceError_TransferringAway) isCloseWorkspaceError_Cause() {}
 
 func (*CloseWorkspaceError_NotYetAdopted) isCloseWorkspaceError_Cause() {}
+
+func (*CloseWorkspaceError_HasOpenChildren) isCloseWorkspaceError_Cause() {}
 
 // WHY the close is blocked — the same evidence the footer's close-blocked
 // state draws, so a caller with no footer (a test, a log line, the host's
@@ -598,20 +616,21 @@ var File_agentrepl_v1_endpoint_close_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_close_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"Q\n" +
+	"+agentrepl/v1/endpoint_close_workspace.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"Q\n" +
 	"\x15CloseWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x9e\x01\n" +
 	"\x16CloseWorkspaceResponse\x12?\n" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.CloseWorkspaceSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.CloseWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15CloseWorkspaceSuccess\"\xd8\x03\n" +
+	"\x15CloseWorkspaceSuccess\"\xae\x04\n" +
 	"\x13CloseWorkspaceError\x12?\n" +
 	"\ablocked\x18\x01 \x01(\v2#.agentrepl.v1.CloseWorkspaceBlockedH\x00R\ablocked\x12[\n" +
 	"\x11unknown_workspace\x18\x02 \x01(\v2,.agentrepl.v1.CloseWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x03 \x01(\v20.agentrepl.v1.CloseWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
 	"\x11transferring_away\x18\x04 \x01(\v2,.agentrepl.v1.CloseWorkspaceTransferringAwayH\x00R\x10transferringAway\x12S\n" +
-	"\x0fnot_yet_adopted\x18\x05 \x01(\v2).agentrepl.v1.CloseWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\x05 \x01(\v2).agentrepl.v1.CloseWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12T\n" +
+	"\x11has_open_children\x18\x06 \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildrenB\a\n" +
 	"\x05cause\"\xba\x01\n" +
 	"\x15CloseWorkspaceBlocked\x12$\n" +
 	"\x0eturn_in_flight\x18\x01 \x01(\bR\fturnInFlight\x12\x1b\n" +
@@ -650,21 +669,23 @@ var file_agentrepl_v1_endpoint_close_workspace_proto_goTypes = []any{
 	(*CloseWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.CloseWorkspaceTransferringAway
 	(*CloseWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.CloseWorkspaceNotYetAdopted
 	(*v1.WorkspaceRef)(nil),                    // 9: workspace.v1.WorkspaceRef
+	(*WorkspaceHasOpenChildren)(nil),           // 10: agentrepl.v1.WorkspaceHasOpenChildren
 }
 var file_agentrepl_v1_endpoint_close_workspace_proto_depIdxs = []int32{
-	9, // 0: agentrepl.v1.CloseWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.CloseWorkspaceResponse.success:type_name -> agentrepl.v1.CloseWorkspaceSuccess
-	3, // 2: agentrepl.v1.CloseWorkspaceResponse.error:type_name -> agentrepl.v1.CloseWorkspaceError
-	4, // 3: agentrepl.v1.CloseWorkspaceError.blocked:type_name -> agentrepl.v1.CloseWorkspaceBlocked
-	5, // 4: agentrepl.v1.CloseWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.CloseWorkspaceUnknownWorkspace
-	6, // 5: agentrepl.v1.CloseWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch
-	7, // 6: agentrepl.v1.CloseWorkspaceError.transferring_away:type_name -> agentrepl.v1.CloseWorkspaceTransferringAway
-	8, // 7: agentrepl.v1.CloseWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.CloseWorkspaceNotYetAdopted
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	9,  // 0: agentrepl.v1.CloseWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.CloseWorkspaceResponse.success:type_name -> agentrepl.v1.CloseWorkspaceSuccess
+	3,  // 2: agentrepl.v1.CloseWorkspaceResponse.error:type_name -> agentrepl.v1.CloseWorkspaceError
+	4,  // 3: agentrepl.v1.CloseWorkspaceError.blocked:type_name -> agentrepl.v1.CloseWorkspaceBlocked
+	5,  // 4: agentrepl.v1.CloseWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.CloseWorkspaceUnknownWorkspace
+	6,  // 5: agentrepl.v1.CloseWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch
+	7,  // 6: agentrepl.v1.CloseWorkspaceError.transferring_away:type_name -> agentrepl.v1.CloseWorkspaceTransferringAway
+	8,  // 7: agentrepl.v1.CloseWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.CloseWorkspaceNotYetAdopted
+	10, // 8: agentrepl.v1.CloseWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_close_workspace_proto_init() }
@@ -672,6 +693,7 @@ func file_agentrepl_v1_endpoint_close_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_close_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*CloseWorkspaceResponse_Success)(nil),
 		(*CloseWorkspaceResponse_Error)(nil),
@@ -682,6 +704,7 @@ func file_agentrepl_v1_endpoint_close_workspace_proto_init() {
 		(*CloseWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*CloseWorkspaceError_TransferringAway)(nil),
 		(*CloseWorkspaceError_NotYetAdopted)(nil),
+		(*CloseWorkspaceError_HasOpenChildren)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

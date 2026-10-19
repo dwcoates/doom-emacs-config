@@ -288,6 +288,7 @@ type NukeWorkspaceError struct {
 	//	*NukeWorkspaceError_TransferringAway
 	//	*NukeWorkspaceError_NotYetAdopted
 	//	*NukeWorkspaceError_GitFailed
+	//	*NukeWorkspaceError_HasOpenChildren
 	Cause         isNukeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -375,6 +376,15 @@ func (x *NukeWorkspaceError) GetGitFailed() *NukeWorkspaceGitFailed {
 	return nil
 }
 
+func (x *NukeWorkspaceError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_HasOpenChildren); ok {
+			return x.HasOpenChildren
+		}
+	}
+	return nil
+}
+
 type isNukeWorkspaceError_Cause interface {
 	isNukeWorkspaceError_Cause()
 }
@@ -404,6 +414,12 @@ type NukeWorkspaceError_GitFailed struct {
 	GitFailed *NukeWorkspaceGitFailed `protobuf:"bytes,5,opt,name=git_failed,json=gitFailed,proto3,oneof"`
 }
 
+type NukeWorkspaceError_HasOpenChildren struct {
+	// The workspace has open children (hidden ones included), and nuking it
+	// would leave them without their parent in the Open section.
+	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,6,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
+}
+
 func (*NukeWorkspaceError_UnknownWorkspace) isNukeWorkspaceError_Cause() {}
 
 func (*NukeWorkspaceError_WorkspaceRefMismatch) isNukeWorkspaceError_Cause() {}
@@ -413,6 +429,8 @@ func (*NukeWorkspaceError_TransferringAway) isNukeWorkspaceError_Cause() {}
 func (*NukeWorkspaceError_NotYetAdopted) isNukeWorkspaceError_Cause() {}
 
 func (*NukeWorkspaceError_GitFailed) isNukeWorkspaceError_Cause() {}
+
+func (*NukeWorkspaceError_HasOpenChildren) isNukeWorkspaceError_Cause() {}
 
 type NukeWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -625,7 +643,7 @@ var File_agentrepl_v1_endpoint_nuke_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_nuke_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"t\n" +
+	"*agentrepl/v1/endpoint_nuke_workspace.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"t\n" +
 	"\x14NukeWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x18\n" +
 	"\x05op_id\x18\x02 \x01(\tH\x00R\x04opId\x88\x01\x01B\b\n" +
@@ -637,14 +655,15 @@ const file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc = "" +
 	"\x06result\",\n" +
 	"\x15NukeWorkspaceAccepted\x12\x13\n" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\"\x16\n" +
-	"\x14NukeWorkspaceSuccess\"\xd9\x03\n" +
+	"\x14NukeWorkspaceSuccess\"\xaf\x04\n" +
 	"\x12NukeWorkspaceError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.NukeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.NukeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2+.agentrepl.v1.NukeWorkspaceTransferringAwayH\x00R\x10transferringAway\x12R\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.NukeWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12E\n" +
 	"\n" +
-	"git_failed\x18\x05 \x01(\v2$.agentrepl.v1.NukeWorkspaceGitFailedH\x00R\tgitFailedB\a\n" +
+	"git_failed\x18\x05 \x01(\v2$.agentrepl.v1.NukeWorkspaceGitFailedH\x00R\tgitFailed\x12T\n" +
+	"\x11has_open_children\x18\x06 \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildrenB\a\n" +
 	"\x05cause\"\x1f\n" +
 	"\x1dNukeWorkspaceUnknownWorkspace\"F\n" +
 	"!NukeWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -680,6 +699,7 @@ var file_agentrepl_v1_endpoint_nuke_workspace_proto_goTypes = []any{
 	(*NukeWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.NukeWorkspaceNotYetAdopted
 	(*NukeWorkspaceGitFailed)(nil),            // 9: agentrepl.v1.NukeWorkspaceGitFailed
 	(*v1.WorkspaceRef)(nil),                   // 10: workspace.v1.WorkspaceRef
+	(*WorkspaceHasOpenChildren)(nil),          // 11: agentrepl.v1.WorkspaceHasOpenChildren
 }
 var file_agentrepl_v1_endpoint_nuke_workspace_proto_depIdxs = []int32{
 	10, // 0: agentrepl.v1.NukeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -691,11 +711,12 @@ var file_agentrepl_v1_endpoint_nuke_workspace_proto_depIdxs = []int32{
 	7,  // 6: agentrepl.v1.NukeWorkspaceError.transferring_away:type_name -> agentrepl.v1.NukeWorkspaceTransferringAway
 	8,  // 7: agentrepl.v1.NukeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.NukeWorkspaceNotYetAdopted
 	9,  // 8: agentrepl.v1.NukeWorkspaceError.git_failed:type_name -> agentrepl.v1.NukeWorkspaceGitFailed
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	11, // 9: agentrepl.v1.NukeWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_nuke_workspace_proto_init() }
@@ -703,6 +724,7 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_nuke_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*NukeWorkspaceResponse_Success)(nil),
@@ -715,6 +737,7 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_init() {
 		(*NukeWorkspaceError_TransferringAway)(nil),
 		(*NukeWorkspaceError_NotYetAdopted)(nil),
 		(*NukeWorkspaceError_GitFailed)(nil),
+		(*NukeWorkspaceError_HasOpenChildren)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

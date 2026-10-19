@@ -12,6 +12,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceHasOpenChildren } from "./family_pb";
+import { file_agentrepl_v1_family } from "./family_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -20,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_kill_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_kill_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfa2lsbF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJjChRLaWxsV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhIKBW9wX2lkGAIgASgJSACIAQFCCAoGX29wX2lkIsQBChVLaWxsV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VFcnJvckgAEjcKCGFjY2VwdGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VBY2NlcHRlZEgAQggKBnJlc3VsdCImChVLaWxsV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiFgoUS2lsbFdvcmtzcGFjZVN1Y2Nlc3MiyQIKEktpbGxXb3Jrc3BhY2VFcnJvchJIChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIrLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElEKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLy5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKy5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJDCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKC5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSIfCh1LaWxsV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI5CiFLaWxsV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjAKHUtpbGxXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHAoaS2lsbFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfa2lsbF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJjChRLaWxsV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhIKBW9wX2lkGAIgASgJSACIAQFCCAoGX29wX2lkIsQBChVLaWxsV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VFcnJvckgAEjcKCGFjY2VwdGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VBY2NlcHRlZEgAQggKBnJlc3VsdCImChVLaWxsV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiFgoUS2lsbFdvcmtzcGFjZVN1Y2Nlc3MijgMKEktpbGxXb3Jrc3BhY2VFcnJvchJIChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIrLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElEKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLy5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKy5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJDCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKC5hZ2VudHJlcGwudjEuS2lsbFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJDChFoYXNfb3Blbl9jaGlsZHJlbhgFIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VIYXNPcGVuQ2hpbGRyZW5IAEIHCgVjYXVzZSIfCh1LaWxsV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI5CiFLaWxsV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjAKHUtpbGxXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHAoaS2lsbFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceRequest
@@ -175,6 +177,15 @@ export type KillWorkspaceError = Message<"agentrepl.v1.KillWorkspaceError"> & {
      */
     value: KillWorkspaceNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The workspace has open children (hidden ones included), and killing it
+     * would leave them without their parent in the Open section.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceHasOpenChildren has_open_children = 5;
+     */
+    value: WorkspaceHasOpenChildren;
+    case: "hasOpenChildren";
   } | { case: undefined; value?: undefined };
 };
 

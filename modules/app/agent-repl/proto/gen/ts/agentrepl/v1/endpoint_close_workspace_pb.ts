@@ -25,6 +25,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceHasOpenChildren } from "./family_pb";
+import { file_agentrepl_v1_family } from "./family_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -33,7 +35,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_close_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_close_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVQ2xvc2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFkNsb3NlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFUNsb3NlV29ya3NwYWNlU3VjY2VzcyKGAwoTQ2xvc2VXb3Jrc3BhY2VFcnJvchI2CgdibG9ja2VkGAEgASgLMiMuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlQmxvY2tlZEgAEkkKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyMC5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSJ/ChVDbG9zZVdvcmtzcGFjZUJsb2NrZWQSFgoOdHVybl9pbl9mbGlnaHQYASABKAgSEQoJbGl2ZV93b3JrGAIgASgNEhQKDGhlbGRfcHJvbXB0cxgDIAEoDRIUCgxtZXJnZV9xdWV1ZWQYBCABKAgSDwoHc3VtbWFyeRgFIAEoCSIgCh5DbG9zZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOgoiQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeQ2xvc2VXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobQ2xvc2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVQ2xvc2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFkNsb3NlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFUNsb3NlV29ya3NwYWNlU3VjY2VzcyLLAwoTQ2xvc2VXb3Jrc3BhY2VFcnJvchI2CgdibG9ja2VkGAEgASgLMiMuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlQmxvY2tlZEgAEkkKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyMC5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJDChFoYXNfb3Blbl9jaGlsZHJlbhgGIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VIYXNPcGVuQ2hpbGRyZW5IAEIHCgVjYXVzZSJ/ChVDbG9zZVdvcmtzcGFjZUJsb2NrZWQSFgoOdHVybl9pbl9mbGlnaHQYASABKAgSEQoJbGl2ZV93b3JrGAIgASgNEhQKDGhlbGRfcHJvbXB0cxgDIAEoDRIUCgxtZXJnZV9xdWV1ZWQYBCABKAgSDwoHc3VtbWFyeRgFIAEoCSIgCh5DbG9zZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOgoiQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeQ2xvc2VXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobQ2xvc2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.CloseWorkspaceRequest
@@ -151,6 +153,15 @@ export type CloseWorkspaceError = Message<"agentrepl.v1.CloseWorkspaceError"> & 
      */
     value: CloseWorkspaceNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The workspace has open children (hidden ones included), and closing it
+     * would leave them without their parent in the Open section.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceHasOpenChildren has_open_children = 6;
+     */
+    value: WorkspaceHasOpenChildren;
+    case: "hasOpenChildren";
   } | { case: undefined; value?: undefined };
 };
 

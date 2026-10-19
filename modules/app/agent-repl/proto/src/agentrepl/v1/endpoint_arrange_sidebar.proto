@@ -4,9 +4,8 @@
 // THE ARRANGEMENT IS THE TAB BAR'S ORDER. The repository grouping draws its
 // repositories in their stored order; inside each repository, the workspaces
 // in no subsection first, then each subsection in its stored order with its
-// own workspaces below its header. The Emacs tab bar
-// (frontend.v1.WorkspaceRoster.tab_bar) lists the open workspaces in exactly
-// that order: every workspace of an earlier repository before any of a later
+// own workspaces below its header. The Emacs tab bar walks the open
+// workspaces in exactly that order (frontend.v1.RosterOpenRow.tab): every workspace of an earlier repository before any of a later
 // one, and inside a repository, the unsectioned workspaces, then the first
 // subsection's, then the next's. So every change here moves tabs as well as
 // rows, and the new order arrives on the roster stream for both.

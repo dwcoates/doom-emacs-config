@@ -345,6 +345,8 @@ type SetWorkspaceHiddenError struct {
 	//	*SetWorkspaceHiddenError_WorkspaceRefMismatch
 	//	*SetWorkspaceHiddenError_TransferringAway
 	//	*SetWorkspaceHiddenError_NotYetAdopted
+	//	*SetWorkspaceHiddenError_HasOpenChildren
+	//	*SetWorkspaceHiddenError_ParentNotOpen
 	Cause         isSetWorkspaceHiddenError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -423,6 +425,24 @@ func (x *SetWorkspaceHiddenError) GetNotYetAdopted() *SetWorkspaceHiddenNotYetAd
 	return nil
 }
 
+func (x *SetWorkspaceHiddenError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceHiddenError_HasOpenChildren); ok {
+			return x.HasOpenChildren
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceHiddenError) GetParentNotOpen() *WorkspaceParentNotOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceHiddenError_ParentNotOpen); ok {
+			return x.ParentNotOpen
+		}
+	}
+	return nil
+}
+
 type isSetWorkspaceHiddenError_Cause interface {
 	isSetWorkspaceHiddenError_Cause()
 }
@@ -447,6 +467,18 @@ type SetWorkspaceHiddenError_NotYetAdopted struct {
 	NotYetAdopted *SetWorkspaceHiddenNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type SetWorkspaceHiddenError_HasOpenChildren struct {
+	// The workspace has open children (hidden ones included), and hiding it
+	// would leave them without their parent in the Open section.
+	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,5,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
+}
+
+type SetWorkspaceHiddenError_ParentNotOpen struct {
+	// The workspace's parent is hidden or closed, and showing it would make an
+	// open child of a parent outside the Open section.
+	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,6,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
+}
+
 func (*SetWorkspaceHiddenError_UnknownWorkspace) isSetWorkspaceHiddenError_Cause() {}
 
 func (*SetWorkspaceHiddenError_WorkspaceRefMismatch) isSetWorkspaceHiddenError_Cause() {}
@@ -454,6 +486,10 @@ func (*SetWorkspaceHiddenError_WorkspaceRefMismatch) isSetWorkspaceHiddenError_C
 func (*SetWorkspaceHiddenError_TransferringAway) isSetWorkspaceHiddenError_Cause() {}
 
 func (*SetWorkspaceHiddenError_NotYetAdopted) isSetWorkspaceHiddenError_Cause() {}
+
+func (*SetWorkspaceHiddenError_HasOpenChildren) isSetWorkspaceHiddenError_Cause() {}
+
+func (*SetWorkspaceHiddenError_ParentNotOpen) isSetWorkspaceHiddenError_Cause() {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
 type SetWorkspaceHiddenUnknownWorkspace struct {
@@ -626,7 +662,7 @@ var File_agentrepl_v1_endpoint_set_workspace_hidden_proto protoreflect.FileDescr
 
 const file_agentrepl_v1_endpoint_set_workspace_hidden_proto_rawDesc = "" +
 	"\n" +
-	"0agentrepl/v1/endpoint_set_workspace_hidden.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xdb\x01\n" +
+	"0agentrepl/v1/endpoint_set_workspace_hidden.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"\xdb\x01\n" +
 	"\x19SetWorkspaceHiddenRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12:\n" +
 	"\x04hide\x18\x02 \x01(\v2$.agentrepl.v1.SetWorkspaceHiddenHideH\x00R\x04hide\x12:\n" +
@@ -639,12 +675,14 @@ const file_agentrepl_v1_endpoint_set_workspace_hidden_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2'.agentrepl.v1.SetWorkspaceHiddenSuccessH\x00R\asuccess\x12=\n" +
 	"\x05error\x18\x02 \x01(\v2%.agentrepl.v1.SetWorkspaceHiddenErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1b\n" +
-	"\x19SetWorkspaceHiddenSuccess\"\xab\x03\n" +
+	"\x19SetWorkspaceHiddenSuccess\"\xd1\x04\n" +
 	"\x17SetWorkspaceHiddenError\x12_\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v20.agentrepl.v1.SetWorkspaceHiddenUnknownWorkspaceH\x00R\x10unknownWorkspace\x12l\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v24.agentrepl.v1.SetWorkspaceHiddenWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12_\n" +
 	"\x11transferring_away\x18\x03 \x01(\v20.agentrepl.v1.SetWorkspaceHiddenTransferringAwayH\x00R\x10transferringAway\x12W\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2-.agentrepl.v1.SetWorkspaceHiddenNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2-.agentrepl.v1.SetWorkspaceHiddenNotYetAdoptedH\x00R\rnotYetAdopted\x12T\n" +
+	"\x11has_open_children\x18\x05 \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildren\x12N\n" +
+	"\x0fparent_not_open\x18\x06 \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpenB\a\n" +
 	"\x05cause\"$\n" +
 	"\"SetWorkspaceHiddenUnknownWorkspace\"K\n" +
 	"&SetWorkspaceHiddenWorkspaceRefMismatch\x12!\n" +
@@ -678,6 +716,8 @@ var file_agentrepl_v1_endpoint_set_workspace_hidden_proto_goTypes = []any{
 	(*SetWorkspaceHiddenTransferringAway)(nil),     // 8: agentrepl.v1.SetWorkspaceHiddenTransferringAway
 	(*SetWorkspaceHiddenNotYetAdopted)(nil),        // 9: agentrepl.v1.SetWorkspaceHiddenNotYetAdopted
 	(*v1.WorkspaceRef)(nil),                        // 10: workspace.v1.WorkspaceRef
+	(*WorkspaceHasOpenChildren)(nil),               // 11: agentrepl.v1.WorkspaceHasOpenChildren
+	(*WorkspaceParentNotOpen)(nil),                 // 12: agentrepl.v1.WorkspaceParentNotOpen
 }
 var file_agentrepl_v1_endpoint_set_workspace_hidden_proto_depIdxs = []int32{
 	10, // 0: agentrepl.v1.SetWorkspaceHiddenRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -689,11 +729,13 @@ var file_agentrepl_v1_endpoint_set_workspace_hidden_proto_depIdxs = []int32{
 	7,  // 6: agentrepl.v1.SetWorkspaceHiddenError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceHiddenWorkspaceRefMismatch
 	8,  // 7: agentrepl.v1.SetWorkspaceHiddenError.transferring_away:type_name -> agentrepl.v1.SetWorkspaceHiddenTransferringAway
 	9,  // 8: agentrepl.v1.SetWorkspaceHiddenError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceHiddenNotYetAdopted
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	11, // 9: agentrepl.v1.SetWorkspaceHiddenError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	12, // 10: agentrepl.v1.SetWorkspaceHiddenError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_hidden_proto_init() }
@@ -701,6 +743,7 @@ func file_agentrepl_v1_endpoint_set_workspace_hidden_proto_init() {
 	if File_agentrepl_v1_endpoint_set_workspace_hidden_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_set_workspace_hidden_proto_msgTypes[0].OneofWrappers = []any{
 		(*SetWorkspaceHiddenRequest_Hide)(nil),
 		(*SetWorkspaceHiddenRequest_Show)(nil),
@@ -714,6 +757,8 @@ func file_agentrepl_v1_endpoint_set_workspace_hidden_proto_init() {
 		(*SetWorkspaceHiddenError_WorkspaceRefMismatch)(nil),
 		(*SetWorkspaceHiddenError_TransferringAway)(nil),
 		(*SetWorkspaceHiddenError_NotYetAdopted)(nil),
+		(*SetWorkspaceHiddenError_HasOpenChildren)(nil),
+		(*SetWorkspaceHiddenError_ParentNotOpen)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

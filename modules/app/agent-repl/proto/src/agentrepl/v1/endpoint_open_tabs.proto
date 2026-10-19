@@ -191,8 +191,8 @@ message OpenTabsOpened {
     // ("<name>: session failed to start: <reason>.").
     OpenTabsOpenedFailed failed = 4;
     // Hidden, or in a collapsed repository section, and not the workspace
-    // the user is looking at: nothing was started, and its tab stays withheld
-    // until it is shown again.
+    // the user is looking at: nothing was started, and it stays off the tab
+    // bar until it is shown again.
     OpenTabsOpenedHidden hidden = 5;
     // The daemon refused to open it; the editor shows no tab and records why.
     OpenTabsOpenedRefused refused = 6;

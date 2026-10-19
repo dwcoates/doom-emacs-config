@@ -65,27 +65,38 @@ message WorkspaceRoster {
   // repository, and nothing else (owner ruling, 2026-10-15).
   reserved 2, 5, 6, 7, 8;
   reserved "task", "maturity", "shown_repository", "shown_task", "shown_maturity";
-  // The open workspaces, one section per repository: the rail's one grouping.
+  // THE THREE LISTS ARE THE THREE STATES. Every workspace the roster draws is
+  // in exactly one of `repository` (OPEN), `hidden` (HIDDEN) and
+  // `recently_merged` (MERGED), and each list's row type (RosterOpenRow,
+  // RosterHiddenRow, RosterMergedRow) is that state, so no row also carries a
+  // state that could disagree with its list. OPEN BEATS MERGED: a merged
+  // workspace that was reopened is open, and listed with the open ones.
+  //
+  // The OPEN workspaces, one section per repository: the rail's one grouping
+  // AND THE EMACS TAB BAR. The tab bar is this tree's depth-first walk --
+  // repository by repository, each one's own rows and then each
+  // subsection's, every family under its parent -- and each open row states
+  // its own tab (RosterOpenRow.tab), so a workspace is in the Open section
+  // exactly when it has a tab, its repository's fold aside, and tab N is
+  // always the row drawn immediately before tab N+1.
   RosterRepositoryView repository = 1;
-  // Workspaces whose merge has settled, hoisted out of the repository
-  // sections and drawn below them: that they are done is the interesting fact.
+  // Workspaces whose merge has settled and that are CLOSED, drawn below the
+  // other sections: that they are done is the interesting fact. Never open.
   RosterMergedSection recently_merged = 3;
-  // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden),
-  // hoisted out of the repository sections and drawn below them, above
-  // the recently-merged band. A hidden workspace keeps its session and its
-  // editor tab, but the Emacs tab bar does not draw, number or navigate to it,
-  // exactly as for a workspace of a collapsed repository section. A merged
-  // workspace is in recently_merged, never here. Always set.
+  // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden). A
+  // hidden workspace may keep its session until it is gated, but it has NO
+  // TAB: the Emacs tab bar never draws, numbers or steps to it. Always set.
   RosterHiddenSection hidden = 9;
   // THE OPEN-WORKSPACES SECTION's heading and fold: the box the repository
   // sections are drawn in, under one "Open" header, above the hidden
   // section. Its count is RosterRepositoryView.open_count. Always set.
   RosterOpenSection open = 13;
-  // THE EDITOR'S TAB BAR, in the repository grouping's order
-  // (RosterTabBar): repository by repository, subsection by subsection,
-  // each family depth-first. Clients draw it as sent and never derive a tab
-  // order from the sections. Always set.
-  RosterTabBar tab_bar = 10;
+  // `tab_bar` (field 10) is RETIRED and reserved: a second list of the open
+  // workspaces in tab order, joined to the rows by id, could disagree with
+  // them. Each open row states its own tab (RosterOpenRow.tab), and the tab
+  // bar is the Open section's walk.
+  reserved 10;
+  reserved "tab_bar";
   // THE ROSTER'S REVISION: the daemon raises it for every roster it
   // resolves, so of two rosters (or a roster and an OpenTabs answer's row,
   // OpenTabsOpenedReady.roster_revision) the higher revision is the newer
@@ -97,47 +108,87 @@ message WorkspaceRoster {
   optional RosterCurrentWorkspace current = 4;
 }
 
-// Every open workspace, one tab each, first tab first. A closed workspace
-// has no tab and is absent. THE ORDER IS THE REPOSITORY GROUPING'S
-// ARRANGEMENT (agentrepl.v1.ArrangeSidebar): repository by repository in the
-// grouping's order, and inside one, its unsectioned workspaces, then each
-// subsection's in turn. INSIDE EACH OF THOSE IT WALKS THE SIDEBAR'S OWN
-// FAMILY TREE, depth-first: a child always sits right of its parent, its
-// siblings in the sidebar's order, so stepping along the bar never skips a
-// row the sidebar draws between. A closed workspace has no tab and its live
-// descendants take its place, as the sidebar hoists them. The run's
-// workspaces the sidebar draws elsewhere (hidden, or merged and still open)
-// follow its drawn ones. Withheld tabs stay in the list so a client
-// cycling from a withheld current workspace still knows its neighbours.
-message RosterTabBar {
-  repeated RosterTab tabs = 1;
+// ---- The three lists' rows -------------------------------------------------
+
+// The top-level open rows of one region of the Open section (a repository's
+// own rows, or one subsection's), in drawn order.
+message RosterOpenRows {
+  // Each top-level open row, carrying its open family nested.
+  repeated RosterOpenRow rows = 1;
 }
 
-// One open workspace's tab.
-message RosterTab {
-  // Which workspace the tab is. The row carrying its name and status is
-  // the one in the roster's sections with the same ref.
-  workspace.v1.WorkspaceRef workspace = 1;
-  // Whether the tab is drawn. Only a drawn tab takes a number and a stop
-  // for left/right navigation; the two withheld arms say why it is not.
-  oneof visibility {
-    RosterTabDrawn drawn = 2;
-    RosterTabWithheldCollapsed withheld_collapsed = 3;
-    RosterTabWithheldHidden withheld_hidden = 4;
+// ONE OPEN WORKSPACE: drawn in the Open section and, unless its repository is
+// folded, on the Emacs tab bar with the same number. Its children are open
+// rows too, so a family is one run of rows and tabs: a child sits right after
+// its parent, its siblings in their order, and no child can leave its
+// parent's run. A workspace whose parent is not open (a closed or hidden
+// parent of a family that predates the rule against one) takes its parent's
+// place instead.
+message RosterOpenRow {
+  // Everything every list draws the same way: identity, name, status,
+  // markers, the when-column and the detail panel.
+  RosterRow row = 1;
+  // The row's tab, as the daemon numbers it. Always set.
+  RosterOpenRowTab tab = 2;
+  // The workspace's open children, in drawn order, each followed by its own.
+  repeated RosterOpenRow children = 3;
+}
+
+// An open row's tab. THE DAEMON NUMBERS EVERY TAB, so the number the sidebar
+// paints beside a row and the number on the Emacs tab bar are one fact.
+message RosterOpenRowTab {
+  // Whether the tab is drawn now. Exactly one arm is set; unset is malformed.
+  oneof tab {
+    // Drawn on the tab bar and numbered in the sidebar.
+    RosterOpenRowTabNumbered numbered = 1;
+    // The workspace's repository is folded: it stays open, but neither the
+    // sidebar nor the tab bar draws it, and it takes no number. It returns
+    // when the repository unfolds.
+    RosterOpenRowTabFolded folded = 2;
   }
 }
 
-// The tab is drawn, numbered by its position among drawn tabs.
-message RosterTabDrawn {}
+// A drawn tab's number: its position among drawn tabs, counting from 1 in
+// the Open section's walk. Numbers run 1 to N with no gap, so `M-1`... reach
+// exactly these and the sidebar's numbers read top to bottom in order.
+message RosterOpenRowTabNumbered {
+  // The tab's number, from 1.
+  uint32 number = 1;
+}
 
-// The tab is not drawn because its repository's sidebar section is
-// collapsed (RosterRepoSection.fold). It returns when the section expands.
-message RosterTabWithheldCollapsed {}
+// The tab is folded away with its repository. DELIBERATELY EMPTY: the arm is
+// the fact.
+message RosterOpenRowTabFolded {}
 
-// The tab is not drawn because the user hid the workspace
-// (agentrepl.v1.SetWorkspaceHidden). It returns when the workspace is
-// shown again, at its registry place.
-message RosterTabWithheldHidden {}
+// The top-level hidden rows, in the hidden section's order.
+message RosterHiddenRows {
+  // Each top-level hidden row, carrying its hidden family nested.
+  repeated RosterHiddenRow rows = 1;
+}
+
+// ONE HIDDEN WORKSPACE: listed only in the hidden section, with NO TAB. It may
+// keep its session until it is gated. A workspace with open children cannot
+// be hidden, so a hidden row's children are hidden too.
+message RosterHiddenRow {
+  // The row as every list draws it.
+  RosterRow row = 1;
+  // The workspace's hidden children, in drawn order.
+  repeated RosterHiddenRow children = 2;
+}
+
+// The rows of one repository's recently-merged group, newest merge first.
+message RosterMergedRows {
+  // Each merged row. FLAT: a settled merge has no family left to draw.
+  repeated RosterMergedRow rows = 1;
+}
+
+// ONE MERGED WORKSPACE: its merge landed and it is closed. Never open: a
+// merged workspace that is reopened leaves this list for the Open section.
+message RosterMergedRow {
+  // The row as every list draws it.
+  RosterRow row = 1;
+}
+
 
 // The priority badge's drawn label.
 message RosterRowPriorityBadge {
@@ -412,8 +463,8 @@ message RosterOpenSectionExpanded {}
 // A collapsed open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterOpenSectionCollapsed {}
 
-// How many rows the open-workspaces section lists: every row of every
-// repository section, nested family rows included, that is not closed. It is
+// How many rows the open-workspaces section lists: every open row of every
+// repository section, nested family rows included. It is
 // the sum of the repository sections' counts
 // (RosterSectionCount), so it is the number a person arrives at by counting
 // every entry, a folded section's included.
@@ -428,8 +479,12 @@ message RosterRepoSection {
   RosterRepoKey key = 1;
   // The header box: label and fold toggle.
   RosterSectionHeader header = 2;
-  // The rows below the header.
-  RosterRows rows = 3;
+  // `rows` (field 3) is RETIRED and reserved: rows of every state shared one
+  // type. The section's rows are open rows (`open_rows`).
+  reserved 3;
+  reserved "rows";
+  // The repository's open workspaces in no subsection, drawn below the header.
+  RosterOpenRows open_rows = 8;
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because two
   // surfaces draw it: the sidebar hides a collapsed section's rows, and the
   // Emacs tab bar hides that repository's workspaces from its tabs, numbering
@@ -465,8 +520,11 @@ message RosterSubsection {
   // The header box: the user's name for it, and the count of the rows it
   // shows (RosterSectionCount, counted as a repository section's is).
   RosterSectionHeader header = 2;
-  // The rows below the header, in render order.
-  RosterRows rows = 3;
+  // `rows` (field 3) is RETIRED and reserved, as RosterRepoSection's is.
+  reserved 3;
+  reserved "rows";
+  // The subsection's open workspaces below the header, in drawn order.
+  RosterOpenRows open_rows = 4;
 }
 
 // A subsection's stable identity, echoed back as agentrepl.v1.SubsectionRef.
@@ -567,9 +625,9 @@ message RosterMergedSection {
   //
   // A COLLAPSED REPOSITORY'S GROUP STILL RIDES THE WIRE, on the
   // RosterMergedRepoGroupRepositoryCollapsed arm, so every reader that walks
-  // the roster's rows (the Emacs tab bar, the daemon's tab order, the
-  // merge-queue verb's lookups) still sees every merged workspace; only the
-  // sidebar leaves the group undrawn.
+  // the roster's rows (the merge-queue verb's lookups, the editor's
+  // workspace switcher) still sees every merged workspace; only the sidebar
+  // leaves the group undrawn.
   repeated RosterMergedRepoGroup groups = 5;
   // WHETHER THE BAND IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
   // fold is no page's own: opening it in one workspace's page opens it in
@@ -599,8 +657,11 @@ message RosterMergedRepoGroup {
   RosterRepoKey key = 1;
   // The group's header box: the repository's label, with no fold toggle.
   RosterMergedRepoGroupHeader header = 2;
+  // `rows` (field 3) is RETIRED and reserved, as RosterRepoSection's is.
+  reserved 3;
+  reserved "rows";
   // The repository's merged workspaces, most recently merged first.
-  RosterRows rows = 3;
+  RosterMergedRows merged_rows = 6;
   // WHETHER THE SIDEBAR DRAWS THE GROUP, resolved from the repository's own
   // fold (the same daemon-held fact as RosterRepoSection.fold, resolved in the
   // same render, so the two never disagree). Never unset on the wire.
@@ -641,8 +702,11 @@ message RosterMergedRepoGroupRepositoryCollapsed {}
 message RosterHiddenSection {
   // The label and the count a folded section draws beside it.
   RosterSectionHeader header = 1;
-  // The hidden workspaces, in roster order.
-  RosterRows rows = 2;
+  // `rows` (field 2) is RETIRED and reserved, as RosterRepoSection's is.
+  reserved 2;
+  reserved "rows";
+  // The hidden workspaces, the latest hide first.
+  RosterHiddenRows hidden_rows = 5;
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
   // page draws the same fold. It folds the SIDEBAR's rows only: a hidden
   // workspace is off the Emacs tab bar whichever arm is set. Never folded or
@@ -681,12 +745,9 @@ message RosterSectionHeader {
   RosterSectionCount count = 2;
 }
 
-// A section's workspace count. A repository section's is every row of its
-// rows region, nested family rows included, that is NOT closed
-// (RosterRowClosed): a closed row rides the wire for Emacs but is never
-// drawn, and its live descendants are drawn in its place. The merged band's
-// is the row count of its drawn groups (each merged row is closed by design,
-// and is exactly what the band shows). Drawn smaller than the label, in the label's own color.
+// A section's workspace count. A repository section's is every open row of
+// its rows regions, nested family rows included. The merged band's is the
+// row count of its drawn groups. Drawn smaller than the label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
 }
@@ -698,14 +759,10 @@ message RosterLabel {
 }
 
 
-// The rows region of a section, in render order.
-message RosterRows {
-  repeated RosterRow rows = 1;
-}
-
-// One workspace in the sidebar: a row line (status dot, name, when-column,
-// current highlight, receded styling), its nested family, and its detail
-// panel.
+// One workspace as every list draws it: a row line (status dot, name,
+// when-column, current highlight, receded styling) and its detail panel. Its
+// family and its state are its list's own row type's (RosterOpenRow,
+// RosterHiddenRow, RosterMergedRow).
 message RosterRow {
   // The workspace this row IS — its identity, and the join key every gesture
   // on the row travels back with. Names collide across repos; dirs do not.
@@ -974,8 +1031,11 @@ message RosterRow {
   // it differently.
   RosterRowCurrent current = 27;
 
-  // Nested workspaces (a spawned family under its parent), in render order.
-  repeated RosterRow children = 28;
+  // `children` (field 28) is RETIRED and reserved: a family nests in its
+  // list's own row type (RosterOpenRow.children, RosterHiddenRow.children),
+  // so every member of a family is in the same list.
+  reserved 28;
+  reserved "children";
 
   // The when-column at the row's right edge.
   RosterRowWhen when = 29;

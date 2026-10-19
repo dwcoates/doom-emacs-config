@@ -288,6 +288,7 @@ type KillWorkspaceError struct {
 	//	*KillWorkspaceError_WorkspaceRefMismatch
 	//	*KillWorkspaceError_TransferringAway
 	//	*KillWorkspaceError_NotYetAdopted
+	//	*KillWorkspaceError_HasOpenChildren
 	Cause         isKillWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -366,6 +367,15 @@ func (x *KillWorkspaceError) GetNotYetAdopted() *KillWorkspaceNotYetAdopted {
 	return nil
 }
 
+func (x *KillWorkspaceError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
+	if x != nil {
+		if x, ok := x.Cause.(*KillWorkspaceError_HasOpenChildren); ok {
+			return x.HasOpenChildren
+		}
+	}
+	return nil
+}
+
 type isKillWorkspaceError_Cause interface {
 	isKillWorkspaceError_Cause()
 }
@@ -390,6 +400,12 @@ type KillWorkspaceError_NotYetAdopted struct {
 	NotYetAdopted *KillWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type KillWorkspaceError_HasOpenChildren struct {
+	// The workspace has open children (hidden ones included), and killing it
+	// would leave them without their parent in the Open section.
+	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,5,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
+}
+
 func (*KillWorkspaceError_UnknownWorkspace) isKillWorkspaceError_Cause() {}
 
 func (*KillWorkspaceError_WorkspaceRefMismatch) isKillWorkspaceError_Cause() {}
@@ -397,6 +413,8 @@ func (*KillWorkspaceError_WorkspaceRefMismatch) isKillWorkspaceError_Cause() {}
 func (*KillWorkspaceError_TransferringAway) isKillWorkspaceError_Cause() {}
 
 func (*KillWorkspaceError_NotYetAdopted) isKillWorkspaceError_Cause() {}
+
+func (*KillWorkspaceError_HasOpenChildren) isKillWorkspaceError_Cause() {}
 
 type KillWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -564,7 +582,7 @@ var File_agentrepl_v1_endpoint_kill_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_kill_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"t\n" +
+	"*agentrepl/v1/endpoint_kill_workspace.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"t\n" +
 	"\x14KillWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x18\n" +
 	"\x05op_id\x18\x02 \x01(\tH\x00R\x04opId\x88\x01\x01B\b\n" +
@@ -576,12 +594,13 @@ const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
 	"\x06result\",\n" +
 	"\x15KillWorkspaceAccepted\x12\x13\n" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\"\x16\n" +
-	"\x14KillWorkspaceSuccess\"\x92\x03\n" +
+	"\x14KillWorkspaceSuccess\"\xe8\x03\n" +
 	"\x12KillWorkspaceError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.KillWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.KillWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2+.agentrepl.v1.KillWorkspaceTransferringAwayH\x00R\x10transferringAway\x12R\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.KillWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.KillWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12T\n" +
+	"\x11has_open_children\x18\x05 \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildrenB\a\n" +
 	"\x05cause\"\x1f\n" +
 	"\x1dKillWorkspaceUnknownWorkspace\"F\n" +
 	"!KillWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -614,21 +633,23 @@ var file_agentrepl_v1_endpoint_kill_workspace_proto_goTypes = []any{
 	(*KillWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.KillWorkspaceTransferringAway
 	(*KillWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.KillWorkspaceNotYetAdopted
 	(*v1.WorkspaceRef)(nil),                   // 9: workspace.v1.WorkspaceRef
+	(*WorkspaceHasOpenChildren)(nil),          // 10: agentrepl.v1.WorkspaceHasOpenChildren
 }
 var file_agentrepl_v1_endpoint_kill_workspace_proto_depIdxs = []int32{
-	9, // 0: agentrepl.v1.KillWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	3, // 1: agentrepl.v1.KillWorkspaceResponse.success:type_name -> agentrepl.v1.KillWorkspaceSuccess
-	4, // 2: agentrepl.v1.KillWorkspaceResponse.error:type_name -> agentrepl.v1.KillWorkspaceError
-	2, // 3: agentrepl.v1.KillWorkspaceResponse.accepted:type_name -> agentrepl.v1.KillWorkspaceAccepted
-	5, // 4: agentrepl.v1.KillWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.KillWorkspaceUnknownWorkspace
-	6, // 5: agentrepl.v1.KillWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
-	7, // 6: agentrepl.v1.KillWorkspaceError.transferring_away:type_name -> agentrepl.v1.KillWorkspaceTransferringAway
-	8, // 7: agentrepl.v1.KillWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.KillWorkspaceNotYetAdopted
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	9,  // 0: agentrepl.v1.KillWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	3,  // 1: agentrepl.v1.KillWorkspaceResponse.success:type_name -> agentrepl.v1.KillWorkspaceSuccess
+	4,  // 2: agentrepl.v1.KillWorkspaceResponse.error:type_name -> agentrepl.v1.KillWorkspaceError
+	2,  // 3: agentrepl.v1.KillWorkspaceResponse.accepted:type_name -> agentrepl.v1.KillWorkspaceAccepted
+	5,  // 4: agentrepl.v1.KillWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.KillWorkspaceUnknownWorkspace
+	6,  // 5: agentrepl.v1.KillWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
+	7,  // 6: agentrepl.v1.KillWorkspaceError.transferring_away:type_name -> agentrepl.v1.KillWorkspaceTransferringAway
+	8,  // 7: agentrepl.v1.KillWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.KillWorkspaceNotYetAdopted
+	10, // 8: agentrepl.v1.KillWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_kill_workspace_proto_init() }
@@ -636,6 +657,7 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_kill_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*KillWorkspaceResponse_Success)(nil),
@@ -647,6 +669,7 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_init() {
 		(*KillWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*KillWorkspaceError_TransferringAway)(nil),
 		(*KillWorkspaceError_NotYetAdopted)(nil),
+		(*KillWorkspaceError_HasOpenChildren)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

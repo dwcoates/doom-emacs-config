@@ -6,6 +6,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "conversation/v1/session.proto";
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -92,6 +93,9 @@ message OpenWorkspaceError {
     // composed (the prompts directory does not hold it, or it will not
     // splice). Nothing was opened: the brief is composed before the open.
     OpenWorkspaceBriefMissing brief_missing = 12;
+    // The workspace's parent is hidden or closed, and reopening it would make an
+    // open child of a parent outside the Open section.
+    WorkspaceParentNotOpen parent_not_open = 13;
   }
 }
 // The refusal of a revert asked of a workspace with no landed merge. Carries

@@ -1,0 +1,51 @@
+// family.proto — the refusals that keep a workspace family in one list of the
+// roster (frontend.v1.WorkspaceRoster). A child workspace merges into its
+// parent and is drawn and tabbed right after it, so a parent may not leave the
+// Open section while a child is still open: a workspace with open children
+// cannot be hidden, closed, killed, nuked, or merged by a merge that closes
+// it, and a workspace cannot be made, moved or brought back as the open child
+// of a parent that is hidden or closed. A HIDDEN CHILD COUNTS AS OPEN: hiding
+// keeps its session, so a family is hidden child first.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The workspace still has open children, so the request would leave them
+// without their parent in the Open section. Nothing was changed. The user
+// closes (or merges) every child first, then asks again.
+message WorkspaceHasOpenChildren {
+  // The workspace the request would have taken out of the Open section, as
+  // the registry holds it. For a merge it is the workspace the merge would
+  // close: the requester of a one-shot merge, or the workspace an async
+  // merge's one-shot names.
+  workspace.v1.WorkspaceRef parent = 1;
+  // Every open child of `parent`, hidden ones included, in the roster's order.
+  // Never empty.
+  repeated workspace.v1.WorkspaceRef children = 2;
+}
+
+// The workspace's parent is not open, so the request would make an open child
+// of a parent outside the Open section. Nothing was changed. The user shows or
+// reopens the parent first, then asks again.
+message WorkspaceParentNotOpen {
+  // The parent that blocks the request, as the registry holds it.
+  workspace.v1.WorkspaceRef parent = 1;
+  // Why the parent is not open. Exactly one arm is set; unset is malformed.
+  oneof state {
+    // The parent is hidden.
+    WorkspaceParentNotOpenHidden hidden = 2;
+    // The parent is closed.
+    WorkspaceParentNotOpenClosed closed = 3;
+  }
+}
+
+// The parent is hidden. DELIBERATELY EMPTY: the arm is the fact.
+message WorkspaceParentNotOpenHidden {}
+
+// The parent is closed. DELIBERATELY EMPTY: the arm is the fact.
+message WorkspaceParentNotOpenClosed {}
