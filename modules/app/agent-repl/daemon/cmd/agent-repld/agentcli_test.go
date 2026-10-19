@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -14,6 +15,8 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // cliClient is a daemon client that records every request and answers the
@@ -77,6 +80,10 @@ func (c *cliClient) SetWorkspaceCorrespondence(_ context.Context, req *connect.R
 
 func (c *cliClient) SubmitPrompt(_ context.Context, req *connect.Request[agentreplv1.SubmitPromptRequest]) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
 	return connect.NewResponse(&agentreplv1.SubmitPromptResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) KillWorkspace(_ context.Context, req *connect.Request[agentreplv1.KillWorkspaceRequest]) (*connect.Response[agentreplv1.KillWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.KillWorkspaceResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) SubscribeWorkspace(_ context.Context, req *connect.Request[agentreplv1.SubscribeWorkspaceRequest]) (*connect.Response[agentreplv1.SubscribeWorkspaceResponse], error) {
@@ -585,5 +592,58 @@ func TestListPrintsEveryWorkspaceOneALine(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], `"name":"caller"`) || !strings.Contains(lines[0], `"calling":true`) || strings.Contains(lines[1], `"calling"`) {
 		t.Fatalf("lines = %q, want the caller first and marked", lines)
+	}
+}
+
+func TestOnWorkspaceSendsTheNamedWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "kill", "peer")
+
+	// Assert
+	req := only[*agentreplv1.KillWorkspaceRequest](t, f)
+	if code != exitSuccess || req.GetWorkspace().GetId() != "ws-peer" {
+		t.Fatalf("exit %d, request %v; want peer named", code, req)
+	}
+}
+
+func TestOnWorkspaceRefusesAnythingAfterTheWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "kill", "peer", "extra")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d, requests %v; want a failure and nothing sent", code, f.client.requests)
+	}
+}
+
+// EVERY ONE-WORKSPACE VERB GOES THROUGH onWorkspace: a verb that parses its
+// one workspace by hand and then makes a single call fails here.
+func TestEveryOneWorkspaceVerbIsOnWorkspace(t *testing.T) {
+	// Arrange
+	var raw []byte
+	for _, file := range sourcescan.Production(t) {
+		if file.Name == "agentcli.go" {
+			raw = file.Source
+		}
+	}
+	verb := regexp.MustCompile(`(?s)func workspace(Kill|Select|Restart)\(c \*cliCall, args \[\]string\) int \{\n(.*?)\n}\n`)
+
+	// Act
+	matches := verb.FindAllSubmatch(raw, -1)
+
+	// Assert
+	if len(matches) == 0 {
+		t.Fatal("found no one-workspace verb to check")
+	}
+	for _, m := range matches {
+		if !strings.HasPrefix(strings.TrimSpace(string(m[2])), "return onWorkspace(") {
+			t.Errorf("workspace%s parses its workspace by hand instead of onWorkspace", m[1])
+		}
 	}
 }

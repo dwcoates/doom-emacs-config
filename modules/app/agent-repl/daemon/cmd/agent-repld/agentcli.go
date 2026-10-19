@@ -823,12 +823,22 @@ func workspaceClose(c *cliCall, args []string) int {
 }
 
 func workspaceKill(c *cliCall, args []string) int {
+	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.KillWorkspaceResponse], error) {
+		return c.client.KillWorkspace(c.ctx, connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ref}))
+	})
+}
+
+// onWorkspace runs a verb that names one workspace and takes nothing else:
+// it resolves the workspace from ARGS, refuses anything after it, and answers
+// CALL's reply to the ref. Every such verb is this, so none parses its
+// workspace on its own.
+func onWorkspace[Res any](c *cliCall, args []string, call func(*workspacev1.WorkspaceRef) (*connect.Response[Res], error)) int {
 	fs, stateDir := c.flags()
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
-	resp, err := c.client.KillWorkspace(c.ctx, connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ref}))
+	resp, err := call(ref)
 	return answer(c, resp, err)
 }
 
