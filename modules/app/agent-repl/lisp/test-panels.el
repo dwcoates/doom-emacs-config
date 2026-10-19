@@ -601,21 +601,6 @@ path must not error."
 
 ;;;; ---- Tests: non-agent-panel-window-p ----
 
-(ert-deftest agent-repl-test-panels-on-close-calls-hide-panels ()
-  "on-close invokes hide-panels for a VTERM workspace.
-The teardown is dispatched through the workspace's own frontend, so the
-workspace has to say which one it is — an undeclared frontend resolves to
-the gui default and tears down a webview instead."
-  (agent-repl-test--with-clean-state
-    (let ((hide-called nil))
-      (agent-repl--ws-put "test-ws" :frontend 'vterm)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--hide-panels)
-                 (lambda () (setq hide-called t)))
-                ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
-        (agent-repl--on-close)
-        (should hide-called)))))
-
 ;;;; ---- Tests: a gui close is a real close ----
 ;;
 ;; The bug these close: the gui branch of `--toggle' called the frontend's
@@ -654,26 +639,8 @@ the gui default and tears down a webview instead."
         (should (= 0 dispatched))
         (should (= 1 hide-called))))))
 
-(ert-deftest agent-repl-test-panels-on-close-restores-config-before-hide ()
-  "on-close restores the pre-panel layout before hiding panels.
-The restore must run BEFORE hide-panels so the frame-filling panels are
-removed via the restored work layout rather than stranding a panel."
-  (agent-repl-test--with-clean-state
-    (let ((order '()))
-      (agent-repl--ws-put "test-ws" :frontend 'vterm)
-      (agent-repl--ws-put "test-ws" :fullscreen-config 'saved-config)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'set-window-configuration)
-                 (lambda (_cfg) (push 'restore order)))
-                ((symbol-function 'agent-repl--hide-panels)
-                 (lambda () (push 'hide order)))
-                ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
-        (agent-repl--on-close)
-        (should (equal order '(hide restore)))
-        (should-not (agent-repl--ws-get "test-ws" :fullscreen-config))))))
-
-(ert-deftest agent-repl-test-panels-on-close-with-explicit-ws ()
-  "on-close accepts an explicit WS argument and closes THAT workspace's view."
+(ert-deftest agent-repl-test-panels-on-simple-close-with-explicit-ws ()
+  "on-simple-close accepts an explicit WS argument and closes THAT workspace's view."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((closed nil))
@@ -682,22 +649,9 @@ removed via the restored work layout rather than stranding a panel."
                 ((symbol-function 'agent-repl--close-view)
                  (lambda (ws _teardown) (setq closed ws))))
         ;; Act
-        (agent-repl--on-close "specific-ws")
+        (agent-repl--on-simple-close "specific-ws")
         ;; Assert
         (should (equal closed "specific-ws"))))))
-
-(ert-deftest agent-repl-test-panels-on-close-writes-no-lifecycle-state ()
-  "Closing the panels is a LOCAL presentation act and says nothing about
-the workspace's lifecycle, which is the roster's."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
-              ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-              ((symbol-function 'agent-repl--close-view) #'ignore))
-      ;; Act
-      (agent-repl--on-close "test-ws")
-      ;; Assert
-      (should-not (agent-repl--ws-get "test-ws" :repl-state)))))
 
 (ert-deftest agent-repl-test-panels-on-simple-close-writes-no-lifecycle-state ()
   "The plain close writes no state either."
@@ -711,72 +665,15 @@ the workspace's lifecycle, which is the roster's."
       ;; Assert
       (should-not (agent-repl--ws-get "test-ws" :repl-state)))))
 
-(ert-deftest agent-repl-test-panels-on-close-nil-ws-still-hides ()
-  "on-close with nil workspace hides panels but skips bookkeeping."
+(ert-deftest agent-repl-test-panels-on-simple-close-nil-ws-still-hides ()
+  "on-simple-close with nil workspace hides panels but skips bookkeeping."
   (agent-repl-test--with-clean-state
     (let ((hide-called nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
                 ((symbol-function 'agent-repl--hide-panels)
                  (lambda () (setq hide-called t))))
-        (agent-repl--on-close)
+        (agent-repl--on-simple-close)
         (should hide-called)))))
-
-(ert-deftest agent-repl-test-panels-on-close-pushes-current-ws-to-back ()
-  "on-close calls `agent-repl-workspace-push-to-back' when WS is the current workspace."
-  (agent-repl-test--with-clean-state
-    (let ((push-called 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl-workspace-push-to-back)
-                 (lambda (&optional _keep) (cl-incf push-called))))
-        (agent-repl--on-close)
-        (should (= push-called 1))))))
-
-(ert-deftest agent-repl-test-panels-on-close-does-not-keep-focus ()
-  "on-close calls push-to-back without KEEP-FOCUS so focus moves to a fresh workspace."
-  (agent-repl-test--with-clean-state
-    (let ((received-args 'unset))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl-workspace-push-to-back)
-                 (lambda (&rest args) (setq received-args args))))
-        (agent-repl--on-close)
-        (should (equal received-args nil))))))
-
-(ert-deftest agent-repl-test-panels-on-close-skips-push-when-explicit-ws-not-current ()
-  "on-close does not push to back when an explicit WS is not the current workspace."
-  (agent-repl-test--with-clean-state
-    (let ((push-called 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl-workspace-push-to-back)
-                 (lambda (&optional _keep) (cl-incf push-called))))
-        (agent-repl--on-close "other-ws")
-        (should (= push-called 0))))))
-
-(ert-deftest agent-repl-test-panels-on-close-skips-push-when-no-workspace ()
-  "on-close does not push to back when no workspace is active."
-  (agent-repl-test--with-clean-state
-    (let ((push-called 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl-workspace-push-to-back)
-                 (lambda (&optional _keep) (cl-incf push-called))))
-        (agent-repl--on-close)
-        (should (= push-called 0))))))
-
-(ert-deftest agent-repl-test-panels-on-close-saves-tab-index-before-pushing ()
-  "on-close calls save-tab-index before push so the captured index is the original."
-  (agent-repl-test--with-clean-state
-    (let ((calls nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl--save-tab-index)
-                 (lambda (_ws) (push 'save calls)))
-                ((symbol-function 'agent-repl-workspace-push-to-back)
-                 (lambda (&optional _keep) (push 'push calls))))
-        (agent-repl--on-close)
-        (should (equal (reverse calls) '(save push)))))))
 
 ;;;; ---- Tests: on-simple-close (no-deprio variant) ----
 
@@ -797,27 +694,24 @@ instead — which is exactly the point of the dispatch."
         (agent-repl--on-simple-close)
         (should (= 1 hide-called))))))
 
-(ert-deftest agent-repl-test-panels-on-simple-close-does-not-save-tab-index ()
-  "on-simple-close does NOT call save-tab-index — that's the deprio path."
+(ert-deftest agent-repl-test-panels-no-close-reorders-the-tabs ()
+  "Closing the panels leaves the tab order alone: only the daemon orders tabs."
+  ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((save-called 0))
+    (let ((agent-repl-roster--tab-order '("a" "test-ws" "b")))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl--save-tab-index)
-                 (lambda (_ws) (cl-incf save-called))))
+                ((symbol-function 'agent-repl--frontend-dispatch-hide) #'ignore))
+        ;; Act
         (agent-repl--on-simple-close)
-        (should (= 0 save-called))))))
+        ;; Assert
+        (should (equal agent-repl-roster--tab-order '("a" "test-ws" "b")))))))
 
-(ert-deftest agent-repl-test-panels-on-simple-close-does-not-push-to-back ()
-  "on-simple-close does NOT call push-to-back — that's the deprio path."
-  (agent-repl-test--with-clean-state
-    (let ((push-called 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl-workspace-push-to-back)
-                 (lambda (&rest _) (cl-incf push-called))))
-        (agent-repl--on-simple-close)
-        (should (= 0 push-called))))))
+(ert-deftest agent-repl-test-panels-the-tab-reorder-is-gone ()
+  "`SPC o C' no longer pushes a tab to the back: the reorder is not defined."
+  (should-not (fboundp 'agent-repl-workspace-push-to-back))
+  (should-not (fboundp 'agent-repl--save-tab-index))
+  (should-not (fboundp 'agent-repl--on-close)))
 
 (ert-deftest agent-repl-test-panels-on-simple-close-exits-fullscreen-before-hide ()
   "on-simple-close restores the pre-fullscreen layout before hiding panels.
@@ -1094,32 +988,6 @@ are the alternative if the view isn't visible)."
               (should (= 1 full-called))))
         (kill-buffer frontend-buf)))))
 
-;;;; ---- Tests: save-tab-index ----
-
-(ert-deftest agent-repl-test-panels-save-tab-index-writes-position ()
-  "save-tab-index records the workspace's persp index as :saved-tab-index."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
-               (lambda () '("a" "b" "test-ws" "c"))))
-      (agent-repl--save-tab-index "test-ws")
-      (should (= 2 (agent-repl--ws-get "test-ws" :saved-tab-index))))))
-
-(ert-deftest agent-repl-test-panels-save-tab-index-skips-when-not-in-list ()
-  "save-tab-index is a no-op when the workspace name isn't in the persp list."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'persp-names-current-frame-fast-ordered)
-               (lambda () '("a" "b"))))
-      (agent-repl--save-tab-index "missing-ws")
-      (should-not (agent-repl--ws-get "missing-ws" :saved-tab-index)))))
-
-(ert-deftest agent-repl-test-panels-save-tab-index-skips-when-persp-unavailable ()
-  "save-tab-index is a no-op when persp helper is not bound."
-  (agent-repl-test--with-clean-state
-    (when (fboundp 'persp-names-current-frame-fast-ordered)
-      (fmakunbound 'persp-names-current-frame-fast-ordered))
-    (agent-repl--save-tab-index "test-ws")
-    (should-not (agent-repl--ws-get "test-ws" :saved-tab-index))))
-
 ;;;; ---- Tests: hide-and-preserve-status ----
 
 (ert-deftest agent-repl-test-panels-hide-and-preserve-no-workspace-errors ()
@@ -1128,12 +996,12 @@ are the alternative if the view isn't visible)."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-error (agent-repl--hide-and-preserve-status)))))
 
-(ert-deftest agent-repl-test-panels-hide-and-preserve-routes-through-on-close ()
-  "hide-and-preserve-status delegates to on-close."
+(ert-deftest agent-repl-test-panels-hide-and-preserve-routes-through-on-simple-close ()
+  "hide-and-preserve-status puts the view away through the one close."
   (agent-repl-test--with-clean-state
     (let ((on-close-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                ((symbol-function 'agent-repl--on-close)
+                ((symbol-function 'agent-repl--on-simple-close)
                  (lambda (&optional ws) (setq on-close-ws ws)))
                 ((symbol-function 'agent-repl--ws-frontend)
                (lambda (_ws) (agent-repl-frontend-create
@@ -2435,7 +2303,7 @@ puts the view away."
     (let ((killed nil)
           (closed nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--on-close)
+                ((symbol-function 'agent-repl--on-simple-close)
                  (lambda (_ws) (setq closed t)))
                 ((symbol-function 'agent-repl--ws-frontend)
                  (lambda (_ws) (agent-repl-frontend-create
@@ -2448,8 +2316,8 @@ puts the view away."
         (should closed)
         (should killed)))))
 
-(ert-deftest agent-repl-test-panels-on-close-never-kills ()
-  "on-close itself must NOT kill: send-and-hide hides sessions that
+(ert-deftest agent-repl-test-panels-on-simple-close-never-kills ()
+  "The close itself must NOT kill: send-and-hide hides sessions that
 keep running."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -2457,15 +2325,13 @@ keep running."
     (let ((killed nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-                ((symbol-function 'agent-repl--save-tab-index) #'ignore)
-                ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore)
                 ((symbol-function 'agent-repl--ws-frontend)
                  (lambda (_ws) (agent-repl-frontend-create
                                 :name 'probe :open-fn #'ignore
                                 :kill-fn (lambda (_ws) (setq killed t))
                                 :running-p-fn #'ignore
                                 :supported-backends '(claude)))))
-        (agent-repl--on-close "ws1")
+        (agent-repl--on-simple-close "ws1")
         (should-not killed)))))
 
 ;;;; ---- Tests: kill-workspace-buffers ----
@@ -4308,129 +4174,6 @@ available now."
         ;; Assert
         (should (and (equal input "test-ws") (null opened)))))))
 
-;;;; ---- Tests: workspace-push-to-back (the deprio shuffle) ----
-;;
-;; The bug these close: `SPC o C' called `agent-repl-workspace-push-to-back'
-;; and nothing defined it — the shuffle existed only as a `cl-letf' stub in
-;; this file, so every keypress signaled a void function.
-
-(ert-deftest agent-repl-test-panels-push-to-back-is-a-command ()
-  "push-to-back is interactively invokable."
-  ;; Arrange / Act / Assert
-  (should (commandp 'agent-repl-workspace-push-to-back)))
-
-(ert-deftest agent-repl-test-panels-push-to-back-moves-ws-last ()
-  "push-to-back puts the current workspace in the LAST roster tab slot."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "b" "c")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
-                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch) #'ignore))
-        ;; Act
-        (agent-repl-workspace-push-to-back)
-        ;; Assert
-        (should (equal agent-repl-roster--tab-order '("b" "c" "a")))))))
-
-(ert-deftest agent-repl-test-panels-push-to-back-syncs-the-names-cache ()
-  "push-to-back hands persp-mode the SAME order it wrote to the roster."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
-          (cached 'unset))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
-                ((symbol-function 'agent-repl--ws-update-names-cache)
-                 (lambda (names) (setq cached names)))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch) #'ignore))
-        ;; Act
-        (agent-repl-workspace-push-to-back)
-        ;; Assert
-        (should (equal cached '("b" "c" "a")))))))
-
-(ert-deftest agent-repl-test-panels-push-to-back-switches-to-the-vacated-slot ()
-  "Without KEEP-FOCUS, focus lands on whoever now holds the vacated slot."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
-          (switched 'unset))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
-                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch)
-                 (lambda (ws &rest _) (setq switched ws))))
-        ;; Act
-        (agent-repl-workspace-push-to-back)
-        ;; Assert
-        (should (equal switched "b"))))))
-
-(ert-deftest agent-repl-test-panels-push-to-back-keep-focus-stays-put ()
-  "With KEEP-FOCUS the moved workspace keeps focus — no switch at all."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
-          (switch-calls 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
-                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch)
-                 (lambda (&rest _) (cl-incf switch-calls))))
-        ;; Act
-        (agent-repl-workspace-push-to-back t)
-        ;; Assert
-        (should (= 0 switch-calls))))))
-
-(ert-deftest agent-repl-test-panels-push-to-back-last-slot-is-idempotent ()
-  "A workspace already last stays last and keeps focus where it is."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
-          (switched 'unset))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "c"))
-                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch)
-                 (lambda (ws &rest _) (setq switched ws))))
-        ;; Act
-        (agent-repl-workspace-push-to-back)
-        ;; Assert
-        (should (equal agent-repl-roster--tab-order '("a" "b" "c")))))))
-
-(ert-deftest agent-repl-test-panels-push-to-back-without-a-tab-is-a-no-op ()
-  "A workspace holding no tab has no slot to vacate: the order is untouched."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "b"))
-          (cache-calls 0))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "tabless"))
-                ((symbol-function 'agent-repl--ws-update-names-cache)
-                 (lambda (_names) (cl-incf cache-calls)))
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch) #'ignore))
-        ;; Act
-        (agent-repl-workspace-push-to-back)
-        ;; Assert
-        (should (= 0 cache-calls))))))
-
-(ert-deftest agent-repl-test-panels-on-close-really-pushes-to-back ()
-  "The deprio close reaches the REAL shuffle, not a stub: `SPC o C' end to end.
-No `cl-letf' over push-to-back here — that stub is exactly what hid the
-void function from this suite."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (agent-repl--ws-put "a" :frontend 'vterm)
-    (let ((agent-repl-roster--tab-order '("a" "b")))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
-                ((symbol-function 'agent-repl--hide-panels) #'ignore)
-                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch) #'ignore))
-        ;; Act
-        (agent-repl--on-close)
-        ;; Assert
-        (should (equal agent-repl-roster--tab-order '("b" "a")))))))
-
 ;;;; ---- Tests: panels-any-visible-p ----
 
 (ert-deftest agent-repl-test-panels-any-visible-input-only ()
@@ -4758,16 +4501,6 @@ explicitly closed the panels, even with a live view buffer."
       (agent-repl--on-simple-close)
       (should (agent-repl--ws-get "ws" :panels-closed-by-user)))))
 
-(ert-deftest agent-repl-test-panels-on-close-records-explicit-close ()
-  "agent-repl--on-close records the explicit-close preference."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws"))
-              ((symbol-function 'agent-repl--close-view) #'ignore)
-              ((symbol-function 'agent-repl--save-tab-index) #'ignore)
-              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
-      (agent-repl--on-close)
-      (should (agent-repl--ws-get "ws" :panels-closed-by-user)))))
-
 ;;;; ---- Tests: opening a workspace opens its panels (arrival) ----
 ;;
 ;; Owner ruling, 2026-09-13, item 6: opening a workspace by any means other
@@ -5028,23 +4761,6 @@ the user switched away and back."
                (lambda (_ws) (setq restored t))))
       (agent-repl--panels-on-view-created "ws-a")
       (should-not restored))))
-
-(ert-deftest agent-repl-test-panels-push-to-back-passes-over-a-hidden-tab ()
-  "The vacated slot's occupant is the next DRAWN tab, never a hidden one."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster--tab-order '("a" "hidden" "c"))
-          (agent-repl-roster--hidden-tabs '("hidden"))
-          (switched 'unset))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
-                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
-                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function 'agent-repl--ws-switch)
-                 (lambda (ws &rest _) (setq switched ws))))
-        ;; Act
-        (agent-repl-workspace-push-to-back)
-        ;; Assert
-        (should (equal switched "c"))))))
 
 ;;;; ---- Switch trigger capture -------------------------------------------
 

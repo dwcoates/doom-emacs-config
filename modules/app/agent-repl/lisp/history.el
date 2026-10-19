@@ -511,7 +511,6 @@ workspace's records route centrally on their own."
                                 :priority ,(agent-repl--ws-get ws :priority)
                                 :source-ws-dir ,(agent-repl--ws-get ws :source-ws-dir)
                                 :repl-state ,(agent-repl--ws-get ws :repl-state)
-                                :saved-tab-index ,(agent-repl--ws-get ws :saved-tab-index)
                                 :backend ,(agent-repl--ws-get ws :backend)
                                 :backend-session-stash ,(agent-repl--ws-get ws :backend-session-stash)
                                 :frontend ,(agent-repl--ws-get ws :frontend)

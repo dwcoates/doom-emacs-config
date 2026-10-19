@@ -1473,7 +1473,7 @@ prompt the user deliberately deferred to its own turn."
 (declare-function agent-repl-send-with-metaprompt "input" ())
 (declare-function agent-repl--fire-metaprompt-read "input" (ws))
 (declare-function agent-repl--command-prefix-for "input" (ws))
-(declare-function agent-repl--on-close "panels" (&optional ws))
+(declare-function agent-repl--on-simple-close "panels" (&optional ws))
 (defvar agent-repl-link-promote-functions)
 (defvar agent-repl-update-pr-prompt)
 (defvar agent-repl-rebase-onto-origin-master-prompt)
@@ -1793,7 +1793,7 @@ With no composer draft to prefix, the sent text is exactly the built
 ;; audit-3 #48
 (ert-deftest agent-repl-itest-composer-send-and-hide-command-site-sends-its-own-origin ()
   "`agent-repl-send-and-hide', the REAL command entry point, sends its own origin.
-Stubs the panel-closing boundary (`agent-repl--on-close') -- window layout
+Stubs the panel-closing boundary (`agent-repl--on-simple-close') -- window layout
 is not what this assertion is about."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
@@ -1806,7 +1806,7 @@ is not what this assertion is about."
                        (lambda () agent-repl-itest-composer--ws))
                       ((symbol-function 'agent-repl--ws-current-log-name)
                        (lambda () agent-repl-itest-composer--ws))
-                      ((symbol-function 'agent-repl--on-close) (lambda (&optional _ws) nil)))
+                      ((symbol-function 'agent-repl--on-simple-close) (lambda (&optional _ws) nil)))
               ;; Act.
               (agent-repl-send-and-hide)
               (agent-repl-itest--await-call daemon "SubmitPrompt")

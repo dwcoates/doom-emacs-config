@@ -822,23 +822,6 @@ session ids survive restart and switching back still resumes."
               (should (null (plist-get data :source-ws-dir)))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-state-save-includes-saved-tab-index ()
-  "state-save serializes `:saved-tab-index' so a deprioritized ws returns
-to its prior tab-bar slot after Emacs restart."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-tabidx-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--ws-put "ws" :active-env :bare-metal)
-            (agent-repl--ws-put "ws" :saved-tab-index 3)
-            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--state-save "ws")
-            (let* ((file (agent-repl--state-file tmpdir))
-                   (data (agent-repl--read-sexp-file file)))
-              (should (eq (plist-get data :saved-tab-index) 3))))
-        (delete-directory tmpdir t)))))
-
 (ert-deftest agent-repl-test-state-save-includes-fork-session-id ()
   "state-save serializes `:fork-session-id' so a fresh fork-ws whose
 claude session never started before quit can still launch with

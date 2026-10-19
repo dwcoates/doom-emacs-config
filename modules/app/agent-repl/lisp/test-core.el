@@ -461,11 +461,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("magit.el" agent-repl-magit-log-commit
      "agent-repl: %s is not among the commits %s's log shows"
      "tells the user the commit they clicked is not in the log that opened")
-    ("panels.el" agent-repl-workspace-push-to-back
-     "Pushed '%s' to the back; switched to '%s'."
-     "confirms the interactive tab reorder and selection")
-    ("panels.el" agent-repl-workspace-push-to-back "Pushed '%s' to the back."
-     "confirms the interactive tab reorder")
     ("persistent-wifi.el" agent-repl-persistent-wifi-handle "agent-repl: %s"
      "tells the user the machine's persistent-wifi standing changed")
     ("persistent-wifi.el" agent-repl-persistent-wifi--on-success "agent-repl: %s · %s · %s · %s"

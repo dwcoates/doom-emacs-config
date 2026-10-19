@@ -101,7 +101,7 @@
 (defvar agent-repl--history-index)
 (defvar agent-repl--history-navigating)
 (defvar agent-repl--history-discard-entry)
-(declare-function agent-repl--on-close "agent-repl-panels" ())
+(declare-function agent-repl--on-simple-close "agent-repl-panels" (&optional ws))
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-command-completion-at-point "command-completion" ())
@@ -2132,7 +2132,7 @@ Returns the submission's idempotency key, or nil when nothing was sent."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "elisp.input.send-and-hide")
   (agent-repl--send :user-sent-and-hide)
-  (agent-repl--on-close))
+  (agent-repl--on-simple-close))
 
 (defun agent-repl-send-with-metaprompt ()
   "Submit with the metaprompt read-directive prepended.

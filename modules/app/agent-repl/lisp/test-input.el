@@ -539,7 +539,7 @@ fake would not exercise them."
 (ert-deftest agent-repl-input-origin-user-sent-and-hide ()
   "`agent-repl-send-and-hide' sends `:user-sent-and-hide'."
   (agent-repl-test-input--with
-    (cl-letf (((symbol-function 'agent-repl--on-close) (lambda () nil)))
+    (cl-letf (((symbol-function 'agent-repl--on-simple-close) (lambda (&optional _ws) nil)))
       (agent-repl-test-input--type "hello")
       (agent-repl-send-and-hide)
       (should (eq (plist-get (agent-repl-test-input--request) :origin)
