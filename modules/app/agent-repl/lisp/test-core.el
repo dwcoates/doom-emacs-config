@@ -479,6 +479,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the interactive tab-bar layout command")
     ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s"
      "tells the user why a workspace with nothing left to restore it from cannot be opened")
+    ("verbs.el" agent-repl-verbs--on-refusal "agent-repl: %s"
+     "tells the user which workspace of the family stands in the way of their command")
     ("verbs.el" agent-repl-verbs--on-refusal
      "%s refused: the shim's lock helper %s %s; no other process owns this conversation"
      "tells the user the shim's lock helper failed, with its binary and how it failed")

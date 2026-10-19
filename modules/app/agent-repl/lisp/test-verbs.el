@@ -4804,3 +4804,77 @@ name or closed flag is roster.el's, so the two files cannot disagree."
                (lambda (_ws) (list :id "ws-sub" :dir "/w/sub"))))
       ;; Act / Assert
       (should (eq (agent-repl-verbs--section-of-ws "ws-sub" roster) section)))))
+
+;;;; ---- The family refusals (agentrepl.v1 family.proto) ----
+
+(ert-deftest agent-repl-verbs-family-sentence-names-the-open-children ()
+  "A refusal for open children names each of them, and what to close."
+  (should (equal (agent-repl-verbs-family-sentence
+                  "close" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a"))))
+                 "close refused: child-a is still open under this workspace; close it first"))
+  (should (equal (agent-repl-verbs-family-sentence
+                  "hide" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent")
+                    :children ((:id "a" :dir "/w/child-a") (:id "b" :dir ""))))
+                 "hide refused: child-a, b are still open under this workspace; close them first")))
+
+(ert-deftest agent-repl-verbs-family-sentence-asks-a-merge-to-resolve-the-children-first ()
+  "A merge refused for open children asks them resolved and closed before a one-shot merge."
+  (should (equal (agent-repl-verbs-family-sentence
+                  "merge" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a"))))
+                 "parent still has open child workspaces (child-a); resolve and close all of them before a one-shot merge")))
+
+(ert-deftest agent-repl-verbs-family-sentence-names-the-parent-and-its-state ()
+  "A refusal for a parent that is not open says which parent and what to do."
+  (dolist (spec '((:hidden "open refused: its parent parent is hidden; show the parent first")
+                  (:closed "open refused: its parent parent is closed; reopen the parent first")
+                  (:closing "open refused: its parent parent closes once its queued merge lands")))
+    (should (equal (agent-repl-verbs-family-sentence
+                    "open" :parent-not-open
+                    (list :parent '(:id "p" :dir "/w/parent") :state (list :arm (car spec) :value nil)))
+                   (cadr spec)))))
+
+(ert-deftest agent-repl-verbs-family-sentence-refuses-a-state-it-cannot-word ()
+  "A parent state this build does not know is an error, never a guess."
+  (should-error (agent-repl-verbs-family-sentence
+                 "open" :parent-not-open '(:parent (:id "p" :dir "/w/p") :state (:arm :frozen :value nil)))))
+
+(ert-deftest agent-repl-verbs-family-sentence-is-nil-for-any-other-arm ()
+  "Only the two family refusals are worded here."
+  (should-not (agent-repl-verbs-family-sentence "close" :blocked nil)))
+
+(ert-deftest agent-repl-verbs-a-family-refusal-is-said-in-words-at-info ()
+  "The refusal reporter records a family refusal at INFO and says it in words."
+  ;; Arrange
+  (let (infos warns said)
+    (cl-letf (((symbol-function 'agent-repl-host-route-handover) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--info) (lambda (_ws fmt &rest _) (push fmt infos)))
+              ((symbol-function 'agent-repl--warn) (lambda (_ws fmt &rest _) (push fmt warns)))
+              ((symbol-function 'message) (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+      ;; Act
+      (agent-repl-verbs--on-refusal
+       "ws" "close"
+       '(:cause (:arm :has-open-children
+                 :value (:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a")))))))
+    ;; Assert
+    (should (equal said "agent-repl: close refused: child-a is still open under this workspace; close it first"))
+    (should (seq-some (lambda (fmt) (string-prefix-p "elisp.verbs.close-family-refused" fmt)) infos))
+    (should (null warns))))
+
+(ert-deftest agent-repl-verbs-register-words-a-parent-not-open ()
+  "An announcement refused for a closed parent names the parent."
+  (should (equal (agent-repl-verbs-register-refusal-sentence
+                  "/w/child"
+                  '(:cause (:arm :parent-not-open
+                            :value (:parent (:id "p" :dir "/w/parent") :state (:arm :closed :value nil)))))
+                 "register refused: its parent parent is closed; reopen the parent first")))
+
+(ert-deftest agent-repl-verbs-a-swap-of-two-workspaces-that-are-not-siblings-is-said-in-words ()
+  "A swap refused not_siblings is an answer, said in words."
+  (let (said)
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore)
+              ((symbol-function 'message) (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+      (should (agent-repl-verbs--no-tab-to-take "swap" "kid" "root" '(:cause (:arm :not-siblings :value nil)))))
+    (should (equal said "agent-repl: kid and root are not siblings, so kid cannot take that tab"))))

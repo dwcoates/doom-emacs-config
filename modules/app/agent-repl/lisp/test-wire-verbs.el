@@ -698,7 +698,7 @@ declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_swap_workspaces.pb.go" "SwapWorkspacesError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "otherRepository")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "otherRepository" "notSiblings")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-swap-error-other-repository-arm ()
@@ -1692,7 +1692,7 @@ the form is its prompt and nothing else."
                         "agentrepl/v1/endpoint_close_workspace.pb.go"
                         "CloseWorkspaceError")
                        #'string<)
-                 '("blocked" "notYetAdopted" "transferringAway"
+                 '("blocked" "hasOpenChildren" "notYetAdopted" "transferringAway"
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
@@ -1969,7 +1969,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "parentNotOpen")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-off-primary-branch-arm ()
@@ -2182,7 +2182,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable" "notMerged" "briefMissing")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable" "notMerged" "briefMissing" "parentNotOpen")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()
@@ -2274,7 +2274,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceError")
                        #'string<)
-                 (sort (list "blocked" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "blocked" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-kill-error-unknown-workspace-arm ()
@@ -2329,7 +2329,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-nuke-error-unknown-workspace-arm ()
@@ -2391,7 +2391,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed" "hasOpenChildren")
                        #'string<))))
 
 ;;;; ---- MergeWorkspaceRequest ----------------------------------------
@@ -2665,7 +2665,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester" "versionIncrementRequired" "versionIncrementUnexpected")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester" "versionIncrementRequired" "versionIncrementUnexpected" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-mode-arms-pinned ()
@@ -5466,3 +5466,70 @@ instead diverges from it unseen."
                        #'string<)
                  '("askNotStanding" "noSession" "noStandingOffer" "notYetAdopted"
                    "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))
+
+;;;; ---- The family refusals (agentrepl.v1 family.proto) ----
+
+(defconst agent-repl-test-wire-verbs--open-children-json
+  "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/parent\"},\"children\":[{\"id\":\"c\",\"dir\":\"/w/child\"}]}}"
+  "A `has_open_children' cause naming one parent and one child.")
+
+(defconst agent-repl-test-wire-verbs--open-children-decoded
+  '(:cause (:arm :has-open-children
+            :value (:parent (:id "p" :dir "/w/parent") :children ((:id "c" :dir "/w/child")))))
+  "What `agent-repl-test-wire-verbs--open-children-json' decodes to.")
+
+(ert-deftest agent-repl-test-wire-verbs-every-has-open-children-arm-decodes-alike ()
+  "Close, kill, nuke, merge and hide decode `has_open_children' with its parent and children."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (decoder '(agent-repl-wire-decode-close-workspace-error
+                       agent-repl-wire-decode-kill-workspace-error
+                       agent-repl-wire-decode-nuke-workspace-error
+                       agent-repl-wire-decode-merge-workspace-error
+                       agent-repl-wire-decode-set-workspace-hidden-error))
+      (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse agent-repl-test-wire-verbs--open-children-json))
+                     agent-repl-test-wire-verbs--open-children-decoded)))))
+
+(ert-deftest agent-repl-test-wire-verbs-has-open-children-naming-no-child-is-a-breach ()
+  "The contract says the children are never empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"children\":[]}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-every-parent-not-open-arm-decodes-each-state ()
+  "Open, create and show decode `parent_not_open' with its parent and state."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (decoder '(agent-repl-wire-decode-open-workspace-error
+                       agent-repl-wire-decode-create-workspace-error
+                       agent-repl-wire-decode-set-workspace-hidden-error))
+      (dolist (state '(("hidden" . :hidden) ("closed" . :closed) ("closing" . :closing)))
+        (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse
+                                         (format "{\"parentNotOpen\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"%s\":{}}}"
+                                                 (car state))))
+                       (list :cause (list :arm :parent-not-open
+                                          :value (list :parent '(:id "p" :dir "/w/p")
+                                                       :state (list :arm (cdr state) :value nil))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-parent-not-open-without-a-state-is-a-breach ()
+  "The parent's state is never unset."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-open-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"parentNotOpen\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-swap-error-not-siblings-arm ()
+  "SwapWorkspacesError's `not_siblings' arm decodes, carrying nothing."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
+                    (agent-repl-test-wire-verbs--parse "{\"notSiblings\":{}}"))
+                   '(:cause (:arm :not-siblings :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-error-arms-pinned ()
+  "SetWorkspaceHiddenError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_set_workspace_hidden.pb.go" "SetWorkspaceHiddenError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted"
+                             "hasOpenChildren" "parentNotOpen")
+                       #'string<))))

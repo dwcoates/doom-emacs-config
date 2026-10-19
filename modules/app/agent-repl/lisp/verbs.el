@@ -313,6 +313,44 @@ sentence the shim and the daemon word it with."
   "Return STDERR as a parenthesized suffix, or the empty string when empty."
   (if (string-empty-p stderr) "" (format " (%s)" stderr)))
 
+;; A FAMILY STAYS IN ONE LIST OF THE ROSTER (agentrepl.v1 family.proto): a
+;; workspace with open children is not closed, killed, nuked, hidden or
+;; merged closed, and no open child is made, re-opened or shown under a parent
+;; that is hidden, closed or closing.  Both refusals are ANSWERS, not faults,
+;; and every verb that can meet one words it here, naming the workspaces in
+;; the way, as the sidebar words it (webapp `rpc/family-refusal.ts').
+
+(defun agent-repl-verbs--ref-label (ref)
+  "Name the `WorkspaceRef' REF in words: its directory's last part, else its id."
+  (let ((dir (plist-get ref :dir)))
+    (if (and (stringp dir) (not (string-empty-p dir)))
+        (file-name-nondirectory (directory-file-name dir))
+      (plist-get ref :id))))
+
+(defun agent-repl-verbs-family-sentence (op keyword fields)
+  "Word the family refusal KEYWORD of verb OP from its FIELDS, or nil.
+KEYWORD `:has-open-children' names the parent's open children, and for a
+merge (OP \"merge\") asks for them to be resolved and closed before a
+one-shot merge; `:parent-not-open' names the parent and what to do about
+it.  Nil for any other arm, which is not a family refusal."
+  (pcase keyword
+    (:has-open-children
+     (let* ((children (plist-get fields :children))
+            (names (mapconcat #'agent-repl-verbs--ref-label children ", "))
+            (one (null (cdr children))))
+       (if (equal op "merge")
+           (format "%s still has open child workspaces (%s); resolve and close all of them before a one-shot merge"
+                   (agent-repl-verbs--ref-label (plist-get fields :parent)) names)
+         (format "%s refused: %s %s still open under this workspace; close %s first"
+                 op names (if one "is" "are") (if one "it" "them")))))
+    (:parent-not-open
+     (let ((parent (agent-repl-verbs--ref-label (plist-get fields :parent))))
+       (pcase (plist-get (plist-get fields :state) :arm)
+         (:hidden (format "%s refused: its parent %s is hidden; show the parent first" op parent))
+         (:closed (format "%s refused: its parent %s is closed; reopen the parent first" op parent))
+         (:closing (format "%s refused: its parent %s closes once its queued merge lands" op parent))
+         (state (error "agent-repl-verbs: parent_not_open state %S has no wording" state)))))))
+
 (defun agent-repl-verbs--on-refusal (ws op value)
   "Report a daemon-authored refusal of OP for WS, or route it to the handover.
 The two handover arms are silent by design.  `worktree_unrestorable' is an
@@ -336,6 +374,11 @@ keyword, and the fields."
         (agent-repl--info ws (format "elisp.verbs.%s-unrestorable ws=%%s dir=%%S branch=%%S" op)
                           ws (plist-get fields :dir) (plist-get fields :branch))
         (message "%s refused: %s" op (plist-get fields :detail))))
+     ((memq keyword '(:has-open-children :parent-not-open))
+      ;; A FAMILY RULE ANSWERED: recorded at INFO, said in words.
+      (agent-repl--info ws (format "elisp.verbs.%s-family-refused ws=%%s arm=%%S fields=%%S" op)
+                        ws keyword (plist-get arm :value))
+      (message "agent-repl: %s" (agent-repl-verbs-family-sentence op keyword (plist-get arm :value))))
      ((eq keyword :lock-holder-unavailable)
       ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
       ;; the conversation: the shim's own lock helper failed, and the binary
@@ -978,10 +1021,11 @@ with a record saying so."
 (defun agent-repl-verb-swap (ws target)
   "Exchange the places of WS and TARGET in the registry order.
 WS takes TARGET's place and TARGET takes WS's; every other workspace keeps
-its own.  The two must belong to one repository; another repository's tab
-is refused and said in words (`agent-repl-verbs--no-tab-to-take').  The tab bar and the sidebar are both views of the registry, and
-the new order arrives on the roster stream, so success changes no editor
-state."
+its own.  The two must be siblings of one repository (both top-level, or
+children of one parent); any other tab is refused and said in words
+\(`agent-repl-verbs--no-tab-to-take').  The tab bar and the sidebar are
+both views of the registry, and the new order arrives on the roster
+stream, so success changes no editor state."
   (agent-repl-verbs--send
    #'agent-repl-rpc-swap-workspaces (agent-repl-verbs--conn ws)
    (list :workspace (agent-repl-verbs--ref ws) :target (agent-repl-verbs--ref target))
@@ -996,7 +1040,8 @@ state."
   "Claim refusal VALUE of tab-slot gesture OP when it says no tab can be taken.
 NO TAB TO TAKE IS AN ANSWER, NOT A FAULT: the user pressed the tab of a
 workspace of another repository (`:other-repository') or another family
-\(`:not-siblings'), and the daemon said why WS cannot take TARGET's tab.
+\(`:not-siblings', a child's tab always following its parent's), and the
+daemon said why WS cannot take TARGET's tab.
 Recorded at INFO and said in words, answering non-nil; every other arm is
 left to the arm-generic report."
   (let ((arm (plist-get (agent-repl-verbs--refusal-arm value) :arm)))
@@ -1241,6 +1286,7 @@ is named by its keyword and fields rather than dropped."
       (:inside-temporary-directory
        (agent-repl-verbs-temporary-directory-sentence (plist-get arm :value)))
       (:not-a-worktree (format "%s is not a git worktree" dir))
+      (:parent-not-open (agent-repl-verbs-family-sentence "register" keyword (plist-get arm :value)))
       (_ (format "the daemon refused %s: %s%s" dir
                  (if keyword (substring (symbol-name keyword) 1) "unstated")
                  (agent-repl-verbs--refusal-fields arm))))))

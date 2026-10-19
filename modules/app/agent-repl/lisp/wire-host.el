@@ -49,6 +49,7 @@
 (declare-function agent-repl-wire--object "wire-common")
 (declare-function agent-repl-wire-decode-drain-reason "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
+(declare-function agent-repl-wire-decode-workspace-parent-not-open "wire-common")
 (declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
 (declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
 (declare-function agent-repl-wire-decode-nuke-workspace-error "wire-verbs")
@@ -804,12 +805,13 @@ register; VALUE carries the canonical `dir' and `temporary_root'."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((object (agent-repl-wire--object "RegisterWorkspaceError" value)))
-    (agent-repl-wire--check-keys "RegisterWorkspaceError" object '(notAWorktree insideTemporaryDirectory))
+    (agent-repl-wire--check-keys "RegisterWorkspaceError" object '(notAWorktree insideTemporaryDirectory parentNotOpen))
     (agent-repl-wire--decode-oneof
      "RegisterWorkspaceError" 'cause object
      '((notAWorktree :not-a-worktree agent-repl-wire-decode-register-workspace-error-not-a-worktree)
        (insideTemporaryDirectory :inside-temporary-directory
-                                 agent-repl-wire-decode-register-workspace-error-inside-temporary-directory)))))
+                                 agent-repl-wire-decode-register-workspace-error-inside-temporary-directory)
+       (parentNotOpen :parent-not-open agent-repl-wire-decode-workspace-parent-not-open)))))
 
 (defun agent-repl-wire-decode-register-workspace-error (value)
   "Decode VALUE as `RegisterWorkspaceError', a plist (:cause ONEOF)."

@@ -1452,8 +1452,16 @@ guessed at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_register_workspace.pb.go" "RegisterWorkspaceError")
                        #'string<)
-                 (sort (list "notAWorktree" "insideTemporaryDirectory")
+                 (sort (list "notAWorktree" "insideTemporaryDirectory" "parentNotOpen")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-register-error-parent-not-open-arm ()
+  "RegisterWorkspaceError's `parent_not_open' arm decodes its parent and state."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspace-error
+                  "{\"parentNotOpen\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"closed\":{}}}")
+                 '(:cause (:arm :parent-not-open
+                           :value (:parent (:id "p" :dir "/w/p") :state (:arm :closed :value nil)))))))
 
 (ert-deftest agent-repl-test-wire-host-select-error-unknown-workspace-arm ()
   "SelectWorkspaceError's `unknown_workspace' arm decodes with everything it

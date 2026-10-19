@@ -77,6 +77,8 @@
 (declare-function agent-repl-wire--decode-double "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-workspace-has-open-children "agent-repl-wire-common" (value))
+(declare-function agent-repl-wire-decode-workspace-parent-not-open "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-encode-repository-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-repository-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-user-said "agent-repl-wire-common" (said))
@@ -112,6 +114,18 @@
 
 
 ;;;; ---- Shared primitives ----------------------------------------------
+
+(defconst agent-repl-wire-verbs--has-open-children-arm
+  (list 'hasOpenChildren :has-open-children #'agent-repl-wire-decode-workspace-has-open-children)
+  "The `has_open_children' family refusal, as a decode-oneof arm.
+Every error that carries it spells it identically (agentrepl.v1
+family.proto).")
+
+(defconst agent-repl-wire-verbs--parent-not-open-arm
+  (list 'parentNotOpen :parent-not-open #'agent-repl-wire-decode-workspace-parent-not-open)
+  "The `parent_not_open' family refusal, as a decode-oneof arm.
+Every error that carries it spells it identically (agentrepl.v1
+family.proto).")
 
 (defun agent-repl-wire-verbs--fail (message field reason)
   "Log a contract breach at ERROR and signal `agent-repl-wire-error'.
@@ -752,7 +766,7 @@ temporary directory; JSON carries the canonical `dir' and `temporary_root'."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace parentNotOpen))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -772,7 +786,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
          (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
          (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved)
-         (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace))))))
+         (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace)
+         agent-repl-wire-verbs--parent-not-open-arm)))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -977,7 +992,7 @@ never an ownership conflict."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "OpenWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed vendorStartFailed lockHolderUnavailable worktreeUnrestorable notMerged briefMissing))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed vendorStartFailed lockHolderUnavailable worktreeUnrestorable notMerged briefMissing parentNotOpen))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -992,7 +1007,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'lockHolderUnavailable :lock-holder-unavailable #'agent-repl-wire-decode-open-workspace-error-lock-holder-unavailable)
          (list 'worktreeUnrestorable :worktree-unrestorable #'agent-repl-wire-decode-open-workspace-error-worktree-unrestorable)
          (list 'notMerged :not-merged #'agent-repl-wire-decode-open-workspace-error-not-merged)
-         (list 'briefMissing :brief-missing #'agent-repl-wire-decode-open-workspace-error-brief-missing))))))
+         (list 'briefMissing :brief-missing #'agent-repl-wire-decode-open-workspace-error-brief-missing)
+         agent-repl-wire-verbs--parent-not-open-arm)))))
 
 (defun agent-repl-wire-decode-open-workspace-response-success (json)
   "Decode OpenWorkspaceResponse's `success' arm from JSON."
@@ -1439,7 +1455,7 @@ not finished adopting this workspace yet."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CloseWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(blocked unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire-verbs--check-keys message json '(blocked unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted hasOpenChildren))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1447,7 +1463,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-close-workspace-error-unknown-workspace)
          (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-close-workspace-error-workspace-ref-mismatch)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-close-workspace-error-transferring-away)
-         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-close-workspace-error-not-yet-adopted))))))
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-close-workspace-error-not-yet-adopted)
+         agent-repl-wire-verbs--has-open-children-arm)))))
 
 (defun agent-repl-wire-decode-close-workspace-response-success (json)
   "Decode CloseWorkspaceResponse's `success' arm from JSON."
@@ -1536,14 +1553,15 @@ not finished adopting this workspace yet."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "KillWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted hasOpenChildren))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-kill-workspace-error-unknown-workspace)
          (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-kill-workspace-error-workspace-ref-mismatch)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-kill-workspace-error-transferring-away)
-         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-kill-workspace-error-not-yet-adopted))))))
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-kill-workspace-error-not-yet-adopted)
+         agent-repl-wire-verbs--has-open-children-arm)))))
 
 (defun agent-repl-wire-decode-kill-workspace-response-success (json)
   "Decode KillWorkspaceResponse's `success' arm from JSON."
@@ -1656,7 +1674,7 @@ A git operation failed mid-delete."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "NukeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted gitFailed))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted gitFailed hasOpenChildren))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1664,7 +1682,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-nuke-workspace-error-workspace-ref-mismatch)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-nuke-workspace-error-transferring-away)
          (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-nuke-workspace-error-not-yet-adopted)
-         (list 'gitFailed :git-failed #'agent-repl-wire-decode-nuke-workspace-error-git-failed))))))
+         (list 'gitFailed :git-failed #'agent-repl-wire-decode-nuke-workspace-error-git-failed)
+         agent-repl-wire-verbs--has-open-children-arm)))))
 
 (defun agent-repl-wire-decode-nuke-workspace-response-success (json)
   "Decode NukeWorkspaceResponse's `success' arm from JSON."
@@ -1954,7 +1973,7 @@ JSON is the arm's value."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "MergeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownOneShotWorkspace unknownBranch nameTaken branchCheckedOutInRequester versionIncrementRequired versionIncrementUnexpected))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownOneShotWorkspace unknownBranch nameTaken branchCheckedOutInRequester versionIncrementRequired versionIncrementUnexpected hasOpenChildren))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1971,7 +1990,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'nameTaken :name-taken #'agent-repl-wire-decode-merge-workspace-error-name-taken)
          (list 'branchCheckedOutInRequester :branch-checked-out-in-requester #'agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester)
          (list 'versionIncrementRequired :version-increment-required #'agent-repl-wire-decode-merge-workspace-error-version-increment-required)
-         (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected))))))
+         (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected)
+         agent-repl-wire-verbs--has-open-children-arm)))))
 
 (defun agent-repl-wire-decode-merge-workspace-response-success (json)
   "Decode MergeWorkspaceResponse's `success' arm from JSON."
@@ -2301,12 +2321,18 @@ workspaces belong to different repositories, whose tabs never interleave."
   "Decode SwapWorkspacesError's `other_repository' cause arm from JSON."
   (agent-repl-wire-decode-swap-workspaces-other-repository json))
 
+(defun agent-repl-wire-decode-swap-workspaces-not-siblings (json)
+  "Decode SwapWorkspacesNotSiblings from JSON.  Empty: the two workspaces
+are neither both top-level nor children of one parent, and a child's tab
+always follows its parent's."
+  (agent-repl-wire-verbs--decode-empty "SwapWorkspacesNotSiblings" json))
+
 (defun agent-repl-wire-decode-swap-workspaces-error (json)
   "Decode SwapWorkspacesError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SwapWorkspacesError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted otherRepository))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted otherRepository notSiblings))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -2314,7 +2340,8 @@ arm this codec does not know is refused as an unknown field."
                  (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-swap-workspaces-error-workspace-ref-mismatch)
                  (list 'transferringAway :transferring-away #'agent-repl-wire-decode-swap-workspaces-error-transferring-away)
                  (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-swap-workspaces-error-not-yet-adopted)
-                 (list 'otherRepository :other-repository #'agent-repl-wire-decode-swap-workspaces-error-other-repository))))))
+                 (list 'otherRepository :other-repository #'agent-repl-wire-decode-swap-workspaces-error-other-repository)
+                 (list 'notSiblings :not-siblings #'agent-repl-wire-decode-swap-workspaces-not-siblings))))))
 
 (defun agent-repl-wire-decode-swap-workspaces-response-success (json)
   "Decode SwapWorkspacesResponse's `success' arm from JSON."
@@ -5304,13 +5331,16 @@ Empty: the roster push carries the new state."
 
 (defun agent-repl-wire-decode-set-workspace-hidden-error (json)
   "Decode SetWorkspaceHiddenError from JSON into (:cause (:arm ARM :value V)).
-THE ARM IS THE REFUSAL: the four cross-cutting ownership arms."
+THE ARM IS THE REFUSAL: the four cross-cutting ownership arms, and the two
+family rules a hide and a show keep."
   (let ((message "SetWorkspaceHiddenError"))
     (agent-repl-wire-verbs--check-keys
-     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted hasOpenChildren parentNotOpen))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
-           message "cause" json (agent-repl-wire-verbs--handover-arms "SetWorkspaceHidden")))))
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "SetWorkspaceHidden")
+                   (list agent-repl-wire-verbs--has-open-children-arm agent-repl-wire-verbs--parent-not-open-arm))))))
 
 (defun agent-repl-wire-decode-set-workspace-hidden-response (json)
   "Decode SetWorkspaceHiddenResponse from JSON into (:arm ARM :value V)."
