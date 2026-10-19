@@ -23,12 +23,20 @@
  *     Workspaces as far as its lines fit, then Recently Merged.
  *   - A rail too short for the bands' share shrinks the bands, the longer one
  *     first, Recently Merged on a tie, and shows the Open section no lines.
+ *   - THE LOWEST OPEN SECTION REACHES THE RAIL'S FOOT (owner request,
+ *     2026-10-19). Whatever room is left once every section shows its whole
+ *     lines, less than one more line of any section, is added to the
+ *     viewport of the lowest section not folded (Recently Merged, unless it
+ *     is folded), so no strip of the rail is ever left under it. That
+ *     viewport may cut its last line through, scrolling it into view; the
+ *     section's rows region stands that tall even when it holds fewer rows.
  *
  * A LINE IS ONE `.row`, a nested family member included, or a folded
  * repository's header, and a viewport of K lines is exactly as tall as the
  * first K lines are drawn, the header above a line (a repository section's,
- * a Recently Merged repository group's) riding with it, so no line is ever
- * cut through. A folded section shows no lines and takes no room.
+ * a Recently Merged repository group's) riding with it, so no line is cut
+ * through but the lowest section's last. A folded section shows no lines and
+ * takes no room.
  *
  * THE COUNT IS THE DAEMON'S. Every row is reachable by scrolling, so the
  * folded "(N)" stays the number of rows the section holds.
@@ -263,9 +271,20 @@ function measureRoom(scroller: HTMLElement, pane: HTMLElement, bands: readonly B
   return contentHeight(scroller) - (pane.getBoundingClientRect().height - regions);
 }
 
-/** Size BAND's viewport to LINES of its STOPS, and state LINES on it. */
-function sizeBand(band: Band, stops: BandStops, lines: number): void {
-  band.region.style.maxHeight = lines < stops.length - 1 ? `${stops[lines]}px` : "";
+/**
+ * Size BAND's viewport to LINES of its STOPS, and state LINES on it. A band
+ * handed a STRETCH (the lowest; see the module note) stands exactly that
+ * much taller than its LINES, cutting through the next line; any other is
+ * capped at its LINES.
+ */
+function sizeBand(band: Band, stops: BandStops, lines: number, stretch: number | null): void {
+  if (stretch === null) {
+    band.region.style.height = "";
+    band.region.style.maxHeight = lines < stops.length - 1 ? `${stops[lines]}px` : "";
+  } else {
+    band.region.style.maxHeight = "";
+    band.region.style.height = `${stops[lines] + stretch}px`;
+  }
   band.section.setAttribute(BAND_LINES_ATTRIBUTE, String(lines));
 }
 
@@ -304,6 +323,9 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     return null;
   }
   const bands = [openSection, hiddenSection, mergedSection].filter((band): band is Band => band !== null);
+  // A stretched viewport stands taller than its rows, so it is let go before
+  // the rows are measured: the stops are the rows' own, never the stretch's.
+  for (const band of bands) band.region.style.height = "";
   const room = measureRoom(scroller, pane, bands);
   const open = measure(openSection);
   const hidden = measure(hiddenSection);
@@ -315,9 +337,15 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     merged: merged?.stops ?? [0],
     mergedToday: today,
   });
-  if (open !== null) sizeBand(open.band, open.stops, lines.open);
-  if (hidden !== null) sizeBand(hidden.band, hidden.stops, lines.hidden);
-  if (merged !== null) sizeBand(merged.band, merged.stops, lines.merged);
+  const sized = [
+    [open, lines.open],
+    [hidden, lines.hidden],
+    [merged, lines.merged],
+  ].filter((entry): entry is [Measured, number] => entry[0] !== null);
+  const used = sized.reduce((sum, [m, n]) => sum + m.stops[n], 0);
+  // A rail shorter than the sections' headers leaves no room to stretch into.
+  const stretch = Math.max(0, room - used);
+  sized.forEach(([m, n], i) => sizeBand(m.band, m.stops, n, i === sized.length - 1 ? stretch : null));
   const context = {
     room,
     open_total: (open?.stops.length ?? 1) - 1,
@@ -327,6 +355,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     merged_total: (merged?.stops.length ?? 1) - 1,
     merged_today: today,
     merged_shown: lines.merged,
+    stretch,
   };
   const fittedRoom = measureRoom(scroller, pane, bands);
   if (fittedRoom !== room) {

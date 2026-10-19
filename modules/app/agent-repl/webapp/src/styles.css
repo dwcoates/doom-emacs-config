@@ -901,8 +901,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    (2026-10-11: a content-sized basis flipped Recently Merged between five and
    six lines many times a second).
    THE RAIL ITSELF NEVER SCROLLS (owner request, 2026-10-18): the fit sizes
-   each section's rows to the room, and each section scrolls its own. */
-#ws-sidebar .sb-scroll { flex: 1 1 0; min-height: 0; overflow-y: hidden; padding: 0.35rem 0 1rem; }
+   each section's rows to the room, and each section scrolls its own.
+   NO PADDING AT ITS FOOT (owner request, 2026-10-19): the lowest section's
+   rows reach the rail's bottom edge, so nothing is left blank under them. */
+#ws-sidebar .sb-scroll { flex: 1 1 0; min-height: 0; overflow-y: hidden; padding: 0.35rem 0 0; }
 
 /* Repo section header: fold triangle + repo label in the --info-ws hue the
    topbar already uses for the workspace datapoint. */
