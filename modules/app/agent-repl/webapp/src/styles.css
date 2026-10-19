@@ -1026,6 +1026,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-size: 0.7rem;
 }
 #ws-sidebar .sb-subsection > .rows:not(:empty) + .sb-subsection-empty { display: none; }
+/* A COLLAPSED SUBSECTION (its triangle, src/sidebar/subsections.ts) shows its
+   header alone: its rows and its drop slot are hidden, and its header greys
+   as a collapsed repository's does. */
+#ws-sidebar .sb-subsection.folded > .rows,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-empty { display: none; }
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head { color: var(--repo-head-collapsed); }
 
 /* THE DRAG (src/sidebar/drag.ts): the item stays in its list as a dimmed
    slot that travels to where the drop would land, and a copy follows the

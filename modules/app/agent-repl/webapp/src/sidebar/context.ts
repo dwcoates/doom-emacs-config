@@ -95,6 +95,11 @@ export function repoFoldKey(repositoryId: string): string {
   return `repo:${repositoryId}`;
 }
 
+/** The key a subsection is identified by on this page. */
+export function subsectionFoldKey(subsectionId: string): string {
+  return `subsection:${subsectionId}`;
+}
+
 /**
  * The recently-merged section's fold key.
  *

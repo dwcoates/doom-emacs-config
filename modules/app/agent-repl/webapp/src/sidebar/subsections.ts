@@ -9,6 +9,12 @@
  * subsection's (`arrange.ts`). An empty subsection still draws, with a slot to
  * drop into.
  *
+ * A SUBSECTION FOLDS AS A REPOSITORY SECTION DOES (`section-fold.ts`): its
+ * triangle asks UpdateSidebarView for the other fold, a collapsed
+ * subsection's rows are hidden, and the daemon folds its workspaces' tabs off
+ * the Emacs tab bar. Only the triangle folds it: the header's label renames
+ * on a double-click, which a fold on every click would undo.
+ *
  * WHAT DRAGS. In the open workspaces' repository sections only, which are the
  * ones whose order the tab bar walks:
  *
@@ -36,7 +42,8 @@ import { OPEN_REGION_CLASS, SUBSECTION_SLOT_CLASS } from "./band-fit.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import { sendArrangement, type ArrangeChange } from "./arrange.js";
-import type { SidebarContext } from "./context.js";
+import { subsectionFoldKey, type SidebarContext } from "./context.js";
+import { drawFoldToggle, drawRosterSectionFold, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "./drag.js";
 
 /** The class of a repository section's subsections box, and of one subsection. */
@@ -83,7 +90,7 @@ export function drawRosterSubsections(
   return box;
 }
 
-/** One subsection: its header (name, count, delete) and its rows. */
+/** One subsection: its header (fold, name, count, delete) and its rows. */
 export function drawRosterSubsection(
   u: RosterSubsection,
   sc: SidebarContext,
@@ -97,9 +104,12 @@ export function drawRosterSubsection(
   const element = document.createElement("div");
   element.className = SUBSECTION_CLASS;
   element.setAttribute(BUCKET_ATTRIBUTE, id);
+  const foldKey = subsectionFoldKey(id);
+  trackDaemonFold(element, foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
 
   const head = document.createElement("div");
   head.className = SUBSECTION_HEAD_CLASS;
+  const triangle = drawFoldToggle(element, sectionFold(sc, foldKey, { case: "subsection", value: { id } }));
   const label = document.createElement("span");
   label.className = "sb-subsection-label";
   label.textContent = name;
@@ -126,7 +136,7 @@ export function drawRosterSubsection(
     event.stopPropagation();
     void sendArrangement(sc, sc.arrange.status, { case: "deleteSubsection", value: { subsection: { id } } });
   });
-  head.append(label, shown, remove);
+  head.append(triangle, label, shown, remove);
   element.appendChild(head);
 
   const rows = drawRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`);

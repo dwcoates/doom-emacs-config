@@ -275,6 +275,25 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-subsection-empty", "row"]);
   });
 
+  it("counts a folded subsection's header as a line, and its hidden rows as none", () => {
+    // Arrange: the stylesheet hides a collapsed subsection's rows and slot.
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="sb-subsection folded"><div class="sb-subsection-head"></div><div class="rows"><div class="row"></div></div><div class="sb-subsection-empty"></div></div><div class="row"></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-subsection-head, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-subsection .row, .sb-subsection-empty")) el.getBoundingClientRect = () => rect(0, 0);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["sb-subsection-head", "row"]);
+  });
+
+  it("counts an expanded subsection's header as no line", () => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="sb-subsection"><div class="sb-subsection-head"></div><div class="rows"><div class="row"></div></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-subsection-head, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["row"]);
+  });
+
   it("counts a filled subsection's hidden drop slot as no line", () => {
     // Arrange
     const box = document.createElement("div");

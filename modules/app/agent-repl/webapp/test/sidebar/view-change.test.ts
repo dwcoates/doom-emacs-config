@@ -100,6 +100,7 @@ describe("changeView", () => {
 describe("updateSidebarViewRefusal", () => {
   it.each([
     ["unknownRepository", "the daemon no longer has that repository"],
+    ["unknownSubsection", "the daemon no longer has that subsection"],
   ] as const)("words %s", (arm, sentence) => {
     expect(updateSidebarViewRefusal({ case: arm, value: {} } as never)).toBe(sentence);
   });

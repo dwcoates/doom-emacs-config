@@ -282,7 +282,7 @@ export function repoSection(init: {
   /** The label hover's measurement; pending unless said. */
   divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
   /** The repository's subsections, in order; none unless said. */
-  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[] }>;
+  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean }>;
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
@@ -294,6 +294,7 @@ export function repoSection(init: {
       key: { subsectionId: sub.id },
       header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
       openRows: { rows: (sub.rows ?? []).map(openRow) },
+      fold: sub.collapsed === true ? ({ case: "collapsed", value: {} } as const) : ({ case: "expanded", value: {} } as const),
     })),
   });
 }

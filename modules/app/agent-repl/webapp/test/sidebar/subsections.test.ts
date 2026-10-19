@@ -10,6 +10,12 @@ import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, REARRANGED_ATTRIBUTE } from "../../s
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
 import { queryAll } from "../../src/dom.js";
+import {
+  UpdateSidebarViewResponseSchema,
+  type UpdateSidebarViewRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
+import { MalformedView } from "../../src/rpc/malformed.js";
+import { cascadedValue, inRail } from "../stylesheet.js";
 import { appContext, hiddenSection, primaryPointer, repoSection, roster, row, sidebarContext } from "./harness.js";
 
 /** Every ArrangeSidebar request the daemon received, and a context over it. */
@@ -517,5 +523,107 @@ describe("a drag stays inside its repository", () => {
       queryAll(other, ".sb-subsection").map((el) => el.getAttribute("data-subsection")),
       change?.case === "moveSubsection" ? [change.value.subsection?.id, change.value.to.case] : null,
     ]).toEqual([["sub-x"], ["sub-a", "end"]]);
+  });
+});
+
+describe("a subsection's fold", () => {
+  /** A context whose daemon records every UpdateSidebarView and answers success. */
+  function viewing(): { sc: RailContext & SidebarContext; asked: UpdateSidebarViewRequest[] } {
+    const asked: UpdateSidebarViewRequest[] = [];
+    const sc = sidebarContext(
+      appContext({
+        updateSidebarView: (request) => {
+          asked.push(request);
+          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    return { sc, asked };
+  }
+
+  /**
+   * Click EL as a pointer does: pressed and released first, which clears the
+   * click a finished drag swallows (`drag.ts`), so an earlier test's drag
+   * cannot eat this click.
+   */
+  const click = (el: HTMLElement): void => {
+    pointer("pointerdown", el, 0);
+    pointer("pointerup", window, 0);
+    el.click();
+  };
+
+  const subsectionOf = (collapsed: boolean) =>
+    roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1", rows: [row({ id: "ws-1" })], collapsed }] })] });
+
+  it.each([true, false])("draws the subsection folded as the daemon says (%s)", (collapsed) => {
+    // Act
+    const pane = mount(subsectionOf(collapsed), sidebarContext());
+
+    // Assert
+    const sub = pane.querySelector(".sb-subsection") as HTMLElement;
+    expect([sub.classList.contains("folded"), sub.querySelector("[data-section-fold]")?.getAttribute("data-folded")]).toEqual([
+      collapsed,
+      String(collapsed),
+    ]);
+  });
+
+  it.each([
+    { collapsed: false, fold: "collapse" },
+    { collapsed: true, fold: "expand" },
+  ])("asks for the other fold from its triangle ($fold)", async ({ collapsed, fold }) => {
+    // Arrange
+    const { sc, asked } = viewing();
+    const pane = mount(subsectionOf(collapsed), sc);
+
+    // Act
+    click(pane.querySelector(".sb-subsection [data-section-fold]") as HTMLElement);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    const change = asked[0]?.change;
+    expect(
+      change?.case === "foldSection" && change.value.section.case === "subsection"
+        ? [change.value.section.value.id, change.value.fold.case]
+        : change,
+    ).toEqual(["sub-1", fold]);
+  });
+
+  it("is not folded by a click on its name, which renames on a double-click", async () => {
+    // Arrange
+    const { sc, asked } = viewing();
+    const pane = mount(subsectionOf(false), sc);
+
+    // Act
+    click(pane.querySelector(".sb-subsection-label") as HTMLElement);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses a subsection with no fold as a malformed view", () => {
+    // Arrange
+    const made = subsectionOf(false);
+    made.repository!.sections[0]!.subsections[0]!.fold = { case: undefined };
+
+    // Act / Assert
+    expect(() => drawWorkspaceRoster(made, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it.each([
+    { collapsed: true, rows: "none", color: "var(--repo-head-collapsed)" },
+    { collapsed: false, rows: "block", color: "var(--muted)" },
+  ])("styles a subsection collapsed=$collapsed: rows $rows, header $color", ({ collapsed, rows, color }) => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(subsectionOf(collapsed), sidebarContext());
+
+    // Act / Assert
+    inRail(drawn, (rail) => {
+      const sub = rail.querySelector(".sb-subsection") as HTMLElement;
+      expect([
+        cascadedValue(sub.querySelector(":scope > .rows") as HTMLElement, "display"),
+        cascadedValue(sub.querySelector(":scope > .sb-subsection-head") as HTMLElement, "color"),
+      ]).toEqual([rows, color]);
+    });
   });
 });

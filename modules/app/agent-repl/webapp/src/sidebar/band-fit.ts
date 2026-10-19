@@ -36,7 +36,8 @@
  *     strip; scrolled to its end, the mark drops and the last row shows whole.
  *
  * A LINE IS ONE `.row`, a nested family member included, a folded
- * repository's header, or an empty subsection's drop slot (a subsection with
+ * repository's header, a folded subsection's header, or an empty
+ * subsection's drop slot (a subsection with
  * no rows draws the slot in their place, so it is a line as a folded
  * repository's header is), and a viewport of K lines is exactly as tall as the
  * first K lines are drawn, the header above a line (a repository section's,
@@ -106,8 +107,11 @@ const SECTION_REGIONS = [
  */
 export const SUBSECTION_SLOT_CLASS = "sb-subsection-empty";
 
-/** What one line is: a row, a folded repository section's header, or an empty subsection's slot. */
-const LINE_SELECTOR = `.row, .repo.folded > .repo-head, .${SUBSECTION_SLOT_CLASS}`;
+/**
+ * What one line is: a row, a folded repository section's header, a folded
+ * subsection's header, or an empty subsection's slot.
+ */
+const LINE_SELECTOR = `.row, .repo.folded > .repo-head, .sb-subsection.folded > .sb-subsection-head, .${SUBSECTION_SLOT_CLASS}`;
 
 /** How many lines each section's viewport shows. */
 export interface SectionLines {
