@@ -86,6 +86,18 @@ func (c *cliClient) KillWorkspace(_ context.Context, req *connect.Request[agentr
 	return connect.NewResponse(&agentreplv1.KillWorkspaceResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) SelectWorkspace(_ context.Context, req *connect.Request[agentreplv1.SelectWorkspaceRequest]) (*connect.Response[agentreplv1.SelectWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.SelectWorkspaceResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) RestartWorkspace(_ context.Context, req *connect.Request[agentreplv1.RestartWorkspaceRequest]) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.RestartWorkspaceResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) Interrupt(_ context.Context, req *connect.Request[agentreplv1.InterruptRequest]) (*connect.Response[agentreplv1.InterruptResponse], error) {
+	return connect.NewResponse(&agentreplv1.InterruptResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) SubscribeWorkspace(_ context.Context, req *connect.Request[agentreplv1.SubscribeWorkspaceRequest]) (*connect.Response[agentreplv1.SubscribeWorkspaceResponse], error) {
 	return connect.NewResponse(&agentreplv1.SubscribeWorkspaceResponse{}), c.record(req.Msg)
 }
@@ -647,3 +659,86 @@ func TestEveryOneWorkspaceVerbIsOnWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectAndRestartNameTheirWorkspace(t *testing.T) {
+	tests := []struct {
+		verb string
+		got  func(*testing.T, *cliFixture) string
+	}{
+		{verb: "select", got: func(t *testing.T, f *cliFixture) string {
+			return only[*agentreplv1.SelectWorkspaceRequest](t, f).GetWorkspace().GetId()
+		}},
+		{verb: "restart", got: func(t *testing.T, f *cliFixture) string {
+			return only[*agentreplv1.RestartWorkspaceRequest](t, f).GetWorkspace().GetId()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.verb, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.verb, "peer")
+
+			// Assert
+			if got := tt.got(t, f); code != exitSuccess || got != "ws-peer" {
+				t.Fatalf("exit %d, workspace %q; want ws-peer", code, got)
+			}
+		})
+	}
+}
+
+func TestOnWorkspaceSaysWhyItRefusesAnythingAfterTheWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	f.run(workspaceNoun, "restart", "peer", "extra")
+
+	// Assert
+	if !strings.Contains(f.errOut.String(), "nothing after it") {
+		t.Fatalf("stderr %q, want the refusal explained", f.errOut.String())
+	}
+}
+
+func TestInterruptChoosesItsTarget(t *testing.T) {
+	tests := []struct {
+		name      string
+		flags     []string
+		allAgents bool
+		confirm   bool
+	}{
+		{name: "the running turn"},
+		{name: "the running turn and its live agents", flags: []string{"-confirm-agents"}, confirm: true},
+		{name: "every live agent", flags: []string{"-all-agents"}, allAgents: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"interrupt", "peer"}, tt.flags...)...)
+
+			// Assert
+			req := only[*agentreplv1.InterruptRequest](t, f)
+			if code != exitSuccess || (req.GetAllAgents() != nil) != tt.allAgents || (req.GetTurn() != nil) == tt.allAgents || req.GetConfirmAgents() != tt.confirm {
+				t.Fatalf("exit %d, request %v; want all-agents %v, confirm %v", code, req, tt.allAgents, tt.confirm)
+			}
+		})
+	}
+}
+
+func TestInterruptRefusesBothFlags(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "interrupt", "peer", "-all-agents", "-confirm-agents")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
+	}
+}
+

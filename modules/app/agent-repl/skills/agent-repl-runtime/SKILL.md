@@ -1,6 +1,6 @@
 ---
 name: agent-repl-runtime
-description: 'Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, hold or release the merge queue''s rollouts, evaluate elisp in the running Emacs and read the answer back, arrange the sidebar, and send any unary request to the running daemon (restart or interrupt a workspace, select one, ask its health). Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, or poke agent-repl, or names one of the terms in this skill''s terminology table; whenever a hand-deployed build (a profiling build) must not be replaced by the next landing; whenever live editor state must be inspected or changed rather than reasoned about from source; and whenever the sidebar should be organized.'
+description: 'Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, hold or release the merge queue''s rollouts, evaluate elisp in the running Emacs and read the answer back, arrange the sidebar, and send any unary request to the running daemon. Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, or poke agent-repl, or names one of the terms in this skill''s terminology table; whenever a hand-deployed build (a profiling build) must not be replaced by the next landing; whenever live editor state must be inspected or changed rather than reasoned about from source; and whenever the sidebar should be organized.'
 argument-hint: "<build|byte-compile|bounce|hard-bounce|deploy|hot-reload FILE...|call [-workspace DIR] METHOD ...|doctor|readiness|logs|rollouts hold|release|eval TEXT|sidebar> or a plain-English request"
 allowed-tools: Bash(~/.claude/skills/agent-repl-runtime/run.sh:*), Bash(~/.claude/skills/agent-repl-runtime/agent-repld:*)
 lineage_root: user.dodge.skills.agent-repl-runtime
@@ -36,9 +36,9 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
     | "hard bounce agent-repl" (or "hard bounce", "bounce everything") | `hard-bounce` | Rebuild everything, byte-compile, hot-load stale elisp, stand down every daemon of the state root and every shim AND restart Emacs.app, unless the user says to leave Emacs running, in which case use `bounce`. |
     | "bounce" / "force bounce the backends" | `bounce` | The same without restarting Emacs. |
     | "deploy" / "roll out" | `deploy` | Rolling deploy; running turns continue. |
-    | "restart the workspace" / "bounce this workspace" | `call -workspace DIR RestartWorkspace` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
-    | "interrupt / stop the turn in DIR" | `call -workspace DIR Interrupt '{"target":{"turn":{}}}'` | Stops the running turn. The user's own key is `C-c C-k` in the input window. |
-    | "switch to / select workspace DIR" | `call -workspace DIR SelectWorkspace` | Makes it current; Emacs and the webapp follow. |
+    | "restart the workspace" / "bounce this workspace" | `agent-repld workspace restart WS` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
+    | "interrupt / stop the turn in WS" | `agent-repld workspace interrupt WS` | Stops the running turn. The user's own key is `C-c C-k` in the input window. |
+    | "switch to / select workspace WS" | `agent-repld workspace select WS` | Makes it current; Emacs and the webapp follow. |
     | "is the daemon healthy" | `call DaemonHealth` | Prints the daemon's health and identity. |
     | "hot reload" / "reload the lisp" | `hot-reload FILE.el...` | Loads the changed non-test `.el` files into the running Emacs. |
     | "reload the page" / "reload the webview" | *(no argument)* | The user's own key is `SPC o l`; suggest it, do not act. |

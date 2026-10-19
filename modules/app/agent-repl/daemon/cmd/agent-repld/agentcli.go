@@ -137,6 +137,9 @@ var cliNouns = map[string]map[string]cliCommand{
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
 		"kill":        {usage: "kill WS", run: workspaceKill},
+		"select":      {usage: "select WS", run: workspaceSelect},
+		"restart":     {usage: "restart WS", run: workspaceRestart},
+		"interrupt":   {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
 		"compact":     {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":      {usage: "status WS", run: workspaceStatus},
 		"list":        {usage: "list", run: workspaceList},
@@ -828,6 +831,43 @@ func workspaceKill(c *cliCall, args []string) int {
 	})
 }
 
+// workspaceSelect makes WS the workspace the editor and the webapp show.
+func workspaceSelect(c *cliCall, args []string) int {
+	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.SelectWorkspaceResponse], error) {
+		return c.client.SelectWorkspace(c.ctx, connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref}))
+	})
+}
+
+// workspaceRestart bounces WS's session and reloads its page, at once.
+func workspaceRestart(c *cliCall, args []string) int {
+	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
+		return c.client.RestartWorkspace(c.ctx, connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ref}))
+	})
+}
+
+// workspaceInterrupt stops WS's running turn, or with -all-agents every live
+// detached agent. A turn stop while agents are live is refused once, naming
+// them; -confirm-agents stops them with it.
+func workspaceInterrupt(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	allAgents := fs.Bool("all-agents", false, "stop every live detached agent instead of the turn")
+	confirmAgents := fs.Bool("confirm-agents", false, "stop the live agents along with the turn")
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 || (*allAgents && *confirmAgents) {
+		return c.usageFailed("the command names its workspace, with -all-agents or -confirm-agents but not both")
+	}
+	req := &agentreplv1.InterruptRequest{Workspace: ref, ConfirmAgents: *confirmAgents,
+		Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}}}
+	if *allAgents {
+		req.Target = &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}}
+	}
+	resp, err := c.client.Interrupt(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
 // onWorkspace runs a verb that names one workspace and takes nothing else:
 // it resolves the workspace from ARGS, refuses anything after it, and answers
 // CALL's reply to the ref. Every such verb is this, so none parses its
@@ -835,8 +875,11 @@ func workspaceKill(c *cliCall, args []string) int {
 func onWorkspace[Res any](c *cliCall, args []string, call func(*workspacev1.WorkspaceRef) (*connect.Response[Res], error)) int {
 	fs, stateDir := c.flags()
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
-	if !ok || len(rest) != 0 {
+	if !ok {
 		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("the command names its workspace and nothing after it")
 	}
 	resp, err := call(ref)
 	return answer(c, resp, err)

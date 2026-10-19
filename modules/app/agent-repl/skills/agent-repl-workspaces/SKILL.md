@@ -1,7 +1,7 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), hide or show a workspace, set its priority, retarget its parent, merge a workspace, open, close, kill or compact one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a child created with a note to its owner must be landed or closed by its owner; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
-argument-hint: "create | async-merge | prompt | status | list | set | merge | open | close | kill | compact | gate | subscribe | unsubscribe"
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), hide or show a workspace, set its priority, retarget its parent, merge a workspace, open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a child created with a note to its owner must be landed or closed by its owner; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+argument-hint: "create | async-merge | prompt | status | list | set | merge | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -139,6 +139,16 @@ Choose the combination from what the work needs:
   ends.
 - `workspace compact WS [-instructions TEXT]` compacts WS's conversation.
   Compact only when the user asked for it.
+
+## Restarting, interrupting, selecting
+
+- **CRITICAL: Each of these runs ONLY when the user asked for it.** Each acts
+  on what the user is looking at or waiting on.
+- `workspace restart WS` relaunches WS's session at once and reloads its page.
+- `workspace interrupt WS` stops WS's running turn. A stop while WS has live
+  detached agents is refused once, naming them: `-confirm-agents` stops them
+  too, and `-all-agents` stops every live agent instead of the turn.
+- `workspace select WS` makes WS the workspace the editor and the webapp show.
 
 ## Destructive and gated acts
 
