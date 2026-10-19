@@ -10,9 +10,10 @@
  *     scrolls.
  *   - Otherwise the Open section dominates: it lengthens until the two bands
  *     below it are left `BAND_FLOOR` lines each, and scrolls past that.
- *   - The bands SHARE those `2 * BAND_FLOOR` lines: a band that needs fewer
- *     than `BAND_FLOOR` gives the rest to the other, so a Recently Merged of
- *     one merge today leaves Hidden Workspaces seven.
+ *   - The bands SHARE those `2 * BAND_FLOOR` lines (six, owner request,
+ *     2026-10-19): a band that needs fewer than `BAND_FLOOR` gives the rest
+ *     to the other, so a Recently Merged of one merge today leaves Hidden
+ *     Workspaces five.
  *   - Recently Merged claims its share only for the lines that reach TODAY's
  *     merges. An older merge has no claim against the Open section or Hidden
  *     Workspaces: it shows only in room both leave once they are whole.
@@ -68,7 +69,7 @@ export const BAND_LINES_ATTRIBUTE = "data-band-lines";
 export const MERGED_AT_ATTRIBUTE = "data-merged-at";
 
 /** The lines each band keeps once the Open section has filled the rail. */
-export const BAND_FLOOR = 4;
+export const BAND_FLOOR = 3;
 
 /** Each section's class and its rows region's, top to bottom. */
 const SECTION_REGIONS = [

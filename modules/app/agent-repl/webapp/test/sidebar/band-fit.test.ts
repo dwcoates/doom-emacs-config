@@ -177,10 +177,10 @@ function sections(o: number, h: number, m: number, today = 0) {
 
 describe("bandShare", () => {
   it.each([
-    { name: "four lines each to two long bands", hidden: 10, today: 10, want: { hidden: 4, merged: 4 } },
-    { name: "seven to Hidden Workspaces beside one merge today", hidden: 10, today: 1, want: { hidden: 7, merged: 1 } },
-    { name: "six to Hidden Workspaces beside two merges today", hidden: 10, today: 2, want: { hidden: 6, merged: 2 } },
-    { name: "a short Hidden Workspaces' lines to today's merges", hidden: 2, today: 10, want: { hidden: 2, merged: 6 } },
+    { name: "three lines each to two long bands", hidden: 10, today: 10, want: { hidden: 3, merged: 3 } },
+    { name: "five to Hidden Workspaces beside one merge today", hidden: 10, today: 1, want: { hidden: 5, merged: 1 } },
+    { name: "four to Hidden Workspaces beside two merges today", hidden: 10, today: 2, want: { hidden: 4, merged: 2 } },
+    { name: "a short Hidden Workspaces' lines to today's merges", hidden: 2, today: 10, want: { hidden: 2, merged: 4 } },
     { name: "only the lines two short bands need", hidden: 3, today: 2, want: { hidden: 3, merged: 2 } },
     { name: "nothing to two empty bands", hidden: 0, today: 0, want: { hidden: 0, merged: 0 } },
   ])("shares $name", ({ hidden, today, want }) => {
@@ -194,11 +194,11 @@ describe("bandShare", () => {
 describe("allocateSectionLines", () => {
   it.each([
     { name: "every section whole when all fit", room: 12 * ROW, s: sections(2, 4, 6), want: { open: 2, hidden: 4, merged: 6 } },
-    { name: "the Open section all but four lines of each band", room: 20 * ROW, s: sections(40, 40, 40, 40), want: { open: 12, hidden: 4, merged: 4 } },
-    { name: "seven lines to Hidden Workspaces beside one merge today", room: 20 * ROW, s: sections(40, 40, 1, 1), want: { open: 12, hidden: 7, merged: 1 } },
-    { name: "six lines to Hidden Workspaces beside two merges today", room: 20 * ROW, s: sections(40, 40, 2, 2), want: { open: 12, hidden: 6, merged: 2 } },
+    { name: "the Open section all but three lines of each band", room: 20 * ROW, s: sections(40, 40, 40, 40), want: { open: 14, hidden: 3, merged: 3 } },
+    { name: "five lines to Hidden Workspaces beside one merge today", room: 20 * ROW, s: sections(40, 40, 1, 1), want: { open: 14, hidden: 5, merged: 1 } },
+    { name: "four lines to Hidden Workspaces beside two merges today", room: 20 * ROW, s: sections(40, 40, 2, 2), want: { open: 14, hidden: 4, merged: 2 } },
     { name: "no line to older merges while the Open section scrolls", room: 20 * ROW, s: sections(40, 2, 10, 0), want: { open: 18, hidden: 2, merged: 0 } },
-    { name: "the lines reaching today's merges, older ones above them", room: 20 * ROW, s: sections(40, 40, 10, 3), want: { open: 12, hidden: 5, merged: 3 } },
+    { name: "the lines reaching today's merges, older ones above them", room: 20 * ROW, s: sections(40, 40, 10, 2), want: { open: 14, hidden: 4, merged: 2 } },
     { name: "older merges the room a whole Open and Hidden leave", room: 10 * ROW, s: sections(3, 2, 30, 0), want: { open: 3, hidden: 2, merged: 5 } },
     { name: "Hidden Workspaces grown before older merges", room: 10 * ROW, s: sections(2, 10, 10, 0), want: { open: 2, hidden: 8, merged: 0 } },
     { name: "spare room to each band in turn, Hidden Workspaces first", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, hidden: 6, merged: 5 } },
@@ -360,14 +360,14 @@ describe("regionStops", () => {
 });
 
 describe("fitBands", () => {
-  it("lengthens the Open section until each band keeps four lines", () => {
+  it("lengthens the Open section until each band keeps three lines", () => {
     // Arrange — room for twenty lines below 100px of other content.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
     laidOut(rail, 500, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(maxHeights(rail.pane)).toEqual(["240px", "80px", "80px"]);
+    expect(maxHeights(rail.pane)).toEqual(["280px", "60px", "60px"]);
   });
 
   it("states the lines each section shows", () => {
@@ -377,7 +377,7 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["12", "7", "1"]);
+    expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["14", "5", "1"]);
   });
 
   it("gives older merges no room while the Open section scrolls", () => {
@@ -402,12 +402,12 @@ describe("fitBands", () => {
 
   it("gives a folded band's share to the other band", () => {
     // Arrange — room for ten lines, Hidden Workspaces folded.
-    const rail = drawn({ open: 3, hidden: 10, merged: 20, today: 20, folded: { hidden: true } });
+    const rail = drawn({ open: 5, hidden: 10, merged: 20, today: 20, folded: { hidden: true } });
     laidOut(rail, 300, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 2, hidden: 0, merged: 8 });
+    expect(got).toEqual({ open: 4, hidden: 0, merged: 6 });
   });
 
   it("re-fits a capped section from its whole content", () => {
@@ -623,7 +623,7 @@ describe("installBandFit", () => {
     // Act
     ticker.tick(NOW + 1);
     // Assert
-    expect(maxHeight(rail.pane, "open-section")).toBe("240px");
+    expect(maxHeight(rail.pane, "open-section")).toBe("280px");
     fit.dispose();
   });
 
