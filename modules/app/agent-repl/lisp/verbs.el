@@ -2637,28 +2637,30 @@ current workspace\='s finds it here."
                         (agent-repl-verbs--repo-sections))))
     (agent-repl-verbs--section-ref section)))
 
-(defun agent-repl-verbs--help-repository ()
+(defun agent-repl-verbs--agent-repl-repository ()
   "Return the `RepositoryRef' of the repository agent-repl\='s source lives in.
 The repository is found by its main worktree: the parent of the git
 common-dir of the module root (the directory holding
 `agent-repl-metaprompt-file'), so a module loaded from a linked worktree
 still names its main checkout.  It is matched against the roster\='s
-repository sections by canonical directory.
+repository sections by canonical directory.  Every creation FIXED to
+agent-repl\='s own repository finds it here.
 
 Refuses when the module root is not in a git repository, or when that
-repository is not on the roster -- the help workspace has nowhere else to
-go, and registering the repository (`SPC TAB C-n') is the user\='s act."
+repository is not on the roster -- a creation fixed to it has nowhere
+else to go, and registering the repository (`SPC TAB C-n') is the
+user\='s act."
   (let* ((module-root (file-name-directory agent-repl-metaprompt-file))
          (main (agent-repl--main-worktree-for-dir module-root)))
     (unless main
       (agent-repl--error agent-repl-verbs--create-log-scope
-                         "elisp.verbs.help-repository-unresolved module-root=%s cause=not-a-git-repository"
+                         "elisp.verbs.agent-repl-repository-unresolved module-root=%s cause=not-a-git-repository"
                          module-root)
       (user-error "agent-repl: agent-repl's source at %s is in no git repository" module-root))
     (or (agent-repl-verbs--roster-repository-at main)
         (progn
           (agent-repl--warn agent-repl-verbs--create-log-scope
-                            "elisp.verbs.help-repository-unregistered module-root=%s main=%s"
+                            "elisp.verbs.agent-repl-repository-unregistered module-root=%s main=%s"
                             module-root main)
           (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
                       main)))))
@@ -2667,7 +2669,7 @@ go, and registering the repository (`SPC TAB C-n') is the user\='s act."
   "Create a HELP workspace (`SPC o h\='): a question about agent-repl.
 Asks for the question alone, defaulting to the composer\='s text, and
 creates a standard workspace in agent-repl\='s own repository
-\(`agent-repl-verbs--help-repository\=') whose opening prompt is the
+\(`agent-repl-verbs--agent-repl-repository\=') whose opening prompt is the
 question behind `agent-repl-help-preamble'.  The daemon mints the name.
 
 THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
@@ -2676,7 +2678,7 @@ THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
   (let ((command 'agent-repl-create-help-workspace))
     (agent-repl-verbs--create-invoked command)
     (let* ((repository (agent-repl-verbs--read-for
-                        command 'repository #'agent-repl-verbs--help-repository))
+                        command 'repository #'agent-repl-verbs--agent-repl-repository))
            (question (agent-repl-verbs--read-for
                       command 'prompt
                       (lambda ()
