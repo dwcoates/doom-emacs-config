@@ -23,12 +23,21 @@
 #                                    threshold) within [days] (default 30).
 #   --process-trend <process> [days] One line per day: the process group's
 #                                    mean CPU (cores) and mean footprint.
+#   --restarts [days]                One line per restart and phase over the
+#                                    last [days] (default 7): how many ended
+#                                    ok and failed, and the p50 and p95 of
+#                                    those that ended ok.
+#   --restart-by-version <restart> <phase> [days]
+#                                    The restart phase's p95 per deployed
+#                                    version over the last [days] (default
+#                                    30), as --latency-by-version prints.
 #
 # Exit codes:
 #   0  printed what the verb answers
 #   1  --status: the metrics store does not answer
 #      --catalog: no runtime advertises a metrics surface
-#      --query / --range / --latency-by-version / --process-trend: no series
+#      --query / --range / --latency-by-version / --process-trend /
+#      --restarts / --restart-by-version: no series
 #      --first-version-over: no version went over (the versions seen are
 #      printed)
 #   2  script/usage error, or the metrics store refused the query
@@ -83,12 +92,22 @@ range_args() {
   RANGE_ARGS=(--data-urlencode "start=$start" --data-urlencode "end=$now" --data-urlencode "step=$2")
 }
 
-# p95_by_version LATENCY DAYS — one JSON line per hourly sample with its version.
+# p95_by_version HISTOGRAM SELECTOR DAYS — the hourly p95 of the histogram's
+# series matching SELECTOR, each sample labeled with the version deployed then.
 p95_by_version() {
-  local latency="$1" days="$2" promql args
-  promql="histogram_quantile(0.95, sum by (le, version) (rate(agentrepl_latency_seconds_bucket{latency=\"$latency\"}[1h]) * on() group_left(version) agentrepl_deployed_version_info))"
+  local histogram="$1" selector="$2" days="$3" promql
+  promql="histogram_quantile(0.95, sum by (le, version) (rate(${histogram}_bucket{$selector}[1h]) * on() group_left(version) agentrepl_deployed_version_info))"
   range_args $((days * 24)) 1h
   promql_data query_range "$promql" "${RANGE_ARGS[@]}"
+}
+
+# print_per_version RESULT — print the per-version table of a p95_by_version
+# result, exiting 1 when it holds no sample.
+print_per_version() {
+  local lines
+  lines="$(printf '%s' "$1" | per_version)" || die "could not read the samples"
+  [ -n "$lines" ] || exit 1
+  printf 'version\tfirst_deployed\tp95_seconds\thours\n%s\n' "$lines"
 }
 
 # per_version RESULT — versions oldest first: version, first seen, p95 of the
@@ -163,10 +182,8 @@ case "${1:-}" in
     [ -n "${2:-}" ] || die "--latency-by-version needs a latency name"
     days="${3:-30}"
     [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
-    result="$(p95_by_version "$2" "$days")" || exit 2
-    lines="$(printf '%s' "$result" | per_version)" || die "could not read the latency's samples"
-    [ -n "$lines" ] || exit 1
-    printf 'version\tfirst_deployed\tp95_seconds\thours\n%s\n' "$lines"
+    result="$(p95_by_version agentrepl_latency_seconds "latency=\"$2\"" "$days")" || exit 2
+    print_per_version "$result"
     ;;
   --first-version-over)
     [ -n "${2:-}" ] || die "--first-version-over needs a latency name"
@@ -180,7 +197,7 @@ case "${1:-}" in
       [ -n "$threshold" ] || die "the latency vocabulary names no latency $latency"
     fi
     [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
-    result="$(p95_by_version "$latency" "$days")" || exit 2
+    result="$(p95_by_version agentrepl_latency_seconds "latency=\"$latency\"" "$days")" || exit 2
     lines="$(printf '%s' "$result" | per_version)" || die "could not read the latency's samples"
     over="$(printf '%s\n' "$lines" | awk -F'\t' -v t="$threshold" '$3 != "" && $3 + 0 > t + 0 { print; exit }')"
     if [ -z "$over" ]; then
@@ -207,8 +224,37 @@ case "${1:-}" in
     [ -n "$lines" ] || exit 1
     printf 'day\tcpu_cores\tfootprint_mb\n%s\n' "$lines"
     ;;
+  --restarts)
+    days="${2:-7}"
+    [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
+    window="${days}d"
+    counts="$(promql_data query "sum by (restart, phase, outcome) (increase(agentrepl_restart_seconds_count[$window]))")" || exit 2
+    p50="$(promql_data query "histogram_quantile(0.5, sum by (restart, phase, le) (increase(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
+    p95="$(promql_data query "histogram_quantile(0.95, sum by (restart, phase, le) (increase(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
+    lines="$(jq -rn --argjson c "$counts" --argjson p50 "$p50" --argjson p95 "$p95" '
+      def key: "\(.metric.restart)|\(.metric.phase)";
+      def num: (.value[1] | if . == "NaN" then "-" else (tonumber * 100 | round / 100 | tostring) end);
+      ([$c[] | {k: key, o: .metric.outcome, n: (.value[1] | tonumber | round)}]) as $counts
+      | ([$p50[] | {key: key, value: num}] | from_entries) as $m
+      | ([$p95[] | {key: key, value: num}] | from_entries) as $n
+      | ($counts | map(.k) | unique)[] as $k
+      | [($k | split("|")[]),
+         ([$counts[] | select(.k == $k and .o == "ok") | .n] | add // 0),
+         ([$counts[] | select(.k == $k and .o == "failed") | .n] | add // 0),
+         ($m[$k] // "-"), ($n[$k] // "-")]
+      | @tsv')" || die "could not read the restarts"
+    [ -n "$lines" ] || exit 1
+    printf 'restart\tphase\tok\tfailed\tp50_seconds\tp95_seconds\n%s\n' "$lines"
+    ;;
+  --restart-by-version)
+    [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "--restart-by-version needs a restart and a phase (see --restarts)"
+    days="${4:-30}"
+    [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
+    result="$(p95_by_version agentrepl_restart_seconds "restart=\"$2\",phase=\"$3\",outcome=\"ok\"" "$days")" || exit 2
+    print_per_version "$result"
+    ;;
   *)
-    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days]\n' >&2
+    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [days] | --restart-by-version <restart> <phase> [days]\n' >&2
     exit 1
     ;;
 esac
