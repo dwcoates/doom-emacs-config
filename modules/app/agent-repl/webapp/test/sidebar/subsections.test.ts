@@ -9,6 +9,7 @@ import { disposeWorkspaceRoster, drawWorkspaceRoster } from "../../src/sidebar/r
 import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
+import { queryAll } from "../../src/dom.js";
 import { appContext, hiddenSection, primaryPointer, repoSection, roster, row, sidebarContext } from "./harness.js";
 
 /** Every ArrangeSidebar request the daemon received, and a context over it. */
@@ -459,5 +460,62 @@ describe("a drag across pushes", () => {
     // Assert
     expect([drawn.querySelector(".repo-section") === section, drawn.querySelectorAll(".sb-subsection").length]).toEqual([false, 2]);
     disposeWorkspaceRoster(sc);
+  });
+});
+
+describe("a drag stays inside its repository", () => {
+  it("files a row dropped over another repository's rows into its own repository", async () => {
+    // Arrange: repo-2's rows sit right below repo-1's, under the drop point.
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({
+        repos: [
+          repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })] }),
+          repoSection({ id: "repo-2", rows: [row({ id: "x" }), row({ id: "y" })] }),
+        ],
+      }),
+      sc,
+    );
+    const [own, other] = queryAll<HTMLElement>(pane, ".repo-section > .rows");
+    layOut(own, 0);
+    layOut(other, 100);
+
+    // Act: drag a far below its own list, over repo-2's rows.
+    await drag(rowLine(pane, "a"), 5, 130);
+
+    // Assert: the row never entered repo-2's list, and the placement names
+    // a's own repository's list.
+    const change = sent[0]?.change;
+    expect([
+      [...other.children].map((el) => el.getAttribute("data-roster-row")),
+      change?.case === "placeWorkspace" ? [change.value.into.case, change.value.at.case] : null,
+    ]).toEqual([["x", "y"], ["noSubsection", "end"]]);
+  });
+
+  it("keeps a subsection among its own repository's subsections", async () => {
+    // Arrange
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({
+        repos: [
+          repoSection({ id: "repo-1", subsections: [{ id: "sub-a" }, { id: "sub-b" }] }),
+          repoSection({ id: "repo-2", subsections: [{ id: "sub-x" }] }),
+        ],
+      }),
+      sc,
+    );
+    const [own, other] = queryAll<HTMLElement>(pane, ".sb-subsections");
+    layOut(own, 0);
+    layOut(other, 100);
+
+    // Act: drag sub-a over repo-2's subsections.
+    await drag(pane.querySelector("[data-subsection='sub-a'] > .sb-subsection-head") as Element, 5, 110);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect([
+      queryAll(other, ".sb-subsection").map((el) => el.getAttribute("data-subsection")),
+      change?.case === "moveSubsection" ? [change.value.subsection?.id, change.value.to.case] : null,
+    ]).toEqual([["sub-x"], ["sub-a", "end"]]);
   });
 });
