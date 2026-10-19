@@ -214,6 +214,7 @@ type RegisterWorkspaceError struct {
 	//
 	//	*RegisterWorkspaceError_NotAWorktree
 	//	*RegisterWorkspaceError_InsideTemporaryDirectory
+	//	*RegisterWorkspaceError_ParentNotOpen
 	Cause         isRegisterWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -274,6 +275,15 @@ func (x *RegisterWorkspaceError) GetInsideTemporaryDirectory() *RegisterWorkspac
 	return nil
 }
 
+func (x *RegisterWorkspaceError) GetParentNotOpen() *WorkspaceParentNotOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*RegisterWorkspaceError_ParentNotOpen); ok {
+			return x.ParentNotOpen
+		}
+	}
+	return nil
+}
+
 type isRegisterWorkspaceError_Cause interface {
 	isRegisterWorkspaceError_Cause()
 }
@@ -288,9 +298,18 @@ type RegisterWorkspaceError_InsideTemporaryDirectory struct {
 	InsideTemporaryDirectory *RegisterWorkspaceInsideTemporaryDirectory `protobuf:"bytes,2,opt,name=inside_temporary_directory,json=insideTemporaryDirectory,proto3,oneof"`
 }
 
+type RegisterWorkspaceError_ParentNotOpen struct {
+	// The dir is a closed workspace's, and announcing it would re-open it as
+	// the open child of a parent that is not open (agentrepl.v1 family.proto).
+	// The workspace stays closed; the user opens its parent first.
+	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,3,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
+}
+
 func (*RegisterWorkspaceError_NotAWorktree) isRegisterWorkspaceError_Cause() {}
 
 func (*RegisterWorkspaceError_InsideTemporaryDirectory) isRegisterWorkspaceError_Cause() {}
+
+func (*RegisterWorkspaceError_ParentNotOpen) isRegisterWorkspaceError_Cause() {}
 
 type RegisterWorkspaceNotAWorktree struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -391,7 +410,7 @@ var File_agentrepl_v1_endpoint_register_workspace_proto protoreflect.FileDescrip
 
 const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
 	"\n" +
-	".agentrepl/v1/endpoint_register_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\",\n" +
+	".agentrepl/v1/endpoint_register_workspace.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\",\n" +
 	"\x18RegisterWorkspaceRequest\x12\x10\n" +
 	"\x03dir\x18\x01 \x01(\tR\x03dir\"\xa7\x01\n" +
 	"\x19RegisterWorkspaceResponse\x12B\n" +
@@ -399,10 +418,11 @@ const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.RegisterWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"T\n" +
 	"\x18RegisterWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xef\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xbf\x02\n" +
 	"\x16RegisterWorkspaceError\x12S\n" +
 	"\x0enot_a_worktree\x18\x01 \x01(\v2+.agentrepl.v1.RegisterWorkspaceNotAWorktreeH\x00R\fnotAWorktree\x12w\n" +
-	"\x1ainside_temporary_directory\x18\x02 \x01(\v27.agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectoryH\x00R\x18insideTemporaryDirectoryB\a\n" +
+	"\x1ainside_temporary_directory\x18\x02 \x01(\v27.agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectoryH\x00R\x18insideTemporaryDirectory\x12N\n" +
+	"\x0fparent_not_open\x18\x03 \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpenB\a\n" +
 	"\x05cause\"\x1f\n" +
 	"\x1dRegisterWorkspaceNotAWorktree\"d\n" +
 	")RegisterWorkspaceInsideTemporaryDirectory\x12\x10\n" +
@@ -430,6 +450,7 @@ var file_agentrepl_v1_endpoint_register_workspace_proto_goTypes = []any{
 	(*RegisterWorkspaceNotAWorktree)(nil),             // 4: agentrepl.v1.RegisterWorkspaceNotAWorktree
 	(*RegisterWorkspaceInsideTemporaryDirectory)(nil), // 5: agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
 	(*v1.WorkspaceRef)(nil),                           // 6: workspace.v1.WorkspaceRef
+	(*WorkspaceParentNotOpen)(nil),                    // 7: agentrepl.v1.WorkspaceParentNotOpen
 }
 var file_agentrepl_v1_endpoint_register_workspace_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.RegisterWorkspaceResponse.success:type_name -> agentrepl.v1.RegisterWorkspaceSuccess
@@ -437,11 +458,12 @@ var file_agentrepl_v1_endpoint_register_workspace_proto_depIdxs = []int32{
 	6, // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
 	4, // 3: agentrepl.v1.RegisterWorkspaceError.not_a_worktree:type_name -> agentrepl.v1.RegisterWorkspaceNotAWorktree
 	5, // 4: agentrepl.v1.RegisterWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	7, // 5: agentrepl.v1.RegisterWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_register_workspace_proto_init() }
@@ -449,6 +471,7 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_register_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*RegisterWorkspaceResponse_Success)(nil),
 		(*RegisterWorkspaceResponse_Error)(nil),
@@ -456,6 +479,7 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 	file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3].OneofWrappers = []any{
 		(*RegisterWorkspaceError_NotAWorktree)(nil),
 		(*RegisterWorkspaceError_InsideTemporaryDirectory)(nil),
+		(*RegisterWorkspaceError_ParentNotOpen)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

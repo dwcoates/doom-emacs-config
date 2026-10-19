@@ -11,6 +11,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceParentNotOpen } from "./family_pb";
+import { file_agentrepl_v1_family } from "./family_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -19,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_register_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_register_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiSQoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYixwEKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAQgcKBWNhdXNlIh8KHVJlZ2lzdGVyV29ya3NwYWNlTm90QVdvcmt0cmVlIlAKKVJlZ2lzdGVyV29ya3NwYWNlSW5zaWRlVGVtcG9yYXJ5RGlyZWN0b3J5EgsKA2RpchgBIAEoCRIWCg50ZW1wb3Jhcnlfcm9vdBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiSQoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiiAIKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAEj8KD3BhcmVudF9ub3Rfb3BlbhgDIAEoCzIkLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuSABCBwoFY2F1c2UiHwodUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWUiUAopUmVnaXN0ZXJXb3Jrc3BhY2VJbnNpZGVUZW1wb3JhcnlEaXJlY3RvcnkSCwoDZGlyGAEgASgJEhYKDnRlbXBvcmFyeV9yb290GAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RegisterWorkspaceRequest
@@ -121,6 +123,16 @@ export type RegisterWorkspaceError = Message<"agentrepl.v1.RegisterWorkspaceErro
      */
     value: RegisterWorkspaceInsideTemporaryDirectory;
     case: "insideTemporaryDirectory";
+  } | {
+    /**
+     * The dir is a closed workspace's, and announcing it would re-open it as
+     * the open child of a parent that is not open (agentrepl.v1 family.proto).
+     * The workspace stays closed; the user opens its parent first.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceParentNotOpen parent_not_open = 3;
+     */
+    value: WorkspaceParentNotOpen;
+    case: "parentNotOpen";
   } | { case: undefined; value?: undefined };
 };
 

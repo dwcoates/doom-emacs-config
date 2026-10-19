@@ -4,8 +4,11 @@
 // Open section while a child is still open: a workspace with open children
 // cannot be hidden, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
-// of a parent that is hidden or closed. A HIDDEN CHILD COUNTS AS OPEN: hiding
-// keeps its session, so a family is hidden child first.
+// of a parent that is hidden, closed, or closing (a merge waiting in its
+// repository's queue closes it once it lands). A HIDDEN CHILD COUNTS AS OPEN:
+// hiding keeps its session, so a family is hidden child first. A HIDDEN MERGE
+// WORKSPACE (an async merge's, drawn nowhere until it is revealed) is no open
+// child: it is the merge's machinery, not a member of the family.
 
 syntax = "proto3";
 
@@ -41,6 +44,11 @@ message WorkspaceParentNotOpen {
     WorkspaceParentNotOpenHidden hidden = 2;
     // The parent is closed.
     WorkspaceParentNotOpenClosed closed = 3;
+    // The parent is open, but a merge waiting in its repository's queue closes
+    // it once it lands: its own one-shot merge, or an async merge whose
+    // one-shot names it. A child made now would be left open under a closed
+    // parent the moment that merge lands.
+    WorkspaceParentNotOpenClosing closing = 4;
   }
 }
 
@@ -49,3 +57,7 @@ message WorkspaceParentNotOpenHidden {}
 
 // The parent is closed. DELIBERATELY EMPTY: the arm is the fact.
 message WorkspaceParentNotOpenClosed {}
+
+// A queued merge closes the parent once it lands. DELIBERATELY EMPTY: the arm
+// is the fact, and the merge queue shows the merge.
+message WorkspaceParentNotOpenClosing {}

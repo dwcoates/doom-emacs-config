@@ -360,7 +360,12 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   open) cannot be hidden, closed, killed, nuked, or merged by a merge that
   closes it; the merge refusal names the children, to be resolved and
   closed first. A workspace cannot be created, re-parented, reopened or
-  shown as the open child of a hidden or closed parent. Families that
+  shown as the open child of a hidden, closed or CLOSING parent (one a
+  merge waiting in its queue closes once it lands). A hidden merge
+  workspace is no open child: it is the merge's machinery, drawn nowhere.
+  Every rule is checked in the same wsm transaction as the write it guards,
+  so no race between a parent's close and a child's creation can leave an
+  open child under a closed parent. Families that
   already break the rule keep drawing by the old rule: an open workspace
   whose parent is not open takes its parent's place.
 
@@ -376,6 +381,11 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   KillWorkspace, NukeWorkspace, SetWorkspaceHidden, MergeWorkspace) and
   `WorkspaceParentNotOpen` (on SetWorkspaceHidden, SetWorkspaceParent,
   CreateWorkspace, OpenWorkspace). `SwapWorkspacesError.not_siblings`.
+- **Added after (2026-10-19):** `WorkspaceParentNotOpen.closing` (a merge
+  queued to close the parent would otherwise strand a child created while
+  it waits) and `RegisterWorkspaceError.parent_not_open` (an editor
+  announcing a closed workspace re-opens it, which the family rules govern
+  as they govern OpenWorkspace).
 - **Why the new field numbers:** a rolling deploy can pair a new daemon with
   an old client for a moment; a reused number with a new type would decode
   as garbage, while a new number decodes as an unknown field.
