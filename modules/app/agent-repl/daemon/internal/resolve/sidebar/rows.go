@@ -254,13 +254,15 @@ func attention(rec wsm.Workspace, current bool) bool {
 	return rec.Attention && !current
 }
 
-// recedes reports whether the row draws GREYED. Three settled ends recede a
-// row and they are deliberately one field rather than three: the workspace was
-// MERGED, its editor state was CLOSED, or its session was KILLED. Receding is
-// orthogonal to the lifecycle — a receded workspace still has one — which is
-// why it is not a status arm.
+// recedes reports whether the row draws GREYED. Two settled ends recede a row
+// and they are deliberately one field rather than two: its editor state was
+// CLOSED (a settled merge is closed too), or its session was KILLED. A merge
+// time alone recedes nothing: OPEN BEATS MERGED, so a merged workspace that
+// was reopened is drawn like any open one. Receding is orthogonal to the
+// lifecycle — a receded workspace still has one — which is why it is not a
+// status arm.
 func recedes(rec wsm.Workspace, session *wsm.Session) bool {
-	if rec.Closed || rec.MergedAt != nil {
+	if rec.Closed {
 		return true
 	}
 	return session != nil && session.Terminal != nil && session.Terminal.Kind == "killed"

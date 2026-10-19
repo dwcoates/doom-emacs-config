@@ -605,6 +605,21 @@ func TestRowRecedesWhenTheWorkspaceIsClosed(t *testing.T) {
 	}
 }
 
+func TestAReopenedMergedRowDoesNotRecede(t *testing.T) {
+	// Arrange: OPEN BEATS MERGED.
+	r, _ := newResolver(t)
+	reopened := workspace("w1", "one")
+	reopened.MergedAt = at(0)
+
+	// Act.
+	r.SetRegistry(registry(reopened))
+
+	// Assert.
+	if onlyRow(t, r).GetClosed().GetClosed() {
+		t.Fatal("a reopened merged workspace's row receded")
+	}
+}
+
 func TestRowRecedesWhenTheWorkspaceMerged(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
