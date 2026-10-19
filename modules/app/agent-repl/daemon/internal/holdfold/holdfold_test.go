@@ -147,6 +147,10 @@ func TestFoldable(t *testing.T) {
 		{name: "a folded context cut is refused", folded: cut, ahead: prompt("a"), want: ErrNotAPrompt},
 		{name: "an act ahead is refused", folded: prompt("b"), ahead: act, want: ErrAboveNotAPrompt},
 		{name: "a context cut ahead is refused", folded: prompt("b"), ahead: cut, want: ErrAboveNotAPrompt},
+		{name: "an agent's prompt into the user's is refused", folded: sentBy(prompt("b"), "ws-sender"), ahead: prompt("a"), want: ErrOtherAuthor},
+		{name: "the user's prompt into an agent's is refused", folded: prompt("b"), ahead: sentBy(prompt("a"), "ws-sender"), want: ErrOtherAuthor},
+		{name: "two workspaces' prompts are refused", folded: sentBy(prompt("b"), "ws-other"), ahead: sentBy(prompt("a"), "ws-sender"), want: ErrOtherAuthor},
+		{name: "one workspace's two prompts fold", folded: sentBy(prompt("b"), "ws-sender"), ahead: sentBy(prompt("a"), "ws-sender"), want: nil},
 		{name: "the folded entry being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "b", want: ErrEdited},
 		{name: "the entry ahead being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "a", want: ErrEdited},
 	}
@@ -194,4 +198,11 @@ func TestSameAuthor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// sentBy answers H as a prompt the workspace SENDER's agent sent.
+func sentBy(h wsm.HeldPrompt, sender wsm.WorkspaceID) wsm.HeldPrompt {
+	h.Origin = "PROMPT_ORIGIN_AGENT_SENT"
+	h.SentBy = &sender
+	return h
 }

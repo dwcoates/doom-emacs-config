@@ -44,6 +44,8 @@ var (
 	ErrNotAPrompt = errors.New("promptqueue: that entry is a session act, not a prompt")
 	// ErrAboveNotAPrompt is a fold into a session act.
 	ErrAboveNotAPrompt = errors.New("promptqueue: the entry ahead is a session act, not a prompt")
+	// ErrAboveOtherAuthor is a fold into a prompt with another author.
+	ErrAboveOtherAuthor = errors.New("promptqueue: the entry ahead has another author")
 	// ErrAboveMoved is a fold naming an entry that is no longer the one
 	// directly ahead. AboveMovedError carries it with the entry that is.
 	ErrAboveMoved = errors.New("promptqueue: the entry named is no longer directly ahead")
@@ -163,6 +165,9 @@ func (q *queue) aheadForFold(ctx context.Context, ws ids.WorkspaceID, folded wsm
 	case errors.Is(err, holdfold.ErrAboveNotAPrompt):
 		log.Info(opFold, "the fold is refused: the entry ahead is a session act, not a prompt", nil)
 		return wsm.HeldPrompt{}, ErrAboveNotAPrompt
+	case errors.Is(err, holdfold.ErrOtherAuthor):
+		log.Info(opFold, "the fold is refused: the entry ahead has another author", dlog.Context{"ahead_turn": string(ahead.Turn)})
+		return wsm.HeldPrompt{}, ErrAboveOtherAuthor
 	case errors.Is(err, holdfold.ErrEdited):
 		log.Info(opFold, "the fold is refused: one of the two entries is being edited",
 			dlog.Context{"editing_turn": string(editing.Turn), "edit": editing.ID})

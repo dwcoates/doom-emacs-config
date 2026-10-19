@@ -175,6 +175,8 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "not_a_prompt", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrAboveNotAPrompt):
 		return s.fill(refusal{Arm: "above_not_a_prompt", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrAboveOtherAuthor):
+		return s.fill(refusal{Arm: "above_other_author", Reason: err.Error()}), true
 
 	// The feed resolver's page-walk refusals.
 	case errors.Is(err, feed.ErrUnknownFeed):

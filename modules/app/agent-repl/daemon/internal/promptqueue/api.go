@@ -54,6 +54,7 @@ import (
 //	ErrNotAPrompt        → FoldHeldPromptError.not_a_prompt
 //	ErrAboveMoved        → FoldHeldPromptError.above_moved (AboveMovedError)
 //	ErrAboveNotAPrompt   → FoldHeldPromptError.above_not_a_prompt
+//	ErrAboveOtherAuthor  → FoldHeldPromptError.above_other_author
 //	ErrBeingEdited       → FoldHeldPromptError.being_edited (BeingEditedError)
 var (
 	// ErrMerging is a submission that arrived AFTER a merge began. It is

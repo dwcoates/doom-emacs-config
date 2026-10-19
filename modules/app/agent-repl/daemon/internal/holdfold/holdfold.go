@@ -67,6 +67,9 @@ var (
 	// ErrAboveNotAPrompt: the entry ahead is a session act, which never takes
 	// a prompt's words.
 	ErrAboveNotAPrompt = errors.New("holdfold: the entry ahead is a session act, not a prompt")
+	// ErrOtherAuthor: the two entries have different authors (SameAuthor), so
+	// the merged prompt would put one author's words under the other's.
+	ErrOtherAuthor = errors.New("holdfold: the entry ahead has another author")
 	// ErrEdited: one of the two entries is being edited, so its words are in
 	// the editor and changing them underneath it is refused.
 	ErrEdited = errors.New("holdfold: one of the two entries is being edited")
@@ -105,14 +108,16 @@ func Ahead(standing []wsm.HeldPrompt, turn ids.TurnID) (wsm.HeldPrompt, bool) {
 // the workspace's standing edit is on, empty when none stands.
 //
 // The reasons are checked in this order — the folded entry is an act, the
-// entry ahead is an act, either is being edited — so one pair always answers
-// the same reason.
+// entry ahead is an act, the two have different authors, either is being
+// edited — so one pair always answers the same reason.
 func Foldable(folded, ahead wsm.HeldPrompt, editing ids.TurnID) error {
 	switch {
 	case SessionAct(folded):
 		return ErrNotAPrompt
 	case SessionAct(ahead):
 		return ErrAboveNotAPrompt
+	case !SameAuthor(folded.SentBy, ahead.SentBy):
+		return ErrOtherAuthor
 	case editing != "" && (editing == folded.Turn || editing == ahead.Turn):
 		return ErrEdited
 	}
