@@ -1266,3 +1266,136 @@ in `said', the input painting BACKGROUND (nil: no input buffer)."
     ;; Act / Assert
     (should (equal (agent-repl-window--remapped-background (list face 'default))
                    "#123456"))))
+
+;;;; ---- Focus when the panels stand alone ----
+
+(cl-defun agent-repl-window-test--run-focus-input
+    (&key (show-input t) (current-ws "cur") foreign side-foreign
+          select-view-after-close (calls 1))
+  "Drive `agent-repl-window-focus-input-when-panels-alone' over a real layout.
+Shows workspace \"cur\"'s view panel with its input panel split below
+\(the input omitted when SHOW-INPUT is nil, the shape of a standing gate)
+and selects the view window.  When FOREIGN, a third ordinary window is
+split off first and the focus function runs once while it stands; when
+SIDE-FOREIGN, that third window is a right side window instead (the
+shape of a Doom file popup).  The foreign window is then deleted and the
+view selected again, and the focus function runs CALLS times, with the
+view re-selected between calls when SELECT-VIEW-AFTER-CLOSE.  Returns a
+plist: :results (each call's return value), :before (the call made while
+the foreign window stood), :selected (`:input', `:view' or `:other'), and
+:logs (every `agent-repl--log' record as a formatted string)."
+  (let ((view-buf (generate-new-buffer " *fi-view*"))
+        (input-buf (generate-new-buffer " *fi-input*"))
+        (other-buf (generate-new-buffer " *fi-other*"))
+        (logs '()))
+    (unwind-protect
+        (agent-repl-test--with-clean-state
+          (agent-repl-window-test--with-temp-frame
+            (set-frame-parameter nil 'agent-repl-window--foreign-windows-seen nil)
+            (agent-repl--ws-put "cur" :frontend-buffer view-buf)
+            (agent-repl--ws-put "cur" :input-buffer input-buf)
+            (let ((view-win (selected-window)))
+              (set-window-buffer view-win view-buf)
+              (when show-input
+                (set-window-buffer (split-window view-win) input-buf))
+              (cl-letf (((symbol-function '+workspace-current-name)
+                         (lambda () current-ws))
+                        ((symbol-function 'agent-repl--log)
+                         (lambda (_ws fmt &rest args)
+                           (push (apply #'format fmt args) logs))))
+                (let* ((other-win
+                        (cond (foreign (split-window view-win nil 'right))
+                              (side-foreign
+                               (display-buffer-in-side-window
+                                other-buf '((side . right))))))
+                       (before
+                        (when other-win
+                          (when foreign (set-window-buffer other-win other-buf))
+                          (select-window other-win)
+                          (prog1 (agent-repl-window-focus-input-when-panels-alone)
+                            (delete-window other-win)
+                            (select-window view-win))))
+                       (results
+                        (cl-loop repeat calls
+                                 collect (prog1 (agent-repl-window-focus-input-when-panels-alone)
+                                           (when select-view-after-close
+                                             (select-window view-win)))))
+                       (selected (selected-window)))
+                  (list :results results
+                        :before before
+                        :selected (cond ((eq (window-buffer selected) input-buf) :input)
+                                        ((eq selected view-win) :view)
+                                        (t :other))
+                        :logs (nreverse logs)))))))
+      (dolist (buf (list view-buf input-buf other-buf))
+        (when (buffer-live-p buf) (kill-buffer buf)))
+      (set-frame-parameter nil 'agent-repl-window--foreign-windows-seen nil))))
+
+(ert-deftest agent-repl-window-test-focus-input-selects-input-after-window-closes ()
+  "Closing the last non-panel window selects the input window."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input :foreign t)))
+    ;; Assert
+    (should (eq (plist-get run :selected) :input))
+    (should (windowp (car (plist-get run :results))))))
+
+(ert-deftest agent-repl-window-test-focus-input-selects-input-after-popup-closes ()
+  "Closing a side-window popup (a feed link's file popup) selects the input."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input :side-foreign t)))
+    ;; Assert
+    (should (eq (plist-get run :selected) :input))))
+
+(ert-deftest agent-repl-window-test-focus-input-noop-while-foreign-window-stands ()
+  "While a non-panel window stands, focus is left where it is."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input :foreign t)))
+    ;; Assert
+    (should-not (plist-get run :before))))
+
+(ert-deftest agent-repl-window-test-focus-input-noop-when-panels-alone-all-along ()
+  "A layout that was panels-only all along keeps the view selected."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input)))
+    ;; Assert
+    (should (equal (plist-get run :results) '(nil)))
+    (should (eq (plist-get run :selected) :view))))
+
+(ert-deftest agent-repl-window-test-focus-input-edge-fires-once ()
+  "After the edge moves focus, re-selecting the view is not undone."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input
+              :foreign t :calls 2 :select-view-after-close t)))
+    ;; Assert
+    (should (windowp (nth 0 (plist-get run :results))))
+    (should-not (nth 1 (plist-get run :results)))
+    (should (eq (plist-get run :selected) :view))))
+
+(ert-deftest agent-repl-window-test-focus-input-noop-without-input-window ()
+  "Panels alone without an input window (a standing gate) select nothing."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input :foreign t :show-input nil)))
+    ;; Assert
+    (should (equal (plist-get run :results) '(nil)))
+    (should (eq (plist-get run :selected) :view))
+    (should (cl-some (lambda (line) (string-match-p "no input window" line))
+                     (plist-get run :logs)))))
+
+(ert-deftest agent-repl-window-test-focus-input-noop-without-workspace ()
+  "No current workspace means nothing to focus."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input :foreign t :current-ws nil)))
+    ;; Assert
+    (should (equal (plist-get run :results) '(nil)))
+    (should (eq (plist-get run :selected) :view))))
+
+(ert-deftest agent-repl-window-test-focus-input-logs-the-move ()
+  "Moving focus is recorded with the workspace and both windows."
+  ;; Arrange / Act
+  (let ((run (agent-repl-window-test--run-focus-input :foreign t)))
+    ;; Assert
+    (should (cl-some (lambda (line)
+                       (string-match-p
+                        "window--focus-input: ws=cur panels alone .* selecting input window=#<window .* from=#<window"
+                        line))
+                     (plist-get run :logs)))))

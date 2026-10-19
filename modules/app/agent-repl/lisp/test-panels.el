@@ -342,9 +342,11 @@ reconciles the current workspace's own layout."
       (cl-letf (((symbol-function 'agent-repl--sync-panels)
                  (lambda () (push 'sync calls)))
                 ((symbol-function 'agent-repl-window--ensure-layout)
-                 (lambda () (push 'ensure calls))))
+                 (lambda () (push 'ensure calls)))
+                ((symbol-function 'agent-repl-window-focus-input-when-panels-alone)
+                 (lambda () (push 'focus calls))))
         (agent-repl--on-window-change))
-      (should (equal (nreverse calls) '(sync ensure))))))
+      (should (equal (nreverse calls) '(sync ensure focus))))))
 
 (ert-deftest agent-repl-test-panels-on-window-change-defers-while-minibuffer-active ()
   "on-window-change skips layout reconciliation while a minibuffer is
@@ -359,7 +361,9 @@ layout."
                 ((symbol-function 'agent-repl--sync-panels)
                  (lambda () (push 'sync calls)))
                 ((symbol-function 'agent-repl-window--ensure-layout)
-                 (lambda () (push 'ensure calls))))
+                 (lambda () (push 'ensure calls)))
+                ((symbol-function 'agent-repl-window-focus-input-when-panels-alone)
+                 (lambda () (push 'focus calls))))
         (agent-repl--on-window-change))
       (should-not calls))))
 
@@ -374,7 +378,8 @@ layout."
                    (setq captured workspace)
                    (funcall function)))
                 ((symbol-function 'agent-repl--sync-panels) #'ignore)
-                ((symbol-function 'agent-repl-window--ensure-layout) #'ignore))
+                ((symbol-function 'agent-repl-window--ensure-layout) #'ignore)
+                ((symbol-function 'agent-repl-window-focus-input-when-panels-alone) #'ignore))
         ;; Act.
         (agent-repl--on-window-change))
       ;; Assert.

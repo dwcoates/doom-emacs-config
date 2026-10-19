@@ -840,6 +840,76 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
                            view-win input-win)
           t)))))))
 
+;;;; --- Focus when the panels stand alone ---------------------------------
+
+(defun agent-repl-window--foreign-windows (ws &optional frame)
+  "Return FRAME's live windows that are not one of WS's two panel windows.
+The minibuffer window is never counted.  Side windows (Doom popups, a
+treemacs sidebar) are counted: a file popup opened from a feed link is
+exactly the kind of window whose close hands focus back to the input."
+  (let ((view-win (agent-repl-window--panel-window :view ws frame))
+        (input-win (agent-repl-window--panel-window :input ws frame)))
+    (cl-remove-if (lambda (win) (memq win (list view-win input-win)))
+                  (window-list frame 'nomini))))
+
+(defun agent-repl-window-focus-input-when-panels-alone (&optional frame)
+  "Select the input window once the current workspace's panels stand alone.
+
+The edge is \"FRAME showed some window besides the current workspace's
+view and input panels, and now shows only those panels\": closing a file
+popup opened from a feed link, quitting magit, deleting any other window.
+On that edge the input window is selected, so typing lands in the
+composer without a click.  The edge is remembered in FRAME's
+`agent-repl-window--foreign-windows-seen' parameter, so a layout that was
+panels-only all along never steals focus (clicking into the view keeps
+the view selected).
+
+Runs from the debounced `window-configuration-change-hook' handler
+\(`agent-repl--on-window-change'), after the layout is reconciled.
+FRAME defaults to the selected frame.  Returns the selected input window
+when it moved focus, nil otherwise."
+  (let* ((frame (or frame (selected-frame)))
+         (ws (agent-repl--ws-current-name)))
+    (if (not ws)
+        (progn
+          (agent-repl--log-verbose
+           '(:agent-repl-central "the record reports that no workspace exists")
+           "window--focus-input: noop reason=no-current-workspace")
+          nil)
+      (let* ((foreign (agent-repl-window--foreign-windows ws frame))
+             (seen (frame-parameter frame 'agent-repl-window--foreign-windows-seen))
+             (input-win (agent-repl-window--panel-window :input ws frame)))
+        (set-frame-parameter frame 'agent-repl-window--foreign-windows-seen
+                             (and foreign t))
+        (cond
+         (foreign
+          (agent-repl--log-verbose
+           ws "window--focus-input: noop reason=foreign-windows count=%d"
+           (length foreign))
+          nil)
+         ((not seen)
+          (agent-repl--log-verbose
+           ws "window--focus-input: noop reason=panels-alone-already")
+          nil)
+         ((not input-win)
+          (agent-repl--log
+           ws "window--focus-input: ws=%s panels alone but no input window (gate or view only)"
+           ws)
+          nil)
+         ((eq (frame-selected-window frame) input-win)
+          (agent-repl--log-verbose
+           ws "window--focus-input: noop reason=input-already-selected window=%S"
+           input-win)
+          nil)
+         (t
+          (agent-repl--log
+           ws "window--focus-input: ws=%s panels alone after a window closed — selecting input window=%S from=%S"
+           ws input-win (frame-selected-window frame))
+          (if (eq frame (selected-frame))
+              (select-window input-win)
+            (set-frame-selected-window frame input-win))
+          input-win))))))
+
 (add-hook 'agent-repl-host-update-functions #'agent-repl-window-on-host-update)
 
 (provide 'agent-repl-window)
