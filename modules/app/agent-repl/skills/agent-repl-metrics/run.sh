@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run.sh — the metrics-agent-repl skill's driver: reading agent-repl's
+# run.sh — the agent-repl-metrics skill's driver: reading agent-repl's
 # always-on runtime metrics.
 #
 # Verbs:
@@ -60,12 +60,12 @@ ROOT="${AGENT_REPL_METRICS_ROOT:-$HOME/.cache/agent-repl/metrics}"
 VOCAB="$SELF_DIR/../../proto/vocab/latencies.json"
 
 die() {
-  printf 'metrics-agent-repl: %s\n' "$*" >&2
+  printf 'agent-repl-metrics: %s\n' "$*" >&2
   exit 2
 }
 
 log() {
-  printf 'metrics-agent-repl: %s\n' "$*"
+  printf 'agent-repl-metrics: %s\n' "$*"
 }
 
 command -v curl >/dev/null 2>&1 || die "curl is not on PATH"

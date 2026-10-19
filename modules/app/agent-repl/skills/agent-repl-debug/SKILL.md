@@ -106,7 +106,7 @@ reference merely because it exists.
 
 Use `/agent-repl-runtime` when the needed fact exists only inside the live Emacs
 process or in third-party `*Messages*` output. For latency, stalls, or
-hitching, first read the stored metrics with `/metrics-agent-repl` (which
+hitching, first read the stored metrics with `/agent-repl-metrics` (which
 version or day a latency or a process's CPU changed), then enter through
 `references/performance-investigation.md`, which decides between log-derived
 history and live sampling and hands off to `/agent-repl-profile` as the

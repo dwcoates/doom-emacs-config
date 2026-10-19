@@ -5,7 +5,7 @@ The always-on metrics store: VictoriaMetrics, run by launchd
 store and the sidecar every 15 seconds and keeping 30 days. The plan is
 `docs/PLAN-runtime-metrics.md`; the calls made building it are
 `docs/METRICS-JUDGEMENT-CALLS.md`. How to query it, add a metric, and when to
-offer one: the `metrics-agent-repl` skill (`skills/metrics-agent-repl/`).
+offer one: the `agent-repl-metrics` skill (`skills/agent-repl-metrics/`).
 
 - `scrape.yml` is the scrape config, copied by `bin/requirements.sh` into
   `~/.cache/agent-repl/metrics/scrape.yml`. Its only targets are the files

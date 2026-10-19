@@ -1,6 +1,6 @@
 ---
-name: metrics-agent-repl
-description: Read agent-repl's always-on runtime metrics — user-facing latencies (workspace switches, page boots, vendor first output), how long restarts take (deploys and their phases, daemon boots, store and sidecar restarts, each workspace's session start, shim replacements, handover transfers), CPU, memory, disk, energy and descriptors per process group, host load, and the deployed version — from the 30 days of history the metrics store keeps; find the version where a latency or a restart regressed or the day a process started to climb; and add a new metric the right way. Use when the user investigates performance or asks how fast, heavy or hot something is, when a latency or resource question needs history rather than a live profile, when the user wants a feature or UI element measured, or invokes /metrics-agent-repl.
+name: agent-repl-metrics
+description: Read agent-repl's always-on runtime metrics — user-facing latencies (workspace switches, page boots, vendor first output), how long restarts take (deploys and their phases, daemon boots, store and sidecar restarts, each workspace's session start, shim replacements, handover transfers), CPU, memory, disk, energy and descriptors per process group, host load, and the deployed version — from the 30 days of history the metrics store keeps; find the version where a latency or a restart regressed or the day a process started to climb; and add a new metric the right way. Use when the user investigates performance or asks how fast, heavy or hot something is, when a latency or resource question needs history rather than a live profile, when the user wants a feature or UI element measured, or invokes /agent-repl-metrics.
 allowed-tools: Bash(<skill_base_dir>/run.sh:*)
 ---
 

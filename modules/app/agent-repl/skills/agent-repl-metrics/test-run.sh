@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic tests for skills/metrics-agent-repl/run.sh: the metrics store is a
+# Hermetic tests for skills/agent-repl-metrics/run.sh: the metrics store is a
 # curl stub answering canned bodies; nothing reaches a real store.
 
 # shellcheck disable=SC2329

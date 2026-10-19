@@ -13,7 +13,7 @@ live process to explain something that already happened.
 
 | Strategy | Use when | Entry point |
 |---|---|---|
-| Stored metrics | The question is when, or in which version, a latency or a process's CPU or memory changed, over hours to 30 days | `/metrics-agent-repl` |
+| Stored metrics | The question is when, or in which version, a latency or a process's CPU or memory changed, over hours to 30 days | `/agent-repl-metrics` |
 | Historical latency | The slow event already happened, is intermittent, or spans runtimes | Structured logs, via the resolver's extraction verbs |
 | Fresh sampling | The slowness reproduces on demand in the live runtime | `/agent-repl-profile`, paired with `/agent-repl-runtime` for one Emacs operation |
 
