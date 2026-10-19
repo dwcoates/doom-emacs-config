@@ -77,6 +77,7 @@ import {
   type FeedPage,
   type FeedRow,
   type FeedSelection,
+  type FeedToolCardClock,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker, type Ticker } from "../../src/clock.js";
@@ -625,7 +626,7 @@ export function interimRow(id: string, markdown = "meanwhile"): FeedRow {
 export function toolCallRow(
   id: string,
   state: "running" | "returned",
-  opts: { turn?: string; beatAtMs?: bigint; tool?: string } = {},
+  opts: { turn?: string; beatAtMs?: bigint; tool?: string; clock?: FeedToolCardClock } = {},
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -639,6 +640,7 @@ export function toolCallRow(
           value: {
             name: { text: opts.tool ?? "Bash" },
             input: { text: "$ ls" },
+            clock: opts.clock,
             outcome:
               state === "running"
                 ? { case: "running", value: { lastProgress: { atMs: opts.beatAtMs ?? 0n } } }
@@ -913,4 +915,12 @@ export async function settle(advance: (ms: number) => Promise<unknown>): Promise
 export function drawnBefore(a: Element | null, b: Element | null): boolean {
   if (a === null || b === null) throw new Error("the drawing lacks an element the order is about");
   return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+/**
+ * The shape of a feed tabline: each child's first class, in order, so a test
+ * can hold a card's tabline to the shared one (`drawFeedTabline`).
+ */
+export function tablineShape(line: Element | null): string[] {
+  return [...(line?.children ?? [])].map((child) => child.classList[0]);
 }

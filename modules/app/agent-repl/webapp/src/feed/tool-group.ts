@@ -26,13 +26,21 @@
  * survives a re-arrange.
  *
  * THE TABS SIT INSIDE THE MEMBER'S OWN CARD (owner ruling, 2026-10-10). There
- * is no outer bubble: the group draws no chrome of its own, and the strip is
- * laid over the top of the shown member's `.tool-card`, whose top padding grows
- * by the strip's measured height (`--feed-group-strip-h`, kept current by a
- * `ResizeObserver` on the strip). The strip is NOT a child of the card: the card
- * belongs to its renderer, and a redraw that keeps a scrolled box morphs the
- * card's children by index (keep-scroll.ts), which a foreign first child would
- * throw off. So the group owns the strip and the stylesheet places it.
+ * is no outer bubble: the group draws no chrome of its own, and the tabline
+ * (the strip and the clock slot after it, tabs.ts) is laid over the top of the
+ * shown member's `.tool-card`, whose top padding grows by the tabline's
+ * measured height (`--feed-group-tabline-h`, kept current by a
+ * `ResizeObserver` on the tabline). The tabline is NOT a child of the card: the
+ * card belongs to its renderer, and a redraw that keeps a scrolled box morphs
+ * the card's children by index (keep-scroll.ts), which a foreign first child
+ * would throw off. So the group owns the tabline and the stylesheet places it.
+ *
+ * THE SHOWN MEMBER CLOCKS ON THE TABLINE. A card with tabs clocks on its
+ * tabline, not its head line (tabs.ts), so the group draws the shown member's
+ * tool card clock (`GroupMember.clock`) in the tabline's clock slot, and the
+ * stylesheet hides the clock the member's own head still draws while it sits
+ * in a group's panel. A member drawn alone again shows its head clock, because
+ * it is no longer in a panel.
  *
  * ANCHORING REACHES A GROUPED MEMBER. An inactive tab's member is hidden and so
  * has no layout box; a reveal/scroll-to-row that lands on one first activates
@@ -41,19 +49,22 @@
  * feedids, selection and the reveal walk keep working.
  */
 import type { Control } from "../control.js";
-import { drawFeedTab, drawFeedTabStrip } from "./tabs.js";
+import type { Ticker } from "../clock.js";
+import { drawFeedTab, drawFeedTabline, drawFeedTabStrip, setFeedTablineClock } from "./tabs.js";
+import { drawToolCardClock } from "./cards/tool-head.js";
 import { log } from "../log.js";
 import { placeChildren } from "../dom.js";
-import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { isMalformedView } from "../rpc/malformed.js";
+import type { FeedRow, FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 /** The class the group container wears; it draws no bubble of its own. */
 export const FEED_GROUP_CLASS = "feed-group";
 
 /**
- * The custom property the group carries its strip's height on, in px: the
- * extra top padding a member card leaves so the strip sits inside it.
+ * The custom property the group carries its tabline's height on, in px: the
+ * extra top padding a member card leaves so the tabline sits inside it.
  */
-export const STRIP_HEIGHT_PROPERTY = "--feed-group-strip-h";
+export const TABLINE_HEIGHT_PROPERTY = "--feed-group-tabline-h";
 
 /** The attribute a tab button carries the member id it selects on. */
 export const GROUP_TAB_MEMBER_ATTRIBUTE = "data-group-tab-member";
@@ -141,10 +152,48 @@ export function groupGlyph(kind: string): string {
   return KIND_GLYPHS[kind] ?? GENERIC_GLYPH;
 }
 
-/** One member of a run: its row id and the element the controller drew for it. */
+/** A tool card's clock, and where it sits in the view for a malformed one's report. */
+export interface MemberClock {
+  readonly clock: FeedToolCardClock;
+  readonly path: string;
+}
+
+/**
+ * One member of a run: its row id, the element the controller drew for it, and
+ * the clock its tool card head draws, when it has one.
+ */
 export interface GroupMember {
   id: string;
   element: HTMLElement;
+  clock?: MemberClock;
+}
+
+/**
+ * The clock ROW's tool card head draws (`drawToolCardHead`), at the path its
+ * renderer reports it under, or undefined when the row draws no such clock.
+ *
+ * Exactly the groupable kinds that head through `drawToolCardHead`: the inline
+ * tool call, the skill and the hook. A subagent or shell bubble heads with its
+ * own renderer and its own clock, which stays on its head.
+ */
+export function memberClockOf(row: FeedRow): MemberClock | undefined {
+  if (row.row.case !== "activity") return undefined;
+  const unit = row.row.value.unit;
+  switch (unit.case) {
+    case "simpleToolCall":
+      return clockAt(unit.value.clock, "FeedSimpleToolCall.clock");
+    case "skill":
+      return clockAt(unit.value.clock, "FeedSkill.clock");
+    case "hook":
+      return clockAt(unit.value.clock, "FeedHook.clock");
+    default:
+      return undefined;
+  }
+}
+
+/** CLOCK at PATH, or undefined when the producer stated none. */
+function clockAt(clock: FeedToolCardClock | undefined, path: string): MemberClock | undefined {
+  return clock === undefined ? undefined : { clock, path };
 }
 
 /** The activation hooks for open groups, keyed by their `.feed-group` element. */
@@ -202,8 +251,8 @@ export function groupKey(kind: string, firstMemberId: string): string {
   return `${kind}::${firstMemberId}`;
 }
 
-/** Build a store of tabbed groups for one feed. */
-export function createToolGroupStore(): ToolGroupStore {
+/** Build a store of tabbed groups for one feed, whose clocks repaint on TICKER. */
+export function createToolGroupStore(ticker: Ticker): ToolGroupStore {
   const groups = new Map<string, ToolGroup>();
   let seen = new Set<string>();
   return {
@@ -211,7 +260,7 @@ export function createToolGroupStore(): ToolGroupStore {
       seen.add(key);
       let group = groups.get(key);
       if (group === undefined) {
-        group = createToolGroup(kind);
+        group = createToolGroup(kind, ticker);
         groups.set(key, group);
       }
       group.update(members);
@@ -229,7 +278,7 @@ export function createToolGroupStore(): ToolGroupStore {
 }
 
 /** One tabbed group container, persistent across arrange passes. */
-function createToolGroup(kind: string): ToolGroup {
+function createToolGroup(kind: string, ticker: Ticker): ToolGroup {
   /** The reader's chosen member id, or null while the newest is shown. */
   let picked: string | null = null;
   /** The members of the most recent layout, so a click can re-lay them. */
@@ -247,20 +296,22 @@ function createToolGroup(kind: string): ToolGroup {
   group.setAttribute("data-group-kind", kind);
 
   const strip = drawFeedTabStrip("feed-group-strip");
+  const tabline = drawFeedTabline(strip, null);
+  tabline.classList.add("feed-group-tabline");
 
   const panel = document.createElement("div");
   panel.className = "feed-group-panel";
 
-  group.append(strip, panel);
+  group.append(tabline, panel);
   wrapper.append(group);
 
-  // THE STRIP'S HEIGHT IS MEASURED, NOT ASSUMED: the tabs wrap onto more rows
+  // THE TABLINE'S HEIGHT IS MEASURED, NOT ASSUMED: the tabs wrap onto more rows
   // as the run grows, and the member card's top padding must follow so the
-  // strip never covers the card's head.
-  const stripSize = new ResizeObserver(() => {
-    group.style.setProperty(STRIP_HEIGHT_PROPERTY, `${String(strip.offsetHeight)}px`);
+  // tabline never covers the card's head.
+  const tablineSize = new ResizeObserver(() => {
+    group.style.setProperty(TABLINE_HEIGHT_PROPERTY, `${String(tabline.offsetHeight)}px`);
   });
-  stripSize.observe(strip);
+  tablineSize.observe(tabline);
 
   activators.set(group, (id) => {
     picked = id;
@@ -284,6 +335,7 @@ function createToolGroup(kind: string): ToolGroup {
       members.map((member) => member.element),
     );
     for (const member of members) member.element.hidden = member.id !== activeId;
+    setFeedTablineClock(tabline, shownClock(members.find((member) => member.id === activeId)));
     group.setAttribute("data-count", String(members.length));
     group.setAttribute("data-active", activeId ?? "");
     log.debug("laid out a tabbed tool group", {
@@ -307,12 +359,32 @@ function createToolGroup(kind: string): ToolGroup {
     return btn;
   }
 
+  /**
+   * The tabline clock of the shown MEMBER, or null when it states none.
+   *
+   * A malformed clock draws none here: the member's own head drew from the
+   * same clock first, so its row draw already failed, was logged and was
+   * reported (feed-view.ts, the one owner of a malformed row's report), and the
+   * member shows that row's placeholder rather than a card to clock.
+   */
+  function shownClock(member: GroupMember | undefined): HTMLElement | null {
+    if (member?.clock === undefined) return null;
+    try {
+      return drawToolCardClock(member.clock.clock, member.clock.path, ticker);
+    } catch (err) {
+      if (!isMalformedView(err)) throw err;
+      return null;
+    }
+  }
+
   return {
     wrapper,
     update: layout,
     dispose(): void {
       activators.delete(group);
-      stripSize.disconnect();
+      tablineSize.disconnect();
+      // The tabline's clock is the group's own, so it is stopped here.
+      setFeedTablineClock(tabline, null);
       // The members are the controller's; the arrange pass that dropped this
       // group has already re-placed or discarded each of them, so the wrapper is
       // detached without touching them.

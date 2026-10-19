@@ -462,7 +462,8 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     // Arrange: the timers spied, then as they stood before the boot wrapped them.
     const armed = vi.spyOn(globalThis, "setTimeout");
     const cleared = vi.spyOn(globalThis, "clearTimeout");
-    const before = (window as { setTimeout: unknown }).setTimeout;
+    // Read as a value: only its identity is compared, it is never called.
+    const before: unknown = Reflect.get(window, "setTimeout");
     try {
       await bootMain();
       const censusCall = armed.mock.calls.findIndex(([, ms]) => ms === CENSUS_EVERY_MS);

@@ -8344,11 +8344,13 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    THE TABBED TOOL GROUP (tool-group.ts). A maximal run of >=2 consecutive
    same-specific-kind tool cards is shown one member at a time behind a tab
    strip. THERE IS NO OUTER BUBBLE (owner ruling, 2026-10-10): `.feed-group`
-   draws no chrome, and the strip sits INSIDE the shown member's own card, with
-   no line between the tabs and the card's head. The strip is the group's, not
-   the card's (see tool-group.ts), so it is laid over the card: placed at the
-   card's border-plus-padding inset, and the card's top padding grows by the
-   strip's measured height (`--feed-group-strip-h`). The shared width cap still
+   draws no chrome, and the tabline sits INSIDE the shown member's own card,
+   with no line between the tabs and the card's head. The tabline is the
+   group's, not the card's (see tool-group.ts), so it is laid over the card:
+   placed at the card's border-plus-padding inset, and the card's top padding
+   grows by the tabline's measured height (`--feed-group-tabline-h`). The
+   shown member's clock rides the tabline, so its head's own clock is hidden
+   while it sits in the panel. The shared width cap still
    keys on `.feed-item > .feed-group` (see the feed-card rule above), and the
    member card inside the panel has its own cap lifted so it fills the group.
    ──────────────────────────────────────────────────────────────────────── */
@@ -8365,10 +8367,28 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   gap: 0.156rem;
   padding: 0.062rem 0 0.188rem;
 }
-/* The tool group's strip, inset by the member card's 1px border and its
+/* EVERY FEED TABLINE (src/feed/tabs.ts): the row holding a card's tab strip,
+   with the card's clock after the tabs. A card with tabs clocks here rather
+   than on its head line. The strip takes the row and wraps inside it, so the
+   clock keeps the first row's right end, sharing its baseline with the tabs. */
+.feed-tabline {
+  display: flex;
+  align-items: baseline;
+}
+.feed-tabline > .feed-tab-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.feed-tabline-clock {
+  flex: none;
+}
+.feed-tabline-clock:not(:empty) {
+  margin-left: 0.5rem;
+}
+/* The tool group's tabline, inset by the member card's 1px border and its
    0.3rem top / 0.75rem side padding, and raised over the card, which comes
    later in the document. */
-.feed-group-strip {
+.feed-group-tabline {
   position: absolute;
   z-index: 1;
   top: calc(1px + 0.3rem);
@@ -8408,7 +8428,12 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   max-width: none;
   margin-left: 0;
   margin-right: 0;
-  padding-top: calc(0.3rem + var(--feed-group-strip-h) + 0.3rem);
+  padding-top: calc(0.3rem + var(--feed-group-tabline-h) + 0.3rem);
+}
+/* The shown member's clock is on the group's tabline, so the clock its own
+   head draws is not shown twice. */
+.feed-group-panel > .feed-item > .tool-card > .tool-head > .tool-clock {
+  display: none;
 }
 
 /* ---- the detached-work id (src/feed/work-id.ts) ---- */

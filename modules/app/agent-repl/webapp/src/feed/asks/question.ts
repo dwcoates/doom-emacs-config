@@ -41,7 +41,7 @@
  * can no longer match. Markdown is presentation only: what a click echoes is
  * the served string, never the drawn one.
  */
-import { drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
+import { drawStatedToolCardClock, drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
 import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
@@ -76,7 +76,7 @@ import {
 import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { drawFeedTab, drawFeedTabStrip } from "../tabs.js";
+import { drawFeedTab, drawFeedTabline, drawFeedTabStrip } from "../tabs.js";
 import { buildUpdateQuestionDraftRequest, type QuestionDraftEdit } from "./requests.js";
 
 const PATH = "FeedQuestion";
@@ -112,11 +112,15 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
 
   const card = document.createElement("div");
   card.setAttribute("data-state", state.case);
+  // A CARD WITH TABS CLOCKS ON ITS TABLINE (tabs.ts): an open batch's clock
+  // leaves the head for the row holding its tabs, and every other card keeps
+  // it on the head.
+  const tabbed = state.case === "open" && batchHasTabs(u);
   card.append(
     drawToolCardHead({
       title: QUESTION_TITLE,
       badge: drawFeedQuestionBadge(state.case),
-      clock: u.clock,
+      clock: tabbed ? undefined : u.clock,
       clockPath: `${PATH}.clock`,
       ticker: rc.ctx.ticker,
     }),
@@ -140,9 +144,15 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
   }
 }
 
+/** Whether an open batch draws tabs: one per question, for two or more. */
+function batchHasTabs(u: FeedQuestion): boolean {
+  return u.questions.length > 1;
+}
+
 /**
- * THE OPEN BATCH: the tab strip (a batch of two or more), the shown question's
- * panel, and the slot a refused click is stated in.
+ * THE OPEN BATCH: the tabline (a batch of two or more: the tab strip, then the
+ * card's clock), the shown question's panel, and the slot a refused click is
+ * stated in.
  *
  * Every question is still VALIDATED up front, shown or not: a malformed
  * question in tab three refuses the card rather than waiting to be clicked.
@@ -181,7 +191,7 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
     }),
   );
 
-  if (u.questions.length > 1) {
+  if (batchHasTabs(u)) {
     const strip = drawFeedTabStrip("q-tabs");
     strip.setAttribute("data-question-tabs", "");
     u.questions.forEach((item, index) => {
@@ -199,7 +209,7 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
       controls.push(tab);
       strip.append(tab);
     });
-    wrap.append(strip);
+    wrap.append(drawFeedTabline(strip, drawStatedToolCardClock(u.clock, `${PATH}.clock`, rc.ctx.ticker)));
     const given = drawGivenSoFar(u.questions, open);
     if (given !== null) wrap.append(given);
   }
