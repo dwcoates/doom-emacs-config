@@ -1149,6 +1149,13 @@ resets."
                         "elisp.commands.open-most-recent-cycle-reset")
       (message "All workspaces visited -- cycle reset"))))
 
+(defun agent-repl--jump-log-ws (shown)
+  "Return the log target of a jump made from SHOWN.
+SHOWN's own log name, or the context of a placeholder, which names no
+workspace.  The one target every recency jump logs under."
+  (or (agent-repl--ws-log-name shown)
+      '(:agent-repl-context "a jump from a placeholder names no workspace")))
+
 (defun agent-repl-switch-to-previous-workspace ()
   "Switch to the workspace selected before the one shown.
 HOWEVER it was selected: the order is the ONE selection-recency order
@@ -1161,8 +1168,7 @@ No other open workspace is a reported, logged no-op.  The target is
 REQUESTED of the daemon, never switched to here."
   (interactive)
   (let* ((shown (agent-repl--ws-current-name))
-         (log-ws (or (agent-repl--ws-log-name shown)
-                     '(:agent-repl-context "a jump from a placeholder names no workspace")))
+         (log-ws (agent-repl--jump-log-ws shown))
          (target (car (remove shown (agent-repl--roster-recent-names)))))
     (if (null target)
         (progn
@@ -1185,8 +1191,7 @@ switch.  No candidate is a reported, logged no-op.  The target is
 REQUESTED of the daemon, never switched to here."
   (interactive)
   (let* ((shown (agent-repl--ws-current-name))
-         (log-ws (or (agent-repl--ws-log-name shown)
-                     '(:agent-repl-context "a jump from a placeholder names no workspace")))
+         (log-ws (agent-repl--jump-log-ws shown))
          (names (remove shown (agent-repl--drawn-tab-names)))
          (target (agent-repl-roster-last-finished-name names)))
     (if (null target)

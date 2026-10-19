@@ -666,6 +666,35 @@ order a close lands by."
       (should-not switched)
       (should-not agent-repl--opened-recent-cycle))))
 
+;;;; ---- The log target every recency jump shares ----
+
+(ert-deftest agent-repl-test-commands-jump-log-ws-is-the-shown-log-name ()
+  "A jump from a workspace logs under that workspace's log name."
+  (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (ws) (concat "log-" ws))))
+    (should (equal (agent-repl--jump-log-ws "here") "log-here"))))
+
+(ert-deftest agent-repl-test-commands-jump-log-ws-from-a-placeholder-names-the-context ()
+  "A jump from a placeholder, which has no log name, logs under its context."
+  (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (_ws) nil)))
+    (should (equal (agent-repl--jump-log-ws nil)
+                   '(:agent-repl-context "a jump from a placeholder names no workspace")))))
+
+(ert-deftest agent-repl-test-commands-recency-jumps-share-the-jump-log-ws ()
+  "Both recency jumps take their log target from `agent-repl--jump-log-ws'."
+  (dolist (cmd '(agent-repl-switch-to-previous-workspace
+                 agent-repl-switch-to-last-finished-workspace))
+    (let ((used nil))
+      (cl-letf (((symbol-function 'agent-repl--jump-log-ws)
+                 (lambda (_shown) (setq used t) "log"))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
+                ((symbol-function 'agent-repl--roster-recent-names) (lambda () '("here")))
+                ((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("here")))
+                ((symbol-function 'agent-repl-roster-last-finished-name) #'ignore)
+                ((symbol-function 'agent-repl--info) #'ignore)
+                ((symbol-function 'message) #'ignore))
+        (funcall cmd)
+        (should used)))))
+
 ;;;; ---- The jump back to the previously selected workspace ----
 
 (defmacro agent-repl-test-commands--with-previous (shown recent &rest body)
