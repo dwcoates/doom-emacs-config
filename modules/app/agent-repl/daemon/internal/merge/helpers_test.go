@@ -138,6 +138,10 @@ type fakeDB struct {
 	beforeRelease func(f *fakeDB)
 	// queueReadErr, when set, fails every MergeQueue read.
 	queueReadErr error
+	// openChildrenErr, when set, is what every RequireNoOpenChildren
+	// answers; openChildrenAsked records each workspace it was asked about.
+	openChildrenErr   error
+	openChildrenAsked []ids.WorkspaceID
 	// onQueueRead, when set, runs after every MergeQueue read has taken its
 	// copy, outside the fake's lock, so a test can change the world between
 	// the read and whatever its reader does with the answer.
@@ -3077,4 +3081,12 @@ func (f *fakeQueueEvents) kinds() []QueueChangeKind {
 		out = append(out, change.Kind)
 	}
 	return out
+}
+
+// RequireNoOpenChildren answers openChildrenErr, recording what it was asked.
+func (f *fakeDB) RequireNoOpenChildren(_ context.Context, ws ...ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.openChildrenAsked = append(f.openChildrenAsked, ws...)
+	return f.openChildrenErr
 }

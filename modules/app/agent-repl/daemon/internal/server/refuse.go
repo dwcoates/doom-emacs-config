@@ -82,6 +82,12 @@ func mergeFields(fields map[string]any) map[string]any {
 // asRefusal normalizes a component error into a refusal, reporting false for an
 // ordinary failure that must surface as an error rather than an answer.
 func (s *server) asRefusal(err error) (refusal, bool) {
+	// A FAMILY RULE REFUSING (wsm/family.go) is spelled with the same arm
+	// under every rpc that can raise it, so it is mapped here once, whichever
+	// verb carried it up.
+	if family, ok := familyRefusal(err); ok {
+		return s.fill(family), true
+	}
 	if wsRefusal, ok := workspace.AsRefusal(err); ok {
 		return s.fill(refusal{
 			Arm:      wsRefusal.Arm,
@@ -342,6 +348,20 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 // leaves the field unset rather than writing a wrong value, and the refusal's
 // prose still states the evidence.
 func setListField(armMessage protoreflect.Message, field protoreflect.FieldDescriptor, value any) {
+	// A REPEATED MESSAGE (WorkspaceHasOpenChildren.children) arrives as the
+	// messages themselves.
+	if field.Kind() == protoreflect.MessageKind {
+		messages, ok := value.([]proto.Message)
+		if !ok {
+			return
+		}
+		list := armMessage.NewField(field).List()
+		for _, message := range messages {
+			list.Append(protoreflect.ValueOfMessage(message.ProtoReflect()))
+		}
+		armMessage.Set(field, protoreflect.ValueOfList(list))
+		return
+	}
 	if field.Kind() != protoreflect.StringKind {
 		return
 	}
@@ -354,6 +374,34 @@ func setListField(armMessage protoreflect.Message, field protoreflect.FieldDescr
 		list.Append(protoreflect.ValueOfString(item))
 	}
 	armMessage.Set(field, protoreflect.ValueOfList(list))
+}
+
+// familyRefusal maps a family rule's refusal (wsm.HasOpenChildrenError,
+// wsm.ParentNotOpenError) onto its shared arm (agentrepl.v1 family.proto),
+// reporting false for any other error.
+func familyRefusal(err error) (refusal, bool) {
+	var children *wsm.HasOpenChildrenError
+	if errors.As(err, &children) {
+		refs := make([]proto.Message, len(children.Children))
+		for i, child := range children.Children {
+			refs[i] = familyRef(child)
+		}
+		return refusal{Arm: "has_open_children", Reason: err.Error(), Fields: map[string]any{
+			"parent": familyRef(children.Parent), "children": refs,
+		}}, true
+	}
+	var parent *wsm.ParentNotOpenError
+	if errors.As(err, &parent) {
+		return refusal{Arm: "parent_not_open", Reason: err.Error(), Fields: map[string]any{
+			"parent": familyRef(parent.Parent), "state": nestedArm(parent.State.String()),
+		}}, true
+	}
+	return refusal{}, false
+}
+
+// familyRef is a family refusal's workspace as the wire names it.
+func familyRef(ref wsm.FamilyRef) *workspacev1.WorkspaceRef {
+	return &workspacev1.WorkspaceRef{Id: string(ref.ID), Dir: ref.Dir}
 }
 
 // setNestedArms selects the arm of every NESTED oneof the refusal named,

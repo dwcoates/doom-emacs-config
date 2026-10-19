@@ -375,6 +375,18 @@ func refuse(log dlog.Logger, rpc, arm, reason string, notFound bool) *Refusal {
 	return refuseWith(log, rpc, arm, reason, notFound, nil)
 }
 
+// refusedByFamily reports whether ERR is a family rule refusing the write
+// (wsm/family.go), recording it at INFO under OP when it is. Such a refusal is
+// an ANSWER, never a failure: the server maps it onto the rpc's shared arm
+// (has_open_children, parent_not_open), and nothing was written.
+func refusedByFamily(log dlog.Logger, op string, err error) bool {
+	if !wsm.IsFamilyRefusal(err) {
+		return false
+	}
+	log.Info(op, "a family rule refused the request; nothing was written", dlog.Context{"cause": err.Error()})
+	return true
+}
+
 // refuseUnrestorable refuses RPC with ArmWorktreeUnrestorable for RECORD:
 // nothing is left to check its worktree out from. The arm carries the
 // recorded directory and branch as its evidence beside DETAIL, the sentence

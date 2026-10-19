@@ -116,6 +116,10 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 		// THE RPC IS THE CALLER'S TO NAME, as for not_a_worktree above.
 		return wsm.Workspace{}, false, refused
 	}
+	// A NEW CHILD OF A PARENT THAT IS NOT OPEN IS REFUSED (wsm/family.go).
+	if refusedByFamily(global, opRegister, err) {
+		return wsm.Workspace{}, false, err
+	}
 	if err != nil {
 		global.Error(opRegister, "could not record the workspace", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
@@ -156,6 +160,11 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	// spawned anything and the mount is what spawns.
 	if !created && record.Closed {
 		if err := v.deps.DB.Reopen(ctx, record.ID); err != nil {
+			// A CLOSED CHILD OF A PARENT THAT IS NOT OPEN STAYS CLOSED
+			// (wsm/family.go): the announcement is refused parent_not_open.
+			if refusedByFamily(log, opRegister, err) {
+				return wsm.Workspace{}, false, err
+			}
 			log.Error(opRegister, "could not re-open the announced workspace", dlog.Context{
 				"workspace": string(record.ID), "cause": err.Error(),
 			})

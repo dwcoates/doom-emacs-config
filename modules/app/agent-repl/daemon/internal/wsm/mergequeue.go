@@ -69,8 +69,10 @@ func (s *store) RequestOneShotMerge(ctx context.Context, repo RepoKey, id Worksp
 
 // requestMerge is the one body every merge request is recorded through:
 // the key normalized, the source validated, a workspace already in the queue
-// refused with the place it holds, then the request row written and MARK (when
-// non-nil) run in the same transaction.
+// refused with the place it holds, a request whose landing would close a
+// workspace with open children refused (HasOpenChildrenError, family.go),
+// then the request row written and MARK (when non-nil) run in the same
+// transaction.
 func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time, mark func(context.Context, *sql.Tx) error) error {
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
@@ -97,6 +99,18 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		// A MERGE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN (family.go):
+		// every workspace its landing closes is checked in this transaction,
+		// so no child can be made under it between the check and the row.
+		origin, err := mergeOriginOf(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		for _, closes := range source.Closes(id, origin) {
+			if err := refuseOpenChildren(ctx, tx, closes); err != nil {
+				return err
+			}
 		}
 		if err := insertRequest(ctx, tx, key, id, source, at); err != nil {
 			return err

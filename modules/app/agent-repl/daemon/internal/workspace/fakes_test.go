@@ -134,6 +134,11 @@ type fakeDB struct {
 	// setMergedErr fails SetMergedAt.
 	setMergedErr error
 
+	// openParentErr is what every RequireOpenParent answers; openParentAsked
+	// records each parent it was asked about.
+	openParentErr   error
+	openParentAsked []ids.WorkspaceID
+
 	registerErr error
 	registered  []wsm.RegisterFacts
 	registerDir string
@@ -2999,3 +3004,33 @@ func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
 type visibilityFunc func(ws ids.WorkspaceID)
 
 func (f visibilityFunc) VisibilityChanged(ws ids.WorkspaceID) { f(ws) }
+
+// RequireOpenParent answers openParentErr, recording the parent asked about.
+func (f *fakeDB) RequireOpenParent(_ context.Context, parent ids.WorkspaceID) error {
+	f.openParentAsked = append(f.openParentAsked, parent)
+	return f.openParentErr
+}
+
+// errOpenChildren is a family rule refusing a parent with an open child.
+var errOpenChildren = &wsm.HasOpenChildrenError{
+	Parent:   wsm.FamilyRef{ID: "w1", Dir: "/w/w1"},
+	Children: []wsm.FamilyRef{{ID: "w2", Dir: "/w/w2"}},
+}
+
+// errParentNotOpen is a family rule refusing a child of a closed parent.
+var errParentNotOpen = &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "parent", Dir: "/w/parent"}, State: wsm.ParentClosed}
+
+// requireFamilyAnswer fails unless ERR is WANT, recorded under OPERATION at
+// INFO and never at ERROR: a family refusal is an answer, not a failure.
+func requireFamilyAnswer(t *testing.T, f *fixture, err, want error, operation string) {
+	t.Helper()
+	if !errors.Is(err, want) {
+		t.Fatalf("error = %v, want the family refusal %v", err, want)
+	}
+	if loggedAtError(f, operation) {
+		t.Fatalf("the family refusal was recorded at ERROR under %s", operation)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: operation}); !ok {
+		t.Fatalf("the family refusal was not recorded at INFO under %s", operation)
+	}
+}

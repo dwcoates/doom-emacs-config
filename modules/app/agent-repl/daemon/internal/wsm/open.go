@@ -602,6 +602,12 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the arrangement was refused; nothing was written", withError(fields, err))
 			return err
 		}
+		// A FAMILY RULE REFUSING is the store answering what was asked
+		// (family.go); the verb turns it into the rpc's arm.
+		if IsFamilyRefusal(err) {
+			s.log.Debug(op, "a family rule refused the write; nothing was written", withError(fields, err))
+			return err
+		}
 		if _, ok := AsParentRefused(err); ok {
 			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
 			return err

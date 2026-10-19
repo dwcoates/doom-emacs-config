@@ -50,6 +50,19 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	// discipline boot applies: "could not tell" is not an answer, and
 	// restoring or refusing on it would act on a workspace that is merely
 	// unreachable this instant.
+	// A CLOSED CHILD IS RE-OPENED ONLY UNDER AN OPEN PARENT (wsm/family.go).
+	// Asked before anything is restored or brought up, so a refused open
+	// starts nothing; the re-open below checks again in its own transaction,
+	// which is the guarantee.
+	if record.Closed && record.Parent != nil {
+		if err := v.deps.DB.RequireOpenParent(ctx, *record.Parent); err != nil {
+			if refusedByFamily(log, opOpen, err) {
+				return err
+			}
+			log.Error(opOpen, "could not read whether the workspace's parent is open", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("open %q: read the parent: %w", ws, err)
+		}
+	}
 	reportOpenStage(progress, OpenStageCheckingWorktree)
 	if _, statErr := os.Stat(record.Dir); errors.Is(statErr, fs.ErrNotExist) {
 		restored, err := v.restoreWorktree(ctx, log, record, progress, "OpenWorkspace")
@@ -121,6 +134,9 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	if record.Closed || record.MergedAt != nil {
 		reportOpenStage(progress, OpenStageClearingClosed)
 		if err := v.deps.DB.Reopen(ctx, ws); err != nil {
+			if refusedByFamily(log, opOpen, err) {
+				return err
+			}
 			log.Error(opOpen, "could not clear the closed flag", dlog.Context{
 				"merged": record.MergedAt != nil, "cause": err.Error()})
 			return fmt.Errorf("open %q: clear closed: %w", ws, err)

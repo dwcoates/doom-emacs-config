@@ -887,6 +887,66 @@ func TestSetWorkspaceHiddenMapsTheVerbsRefusal(t *testing.T) {
 	}
 }
 
+// TestFamilyRefusalsReachEveryRpcThatCarriesThem pins that a family rule's
+// refusal, wrapped by whichever verb carried it up, answers on the rpc's own
+// shared arm.
+func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
+	parentNotOpen := &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: wsm.ParentHidden}
+	tests := []struct {
+		name  string
+		setUp func(h *harness)
+		call  func(h *harness) (bool, error)
+	}{
+		{
+			name:  "CloseWorkspace has_open_children",
+			setUp: func(h *harness) { h.Verbs.closeErr = fmt.Errorf("close: %w", familyChildren) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.CloseWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref()}))
+				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
+			},
+		},
+		{
+			name:  "SetWorkspaceHidden has_open_children",
+			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("hide: %w", familyChildren) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.SetWorkspaceHidden(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
+			},
+		},
+		{
+			name:  "SetWorkspaceHidden parent_not_open",
+			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("show: %w", parentNotOpen) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.SetWorkspaceHidden(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+				return err == nil && resp.Msg.GetError().GetParentNotOpen().GetHidden() != nil, err
+			},
+		},
+		{
+			name:  "OpenWorkspace parent_not_open",
+			setUp: func(h *harness) { h.Verbs.openErr = fmt.Errorf("open: %w", parentNotOpen) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.OpenWorkspace(context.Background(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref()}))
+				return err == nil && resp.Msg.GetError().GetParentNotOpen() != nil, err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.setUp(h)
+
+			// Act.
+			ok, err := tt.call(h)
+
+			// Assert.
+			if err != nil || !ok {
+				t.Fatalf("answered %v (err %v), want the family arm", ok, err)
+			}
+		})
+	}
+}
+
 // TestSetWorkspaceHiddenRefusesAMissingVisibility pins an unset arm as a
 // malformed request that reaches no verb.
 func TestSetWorkspaceHiddenRefusesAMissingVisibility(t *testing.T) {

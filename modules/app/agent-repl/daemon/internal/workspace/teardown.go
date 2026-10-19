@@ -33,22 +33,27 @@ func (v *verbs) Kill(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // BeginKill is Kill's fast half. It answers every refusal a kill can have (the
-// workspace is not this daemon's to kill), drops a queued merge, and marks the
+// workspace is not this daemon's to kill, or it has open children), marks the
 // workspace CLOSED, so the roster says so everywhere before the session has
-// begun to die; the Teardown it answers kills the session.
+// begun to die, and drops a queued merge; the Teardown it answers kills the
+// session.
 func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, error) {
 	_, log, err := v.owned(ctx, "KillWorkspace", ws)
 	if err != nil {
 		return nil, err
+	}
+	// THE CLOSE IS RECORDED FIRST, because it is the one step a kill can be
+	// refused at: a workspace with open children is not killed
+	// (wsm/family.go), and a refused kill must leave its queued merge where it
+	// stands.
+	if err := v.markClosedFirst(ctx, log, opKill, ws); err != nil {
+		return nil, fmt.Errorf("kill %q: %w", ws, err)
 	}
 	// A WAITING MERGE ENDS WITH THE WORKSPACE. Close refuses outright while a
 	// merge is queued, but Kill never blocks on what is running, so this is the
 	// one door a queued merge's workspace can leave through — and a merge left
 	// on the queue behind it would wait forever on a workspace that is gone.
 	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
-	if err := v.markClosedFirst(ctx, log, opKill, ws); err != nil {
-		return nil, fmt.Errorf("kill %q: %w", ws, err)
-	}
 	return func(ctx context.Context) error { return v.kill(ctx, log, ws) }, nil
 }
 
@@ -59,6 +64,9 @@ func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 // either, since a closed workspace's session is never brought back.
 func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID) error {
 	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByUser}); err != nil {
+		if refusedByFamily(log, op, err) {
+			return err
+		}
 		log.Error(op, "could not record the close ahead of the teardown", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("record closed: %w", err)
 	}
@@ -159,12 +167,14 @@ func (v *verbs) BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 		return nil, err
 	}
 
-	// The waiting merge goes first, for the same reason Kill drops it: the
-	// nuke destroys the very worktree the merge would have run against.
-	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
+	// The close is recorded first, the one step a nuke can be refused at, as
+	// for a kill; then the waiting merge goes, for the same reason Kill drops
+	// it: the nuke destroys the very worktree the merge would have run
+	// against.
 	if err := v.markClosedFirst(ctx, log, opNuke, ws); err != nil {
 		return nil, fmt.Errorf("nuke %q: %w", ws, err)
 	}
+	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
 	return func(ctx context.Context) error { return v.nuke(ctx, log, record) }, nil
 }
 

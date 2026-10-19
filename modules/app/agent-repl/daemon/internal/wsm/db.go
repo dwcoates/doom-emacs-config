@@ -58,6 +58,12 @@ type DB interface {
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
+	// RequireOpenParent answers ParentNotOpenError when the parent is hidden,
+	// closed or closing, nil when it is open (family.go).
+	RequireOpenParent(ctx context.Context, parent WorkspaceID) error
+	// RequireNoOpenChildren answers HasOpenChildrenError for the first of ids
+	// with an open descendant, nil when none has (family.go).
+	RequireNoOpenChildren(ctx context.Context, ids ...WorkspaceID) error
 	// Reopen records that a workspace's editor state stands again, clearing
 	// its close record and, for a merged workspace, the merge's settlement.
 	Reopen(ctx context.Context, id WorkspaceID) error

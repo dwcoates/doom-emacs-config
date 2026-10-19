@@ -1683,3 +1683,31 @@ func TestHidingLandsOnTheNeighbourTheUserSawBeforeTheHide(t *testing.T) {
 		t.Fatalf("current = %v, want w1, the left neighbour the user saw", f.db.current)
 	}
 }
+
+func TestSetHiddenAnswersAFamilyRefusal(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+		err    error
+	}{
+		{name: "a hide of a parent with open children", hidden: true, err: errOpenChildren},
+		{name: "a show under a parent that is not open", hidden: false, err: errParentNotOpen},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.setHiddenErr = tt.err
+
+			// Act
+			err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden)
+
+			// Assert
+			requireFamilyAnswer(t, f, err, tt.err, opSetHidden)
+			if len(f.visibilityEdges) != 0 {
+				t.Fatalf("visibility edges = %v, want none for a refused write", f.visibilityEdges)
+			}
+		})
+	}
+}

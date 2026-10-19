@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionwatcher"
@@ -1274,4 +1275,83 @@ func TestRestoreMissingWorktreeRecordsTheMergedWorkspaceItLeavesAtInfo(t *testin
 		}
 	}
 	t.Fatalf("no INFO record of the merged workspace the boot left; records = %+v", f.log.logger.Records())
+}
+
+func TestOpenRefusesAClosedChildOfAParentThatIsNotOpenBeforeStartingAnything(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("parent", t.TempDir())
+	ws := f.workspace("w1", t.TempDir())
+	ws.Closed = true
+	parent := ids.WorkspaceID("parent")
+	ws.Parent = &parent
+	f.db.with(ws)
+	f.db.openParentErr = errParentNotOpen
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	requireFamilyAnswer(t, f, err, errParentNotOpen, opOpen)
+	if len(f.fleet.startCalls) != 0 || len(f.db.reopened) != 0 {
+		t.Fatalf("starts = %v, reopens = %v; want neither for a refused open", f.fleet.startCalls, f.db.reopened)
+	}
+	if len(f.db.openParentAsked) != 1 || f.db.openParentAsked[0] != parent {
+		t.Fatalf("parents asked = %v, want [parent]", f.db.openParentAsked)
+	}
+}
+
+func TestOpenAsksNoParentForAnOpenWorkspace(t *testing.T) {
+	// Arrange -- an open legacy child is no re-open, whatever its parent.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	parent := ids.WorkspaceID("parent")
+	ws.Parent = &parent
+	f.db.with(ws)
+	f.db.openParentErr = errParentNotOpen
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err != nil || len(f.db.openParentAsked) != 0 {
+		t.Fatalf("Open = %v asking %v, want success asking nothing", err, f.db.openParentAsked)
+	}
+}
+
+func TestOpenAnswersAReopenTheFamilyRulesRefuse(t *testing.T) {
+	// Arrange -- the parent closed between the read and the re-open.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	ws.Closed = true
+	f.db.with(ws)
+	f.db.setClosedErr = errParentNotOpen
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	requireFamilyAnswer(t, f, err, errParentNotOpen, opOpen)
+}
+
+func TestOpenFailsWhenTheParentCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	ws.Closed = true
+	parent := ids.WorkspaceID("parent")
+	ws.Parent = &parent
+	f.db.with(ws)
+	f.db.openParentErr = errors.New("disk I/O error")
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err == nil || !loggedAtError(f, opOpen) {
+		t.Fatalf("Open = %v, want a failure recorded at ERROR", err)
+	}
+	if len(f.fleet.startCalls) != 0 {
+		t.Fatalf("starts = %v, want none", f.fleet.startCalls)
+	}
 }

@@ -110,7 +110,9 @@ type ParentChange struct {
 // merge target the parent's checkout (or, for nil, the repository's main
 // checkout), in one transaction. The new parent must be a registered
 // workspace of the same repository, and neither the workspace nor one of its
-// descendants; a workspace with no creation job has no merge to retarget.
+// descendants; a workspace with no creation job has no merge to retarget. A
+// new parent that is hidden, closed or closing is refused with
+// ParentNotOpenError (family.go).
 // Every check runs inside the transaction, so a retarget racing another cannot
 // close a cycle the check did not see. An unknown workspace is ErrNotFound.
 func (s *store) SetParent(ctx context.Context, id WorkspaceID, parent *WorkspaceID) (ParentChange, error) {
@@ -189,6 +191,11 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *Workspac
 			return ParentChange{}, refused(ParentUnknown)
 		}
 		if err != nil {
+			return ParentChange{}, err
+		}
+		// A WORKSPACE IS NEVER MOVED UNDER A PARENT THAT IS NOT OPEN
+		// (family.go).
+		if err := requireOpenParent(ctx, tx, *parent); err != nil {
 			return ParentChange{}, err
 		}
 		if repo != current.repo {

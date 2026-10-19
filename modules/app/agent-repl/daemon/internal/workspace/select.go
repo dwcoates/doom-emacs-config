@@ -268,6 +268,11 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 // answered cold gate (AnswerColdGate) both reach it.
 func (v *verbs) recordHidden(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, hidden bool) error {
 	if err := v.deps.DB.SetHidden(ctx, ws, hidden, v.now()); err != nil {
+		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST
+		// (wsm/family.go): the refusal is the answer.
+		if refusedByFamily(log, opSetHidden, err) {
+			return err
+		}
 		log.Error(opSetHidden, "could not record whether the workspace is hidden", dlog.Context{"hidden": hidden, "cause": err.Error()})
 		return fmt.Errorf("set hidden on %q: %w", ws, err)
 	}

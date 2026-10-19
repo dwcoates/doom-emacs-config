@@ -232,3 +232,30 @@ func TestOnlyRefuseUnrestorableRaisesTheUnrestorableArm(t *testing.T) {
 		t.Fatalf("functions naming ArmWorktreeUnrestorable = %v, want only refuseUnrestorable", got)
 	}
 }
+
+func TestRefusedByFamilyAnswersOnlyTheFamilyRules(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "open children", err: fmt.Errorf("close: %w", errOpenChildren), want: true},
+		{name: "a parent not open", err: fmt.Errorf("open: %w", errParentNotOpen), want: true},
+		{name: "an ordinary failure", err: errors.New("disk I/O error"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+
+			// Act
+			got := refusedByFamily(log, "daemon.workspace.test", tt.err)
+
+			// Assert
+			_, recorded := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.workspace.test"})
+			if got != tt.want || recorded != tt.want {
+				t.Fatalf("refusedByFamily = %v (recorded %v), want %v", got, recorded, tt.want)
+			}
+		})
+	}
+}

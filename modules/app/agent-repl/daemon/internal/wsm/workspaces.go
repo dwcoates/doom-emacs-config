@@ -172,7 +172,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 
 // RegisterWorkspace records a workspace, idempotent by normalized dir. It mints
 // the WorkspaceID and, on first sight of the repository, the RepoID. The bool
-// reports whether the record was created.
+// reports whether the record was created. A new workspace whose parent is not
+// open is refused with ParentNotOpenError, nothing written (family.go); a
+// merge workspace is exempt, being drawn nowhere until it is revealed.
 func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts RegisterFacts) (Workspace, bool, error) {
 	const op = "daemon.wsm.register_workspace"
 	normalized, err := normalizeDir(dir)
@@ -207,6 +209,14 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			return nil
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
+		}
+		// A NEW CHILD IS ONLY EVER MADE UNDER AN OPEN PARENT (family.go). A
+		// merge workspace is exempt: it is drawn nowhere until revealed, so it
+		// is no open child of the requester it forks.
+		if facts.Parent != nil && facts.MergeOf == nil {
+			if err := requireOpenParent(ctx, tx, *facts.Parent); err != nil {
+				return err
+			}
 		}
 		repoDir, err := normalizeDir(facts.RepoDir)
 		if err != nil {
@@ -554,6 +564,10 @@ func requireOneRow(res sql.Result, what string) error {
 // missing-directory close) can leave a closed row a later handover transfers.
 // This is the one helper every close goes through.
 //
+// A GESTURE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN: a close by the user
+// or an agent (CloseCause.isGesture) of a workspace with an open descendant is
+// refused with HasOpenChildrenError, nothing written (family.go).
+//
 // THE FIRST CLOSE IS THE ONE RECORDED: a row already closed keeps its record
 // (a kill marks the row closed before its teardown and again after it, and a
 // boot re-closes a row to release its serving ownership), except that a USER
@@ -572,9 +586,18 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		subscriptions int64
 	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &released)
+		var closed bool
+		err := scanWorkspaceRow(ctx, tx, id, "serving_instance, closed", &released, &closed)
 		if err != nil {
 			return err
+		}
+		// A USER'S OR AN AGENT'S CLOSE OF A WORKSPACE WITH OPEN CHILDREN IS
+		// REFUSED (family.go). The daemon's own closes record what already
+		// happened, and a row already closed is no close at all.
+		if !closed && closure.By.isGesture() {
+			if err := refuseOpenChildren(ctx, tx, id); err != nil {
+				return err
+			}
 		}
 		// `restamp` is evaluated against the row as it stood BEFORE this
 		// update: SQLite reads every right-hand side off the old row.
@@ -627,6 +650,9 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 // merge workspace the user opened is revealed, never drawn nowhere. A row that
 // is not merged keeps every one of those columns as it stands.
 //
+// A CLOSED WORKSPACE WHOSE PARENT IS NOT OPEN IS NOT RE-OPENED: the family
+// rules refuse it with ParentNotOpenError, and nothing is written (family.go).
+//
 // A REOPENED WORKSPACE KEEPS ITS CACHE WARM AGAIN, so the same statement
 // clears the projected cache lapse its close left (cachelapse.Keeper), unless
 // the row is still hidden, whose projection is the hide's.
@@ -635,9 +661,17 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
 		var mergeOf sql.NullString
-		var hidden bool
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, hidden", &merged, &mergeOf, &hidden); err != nil {
+		var hidden, closed bool
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, hidden, closed", &merged, &mergeOf, &hidden, &closed); err != nil {
 			return err
+		}
+		// A CLOSED CHILD IS RE-OPENED ONLY UNDER AN OPEN PARENT (family.go).
+		// A workspace already open is no re-open, so a legacy open child is
+		// never refused for a parent it already outlived.
+		if closed {
+			if err := requireOpenParentOf(ctx, tx, id); err != nil {
+				return err
+			}
 		}
 		fields["was_merged"] = merged.Valid
 		columns := []workspaceColumn{
@@ -782,18 +816,41 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 // waits for the shim's own projection rather than reading an old one. Hiding a workspace already hidden re-stamps it, so
 // the instant is always the latest hide. An unknown workspace is refused
 // (ErrNotFound), never a write that touched nothing.
+//
+// A WORKSPACE WITH OPEN CHILDREN IS NOT HIDDEN, and a hidden child is not
+// shown under a parent that is not open: both are refused by the family rules,
+// nothing written (family.go).
 func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error {
 	var hiddenAt any
-	fields := dlog.Context{"hidden": hidden}
+	fields := dlog.Context{"workspace": string(id), "hidden": hidden}
 	if hidden {
 		hiddenAt = nanos(at)
 		fields["hidden_at"] = at
 	}
-	return s.setWorkspaceColumns(ctx, "daemon.wsm.set_hidden", id, fields,
-		workspaceColumn{name: "hidden", value: hidden},
-		workspaceColumn{name: "hidden_at", value: hiddenAt},
-		workspaceColumn{name: "cache_lapses_at", value: nil},
-		workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
+	return s.write(ctx, "daemon.wsm.set_hidden", fields, func(ctx context.Context, tx *sql.Tx) error {
+		var was bool
+		if err := scanWorkspaceRow(ctx, tx, id, "hidden", &was); err != nil {
+			return err
+		}
+		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST (family.go).
+		// Only a change is judged: a re-stamp of a hide, or a show of a shown
+		// workspace, moves nothing between lists.
+		switch {
+		case hidden && !was:
+			if err := refuseOpenChildren(ctx, tx, id); err != nil {
+				return err
+			}
+		case !hidden && was:
+			if err := requireOpenParentOf(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		return updateWorkspaceColumns(ctx, tx, id,
+			workspaceColumn{name: "hidden", value: hidden},
+			workspaceColumn{name: "hidden_at", value: hiddenAt},
+			workspaceColumn{name: "cache_lapses_at", value: nil},
+			workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
+	})
 }
 
 // SetCurrent records the user's selection of a workspace at an instant. At most

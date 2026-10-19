@@ -117,6 +117,18 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	if source.Branch != "" {
 		fields["branch"] = source.Branch
 	}
+	// A MERGE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN (wsm/family.go).
+	// Asked before anything is flushed or recorded, so a refused merge
+	// changes nothing; the request's own transaction checks again, which is
+	// the guarantee. The refusal is the answer, has_open_children.
+	if err := o.deps.DB.RequireNoOpenChildren(ctx, source.Closes(ws, record.MergeOf)...); err != nil {
+		if wsm.IsFamilyRefusal(err) {
+			log.Info(op, "refused a merge that would close a workspace with open children", withField(fields, "error", err.Error()))
+			return err
+		}
+		log.Error(op, "could not read whether the merge closes a workspace with open children", withField(fields, "error", err.Error()))
+		return err
+	}
 	session, found, err := o.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace's session", withField(fields, "error", err.Error()))
@@ -169,6 +181,10 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 			refusal := refuse(arm, ws, "the merge already stands %s in its repository's queue", queued.State)
 			log.Warn(op, "refused a duplicate merge request", withField(fields, "repo", string(repo)))
 			return refusal
+		}
+		if wsm.IsFamilyRefusal(err) {
+			log.Info(op, "refused a merge that would close a workspace with open children", withField(fields, "error", err.Error()))
+			return err
 		}
 		log.Error(op, "could not record the merge request", withField(fields, "error", err.Error()))
 		return err

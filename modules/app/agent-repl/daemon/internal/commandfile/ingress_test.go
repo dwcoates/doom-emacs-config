@@ -1362,6 +1362,9 @@ func TestApplyFileQuarantinesARetargetAsAnAnswerOrAFault(t *testing.T) {
 		{name: "a session parked at its cold gate", parent: `null`,
 			err:       fmt.Errorf("retarget w1: notify: submit: %w", &promptqueue.ColdGateRefusal{Detail: "resumed cold"}),
 			wantCause: "cold gate", wantLevel: "info", wantCalls: 1},
+		{name: "a family rule refusing", parent: `null`,
+			err:       fmt.Errorf("retarget w1: %w", &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "p", Dir: "/tree/p"}, State: wsm.ParentHidden}),
+			wantCause: "parent p is hidden", wantLevel: "info", wantCalls: 1},
 		{name: "a retarget that failed", parent: `null`, err: errors.New("disk I/O error"),
 			wantCause: "disk I/O error", wantLevel: "warn", wantCalls: 1},
 	}
