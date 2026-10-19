@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -3830,6 +3831,28 @@ func TestStartTimesEachStepOfTheSessionsStart(t *testing.T) {
 	}
 }
 
+func TestWithRecordTakesTheRecordsFacts(t *testing.T) {
+	tests := []struct {
+		name   string
+		record wsm.Workspace
+		want   bool
+	}{
+		{name: "a shown workspace runs its keep-alives", record: wsm.Workspace{ID: "w1"}, want: false},
+		{name: "a hidden workspace not selected holds them", record: wsm.Workspace{ID: "w1", Hidden: true}, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := source{VendorSessionID: "vendor-1"}.withRecord(tc.record)
+
+			// Assert.
+			if got.HoldKeepalive != tc.want || got.VendorSessionID != "vendor-1" {
+				t.Fatalf("withRecord = %+v, want HoldKeepalive %v and the source otherwise as it was", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -3847,5 +3870,40 @@ func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
 	got := sessionSteps(&f.restarts)[before:]
 	if fmt.Sprint(got) != fmt.Sprint([]string{"slot_wait/cold_answer/ok", "vendor/cold_answer/ok"}) {
 		t.Fatalf("steps = %v, want the cold answer's slot wait and vendor start", got)
+	}
+}
+
+// EVERY BRING-UP TAKES THE RECORD'S FACTS THROUGH withRecord: no other code
+// in the package sets a source's record facts, so a path that hand-copied one
+// and forgot another fails here.
+func TestEveryBringUpTakesTheRecordThroughWithRecord(t *testing.T) {
+	// Arrange.
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob the package: %v", err)
+	}
+	handCopied := regexp.MustCompile(`HoldKeepalive\s*[:=]\s*record\.`)
+	helperBody := regexp.MustCompile(`(?s)func \(src source\) withRecord\(.*?\n}\n`)
+
+	// Act.
+	var found []string
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		// withRecord's own body is the one copy there is meant to be.
+		body := helperBody.ReplaceAll(raw, nil)
+		if handCopied.Match(body) {
+			found = append(found, path)
+		}
+	}
+
+	// Assert.
+	if len(found) > 0 {
+		t.Fatalf("these files copy the record onto a source by hand instead of withRecord: %v", found)
 	}
 }
