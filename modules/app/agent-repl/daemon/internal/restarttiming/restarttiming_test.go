@@ -1,4 +1,4 @@
-package restarttiming
+package restarttiming_test
 
 import (
 	"errors"
@@ -6,26 +6,28 @@ import (
 	"time"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 )
 
 func TestConstructorsLabelEachRestart(t *testing.T) {
 	ws := ids.WorkspaceID("w1")
 	cases := []struct {
 		name      string
-		got       Observation
-		restart   Restart
+		got       restarttiming.Observation
+		restart   restarttiming.Restart
 		phase     string
 		cause     string
-		outcome   Outcome
+		outcome   restarttiming.Outcome
 		workspace ids.WorkspaceID
 		seconds   float64
 	}{
-		{"deploy", OfDeploy(DeployBuild, OK, 2*time.Second), Deploy, "build", "", OK, "", 2},
-		{"boot", OfBoot(BootServing, BootSuccessor, 1500*time.Millisecond), DaemonBoot, "serving", "successor", OK, "", 1.5},
-		{"service", OfService(Store, Failed, time.Second), ServiceRestart, "store", "", Failed, "", 1},
-		{"workspace start", OfWorkspaceStart(ws, StartWake, StartTakeover, OK, 3*time.Second), WorkspaceStart, "wake", "takeover", OK, ws, 3},
-		{"shim restart", OfShimRestart(ws, ShimResume, "build_stale", OK, 4*time.Second), ShimRestart, "resume", "build_stale", OK, ws, 4},
-		{"transfer", OfTransfer(ws, TransferRun, OK, 250*time.Millisecond), Transfer, "run", "", OK, ws, 0.25},
+		{"deploy", restarttiming.OfDeploy(restarttiming.DeployBuild, restarttiming.OK, 2*time.Second), restarttiming.Deploy, "build", "", restarttiming.OK, "", 2},
+		{"boot", restarttiming.OfBoot(restarttiming.BootServing, restarttiming.BootSuccessor, 1500*time.Millisecond), restarttiming.DaemonBoot, "serving", "successor", restarttiming.OK, "", 1.5},
+		{"service", restarttiming.OfService(restarttiming.Store, restarttiming.Failed, time.Second), restarttiming.ServiceRestart, "store", "", restarttiming.Failed, "", 1},
+		{"workspace start", restarttiming.OfWorkspaceStart(ws, restarttiming.StartWake, restarttiming.StartTakeover, restarttiming.OK, 3*time.Second), restarttiming.WorkspaceStart, "wake", "takeover", restarttiming.OK, ws, 3},
+		{"shim restart", restarttiming.OfShimRestart(ws, restarttiming.ShimResume, "build_stale", restarttiming.OK, 4*time.Second), restarttiming.ShimRestart, "resume", "build_stale", restarttiming.OK, ws, 4},
+		{"transfer", restarttiming.OfTransfer(ws, restarttiming.TransferRun, restarttiming.OK, 250*time.Millisecond), restarttiming.Transfer, "run", "", restarttiming.OK, ws, 0.25},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,23 +53,45 @@ func TestNegativeDurationPanics(t *testing.T) {
 	}()
 
 	// Act
-	OfDeploy(DeployTotal, OK, -time.Millisecond)
+	restarttiming.OfDeploy(restarttiming.DeployTotal, restarttiming.OK, -time.Millisecond)
 }
 
 func TestOutcomeOf(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
-		want Outcome
+		want restarttiming.Outcome
 	}{
-		{"nil is ok", nil, OK},
-		{"an error is failed", errors.New("boom"), Failed},
+		{"nil is ok", nil, restarttiming.OK},
+		{"an error is failed", errors.New("boom"), restarttiming.Failed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := OutcomeOf(tc.err); got != tc.want {
+			if got := restarttiming.OutcomeOf(tc.err); got != tc.want {
 				t.Fatalf("OutcomeOf(%v) = %s, want %s", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestABootTimerTimesEachPhaseFromTheProcessStart(t *testing.T) {
+	// Arrange
+	started := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	now := started
+	var rec restarttimingtest.Recorder
+	timer := restarttiming.NewBootTimer(&rec, restarttiming.BootSuccessor, started, func() time.Time { return now })
+
+	// Act
+	now = started.Add(2 * time.Second)
+	timer.Reached(restarttiming.BootClaim)
+	now = started.Add(5 * time.Second)
+	timer.Reached(restarttiming.BootServing)
+
+	// Assert
+	got := rec.Observations()
+	if len(got) != 2 ||
+		got[0].Phase() != "claim" || got[0].Seconds() != 2 || got[0].Cause() != "successor" ||
+		got[1].Phase() != "serving" || got[1].Seconds() != 5 {
+		t.Fatalf("observations = %+v, want claim at 2s and serving at 5s, both successor", got)
 	}
 }

@@ -138,6 +138,9 @@ const (
 	StartBoot StartVia = "boot"
 	// StartTakeover is a successor taking workspaces over.
 	StartTakeover StartVia = "takeover"
+	// StartEditor is an editor opening its tabs: Emacs starting, or
+	// reconnecting to a daemon that serves them with no session.
+	StartEditor StartVia = "editor_open"
 )
 
 // StartPhase is what a workspace's start was, its `phase`.
@@ -259,4 +262,24 @@ func OfTransfer(ws ids.WorkspaceID, p TransferPhase, outcome Outcome, d time.Dur
 // anything but its own short lock.
 type Recorder interface {
 	ObserveRestart(o Observation)
+}
+
+// BootTimer times one daemon process's boot phases, each from the process's
+// own start.
+type BootTimer struct {
+	recorder Recorder
+	mode     BootMode
+	started  time.Time
+	now      func() time.Time
+}
+
+// NewBootTimer answers the timer of a process that started at started and
+// booted in mode, reading the clock through now.
+func NewBootTimer(recorder Recorder, mode BootMode, started time.Time, now func() time.Time) BootTimer {
+	return BootTimer{recorder: recorder, mode: mode, started: started, now: now}
+}
+
+// Reached records that the boot reached phase now.
+func (b BootTimer) Reached(phase BootPhase) {
+	b.recorder.ObserveRestart(OfBoot(phase, b.mode, b.now().Sub(b.started)))
 }
