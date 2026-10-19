@@ -543,9 +543,30 @@ message RosterSubsection {
   // `rows` (field 3) is RETIRED and reserved, as RosterRepoSection's is.
   reserved 3;
   reserved "rows";
-  // The subsection's open workspaces below the header, in drawn order.
+  // The subsection's open workspaces below the header, in drawn order. A
+  // collapsed subsection still lists them, each with a folded tab.
   RosterOpenRows open_rows = 4;
+  // WHETHER THE SUBSECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), for
+  // the same two readers as a repository section's fold: the sidebar hides a
+  // collapsed subsection's rows, and the Emacs tab bar hides its workspaces
+  // from its tabs, numbering and navigation (each open row's tab is folded).
+  // A collapsed repository folds its subsections' rows whatever each
+  // subsection's own fold says. Never unset on a wire subsection.
+  oneof fold {
+    // The rows are shown, and the subsection's workspaces have tabs (unless
+    // the repository is collapsed).
+    RosterSubsectionExpanded expanded = 5;
+    // The rows are hidden, and the subsection's workspaces have no tabs on
+    // the bar.
+    RosterSubsectionCollapsed collapsed = 6;
+  }
 }
+
+// An expanded subsection. DELIBERATELY EMPTY: the arm is the fact.
+message RosterSubsectionExpanded {}
+
+// A collapsed subsection. DELIBERATELY EMPTY: the arm is the fact.
+message RosterSubsectionCollapsed {}
 
 // A subsection's stable identity, echoed back as agentrepl.v1.SubsectionRef.
 message RosterSubsectionKey {

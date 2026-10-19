@@ -24,6 +24,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/subsection.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -70,6 +71,12 @@ message SidebarViewFoldSection {
     // hides rows in the sidebar only: the Emacs tab bar draws an open
     // workspace whether the section is folded or not.
     SidebarViewOpen open = 9;
+    // One subsection of a repository's section, echoed from
+    // frontend.v1.RosterSubsectionKey. Its fold has the repository fold's two
+    // readers and the same effect on its workspaces: the Emacs tab bar hides
+    // them, and COLLAPSING STANDS THEIR SESSIONS DOWN as a repository's
+    // collapse does. EXPANDING starts nothing by itself.
+    SubsectionRef subsection = 10;
   }
   // THE ARM IS THE FOLD ASKED FOR. Unset is malformed.
   oneof fold {
@@ -117,8 +124,14 @@ message UpdateSidebarViewError {
   oneof cause {
     // No registered repository matches the ref.
     UpdateSidebarViewUnknownRepository unknown_repository = 1;
+    // No subsection matches the ref: it was deleted, or never existed.
+    UpdateSidebarViewUnknownSubsection unknown_subsection = 3;
   }
 }
+
+// No subsection matches the ref. DELIBERATELY EMPTY: the arm is the cause,
+// and the request names the subsection.
+message UpdateSidebarViewUnknownSubsection {}
 
 // No registered repository matches the ref. DELIBERATELY EMPTY: the arm is
 // the cause.

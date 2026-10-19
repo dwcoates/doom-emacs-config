@@ -386,6 +386,12 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   it waits) and `RegisterWorkspaceError.parent_not_open` (an editor
   announcing a closed workspace re-opens it, which the family rules govern
   as they govern OpenWorkspace).
+- **Subsection folds (owner, 2026-10-19):** `RosterSubsection.fold`
+  (expanded, collapsed) and `SidebarViewFoldSection.subsection`, with
+  `UpdateSidebarViewError.unknown_subsection`. A collapsed subsection has
+  the effect a collapsed repository has: its rows are hidden in the
+  sidebar, its workspaces' tabs are folded off the tab bar, and collapsing
+  stands their sessions down.
 - **Why the new field numbers:** a rolling deploy can pair a new daemon with
   an old client for a moment; a reused number with a new type would decode
   as garbage, while a new number decodes as an unknown field.
