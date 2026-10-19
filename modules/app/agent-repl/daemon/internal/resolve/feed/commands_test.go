@@ -89,7 +89,7 @@ func TestPromptCommandsNamesTheCatalogCommandsTheTextSlashes(t *testing.T) {
 		{
 			name: "a block that is not text names nothing",
 			prompt: userPromptOf(&frontendv1.FeedUserPromptBlock{Block: &frontendv1.FeedUserPromptBlock_Quote{
-				Quote: &frontendv1.FeedQuoteBlock{Text: "/merge-queue"},
+				Quote: &frontendv1.FeedQuoteBlock{Quoted: "/merge-queue"},
 			}}),
 			catalog: catalogtest.Named("merge-queue"),
 			want:    nil,

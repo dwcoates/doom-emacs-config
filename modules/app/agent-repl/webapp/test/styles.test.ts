@@ -35,7 +35,7 @@ import {
 } from "../src/bubble/draw.js";
 import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
-import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
+import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
@@ -3798,14 +3798,31 @@ describe("a reply's quote in a prompt bubble", () => {
     // Arrange / Act
     const selectors = quoteRules().flatMap((rule) => rule.selectors);
     // Assert
-    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_QUOTE_CLASS}`]);
+    expect(selectors).toEqual([
+      `.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_QUOTE_CLASS}`,
+      `.bubble-scroll:not(.expanded) > .bubble-body > .${QUOTE_PARTS_CLASS} .${BUBBLE_QUOTE_CLASS}`,
+    ]);
   });
 
   it("takes the hidden quote out of layout", () => {
     // Arrange / Act
     const declarations = quoteRules().map((rule) => rule.declarations.trim());
     // Assert
-    expect(declarations).toEqual(["display: none;"]);
+    expect(declarations).toEqual(["display: none;", "display: none;"]);
+  });
+
+  it("draws the quote's heading and closing marker smaller than the prompt's words", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.${QUOTE_MARKER_CLASS}`) ?? "";
+    // Assert
+    expect(rule).toMatch(/font-size:\s*0\.88em/);
+  });
+
+  it("draws the quote's heading and closing marker greyer than the prompt's words", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.${QUOTE_MARKER_CLASS}`) ?? "";
+    // Assert
+    expect(rule).toMatch(/color:\s*color-mix\(in srgb, var\(--fg\) 55%, var\(--muted\)\)/);
   });
 });
 

@@ -128,3 +128,37 @@
   left out.
 - Every change adds an arm or a message, or changes a comment, so no package
   version changes.
+
+## The feed quote is drawn from its parts (owner request, 2026-10-19)
+
+### The request
+
+- The quote's heading ("⟢ Replying to an earlier response of yours", without
+  its colon) shows in the collapsed prompt bubble too.
+- The heading is slightly smaller and greyer than the prompt's words.
+- The quoted text is drawn as a code block.
+
+### What was wrong
+
+- The feed drew the whole composed text as markdown.
+- A quoted response is usually a metaprompt tree, and the webapp draws a
+  language-less fenced tree as a tree, so the quote never read as code.
+- The heading could not be shown alone without the client parsing the text.
+
+### The design
+
+- `frontend.v1.FeedQuoteBlock` retires `text` (tag 1, reserved) for three
+  fields: `heading`, `quoted` and `closing`.
+  - `heading` and `closing` are the wording the agent was told, without
+    their trailing colons.
+  - `quoted` is the quoted bubble's markdown, unfenced.
+- The daemon takes the composed quote apart with `replyquote.Split`, the
+  inverse of `replyquote.Block`, so the wording still lives in one package.
+  - Every quote block is `replyquote.Block`'s, so one that does not split is
+    an invariant violation: recorded at ERROR
+    (`daemon.feed.quote_unsplittable`) and panicked on.
+- The webapp draws the heading in both views, and its colon, the quoted text
+  (as the shared fence code block, `codeBlockHtml`, never parsed as markdown)
+  and the closing marker only in the expanded view.
+- `conversation.v1.UserQuoteBlock` is unchanged: the record stays the text the
+  agent received, and the held-prompt tray still draws it verbatim.

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"fmt"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -10,6 +11,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
+	"agent-repld/internal/replyquote"
 )
 
 // ① THE PROMPT ROWS. Two kinds, one shape of thing: what a PERSON typed, and
@@ -478,18 +480,30 @@ func DrawUserBlocks(
 				},
 			})
 		case *conversationv1.UserContentBlock_Quote:
-			// A QUOTED BUBBLE IS ITS OWN DRAWN BLOCK, verbatim and unstripped:
-			// the daemon composed it (replyquote), so it holds no host
-			// sentinel span, and the client draws it only in the expanded
-			// bubble.
+			// A QUOTED BUBBLE IS ITS OWN DRAWN BLOCK, unstripped and taken
+			// apart into its parts: the daemon composed it (replyquote), so
+			// it holds no host sentinel span, and the client draws each part
+			// in its own place without parsing text.
 			blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
-				Block: &frontendv1.FeedUserPromptBlock_Quote{
-					Quote: &frontendv1.FeedQuoteBlock{Text: b.Quote.GetText()},
-				},
+				Block: &frontendv1.FeedUserPromptBlock_Quote{Quote: drawQuote(b.Quote, log)},
 			})
 		}
 	}
 	return blocks
+}
+
+// drawQuote is QUOTE taken apart for drawing (replyquote.Split). Every quote
+// block is composed by replyquote.Block, so one that does not split is an
+// invariant violation: recorded once and panicked on, never drawn as a guess.
+func drawQuote(quote *conversationv1.UserQuoteBlock, log dlog.Logger) *frontendv1.FeedQuoteBlock {
+	parts, err := replyquote.Split(quote.GetText())
+	if err != nil {
+		log.Error("daemon.feed.quote_unsplittable",
+			"a prompt's quote block was not composed by replyquote.Block, so it cannot be drawn",
+			dlog.Context{"characters": len(quote.GetText()), "cause": err.Error()})
+		panic(fmt.Sprintf("feed: a quote block did not split: %v", err))
+	}
+	return &frontendv1.FeedQuoteBlock{Heading: parts.Heading, Quoted: parts.Quoted, Closing: parts.Closing}
 }
 
 // resolveImage runs the injected resolver, refusing rather than guessing when

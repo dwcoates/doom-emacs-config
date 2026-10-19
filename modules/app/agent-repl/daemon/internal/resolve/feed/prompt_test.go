@@ -8,11 +8,15 @@ import (
 	"go/token"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/replyquote"
 	"agent-repld/internal/sessionwatcher"
 )
 
@@ -883,34 +887,64 @@ func TestTheJoinedTurnsTerminalSettlesTheFoldedPrompt(t *testing.T) {
 	}
 }
 
-// quoteBlock is the quote of an earlier bubble, as replyquote composes one.
-func quoteBlock(text string) *conversationv1.UserContentBlock {
-	return &conversationv1.UserContentBlock{
-		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text}},
-	}
+// quoteBlock is the quote of an earlier response quoting MARKDOWN, as
+// replyquote composes one.
+func quoteBlock(markdown string) *conversationv1.UserContentBlock {
+	return replyquote.Block(markdown, false)
 }
 
 // TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock pins that a reply's quote is
-// resolved into the row's own quote arm, ahead of the person's words, so the
-// client can draw it in the expanded bubble alone without parsing text.
+// resolved into the row's own quote arm, taken apart into its parts, ahead of
+// the person's words, so the client draws each part without parsing text.
 func TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 
 	// Act.
 	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
-		quoteBlock("⟢ quoted\n```\nParis.\n```"), textBlock("And its population?"))
+		quoteBlock("Paris."), textBlock("And its population?"))
 
 	// Assert.
 	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
 	if len(blocks) != 2 {
 		t.Fatalf("drawn blocks = %v, want the quote then the words", blocks)
 	}
-	if got := blocks[0].GetQuote().GetText(); got != "⟢ quoted\n```\nParis.\n```" {
-		t.Errorf("first block's quote = %q, want the quote verbatim", got)
+	want := &frontendv1.FeedQuoteBlock{Heading: replyquote.HeadingResponse, Quoted: "Paris.", Closing: replyquote.ClosingMarker}
+	if got := blocks[0].GetQuote(); !proto.Equal(got, want) {
+		t.Errorf("first block's quote = %v, want %v", got, want)
 	}
 	if got := blocks[1].GetText().GetText(); got != "And its population?" {
 		t.Errorf("second block's text = %q, want the person's words", got)
+	}
+}
+
+// TestAQuoteTextBlockDidNotComposeIsRecordedAndPanics pins the invariant:
+// every quote block is replyquote.Block's, so one that does not split is
+// recorded at ERROR and panicked on rather than drawn as a guess.
+func TestAQuoteTextBlockDidNotComposeIsRecordedAndPanics(t *testing.T) {
+	// Arrange.
+	content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: "not a composed quote"}}},
+	}}
+	log := dlog.NewTestLogger()
+
+	// Act.
+	panicked := func() (recovered any) {
+		defer func() { recovered = recover() }()
+		DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, log)
+		return nil
+	}()
+
+	// Assert.
+	if panicked == nil {
+		t.Fatal("DrawUserBlocks drew a quote replyquote.Block did not compose, want a panic")
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.feed.quote_unsplittable"})
+	if !ok {
+		t.Fatalf("records = %v, want an ERROR daemon.feed.quote_unsplittable", log.Records())
+	}
+	if record.Context["cause"] != replyquote.ErrNotComposed.Error() || record.Context["characters"] != len("not a composed quote") {
+		t.Fatalf("record context = %v, want the cause and the text's length", record.Context)
 	}
 }
 
@@ -928,7 +962,7 @@ func TestAQuoteIsDrawnUnstripped(t *testing.T) {
 
 	// Assert.
 	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	if got := blocks[0].GetQuote().GetText(); got != "the quote" {
+	if got := blocks[0].GetQuote().GetQuoted(); got != "the quote" {
 		t.Fatalf("quote = %q, want it unstripped", got)
 	}
 }
@@ -948,7 +982,7 @@ func TestAReplayedQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
 
 	// Assert.
 	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	if len(blocks) != 2 || blocks[0].GetQuote().GetText() != "the quote" || blocks[1].GetText().GetText() != "And its population?" {
+	if len(blocks) != 2 || blocks[0].GetQuote().GetQuoted() != "the quote" || blocks[1].GetText().GetText() != "And its population?" {
 		t.Fatalf("replayed blocks = %v, want the quote then the words", blocks)
 	}
 }
@@ -958,7 +992,7 @@ func TestAReplayedQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
 // rather than dropping it.
 func TestAgentBlocksCarryAQuote(t *testing.T) {
 	// Arrange.
-	quote := &frontendv1.FeedQuoteBlock{Text: "the quote"}
+	quote := &frontendv1.FeedQuoteBlock{Heading: replyquote.HeadingResponse, Quoted: "the quote", Closing: replyquote.ClosingMarker}
 	blocks := []*frontendv1.FeedUserPromptBlock{{Block: &frontendv1.FeedUserPromptBlock_Quote{Quote: quote}}}
 
 	// Act.

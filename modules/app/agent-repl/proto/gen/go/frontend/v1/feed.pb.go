@@ -16291,16 +16291,22 @@ func (x *FeedUnsupportedBlock) GetKind() string {
 }
 
 // AN EARLIER BUBBLE THE PROMPT REPLIED TO (conversation.v1.UserQuoteBlock),
-// resolved for drawing. It belongs to the bubble's EXPANDED view only: a
-// collapsed prompt bubble shows the person's own words and hides every quote
-// block, and expanding the bubble shows each quote in its place among the
-// blocks, ahead of the words it introduces.
+// resolved for drawing: the daemon takes the composed quote apart into its
+// parts, so a client draws each part in its own place and never parses text.
+// The HEADING shows in both views (owner request, 2026-10-19), and the quoted
+// text and closing marker only in the bubble's EXPANDED view: a collapsed
+// prompt bubble shows the heading and the person's own words.
 type FeedQuoteBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The quote as the agent received it — the reply preamble, the quoted text
-	// inside a code fence, and the marker introducing the person's message —
-	// drawn as markdown, verbatim. Never parsed.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// What is quoted, as the agent was told it, without its trailing colon:
+	// e.g. "⟢ Replying to an earlier response of yours". Never empty.
+	Heading string `protobuf:"bytes,2,opt,name=heading,proto3" json:"heading,omitempty"`
+	// The quoted bubble's markdown, unfenced. A client draws it verbatim as a
+	// code block, never as markdown. May be empty.
+	Quoted string `protobuf:"bytes,3,opt,name=quoted,proto3" json:"quoted,omitempty"`
+	// The marker introducing the person's words, as the agent was told it,
+	// without its trailing colon: "⟢ My message". Never empty.
+	Closing       string `protobuf:"bytes,4,opt,name=closing,proto3" json:"closing,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -16335,9 +16341,23 @@ func (*FeedQuoteBlock) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{260}
 }
 
-func (x *FeedQuoteBlock) GetText() string {
+func (x *FeedQuoteBlock) GetHeading() string {
 	if x != nil {
-		return x.Text
+		return x.Heading
+	}
+	return ""
+}
+
+func (x *FeedQuoteBlock) GetQuoted() string {
+	if x != nil {
+		return x.Quoted
+	}
+	return ""
+}
+
+func (x *FeedQuoteBlock) GetClosing() string {
+	if x != nil {
+		return x.Closing
 	}
 	return ""
 }
@@ -25950,9 +25970,11 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x03src\x18\x01 \x01(\tR\x03src\x12\x10\n" +
 	"\x03alt\x18\x02 \x01(\tR\x03alt\"*\n" +
 	"\x14FeedUnsupportedBlock\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\"$\n" +
-	"\x0eFeedQuoteBlock\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xc1\x03\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\"h\n" +
+	"\x0eFeedQuoteBlock\x12\x18\n" +
+	"\aheading\x18\x02 \x01(\tR\aheading\x12\x16\n" +
+	"\x06quoted\x18\x03 \x01(\tR\x06quoted\x12\x18\n" +
+	"\aclosing\x18\x04 \x01(\tR\aclosingJ\x04\b\x01\x10\x02R\x04text\"\xc1\x03\n" +
 	"\x0fFeedAgentPrompt\x12=\n" +
 	"\aaddress\x18\x01 \x01(\v2#.frontend.v1.FeedAgentPromptAddressR\aaddress\x124\n" +
 	"\x04body\x18\x02 \x01(\v2 .frontend.v1.FeedAgentPromptBodyR\x04body\x12P\n" +
