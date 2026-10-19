@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/envc"
 )
 
@@ -202,7 +202,7 @@ func exitAccount(format, stdout string) string {
 // question on stdin, so the question never rides an argv a process listing
 // would show.
 func execCLI(ctx context.Context, bin string, args, env []string, stdin string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // daemon-resolved binary, never client input
+	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, args...) //nolint:gosec // daemon-resolved binary, never client input
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer

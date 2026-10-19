@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 )
@@ -26,7 +26,7 @@ func askBinary(ctx context.Context, bin, question string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, layoutProbeBound)
 	defer cancel()
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, question)
+	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, question)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

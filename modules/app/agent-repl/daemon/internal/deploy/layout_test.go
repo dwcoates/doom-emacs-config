@@ -119,7 +119,7 @@ func TestTheBinaryQuestionsShareAskBinary(t *testing.T) {
 	}
 
 	// Act
-	execs := strings.Count(string(src), "exec.CommandContext(")
+	execs := strings.Count(string(src), "childproc.CommandContext(")
 
 	// Assert
 	if execs != 1 {

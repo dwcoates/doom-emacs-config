@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/ids"
 )
 
@@ -114,7 +114,7 @@ type ExecRunner struct{}
 // Run executes bin with args and answers its standard output. A non-zero exit
 // is an error carrying the program's standard error.
 func (ExecRunner) Run(ctx context.Context, bin string, args []string, started func()) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

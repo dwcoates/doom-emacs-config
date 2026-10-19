@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/usersetup"
 )
@@ -265,7 +265,7 @@ func (o *opener) openDefault(ctx context.Context, url, profile string) error {
 // fails synchronously and loudly, which is the case an operator most needs to
 // see.
 func (o *opener) run(ctx context.Context, name string, args []string) error {
-	cmd := exec.Command(name, args...) //nolint:gosec // daemon-configured launcher, url validated above
+	cmd := childproc.Command(childproc.Stable, name, args...) //nolint:gosec // daemon-configured launcher, url validated above
 	// The launcher outlives this call; a pipe to the daemon's own stdio would
 	// keep a descriptor open for the life of a browser.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil

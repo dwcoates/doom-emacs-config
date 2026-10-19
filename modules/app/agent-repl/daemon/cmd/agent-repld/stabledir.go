@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+
+	"agent-repld/internal/childproc"
 )
 
 // stableDir is the working directory a serving daemon runs in.
@@ -15,9 +17,9 @@ import (
 // daemon started without a directory of its own inherited a deleted one: the
 // naming call's `claude -p` refused with "The current working directory was
 // deleted", and every create that needed a name failed (2026-10-18, four
-// one-shot dispatches). `/` always exists and no workspace's teardown removes
-// it.
-const stableDir = "/"
+// one-shot dispatches). It is childproc.Stable, the directory a child with no
+// directory of its own is started in.
+const stableDir = childproc.Stable
 
 // pathFlags is every path the command line hands the daemon, by flag name.
 // --store-socket is not among them: parseFlags already refuses a relative one

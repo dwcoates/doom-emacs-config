@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"agent-repld/internal/atomicfile"
+	"agent-repld/internal/childproc"
 )
 
 // JoiningFlag is the successor's binding argv spelling. Go's flag package
@@ -183,7 +183,7 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	// just been handed refusing connections. ctx still bounds the WAIT below,
 	// which is this call's own work; it must not bound the process this call
 	// exists to leave running.
-	cmd := exec.Command(s.Exe, successorArgv(s.Argv, incumbentAddress)...)
+	cmd := childproc.Command(childproc.Stable, s.Exe, successorArgv(s.Argv, incumbentAddress)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	// ITS OWN SESSION, WHICH IS WHAT "OUTLIVES" ACTUALLY TAKES.
@@ -275,7 +275,7 @@ func (s *ProcessSpawner) SpawnReplacement(_ context.Context) (int, error) {
 	if strings.TrimSpace(s.Exe) == "" {
 		return 0, fmt.Errorf("rollout: no daemon binary to spawn the replacement from")
 	}
-	cmd := exec.Command(s.Exe, replacementArgv(s.Argv)...)
+	cmd := childproc.Command(childproc.Stable, s.Exe, replacementArgv(s.Argv)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
