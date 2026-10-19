@@ -1905,19 +1905,73 @@ current workspace rides as the fork source, and no parent is sent."
                        (agent-repl-test-verbs--repo-ref)))))))
 
 (ert-deftest agent-repl-verbs-oneshot-asks-no-repository ()
-  "The one-shot derives its repository instead of asking."
+  "The one-shot finds its repository instead of asking."
   ;; Arrange.
   (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
     (agent-repl-test-verbs--with nil
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission"))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
-        ;; Act.
-        (agent-repl-create-oneshot nil)
-        ;; Assert.
-        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
-                       (agent-repl-test-verbs--repo-ref)))))))
+      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission"))
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _) (error "a one-shot must not ask for a repository"))))
+          ;; Act.
+          (agent-repl-create-oneshot nil)
+          ;; Assert.
+          (should agent-repl-test-verbs--sent))))))
+
+(ert-deftest agent-repl-verbs-oneshot-lands-in-agent-repls-repository-from-another-repository ()
+  "`SPC TAB o\=' from a workspace in another repository still lands in agent-repl\='s."
+  ;; Arrange: the current workspace sits in repo-one, not agent-repl's repository.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
+          ;; Act.
+          (agent-repl-create-oneshot nil)
+          ;; Assert.
+          (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                         (agent-repl-test-verbs--repo-ref
+                          "agent-repl-repo" "/tmp/agent-repl-test/doom"))))))))
+
+(ert-deftest agent-repl-verbs-oneshot-lands-in-agent-repls-repository-without-a-current-workspace ()
+  "`SPC TAB o\=' needs no current workspace: its repository is never derived."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil))
+                  ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
+          ;; Act.
+          (agent-repl-create-oneshot nil)
+          ;; Assert.
+          (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                         (agent-repl-test-verbs--repo-ref
+                          "agent-repl-repo" "/tmp/agent-repl-test/doom"))))))))
+
+(ert-deftest agent-repl-verbs-oneshot-refuses-when-agent-repls-repository-is-not-on-the-roster ()
+  "`SPC TAB o\=' never falls back to the current workspace\='s repository."
+  ;; Arrange: the roster carries only the current workspace's repository.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row))))
+        (logged nil))
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                  ((symbol-function 'agent-repl-verbs--read-prompt)
+                   (lambda (_p &optional _history-file _unseeded) (error "the commission must not be asked"))))
+          ;; Act.
+          (let ((err (should-error (agent-repl-create-oneshot nil) :type 'user-error)))
+            ;; Assert.
+            (should (string-match-p "is not on the roster" (cadr err)))
+            (should-not agent-repl-test-verbs--sent)
+            (should (cl-some (lambda (m)
+                               (string-match-p
+                                "\\`elisp.verbs.agent-repl-repository-unregistered module-root=.+ main=/tmp/agent-repl-test/doom\\'"
+                                m))
+                             logged))))))))
 
 (ert-deftest agent-repl-verbs-static-create-sends-its-name ()
   "The STATIC create asks a repository and a REQUIRED name, and sends both."
@@ -2090,6 +2144,10 @@ A fork that left no trace was indistinguishable from one never run."
                      (lambda (_c)
                        (setq logged-at-first-read (copy-sequence logs))
                        (signal 'quit nil)))
+                    ((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                     (lambda ()
+                       (setq logged-at-first-read (copy-sequence logs))
+                       (signal 'quit nil)))
                     ((symbol-function 'agent-repl-verbs--read-repository)
                      (lambda ()
                        (setq logged-at-first-read (copy-sequence logs))
@@ -2120,6 +2178,8 @@ A fork that left no trace was indistinguishable from one never run."
                       ((symbol-function 'agent-repl-verbs--section-of-ws)
                        (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                       ((symbol-function 'agent-repl-verbs--read-repository)
+                       (lambda () (agent-repl-test-verbs--repo-ref)))
+                      ((symbol-function 'agent-repl-verbs--agent-repl-repository)
                        (lambda () (agent-repl-test-verbs--repo-ref)))
                       ((symbol-function 'agent-repl-verbs--read-prompt)
                        (lambda (_p &optional _history-file _unseeded) (signal 'quit nil)))
@@ -2188,8 +2248,8 @@ is a contract breach and the user is owed the reason nothing came up."
   "A one-shot carries its prompt and NOTHING else: there is no finish choice,
 because what happens on completion is the repository's own directive."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
       (agent-repl-create-oneshot nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
@@ -2200,8 +2260,8 @@ because what happens on completion is the repository's own directive."
 (ert-deftest agent-repl-verbs-oneshot-carries-its-prompt ()
   "A one-shot IS its prompt, so the prompt travels as a UserSaid text block."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
       (agent-repl-create-oneshot nil)
       (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
@@ -2215,8 +2275,8 @@ because what happens on completion is the repository's own directive."
 (ert-deftest agent-repl-verbs-oneshot-refuses-a-blank-commission ()
   "A one-shot with no prompt is refused before a request is built."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "   ")))
       (should-error (agent-repl-create-oneshot nil) :type 'user-error)
       (should-not agent-repl-test-verbs--sent))))
@@ -2224,8 +2284,8 @@ because what happens on completion is the repository's own directive."
 (ert-deftest agent-repl-verbs-oneshot-prefix-arg-picks-a-model ()
   "A prefix argument threads the chosen model onto the shared facts."
   (agent-repl-test-verbs--with nil
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission"))
               ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
       (agent-repl-create-oneshot t)
@@ -2239,6 +2299,8 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+             ((symbol-function 'agent-repl-verbs--agent-repl-repository)
+              (lambda () (agent-repl-test-verbs--repo-ref)))
              ((symbol-function 'agent-repl-verbs--read-prompt)
               (lambda (label &optional _history-file _unseeded) (push label ,prompts) "fix its feed")))
      ,@body))
@@ -2328,13 +2390,27 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
           (agent-repl-create-explanation-engine-oneshot t)
           ;; Assert.
           (should (equal (reverse calls)
-                         '((agent-repl-create-oneshot nil nil agent-repl-verbs--oneshot-repository)
+                         '((agent-repl-create-oneshot nil nil agent-repl-verbs--agent-repl-repository)
                            (agent-repl-create-oneshot-for-current-workspace t t agent-repl-verbs--oneshot-repository)
                            (agent-repl-create-explanation-engine-oneshot
                             t nil agent-repl-verbs--explanation-engine-repository)))))))))
 
+(ert-deftest agent-repl-verbs-oneshot-for-current-workspace-lands-in-the-current-workspaces-repository ()
+  "`SPC TAB C-o\=' takes the current workspace\='s repository, not agent-repl\='s."
+  ;; Arrange: agent-repl's repository is on the roster beside repo-one.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fix its feed")))
+          ;; Act.
+          (agent-repl-create-oneshot-for-current-workspace nil)
+          ;; Assert.
+          (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                         (agent-repl-test-verbs--repo-ref))))))))
+
 (ert-deftest agent-repl-verbs-oneshot-repository-is-the-current-workspaces ()
-  "The ordinary one-shots take the repository the current workspace sits in."
+  "`SPC TAB C-o\=''s resolver takes the repository the current workspace sits in."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section))))
@@ -2841,8 +2917,8 @@ That is what survives a crash: nothing waits for the read to end."
   (agent-repl-test-verbs--with nil
     ;; Arrange.
     (let (history-files)
-      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+      (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref)))
                 ((symbol-function 'agent-repl-verbs--read-prompt)
                  (lambda (_p &optional history-file _unseeded) (push history-file history-files) "commission")))
         ;; Act.

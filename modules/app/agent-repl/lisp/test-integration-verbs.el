@@ -1993,14 +1993,19 @@ daemon's default instead."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
-      ;; A one-shot derives its repository (owner ruling, 2026-09-12), so the
-      ;; only picker it may open is the model one this prefix asks for.
+      ;; A one-shot finds its repository -- agent-repl's own (owner ruling,
+      ;; 2026-10-19), here the fixture repository standing in for it -- so
+      ;; the only picker it may open is the model one this prefix asks for.
       (agent-repl-itest-verbs--with-roster
           daemon (list (agent-repl-itest-verbs--roster-row
                         (plist-get ref :id) (plist-get ref :dir)
                         :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'agent-repl--main-worktree-for-dir)
+                   (lambda (_dir)
+                     (agent-repl--path-canonical
+                      (plist-get agent-repl-itest-verbs--repo :dir))))
                   ((symbol-function 'completing-read)
                    (lambda (prompt &rest _)
                      (if (string-prefix-p "Model" prompt) "haiku"
