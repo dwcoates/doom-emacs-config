@@ -289,31 +289,43 @@ func bulkyForeignSchema(t *testing.T, path string, megabytes int) {
 // with no socket listening, and the deploy gave up and left the rest of the
 // stack un-bounced.
 //
-// The bound is a small multiple of the observed healthy boot, which is about
-// twelve milliseconds over the staged file below. It is a regression fence on
-// the SERVING deadline, not the proof of the mechanism — that the file is
-// unlinked rather than emptied in place is pinned on the file's own identity in
-// internal/db. What this pins black-box is that a real store process over a
-// real foreign database on disk is answering calls in milliseconds.
+// WHAT IS PINNED IS THE STORE'S OWN WORK, NOT THE WALL CLOCK. A wall bound
+// failed only when the host was loaded (1.09s under two concurrent full runs,
+// 2026-10-19, with 70ms of the store's own CPU), and could not catch the
+// regression it fenced: a DROP of the staged 64 MiB costs about 70ms, under
+// any sane wall bound. So the store must REPLACE the discarded file rather
+// than empty it (a new file at the path, the mechanism internal/db pins on
+// the file's identity), and reach its socket on a small budget of its own CPU.
 func TestAStoreOverABulkyForeignSchemaIsServingPromptly(t *testing.T) {
 	// Arrange
 	dbPath := filepath.Join(t.TempDir(), "events.db")
 	bulkyForeignSchema(t, dbPath, 64)
-	info, err := os.Stat(dbPath)
+	staged, err := os.Stat(dbPath)
 	if err != nil {
 		t.Fatalf("stat the staged database: %v", err)
 	}
 
 	// Act: startStore returns only once the socket accepts connections.
-	began := time.Now()
 	store := startStore(t, storeOptions{dbPath: dbPath})
-	elapsed := time.Since(began)
+	cpu, err := processCPU(store.cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("read the store's CPU: %v", err)
+	}
 
-	// Assert: it came up promptly, and it came up EMPTY.
-	const bound = 500 * time.Millisecond
-	if elapsed > bound {
-		t.Fatalf("a store over a %d MiB foreign schema took %v to serve, want under %v — a boot that scales with the discarded file is a DROP, not an unlink\nstderr:\n%s",
-			info.Size()>>20, elapsed, bound, store.stderrText())
+	// Assert: it replaced the foreign file, came up on little of its own CPU,
+	// and came up EMPTY.
+	served, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat the served database: %v", err)
+	}
+	if os.SameFile(staged, served) {
+		t.Fatalf("the store emptied the %d MiB foreign database in place instead of replacing it — a DROP, not an unlink\nstderr:\n%s",
+			staged.Size()>>20, store.stderrText())
+	}
+	const budget = 500 * time.Millisecond
+	if cpu > budget {
+		t.Fatalf("a store over a %d MiB foreign schema spent %v of its own CPU reaching its socket, want under %v\nstderr:\n%s",
+			staged.Size()>>20, cpu, budget, store.stderrText())
 	}
 	ctx, cancel := callContext(t)
 	defer cancel()
