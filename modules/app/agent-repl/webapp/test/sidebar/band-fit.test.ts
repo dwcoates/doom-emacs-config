@@ -103,7 +103,7 @@ function region(pane: HTMLElement, cls: SectionClass): HTMLElement | null {
   return pane.querySelector(`:scope > .${cls}`)?.querySelector<HTMLElement>(REGIONS[cls]) ?? null;
 }
 
-/** Lay one section's rows region out: its lines ROW px each, capped by its max-height. */
+/** Lay one section's rows region out: its lines ROW px each, as tall as its height says, else capped by its max-height. */
 function layRegion(pane: HTMLElement, cls: SectionClass): void {
   const section = pane.querySelector<HTMLElement>(`:scope > .${cls}`);
   const rows = region(pane, cls);
@@ -112,6 +112,7 @@ function layRegion(pane: HTMLElement, cls: SectionClass): void {
   const full = lines.length * ROW;
   const height = (): number => {
     if (section.classList.contains("folded")) return 0;
+    if (rows.style.height !== "") return Number.parseFloat(rows.style.height);
     return rows.style.maxHeight === "" ? full : Number.parseFloat(rows.style.maxHeight);
   };
   rows.getBoundingClientRect = () => rect(0, height());
@@ -168,6 +169,11 @@ function maxHeight(pane: HTMLElement, cls: SectionClass): string {
 /** Every section's region max-height, top to bottom. */
 function maxHeights(pane: HTMLElement): string[] {
   return SECTIONS.map((cls) => maxHeight(pane, cls));
+}
+
+/** Every section's region height, as the fit wrote it, top to bottom. */
+function heights(pane: HTMLElement): string[] {
+  return SECTIONS.map((cls) => (region(pane, cls) as HTMLElement).style.height);
 }
 
 /** What `allocateSectionLines` is handed: sections of O, H and M lines, TODAY of M today's. */
@@ -385,7 +391,90 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(maxHeights(rail.pane)).toEqual(["280px", "60px", "60px"]);
+    expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "60px", "", "60px"]);
+  });
+
+  it("stretches Recently Merged to the rail's foot through a line it cuts", () => {
+    // Arrange — 410px of room: twenty whole lines and half of one more.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)).toEqual(["", "", "70px"]);
+  });
+
+  it("states the whole lines a stretched band shows", () => {
+    // Arrange — half a line of stretch.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(band(rail.pane, "merged-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("3");
+  });
+
+  it("stretches Recently Merged to the rail's foot when every line fits", () => {
+    // Arrange — 900px of room, 200px of lines.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    laidOut(rail, 1000, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect([...maxHeights(rail.pane), ...heights(rail.pane)]).toEqual(["", "", "", "", "", "780px"]);
+  });
+
+  it("stretches Hidden Workspaces when Recently Merged is folded", () => {
+    // Arrange
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { merged: true } });
+    laidOut(rail, 1000, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)).toEqual(["", "840px", ""]);
+  });
+
+  it("stretches the Open section when both bands are folded", () => {
+    // Arrange
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true, merged: true } });
+    laidOut(rail, 1000, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)).toEqual(["900px", "", ""]);
+  });
+
+  it("lets go of a stretch once a band below unfolds", () => {
+    // Arrange — fitted with Recently Merged folded, Hidden Workspaces stretched.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { merged: true } });
+    laidOut(rail, 1000, 100);
+    fitBands(rail.scroller, rail.pane, NOW);
+    band(rail.pane, "merged-section").classList.remove("folded");
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)).toEqual(["", "", "780px"]);
+  });
+
+  it("measures a stretched band from its rows, not its stretch", () => {
+    // Arrange — fitted once, stretched by half a line.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    const first = fitBands(rail.scroller, rail.pane, NOW);
+    // Act
+    const second = fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect([second, heights(rail.pane)[2]]).toEqual([first, "70px"]);
+  });
+
+  it("stretches nothing in a rail shorter than the headers", () => {
+    // Arrange — the other content alone overflows the rail.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    laidOut(rail, 50, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)).toEqual(["", "", "0px"]);
   });
 
   it("states the lines each section shows", () => {
@@ -538,7 +627,7 @@ describe("fitBands", () => {
   it("refuses a fit that moves its own room", () => {
     // Arrange — the pane's other content grows a pixel whenever Recently Merged is capped.
     const rail = drawn({ merged: 10, folded: { hidden: true } });
-    laidOut(rail, 200, () => (maxHeight(rail.pane, "merged-section") === "" ? 100 : 101));
+    laidOut(rail, 200, () => ((region(rail.pane, "merged-section") as HTMLElement).style.height === "" ? 100 : 101));
     // Act / Assert
     expect(() => fitBands(rail.scroller, rail.pane, NOW)).toThrow(/moved the room/);
   });
@@ -547,7 +636,7 @@ describe("fitBands", () => {
     // Arrange
     const capture = captureLogRecords();
     const rail = drawn({ merged: 10, folded: { hidden: true } });
-    laidOut(rail, 200, () => (maxHeight(rail.pane, "merged-section") === "" ? 100 : 101));
+    laidOut(rail, 200, () => ((region(rail.pane, "merged-section") as HTMLElement).style.height === "" ? 100 : 101));
     // Act
     expect(() => fitBands(rail.scroller, rail.pane, NOW)).toThrow();
     // Assert

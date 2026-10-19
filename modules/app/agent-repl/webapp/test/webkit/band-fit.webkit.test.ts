@@ -5,7 +5,8 @@
  * until Hidden Workspaces and Recently Merged are left three lines each, the
  * two sharing those six lines and Recently Merged claiming only today's
  * merges, any room the Open section cannot use goes to Hidden Workspaces and
- * then Recently Merged, and each section scrolls the rest. jsdom lays nothing out, so this draws a rail in
+ * then Recently Merged, the lowest open section's viewport reaches the rail's
+ * foot, and each section scrolls the rest. jsdom lays nothing out, so this draws a rail in
  * the shape the sidebar draws it, in real headless WebKit over the real
  * stylesheet, runs the REAL `fitBands` (src/sidebar/band-fit.ts, bundled), and
  * measures the viewports the engine draws.
@@ -88,8 +89,6 @@ interface Fitted {
   railScrolls: boolean;
   /** The rail's room left under the pane, in px. */
   slack: number;
-  /** One Hidden Workspaces row's drawn height, in px. */
-  rowHeight: number;
 }
 
 /** Draw a rail, fit its bands with the real module, and measure. */
@@ -128,7 +127,6 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
         Number.parseFloat(getComputedStyle(scroller).paddingBottom) -
         Number.parseFloat(getComputedStyle(scroller).borderBottomWidth) -
         pane.getBoundingClientRect().bottom,
-      rowHeight: (document.querySelector(".hidden-section .row") as HTMLElement).getBoundingClientRect().height,
     };
   }, markup);
 }
@@ -210,9 +208,14 @@ describe("the band fit in WebKit", () => {
     expect(got.railScrolls).toBe(false);
   });
 
-  it("cuts no line through in a rail out of room", async () => {
+  it("cuts no line of the Open section or Hidden Workspaces through in a rail out of room", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
-    expect([got.open.cut, got.hidden.cut, got.merged.cut]).toEqual([0, 0, 0]);
+    expect([got.open.cut, got.hidden.cut]).toEqual([0, 0]);
+  });
+
+  it("cuts at most Recently Merged's last line through, at the rail's foot", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    expect(got.merged.cut).toBeLessThanOrEqual(1);
   });
 
   it("gives Hidden Workspaces five lines beside one merge today", async () => {
@@ -232,7 +235,7 @@ describe("the band fit in WebKit", () => {
 
   it("shows three whole merged lines across several repository groups", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 3 }));
-    expect([got.merged.whole, got.merged.cut]).toEqual([3, 0]);
+    expect(got.merged.whole).toBe(3);
   });
 
   it("never leaves a group's header dangling at a viewport's foot", async () => {
@@ -286,13 +289,18 @@ describe("the band fit in WebKit", () => {
     expect([got.hidden.whole, got.merged.whole > 3, got.railScrolls]).toEqual([4, true, false]);
   });
 
-  it("leaves no room a band's line fits in while a band scrolls", async () => {
+  it("reaches the rail's foot at every rail height while a band scrolls", async () => {
     const heights = Array.from({ length: 31 }, (_, i) => 400 + i * 7);
-    const wasted: number[] = [];
+    const short: number[] = [];
     for (const height of heights) {
       const got = await fit(page, rail(height, { live: 12, repos: 4, hidden: 20, merged: 20, today: 0 }));
-      if ((got.hidden.scrolls || got.merged.scrolls) && got.slack >= got.rowHeight) wasted.push(height);
+      if (Math.abs(got.slack) > 0.5) short.push(height);
     }
-    expect(wasted).toEqual([]);
+    expect(short).toEqual([]);
+  });
+
+  it("reaches the rail's foot when every line fits", async () => {
+    const got = await fit(page, rail(880, { live: 2, hidden: 2, merged: 2 }));
+    expect(Math.abs(got.slack)).toBeLessThanOrEqual(0.5);
   });
 });
