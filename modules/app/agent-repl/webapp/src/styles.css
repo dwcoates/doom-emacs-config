@@ -2492,6 +2492,18 @@ html[data-page-unshown] *::after {
   margin-left: auto;
   flex: 0 0 auto;
 }
+/* A CLOCK THAT CLOSES ITS LINE ENDS ITS READING AT THE LINE'S END (owner
+   request, 2026-10-19): a head's clock and a tool group's tabline clock end
+   where the card's content does, just after a one-line title's `…`. Each is a
+   reserved clock (`.reserved-clock`), a box as wide as the widest reading it
+   can tick to, so a reading left in that box ended a whole reserve short of
+   the edge ("3s" in a "999h 59m" box). Set right in the box, the reading ends
+   on the box's right edge, and a tick grows it leftward into the reserve, so
+   the box still never changes width. */
+.head-clock,
+.feed-tabline-clock > .reserved-clock {
+  text-align: right;
+}
 .badge { font-size: calc(0.7rem * var(--feed-text-scale)); padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
