@@ -77,8 +77,21 @@ export function drawToolCardHead(parts: ToolCardHead): HTMLElement {
   const title = typeof parts.title === "string" ? drawToolName(parts.title) : parts.title;
   title.classList.add(TOOL_NAME_CLASS);
   head.append(title, parts.badge);
-  if (parts.clock !== undefined) head.append(asHeadClock(drawToolCardClock(parts.clock, parts.clockPath, parts.ticker)));
+  const clock = drawStatedToolCardClock(parts.clock, parts.clockPath, parts.ticker);
+  if (clock !== null) head.append(asHeadClock(clock));
   return head;
+}
+
+/**
+ * A tool card's clock where the producer stated one, or null where it stated
+ * none: the one way a card's head or its tabline (tabs.ts) gets its clock.
+ */
+export function drawStatedToolCardClock(
+  clock: FeedToolCardClock | undefined,
+  path: string,
+  ticker: Ticker,
+): HTMLElement | null {
+  return clock === undefined ? null : drawToolCardClock(clock, path, ticker);
 }
 
 /**

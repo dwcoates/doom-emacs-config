@@ -20,6 +20,7 @@ import {
   drawToolCardHead,
   drawToolHead,
   asHeadClock,
+  drawStatedToolCardClock,
 } from "../../../src/feed/cards/tool-head.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { runningClock, stoppedClock } from "./tool-card-head-shape.js";
@@ -189,10 +190,39 @@ describe("every head marks its clock through asHeadClock", () => {
     // Act
     const drawn = [...source.matchAll(/reserved(?:Live|Settled)ElapsedClock\(/g)].length;
     const marked = [...source.matchAll(/asHeadClock\(\s*reserved(?:Live|Settled)ElapsedClock\(/g)].length;
-    const viaCardClock = /asHeadClock\(drawToolCardClock\(/.test(source);
+    const viaCardClock = /head\.append\(asHeadClock\(clock\)\)/.test(source) && /drawStatedToolCardClock\(/.test(source);
 
     // Assert
     expect(file === "feed/cards/tool-head.ts" ? viaCardClock : drawn > 0 && marked === drawn).toBe(true);
+  });
+});
+
+describe("drawStatedToolCardClock", () => {
+  it("draws nothing where the producer stated no clock", () => {
+    expect(drawStatedToolCardClock(undefined, "X.clock", createTicker())).toBeNull();
+  });
+
+  it("draws a stated clock exactly as drawToolCardClock does", () => {
+    // Arrange
+    const clock = stoppedClock(1_000, 135_000);
+    // Act
+    const el = drawStatedToolCardClock(clock, "X.clock", createTicker());
+    // Assert
+    expect(el?.outerHTML).toBe(drawToolCardClock(clock, "X.clock", createTicker()).outerHTML);
+  });
+
+  it("refuses a stated clock that is malformed", () => {
+    expect(() => drawStatedToolCardClock(stoppedClock(5_000, 1_000), "X.clock", createTicker())).toThrow(MalformedView);
+  });
+
+  it("is the one way a card draws a clock it may not have", () => {
+    // A card checking for a stated clock by hand drifts from the shared step.
+    // The tool group alone draws through drawToolCardClock, from a member clock
+    // it already knows is stated.
+    const users = filesUnder(SRC)
+      .filter((file) => file !== path.join(SRC, "feed/cards/tool-head.ts"))
+      .filter((file) => /drawToolCardClock\(/.test(readFileSync(file, "utf8")));
+    expect(users.map((file) => path.relative(SRC, file))).toEqual(["feed/tool-group.ts"]);
   });
 });
 

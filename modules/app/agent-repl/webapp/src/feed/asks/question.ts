@@ -41,7 +41,7 @@
  * can no longer match. Markdown is presentation only: what a click echoes is
  * the served string, never the drawn one.
  */
-import { drawToolCardBadge, drawToolCardClock, drawToolCardHead } from "../cards/tool-head.js";
+import { drawStatedToolCardClock, drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
 import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
@@ -209,8 +209,7 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
       controls.push(tab);
       strip.append(tab);
     });
-    const clock = u.clock === undefined ? null : drawToolCardClock(u.clock, `${PATH}.clock`, rc.ctx.ticker);
-    wrap.append(drawFeedTabline(strip, clock));
+    wrap.append(drawFeedTabline(strip, drawStatedToolCardClock(u.clock, `${PATH}.clock`, rc.ctx.ticker)));
     const given = drawGivenSoFar(u.questions, open);
     if (given !== null) wrap.append(given);
   }
