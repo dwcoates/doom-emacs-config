@@ -823,6 +823,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplListRollbackPromptsProcedure,
 			connect.WithSchema(agentReplListRollbackPromptsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		answerPermission: connect.NewClient[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse](
@@ -853,6 +854,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplWatchWorkspaceRosterProcedure,
 			connect.WithSchema(agentReplWatchWorkspaceRosterMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		createWorkspace: connect.NewClient[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse](
@@ -877,6 +879,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplListWorkspaceTranscriptsProcedure,
 			connect.WithSchema(agentReplListWorkspaceTranscriptsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		bindWorkspaceSession: connect.NewClient[v1.BindWorkspaceSessionRequest, v1.BindWorkspaceSessionResponse](
@@ -1111,12 +1114,14 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplDaemonHealthProcedure,
 			connect.WithSchema(agentReplDaemonHealthMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		sessionHealth: connect.NewClient[v1.SessionHealthRequest, v1.SessionHealthResponse](
 			httpClient,
 			baseURL+AgentReplSessionHealthProcedure,
 			connect.WithSchema(agentReplSessionHealthMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		clientLog: connect.NewClient[v1.ClientLogRequest, v1.ClientLogResponse](
@@ -1201,6 +1206,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplListSlashCommandsProcedure,
 			connect.WithSchema(agentReplListSlashCommandsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		watchWebWorkspace: connect.NewClient[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse](
@@ -1291,12 +1297,14 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplGetWorkspaceStatusProcedure,
 			connect.WithSchema(agentReplGetWorkspaceStatusMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		getMergeQueueStatus: connect.NewClient[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse](
 			httpClient,
 			baseURL+AgentReplGetMergeQueueStatusProcedure,
 			connect.WithSchema(agentReplGetMergeQueueStatusMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		subscribeWorkspace: connect.NewClient[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse](
@@ -2341,6 +2349,7 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplListRollbackPromptsProcedure,
 		svc.ListRollbackPrompts,
 		connect.WithSchema(agentReplListRollbackPromptsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAnswerPermissionHandler := connect.NewUnaryHandler(
@@ -2371,6 +2380,7 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplWatchWorkspaceRosterProcedure,
 		svc.WatchWorkspaceRoster,
 		connect.WithSchema(agentReplWatchWorkspaceRosterMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplCreateWorkspaceHandler := connect.NewUnaryHandler(
@@ -2395,6 +2405,7 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplListWorkspaceTranscriptsProcedure,
 		svc.ListWorkspaceTranscripts,
 		connect.WithSchema(agentReplListWorkspaceTranscriptsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplBindWorkspaceSessionHandler := connect.NewUnaryHandler(
@@ -2629,12 +2640,14 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplDaemonHealthProcedure,
 		svc.DaemonHealth,
 		connect.WithSchema(agentReplDaemonHealthMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplSessionHealthHandler := connect.NewUnaryHandler(
 		AgentReplSessionHealthProcedure,
 		svc.SessionHealth,
 		connect.WithSchema(agentReplSessionHealthMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplClientLogHandler := connect.NewUnaryHandler(
@@ -2719,6 +2732,7 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplListSlashCommandsProcedure,
 		svc.ListSlashCommands,
 		connect.WithSchema(agentReplListSlashCommandsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplWatchWebWorkspaceHandler := connect.NewServerStreamHandler(
@@ -2809,12 +2823,14 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplGetWorkspaceStatusProcedure,
 		svc.GetWorkspaceStatus,
 		connect.WithSchema(agentReplGetWorkspaceStatusMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplGetMergeQueueStatusHandler := connect.NewUnaryHandler(
 		AgentReplGetMergeQueueStatusProcedure,
 		svc.GetMergeQueueStatus,
 		connect.WithSchema(agentReplGetMergeQueueStatusMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplSubscribeWorkspaceHandler := connect.NewUnaryHandler(

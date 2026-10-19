@@ -125,6 +125,8 @@ type cliFixture struct {
 	cwd    string
 	out    bytes.Buffer
 	errOut bytes.Buffer
+	// dialOptions counts the client options the command dialed with.
+	dialOptions int
 }
 
 func newCLIFixture() *cliFixture {
@@ -139,7 +141,10 @@ func cliRow(id, dir, name string) *frontendv1.RosterRow {
 func (f *cliFixture) run(noun string, args ...string) int {
 	deps := cliDeps{
 		address: func(string) (string, error) { return "127.0.0.1:1", nil },
-		client:  func(string) agentreplv1connect.AgentReplClient { return f.client },
+		client: func(_ string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+			f.dialOptions = len(options)
+			return f.client
+		},
 		roster: func(context.Context, agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
 			return roster(cliRow("ws-caller", "/wt/caller", "caller"), cliRow("ws-peer", "/wt/peer", "peer"),
 				cliRow("ws-twin-1", "/wt/twin-1", "twin"), cliRow("ws-twin-2", "/wt/twin-2", "twin")), nil
@@ -741,4 +746,3 @@ func TestInterruptRefusesBothFlags(t *testing.T) {
 		t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
 	}
 }
-

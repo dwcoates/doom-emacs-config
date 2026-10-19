@@ -171,7 +171,10 @@ service AgentRepl {
   rpc RollBack(RollBackRequest) returns (RollBackResponse);
   // The prompts a rollback can reach, newest first, for a frontend to offer
   // as a choice; changes nothing. See endpoint_list_rollback_prompts.proto.
-  rpc ListRollbackPrompts(ListRollbackPromptsRequest) returns (ListRollbackPromptsResponse);
+  rpc ListRollbackPrompts(ListRollbackPromptsRequest) returns (ListRollbackPromptsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // The permission card's verdicts and the question card's answers. See
   // endpoint_answer_permission.proto.
@@ -190,7 +193,10 @@ service AgentRepl {
 
   // The one global stream: the roster, whole, for every webview alike. See
   // endpoint_watch_workspace_roster.proto.
-  rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse);
+  rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // A new workspace in a repository; the daemon names and creates everything.
   // See endpoint_create_workspace.proto.
@@ -207,7 +213,10 @@ service AgentRepl {
   // Every vendor conversation filed under the workspace's directory, with
   // what each would cost to resume. A pull: the set changes only when a
   // conversation is started or cleared.
-  rpc ListWorkspaceTranscripts(ListWorkspaceTranscriptsRequest) returns (ListWorkspaceTranscriptsResponse);
+  rpc ListWorkspaceTranscripts(ListWorkspaceTranscriptsRequest) returns (ListWorkspaceTranscriptsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // Point the workspace at one of those conversations. A session swap, so a
   // cold one comes up parked at its cold gate.
   rpc BindWorkspaceSession(BindWorkspaceSessionRequest) returns (BindWorkspaceSessionResponse);
@@ -361,11 +370,17 @@ service AgentRepl {
 
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.
-  rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse);
+  rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // Is this workspace's session healthy? Unhealthy is an ANSWER. See
   // endpoint_session_health.proto.
-  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse);
+  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // A console-less client's diagnostic record, into the durable log. See
   // endpoint_client_log.proto.
@@ -431,7 +446,10 @@ service AgentRepl {
 
   // Every slash command the workspace's agent runtime answers, for the
   // composer's completion. See endpoint_list_slash_commands.proto.
-  rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse);
+  rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // ---- WEB LINK ----
   // The webview's connection surface: neither host-natured nor a drawn
@@ -497,9 +515,15 @@ service AgentRepl {
 
   // ---- AGENT API: what an agent reads and follows ----
   // One workspace's status, now. See endpoint_get_workspace_status.proto.
-  rpc GetWorkspaceStatus(GetWorkspaceStatusRequest) returns (GetWorkspaceStatusResponse);
+  rpc GetWorkspaceStatus(GetWorkspaceStatusRequest) returns (GetWorkspaceStatusResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
-  rpc GetMergeQueueStatus(GetMergeQueueStatusRequest) returns (GetMergeQueueStatusResponse);
+  rpc GetMergeQueueStatus(GetMergeQueueStatusRequest) returns (GetMergeQueueStatusResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // Tell one workspace's agent when another workspace changes, answering with
   // its status now. See endpoint_subscribe_workspace.proto.
   rpc SubscribeWorkspace(SubscribeWorkspaceRequest) returns (SubscribeWorkspaceResponse);

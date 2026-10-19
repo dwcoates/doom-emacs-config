@@ -75,8 +75,9 @@ const here = "here"
 type cliDeps struct {
 	// address answers the serving daemon's address for a state-dir flag.
 	address func(stateDir string) (string, error)
-	// client is the daemon's client at an address.
-	client func(address string) agentreplv1connect.AgentReplClient
+	// client is the daemon's client at an address, with OPTIONS applied (a dry
+	// run's interceptor).
+	client func(address string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient
 	// roster reads the daemon's roster once.
 	roster func(ctx context.Context, client agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error)
 	getwd  func() (string, error)
@@ -199,13 +200,17 @@ type cliCall struct {
 
 	client agentreplv1connect.AgentReplClient
 	roster *frontendv1.WorkspaceRoster
+	// dryRun is the command's -dry-run flag, set by flags.
+	dryRun *bool
 }
 
-// flags is the command's flag set, carrying the shared -state-dir.
+// flags is the command's flag set, carrying the shared -state-dir and
+// -dry-run.
 func (c *cliCall) flags() (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
 	fs.SetOutput(c.errOut)
-	fs.Usage = func() { fmt.Fprintf(c.errOut, "usage: agent-repld %s %s\n", strings.Fields(c.name)[0], c.usage) }
+	fs.Usage = func() { fmt.Fprintf(c.errOut, "usage: agent-repld %s %s [-dry-run]\n", strings.Fields(c.name)[0], c.usage) }
+	c.dryRun = fs.Bool("dry-run", false, "print every request that would change something instead of sending it")
 	return fs, fs.String("state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
 }
 
@@ -231,7 +236,11 @@ func (c *cliCall) dial(stateDir string) bool {
 	if err != nil {
 		return c.failed("%v", err)
 	}
-	c.client = c.deps.client(address)
+	var options []connect.ClientOption
+	if c.dryRun != nil && *c.dryRun {
+		options = append(options, connect.WithInterceptors(dryRunInterceptor(c.out)))
+	}
+	c.client = c.deps.client(address, options...)
 	return true
 }
 
@@ -347,6 +356,9 @@ func (c *cliCall) repository(name string) (*workspacev1.RepositoryRef, bool) {
 
 // answer prints an rpc's answer and answers the command's exit.
 func answer[Res any](c *cliCall, resp *connect.Response[Res], err error) int {
+	if errors.Is(err, errDryRun) {
+		return exitSuccess
+	}
 	if err != nil {
 		c.failed("the daemon failed the call: %v", err)
 		return exitFailure

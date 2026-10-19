@@ -21,8 +21,8 @@ import (
 
 // newDaemonClient is a client for the daemon at a loopback address: h2c on
 // the daemon's one origin.
-func newDaemonClient(address string) agentreplv1connect.AgentReplClient {
-	return agentreplv1connect.NewAgentReplClient(h2cClient(), "http://"+address)
+func newDaemonClient(address string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+	return agentreplv1connect.NewAgentReplClient(h2cClient(), "http://"+address, options...)
 }
 
 // h2cClient is the transport every verb dials the daemon with: HTTP/2 in

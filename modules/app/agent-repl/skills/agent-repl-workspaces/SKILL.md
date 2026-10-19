@@ -15,6 +15,8 @@ refusal's printed arm rather than guessing. This skill says WHEN and WHY.
 
 - A workspace is named by its roster name, by its directory (anything with a
   `/`), or as `here` for the calling workspace.
+- Any command takes `-dry-run`: it reads what it needs and prints every
+  request that would change something instead of sending it.
 - WHO ASKED is the calling workspace, found from the working directory. A call
   from a directory that is no workspace (a subagent's worktree) is refused.
   `-as-user` says the user asks; pass it ONLY when the user typed the command
