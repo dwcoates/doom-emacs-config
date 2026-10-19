@@ -103,9 +103,11 @@
      of this token. */
   --assistant: var(--panel-bg);
   --accent: #2563eb;
-  /* A link inside a blue prompt bubble. It is --accent in this theme; the dark
-     theme's bright prompt blue swallows --accent, so it sets its own. */
-  --prompt-link: var(--accent);
+  /* A link inside a blue prompt bubble wears the known command's purple
+     (owner request, 2026-10-19), so a prompt's links and its skill names
+     read in one color. Resolved through --known-command, so each theme's
+     own purple carries through without a dark override of this token. */
+  --prompt-link: var(--known-command);
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
@@ -508,9 +510,6 @@
     --user: #0764c2;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #f0c4ff;
-    /* A dark navy, so a link stands out on the dark theme's prompt blue
-       (owner ruling, 2026-09-27). */
-    --prompt-link: #0a2a5e;
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six

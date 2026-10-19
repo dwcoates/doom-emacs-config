@@ -3949,21 +3949,19 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
   });
 });
 
-describe("a link in a prompt bubble (owner ruling, 2026-09-27)", () => {
-  it("is darker than the dark theme's prompt blue", () => {
-    // Arrange
-    const block = darkThemeBlock();
-    // Act
-    const [link, fill] = [luminance(rgbOf(block, "--prompt-link")), luminance(rgbOf(block, "--user"))];
-    // Assert
-    expect(link).toBeLessThan(fill);
-  });
-
-  it("is the accent in the light theme", () => {
+describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
+  it("is the known command's purple", () => {
     // Arrange / Act
     const root = declarationsOf(":root") ?? "";
     // Assert
-    expect(root).toMatch(/--prompt-link:\s*var\(--accent\)/);
+    expect(root).toMatch(/--prompt-link:\s*var\(--known-command\)/);
+  });
+
+  it("is not overridden by the dark theme", () => {
+    // Arrange / Act
+    const block = darkThemeBlock();
+    // Assert
+    expect(block).not.toMatch(/--prompt-link:/);
   });
 
   it("colors links in every prompt but a held one", () => {
