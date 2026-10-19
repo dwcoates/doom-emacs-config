@@ -256,33 +256,32 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 	}
 	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause}
 
-	// A MERGED workspace files under recently_merged whatever its hidden flag:
-	// it has no tab to hide, and that it is done is the more useful fact.
-	// A merge past the band's newest MergedShown is drawn NOWHERE (owner
-	// ruling, 2026-10-15).
-	var live, hidden, merged []wsm.Workspace
-	var settled []wsm.Workspace
+	// EVERY WORKSPACE IS IN ONE LIST (taborder.go). OPEN is neither closed nor
+	// hidden, whatever its merge time (OPEN BEATS MERGED: a merged workspace
+	// that was reopened is open); HIDDEN is open but hidden; MERGED is merged
+	// AND closed; CLOSED is closed and never merged. A merge past the band's
+	// newest MergedShown is listed NOWHERE (owner ruling, 2026-10-15). A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it
+	// needs the user (owner ruling, 2026-10-11): not even in the hidden
+	// section.
+	var hidden, settled, closed []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
 		switch {
 		case ws.MergeHidden():
-			// A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it needs the user
-			// (owner ruling, 2026-10-11): not even in the hidden section.
-		case ws.MergedAt != nil:
+		case ws.Closed && ws.MergedAt != nil:
 			settled = append(settled, ws)
+		case ws.Closed:
+			closed = append(closed, ws)
 		case ws.Hidden:
 			hidden = append(hidden, ws)
-		default:
-			live = append(live, ws)
 		}
 	}
-	merged = recentMerges(settled)
 
 	out := &frontendv1.WorkspaceRoster{
-		Repository:     r.repositoryView(live, rc, log),
+		Repository:     r.repositoryView(rc, log),
 		Hidden:         r.hiddenSection(hidden, rc, log),
 		Open:           r.openSection(),
-		RecentlyMerged: r.mergedSection(merged, rc, log),
-		TabBar:         r.tabBar(log),
+		RecentlyMerged: r.mergedSection(recentMerges(settled), rc, log),
+		Closed:         r.closedRows(closed, rc, log),
 	}
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur

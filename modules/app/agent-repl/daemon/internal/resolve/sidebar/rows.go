@@ -20,13 +20,12 @@ type rowContext struct {
 	sessions map[ids.WorkspaceID]*wsm.Session
 	// selected is the current selection, nil when none is.
 	selected *ids.WorkspaceID
-	// tree is the section's nesting, empty for a flat section.
-	tree forest
 	// cause is the operation whose fact is being rendered.
 	cause string
 }
 
-// row composes one workspace's row, and its family below it.
+// row composes one workspace's row, as every list draws it. Its family is
+// its list's own row type's (openRow, hiddenRow).
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
@@ -146,9 +145,6 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// THE UPDATE RECENCY, for ordering only: the editor's switcher offers
 	// workspaces most-recently-updated first. Always set.
 	out.LastUpdated = lastUpdated(rec, s.statusChangedAt)
-	for _, child := range rc.tree.children[rec.ID] {
-		out.Children = append(out.Children, r.row(child, rc, rowLog))
-	}
 	return out
 }
 

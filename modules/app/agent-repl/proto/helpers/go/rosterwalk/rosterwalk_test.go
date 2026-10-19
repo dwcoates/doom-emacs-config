@@ -8,12 +8,19 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
-// row is a roster row for id with children.
-func row(id string, children ...*frontendv1.RosterRow) *frontendv1.RosterRow {
-	return &frontendv1.RosterRow{
-		Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id}},
-		Children:  children,
-	}
+// row is a shared roster row for id.
+func row(id string) *frontendv1.RosterRow {
+	return &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id}}}
+}
+
+// open is an open row for id with children.
+func open(id string, children ...*frontendv1.RosterOpenRow) *frontendv1.RosterOpenRow {
+	return &frontendv1.RosterOpenRow{Row: row(id), Children: children}
+}
+
+// hidden is a hidden row for id with children.
+func hidden(id string, children ...*frontendv1.RosterHiddenRow) *frontendv1.RosterHiddenRow {
+	return &frontendv1.RosterHiddenRow{Row: row(id), Children: children}
 }
 
 // ids names the workspace ids of rows, in order.
@@ -25,154 +32,108 @@ func ids(rows []*frontendv1.RosterRow) []string {
 	return out
 }
 
-// mergedOf is a recently-merged band of one group per rows region.
-func mergedOf(groups ...*frontendv1.RosterRows) *frontendv1.RosterMergedSection {
-	section := &frontendv1.RosterMergedSection{}
-	for _, rows := range groups {
-		section.Groups = append(section.Groups, &frontendv1.RosterMergedRepoGroup{Rows: rows})
+// openIDs names the workspace ids of open rows, in order.
+func openIDs(rows []*frontendv1.RosterOpenRow) []string {
+	var out []string
+	for _, r := range rows {
+		out = append(out, r.GetRow().GetWorkspace().GetWorkspace().GetId())
 	}
-	return section
+	return out
 }
 
-// rowsOf wraps rows in a rows region.
-func rowsOf(rows ...*frontendv1.RosterRow) *frontendv1.RosterRows {
-	return &frontendv1.RosterRows{Rows: rows}
+// section is a repository section with its own rows and subsections' rows.
+func section(own []*frontendv1.RosterOpenRow, subs ...[]*frontendv1.RosterOpenRow) *frontendv1.RosterRepoSection {
+	s := &frontendv1.RosterRepoSection{OpenRows: &frontendv1.RosterOpenRows{Rows: own}}
+	for _, rows := range subs {
+		s.Subsections = append(s.Subsections, &frontendv1.RosterSubsection{OpenRows: &frontendv1.RosterOpenRows{Rows: rows}})
+	}
+	return s
 }
 
-func TestFlattenRows(t *testing.T) {
+func TestFlattenOpen(t *testing.T) {
 	cases := []struct {
 		name string
-		rows []*frontendv1.RosterRow
+		rows []*frontendv1.RosterOpenRow
 		want []string
 	}{
 		{name: "an empty region lists nothing", rows: nil, want: nil},
-		{name: "flat rows keep their order", rows: []*frontendv1.RosterRow{row("a"), row("b")}, want: []string{"a", "b"}},
+		{name: "flat rows keep their order", rows: []*frontendv1.RosterOpenRow{open("a"), open("b")}, want: []string{"a", "b"}},
 		{name: "a child follows its parent, before the parent's next sibling",
-			rows: []*frontendv1.RosterRow{row("a", row("a1")), row("b")}, want: []string{"a", "a1", "b"}},
+			rows: []*frontendv1.RosterOpenRow{open("a", open("a1")), open("b")}, want: []string{"a", "a1", "b"}},
 		{name: "a grandchild is listed at its depth",
-			rows: []*frontendv1.RosterRow{row("a", row("a1", row("a1x")), row("a2"))}, want: []string{"a", "a1", "a1x", "a2"}},
+			rows: []*frontendv1.RosterOpenRow{open("a", open("a1", open("a1x")), open("a2"))}, want: []string{"a", "a1", "a1x", "a2"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := ids(FlattenRows(tc.rows))
+			got := openIDs(FlattenOpen(tc.rows))
 
 			// Assert.
 			if !slices.Equal(got, tc.want) {
-				t.Fatalf("FlattenRows = %v, want %v", got, tc.want)
+				t.Fatalf("FlattenOpen = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestAllRows(t *testing.T) {
-	cases := []struct {
-		name   string
-		roster *frontendv1.WorkspaceRoster
-		want   []string
-	}{
-		{name: "a nil roster lists nothing", roster: nil, want: nil},
-		{name: "repository sections, then hidden, then recently merged, in that order",
-			roster: &frontendv1.WorkspaceRoster{
-				RecentlyMerged: mergedOf(rowsOf(row("m"))),
-				Hidden:         &frontendv1.RosterHiddenSection{Rows: rowsOf(row("h", row("h1")))},
-				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-					{Rows: rowsOf(row("r1"))}, {Rows: rowsOf(row("r2"))}}},
-			},
-			want: []string{"r1", "r2", "h", "h1", "m"}},
-		{name: "nested rows are flattened in every section",
-			roster: &frontendv1.WorkspaceRoster{
-				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-					{Rows: rowsOf(row("r", row("r1")))}}},
-				RecentlyMerged: mergedOf(rowsOf(row("m", row("m1")))),
-			},
-			want: []string{"r", "r1", "m", "m1"}},
-		{name: "a repository section's subsections follow its own rows",
-			roster: &frontendv1.WorkspaceRoster{
-				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-					{Rows: rowsOf(row("r")), Subsections: []*frontendv1.RosterSubsection{
-						{Rows: rowsOf(row("s", row("s1")))}, {Rows: rowsOf(row("u"))}}},
-					{Rows: rowsOf(row("next"))}}},
-			},
-			want: []string{"r", "s", "s1", "u", "next"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			got := ids(AllRows(tc.roster))
+func TestFlattenHiddenListsAChildAfterItsParent(t *testing.T) {
+	// Act.
+	got := FlattenHidden([]*frontendv1.RosterHiddenRow{hidden("h", hidden("h1")), hidden("g")})
 
-			// Assert.
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("AllRows = %v, want %v", got, tc.want)
-			}
-		})
+	// Assert.
+	var names []string
+	for _, h := range got {
+		names = append(names, h.GetRow().GetWorkspace().GetWorkspace().GetId())
+	}
+	if want := []string{"h", "h1", "g"}; !slices.Equal(names, want) {
+		t.Fatalf("FlattenHidden = %v, want %v", names, want)
 	}
 }
 
-func TestRepoSectionRegions(t *testing.T) {
-	cases := []struct {
-		name    string
-		section *frontendv1.RosterRepoSection
-		want    [][]string
-	}{
-		{name: "a section with no subsections is its own rows", section: &frontendv1.RosterRepoSection{Rows: rowsOf(row("r"))},
-			want: [][]string{{"r"}}},
-		{name: "subsections follow in their order, an empty one included",
-			section: &frontendv1.RosterRepoSection{Rows: rowsOf(row("r")), Subsections: []*frontendv1.RosterSubsection{
-				{Rows: rowsOf()}, {Rows: rowsOf(row("s"))}}},
-			want: [][]string{{"r"}, nil, {"s"}}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			regions := RepoSectionRegions(tc.section)
+func TestSectionOpenRowsListsTheOwnRowsThenEachSubsections(t *testing.T) {
+	// Arrange.
+	s := section([]*frontendv1.RosterOpenRow{open("a", open("a1"))}, []*frontendv1.RosterOpenRow{open("s")}, nil)
 
-			// Assert.
-			if len(regions) != len(tc.want) {
-				t.Fatalf("regions = %d, want %d", len(regions), len(tc.want))
-			}
-			for i, region := range regions {
-				if got := ids(region.GetRows()); !slices.Equal(got, tc.want[i]) {
-					t.Fatalf("region %d = %v, want %v", i, got, tc.want[i])
-				}
-			}
-		})
+	// Act / Assert.
+	if got, want := openIDs(SectionOpenRows(s)), []string{"a", "a1", "s"}; !slices.Equal(got, want) {
+		t.Fatalf("SectionOpenRows = %v, want %v", got, want)
 	}
 }
 
-func TestMergedRows(t *testing.T) {
-	collapsed := &frontendv1.RosterMergedRepoGroup{
-		Rows:  rowsOf(row("c")),
-		Drawn: &frontendv1.RosterMergedRepoGroup_RepositoryCollapsed{RepositoryCollapsed: &frontendv1.RosterMergedRepoGroupRepositoryCollapsed{}},
-	}
-	cases := []struct {
-		name   string
-		roster *frontendv1.WorkspaceRoster
-		want   []string
-	}{
-		{name: "a nil roster lists nothing", roster: nil, want: nil},
-		{name: "a band with no groups lists nothing",
-			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: &frontendv1.RosterMergedSection{}}, want: nil},
-		{name: "groups are listed in the band's order",
-			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: mergedOf(rowsOf(row("a1"), row("a2")), rowsOf(row("b1")))},
-			want:   []string{"a1", "a2", "b1"}},
-		{name: "a collapsed repository's group is listed too",
-			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: &frontendv1.RosterMergedSection{
-				Groups: []*frontendv1.RosterMergedRepoGroup{collapsed}}},
-			want: []string{"c"}},
-		{name: "nested rows in a group are flattened",
-			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: mergedOf(rowsOf(row("m", row("m1"))))},
-			want:   []string{"m", "m1"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			got := ids(MergedRows(tc.roster))
+func TestOpenRowsWalksTheSectionsInOrder(t *testing.T) {
+	// Arrange.
+	roster := &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
+		section([]*frontendv1.RosterOpenRow{open("a")}, []*frontendv1.RosterOpenRow{open("b")}),
+		section([]*frontendv1.RosterOpenRow{open("c")}),
+	}}}
 
-			// Assert.
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("MergedRows = %v, want %v", got, tc.want)
-			}
-		})
+	// Act / Assert.
+	if got, want := openIDs(OpenRows(roster)), []string{"a", "b", "c"}; !slices.Equal(got, want) {
+		t.Fatalf("OpenRows = %v, want %v", got, want)
+	}
+}
+
+func TestAllRowsListsOpenThenHiddenThenMergedThenClosed(t *testing.T) {
+	// Arrange.
+	roster := &frontendv1.WorkspaceRoster{
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section([]*frontendv1.RosterOpenRow{open("o", open("o1"))})}},
+		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: []*frontendv1.RosterHiddenRow{hidden("h", hidden("h1"))}}},
+		RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{
+			{MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: row("m")}}}},
+			{MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: row("n")}}}},
+		}},
+		Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("c")}}},
+	}
+
+	// Act / Assert.
+	if got, want := ids(AllRows(roster)), []string{"o", "o1", "h", "h1", "m", "n", "c"}; !slices.Equal(got, want) {
+		t.Fatalf("AllRows = %v, want %v", got, want)
+	}
+}
+
+func TestAllRowsOfAnEmptyRosterIsEmpty(t *testing.T) {
+	// Act / Assert.
+	if got := AllRows(&frontendv1.WorkspaceRoster{}); len(got) != 0 {
+		t.Fatalf("AllRows = %v, want none", ids(got))
 	}
 }

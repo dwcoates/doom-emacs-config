@@ -15,6 +15,7 @@ import (
 func mergedAt(id string, ago time.Duration) wsm.Workspace {
 	ws := workspace(id, id)
 	ws.MergedAt = at(-ago)
+	ws.Closed = true
 	return ws
 }
 

@@ -23,36 +23,44 @@ const HiddenSectionLabel = "Hidden"
 // OpenSectionLabel is the open-workspaces section's heading.
 const OpenSectionLabel = "Open"
 
-// repositoryView resolves the repository grouping: ONE SECTION PER REPOSITORY
-// in the arrangement's order (arrangement.go), its unsectioned rows first and
-// then one subsection per subsection, each nested by lineage among its own
-// workspaces and ordered in roster order.
+// repositoryView resolves the Open section from the Open tree (openTree):
+// ONE SECTION PER REPOSITORY in the arrangement's order, its own rows first
+// and then one subsection per subsection, each open row carrying its tab
+// numbered in this very walk (tabNumberer), so the sidebar's numbers and the
+// tab bar's are one fact.
 //
 // A repository with no rows still draws a section, and a subsection with no
 // rows still draws: both are registered, and a section that vanished when its
 // last workspace left would make the grouping flicker (and leave an empty
 // subsection nowhere to drag a workspace into).
-func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
-	arranged, orphans := arrange(r.state.reg, live)
+func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
+	repos, orphans := openTree(r.state.reg, log)
 	out := &frontendv1.RosterRepositoryView{}
+	numbers := &tabNumberer{}
 	shown := 0
-	for _, placed := range arranged {
+	for _, placed := range repos {
 		repoLog := log.With(dlog.Context{"repo_id": string(placed.repo.ID)})
-		rows := r.sectionRows(placed.buckets[0].workspaces, rc, repoLog)
-		count := drawnLiveRowCount(rows)
 		section := &frontendv1.RosterRepoSection{
 			Key:        repoKey(placed.repo),
-			Rows:       rows,
 			Divergence: repoDivergence(r.state.divergence[placed.repo.ID]),
 		}
-		for _, b := range placed.buckets[1:] {
-			subRows := r.sectionRows(b.workspaces, rc, repoLog.With(dlog.Context{"subsection": string(b.subsection.ID)}))
-			subCount := drawnLiveRowCount(subRows)
-			count += subCount
+		count := 0
+		for _, region := range placed.regions {
+			regionLog := repoLog
+			if region.subsection != nil {
+				regionLog = repoLog.With(dlog.Context{"subsection": string(region.subsection.ID)})
+			}
+			rows := r.openRows(region.rows, placed.repo.Folded, numbers, rc, regionLog)
+			regionCount := len(rosterwalk.FlattenOpen(rows.GetRows()))
+			count += regionCount
+			if region.subsection == nil {
+				section.OpenRows = rows
+				continue
+			}
 			section.Subsections = append(section.Subsections, &frontendv1.RosterSubsection{
-				Key:    &frontendv1.RosterSubsectionKey{SubsectionId: string(b.subsection.ID)},
-				Header: sectionHeader(b.subsection.Name, subCount),
-				Rows:   subRows,
+				Key:      &frontendv1.RosterSubsectionKey{SubsectionId: string(region.subsection.ID)},
+				Header:   sectionHeader(region.subsection.Name, regionCount),
+				OpenRows: rows,
 			})
 		}
 		section.Header = sectionHeader(placed.repo.Name, count)
@@ -62,6 +70,26 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
 	out.OpenCount = &frontendv1.RosterOpenCount{Workspaces: uint32(shown)}
+	return out
+}
+
+// openRows composes one region's open rows, depth-first, each taking the next
+// tab of NUMBERS before its family does, so a parent's number precedes its
+// children's.
+func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRows {
+	out := &frontendv1.RosterOpenRows{}
+	for _, node := range nodes {
+		out.Rows = append(out.Rows, r.openRow(node, folded, numbers, rc, log))
+	}
+	return out
+}
+
+// openRow composes one open row, its tab, and its open family below it.
+func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
+	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded)}
+	for _, child := range node.children {
+		out.Children = append(out.Children, r.openRow(child, folded, numbers, rc, log))
+	}
 	return out
 }
 
@@ -143,7 +171,6 @@ func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspa
 // the wire on its repository_collapsed arm (so every roster walker still sees
 // its workspaces) and the band's count leaves its rows out.
 func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMergedSection {
-	rc.tree = forest{}
 	byRepo := map[ids.RepoID][]wsm.Workspace{}
 	for _, ws := range merged {
 		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
@@ -156,14 +183,14 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		if !ok {
 			continue
 		}
-		rows := &frontendv1.RosterRows{}
+		rows := &frontendv1.RosterMergedRows{}
 		for _, ws := range sortMergedNewestFirst(workspaces) {
-			rows.Rows = append(rows.Rows, r.row(ws, rc, log))
+			rows.Rows = append(rows.Rows, &frontendv1.RosterMergedRow{Row: r.row(ws, rc, log)})
 		}
 		group := &frontendv1.RosterMergedRepoGroup{
-			Key:    repoKey(repo),
-			Header: &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}},
-			Rows:   rows,
+			Key:        repoKey(repo),
+			Header:     &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}},
+			MergedRows: rows,
 		}
 		setMergedGroupDrawn(group, repo.Folded)
 		if !repo.Folded {
@@ -188,27 +215,46 @@ func setMergedGroupDrawn(group *frontendv1.RosterMergedRepoGroup, repositoryFold
 	group.Drawn = &frontendv1.RosterMergedRepoGroup_Shown{Shown: &frontendv1.RosterMergedRepoGroupShown{}}
 }
 
-// hiddenSection resolves the hidden-workspaces section: the workspaces the
-// user hid (SetWorkspaceHidden), hoisted out of every grouping. Its rows nest
-// by lineage among the hidden workspaces alone, as a repository section's do
-// among its own, so a hidden family keeps its shape; its top-level rows go in
-// HIDE ORDER, the latest hide first (sortHiddenNewestFirst, owner request
-// 2026-10-13), and its count is the rows it draws, closed rows left out,
-// exactly as a repository section counts.
+// hiddenSection resolves the hidden-workspaces section: the open workspaces
+// the user hid (SetWorkspaceHidden), which have NO TAB. Its rows nest by
+// lineage among the hidden workspaces alone, so a hidden family keeps its
+// shape (a workspace with open children cannot be hidden, so a hidden row's
+// family is hidden too); its top-level rows go in HIDE ORDER, the latest hide
+// first (sortHiddenNewestFirst, owner request 2026-10-13), and its count is
+// the rows it draws.
 func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenSection {
 	log = log.With(dlog.Context{"section": "hidden"})
-	rc.tree = nest(hidden, log)
-	rc.tree.roots = sortHiddenNewestFirst(rc.tree.roots)
-	rows := &frontendv1.RosterRows{}
-	for _, ws := range rc.tree.roots {
-		rows.Rows = append(rows.Rows, r.row(ws, rc, log))
+	tree := nest(hidden, log)
+	rows := &frontendv1.RosterHiddenRows{}
+	for _, ws := range sortHiddenNewestFirst(tree.roots) {
+		rows.Rows = append(rows.Rows, r.hiddenRow(ws, tree, rc, log))
 	}
 	section := &frontendv1.RosterHiddenSection{
-		Header: sectionHeader(HiddenSectionLabel, drawnLiveRowCount(rows)),
-		Rows:   rows,
+		Header:     sectionHeader(HiddenSectionLabel, len(rosterwalk.FlattenHidden(rows.GetRows()))),
+		HiddenRows: rows,
 	}
 	setHiddenFold(section, r.state.reg.View.HiddenFolded)
 	return section
+}
+
+// hiddenRow composes one hidden row and its hidden family below it.
+func (r *resolver) hiddenRow(ws wsm.Workspace, tree forest, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenRow {
+	out := &frontendv1.RosterHiddenRow{Row: r.row(ws, rc, log)}
+	for _, child := range tree.children[ws.ID] {
+		out.Children = append(out.Children, r.hiddenRow(child, tree, rc, log))
+	}
+	return out
+}
+
+// closedRows resolves the closed list: the closed workspaces that never
+// merged, in roster order. No sidebar section draws it; the editor offers them
+// again and routes their records by it.
+func (r *resolver) closedRows(closed []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterClosedRows {
+	out := &frontendv1.RosterClosedRows{}
+	for _, ws := range sortWorkspaces(closed) {
+		out.Rows = append(out.Rows, &frontendv1.RosterClosedRow{Row: r.row(ws, rc, log)})
+	}
+	return out
 }
 
 // setHiddenFold states the hidden section's fold. The fold is the daemon's so
@@ -236,19 +282,6 @@ func (r *resolver) openSection() *frontendv1.RosterOpenSection {
 	return section
 }
 
-// openCount is how many rows the open-workspaces section lists: every
-// not-closed row of every repository section, nested family rows included, a
-// folded section's too. It reads the very rows each section
-// carries (drawnLiveRowCount), so it is always the sum of the sections' own
-// counts and no client counts rows for itself.
-func openCount[S interface{ GetRows() *frontendv1.RosterRows }](sections []S) *frontendv1.RosterOpenCount {
-	n := 0
-	for _, section := range sections {
-		n += drawnLiveRowCount(section.GetRows())
-	}
-	return &frontendv1.RosterOpenCount{Workspaces: uint32(n)}
-}
-
 // setMergedFold states the recently-merged band's fold. The fold is the
 // daemon.s so every page draws the same one (UpdateSidebarView).
 func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
@@ -261,42 +294,11 @@ func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
 
 // sectionHeader composes a repository or Recently Merged header: its label and
 // the count a FOLDED section draws beside it, which its caller reads off the
-// very rows the section carries (drawnLiveRowCount, or the merged band's own
-// rows), so it can never disagree with them, and no client counts rows for
+// very rows the section carries, so it can never disagree with them, and no client counts rows for
 // itself.
 func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},
 		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(count)},
 	}
-}
-
-// drawnLiveRowCount is how many rows a live section shows UNFOLDED: every row
-// of its tree, nested family rows included, that is not CLOSED (owner request,
-// 2026-10-08: a folded section's count equals the rows it shows unfolded).
-// A closed, killed or nuked workspace still rides the wire (Emacs reconciles
-// its tabs from the flag) but no client draws it, and its live descendants
-// are drawn in its place (the webapp's expandVisibleRows), so the count is
-// exactly the not-closed rows of the flattened tree, read off the same
-// RosterRowClosed fact the client drops a row by.
-func drawnLiveRowCount(rows *frontendv1.RosterRows) int {
-	n := 0
-	for _, row := range rosterwalk.FlattenRows(rows.GetRows()) {
-		if !row.GetClosed().GetClosed() {
-			n++
-		}
-	}
-	return n
-}
-
-// sectionRows nests one section's workspaces and composes their rows. Nesting
-// is scoped to the section, so the SAME workspace can be a root in the task
-// view (its parent is on another task) and a child in the repo view.
-func (r *resolver) sectionRows(in []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRows {
-	rc.tree = nest(in, log)
-	out := &frontendv1.RosterRows{}
-	for _, ws := range rc.tree.roots {
-		out.Rows = append(out.Rows, r.row(ws, rc, log))
-	}
-	return out
 }

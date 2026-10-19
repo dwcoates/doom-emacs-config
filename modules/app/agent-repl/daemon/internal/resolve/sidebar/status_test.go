@@ -1024,11 +1024,11 @@ func watchStatusWalk(t *testing.T, r sidebar.Resolver) *statusWalk {
 	go func() {
 		for roster := range rosters {
 			sections := roster.GetRepository().GetSections()
-			if len(sections) == 0 || len(sections[0].GetRows().GetRows()) == 0 {
+			if len(sections) == 0 || len(innerRows(sections[0].GetOpenRows().GetRows())) == 0 {
 				continue
 			}
 			w.mu.Lock()
-			w.seen = append(w.seen, statusName(sections[0].GetRows().GetRows()[0]))
+			w.seen = append(w.seen, statusName(innerRows(sections[0].GetOpenRows().GetRows())[0]))
 			w.mu.Unlock()
 			select {
 			case w.woke <- struct{}{}:

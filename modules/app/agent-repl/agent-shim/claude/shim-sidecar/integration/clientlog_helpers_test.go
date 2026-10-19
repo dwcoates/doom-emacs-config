@@ -174,15 +174,15 @@ func normalizeFakeWorkspaceDir(dir string) (string, error) {
 }
 
 func fakeRoster(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
-	rows := make([]*frontendv1.RosterRow, 0, len(refs))
+	rows := make([]*frontendv1.RosterOpenRow, 0, len(refs))
 	for _, ref := range refs {
-		rows = append(rows, &frontendv1.RosterRow{
+		rows = append(rows, &frontendv1.RosterOpenRow{Row: &frontendv1.RosterRow{
 			Workspace: &frontendv1.RosterRowWorkspace{Workspace: ref},
-		})
+		}})
 	}
 	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			Rows: &frontendv1.RosterRows{Rows: rows},
+			OpenRows: &frontendv1.RosterOpenRows{Rows: rows},
 		}}},
 	}}}
 }

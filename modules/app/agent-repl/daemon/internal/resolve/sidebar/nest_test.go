@@ -19,8 +19,8 @@ func TestRosterDoesNotNestAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {
 	r.SetRegistry(registry(feature, cut))
 
 	// Assert: a row nests only under the workspace it merges into.
-	rows := repoRows(t, latest(t, r))
-	if got := rowNames(rows); !equal(got, []string{"feature", "cut"}) || len(rows[0].GetChildren()) != 0 {
+	rows := repoOpen(t, latest(t, r))
+	if got := rowNames(innerRows(rows)); !equal(got, []string{"feature", "cut"}) || len(rows[0].GetChildren()) != 0 {
 		t.Fatalf("rows = %v, want both at the top level", got)
 	}
 }
@@ -37,11 +37,11 @@ func TestRosterNestsAWorkspaceUnderItsRecordedParent(t *testing.T) {
 	r.SetRegistry(registry(parent, child))
 
 	// Assert.
-	rows := repoRows(t, latest(t, r))
+	rows := repoOpen(t, latest(t, r))
 	if len(rows) != 1 {
 		t.Fatalf("the section drew %d top-level rows, want only the parent", len(rows))
 	}
-	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"child"}) {
+	if got := rowNames(innerRows(rows[0].GetChildren())); !equal(got, []string{"child"}) {
 		t.Fatalf("children = %v, want the workspace its parent spawned", got)
 	}
 }
@@ -75,8 +75,8 @@ func TestRosterNestsAGrandchild(t *testing.T) {
 	r.SetRegistry(registry(parent, child, grandchild))
 
 	// Assert.
-	rows := repoRows(t, latest(t, r))
-	got := rowNames(rows[0].GetChildren()[0].GetChildren())
+	rows := repoOpen(t, latest(t, r))
+	got := rowNames(innerRows(rows[0].GetChildren()[0].GetChildren()))
 	if !equal(got, []string{"grandchild"}) {
 		t.Fatalf("grandchildren = %v, want the family nested two deep", got)
 	}
@@ -120,7 +120,7 @@ func TestRosterNeverNestsAWorkspaceUnderItself(t *testing.T) {
 	r.SetRegistry(registry(ws))
 
 	// Assert.
-	rows := repoRows(t, latest(t, r))
+	rows := repoOpen(t, latest(t, r))
 	if len(rows) != 1 || len(rows[0].GetChildren()) != 0 {
 		t.Fatal("a workspace nested under itself")
 	}
@@ -173,9 +173,11 @@ func TestRecentlyMergedIsFlat(t *testing.T) {
 	r, _ := newResolver(t)
 	parent := workspace("w-parent", "parent")
 	parent.MergedAt = at(0)
+	parent.Closed = true
 	child := workspace("w-child", "child")
 	child.Parent = &parent.ID
 	child.MergedAt = at(0)
+	child.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(parent, child))
@@ -250,11 +252,11 @@ func TestRosterStillNestsARecordedChildCutFromTheDefaultBranch(t *testing.T) {
 	r.SetRegistry(registry(main, fork))
 
 	// Assert.
-	rows := repoRows(t, latest(t, r))
+	rows := repoOpen(t, latest(t, r))
 	if len(rows) != 1 {
 		t.Fatalf("the section drew %d top-level rows, want only the recorded parent", len(rows))
 	}
-	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"fork"}) {
+	if got := rowNames(innerRows(rows[0].GetChildren())); !equal(got, []string{"fork"}) {
 		t.Fatalf("children = %v, want the recorded child", got)
 	}
 }

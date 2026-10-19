@@ -166,11 +166,27 @@ func rosterRow(dir string, status string, mergedAt int64) *frontendv1.RosterRow 
 	return row
 }
 
-// roster is a roster holding rows in a repository section.
+// roster is a roster holding rows as top-level open rows of a repository
+// section.
 func roster(rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
+	open := make([]*frontendv1.RosterOpenRow, 0, len(rows))
+	for _, row := range rows {
+		open = append(open, openRow(row))
+	}
+	return rosterOf(open...)
+}
+
+// rosterOf is a roster holding open rows, families nested, in a repository
+// section.
+func rosterOf(open ...*frontendv1.RosterOpenRow) *frontendv1.WorkspaceRoster {
 	return &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
-		Sections: []*frontendv1.RosterRepoSection{{Rows: &frontendv1.RosterRows{Rows: rows}}},
+		Sections: []*frontendv1.RosterRepoSection{{OpenRows: &frontendv1.RosterOpenRows{Rows: open}}},
 	}}
+}
+
+// openRow is ROW as an open row with CHILDREN.
+func openRow(row *frontendv1.RosterRow, children ...*frontendv1.RosterOpenRow) *frontendv1.RosterOpenRow {
+	return &frontendv1.RosterOpenRow{Row: row, Children: children}
 }
 
 // frames turns rosters into script steps.
@@ -409,12 +425,13 @@ func TestTheMergeQueueVerbPicksTheDeepestWorkspaceHoldingTheCaller(t *testing.T)
 	}
 }
 
-// nestedUnder is a workspace row for dir with id, nested as a child under parent.
-func nestedUnder(parent *frontendv1.RosterRow, dir, id, status string) *frontendv1.RosterRow {
+// nestedUnder is an open row for dir with id, nested as a child under parent.
+func nestedUnder(parent *frontendv1.RosterOpenRow, dir, id, status string) *frontendv1.RosterOpenRow {
 	child := rosterRow(dir, status, 0)
 	child.Workspace.Workspace.Id = id
-	parent.Children = append(parent.Children, child)
-	return child
+	open := openRow(child)
+	parent.Children = append(parent.Children, open)
+	return open
 }
 
 func TestTheMergeQueueVerbAsksFromANestedWorkspace(t *testing.T) {
@@ -423,17 +440,17 @@ func TestTheMergeQueueVerbAsksFromANestedWorkspace(t *testing.T) {
 		roster func(f *mergeFixture) *frontendv1.WorkspaceRoster
 	}{
 		{name: "a child under its parent", roster: func(f *mergeFixture) *frontendv1.WorkspaceRoster {
-			parent := rosterRow(f.other, "done", 0)
-			parent.Workspace.Workspace.Id = "ws-parent"
+			parent := openRow(rosterRow(f.other, "done", 0))
+			parent.Row.Workspace.Workspace.Id = "ws-parent"
 			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
-			return roster(parent)
+			return rosterOf(parent)
 		}},
 		{name: "a grandchild under its parent's parent", roster: func(f *mergeFixture) *frontendv1.WorkspaceRoster {
-			grand := rosterRow(filepath.Join(t.TempDir(), "grand"), "done", 0)
-			grand.Workspace.Workspace.Id = "ws-grand"
+			grand := openRow(rosterRow(filepath.Join(t.TempDir(), "grand"), "done", 0))
+			grand.Row.Workspace.Workspace.Id = "ws-grand"
 			parent := nestedUnder(grand, f.other, "ws-parent", "done")
 			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
-			return roster(grand)
+			return rosterOf(grand)
 		}},
 	}
 	for _, tt := range tests {
@@ -460,13 +477,13 @@ func TestTheMergeQueueVerbReportsANestedWorkspacesLanding(t *testing.T) {
 	// parent, as its merge lands in that parent.
 	f := newMergeFixture(t)
 	at := func(status string, mergedAt int64) *frontendv1.WorkspaceRoster {
-		parent := rosterRow(f.other, "done", 0)
-		parent.Workspace.Workspace.Id = "ws-parent"
+		parent := openRow(rosterRow(f.other, "done", 0))
+		parent.Row.Workspace.Workspace.Id = "ws-parent"
 		child := nestedUnder(parent, f.worktree, "ws-nested", status)
 		if status == statusMergedDone {
-			child.When = rosterRow(f.worktree, statusMergedDone, mergedAt).When
+			child.Row.When = rosterRow(f.worktree, statusMergedDone, mergedAt).When
 		}
-		return roster(parent)
+		return rosterOf(parent)
 	}
 	f.daemons = []*fakeMergeDaemon{{script: frames(
 		at("done", 0), at(statusQueued, 0), at(statusMerging, 0), at(statusMergedDone, 7),
@@ -771,7 +788,7 @@ func TestFindRosterRowLooksInTheRecentlyMergedSection(t *testing.T) {
 	dir := t.TempDir()
 	r := &frontendv1.WorkspaceRoster{RecentlyMerged: &frontendv1.RosterMergedSection{
 		Groups: []*frontendv1.RosterMergedRepoGroup{{
-			Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{rosterRow(dir, statusMergedDone, 1)}},
+			MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: rosterRow(dir, statusMergedDone, 1)}}},
 		}},
 	}}
 
@@ -787,11 +804,11 @@ func TestFindRosterRowLooksInTheRecentlyMergedSection(t *testing.T) {
 func TestFindRosterRowLooksInNestedRows(t *testing.T) {
 	// Arrange: a child workspace nested under its parent's row.
 	dir := t.TempDir()
-	parent := rosterRow(filepath.Join(t.TempDir(), "parent"), "done", 0)
+	parent := openRow(rosterRow(filepath.Join(t.TempDir(), "parent"), "done", 0))
 	nestedUnder(parent, dir, "ws-nested", statusMerging)
 
 	// Act.
-	row := findRosterRow(roster(parent), canonicalDir(dir))
+	row := findRosterRow(rosterOf(parent), canonicalDir(dir))
 
 	// Assert.
 	if row.GetWorkspace().GetWorkspace().GetId() != "ws-nested" {

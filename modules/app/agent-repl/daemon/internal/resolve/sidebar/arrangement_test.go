@@ -3,8 +3,6 @@ package sidebar_test
 import (
 	"testing"
 
-	"agentrepl/protohelpers/rosterwalk"
-
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -44,7 +42,7 @@ func arrangedRegistry() sidebar.Registry {
 func subsectionNamesOf(section *frontendv1.RosterRepoSection) []string {
 	var out []string
 	for _, sub := range section.GetSubsections() {
-		out = append(out, sub.GetHeader().GetLabel().GetText()+"="+joinNames(rowNames(sub.GetRows().GetRows())))
+		out = append(out, sub.GetHeader().GetLabel().GetText()+"="+joinNames(rowNames(innerRows(sub.GetOpenRows().GetRows()))))
 	}
 	return out
 }
@@ -69,7 +67,7 @@ func TestTheRepositorySectionDrawsItsUnsectionedRowsAboveItsSubsections(t *testi
 
 	// Assert
 	section := latest(t, r).GetRepository().GetSections()[0]
-	if got := rowNames(section.GetRows().GetRows()); !equal(got, []string{"second", "third"}) {
+	if got := rowNames(innerRows(section.GetOpenRows().GetRows())); !equal(got, []string{"second", "third"}) {
 		t.Fatalf("unsectioned rows = %v, want [second third]", got)
 	}
 	if got := subsectionNamesOf(section); !equal(got, []string{"empty=", "later=first"}) {
@@ -158,9 +156,9 @@ func TestASubsectionNestsAChildUnderItsParent(t *testing.T) {
 	r.SetRegistry(reg)
 
 	// Assert
-	rows := latest(t, r).GetRepository().GetSections()[0].GetSubsections()[0].GetRows().GetRows()
-	if len(rows) != 1 || rowNames(rows[0].GetChildren()) == nil || rowNames(rows[0].GetChildren())[0] != "child" {
-		t.Fatalf("subsection rows = %v, want parent with child nested", rowNames(rows))
+	rows := latest(t, r).GetRepository().GetSections()[0].GetSubsections()[0].GetOpenRows().GetRows()
+	if len(rows) != 1 || rowNames(innerRows(rows[0].GetChildren())) == nil || rowNames(innerRows(rows[0].GetChildren()))[0] != "child" {
+		t.Fatalf("subsection rows = %v, want parent with child nested", rowNames(innerRows(rows)))
 	}
 }
 
@@ -275,21 +273,9 @@ func TestTheTabBarMatchesTheSidebarsRowOrder(t *testing.T) {
 	r.SetRegistry(reg)
 
 	// Assert
-	roster := latest(t, r)
-	var rows []string
-	for _, section := range roster.GetRepository().GetSections() {
-		for _, region := range rosterwalk.RepoSectionRegions(section) {
-			for _, row := range rosterwalk.FlattenRows(region.GetRows()) {
-				rows = append(rows, row.GetWorkspace().GetWorkspace().GetId())
-			}
-		}
-	}
-	var tabs []string
-	for _, tab := range roster.GetTabBar().GetTabs() {
-		tabs = append(tabs, tab.GetWorkspace().GetId())
-	}
-	if !equal(tabs, rows) {
-		t.Fatalf("tab bar = %v, sidebar rows = %v; want the same order", tabs, rows)
+	rows, numbers := openRowsAndNumbers(latest(t, r))
+	if want := []string{"w-o", "w-p", "w-k", "w-m"}; !equal(rows, want) || !equal(numbers, []string{"1", "2", "3", "4"}) {
+		t.Fatalf("open rows %v numbered %v, want %v numbered 1..4", rows, numbers, want)
 	}
 }
 
@@ -339,6 +325,7 @@ func TestArrangedLeavesOutClosedAndMergedWorkspacesAndHoistsAClosedParentsChildr
 	child.Parent = &parent.ID
 	merged := placed(workspace("w-m", "merged"), 3)
 	merged.MergedAt = at(0)
+	merged.Closed = true
 	hidden := placed(hiddenWorkspace("w-h", "hidden"), 4)
 
 	// Act

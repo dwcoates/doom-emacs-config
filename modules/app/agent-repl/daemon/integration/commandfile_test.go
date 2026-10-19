@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,16 +64,9 @@ func commandfilePlace(t *testing.T, dir, name, body string, mtime *time.Time) st
 // commandfileRowByName finds a roster row by its display name, anywhere in
 // the repository grouping.
 func commandfileRowByName(r *frontendv1.WorkspaceRoster, name string) *frontendv1.RosterRow {
-	for _, s := range r.GetRepository().GetSections() {
-		for _, row := range s.GetRows().GetRows() {
-			if row.GetName().GetText() == name {
-				return row
-			}
-			for _, c := range row.GetChildren() {
-				if c.GetName().GetText() == name {
-					return c
-				}
-			}
+	for _, open := range rosterwalk.OpenRows(r) {
+		if open.GetRow().GetName().GetText() == name {
+			return open.GetRow()
 		}
 	}
 	return nil

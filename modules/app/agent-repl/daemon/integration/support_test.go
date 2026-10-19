@@ -461,48 +461,34 @@ func awaitRoster(t *testing.T, d *harness.Daemon, s *harness.Stream[*frontendv1.
 // rosterRow finds a workspace's row anywhere in the roster, repository
 // sections, task sections, recently merged and nested children alike.
 func rosterRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
-	var walk func(rows []*frontendv1.RosterRow) *frontendv1.RosterRow
-	walk = func(rows []*frontendv1.RosterRow) *frontendv1.RosterRow {
-		for _, r := range rows {
-			if r.GetWorkspace().GetWorkspace().GetId() == id {
-				return r
-			}
-			if found := walk(r.GetChildren()); found != nil {
-				return found
-			}
-		}
-		return nil
-	}
-	for _, s := range roster.GetRepository().GetSections() {
-		if found := walk(s.GetRows().GetRows()); found != nil {
-			return found
-		}
-	}
-	return walk(rosterwalk.MergedRows(roster))
-}
-
-// rosterRepoRow finds a workspace's row only under the repository grouping.
-func rosterRepoRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
-	for _, s := range roster.GetRepository().GetSections() {
-		for _, r := range s.GetRows().GetRows() {
-			if r.GetWorkspace().GetWorkspace().GetId() == id {
-				return r
-			}
-			for _, c := range r.GetChildren() {
-				if c.GetWorkspace().GetWorkspace().GetId() == id {
-					return c
-				}
-			}
+	for _, r := range rosterwalk.AllRows(roster) {
+		if r.GetWorkspace().GetWorkspace().GetId() == id {
+			return r
 		}
 	}
 	return nil
 }
 
+// rosterOpenRow finds a workspace's open row under the repository grouping.
+func rosterOpenRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterOpenRow {
+	for _, open := range rosterwalk.OpenRows(roster) {
+		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == id {
+			return open
+		}
+	}
+	return nil
+}
+
+// rosterRepoRow finds a workspace's row only under the repository grouping.
+func rosterRepoRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
+	return rosterOpenRow(roster, id).GetRow()
+}
+
 // rosterNests reports whether the repository grouping draws the child's row
 // among the parent's children.
 func rosterNests(roster *frontendv1.WorkspaceRoster, parentID, childID string) bool {
-	for _, c := range rosterRepoRow(roster, parentID).GetChildren() {
-		if c.GetWorkspace().GetWorkspace().GetId() == childID {
+	for _, c := range rosterOpenRow(roster, parentID).GetChildren() {
+		if c.GetRow().GetWorkspace().GetWorkspace().GetId() == childID {
 			return true
 		}
 	}
@@ -573,8 +559,8 @@ func markViewed(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 func repoRowIDs(r *frontendv1.WorkspaceRoster) []string {
 	var out []string
 	for _, s := range r.GetRepository().GetSections() {
-		for _, row := range s.GetRows().GetRows() {
-			out = append(out, row.GetWorkspace().GetWorkspace().GetId())
+		for _, open := range s.GetOpenRows().GetRows() {
+			out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId())
 		}
 	}
 	return out

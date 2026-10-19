@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"context"
 	"sync"
 	"testing"
@@ -314,14 +315,45 @@ func prioritized(ws wsm.Workspace, p wsm.Priority) wsm.Workspace {
 	return ws
 }
 
-// repoRows reads the rows of the repository grouping's only section.
-func repoRows(t *testing.T, roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+// repoOpen reads the top-level open rows of the repository grouping's only
+// section.
+func repoOpen(t *testing.T, roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterOpenRow {
 	t.Helper()
 	sections := roster.GetRepository().GetSections()
 	if len(sections) != 1 {
 		t.Fatalf("the repository view carried %d sections, want exactly 1", len(sections))
 	}
-	return sections[0].GetRows().GetRows()
+	return sections[0].GetOpenRows().GetRows()
+}
+
+// repoRows reads the shared rows of the repository grouping's only section's
+// top-level open rows.
+func repoRows(t *testing.T, roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+	t.Helper()
+	return innerRows(repoOpen(t, roster))
+}
+
+// innerRows reads the shared rows of OPEN, in order.
+func innerRows(open []*frontendv1.RosterOpenRow) []*frontendv1.RosterRow {
+	out := make([]*frontendv1.RosterRow, 0, len(open))
+	for _, o := range open {
+		out = append(out, o.GetRow())
+	}
+	return out
+}
+
+// hiddenRows reads the hidden section's shared rows, flattened.
+func hiddenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+	return rosterwalk.HiddenRows(roster)
+}
+
+// topHidden reads the hidden section's top-level shared rows, in order.
+func topHidden(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+	var out []*frontendv1.RosterRow
+	for _, h := range roster.GetHidden().GetHiddenRows().GetRows() {
+		out = append(out, h.GetRow())
+	}
+	return out
 }
 
 // rowNames reads a row list's display names, in the order they render.
@@ -333,23 +365,20 @@ func rowNames(rows []*frontendv1.RosterRow) []string {
 	return out
 }
 
-// rowFor finds the row for a workspace id anywhere in a row list's tree.
+// rowFor finds the row for a workspace id in a row list.
 func rowFor(rows []*frontendv1.RosterRow, id string) *frontendv1.RosterRow {
 	for _, row := range rows {
 		if row.GetWorkspace().GetWorkspace().GetId() == id {
 			return row
 		}
-		if found := rowFor(row.GetChildren(), id); found != nil {
-			return found
-		}
 	}
 	return nil
 }
 
-// onlyRow reads the repository grouping's single row.
+// onlyRow reads the roster's single row, in whichever list it is.
 func onlyRow(t *testing.T, r sidebar.Resolver) *frontendv1.RosterRow {
 	t.Helper()
-	rows := repoRows(t, latest(t, r))
+	rows := rosterwalk.AllRows(latest(t, r))
 	if len(rows) != 1 {
 		t.Fatalf("the section carried %d rows, want exactly 1", len(rows))
 	}

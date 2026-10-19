@@ -35,13 +35,14 @@ func TestRepoSectionDrawsEvenWithNoRows(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(merged))
 
 	// Assert: a section that vanished would make the grouping flicker.
 	sections := latest(t, r).GetRepository().GetSections()
-	if len(sections) != 1 || len(sections[0].GetRows().GetRows()) != 0 {
+	if len(sections) != 1 || len(innerRows(sections[0].GetOpenRows().GetRows())) != 0 {
 		t.Fatal("a repository section with no rows did not draw")
 	}
 }
@@ -66,7 +67,7 @@ func TestRepoSectionDrawsForARepositoryWithNoWorkspaceAtAll(t *testing.T) {
 	if got := sections[0].GetKey().GetRepository().GetId(); got != string(repo.ID) {
 		t.Fatalf("section key = %q, want the registered repository %q", got, repo.ID)
 	}
-	if rows := sections[0].GetRows().GetRows(); len(rows) != 0 {
+	if rows := innerRows(sections[0].GetOpenRows().GetRows()); len(rows) != 0 {
 		t.Fatalf("the section drew %d rows, want none", len(rows))
 	}
 }
@@ -76,6 +77,7 @@ func TestRecentlyMergedHoistsOutOfTheRepositoryGrouping(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(merged, workspace("w-live", "live")))
@@ -92,6 +94,7 @@ func TestRecentlyMergedCarriesTheMergedRow(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(merged))
@@ -166,6 +169,7 @@ func TestEveryRegisteredWorkspaceIsResolvableFromTheRoster(t *testing.T) {
 	merge := func(ws wsm.Workspace) wsm.Workspace {
 		at := epoch
 		ws.MergedAt = &at
+		ws.Closed = true
 		return ws
 	}
 
@@ -328,7 +332,7 @@ func TestRepoSectionCountIncludesANestedFamilyRow(t *testing.T) {
 
 	// Assert: one top-level row, two workspaces.
 	section := latest(t, r).GetRepository().GetSections()[0]
-	if top := len(section.GetRows().GetRows()); top != 1 {
+	if top := len(section.GetOpenRows().GetRows()); top != 1 {
 		t.Fatalf("top-level rows = %d, want the child nested under its parent", top)
 	}
 	got := section.GetHeader().GetCount().GetWorkspaces()
@@ -392,6 +396,7 @@ func TestRecentlyMergedCountsItsRows(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(merged, workspace("w-live", "live")))
@@ -409,8 +414,10 @@ func TestRecentlyMergedCountsEveryMergedRowThoughEachIsClosed(t *testing.T) {
 	r, _ := newResolver(t)
 	first := workspace("w-a", "a")
 	first.MergedAt = at(0)
+	first.Closed = true
 	second := workspace("w-b", "b")
 	second.MergedAt = at(1)
+	second.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(first, second))
@@ -458,7 +465,7 @@ func TestTheHiddenSectionCarriesTheHiddenRow(t *testing.T) {
 
 	// Assert.
 	section := latest(t, r).GetHidden()
-	if got := rowNames(section.GetRows().GetRows()); !equal(got, []string{"hidden"}) {
+	if got := rowNames(topHidden(latest(t, r))); !equal(got, []string{"hidden"}) {
 		t.Fatalf("hidden rows = %v, want the one hidden workspace", got)
 	}
 	if got := section.GetHeader().GetLabel().GetText(); got != sidebar.HiddenSectionLabel {
@@ -481,13 +488,13 @@ func TestTheHiddenSectionIsOnTheWireWithNothingHidden(t *testing.T) {
 	if section == nil || section.GetHeader() == nil || section.GetFold() == nil {
 		t.Fatalf("hidden section = %v, want it whole with no rows", section)
 	}
-	if len(section.GetRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
+	if len(section.GetHiddenRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
 		t.Fatalf("hidden section = %v, want no rows and a zero count", section)
 	}
 }
 
-func TestTheHiddenSectionCountLeavesOutAClosedRow(t *testing.T) {
-	// Arrange.
+func TestAClosedHiddenWorkspaceIsInNoSection(t *testing.T) {
+	// Arrange: a closed workspace is listed nowhere but recently merged.
 	r, _ := newResolver(t)
 	closed := hiddenWorkspace("w-closed", "closed")
 	closed.Closed = true
@@ -497,11 +504,11 @@ func TestTheHiddenSectionCountLeavesOutAClosedRow(t *testing.T) {
 
 	// Assert.
 	section := latest(t, r).GetHidden()
-	if len(section.GetRows().GetRows()) != 2 {
-		t.Fatalf("hidden rows = %v, want both on the wire", rowNames(section.GetRows().GetRows()))
+	if got := rowNames(topHidden(latest(t, r))); !equal(got, []string{"open"}) {
+		t.Fatalf("hidden rows = %v, want only the open one", got)
 	}
 	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("hidden count = %d, want 1 (the closed row is not drawn)", got)
+		t.Fatalf("hidden count = %d, want 1", got)
 	}
 }
 
@@ -510,13 +517,14 @@ func TestAMergedHiddenWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := hiddenWorkspace("w-merged", "merged")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(merged))
 
 	// Assert.
 	roster := latest(t, r)
-	if len(roster.GetHidden().GetRows().GetRows()) != 0 {
+	if len(topHidden(roster)) != 0 {
 		t.Fatal("a merged workspace was filed under hidden")
 	}
 	if got := rowNames(rosterwalk.MergedRows(roster)); !equal(got, []string{"merged"}) {
@@ -557,6 +565,7 @@ func mergedIn(id string, repository wsm.Repository, d time.Duration) wsm.Workspa
 	ws := workspace(id, id)
 	ws.Repo = repository.ID
 	ws.MergedAt = at(d)
+	ws.Closed = true
 	return ws
 }
 
@@ -604,7 +613,7 @@ func TestRecentlyMergedGroupOrdersItsRowsByMergeTime(t *testing.T) {
 	r.SetRegistry(registry(placed(mergedIn("older", repo, 0), 1), placed(mergedIn("newer", repo, time.Minute), 2)))
 
 	// Assert: the latest merge first (owner request, 2026-10-13).
-	got := rowNames(latest(t, r).GetRecentlyMerged().GetGroups()[0].GetRows().GetRows())
+	got := rowNames(rosterwalk.MergedRows(latest(t, r)))
 	if !equal(got, []string{"newer", "older"}) {
 		t.Fatalf("group rows = %v, want the latest merge first", got)
 	}
@@ -815,9 +824,9 @@ func TestAHiddenRowCountsFromItsHide(t *testing.T) {
 	r.SetRegistry(registry(hiddenAt(workspace("w1", "one"), time.Hour)))
 
 	// Assert.
-	got := latest(t, r).GetHidden().GetRows().GetRows()[0].GetWhen().GetHidden()
+	got := topHidden(latest(t, r))[0].GetWhen().GetHidden()
 	if got == nil || got.GetAtMs() != at(time.Hour).UnixMilli() {
-		t.Fatalf("when = %v, want the hide instant", latest(t, r).GetHidden().GetRows().GetRows()[0].GetWhen())
+		t.Fatalf("when = %v, want the hide instant", topHidden(latest(t, r))[0].GetWhen())
 	}
 }
 
@@ -826,6 +835,7 @@ func TestAMergedHiddenRowCountsFromItsMerge(t *testing.T) {
 	r, _ := newResolver(t)
 	ws := hiddenAt(workspace("w1", "one"), time.Hour)
 	ws.MergedAt = at(2 * time.Hour)
+	ws.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(ws))
@@ -891,6 +901,7 @@ func TestTheOpenCountCountsTheRowsTheOpenSectionLists(t *testing.T) {
 	closed.Closed = true
 	merged := workspace("w-merged", "merged")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 	reg := twoRepoRegistry(parent, child, other, closed, hiddenWorkspace("w-hidden", "hidden"), merged)
 
 	// Act.

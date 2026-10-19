@@ -30,9 +30,8 @@ func (w Withholding) String() string {
 }
 
 // Withheld answers whether the tab bar withholds the workspace's tab, given
-// whether its repository's section is collapsed. A merged workspace files under
-// recently merged whatever its hidden flag, so only its repository's fold can
-// withhold it, exactly as its merged group follows that fold.
+// whether its repository's section is collapsed. A hidden workspace has no tab
+// at all; a folded repository's open workspaces keep a folded one.
 func (ws Workspace) Withheld(repoFolded bool) Withholding {
 	switch {
 	case ws.InHiddenSection():
@@ -44,11 +43,12 @@ func (ws Workspace) Withheld(repoFolded bool) Withholding {
 	}
 }
 
-// InHiddenSection reports whether the workspace sits in the roster's hidden
-// section: the user hid it, and it has not merged, since a merged workspace
-// files under recently merged whatever its hidden flag.
+// InHiddenSection reports whether the user's hide governs the workspace: it
+// is hidden and its merge has not settled. OPEN BEATS MERGED, so a merged
+// workspace that was reopened and hidden is hidden like any other; only a
+// settled merge (merged and closed) is listed under recently merged instead.
 func (ws Workspace) InHiddenSection() bool {
-	return ws.Hidden && ws.MergedAt == nil
+	return ws.Hidden && !(ws.Closed && ws.MergedAt != nil)
 }
 
 // LetsCacheLapse reports whether the workspace's prompt cache is left to lapse

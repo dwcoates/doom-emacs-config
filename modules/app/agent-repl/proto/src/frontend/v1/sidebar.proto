@@ -65,12 +65,13 @@ message WorkspaceRoster {
   // repository, and nothing else (owner ruling, 2026-10-15).
   reserved 2, 5, 6, 7, 8;
   reserved "task", "maturity", "shown_repository", "shown_task", "shown_maturity";
-  // THE THREE LISTS ARE THE THREE STATES. Every workspace the roster draws is
-  // in exactly one of `repository` (OPEN), `hidden` (HIDDEN) and
-  // `recently_merged` (MERGED), and each list's row type (RosterOpenRow,
-  // RosterHiddenRow, RosterMergedRow) is that state, so no row also carries a
-  // state that could disagree with its list. OPEN BEATS MERGED: a merged
-  // workspace that was reopened is open, and listed with the open ones.
+  // THE LISTS ARE THE STATES. Every workspace the roster carries is in
+  // exactly one of `repository` (OPEN), `hidden` (HIDDEN), `recently_merged`
+  // (MERGED) and `closed` (CLOSED), and each list's row type (RosterOpenRow,
+  // RosterHiddenRow, RosterMergedRow, RosterClosedRow) is that state, so no
+  // row also carries a state that could disagree with its list. OPEN BEATS
+  // MERGED: a merged workspace that was reopened is open, and listed with the
+  // open ones.
   //
   // The OPEN workspaces, one section per repository: the rail's one grouping
   // AND THE EMACS TAB BAR. The tab bar is this tree's depth-first walk --
@@ -87,6 +88,11 @@ message WorkspaceRoster {
   // hidden workspace may keep its session until it is gated, but it has NO
   // TAB: the Emacs tab bar never draws, numbers or steps to it. Always set.
   RosterHiddenSection hidden = 9;
+  // Workspaces that are CLOSED and not in `recently_merged`: they have no tab
+  // and no sidebar section draws them. Carried so the editor can offer them
+  // again (its workspace switcher, reopening) and route their records.
+  // Always set.
+  RosterClosedRows closed = 14;
   // THE OPEN-WORKSPACES SECTION's heading and fold: the box the repository
   // sections are drawn in, under one "Open" header, above the hidden
   // section. Its count is RosterRepositoryView.open_count. Always set.
@@ -180,6 +186,20 @@ message RosterHiddenRow {
 message RosterMergedRows {
   // Each merged row. FLAT: a settled merge has no family left to draw.
   repeated RosterMergedRow rows = 1;
+}
+
+// The closed workspaces the roster carries outside recently_merged, in the
+// registry's order.
+message RosterClosedRows {
+  // Each closed row. FLAT: a closed workspace is drawn in no family.
+  repeated RosterClosedRow rows = 1;
+}
+
+// ONE CLOSED WORKSPACE that is not listed as merged. No tab; drawn by no
+// sidebar section. Reopening it moves it back to the Open section.
+message RosterClosedRow {
+  // The row as every list draws it.
+  RosterRow row = 1;
 }
 
 // ONE MERGED WORKSPACE: its merge landed and it is closed. Never open: a

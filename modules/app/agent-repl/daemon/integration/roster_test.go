@@ -4,6 +4,7 @@ package integration
 
 import (
 	"agentrepl/protohelpers/oneofarm"
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -86,11 +87,12 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.result_read")
 }
 
-// tabBarIDs lists the roster's tab bar, first tab first.
+// tabBarIDs lists the roster's tabs -- its open rows in the Open section's
+// walk, folded ones included -- first tab first.
 func tabBarIDs(r *frontendv1.WorkspaceRoster) []string {
 	var out []string
-	for _, tab := range r.GetTabBar().GetTabs() {
-		out = append(out, tab.GetWorkspace().GetId())
+	for _, open := range rosterwalk.OpenRows(r) {
+		out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId())
 	}
 	return out
 }

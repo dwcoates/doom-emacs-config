@@ -17,7 +17,8 @@ func TestWithheld(t *testing.T) {
 		{name: "a hidden workspace is withheld hidden", ws: Workspace{Hidden: true}, want: WithheldHidden},
 		{name: "a workspace in a collapsed section is withheld collapsed", ws: Workspace{}, repoFolded: true, want: WithheldCollapsed},
 		{name: "a hidden workspace in a collapsed section is withheld hidden", ws: Workspace{Hidden: true}, repoFolded: true, want: WithheldHidden},
-		{name: "a merged workspace ignores its hidden flag", ws: Workspace{Hidden: true, MergedAt: &merged}, want: Drawn},
+		{name: "a reopened merged workspace the user hid is withheld hidden", ws: Workspace{Hidden: true, MergedAt: &merged}, want: WithheldHidden},
+		{name: "a settled merge ignores its hidden flag", ws: Workspace{Hidden: true, Closed: true, MergedAt: &merged}, want: Drawn},
 		{name: "a merged workspace follows its repository's fold", ws: Workspace{MergedAt: &merged}, repoFolded: true, want: WithheldCollapsed},
 	}
 	for _, tc := range cases {
@@ -42,7 +43,8 @@ func TestInHiddenSection(t *testing.T) {
 	}{
 		{name: "an ordinary workspace is not", ws: Workspace{}, want: false},
 		{name: "a hidden workspace is", ws: Workspace{Hidden: true}, want: true},
-		{name: "a merged hidden workspace is not", ws: Workspace{Hidden: true, MergedAt: &merged}, want: false},
+		{name: "a reopened merged hidden workspace is", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
+		{name: "a settled merge that was hidden is not", ws: Workspace{Hidden: true, Closed: true, MergedAt: &merged}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,7 +70,7 @@ func TestLetsCacheLapse(t *testing.T) {
 		{name: "a hidden workspace does", ws: Workspace{Hidden: true}, want: true},
 		{name: "a closed workspace does", ws: Workspace{Closed: true}, want: true},
 		{name: "a closed hidden workspace does", ws: Workspace{Hidden: true, Closed: true}, want: true},
-		{name: "a merged hidden workspace still open does not", ws: Workspace{Hidden: true, MergedAt: &merged}, want: false},
+		{name: "a reopened merged hidden workspace does", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
 		{name: "a merged closed workspace does", ws: Workspace{Closed: true, MergedAt: &merged}, want: true},
 	}
 	for _, tc := range cases {
@@ -142,7 +144,7 @@ func TestKeepaliveHeld(t *testing.T) {
 		{name: "an ordinary workspace keeps its cache warm", ws: Workspace{}, want: false},
 		{name: "a hidden workspace lets its cache lapse", ws: Workspace{Hidden: true}, want: true},
 		{name: "a hidden workspace the user is looking at keeps its cache warm", ws: Workspace{Hidden: true, Current: true}, want: false},
-		{name: "a merged hidden workspace keeps its cache warm", ws: Workspace{Hidden: true, MergedAt: &merged}, want: false},
+		{name: "a reopened merged hidden workspace lets its cache lapse", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

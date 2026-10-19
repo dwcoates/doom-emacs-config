@@ -127,16 +127,16 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	if row := liveRow(hidden, mergeWS.GetId()); row != nil {
 		t.Fatalf("the merge workspace had a row %v while hidden, want none", row)
 	}
-	for _, tab := range hidden.GetTabBar().GetTabs() {
-		if tab.GetWorkspace().GetId() == mergeWS.GetId() {
-			t.Fatalf("the merge workspace had a tab %v while hidden, want none", tab)
+	for _, open := range rosterwalk.OpenRows(hidden) {
+		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == mergeWS.GetId() {
+			t.Fatalf("the merge workspace had a tab %v while hidden, want none", open.GetTab())
 		}
 	}
 	revealed := awaitRoster(t, s.d, s.d.WatchRoster(), "the merge workspace revealed", func(r *frontendv1.WorkspaceRoster) bool {
 		return liveRow(r, mergeWS.GetId()) != nil
 	})
-	for _, tab := range revealed.GetTabBar().GetTabs() {
-		if tab.GetWorkspace().GetId() == mergeWS.GetId() {
+	for _, open := range rosterwalk.OpenRows(revealed) {
+		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == mergeWS.GetId() {
 			return
 		}
 	}

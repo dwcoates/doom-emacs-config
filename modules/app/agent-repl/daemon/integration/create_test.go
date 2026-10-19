@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"os"
 	"path/filepath"
 	"strings"
@@ -606,8 +607,8 @@ func createRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *w
 		return rosterRepoRow(r, ws.GetId()) != nil
 	})
 	for _, s := range got.GetRepository().GetSections() {
-		for _, row := range s.GetRows().GetRows() {
-			if row.GetWorkspace().GetWorkspace().GetId() == ws.GetId() {
+		for _, open := range rosterwalk.SectionOpenRows(s) {
+			if open.GetRow().GetWorkspace().GetWorkspace().GetId() == ws.GetId() {
 				return s.GetKey().GetRepository()
 			}
 		}

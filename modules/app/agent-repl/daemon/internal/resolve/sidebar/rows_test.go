@@ -417,6 +417,7 @@ func TestMergedBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	// Arrange.
 	ws := workspace(string(theWS), "one")
 	ws.MergedAt = at(time.Hour)
+	ws.Closed = true
 	r := live(t, arrange(t, ws))
 
 	// Act.
@@ -440,7 +441,7 @@ func TestHiddenBeatsARunningTurnInTheWhenColumn(t *testing.T) {
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 
 	// Assert: a hidden row counts from its hide.
-	row := latest(t, r).GetHidden().GetRows().GetRows()[0]
+	row := hiddenRows(latest(t, r))[0]
 	if got := row.GetWhen().GetHidden().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the hide instant", row.GetWhen())
 	}
@@ -609,6 +610,7 @@ func TestRowRecedesWhenTheWorkspaceMerged(t *testing.T) {
 	r, _ := newResolver(t)
 	merged := workspace("w1", "one")
 	merged.MergedAt = at(0)
+	merged.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(merged))
@@ -1365,9 +1367,9 @@ func TestAMergeWorkspaceNestsUnderTheWorkspaceItWasForkedFrom(t *testing.T) {
 	r.SetRegistry(registry(requester, merging))
 
 	// Assert
-	rows := repoRows(t, latest(t, r))
-	if len(rows) != 1 || len(rows[0].GetChildren()) != 1 || rows[0].GetChildren()[0].GetName().GetText() != "one-merge" {
-		t.Fatalf("rows = %v, want the merge workspace nested under its requester", rowNames(rows))
+	rows := repoOpen(t, latest(t, r))
+	if len(rows) != 1 || len(rows[0].GetChildren()) != 1 || rows[0].GetChildren()[0].GetRow().GetName().GetText() != "one-merge" {
+		t.Fatalf("rows = %v, want the merge workspace nested under its requester", rowNames(innerRows(rows)))
 	}
 }
 
@@ -1395,9 +1397,9 @@ func TestAHiddenMergeWorkspaceIsInNoSection(t *testing.T) {
 			t.Fatalf("the hidden merge workspace has a row: %v", row)
 		}
 	}
-	rows := repoRows(t, latest(t, r))
+	rows := repoOpen(t, latest(t, r))
 	if len(rows) != 1 || len(rows[0].GetChildren()) != 0 {
-		t.Fatalf("rows = %v, want the requester alone, with no child", rowNames(rows))
+		t.Fatalf("rows = %v, want the requester alone, with no child", rowNames(innerRows(rows)))
 	}
 }
 
@@ -1410,9 +1412,9 @@ func TestAHiddenMergeWorkspaceHasNoTab(t *testing.T) {
 	r.SetRegistry(registry(requester, hiddenMergeWorkspace(requester.ID)))
 
 	// Assert
-	for _, tab := range latest(t, r).GetTabBar().GetTabs() {
-		if tab.GetWorkspace().GetId() == "w2" {
-			t.Fatalf("the hidden merge workspace has a tab: %v", tab)
+	for _, open := range rosterwalk.OpenRows(latest(t, r)) {
+		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == "w2" {
+			t.Fatalf("the hidden merge workspace has a tab: %v", open.GetTab())
 		}
 	}
 }
@@ -1423,6 +1425,7 @@ func TestALandedHiddenMergeWorkspaceIsInRecentlyMerged(t *testing.T) {
 	requester := workspace("w1", "one")
 	merged := hiddenMergeWorkspace(requester.ID)
 	merged.MergedAt = at(0)
+	merged.Closed = true
 	merged.Closed = true
 
 	// Act
@@ -1445,8 +1448,8 @@ func TestARevealedMergeWorkspaceHasATab(t *testing.T) {
 	r.SetRegistry(registry(requester, revealed))
 
 	// Assert
-	for _, tab := range latest(t, r).GetTabBar().GetTabs() {
-		if tab.GetWorkspace().GetId() == "w2" {
+	for _, open := range rosterwalk.OpenRows(latest(t, r)) {
+		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == "w2" && open.GetTab().GetNumbered() != nil {
 			return
 		}
 	}
