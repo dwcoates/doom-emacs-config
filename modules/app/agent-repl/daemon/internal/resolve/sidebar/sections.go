@@ -50,18 +50,20 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 			if region.subsection != nil {
 				regionLog = repoLog.With(dlog.Context{"subsection": string(region.subsection.ID)})
 			}
-			rows := r.openRows(region.rows, placed.repo.Folded, numbers, rc, regionLog)
+			rows := r.openRows(region.rows, region.folded(placed.repo), numbers, rc, regionLog)
 			regionCount := len(rosterwalk.FlattenOpen(rows.GetRows()))
 			count += regionCount
 			if region.subsection == nil {
 				section.OpenRows = rows
 				continue
 			}
-			section.Subsections = append(section.Subsections, &frontendv1.RosterSubsection{
+			sub := &frontendv1.RosterSubsection{
 				Key:      &frontendv1.RosterSubsectionKey{SubsectionId: string(region.subsection.ID)},
 				Header:   sectionHeader(region.subsection.Name, regionCount),
 				OpenRows: rows,
-			})
+			}
+			setSubsectionFold(sub, region.subsection.Folded)
+			section.Subsections = append(section.Subsections, sub)
 		}
 		section.Header = sectionHeader(placed.repo.Name, count)
 		shown += count
@@ -108,6 +110,17 @@ func setRepoFold(section *frontendv1.RosterRepoSection, folded bool) {
 		return
 	}
 	section.Fold = &frontendv1.RosterRepoSection_Expanded{Expanded: &frontendv1.RosterRepoSectionExpanded{}}
+}
+
+// setSubsectionFold sets a subsection's fold arm: its OWN fold, which the
+// sidebar draws. Its tabs are folded by its repository's collapse as well
+// (openRegion.folded).
+func setSubsectionFold(sub *frontendv1.RosterSubsection, folded bool) {
+	if folded {
+		sub.Fold = &frontendv1.RosterSubsection_Collapsed{Collapsed: &frontendv1.RosterSubsectionCollapsed{}}
+		return
+	}
+	sub.Fold = &frontendv1.RosterSubsection_Expanded{Expanded: &frontendv1.RosterSubsectionExpanded{}}
 }
 
 // repoDivergence projects a repository's measure onto its section's label

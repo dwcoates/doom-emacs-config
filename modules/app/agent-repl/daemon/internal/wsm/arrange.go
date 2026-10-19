@@ -496,8 +496,8 @@ func requireRepository(ctx context.Context, tx *sql.Tx, id RepoID) error {
 // the id.
 func subsectionRow(ctx context.Context, tx *sql.Tx, id SubsectionID) (Subsection, error) {
 	var sub Subsection
-	err := tx.QueryRowContext(ctx, `SELECT id, repo_id, name, place FROM subsections WHERE id = ?`, id).
-		Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place)
+	err := tx.QueryRowContext(ctx, `SELECT `+subsectionColumns+` FROM subsections WHERE id = ?`, id).
+		Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place, &sub.Folded)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Subsection{}, &UnknownSubsectionError{ID: id}
 	}
@@ -627,13 +627,17 @@ func (s *store) ListSubsections(ctx context.Context) ([]Subsection, error) {
 
 // listSubsections loads every subsection through Q, all-or-nothing.
 func listSubsections(ctx context.Context, q querier) ([]Subsection, error) {
-	return listRows(ctx, q, `SELECT id, repo_id, name, place FROM subsections ORDER BY repo_id, place`, scanSubsection)
+	return listRows(ctx, q, `SELECT `+subsectionColumns+` FROM subsections ORDER BY repo_id, place`, scanSubsection)
 }
 
-// scanSubsection reads one Subsection from a row of its four columns.
+// subsectionColumns is every column a Subsection is read from, in
+// scanSubsection's order.
+const subsectionColumns = `id, repo_id, name, place, folded`
+
+// scanSubsection reads one Subsection from a row of subsectionColumns.
 func scanSubsection(row interface{ Scan(...any) error }) (Subsection, error) {
 	var sub Subsection
-	err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place)
+	err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place, &sub.Folded)
 	return sub, err
 }
 

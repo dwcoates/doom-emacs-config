@@ -2058,3 +2058,9 @@ func (f *fakeLatencies) all() []observedLatency {
 	defer f.mu.Unlock()
 	return append([]observedLatency(nil), f.observed...)
 }
+
+// FoldSubsection records the subsection fold as an arrangement call and
+// answers arrangeErr.
+func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, folded bool) error {
+	return v.arrange(fmt.Sprintf("FoldSubsection %s %v", sub, folded))
+}

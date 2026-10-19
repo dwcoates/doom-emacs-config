@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -34,6 +36,35 @@ func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool
 			return refuse(log, "FoldRepository", ArmUnknownRepository, fmt.Sprintf("no repository %q is registered", repo), true)
 		},
 		holds: func(ws wsm.Workspace) bool { return ws.Repo == repo },
+	})
+}
+
+// opFoldSubsection is the operation FoldSubsection's records carry.
+const opFoldSubsection = "daemon.workspace.fold_subsection"
+
+// FoldSubsection records whether a subsection of a repository's section is
+// collapsed, with the effect a repository's collapse has (FoldRepository):
+// the sidebar hides its rows, the Emacs tab bar folds its workspaces' tabs,
+// and COLLAPSING STANDS ITS OPEN WORKSPACES' SESSIONS DOWN. A workspace sits
+// in its root's subsection, so a family folds whole. An unknown subsection is
+// refused unknown_subsection.
+func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool) error {
+	log := v.deps.Log.Global().With(dlog.Context{"subsection": string(sub), "folded": folded})
+	return v.foldTabs(ctx, log, foldTabsSpec{
+		op:     opFoldSubsection,
+		what:   "subsection",
+		target: string(sub),
+		folded: folded,
+		write:  func() error { return v.deps.DB.SetSubsectionFolded(ctx, sub, folded) },
+		unknown: func(err error) error {
+			var unknown *wsm.UnknownSubsectionError
+			if !errors.As(err, &unknown) {
+				return nil
+			}
+			return refuseWith(log, "UpdateSidebarView", ArmUnknownSubsection, err.Error(), true,
+				map[string]any{"subsection": &agentreplv1.SubsectionRef{Id: string(sub)}})
+		},
+		holds: func(ws wsm.Workspace) bool { return ws.Subsection != nil && *ws.Subsection == sub },
 	})
 }
 

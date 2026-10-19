@@ -55,6 +55,9 @@ type DB interface {
 	// SetRepositoryFolded records whether a repository's roster section is
 	// collapsed; an unknown repository is ErrNotFound.
 	SetRepositoryFolded(ctx context.Context, id RepoID, folded bool) error
+	// SetSubsectionFolded records whether a subsection is collapsed; an
+	// unknown subsection is UnknownSubsectionError (subsectionfolds.go).
+	SetSubsectionFolded(ctx context.Context, id SubsectionID, folded bool) error
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error

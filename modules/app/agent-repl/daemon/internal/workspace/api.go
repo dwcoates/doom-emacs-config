@@ -372,6 +372,9 @@ type Verbs interface {
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.
 	FoldRepository(ctx context.Context, repo ids.RepoID, folded bool) error
+	// FoldSubsection records whether a subsection is collapsed, republishes
+	// the roster, and on a collapse stands its open workspaces down.
+	FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool) error
 	// FoldMergedSection records whether the recently-merged band is collapsed
 	// and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error

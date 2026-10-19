@@ -3034,3 +3034,15 @@ func requireFamilyAnswer(t *testing.T, f *fixture, err, want error, operation st
 		t.Fatalf("the family refusal was not recorded at INFO under %s", operation)
 	}
 }
+
+// SetSubsectionFolded records the fold on the fake's subsection, as WSM does;
+// an unknown subsection is WSM's UnknownSubsectionError.
+func (d *fakeDB) SetSubsectionFolded(_ context.Context, id ids.SubsectionID, folded bool) error {
+	for i := range d.subsections {
+		if d.subsections[i].ID == id {
+			d.subsections[i].Folded = folded
+			return nil
+		}
+	}
+	return &wsm.UnknownSubsectionError{ID: id}
+}

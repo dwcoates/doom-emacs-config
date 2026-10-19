@@ -8,6 +8,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
@@ -125,5 +126,87 @@ func TestAnOpenChildOfAClosedParentTakesItsParentsPlace(t *testing.T) {
 	// Assert.
 	if rows, _ := openRowsAndNumbers(latest(t, r)); !equal(rows, []string{"first", "k", "last"}) {
 		t.Fatalf("open rows = %v, want the kid where its closed parent stood", rows)
+	}
+}
+
+// foldedSubsectionRegistry is numberingRegistry with its subsection collapsed.
+func foldedSubsectionRegistry() sidebar.Registry {
+	reg := numberingRegistry()
+	reg.Subsections[0].Folded = true
+	return reg
+}
+
+func TestAFoldedSubsectionsOpenRowsHaveAFoldedTabAndTheRestRunUnbroken(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(foldedSubsectionRegistry())
+
+	// Assert: a2 (in the folded subsection) is off the bar, and the numbers
+	// still run 1..N with no gap.
+	rows, numbers := openRowsAndNumbers(latest(t, r))
+	if want := []string{"a1", "p", "k", "m", "b1"}; !equal(rows, want) {
+		t.Fatalf("numbered rows = %v, want %v", rows, want)
+	}
+	if want := []string{"1", "2", "3", "4", "5"}; !equal(numbers, want) {
+		t.Fatalf("numbers = %v, want %v", numbers, want)
+	}
+}
+
+func TestASubsectionStatesItsOwnFold(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry func() sidebar.Registry
+		want     string
+	}{
+		{name: "expanded", registry: numberingRegistry, want: "expanded"},
+		{name: "collapsed", registry: foldedSubsectionRegistry, want: "collapsed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+
+			// Act.
+			r.SetRegistry(tt.registry())
+
+			// Assert.
+			var got []string
+			for _, section := range latest(t, r).GetRepository().GetSections() {
+				for _, sub := range section.GetSubsections() {
+					switch {
+					case sub.GetExpanded() != nil:
+						got = append(got, "expanded")
+					case sub.GetCollapsed() != nil:
+						got = append(got, "collapsed")
+					default:
+						got = append(got, "unset")
+					}
+				}
+			}
+			if !equal(got, []string{tt.want}) {
+				t.Fatalf("subsection folds = %v, want [%s]", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAFoldedSubsectionsTabsAreWithheldCollapsed(t *testing.T) {
+	// Arrange.
+	reg := foldedSubsectionRegistry()
+
+	// Act.
+	tabs := sidebar.Tabs(reg, dlog.NewTestLogger())
+
+	// Assert.
+	for _, tab := range tabs {
+		want := wsm.Drawn
+		if tab.Workspace.ID == "a2" || tab.Workspace.ID == "c1" {
+			want = wsm.WithheldCollapsed
+		}
+		if tab.Withheld != want {
+			t.Fatalf("%s's tab = %v, want %v", tab.Workspace.ID, tab.Withheld, want)
+		}
 	}
 }

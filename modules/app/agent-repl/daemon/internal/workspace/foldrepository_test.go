@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sourcescan"
@@ -254,7 +256,49 @@ func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownWithheld(ws.ID)")
 
 	// Assert.
-	if shared != 1 || byHand != 1 {
+	if shared != 2 || byHand != 1 {
 		t.Fatalf("foldTabs calls = %d, stand-down loops = %d; want every tab-hiding fold through foldTabs", shared, byHand)
+	}
+}
+
+func TestFoldSubsectionRecordsTheFoldAndStandsDownOnlyItsOwnWorkspaces(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	sub := ids.SubsectionID("sub-1")
+	f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: sub, Repo: "repo-1", Name: "later", Place: 1})
+	inside := f.workspace("inside", t.TempDir())
+	inside.Subsection = &sub
+	f.db.with(inside)
+	f.workspace("outside", t.TempDir())
+
+	// Act
+	err := f.verbs.FoldSubsection(context.Background(), sub, true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldSubsection: %v", err)
+	}
+	if !f.db.subsections[0].Folded {
+		t.Fatal("the subsection's fold was not recorded")
+	}
+	if !slices.Equal(f.standDowns, []ids.WorkspaceID{"inside"}) {
+		t.Fatalf("stand-downs = %v, want only the subsection's workspace", f.standDowns)
+	}
+}
+
+func TestFoldSubsectionRefusesAnUnknownSubsection(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.verbs.FoldSubsection(context.Background(), "absent", true)
+
+	// Assert
+	refusal := asRefusal(t, err, ArmUnknownSubsection)
+	if ref, ok := refusal.Fields["subsection"].(*agentreplv1.SubsectionRef); !ok || ref.GetId() != "absent" {
+		t.Fatalf("refusal fields = %v, want the subsection named", refusal.Fields)
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
 	}
 }

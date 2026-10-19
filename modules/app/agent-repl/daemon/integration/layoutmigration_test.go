@@ -160,6 +160,7 @@ var layout3Undo = map[int][]string{
 		`DROP TRIGGER workspaces_subsection_same_repo_update`, `DROP TRIGGER workspaces_subsection_same_repo_insert`,
 		`ALTER TABLE workspaces DROP COLUMN subsection_id`, `DROP TABLE subsections`,
 		`DROP TRIGGER repositories_land_unplaced`, `DROP INDEX repositories_by_place`, `ALTER TABLE repositories DROP COLUMN place`},
+	59: {`ALTER TABLE subsections DROP COLUMN folded`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

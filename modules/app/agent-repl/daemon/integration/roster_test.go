@@ -279,6 +279,53 @@ func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *t
 	})
 }
 
+func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
+	t.Parallel()
+	// Arrange: a and b in one repository, b filed in a subsection.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	first := awaitRoster(t, d, roster, "two tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 2 })
+	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "later"}}}).GetCreated()
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace: b,
+			Into:      &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: created},
+			At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		}}})
+
+	// Act.
+	resp, err := d.Client().UpdateSidebarView(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateSidebarViewRequest{
+		Change: &agentreplv1.UpdateSidebarViewRequest_FoldSection{FoldSection: &agentreplv1.SidebarViewFoldSection{
+			Section: &agentreplv1.SidebarViewFoldSection_Subsection{Subsection: created},
+			Fold:    &agentreplv1.SidebarViewFoldSection_Collapse{Collapse: &agentreplv1.SidebarViewCollapse{}},
+		}}}))
+
+	// Assert: the subsection is collapsed and b's tab folded, a numbered 1.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateSidebarView = (%v, %v), want success", resp, err)
+	}
+	awaitRoster(t, d, roster, "the subsection collapsed and b's tab folded", func(r *frontendv1.WorkspaceRoster) bool {
+		subs := r.GetRepository().GetSections()[0].GetSubsections()
+		if len(subs) != 1 || subs[0].GetCollapsed() == nil {
+			return false
+		}
+		for _, open := range rosterwalk.OpenRows(r) {
+			id := open.GetRow().GetWorkspace().GetWorkspace().GetId()
+			if id == b.GetId() && open.GetTab().GetFolded() == nil {
+				return false
+			}
+			if id != b.GetId() && open.GetTab().GetNumbered().GetNumber() != 1 {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.

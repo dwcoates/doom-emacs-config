@@ -229,6 +229,10 @@ type Subsection struct {
 	// Place is the subsection's position among its repository's
 	// subsections. Unique within the repository, and at least 1.
 	Place int64
+	// Folded is whether the subsection is collapsed: its rows hidden in the
+	// sidebar and its workspaces' tabs folded off the tab bar
+	// (SetSubsectionFolded).
+	Folded bool
 }
 
 // ForgetReport is what a Forget removed BESIDES the workspace's own rows.

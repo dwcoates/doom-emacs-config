@@ -19,8 +19,9 @@ import (
 //     closed nor hidden, and OPEN BEATS MERGED, so a merged workspace that was
 //     reopened is open and listed here.
 //   - IN OPEN IF AND ONLY IF IT HAS A TAB. Every open row carries a tab, and
-//     nothing else does. A folded repository's rows keep a FOLDED tab: open,
-//     but drawn by neither surface and given no number.
+//     nothing else does. A folded repository's rows, and a folded
+//     subsection's, keep a FOLDED tab: open, but drawn by neither surface and
+//     given no number (openRegion.folded).
 //   - NUMBERS MATCH POSITION. Tabs are numbered 1..N with no gap in the
 //     tree's depth-first walk, numbered tabs only, so tab N is always the row
 //     drawn immediately before tab N+1, in the sidebar and on the bar.
@@ -46,6 +47,13 @@ type openNode struct {
 type openRegion struct {
 	subsection *wsm.Subsection
 	rows       []openNode
+}
+
+// folded reports whether the region's tabs are folded off the tab bar: its
+// repository is collapsed, or it is a subsection that is. The one statement
+// of a folded tab, which the sidebar's numbering and the tab bar read alike.
+func (r openRegion) folded(repo wsm.Repository) bool {
+	return repo.Folded || (r.subsection != nil && r.subsection.Folded)
 }
 
 // openRepo is one repository's Open section, its own region first.
@@ -149,18 +157,18 @@ type Tab struct {
 }
 
 // Tabs answers the editor's tab bar: every open workspace in the Open
-// section's walk (openTree), a folded repository's withheld as collapsed. It
+// section's walk (openTree), a folded region's withheld as collapsed. It
 // is the same walk the roster numbers its open rows by, so hiding the current
 // workspace lands the user on the neighbour the bar actually draws.
 func Tabs(reg Registry, log dlog.Logger) []Tab {
 	repos, _ := openTree(reg, log)
 	var out []Tab
 	for _, repo := range repos {
-		withheld := wsm.Drawn
-		if repo.repo.Folded {
-			withheld = wsm.WithheldCollapsed
-		}
 		for _, region := range repo.regions {
+			withheld := wsm.Drawn
+			if region.folded(repo.repo) {
+				withheld = wsm.WithheldCollapsed
+			}
 			walkOpen(region.rows, func(ws wsm.Workspace) { out = append(out, Tab{Workspace: ws, Withheld: withheld}) })
 		}
 	}
@@ -168,12 +176,12 @@ func Tabs(reg Registry, log dlog.Logger) []Tab {
 }
 
 // tabNumberer hands out tab numbers in the Open section's walk: 1, 2, ... to
-// every tab of an unfolded repository, none to a folded one's.
+// every tab of an unfolded region, none to a folded one's.
 type tabNumberer struct {
 	next uint32
 }
 
-// tab answers the next open row's tab, given whether its repository is folded.
+// tab answers the next open row's tab, given whether its region is folded.
 func (n *tabNumberer) tab(folded bool) *frontendv1.RosterOpenRowTab {
 	if folded {
 		return &frontendv1.RosterOpenRowTab{Tab: &frontendv1.RosterOpenRowTab_Folded{Folded: &frontendv1.RosterOpenRowTabFolded{}}}
