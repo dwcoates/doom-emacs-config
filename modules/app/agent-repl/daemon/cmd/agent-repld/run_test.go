@@ -19,8 +19,8 @@ import (
 	"agent-repld/internal/boot"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/rollout"
 	"agent-repld/internal/restarttiming/restarttimingtest"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/server"
 	"agent-repld/internal/wsm"
 
