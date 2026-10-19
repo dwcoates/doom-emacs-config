@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -184,5 +185,76 @@ func TestCollapsingARepositoryWhoseWorkspacesCannotBeListedFailsLoudly(t *testin
 	}
 	if !found {
 		t.Fatal("the failed listing was not recorded at error")
+	}
+}
+
+func TestFoldTabs(t *testing.T) {
+	errWrite := errors.New("disk I/O error")
+	tests := []struct {
+		name          string
+		folded        bool
+		writeErr      error
+		unknown       error
+		wantErr       error
+		wantRepublish int
+		wantStandDown []ids.WorkspaceID
+	}{
+		{name: "a collapse stands down the open workspaces it holds", folded: true, wantRepublish: 1, wantStandDown: []ids.WorkspaceID{"held"}},
+		{name: "an expand stands nothing down", folded: false, wantRepublish: 1},
+		{name: "an unknown target answers its refusal", folded: true, writeErr: wsm.ErrNotFound, unknown: errUnknownTarget, wantErr: errUnknownTarget},
+		{name: "a failed write is surfaced", folded: true, writeErr: errWrite, wantErr: errWrite},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("held", t.TempDir())
+			closed := f.workspace("closed-held", t.TempDir())
+			closed.Closed = true
+			f.db.with(closed)
+			f.workspace("other", t.TempDir())
+			log := f.log.logger
+
+			// Act
+			err := f.verbs.(*verbs).foldTabs(context.Background(), log, foldTabsSpec{
+				op: "daemon.workspace.test", what: "thing", target: "t1", folded: tt.folded,
+				write: func() error { return tt.writeErr },
+				unknown: func(error) error {
+					if tt.unknown == nil {
+						return nil
+					}
+					return tt.unknown
+				},
+				holds: func(ws wsm.Workspace) bool { return ws.ID != "other" },
+			})
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) || (tt.wantErr == nil && err != nil) {
+				t.Fatalf("foldTabs = %v, want %v", err, tt.wantErr)
+			}
+			if len(f.sidebar.registries) != tt.wantRepublish {
+				t.Fatalf("roster republications = %d, want %d", len(f.sidebar.registries), tt.wantRepublish)
+			}
+			if !slices.Equal(f.standDowns, tt.wantStandDown) {
+				t.Fatalf("stand-downs = %v, want %v", f.standDowns, tt.wantStandDown)
+			}
+			if failed := loggedAtError(f, "daemon.workspace.test"); failed != (tt.wantErr == errWrite) {
+				t.Fatalf("recorded at ERROR = %v, want it only for the failed write", failed)
+			}
+		})
+	}
+}
+
+// errUnknownTarget is a fold's refusal of a target nothing carries.
+var errUnknownTarget = errors.New("no such target")
+
+func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
+	// Act.
+	shared := sourcescan.Count(t, "v.foldTabs(ctx, log, foldTabsSpec{")
+	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownWithheld(ws.ID)")
+
+	// Assert.
+	if shared != 1 || byHand != 1 {
+		t.Fatalf("foldTabs calls = %d, stand-down loops = %d; want every tab-hiding fold through foldTabs", shared, byHand)
 	}
 }
