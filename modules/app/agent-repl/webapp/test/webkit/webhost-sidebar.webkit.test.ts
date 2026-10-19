@@ -55,15 +55,43 @@ async function measure(page: Page, css: string, html: string, rootClass: string,
 
 describe("the webhost's sidebar in WebKit", () => {
   let browser: Browser;
-  let page: Page;
-  let css: string;
+  // Every layout is measured in the hook: a test body only reads what the hook
+  // produced (vitest.webkit.config.ts).
+  const covered = new Map<boolean, { own: Box; webhost: Box }>();
+  let column: { own: Box; docked: Box };
+  let reservedVisibility: string;
 
   beforeAll(async () => {
     const styles = await readFile(path.join(here, "../../src/styles.css"), "utf8");
     const host = await readFile(path.join(here, "../../src/host/host.css"), "utf8");
-    css = `${styles}\n${host}`;
+    const css = `${styles}\n${host}`;
     browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    const told = `${DOCK_HEIGHT_PROPERTY}: ${BAND}px`;
+
+    for (const gate of [false, true]) {
+      const own = await measure(page, css, pageShell("rows", gate), "", told, "#ws-sidebar");
+      const webhost = await measure(
+        page,
+        css,
+        `<div class="webhost-frames"></div><nav id="ws-sidebar">rows</nav>`,
+        HOST_ROOT_CLASS,
+        `${SIDEBAR_BOTTOM_PROPERTY}: ${gate ? BAND : 0}px`,
+        "#ws-sidebar",
+      );
+      covered.set(gate, { own, webhost });
+    }
+
+    column = {
+      own: await measure(page, css, pageShell("rows", true), "", told, "#main-col"),
+      docked: await measure(page, css, pageShell("", true), WEBHOST_SIDEBAR_CLASS, told, "#main-col"),
+    };
+
+    await page.setContent(
+      `<!doctype html><html class="${WEBHOST_SIDEBAR_CLASS}"><head></head><body>${pageShell("", false)}</body></html>`,
+    );
+    await page.addStyleTag({ content: css });
+    reservedVisibility = await page.evaluate(() => getComputedStyle(document.getElementById("ws-sidebar")!).visibility);
   });
 
   afterAll(async () => {
@@ -73,36 +101,19 @@ describe("the webhost's sidebar in WebKit", () => {
   it.each([
     { name: "with no gate standing", gate: false },
     { name: "above a standing gate", gate: true },
-  ])("covers exactly the box a page's own sidebar takes, $name", async ({ gate }) => {
-    const told = `${DOCK_HEIGHT_PROPERTY}: ${BAND}px`;
-    const own = await measure(page, css, pageShell("rows", gate), "", told, "#ws-sidebar");
-    const webhost = await measure(
-      page,
-      css,
-      `<div class="webhost-frames"></div><nav id="ws-sidebar">rows</nav>`,
-      HOST_ROOT_CLASS,
-      `${SIDEBAR_BOTTOM_PROPERTY}: ${gate ? BAND : 0}px`,
-      "#ws-sidebar",
-    );
+  ])("covers exactly the box a page's own sidebar takes, $name", ({ gate }) => {
+    const { own, webhost } = covered.get(gate)!;
     expect(webhost.left).toBeCloseTo(own.left, 1);
     expect(webhost.top).toBeCloseTo(own.top, 1);
     expect(webhost.width).toBeCloseTo(own.width, 1);
     expect(webhost.height).toBeCloseTo(own.height, 1);
   });
 
-  it("leaves a docked page's main column where it is beside a sidebar of its own", async () => {
-    const told = `${DOCK_HEIGHT_PROPERTY}: ${BAND}px`;
-    const own = await measure(page, css, pageShell("rows", true), "", told, "#main-col");
-    const docked = await measure(page, css, pageShell("", true), WEBHOST_SIDEBAR_CLASS, told, "#main-col");
-    expect(docked).toEqual(own);
+  it("leaves a docked page's main column where it is beside a sidebar of its own", () => {
+    expect(column.docked).toEqual(column.own);
   });
 
-  it("draws nothing in a docked page's reserved column", async () => {
-    await page.setContent(
-      `<!doctype html><html class="${WEBHOST_SIDEBAR_CLASS}"><head></head><body>${pageShell("", false)}</body></html>`,
-    );
-    await page.addStyleTag({ content: css });
-    const visibility = await page.evaluate(() => getComputedStyle(document.getElementById("ws-sidebar")!).visibility);
-    expect(visibility).toBe("hidden");
+  it("draws nothing in a docked page's reserved column", () => {
+    expect(reservedVisibility).toBe("hidden");
   });
 });

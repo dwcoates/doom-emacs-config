@@ -3,10 +3,9 @@
  * feed) the commission the bubble was given.
  *
  * THE LOOK IS THE EXISTING ONE, unchanged: the right-flushed `.bubble.user`
- * with its body in `.bubble-body`, the page-global shadow wave crossing its
- * background, and the shared 25-line cap the stylesheet puts on every bubble
- * body. Nothing about the message that carries prompts now suggests the bubble
- * should look different, so it does not.
+ * with its body in `.bubble-body`, and the page-global shadow wave crossing its
+ * background. It folds with no line cap (`USER_PROMPT_CAP_LINES`): folded, it
+ * shows the whole prompt and hides only a reply's quote.
  *
  * ONE ARM ON PURPOSE. `FeedUserPrompt.result` has a single `success` arm
  * because a user row is never in flight and never fails — but it is still a

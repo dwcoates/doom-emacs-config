@@ -130,7 +130,7 @@ describe("drawFeedAgentPrompt: its spec", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("agent");
   });
 
-  it("collapses at the five-line subagent prompt cap", () => {
+  it("folds at the subagent prompt cap, which has no line limit", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(AGENT_PROMPT_CAP_LINES));
   });
 

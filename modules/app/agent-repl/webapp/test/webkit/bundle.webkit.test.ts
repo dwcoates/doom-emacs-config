@@ -6,15 +6,25 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { rejectionOf } from "./rejection";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("bundlePage", () => {
-  it("assigns the entry's exports to the named global", async () => {
+  // Each bundle is a real vite build, paid in the hook: a test body only reads
+  // what the hook produced (vitest.webkit.config.ts).
+  let code: string;
+  let refusal: unknown;
+
+  beforeAll(async () => {
+    code = await bundlePage(path.join(here, "fixtures/bundle-entry.ts"), "bundleEntry");
+    refusal = await rejectionOf(bundlePage(path.join(here, "fixtures/no-such-entry.ts"), "missing"));
+  });
+
+  it("assigns the entry's exports to the named global", () => {
     // Arrange
-    const code = await bundlePage(path.join(here, "fixtures/bundle-entry.ts"), "bundleEntry");
     const sandbox: Record<string, unknown> = {};
 
     // Act
@@ -24,7 +34,8 @@ describe("bundlePage", () => {
     expect((sandbox.bundleEntry as { answer: number }).answer).toBe(42);
   });
 
-  it("refuses an entry that does not exist", async () => {
-    await expect(bundlePage(path.join(here, "fixtures/no-such-entry.ts"), "missing")).rejects.toThrow();
+  it("refuses an entry that does not exist", () => {
+    // Arrange + Act: the hook's bundle of a missing entry. Assert
+    expect(refusal).toBeInstanceOf(Error);
   });
 });

@@ -10,18 +10,21 @@ import { fileURLToPath } from "node:url";
 import { webkit, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootPage, pageAssets } from "./boot-page";
+import { rejectionOf } from "./rejection";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 let browser: Browser;
 
-// THE BROWSER'S COLD START IS THE HOOK'S WORK, under the hook's bound: the
-// first page a freshly launched WebKit opens pays for its web process, which
-// alone outruns the 850ms a test may take, so the hook opens and closes one
-// and every test's boot is a warm one.
+/*
+ * EVERY BOOT, BUNDLE AND READ IS PAID IN A HOOK. The webkit config gives a test
+ * body 850ms and a hook 90s (webapp/AGENTS.md "Wait/timeout bounds"), on the
+ * contract that a test only reads what its hook produced: a page boot measured
+ * ~0.5s healthy and crossed 850ms under a loaded full run. Each describe's
+ * `beforeAll` does the work and records what the tests read.
+ */
 beforeAll(async () => {
   browser = await webkit.launch();
-  await (await browser.newPage()).close();
 });
 
 afterAll(async () => {
@@ -34,35 +37,37 @@ const PUBLISHES = "window.sample = { ready: true };";
 const NO_RULES = "/* no rules */";
 
 describe("bootPage", () => {
-  it("answers once the script has published its API on the named global", async () => {
-    // Arrange + Act
-    const { page } = await bootPage(browser, {
+  /** What each boot the tests read answered. */
+  const seen: {
+    published?: boolean;
+    margin?: string;
+    viewport?: unknown[];
+    bootFailure?: unknown;
+    laterErrors?: string;
+  } = {};
+
+  beforeAll(async () => {
+    const published = await bootPage(browser, {
       script: PUBLISHES,
       css: NO_RULES,
       global: "sample",
       viewport: { width: 300, height: 200 },
     });
-    // Assert
-    expect(await page.evaluate(() => (window as unknown as { sample: { ready: boolean } }).sample.ready)).toBe(true);
-    await page.close();
-  });
+    seen.published = await published.page.evaluate(
+      () => (window as unknown as { sample: { ready: boolean } }).sample.ready,
+    );
+    await published.page.close();
 
-  it("lays the stylesheet under the page", async () => {
-    // Arrange + Act
-    const { page } = await bootPage(browser, {
+    const styled = await bootPage(browser, {
       script: PUBLISHES,
       css: "body { margin: 7px; }",
       global: "sample",
       viewport: { width: 300, height: 200 },
     });
-    // Assert
-    expect(await page.evaluate(() => getComputedStyle(document.body).marginTop)).toBe("7px");
-    await page.close();
-  });
+    seen.margin = await styled.page.evaluate(() => getComputedStyle(document.body).marginTop);
+    await styled.page.close();
 
-  it("opens the page at the viewport and pixel ratio asked for, with the body's style", async () => {
-    // Arrange + Act
-    const { page } = await bootPage(browser, {
+    const sized = await bootPage(browser, {
       script: PUBLISHES,
       css: NO_RULES,
       global: "sample",
@@ -70,28 +75,19 @@ describe("bootPage", () => {
       deviceScaleFactor: 2,
       bodyStyle: "margin:0;background:#fff",
     });
-    // Assert
-    const seen = await page.evaluate(() => [
+    seen.viewport = await sized.page.evaluate(() => [
       window.innerWidth,
       window.innerHeight,
       window.devicePixelRatio,
       document.body.getAttribute("style"),
     ]);
-    expect(seen).toEqual([321, 123, 2, "margin:0;background:#fff"]);
-    await page.close();
-  });
+    await sized.page.close();
 
-  it("fails the boot, naming the error, when the page throws while booting", async () => {
-    // Arrange
     const script = `${PUBLISHES} throw new Error("the mount broke");`;
-    // Act + Assert
-    await expect(
+    seen.bootFailure = await rejectionOf(
       bootPage(browser, { script, css: NO_RULES, global: "sample", viewport: { width: 300, height: 200 } }),
-    ).rejects.toThrow(/the page failed to boot: .*the mount broke/);
-  });
+    );
 
-  it("answers the list later page errors land in", async () => {
-    // Arrange
     const { page, errors } = await bootPage(browser, {
       script: PUBLISHES,
       css: NO_RULES,
@@ -99,41 +95,62 @@ describe("bootPage", () => {
       viewport: { width: 300, height: 200 },
     });
     const thrown = page.waitForEvent("pageerror");
-    // Act
     await page.evaluate(() => {
       setTimeout(() => {
         throw new Error("after the boot");
       }, 0);
     });
     await thrown;
-    // Assert
-    expect(errors.join("; ")).toMatch(/after the boot/);
+    seen.laterErrors = errors.join("; ");
     await page.close();
+  });
+
+  it("answers once the script has published its API on the named global", () => {
+    // Arrange + Act: the hook's first boot. Assert
+    expect(seen.published).toBe(true);
+  });
+
+  it("lays the stylesheet under the page", () => {
+    // Arrange + Act: the hook's styled boot. Assert
+    expect(seen.margin).toBe("7px");
+  });
+
+  it("opens the page at the viewport and pixel ratio asked for, with the body's style", () => {
+    // Arrange + Act: the hook's sized boot. Assert
+    expect(seen.viewport).toEqual([321, 123, 2, "margin:0;background:#fff"]);
+  });
+
+  it("fails the boot, naming the error, when the page throws while booting", () => {
+    // Arrange + Act: the hook's throwing boot. Assert
+    expect(seen.bootFailure).toBeInstanceOf(Error);
+    expect(String(seen.bootFailure)).toMatch(/the page failed to boot: .*the mount broke/);
+  });
+
+  it("answers the list later page errors land in", () => {
+    // Arrange + Act: the hook's boot that throws after booting. Assert
+    expect(seen.laterErrors).toMatch(/after the boot/);
   });
 });
 
 describe("pageAssets", () => {
-  // THE BUNDLE IS THE HOOK'S WORK, under the hook's bound: a cold bundle
-  // (the first after a source change) outruns the 850ms a test may take, so
-  // the test only reads what the hook produced.
   let assets: { script: string; css: string };
+
   beforeAll(async () => {
     assets = await pageAssets("page-log.ts", "pageLog");
   });
 
   it("bundles the page module beside it and reads the real stylesheet", () => {
-    // Assert
+    // Arrange + Act: the hook's bundle. Assert
     expect([assets.script.includes("installPageLogger"), assets.css.includes("#feed-scroll")]).toEqual([true, true]);
   });
 });
 
 describe("the one boot", () => {
-  // READING EVERY SUITE IS THE HOOK'S WORK, under the hook's bound, for the
-  // same reason as the bundle above; the test reads what the hook found.
-  // This suite names the boot's own failure, so it is not one of them.
   let suites: string[];
   const own: string[] = [];
+
   beforeAll(async () => {
+    // This suite names the boot's own failure, so it is not one of them.
     suites = (await readdir(here)).filter(
       (name) => name.endsWith(".webkit.test.ts") && name !== "boot-page.webkit.test.ts",
     );
@@ -144,7 +161,7 @@ describe("the one boot", () => {
   });
 
   it("is the only place a WebKit suite boots its page by hand", () => {
-    // Assert
+    // Arrange + Act: the hook's read of every suite. Assert
     expect([suites.length > 5, own]).toEqual([true, []]);
   });
 });
