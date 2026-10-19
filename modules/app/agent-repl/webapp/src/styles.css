@@ -980,8 +980,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    selection's accent, a merge-today's off-white), so the two never drift. */
 #ws-sidebar { --row-gutter-w: 3px; }
 /* ONE VERTICAL PADDING for every rail row, read wherever a row's height is
-   built out of it (Recently Merged's --merged-row-h), so the two never drift. */
-#ws-sidebar { --row-pad-y: 0.28rem; }
+   built out of it (Recently Merged's --merged-row-h), so the two never drift.
+   Halved from 0.28rem so the rows sit closer (owner request, 2026-10-19). */
+#ws-sidebar { --row-pad-y: 0.14rem; }
 #ws-sidebar .row {
   display: flex;
   align-items: center;

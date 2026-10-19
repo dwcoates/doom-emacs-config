@@ -1258,7 +1258,7 @@ describe("recently merged rows", () => {
   });
 
   it("declares the one rail row vertical padding", () => {
-    expect(css).toContain("#ws-sidebar { --row-pad-y: 0.28rem; }");
+    expect(css).toContain("#ws-sidebar { --row-pad-y: 0.14rem; }");
   });
 
   it("pads every rail row with the shared vertical padding", () => {
