@@ -2046,40 +2046,20 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     ["a held prompt", "held", "var(--selected-bubble-bg)"],
   ])("fills a selected %s with its selection token", (_kind, variant, want) => {
     // Arrange
-    const restore = installStylesheet();
-    const bubble = document.createElement("div");
-    bubble.className = "bubble entry-selected";
-    bubble.setAttribute("data-role", "prompt");
-    bubble.setAttribute("data-variant", variant);
-    document.body.append(bubble);
-    try {
-      // Act
-      const fill = cascadedValue(bubble, "--bubble-bg");
-      // Assert
-      expect(fill).toBe(want);
-    } finally {
-      bubble.remove();
-      restore();
-    }
+    const bubble = selectedBubble("bubble entry-selected", "prompt", variant);
+    // Act
+    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
+    // Assert
+    expect(fill).toBe(want);
   });
 
   it("fills a selected response with the grey selection token, never the prompt's blue", () => {
     // Arrange
-    const restore = installStylesheet();
-    const bubble = document.createElement("div");
-    bubble.className = "bubble final-response entry-selected";
-    bubble.setAttribute("data-role", "response");
-    bubble.setAttribute("data-variant", "response");
-    document.body.append(bubble);
-    try {
-      // Act
-      const fill = cascadedValue(bubble, "--bubble-bg");
-      // Assert
-      expect(fill).toBe("var(--selected-bubble-bg)");
-    } finally {
-      bubble.remove();
-      restore();
-    }
+    const bubble = selectedBubble("bubble final-response entry-selected", "response", "response");
+    // Act
+    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
+    // Assert
+    expect(fill).toBe("var(--selected-bubble-bg)");
   });
 
   it("sets the selected prompt's fill alone, so selecting a prompt never reflows it", () => {
@@ -3735,6 +3715,15 @@ describe("the response bubble's fill", () => {
 });
 
 /** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */
+/** A bubble of CLASSNAME, ROLE and VARIANT, as the selection tests mount one. */
+function selectedBubble(className: string, role: string, variant: string): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = className;
+  bubble.setAttribute("data-role", role);
+  bubble.setAttribute("data-variant", variant);
+  return bubble;
+}
+
 function rgbOf(block: string, token: string): [number, number, number] {
   const hex = new RegExp(`${token}:\\s*#([0-9a-fA-F]{6})\\s*;`).exec(block)?.[1];
   if (hex === undefined) throw new Error(`no six-digit ${token} in the block`);
