@@ -133,7 +133,7 @@ func OpenSurfaces(runLog string) (Surfaces, *logging.Window, error) {
 		return nil, nil, err
 	}
 	window := logging.NewWindow(sel, time.Now)
-	s, err := openSurfacesWindow(runLog, window, os.Stderr)
+	s, err := openSurfacesWindow(runLog, window, os.Stderr, mirrorsErrorsOnly(os.Stderr))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,6 +143,22 @@ func OpenSurfaces(runLog string) (Surfaces, *logging.Window, error) {
 	return s, window, nil
 }
 
+// mirrorsErrorsOnly answers whether F, the daemon's stderr, gets ERROR records
+// alone: everything when F is a terminal (a character device: a pty, or
+// /dev/null), only errors otherwise.
+//
+// THE FULL MIRROR IS FOR SOMEONE WATCHING. Detached by Emacs, the daemon's
+// stderr is logs/daemon.stdio.log, a regular file, and mirroring every record
+// there made it a second, never-rotated copy of all logging: 6 GB on
+// 2026-10-19, growing about 280 MB a day, since 2026-09-27. The run log and the
+// workspace sinks hold every record already. What stderr must still carry,
+// watched or not, is a failure: a boot that refuses goes loud there, and Emacs
+// reads that file back to say why a daemon died.
+func mirrorsErrorsOnly(f *os.File) bool {
+	info, err := f.Stat()
+	return err != nil || info.Mode()&os.ModeCharDevice == 0
+}
+
 // openSurfaces is OpenSurfaces at one fixed level with the terminal injected,
 // which is how the level filter and the mirror's decoupling are tested.
 func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
@@ -150,11 +166,11 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 	if err != nil {
 		return nil, err
 	}
-	return openSurfacesWindow(runLogPath, logging.FixedWindow(level), terminal)
+	return openSurfacesWindow(runLogPath, logging.FixedWindow(level), terminal, false)
 }
 
 // openSurfacesWindow opens the surfaces on a live level window.
-func openSurfacesWindow(runLogPath string, window *logging.Window, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
+func openSurfacesWindow(runLogPath string, window *logging.Window, terminal interface{ Write([]byte) (int, error) }, errorsOnly bool) (*surfaces, error) {
 	if window == nil {
 		panic("dlog: nil level window")
 	}
@@ -165,7 +181,7 @@ func openSurfacesWindow(runLogPath string, window *logging.Window, terminal inte
 	s := &surfaces{
 		runLog:     rl,
 		logsDir:    filepath.Dir(runLogPath),
-		mirror:     newMirror(terminal, mirrorDepth),
+		mirror:     newMirror(terminal, mirrorDepth, errorsOnly),
 		window:     window,
 		pid:        os.Getpid(),
 		now:        time.Now,
@@ -508,7 +524,7 @@ func (s *surfaces) writeClient(dest interface{ write([]byte) error }, p prepared
 	if err := dest.write(line); err != nil {
 		return err
 	}
-	s.mirror.enqueue(line)
+	s.mirror.enqueue(out.Level, line)
 	return nil
 }
 
@@ -935,7 +951,7 @@ func (s *surfaces) reportSinkFailure(ws *workspaceSinks, name string, cause erro
 			"cause":             cause.Error(),
 		}, s.pid)
 	line := rec.marshal()
-	s.mirror.enqueue(line)
+	s.mirror.enqueue(rec.Level, line)
 
 	s.mu.Lock()
 	daemonSink := ws.sinks["daemon"]
