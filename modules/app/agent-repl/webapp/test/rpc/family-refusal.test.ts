@@ -97,6 +97,11 @@ describe("parentNotOpenSentence", () => {
       state: { case: "closed", value: {} } as const,
       want: "reopen refused: its parent parent-ws is closed; reopen the parent first",
     },
+    {
+      name: "a closing parent's queued merge is named",
+      state: { case: "closing", value: {} } as const,
+      want: "reopen refused: its parent parent-ws closes once its queued merge lands",
+    },
   ])("$name", ({ state, want }) => {
     // Arrange
     const u = parentNotOpen(state);

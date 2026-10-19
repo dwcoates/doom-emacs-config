@@ -49,8 +49,9 @@ export function mergeHasOpenChildrenSentence(u: WorkspaceHasOpenChildren, path: 
 
 /**
  * GESTURE ("reopen", "show", "create a child of") was refused because the
- * parent (U, at PATH) is hidden or closed: showing or reopening the parent
- * first is what makes the gesture possible.
+ * parent (U, at PATH) is hidden, closed, or closing under a queued merge:
+ * showing or reopening the parent first is what makes the gesture possible,
+ * and a closing parent's merge is what stands in the way.
  */
 export function parentNotOpenSentence(u: WorkspaceParentNotOpen, path: string, gesture: string): string {
   const parent = label(requireMessage(u.parent, `${path}.parent`));
@@ -60,6 +61,8 @@ export function parentNotOpenSentence(u: WorkspaceParentNotOpen, path: string, g
       return `${gesture} refused: its parent ${parent} is hidden; show the parent first`;
     case "closed":
       return `${gesture} refused: its parent ${parent} is closed; reopen the parent first`;
+    case "closing":
+      return `${gesture} refused: its parent ${parent} closes once its queued merge lands`;
     default: {
       const other: { case: string } = state;
       return unreachableArm(`${path}.state`, other.case);
