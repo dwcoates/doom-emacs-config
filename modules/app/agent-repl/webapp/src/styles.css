@@ -108,6 +108,11 @@
      read in one color. Resolved through --known-command, so each theme's
      own purple carries through without a dark override of this token. */
   --prompt-link: var(--known-command);
+  /* Inline code and a code block inside a blue prompt bubble sit on a darker
+     blue (owner request, 2026-10-19): clearly darker than the prompt's --user
+     fill, but still that blue rather than a near-navy, so the code reads as
+     set into the bubble. */
+  --prompt-code-bg: #8fb5f2;
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
@@ -396,6 +401,10 @@
      WHITE wash (owner ruling, 2026-10-14): black over the dark grey bubble was
      all but invisible. */
   --code-bg: color-mix(in srgb, #000000 13%, transparent);
+  /* A fenced code block's fill: a faint --fg wash over whatever bubble holds
+     it. Resolved where it is declared, on :root, so the dark theme's own --fg
+     carries through without a dark override of this token. */
+  --code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent);
   /* Feed search (search.ts). Two washes, the isearch split: --search-match is
      every other match (Emacs' lazy-highlight), --search-current is the one the
      user is ON (Emacs' isearch face), and the gap between them has to be big
@@ -515,6 +524,8 @@
     --user: #0764c2;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #f0c4ff;
+    /* The same darker step under this theme's --user blue. */
+    --prompt-code-bg: #054a91;
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six
@@ -2340,12 +2351,20 @@ html[data-page-unshown] *::after {
 .md li { margin: 0.15em 0; }
 .md blockquote { margin: 0.4em 0; padding: 0.1em 0.8em; border-left: 3px solid var(--accent); color: var(--muted); }
 .md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
-.md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
+.md pre.md-code { background: var(--code-block-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
 .md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. A held
    prompt keeps --accent, since its fill is grey, not blue. */
 .bubble[data-role="prompt"]:not([data-variant="held"]) a { color: var(--prompt-link); }
+/* Inline code and code blocks in a blue prompt bubble take the prompt's own
+   darker blue, by feeding the two tokens the one markdown rule set above
+   reads. Only the user's prompt is blue: a held, agent or peer prompt wears
+   the response's fill, so its code keeps the shared washes. */
+.bubble[data-variant="user"] {
+  --code-bg: var(--prompt-code-bg);
+  --code-block-bg: var(--prompt-code-bg);
+}
 /* A known slash command the prompt names, marked as the composer marks it. */
 .bubble[data-variant="user"] .known-command { color: var(--known-command); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }

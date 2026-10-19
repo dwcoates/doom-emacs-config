@@ -3495,6 +3495,14 @@ describe("the one bubble rule set", () => {
             // corner's geometry tokens from the one shared token rule. Its own
             // suite pins both.
             !(prop === "transition" && rule.selectors.length === 1 && rule.selectors[0] === ".bubble.interim-response") &&
+            // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
+            // prompt feeds the two code fills their darker blue; the suite
+            // "code in a blue prompt bubble" pins both.
+            !(
+              (prop === "--code-bg" || prop === "--code-block-bg") &&
+              rule.selectors.length === 1 &&
+              rule.selectors[0] === '.bubble[data-variant="user"]'
+            ) &&
             !(prop.startsWith("--usage-") && rule.selectors.includes(".usage-corner")),
         ),
     );
@@ -4038,6 +4046,72 @@ describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
     const rule = declarationsOf('.bubble[data-role="prompt"]:not([data-variant="held"]) a') ?? "";
     // Assert
     expect(rule).toMatch(/color:\s*var\(--prompt-link\)/);
+  });
+});
+
+describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
+  // CIE L*, so "clearly darker, but not much darker" is one step size in
+  // both themes rather than a luminance ratio that reads differently at each
+  // end of the scale.
+  const lightness = (rgb: [number, number, number]): number => {
+    const y = luminance(rgb);
+    return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+  };
+
+  it.each([
+    ["light", ""],
+    ["dark", darkThemeBlock()],
+  ])("sits clearly but not far darker than --user in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const step = lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--prompt-code-bg"));
+    // Assert
+    expect(step).toBeGreaterThan(6);
+    expect(step).toBeLessThan(16);
+  });
+
+  it.each(["--code-bg", "--code-block-bg"])("feeds %s from --prompt-code-bg on the user prompt", (token) => {
+    // Arrange / Act
+    const decls = rulesOf(stylesheet)
+      .filter((r) => r.selectors.length === 1 && r.selectors[0] === '.bubble[data-variant="user"]')
+      .map((r) => r.declarations)
+      .join(";");
+    // Assert
+    expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--prompt-code-bg\\)`));
+  });
+
+  it.each(['.bubble[data-variant="held"]', '.bubble[data-variant="agent"]', '.bubble[data-variant="peer"]'])(
+    "leaves %s on the shared code washes",
+    (selector) => {
+      // Arrange / Act
+      const decls = rulesOf(stylesheet)
+        .filter((r) => r.selectors.includes(selector))
+        .map((r) => r.declarations)
+        .join(";");
+      // Assert
+      expect(decls).not.toMatch(/--prompt-code-bg/);
+    },
+  );
+
+  it("paints a code block through the --code-block-bg token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md pre.md-code") ?? "";
+    // Assert
+    expect(rule).toMatch(/background:\s*var\(--code-block-bg\)/);
+  });
+
+  it("keeps the code block's shared wash on :root alone", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toContain("--code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent)");
+    expect(darkThemeBlock()).not.toMatch(/--code-block-bg:/);
+  });
+
+  it("leaves a code block's inner code unfilled", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md pre.md-code code") ?? "";
+    // Assert
+    expect(rule).toMatch(/background:\s*none/);
   });
 });
 
