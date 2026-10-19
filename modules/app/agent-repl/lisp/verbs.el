@@ -989,6 +989,23 @@ state."
    (lambda (_)
      (message "agent-repl: swapped %s with %s" ws target))))
 
+(defun agent-repl-verbs--no-tab-to-take (op ws target value)
+  "Claim refusal VALUE of tab-slot gesture OP when it says no tab can be taken.
+NO TAB TO TAKE IS AN ANSWER, NOT A FAULT: the user pressed the tab of a
+workspace of another repository (`:other-repository') or another family
+\(`:not-siblings'), and the daemon said why WS cannot take TARGET's tab.
+Recorded at INFO and said in words, answering non-nil; every other arm is
+left to the arm-generic report."
+  (let ((arm (plist-get (agent-repl-verbs--refusal-arm value) :arm)))
+    (when (memq arm '(:other-repository :not-siblings))
+      (agent-repl--info ws (format "elisp.verbs.%s-no-tab ws=%%s target=%%s arm=%%S" op) ws target arm)
+      (if (eq arm :other-repository)
+          (message "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
+                   ws target ws)
+        (message "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
+                 ws target ws))
+      t)))
+
 (defun agent-repl-verb-move (ws target)
   "Move WS onto TARGET's tab, the tabs between shifting over.
 The daemon places WS just before TARGET when it comes from a later tab and
@@ -1004,20 +1021,7 @@ state."
    (lambda (_)
      (message "agent-repl: moved %s onto %s's tab" ws target))
    :on-error
-   (lambda (value)
-     ;; NO TAB TO TAKE IS AN ANSWER, NOT A FAULT: the user pressed a tab of
-     ;; another repository or another family, and the daemon said why it
-     ;; cannot be taken.  Recorded at INFO and said in words; every other
-     ;; arm falls through to the arm-generic report.
-     (let ((arm (plist-get (agent-repl-verbs--refusal-arm value) :arm)))
-       (when (memq arm '(:other-repository :not-siblings))
-         (agent-repl--info ws "elisp.verbs.move-no-tab ws=%s target=%s arm=%S" ws target arm)
-         (if (eq arm :other-repository)
-             (message "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
-                      ws target ws)
-           (message "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
-                    ws target ws))
-         t)))))
+   (lambda (value) (agent-repl-verbs--no-tab-to-take "move" ws target value))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name

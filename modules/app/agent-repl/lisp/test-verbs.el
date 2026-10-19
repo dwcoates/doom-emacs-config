@@ -1064,6 +1064,25 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
       ;; Assert.
       (should (agent-repl-test-verbs--messaged-p "swap refused: unknown-workspace")))))
 
+;;;; ---- No tab to take: the answer a swap or a move may get ----
+
+(ert-deftest agent-repl-verbs-no-tab-to-take-claims-the-two-arms ()
+  "`other_repository' and `not_siblings' are claimed; any other arm is not."
+  (cl-letf (((symbol-function 'agent-repl--info) #'ignore)
+            ((symbol-function 'message) #'ignore))
+    (should (agent-repl-verbs--no-tab-to-take "move" "a" "b" '(:cause (:arm :other-repository :value nil))))
+    (should (agent-repl-verbs--no-tab-to-take "move" "a" "b" '(:cause (:arm :not-siblings :value nil))))
+    (should-not (agent-repl-verbs--no-tab-to-take "move" "a" "b" '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-verbs-no-tab-to-take-records-under-its-gestures-word ()
+  "The record names the gesture, so a swap's and a move's are told apart."
+  (let (infos)
+    (cl-letf (((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+              ((symbol-function 'message) #'ignore))
+      (agent-repl-verbs--no-tab-to-take "swap" "a" "b" '(:cause (:arm :other-repository :value nil))))
+    (should (equal infos '("elisp.verbs.swap-no-tab ws=a target=b arm=:other-repository")))))
+
 ;;;; ---- MoveWorkspace ----
 
 (ert-deftest agent-repl-verbs-move-carries-both-refs ()
