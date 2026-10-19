@@ -979,11 +979,14 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* ONE GUTTER WIDTH for every bar a rail row draws on its left (the
    selection's accent, a merge-today's off-white), so the two never drift. */
 #ws-sidebar { --row-gutter-w: 3px; }
+/* ONE VERTICAL PADDING for every rail row, read wherever a row's height is
+   built out of it (Recently Merged's --merged-row-h), so the two never drift. */
+#ws-sidebar { --row-pad-y: 0.28rem; }
 #ws-sidebar .row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.28rem 0.7rem 0.28rem 0.9rem;
+  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
   cursor: pointer;
   min-width: 0;
 }
@@ -1047,9 +1050,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   overflow-y: auto;
 }
 #ws-sidebar .repo.merged-section {
-  /* .row's own vertical padding, restated here so a merged row's height is
-     built out of the same numbers the row is drawn from. */
-  --merged-row-pad-y: 0.28rem;
   /* The row's line box, stated rather than left to the font: `normal`
      line-height varies with whatever font resolves, so the cap could not be
      expressed in rows without pinning it. 1.15rem (18.4px) clears the 14px row
@@ -1057,7 +1057,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
      no glyph (`glyphs: false`), so the 1.3rem spinner box cannot appear here. */
   --merged-row-line-h: 1.15rem;
   /* One row's drawn height. */
-  --merged-row-h: calc(var(--merged-row-pad-y) * 2 + var(--merged-row-line-h));
+  --merged-row-h: calc(var(--row-pad-y) * 2 + var(--merged-row-line-h));
   /* One repository group's header height, pinned for the same reason, so a
      group header is as tall wherever it lands in the band's viewport. */
   --merged-group-head-h: 1.25rem;
