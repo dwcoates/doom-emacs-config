@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"agent-repld/internal/childproc"
 )
 
 // --- the environment contract, as a pure function -----------------------
@@ -257,13 +259,10 @@ func TestTheDirectoryIsPassedAsDashC(t *testing.T) {
 
 func TestTheChildIsNotChdiredIntoTheRepository(t *testing.T) {
 	// Arrange: selecting the repository by spawning git INSIDE it would make
-	// the daemon's own working directory part of the contract.
+	// the repository's existence a condition of git running at all. git runs
+	// in childproc.Stable, never in the directory the daemon happens to stand in.
 	git, _ := newTestClient(t)
 	fake := newFakeGit(t, ok("main\n"))
-	here, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("reading the working directory: %v", err)
-	}
 
 	// Act.
 	if _, err := git.CurrentBranch(context.Background(), "/some/repo"); err != nil {
@@ -271,8 +270,8 @@ func TestTheChildIsNotChdiredIntoTheRepository(t *testing.T) {
 	}
 
 	// Assert.
-	if got := fake.only().Cwd; got != here {
-		t.Fatalf("git was spawned in %q, want the daemon's own %q", got, here)
+	if got := fake.only().Cwd; got != childproc.Stable {
+		t.Fatalf("git was spawned in %q, want %q", got, childproc.Stable)
 	}
 }
 

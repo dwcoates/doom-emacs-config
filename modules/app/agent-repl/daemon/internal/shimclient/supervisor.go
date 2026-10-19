@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
@@ -318,8 +318,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	c.stderr = newRing(stderrRingBytes)
 
 	args := shimArgs(spec)
-	cmd := exec.Command(spec.NodeBin, args...)
-	cmd.Dir = spec.WorkspaceDir
+	cmd := childproc.Command(spec.WorkspaceDir, spec.NodeBin, args...)
 	cmd.Env = spawnEnv(spec, contracts)
 	cmd.Stdout = nil
 	cmd.Stderr = c.stderr

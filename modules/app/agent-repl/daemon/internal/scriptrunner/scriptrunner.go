@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
 )
 
@@ -160,8 +161,7 @@ func (r *Runner) RunLinesMeasured(ctx context.Context, dir string, argv []string
 		return Run{}, err
 	}
 
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Dir = dir
+	cmd := childproc.CommandContext(ctx, dir, argv[0], argv[1:]...)
 	// A CANCELLED RUN TAKES ITS CHILDREN WITH IT. The script runs in its own
 	// process group and the context's end kills the whole group: killing the
 	// script alone left a child it started holding the output pipe open, and

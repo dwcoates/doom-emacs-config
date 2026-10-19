@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sync"
 
 	"github.com/creack/pty"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
@@ -124,15 +124,14 @@ func (m *manager) spawn(configDir string) (*session, error) {
 		}
 	}
 
-	cmd := exec.Command(m.vendorBin, LoginArg) //nolint:gosec // daemon-configured binary, never client input
-	cmd.Env = childEnv(configDir)
 	// Run from the temp dir, NOT from any workspace. The login CLI fires the
 	// global vendor hooks like any other invocation, and those hooks key on
 	// cwd — running it inside a workspace would attribute its session
 	// sentinels to that workspace and walk its tab through agent states
 	// belonging to a login prompt. The account is selected by
 	// CLAUDE_CONFIG_DIR, never by cwd, so nothing is lost.
-	cmd.Dir = os.TempDir()
+	cmd := childproc.Command(os.TempDir(), m.vendorBin, LoginArg) //nolint:gosec // daemon-configured binary, never client input
+	cmd.Env = childEnv(configDir)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

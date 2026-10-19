@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
 )
 
@@ -207,7 +208,7 @@ func Binary() string { return gitBinary }
 // the method sets is the only one present.
 func (c *client) invoke(ctx context.Context, dir string, extra []string, args ...string) (invocation, error) {
 	full := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, gitBinary, full...)
+	cmd := childproc.CommandContext(ctx, childproc.Stable, gitBinary, full...)
 	cmd.Env = append(scrubEnv(os.Environ()), extra...)
 
 	var stdout, stderr strings.Builder
