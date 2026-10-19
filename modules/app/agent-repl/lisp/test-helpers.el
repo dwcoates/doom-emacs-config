@@ -1155,39 +1155,70 @@ quit survived the section."
            (when ,err (signal (car ,err) (cdr ,err)))
            ,value)))))
 
-;;;; ---- Roster tab bars ----
+;;;; ---- Roster lists ----
+;;
+;; THE ONE PLACE A DECODED FIXTURE ROSTER GETS ITS FAMILIES AND ITS TABS.  The
+;; shared `RosterRow' holds no family: each list wraps it in its own row type
+;; (`RosterOpenRow' with its tab, `RosterHiddenRow', `RosterMergedRow',
+;; `RosterClosedRow') and nests the family there, so a fixture records a
+;; row's children beside it (`agent-repl-test--with-family') and every suite
+;; wraps its rows through these.
 
-(defun agent-repl-test--tab-bar-of (sections hidden merged &optional merged-groups)
-  "Return a decoded `RosterTabBar' for a fixture roster's SECTIONS, HIDDEN and MERGED.
-MERGED-GROUPS are recently-merged groups walked after MERGED; a group on its
-`repository_collapsed' arm has its tabs withheld, as the daemon withholds
-them.
-The tabs are the open rows in the order the fixture lists them -- each
-section's rows depth-first, then the hidden rows, then the merged rows --
-which is the order a fixture states its registry in.  A collapsed section's
-tabs and every hidden row's are withheld, as the daemon withholds them.
-Fixtures that test an order of their own pass an explicit tab bar instead."
-  (let (tabs)
-    (cl-labels ((walk (rows arm)
-                  (dolist (row rows)
-                    (unless (eq (plist-get (plist-get row :closed) :closed) t)
-                      (push (list :workspace (plist-get (plist-get row :workspace) :workspace)
-                                  :visibility (list :arm arm :value nil))
-                            tabs))
-                    (walk (plist-get row :children) arm))))
+(defvar agent-repl-test--families (make-hash-table :test #'eq :weakness 'key)
+  "Each fixture row's children, as its builder was told them.")
+
+(defun agent-repl-test--with-family (row children)
+  "Record CHILDREN as fixture ROW's family, for the list wrappers.  Answer ROW."
+  (puthash row children agent-repl-test--families)
+  row)
+
+(defun agent-repl-test--open-row (row)
+  "Return fixture ROW as a decoded `RosterOpenRow', its family nested as open rows.
+Its tab is FOLDED until `agent-repl-test--number-tabs' numbers it, as the
+daemon numbers it."
+  (list :row row
+        :tab (list :tab (list :arm :folded :value nil))
+        :children (mapcar #'agent-repl-test--open-row
+                          (gethash row agent-repl-test--families))))
+
+(defun agent-repl-test--open-rows (rows)
+  "Return fixture ROWS as a decoded `RosterOpenRows'."
+  (list :rows (mapcar #'agent-repl-test--open-row rows)))
+
+(defun agent-repl-test--hidden-rows (rows)
+  "Return fixture ROWS as a decoded `RosterHiddenRows', families nested."
+  (cl-labels ((wrap (row) (list :row row :children (mapcar #'wrap (gethash row agent-repl-test--families)))))
+    (list :rows (mapcar #'wrap rows))))
+
+(defun agent-repl-test--merged-rows (rows)
+  "Return fixture ROWS as a decoded `RosterMergedRows'."
+  (list :rows (mapcar (lambda (row) (list :row row)) rows)))
+
+(defun agent-repl-test--closed-rows (rows)
+  "Return fixture ROWS as a decoded `RosterClosedRows'."
+  (list :rows (mapcar (lambda (row) (list :row row)) rows)))
+
+(defun agent-repl-test--number-tabs (sections)
+  "Number the tabs of SECTIONS' open rows in the Open section's walk.
+Repository by repository, its own rows then each subsection's, each row
+before its family: 1, 2, ... for every row of an unfolded region, a folded
+tab for a collapsed repository's or a collapsed subsection's, exactly as
+the daemon numbers them.  Answers SECTIONS."
+  (let ((next 0))
+    (cl-labels ((visit (open folded)
+                  (plist-put open :tab
+                             (list :tab (if folded
+                                            (list :arm :folded :value nil)
+                                          (list :arm :numbered :value (list :number (cl-incf next))))))
+                  (dolist (child (plist-get open :children)) (visit child folded)))
+                (collapsed-p (box) (eq (plist-get (plist-get box :fold) :arm) :collapsed)))
       (dolist (section sections)
-        (walk (plist-get (plist-get section :rows) :rows)
-              (if (eq (plist-get (plist-get section :fold) :arm) :collapsed)
-                  :withheld-collapsed
-                :drawn)))
-      (walk hidden :withheld-hidden)
-      (walk merged :drawn)
-      (dolist (group merged-groups)
-        (walk (plist-get (plist-get group :rows) :rows)
-              (if (eq (plist-get (plist-get group :drawn) :arm) :repository-collapsed)
-                  :withheld-collapsed
-                :drawn))))
-    (list :tabs (nreverse tabs))))
+        (let ((folded (collapsed-p section)))
+          (dolist (open (plist-get (plist-get section :open-rows) :rows)) (visit open folded))
+          (dolist (sub (plist-get section :subsections))
+            (dolist (open (plist-get (plist-get sub :open-rows) :rows))
+              (visit open (or folded (collapsed-p sub)))))))))
+  sections)
 
 (provide 'test-helpers)
 

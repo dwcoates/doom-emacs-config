@@ -115,7 +115,7 @@ ROWS is a vector of RosterRow alists; ARM is the `drawn' arm's key symbol,
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
-  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--with-tab-bar roster)))))
+  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--listed roster)))))
 
 (defmacro agent-repl-itest-roster--with-subscription (daemon &rest body)
   "Subscribe the roster consumer to DAEMON, run BODY, then tear it down."
@@ -731,13 +731,14 @@ out of order would tuck a child under the wrong sibling's tab."
                        '("ws-parent" "ws-child" "ws-sibling")))))))
 
 (ert-deftest agent-repl-itest-roster-recently-merged-rows-walk-after-every-repo-section ()
-  "An open `recently_merged' row is walked AFTER every repo section's rows.
-Fanout §8: \"then `recently_merged.rows'\" — a merged-but-still-open row
-tucked ahead of the repo section would land its tab in the wrong slot."
+  "A `recently_merged' row is walked AFTER every repo section's rows, and has no tab.
+A merged workspace is never open (OPEN BEATS MERGED: one reopened is listed
+in the Open section), so only the repo section's row is on the bar."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
-      (let ((merged-row (agent-repl-itest-roster--row "ws-merged-open" "ws-merged-open" 'ready)))
+      (let ((merged-row (agent-repl-itest-roster--row "ws-merged" "ws-merged" 'merged
+                                                      '(closed . ((closed . t))))))
         ;; Act.
         (agent-repl-itest-roster--push
          daemon (agent-repl-itest-roster--roster
@@ -749,9 +750,11 @@ tucked ahead of the repo section would land its tab in the wrong slot."
                       (collapsed . ())))))
         ;; Assert.
         (agent-repl-itest--wait-until
-         (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-merged-open")))
-         nil "the repo section's row, then the recently-merged row")
-        (should (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-merged-open")))))))
+         (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo")))
+         nil "the repo section's row alone on the bar")
+        (should (equal (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row)))
+                               (agent-repl-roster-walk agent-repl-roster-view))
+                       '("ws-repo" "ws-merged")))))))
 
 (ert-deftest agent-repl-itest-roster-two-repo-sections-walk-in-the-resolver-order ()
   "Two repository sections walk in the resolver's order, A before B.
@@ -1647,7 +1650,7 @@ the composer gate alone."
 Stored and replayed to the next subscriber, which is how a reconnect's
 re-pull is staged without driving the real link/reconnect machinery that
 test-integration-link.el owns."
-  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--with-tab-bar roster))) nil t))
+  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--listed roster))) nil t))
 
 ;; audit-3 #33
 (ert-deftest agent-repl-itest-roster-rename-re-keys-the-host-entry ()

@@ -1336,34 +1336,74 @@ headers, which a caller must not paper over."
 NAME is the canonical spelling, e.g. \"Content-Type\"."
   (alist-get (intern name) (agent-repl-itest--call-headers daemon method index)))
 
-;;;; ---- Roster tab bars ----
+;;;; ---- The roster's listing ----
 
-(defun agent-repl-itest--with-tab-bar (roster)
-  "Return the protojson ROSTER with a `tabBar', unless it already carries one.
-The daemon always sends the tab bar; a fixture that states no order of its
-own gets the open rows in the order it lists them -- each repository
-section depth-first, then the hidden rows, then each merged group's rows --
-with a collapsed section's or merged group's tabs and every hidden row's
-withheld, exactly as the daemon withholds them.  A fixture testing an order of its own sets
-`tabBar' itself."
-  (if (assq 'tabBar roster)
+(defun agent-repl-itest--listed (roster)
+  "Return the protojson ROSTER as the daemon lists it on the wire.
+A fixture states its rows the way a test reads them: plain `RosterRow's in
+each section's (and subsection's) `rows', in the hidden section's and each
+merged group's `rows', a row's family under its own `children'.  The wire
+lists them as the daemon does (`frontend.v1.WorkspaceRoster'): each list's
+own row type -- an open row with its tab, numbered in the Open section's
+walk or folded under a collapsed repository or subsection; a hidden row
+nesting its family; a merged row alone -- the family taken off the shared
+row, and every closed row of a section moved to the `closed' list.  A
+ROSTER already in that shape (it carries `closed') is handed back as it
+is."
+  (if (assq 'closed roster)
       roster
-    (let (tabs)
-      (cl-labels ((walk (rows arm)
-                    (seq-doseq (row rows)
-                      (unless (eq (alist-get 'closed (alist-get 'closed row)) t)
-                        (push `((workspace . ,(alist-get 'workspace (alist-get 'workspace row)))
-                                (,arm . ()))
-                              tabs))
-                      (walk (or (alist-get 'children row) []) arm))))
-        (seq-doseq (section (or (alist-get 'sections (alist-get 'repository roster)) []))
-          (walk (or (alist-get 'rows (alist-get 'rows section)) [])
-                (if (assq 'collapsed section) 'withheldCollapsed 'drawn)))
-        (walk (or (alist-get 'rows (alist-get 'rows (alist-get 'hidden roster))) []) 'withheldHidden)
-        (seq-doseq (group (or (alist-get 'groups (alist-get 'recentlyMerged roster)) []))
-          (walk (or (alist-get 'rows (alist-get 'rows group)) [])
-                (if (assq 'repositoryCollapsed group) 'withheldCollapsed 'drawn))))
-      (append roster `((tabBar . ((tabs . ,(vconcat (nreverse tabs))))))))))
+    (let ((next 0) closed)
+      (cl-labels ((bare (row) (assq-delete-all 'children (copy-alist row)))
+                  (family (row) (or (alist-get 'children row) []))
+                  (closed-p (row) (eq (alist-get 'closed (alist-get 'closed row)) t))
+                  (open-row (row folded)
+                    (let ((tab (if folded '((folded . ())) `((numbered . ((number . ,(cl-incf next))))))))
+                      `((row . ,(bare row)) (tab . ,tab)
+                        (children . ,(vconcat (seq-map (lambda (child) (open-row child folded)) (family row)))))))
+                  (open-rows (rows folded)
+                    (let (out)
+                      (seq-doseq (row (or rows []))
+                        (if (closed-p row)
+                            (push `((row . ,(bare row))) closed)
+                          (push (open-row row folded) out)))
+                      `((rows . ,(vconcat (nreverse out))))))
+                  (hidden-row (row)
+                    `((row . ,(bare row)) (children . ,(vconcat (seq-map #'hidden-row (family row))))))
+                  (rows-of (box) (alist-get 'rows (alist-get 'rows box)))
+                  (relist (box key rows)
+                    (cons (cons key rows) (assq-delete-all 'rows (copy-alist box)))))
+        (let* ((repository (alist-get 'repository roster))
+               (sections
+                (vconcat
+                 (seq-map
+                  (lambda (section)
+                    (let* ((folded (assq 'collapsed section))
+                           (own (open-rows (rows-of section) folded))
+                           (subs (vconcat
+                                  (seq-map (lambda (sub)
+                                             (let ((sub-rows (open-rows (rows-of sub) (or folded (assq 'collapsed sub)))))
+                                               (append (relist sub 'openRows sub-rows)
+                                                       (unless (or (assq 'expanded sub) (assq 'collapsed sub))
+                                                         '((expanded . ()))))))
+                                           (or (alist-get 'subsections section) [])))))
+                      (cons (cons 'subsections subs)
+                            (assq-delete-all 'subsections (relist section 'openRows own)))))
+                  (or (alist-get 'sections repository) []))))
+               (hidden (alist-get 'hidden roster))
+               (merged (alist-get 'recentlyMerged roster)))
+          (append
+           `((repository . ,(cons (cons 'sections sections) (assq-delete-all 'sections (copy-alist repository))))
+             (hidden . ,(relist hidden 'hiddenRows `((rows . ,(vconcat (seq-map #'hidden-row (or (rows-of hidden) [])))))))
+             (recentlyMerged
+              . ,(cons (cons 'groups
+                             (vconcat (seq-map (lambda (group)
+                                                 (relist group 'mergedRows
+                                                         `((rows . ,(vconcat (seq-map (lambda (row) `((row . ,(bare row))))
+                                                                                      (or (rows-of group) [])))))))
+                                               (or (alist-get 'groups merged) []))))
+                       (assq-delete-all 'groups (copy-alist merged))))
+             (closed . ((rows . ,(vconcat (nreverse closed))))))
+           (seq-remove (lambda (entry) (memq (car entry) '(repository hidden recentlyMerged))) roster)))))))
 
 (provide 'test-integration-helpers)
 

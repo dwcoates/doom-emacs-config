@@ -89,38 +89,48 @@ current workspace's row sits in, so a create test hands them this."
   (car (agent-repl-verbs--repo-sections (agent-repl-test-verbs--roster nil))))
 
 (defun agent-repl-test-verbs--row (&rest overrides)
-  "Return a decoded `RosterRow' with OVERRIDES applied at the top level."
+  "Return a decoded `RosterRow' with OVERRIDES applied at the top level.
+A `:children' override is the row's family, recorded through
+`agent-repl-test--with-family': the shared row carries none."
   (let ((row (list :workspace (list :workspace (agent-repl-test-verbs--ref))
                    :attention nil
                    :priority nil
                    :name (list :text "row-one")
                    :status (list :arm :ready :value nil)
                    :current (list :current nil)
-                   :children nil
                    :when '(:arm :no-turn-running :value nil)
                    :detail (list :branch nil :parent-branch nil :summary nil)
-                   :closed (list :closed nil))))
+                   :closed (list :closed nil)))
+        (children nil))
     (while overrides
-      (setq row (plist-put row (pop overrides) (pop overrides))))
-    row))
+      (let ((key (pop overrides)) (value (pop overrides)))
+        (if (eq key :children)
+            (setq children value)
+          (setq row (plist-put row key value)))))
+    (agent-repl-test--with-family row children)))
 
 (defun agent-repl-test-verbs--roster (rows &optional merged-rows sections hidden-rows)
-  "Return a decoded `WorkspaceRoster' carrying ROWS in one repo section.
-HIDDEN-ROWS, when given, are the hidden section's rows."
+  "Return a decoded `WorkspaceRoster' carrying ROWS: the open ones in one repo section.
+A closed one of ROWS is listed in the closed list, as the daemon lists it.
+SECTIONS, when given, replace the one section.  HIDDEN-ROWS, when given,
+are the hidden section's rows."
   (list :repository
         (list :sections
-              (or sections
-                  (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
-                              :header (list :label (list :text "repo-one"))
-                              :rows (list :rows rows)))))
+              (agent-repl-test--number-tabs
+               (or sections
+                   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
+                               :header (list :label (list :text "repo-one"))
+                               :open-rows (agent-repl-test--open-rows
+                                           (seq-remove #'agent-repl-roster-row-closed-p rows)))))))
         :hidden (list :header (list :label (list :text "Hidden"))
-                      :rows (list :rows hidden-rows))
+                      :hidden-rows (agent-repl-test--hidden-rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                :groups (and merged-rows
                                             (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                                                         :header (list :label (list :text "repo-one"))
-                                                        :rows (list :rows merged-rows)
+                                                        :merged-rows (agent-repl-test--merged-rows merged-rows)
                                                         :drawn (list :arm :shown :value nil)))))
+        :closed (agent-repl-test--closed-rows (seq-filter #'agent-repl-roster-row-closed-p rows))
         :current nil))
 
 (defmacro agent-repl-test-verbs--with (answers &rest body)
@@ -958,19 +968,17 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
     ;; Assert.
     (should (equal agent-repl-test-verbs--switch-requests '("ws-one")))))
 
-(ert-deftest agent-repl-verbs-hidden-rows-flattens-and-drops-closed ()
-  "The hidden section's open rows, children included; closed rows are dropped."
+(ert-deftest agent-repl-verbs-hidden-rows-flattens-the-family ()
+  "The hidden section's rows, children included, each before its family.
+The hidden list holds open workspaces only: a closed one is in the closed
+list, so there is nothing to drop."
   ;; Arrange.
   (let* ((child (agent-repl-test-verbs--row
                  :workspace (list :workspace (agent-repl-test-verbs--ref "kid" "/tmp/k"))
                  :name (list :text "child")))
          (parent (agent-repl-test-verbs--row :name (list :text "parent")
                                              :children (list child)))
-         (closed (agent-repl-test-verbs--row
-                  :workspace (list :workspace (agent-repl-test-verbs--ref "cid" "/tmp/c"))
-                  :name (list :text "closed")
-                  :closed (list :closed t)))
-         (roster (agent-repl-test-verbs--roster nil nil nil (list parent closed))))
+         (roster (agent-repl-test-verbs--roster nil nil nil (list parent))))
     ;; Act.
     (let ((rows (agent-repl-verbs--hidden-rows roster)))
       ;; Assert.
@@ -1960,10 +1968,10 @@ current workspace rides as the fork source, and no parent is sent."
   (let* ((other (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                               "other-id" "/tmp/other"))
                       :header (list :label (list :text "other-repo"))
-                      :rows (list :rows nil)))
+                      :open-rows (agent-repl-test--open-rows nil)))
          (mine (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                      :header (list :label (list :text "repo-one"))
-                     :rows (list :rows (list (agent-repl-test-verbs--row)))))
+                     :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row)))))
          (agent-repl-roster-view
           (agent-repl-test-verbs--roster nil nil (list other mine))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
@@ -2522,10 +2530,10 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                        "ee-repo" "/tmp/agent-repl-test/work/explanation-engine"))
               :header (list :label (list :text "explanation-engine"))
-              :rows (list :rows nil))
+              :open-rows (agent-repl-test--open-rows nil))
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
-              :rows (list :rows (list (agent-repl-test-verbs--row))))))
+              :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row))))))
 
 (defmacro agent-repl-test-verbs--with-ee (root &rest body)
   "Run BODY with `MULTI_REPO_ROOT\=' at ROOT and the explanation-engine roster.
@@ -2633,7 +2641,7 @@ directories need not exist."
           nil nil
           (list (list :key (list :repository (agent-repl-test-verbs--repo-ref "slash" "/tmp/agent-repl-test/x/"))
                       :header (list :label (list :text "x"))
-                      :rows (list :rows nil))))))
+                      :open-rows (agent-repl-test--open-rows nil))))))
     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
       ;; Act / Assert.
       (should (equal (plist-get (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/x") :id)
@@ -3045,10 +3053,10 @@ trailing-slash removal alone, so the fixture directories need not exist."
   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                        "agent-repl-repo" "/tmp/agent-repl-test/doom"))
               :header (list :label (list :text "doom"))
-              :rows (list :rows nil))
+              :open-rows (agent-repl-test--open-rows nil))
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
-              :rows (list :rows (list (agent-repl-test-verbs--row))))))
+              :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row))))))
 
 ;;;; ---- Create: no creation moves the user ----
 
@@ -4049,13 +4057,11 @@ persp-mode perspective such as \"main\" appears in the registry."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
       (let ((agent-repl-roster-view
-             (list :repository
-                   (list :sections
-                         (list (list :rows
-                                     (list :rows
-                                           (list (list :workspace (list :workspace '(:id "id-1" :dir "/tmp/ws-one"))
-                                                       :name '(:text "ws-one")
-                                                       :closed '(:closed t))))))))))
+             (list :repository (list :sections nil)
+                   :closed (agent-repl-test--closed-rows
+                            (list (list :workspace (list :workspace '(:id "id-1" :dir "/tmp/ws-one"))
+                                        :name '(:text "ws-one")
+                                        :closed '(:closed t)))))))
         (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
           (should (equal (agent-repl-verbs--ref "ws-one") '(:id "id-1" :dir "/tmp/ws-one"))))))))
 
@@ -4064,13 +4070,11 @@ persp-mode perspective such as \"main\" appears in the registry."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
       (let ((agent-repl-roster-view
-             (list :repository
-                   (list :sections
-                         (list (list :rows
-                                     (list :rows
-                                           (list (list :workspace (list :workspace '(:id "id-2" :dir "/other/ws-one"))
-                                                       :name '(:text "ws-one")
-                                                       :closed '(:closed t))))))))))
+             (list :repository (list :sections nil)
+                   :closed (agent-repl-test--closed-rows
+                            (list (list :workspace (list :workspace '(:id "id-2" :dir "/other/ws-one"))
+                                        :name '(:text "ws-one")
+                                        :closed '(:closed t)))))))
         (should-not (agent-repl-verbs--roster-ref "ws-one"))))))
 
 (ert-deftest agent-repl-verbs-kill-with-an-empty-registry-refuses ()
@@ -4797,8 +4801,8 @@ name or closed flag is roster.el's, so the two files cannot disagree."
   ;; Arrange
   (let* ((row (list :workspace (list :workspace (list :id "ws-sub" :dir "/w/sub"))))
          (section (list :key (list :repository (list :id "repo-1" :dir "/r/1"))
-                        :rows (list :rows nil)
-                        :subsections (list (list :rows (list :rows (list row))))))
+                        :open-rows (agent-repl-test--open-rows nil)
+                        :subsections (list (list :open-rows (agent-repl-test--open-rows (list row))))))
          (roster (list :repository (list :sections (list section)))))
     (cl-letf (((symbol-function 'agent-repl-host-ref)
                (lambda (_ws) (list :id "ws-sub" :dir "/w/sub"))))

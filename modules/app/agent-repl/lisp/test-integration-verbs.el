@@ -1766,7 +1766,7 @@ schema the rest of the suite does."
            (agent-repl-itest--await-subscriber ,daemon "roster")
            (agent-repl-itest--push
             ,daemon "roster"
-            (list (cons 'roster (agent-repl-itest--with-tab-bar
+            (list (cons 'roster (agent-repl-itest--listed
                                  (agent-repl-itest-verbs--roster ,rows)))))
            (agent-repl-itest--wait-until (lambda () agent-repl-roster-view) nil
                                          "the roster push to reach the view")

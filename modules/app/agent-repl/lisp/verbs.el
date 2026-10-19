@@ -130,6 +130,7 @@
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
 (declare-function agent-repl-roster-section-rows "agent-repl-roster" (section))
+(declare-function agent-repl-roster-flatten "agent-repl-roster" (rows))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
@@ -519,13 +520,6 @@ must leave the other a no-op."
 ;; (`agent-repl-roster-row-ref', `agent-repl-roster-row-name',
 ;; `agent-repl-roster-row-closed-p'), never a second spelling here.
 
-(defun agent-repl-verbs--flatten-rows (rows)
-  "Return ROWS and every descendant, depth-first, in walk order."
-  (apply #'append
-         (mapcar (lambda (row)
-                   (cons row (agent-repl-verbs--flatten-rows (plist-get row :children))))
-                 rows)))
-
 (defun agent-repl-verbs--roster-or-view (roster)
   "Return ROSTER, or `agent-repl-roster-view' when ROSTER is nil.
 THE ONE DEFAULTING every roster reader here shares: a nil ROSTER means the
@@ -569,7 +563,7 @@ obvious answer is the repo the user is already working in."
          (cl-find-if (lambda (row)
                        (equal (plist-get (agent-repl-roster-row-ref row) :id)
                               (plist-get ref :id)))
-                     (agent-repl-verbs--flatten-rows
+                     (agent-repl-roster-flatten
                       (agent-repl-roster-section-rows section))))
        (agent-repl-verbs--repo-sections roster)))))
 
@@ -1974,13 +1968,13 @@ row in that section, or picking it from `SPC TAB H', shows it again."
   (agent-repl-verb-set-hidden (agent-repl-verbs--target-ws ws "Hide workspace: ") t))
 
 (defun agent-repl-verbs--hidden-rows (&optional roster)
-  "Return the OPEN rows of ROSTER's hidden section, in walk order.
-ROSTER defaults to `agent-repl-roster-view'.  A closed row has no tab to
-switch to, so only open rows are offered back."
-  (let* ((roster (agent-repl-verbs--roster-or-view roster))
-         (rows (plist-get (plist-get (plist-get roster :hidden) :rows) :rows)))
-    (cl-remove-if #'agent-repl-roster-row-closed-p
-                  (agent-repl-verbs--flatten-rows rows))))
+  "Return the rows of ROSTER's hidden section, in walk order.
+ROSTER defaults to `agent-repl-roster-view'.  The hidden list holds open
+workspaces only (a closed one is in the closed list), so every row is one
+to switch back to."
+  (let ((roster (agent-repl-verbs--roster-or-view roster)))
+    (agent-repl-roster-flatten
+     (plist-get (plist-get (plist-get roster :hidden) :hidden-rows) :rows))))
 
 (defun agent-repl-show-hidden-workspace ()
   "Show a hidden workspace again and switch to it (`SPC TAB H').

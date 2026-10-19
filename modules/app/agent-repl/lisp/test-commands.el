@@ -538,27 +538,31 @@ AT-MS, or 0 when neither is given: every row states one."
         :name (list :text name)
         :status (list :arm :ready :value nil)
         :current (list :current nil)
-        :children nil
         :when '(:arm :no-turn-running :value nil)
         :detail (list :branch nil :parent-branch nil :summary nil)
         :closed (list :closed (and closed t))))
 
 (defun agent-repl-test-commands--roster (rows &optional hidden merged)
-  "Return a decoded roster carrying ROWS in one repo section.
-HIDDEN is the hidden section's rows and MERGED the recently-merged band's,
-in one group."
-  (list :repository
-        (list :sections (list (list :key (list :repository (list :id "r" :dir "/tmp"))
-                                    :header (list :label (list :text "repo"))
-                                    :rows (list :rows rows))))
-        :hidden (list :header (list :label (list :text "Hidden"))
-                      :rows (list :rows hidden))
-        :recently-merged (list :header (list :label (list :text "m"))
-                               :groups (and merged
-                                            (list (list :header (list :label (list :text "repo"))
-                                                        :rows (list :rows merged)
-                                                        :drawn '(:arm :shown :value nil)))))
-        :current nil))
+  "Return a decoded roster carrying ROWS: the open ones in one repo section.
+A closed one of ROWS is listed in the closed list, as the daemon lists
+it.  HIDDEN is the hidden section's rows and MERGED the recently-merged
+band's, in one group."
+  (let ((open (seq-remove #'agent-repl-roster-row-closed-p rows))
+        (closed (seq-filter #'agent-repl-roster-row-closed-p rows)))
+    (list :repository
+          (list :sections (agent-repl-test--number-tabs
+                           (list (list :key (list :repository (list :id "r" :dir "/tmp"))
+                                       :header (list :label (list :text "repo"))
+                                       :open-rows (agent-repl-test--open-rows open)))))
+          :hidden (list :header (list :label (list :text "Hidden"))
+                        :hidden-rows (agent-repl-test--hidden-rows hidden))
+          :recently-merged (list :header (list :label (list :text "m"))
+                                 :groups (and merged
+                                              (list (list :header (list :label (list :text "repo"))
+                                                          :merged-rows (agent-repl-test--merged-rows merged)
+                                                          :drawn '(:arm :shown :value nil)))))
+          :closed (agent-repl-test--closed-rows closed)
+          :current nil)))
 
 (defun agent-repl-test-commands--closed-row (name by at-ms)
   "Return a decoded CLOSED roster row for NAME, closed BY (an arm) at AT-MS.
