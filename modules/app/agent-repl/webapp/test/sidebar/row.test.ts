@@ -29,12 +29,12 @@ import {
   mergedToday,
   drawRosterRowWhen,
   drawStatusMark,
-  expandVisibleRows,
   placeOpenRowDetails,
   placeRowDetail,
   toggleRowMenu,
   type RowPlace,
-  drawnRowEntries,
+  drawRosterFamily,
+  pathedFamilies,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { codeOf } from "../source-text.js";
@@ -49,6 +49,8 @@ import {
   sidebarContext,
   startOfToday,
   startOfTomorrow,
+  openRow,
+  hiddenRow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
 import { SELECTION_NUMBER_RISE, SELECTION_NUMBER_RISE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
@@ -676,17 +678,13 @@ describe("the detail panel", () => {
 
 describe("the family", () => {
   it("nests a child under its parent", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", children: [row({ id: "ws-2" })] }),
-      sidebarContext(),
-      "R",
-    );
+    const drawn = drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sidebarContext(), "R");
     expect(drawn.querySelector(".kids [data-roster-row='ws-2']")).not.toBeNull();
   });
 
   it("nests a grandchild one generation further", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", children: [row({ id: "ws-2", children: [row({ id: "ws-3" })] })] }),
+    const drawn = drawRosterFamily(
+      openRow(row({ id: "ws-1", children: [row({ id: "ws-2", children: [row({ id: "ws-3" })] })] })),
       sidebarContext(),
       "R",
     );
@@ -694,66 +692,46 @@ describe("the family", () => {
   });
 
   it("draws no family box for a childless row", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    const drawn = drawRosterFamily(openRow(row({ id: "ws-1" })), sidebarContext(), "R");
     expect(drawn.querySelector(".kids")).toBeNull();
   });
 
-  it("does not draw a closed child", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", children: [row({ id: "ws-2", closed: true })] }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector("[data-roster-row='ws-2']")).toBeNull();
+  it("draws every child the wire nests, a receded one included", () => {
+    // The daemon lists each state on its own, so a row it nests is drawn.
+    const drawn = drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2", closed: true })] })), sidebarContext(), "R");
+    expect(drawn.querySelector(".kids [data-roster-row='ws-2']")).not.toBeNull();
   });
 
-  it("hoists a live grandchild up in a closed child's place", () => {
-    const drawn = drawRosterRow(
-      row({
-        id: "ws-1",
-        children: [row({ id: "ws-2", closed: true, children: [row({ id: "ws-3" })] })],
-      }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".kids [data-roster-row='ws-3']")).not.toBeNull();
-  });
-
-  it("draws no family box when every child is closed and leaves no descendant", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", children: [row({ id: "ws-2", closed: true })] }),
-      sidebarContext(),
-      "R",
-    );
-    expect(drawn.querySelector(".kids")).toBeNull();
+  it("refuses a list row naming no row as a malformed view", () => {
+    const bad = openRow(row({ id: "ws-1" }));
+    bad.row = undefined;
+    expect(() => drawRosterFamily(bad, sidebarContext(), "R")).toThrow(/R\.row/);
   });
 });
 
-describe("expandVisibleRows", () => {
-  it("keeps an open row", () => {
-    const visible = expandVisibleRows([row({ id: "ws-1", closed: false })], "R");
-    expect(visible.map((v) => v.row.workspace?.workspace?.id)).toEqual(["ws-1"]);
+describe("pathedFamilies", () => {
+  it("gives each family its index under the region's path", () => {
+    const got = pathedFamilies([openRow(row({ id: "a" })), openRow(row({ id: "b" }))], "R.rows");
+    expect(got.map((e) => [e.family.row?.workspace?.workspace?.id, e.path])).toEqual([
+      ["a", "R.rows[0]"],
+      ["b", "R.rows[1]"],
+    ]);
   });
 
-  it("drops a closed row", () => {
-    const visible = expandVisibleRows([row({ id: "ws-1", closed: true })], "R");
-    expect(visible).toEqual([]);
-  });
+  it.each([
+    ["roster.ts", "drawRosterRows"],
+    ["keyed-rows.ts", "visible"],
+    ["row.ts", "appendRowKids"],
+  ])("is how %s walks a list's rows", (file, fn) => {
+    // Arrange
+    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
+    const start = source.indexOf(`function ${fn}(`);
 
-  it("hoists a closed row's live child into its place", () => {
-    const visible = expandVisibleRows(
-      [row({ id: "ws-1", closed: true, children: [row({ id: "ws-2" })] })],
-      "R",
-    );
-    expect(visible.map((v) => v.row.workspace?.workspace?.id)).toEqual(["ws-2"]);
-  });
+    // Act
+    const body = source.slice(start, source.indexOf("\n}\n", start));
 
-  it("gives a hoisted row the message path it was found at", () => {
-    const visible = expandVisibleRows(
-      [row({ id: "ws-1", closed: true, children: [row({ id: "ws-2" })] })],
-      "R",
-    );
-    expect(visible[0]?.path).toBe("R[0].children[0]");
+    // Assert
+    expect(body.includes("pathedFamilies(")).toBe(true);
   });
 });
 
@@ -809,7 +787,7 @@ describe("the row click in the hidden section", () => {
         selectWorkspace: () => SELECT_OK,
       }),
     );
-    const drawn = drawRosterRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }), sc, "R", "hidden");
+    const drawn = drawRosterFamily(hiddenRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sc, "R", "hidden");
     await click(drawn.querySelector("[data-roster-row='ws-2'] [data-select]") as Element);
     expect(shown).toEqual(["ws-2"]);
   });
@@ -1355,7 +1333,7 @@ describe("a malformed row", () => {
       detail: {},
     });
     const parent = row({ id: "ws-1", children: [malformed] });
-    expect(() => drawRosterRow(parent, sidebarContext(), "R")).toThrow(MalformedView);
+    expect(() => drawRosterFamily(openRow(parent), sidebarContext(), "R")).toThrow(MalformedView);
   });
 });
 
@@ -1872,13 +1850,15 @@ describe("the row's display mode", () => {
 
     it("leaves an unviewed child's dot green under a viewed parent", () => {
       // Arrange, Act.
-      const drawn = drawRosterRow(
-        row({
-          id: "parent",
-          status: { case: "done", value: {} },
-          viewed: true,
-          children: [row({ id: "child", status: { case: "done", value: {} } })],
-        }),
+      const drawn = drawRosterFamily(
+        openRow(
+          row({
+            id: "parent",
+            status: { case: "done", value: {} },
+            viewed: true,
+            children: [row({ id: "child", status: { case: "done", value: {} } })],
+          }),
+        ),
         sidebarContext(),
         "R",
       );
@@ -2350,8 +2330,8 @@ describe("the hidden section's rows", () => {
   });
 
   it("draws a hidden child row in plain text too", () => {
-    const drawn = drawRosterRow(
-      row({ id: "ws-1", children: [row({ id: "ws-2", status: { case: "dead", value: {} } })] }),
+    const drawn = drawRosterFamily(
+      hiddenRow(row({ id: "ws-1", children: [row({ id: "ws-2", status: { case: "dead", value: {} } })] })),
       sidebarContext(),
       "R",
       "hidden",
@@ -2363,7 +2343,7 @@ describe("the hidden section's rows", () => {
 describe("drawRosterRowStandIn", () => {
   it("is the row's box, line and name, marked as a stand-in", () => {
     // Act
-    const standIn = drawRosterRowStandIn(row({ id: "ws-1", name: "alpha" }), "row");
+    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", name: "alpha" })), "row");
 
     // Assert
     expect([
@@ -2375,7 +2355,7 @@ describe("drawRosterRowStandIn", () => {
 
   it("draws nothing of the row but its line", () => {
     // Act
-    const standIn = drawRosterRowStandIn(row({ id: "ws-1" }), "row");
+    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1" })), "row");
 
     // Assert
     expect(standIn.querySelectorAll("*").length).toBe(2);
@@ -2383,7 +2363,7 @@ describe("drawRosterRowStandIn", () => {
 
   it("carries a stand-in for each visible child, where the search looks for one", () => {
     // Act
-    const standIn = drawRosterRowStandIn(row({ id: "ws-1", children: [row({ id: "ws-2", name: "beta" })] }), "row");
+    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", children: [row({ id: "ws-2", name: "beta" })] })), "row");
 
     // Assert
     expect(standIn.querySelector(":scope > .kids > [data-roster-row='ws-2'] > .row > .name")?.textContent).toBe("beta");
@@ -2395,7 +2375,7 @@ describe("drawRosterRowStandIn", () => {
     bad.workspace = undefined;
 
     // Act / Assert
-    expect(() => drawRosterRowStandIn(bad, "row")).toThrow(MalformedView);
+    expect(() => drawRosterRowStandIn(openRow(bad), "row")).toThrow(MalformedView);
   });
 
   it("refuses a row with no name as a malformed view", () => {
@@ -2404,7 +2384,7 @@ describe("drawRosterRowStandIn", () => {
     bad.name = undefined;
 
     // Act / Assert
-    expect(() => drawRosterRowStandIn(bad, "row")).toThrow(MalformedView);
+    expect(() => drawRosterRowStandIn(openRow(bad), "row")).toThrow(MalformedView);
   });
 });
 
@@ -2415,7 +2395,7 @@ describe("appendRowKids", () => {
     const parent = row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] });
 
     // Act
-    appendRowKids(ws, parent, "row", (child) => drawRosterRowStandIn(child, "child"));
+    appendRowKids(ws, openRow(parent).children, "row", (child) => drawRosterRowStandIn(child, "child"));
 
     // Assert
     expect([...ws.querySelectorAll(":scope > .kids > [data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))).toEqual([
@@ -2430,7 +2410,7 @@ describe("appendRowKids", () => {
     const parent = row({ id: "ws-1", children: [row({ id: "ws-2" })] });
 
     // Act
-    appendRowKids(document.createElement("div"), parent, "row", (child, childPath) => {
+    appendRowKids(document.createElement("div"), openRow(parent).children, "row", (child, childPath) => {
       paths.push(childPath);
       return document.createElement("div");
     });
@@ -2444,7 +2424,7 @@ describe("appendRowKids", () => {
     const ws = document.createElement("div");
 
     // Act
-    appendRowKids(ws, row({ id: "ws-1" }), "row", () => document.createElement("div"));
+    appendRowKids(ws, [], "row", () => document.createElement("div"));
 
     // Assert
     expect(ws.querySelector(".kids")).toBeNull();
@@ -2462,48 +2442,6 @@ describe("appendRowKids", () => {
   });
 });
 
-
-describe("drawnRowEntries", () => {
-  it("answers every row in order when closed rows are kept", () => {
-    // Arrange
-    const rows = [row({ id: "a" }), row({ id: "b", closed: true })];
-
-    // Act
-    const got = drawnRowEntries(rows, "r", false);
-
-    // Assert
-    expect(got.map((e) => [e.row.workspace?.workspace?.id, e.path])).toEqual([
-      ["a", "r[0]"],
-      ["b", "r[1]"],
-    ]);
-  });
-
-  it("drops a closed row and promotes its family when closed rows are hidden", () => {
-    // Arrange
-    const rows = [row({ id: "a" }), row({ id: "b", closed: true, children: [row({ id: "c" })] })];
-
-    // Act
-    const got = drawnRowEntries(rows, "r", true);
-
-    // Assert
-    expect(got.map((e) => e.row.workspace?.workspace?.id)).toEqual(["a", "c"]);
-  });
-
-  it.each([
-    ["roster.ts", "drawRosterRows"],
-    ["keyed-rows.ts", "visible"],
-  ])("is how %s picks the rows it draws", (file, fn) => {
-    // Arrange
-    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
-    const start = source.indexOf(`function ${fn}(`);
-
-    // Act
-    const body = source.slice(start, source.indexOf("\n}\n", start));
-
-    // Assert
-    expect([body.includes("drawnRowEntries("), body.includes("expandVisibleRows(")]).toEqual([true, false]);
-  });
-});
 
 describe("the tab number slot", () => {
   it("leads an open row's line with an empty number slot before the status mark", () => {

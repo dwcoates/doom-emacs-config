@@ -30,6 +30,7 @@ import {
 import {
   KillWorkspaceRequestSchema,
   KillWorkspaceResponseSchema,
+  type KillWorkspaceError,
   type KillWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import {
@@ -63,6 +64,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import {
   SetWorkspaceHiddenRequestSchema,
+  type SetWorkspaceHiddenError,
   type SetWorkspaceHiddenRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import {
@@ -75,7 +77,9 @@ import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_
 import { log } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { crossCuttingSentence } from "../rpc/refuse.js";
+import { crossCuttingSentence, refusalOf, type SentenceTable } from "../rpc/refuse.js";
+import type { WorkspaceHasOpenChildren, WorkspaceParentNotOpen } from "../../../proto/gen/ts/agentrepl/v1/family_pb";
+import { hasOpenChildrenSentence, mergeHasOpenChildrenSentence, parentNotOpenSentence } from "../rpc/family-refusal.js";
 import type { RefusalCause } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -245,6 +249,7 @@ export function drawKillConfirm(target: VerbTarget): HTMLElement {
       rpc: "KillWorkspace",
       call: (client) => client.killWorkspace(buildKillWorkspaceRequest(target.workspace)),
       schema: KillWorkspaceResponseSchema,
+      refusalText: (cause) => killWorkspaceRefusal(cause as CauseOf<KillWorkspaceError>),
     });
   });
   confirm.appendChild(go);
@@ -546,7 +551,7 @@ export function refusalCause(rpc: string, error: unknown): RefusalCause & { case
  * type `refusalText` against; the hook takes the shape they all have and each
  * site casts to its own once, which is what makes the switch below exhaustive.
  */
-type CauseOf<E extends { cause: { case?: string | undefined } }> = NonNullable<E["cause"]> & {
+export type CauseOf<E extends { cause: { case?: string | undefined } }> = NonNullable<E["cause"]> & {
   case: string;
 };
 
@@ -610,6 +615,8 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
       // The daemon's own sentence names the brief and why it would not
       // compose; nothing was opened.
       return `the merge could not be reverted: ${cause.value.detail}`;
+    case "parentNotOpen":
+      return parentNotOpenSentence(cause.value, "OpenWorkspaceError.parent_not_open", "reopen");
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }
@@ -652,6 +659,8 @@ export function closeWorkspaceRefusal(cause: CauseOf<CloseWorkspaceError>): stri
   switch (cause.case) {
     case "blocked":
       return "close refused: work in flight (see the footer)";
+    case "hasOpenChildren":
+      return hasOpenChildrenSentence(cause.value, "CloseWorkspaceError.has_open_children", "close");
     default:
       return unreachableArm("CloseWorkspaceError.cause", cause.case);
   }
@@ -662,9 +671,42 @@ export function nukeWorkspaceRefusal(cause: CauseOf<NukeWorkspaceError>): string
   switch (cause.case) {
     case "gitFailed":
       return `git refused to remove the worktree: ${cause.value.detail}`;
+    case "hasOpenChildren":
+      return hasOpenChildrenSentence(cause.value, "NukeWorkspaceError.has_open_children", "nuke");
     default:
       return unreachableArm("NukeWorkspaceError.cause", cause.case);
   }
+}
+
+/**
+ * KillWorkspace's own arm: the family rule a kill shares with a close. A
+ * table rather than a switch, because the feed's cold gate offers the same
+ * kill and words its refusal from the same table.
+ */
+export const KILL_WORKSPACE_SENTENCES = {
+  hasOpenChildren: (v: WorkspaceHasOpenChildren) =>
+    hasOpenChildrenSentence(v, "KillWorkspaceError.has_open_children", "kill"),
+} satisfies SentenceTable;
+
+/**
+ * SetWorkspaceHidden's own arms: the family rules a hide and a show keep. A
+ * table, for the cold gate's hide as for KILL_WORKSPACE_SENTENCES.
+ */
+export const SET_WORKSPACE_HIDDEN_SENTENCES = {
+  hasOpenChildren: (v: WorkspaceHasOpenChildren) =>
+    hasOpenChildrenSentence(v, "SetWorkspaceHiddenError.has_open_children", "hide"),
+  parentNotOpen: (v: WorkspaceParentNotOpen) =>
+    parentNotOpenSentence(v, "SetWorkspaceHiddenError.parent_not_open", "show"),
+} satisfies SentenceTable;
+
+/** KillWorkspace's refusal, worded from KILL_WORKSPACE_SENTENCES. */
+export function killWorkspaceRefusal(cause: CauseOf<KillWorkspaceError>): string {
+  return refusalOf(cause, KILL_WORKSPACE_SENTENCES, "KillWorkspaceError.cause").text;
+}
+
+/** SetWorkspaceHidden's refusal, worded from SET_WORKSPACE_HIDDEN_SENTENCES. */
+export function setWorkspaceHiddenRefusal(cause: CauseOf<SetWorkspaceHiddenError>): string {
+  return refusalOf(cause, SET_WORKSPACE_HIDDEN_SENTENCES, "SetWorkspaceHiddenError.cause").text;
 }
 
 /** MergeWorkspace's own arms, including the two that mean "already going". */
@@ -690,6 +732,8 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return "a merge onto agent-repl's master names how it moves the version";
     case "versionIncrementUnexpected":
       return "only a merge onto agent-repl's master moves the version";
+    case "hasOpenChildren":
+      return mergeHasOpenChildrenSentence(cause.value, "MergeWorkspaceError.has_open_children");
     default:
       return unreachableArm("MergeWorkspaceError.cause", cause.case);
   }

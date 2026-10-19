@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { RosterTabBarSchema, type RosterTabBar } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import {
+  RosterOpenRowSchema,
+  RosterRepositoryViewSchema,
+  type RosterOpenRow,
+  type RosterRepositoryView,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   TAB_NUMBER_ATTRIBUTE,
@@ -12,14 +17,19 @@ import {
 } from "../../src/sidebar/tab-numbers.js";
 import { captureLogRecords } from "../log-capture.js";
 
-type Visibility = "drawn" | "withheldCollapsed" | "withheldHidden";
+/** An open row for ID: numbered N, or folded when N is null; with CHILDREN. */
+function open(id: string, n: number | null, ...children: RosterOpenRow[]): RosterOpenRow {
+  return create(RosterOpenRowSchema, {
+    row: { workspace: { workspace: { id, dir: `/w/${id}` } } },
+    tab: { tab: n === null ? { case: "folded", value: {} } : { case: "numbered", value: { number: n } } },
+    children,
+  });
+}
 
-function tabBar(...tabs: Array<[string, Visibility]>): RosterTabBar {
-  return create(RosterTabBarSchema, {
-    tabs: tabs.map(([id, visibility]) => ({
-      workspace: { id, dir: `/w/${id}` },
-      visibility: { case: visibility, value: {} },
-    })),
+/** An Open section of one repository: OWN rows, then one subsection per SUBS. */
+function view(own: RosterOpenRow[], ...subs: RosterOpenRow[][]): RosterRepositoryView {
+  return create(RosterRepositoryViewSchema, {
+    sections: [{ openRows: { rows: own }, subsections: subs.map((rows) => ({ openRows: { rows } })) }],
   });
 }
 
@@ -36,59 +46,52 @@ function slotFor(root: HTMLElement, id: string): HTMLElement {
 }
 
 describe("tabNumbers", () => {
-  it.each<{ name: string; bar: RosterTabBar; want: Array<[string, number]> }>([
-    { name: "numbers drawn tabs from 1 in tab-bar order", bar: tabBar(["b", "drawn"], ["a", "drawn"]), want: [["b", 1], ["a", 2]] },
-    {
-      name: "skips a collapsed repository's tab without counting it",
-      bar: tabBar(["a", "drawn"], ["b", "withheldCollapsed"], ["c", "drawn"]),
-      want: [["a", 1], ["c", 2]],
-    },
-    {
-      name: "skips a hidden workspace's tab without counting it",
-      bar: tabBar(["a", "withheldHidden"], ["b", "drawn"]),
-      want: [["b", 1]],
-    },
-    { name: "numbers nothing on an empty bar", bar: tabBar(), want: [] },
-  ])("$name", ({ bar, want }) => {
+  it.each<{ name: string; view: RosterRepositoryView; want: Array<[string, number]> }>([
+    { name: "reads each open row's own number", view: view([open("b", 1), open("a", 2)]), want: [["b", 1], ["a", 2]] },
+    { name: "reads a nested row's number", view: view([open("p", 1, open("k", 2))]), want: [["p", 1], ["k", 2]] },
+    { name: "reads a subsection's rows", view: view([open("a", 1)], [open("s", 2)]), want: [["a", 1], ["s", 2]] },
+    { name: "gives a folded tab no number", view: view([open("a", 1), open("f", null), open("c", 2)]), want: [["a", 1], ["c", 2]] },
+    { name: "numbers nothing in an empty section", view: view([]), want: [] },
+  ])("$name", ({ view: v, want }) => {
     // Act
-    const numbers = tabNumbers(bar, "WorkspaceRoster.tab_bar");
+    const numbers = tabNumbers(v, "WorkspaceRoster.repository");
 
     // Assert
     expect([...numbers]).toEqual(want);
   });
 
-  it("refuses a tab with no workspace as a malformed view", () => {
+  it("refuses an open row with no tab as a malformed view", () => {
     // Arrange
-    const bar = create(RosterTabBarSchema, { tabs: [{ visibility: { case: "drawn", value: {} } }] });
+    const v = view([create(RosterOpenRowSchema, { row: { workspace: { workspace: { id: "a", dir: "/w/a" } } } })]);
 
     // Act
-    const read = (): unknown => tabNumbers(bar, "WorkspaceRoster.tab_bar");
+    const read = (): unknown => tabNumbers(v, "WorkspaceRoster.repository");
 
     // Assert
     expect(read).toThrow(MalformedView);
-    expect(read).toThrow(/tab_bar\.tabs\[0\]\.workspace/);
+    expect(read).toThrow(/open_rows\.rows\[0\]\.tab/);
   });
 
-  it("refuses a tab with no visibility arm as a malformed view", () => {
+  it("refuses an open row with no tab arm as a malformed view", () => {
     // Arrange
-    const bar = create(RosterTabBarSchema, { tabs: [{ workspace: { id: "a", dir: "/w/a" } }] });
+    const v = view([create(RosterOpenRowSchema, { row: { workspace: { workspace: { id: "a", dir: "/w/a" } } }, tab: {} })]);
 
     // Act
-    const read = (): unknown => tabNumbers(bar, "WorkspaceRoster.tab_bar");
+    const read = (): unknown => tabNumbers(v, "WorkspaceRoster.repository");
 
     // Assert
-    expect(read).toThrow(/tab_bar\.tabs\[0\]\.visibility/);
+    expect(read).toThrow(/open_rows\.rows\[0\]\.tab\.tab/);
   });
 
-  it("refuses a workspace with two tabs as a malformed view", () => {
+  it("refuses a workspace with two open rows as a malformed view", () => {
     // Arrange
-    const bar = tabBar(["a", "drawn"], ["a", "drawn"]);
+    const v = view([open("a", 1), open("a", 2)]);
 
     // Act
-    const read = (): unknown => tabNumbers(bar, "WorkspaceRoster.tab_bar");
+    const read = (): unknown => tabNumbers(v, "WorkspaceRoster.repository");
 
     // Assert
-    expect(read).toThrow(/workspace a has two tabs/);
+    expect(read).toThrow(/workspace a has two open rows/);
   });
 });
 

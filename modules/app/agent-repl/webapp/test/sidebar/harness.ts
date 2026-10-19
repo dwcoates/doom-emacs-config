@@ -29,6 +29,9 @@ import {
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { hiddenRow, numberTabs, openRow, withFamily } from "../roster-families.js";
+
+export { hiddenRow, openRow };
 import type { Ticker } from "../../src/clock.js";
 import { createDrawnStatusLog } from "../../src/drawn-status.js";
 import type { FailureSink } from "../../src/failure/sink.js";
@@ -246,7 +249,7 @@ export function row(init: {
   detail?: MessageInitShape<typeof RosterRowDetailSchema>;
   children?: RosterRow[];
 }): RosterRow {
-  return create(RosterRowSchema, {
+  const built = create(RosterRowSchema, {
     workspace: { workspace: { id: init.id, dir: init.dir ?? `/w/${init.id}` } },
     name: { text: init.name ?? init.id },
     status: init.status ?? { case: "ready", value: {} },
@@ -254,7 +257,6 @@ export function row(init: {
     closed: { closed: init.closed ?? false },
     when: { shown: init.when ?? { case: "noTurnRunning", value: {} } },
     detail: init.detail ?? {},
-    children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.reviving === true ? { reviving: {} } : {}),
@@ -265,6 +267,7 @@ export function row(init: {
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
+  return withFamily(built, init.children ?? []);
 }
 
 /** One repository section. */
@@ -284,13 +287,13 @@ export function repoSection(init: {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
     header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
-    rows: { rows: init.rows ?? [] },
+    openRows: { rows: (init.rows ?? []).map(openRow) },
     fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
     subsections: (init.subsections ?? []).map((sub) => ({
       key: { subsectionId: sub.id },
       header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
-      rows: { rows: sub.rows ?? [] },
+      openRows: { rows: (sub.rows ?? []).map(openRow) },
     })),
   });
 }
@@ -310,7 +313,7 @@ export function mergedSection(
 /** The recently-merged band carrying GROUPS, its count and its fold stated. */
 export function mergedBand(
   groups: RosterMergedRepoGroup[],
-  count: number = groups.filter((g) => g.drawn.case === "shown").reduce((sum, g) => sum + (g.rows?.rows.length ?? 0), 0),
+  count: number = groups.filter((g) => g.drawn.case === "shown").reduce((sum, g) => sum + (g.mergedRows?.rows.length ?? 0), 0),
   collapsed: boolean = true,
 ): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
@@ -336,7 +339,7 @@ export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow
   return create(RosterMergedRepoGroupSchema, {
     key: { repository: { id: init.id, dir: `/r/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
-    rows: { rows },
+    mergedRows: { rows: rows.map((row) => ({ row })) },
     drawn: init.repositoryCollapsed === true ? { case: "repositoryCollapsed", value: {} } : { case: "shown", value: {} },
   });
 }
@@ -353,7 +356,7 @@ export function hiddenSection(
 ): RosterHiddenSection {
   return create(RosterHiddenSectionSchema, {
     header: { label: { text: "Hidden" }, count: { workspaces: count } },
-    rows: { rows },
+    hiddenRows: { rows: rows.map(hiddenRow) },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
@@ -378,22 +381,29 @@ export function roster(init: {
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
   current?: string;
-  /** The Emacs tab bar, first tab first; unless said, no tabs. */
-  tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" | "withheldHidden" }>;
+  /**
+   * Which open rows have a numbered tab, first tab first: each listed DRAWN
+   * row is numbered by its place among them, and every other open row is
+   * folded. Unless said, every open row of an unfolded repository is
+   * numbered in the Open section's walk, as the daemon numbers it.
+   */
+  tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" }>;
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
+  numberTabs(
+    repos.map((section) => ({
+      regions: [section.openRows, ...section.subsections.map((sub) => sub.openRows)],
+      folded: section.fold.case === "collapsed",
+    })),
+    init.tabs?.filter((tab) => (tab.drawn ?? "drawn") === "drawn").map((tab) => tab.id),
+  );
   return create(WorkspaceRosterSchema, {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted } },
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
-    tabBar: {
-      tabs: (init.tabs ?? []).map((tab) => ({
-        workspace: { id: tab.id, dir: `/w/${tab.id}` },
-        visibility: { case: tab.drawn ?? "drawn", value: {} },
-      })),
-    },
+    closed: {},
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),

@@ -328,80 +328,18 @@ describe("folding a section is the daemon's view, shared by every page", () => {
 
 });
 
-describe("closed workspaces never appear in a live grouping", () => {
-  it("drops a closed row from a repository section", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({
-        repos: [
-          repoSection({
-            id: "repo-1",
-            rows: [row({ id: "ws-live" }), row({ id: "ws-closed", closed: true })],
-          }),
-        ],
-      }),
-      sidebarContext(),
-    );
-    expect(pane(drawn).querySelector("[data-roster-row='ws-closed']")).toBeNull();
-    expect(pane(drawn).querySelector("[data-roster-row='ws-live']")).not.toBeNull();
-  });
-
-  it("drops a killed row, whose lifecycle arm is inactive", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({
-        repos: [
-          repoSection({
-            id: "repo-1",
-            rows: [row({ id: "ws-killed", closed: true, status: { case: "inactive", value: {} } })],
-          }),
-        ],
-      }),
-      sidebarContext(),
-    );
-    expect(pane(drawn).querySelector("[data-roster-row='ws-killed']")).toBeNull();
-  });
-
-  it("draws no '?' glyph once the closed rows are gone", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({
-        repos: [
-          repoSection({
-            id: "repo-1",
-            rows: [row({ id: "ws-killed", closed: true, status: { case: "inactive", value: {} } })],
-          }),
-        ],
-      }),
-      sidebarContext(),
-    );
-    const glyphs = [...pane(drawn).querySelectorAll(".st")].map((el) => el.textContent);
-    expect(glyphs).not.toContain("?");
-  });
-
-  it("hoists a killed parent's live child up in its place", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({
-        repos: [
-          repoSection({
-            id: "repo-1",
-            rows: [row({ id: "ws-killed", closed: true, children: [row({ id: "ws-child" })] })],
-          }),
-        ],
-      }),
-      sidebarContext(),
-    );
-    expect(pane(drawn).querySelector("[data-roster-row='ws-killed']")).toBeNull();
-    expect(pane(drawn).querySelector("[data-roster-row='ws-child']")).not.toBeNull();
-  });
-});
-
 describe("drawHeadedSection", () => {
   /** A headed section's wire: a header, rows and a fold. */
   function wire(init: { collapsed?: boolean; rows?: ReturnType<typeof row>[] } = {}) {
     return repoSection({ id: "repo-1", label: "Head", rows: init.rows, collapsed: init.collapsed });
   }
   const SHAPE = { foldKey: "k:1", className: "kind-section", target: { case: "recentlyMerged", value: {} } } as const;
+  /** Draw SECTION as a headed section of its own open rows. */
+  const draw = (section: ReturnType<typeof wire>, sc: Parameters<typeof drawHeadedSection>[1], path: string, shape: Parameters<typeof drawHeadedSection>[3]) =>
+    drawHeadedSection(section, sc, path, shape, section.openRows ?? { rows: [] }, `${path}.open_rows`);
 
   it("draws the box with its kind's class and fold key", () => {
-    const section = drawHeadedSection(wire(), sidebarContext(), "p", SHAPE);
+    const section = draw(wire(), sidebarContext(), "p", SHAPE);
     expect([section.classList.contains("repo"), section.classList.contains("kind-section"), section.getAttribute("data-section")]).toEqual([
       true,
       true,
@@ -413,23 +351,19 @@ describe("drawHeadedSection", () => {
     [false, false],
     [true, true],
   ])("folds the box collapsed=%s folded=%s, as the wire says", (collapsed, folded) => {
-    const section = drawHeadedSection(wire({ collapsed }), sidebarContext(), "p", SHAPE);
+    const section = draw(wire({ collapsed }), sidebarContext(), "p", SHAPE);
     expect(section.classList.contains("folded")).toBe(folded);
   });
 
   it("draws the header's label and folded count", () => {
-    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-1" })] }), sidebarContext(), "p", SHAPE);
+    const section = draw(wire({ rows: [row({ id: "ws-1" })] }), sidebarContext(), "p", SHAPE);
     expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual(["Head", "(1)"]);
   });
 
-  it("drops a closed row from its rows", () => {
-    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-closed", closed: true })] }), sidebarContext(), "p", SHAPE);
-    expect(section.querySelector("[data-roster-row='ws-closed']")).toBeNull();
-  });
 
   it("hands the header and the box to the decoration, after the count", () => {
     let handed: [HTMLElement, HTMLElement] | undefined;
-    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+    const section = draw(wire(), sidebarContext(), "p", {
       ...SHAPE,
       decorateHeader: (header, box) => {
         handed = [header, box];
@@ -445,7 +379,7 @@ describe("drawHeadedSection", () => {
 
   it("asks the daemon for the other fold of its target", async () => {
     const { asked, sc } = viewDaemon();
-    const section = drawHeadedSection(wire(), sc, "p", SHAPE);
+    const section = draw(wire(), sc, "p", SHAPE);
     await click(section.querySelector("[data-section-fold]") as Element);
     expect(asked.map(foldAsked)).toEqual([{ section: "recentlyMerged", id: "", fold: "collapse" }]);
   });
@@ -453,21 +387,13 @@ describe("drawHeadedSection", () => {
   it("refuses a section with no header as a malformed view", () => {
     const bare = wire();
     bare.header = undefined;
-    expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
+    expect(() => draw(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
   });
 
-  it("refuses a section with no rows as a malformed view", () => {
-    const bare = wire();
-    bare.rows = undefined;
-    expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
-  });
 
-  it("keeps a closed row when told not to drop closed rows", () => {
-    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-closed", closed: true })] }), sidebarContext(), "p", {
-      ...SHAPE,
-      hideClosed: false,
-    });
-    expect(section.querySelector("[data-roster-row='ws-closed']")).not.toBeNull();
+  it("draws every row it is handed, a receded one included", () => {
+    const section = draw(wire({ rows: [row({ id: "ws-receded", closed: true })] }), sidebarContext(), "p", SHAPE);
+    expect(section.querySelector("[data-roster-row='ws-receded']")).not.toBeNull();
   });
 
   it("draws its rows in the place it is given", async () => {
@@ -480,13 +406,13 @@ describe("drawHeadedSection", () => {
         },
       }),
     );
-    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-1" })] }), sc, "p", { ...SHAPE, place: "hidden" });
+    const section = draw(wire({ rows: [row({ id: "ws-1" })] }), sc, "p", { ...SHAPE, place: "hidden" });
     await click(section.querySelector("[data-select]") as Element);
     expect(shown).toEqual(["ws-1"]);
   });
 
   it("leaves the box out, marked, when its left-out test says so", () => {
-    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+    const section = draw(wire(), sidebarContext(), "p", {
       ...SHAPE,
       leftOut: { when: () => true, attribute: "data-test-empty" },
     });
@@ -498,7 +424,7 @@ describe("drawHeadedSection", () => {
   });
 
   it("draws the box whole when its left-out test says no", () => {
-    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+    const section = draw(wire(), sidebarContext(), "p", {
       ...SHAPE,
       leftOut: { when: () => false, attribute: "data-test-empty" },
     });
@@ -509,7 +435,7 @@ describe("drawHeadedSection", () => {
     const bare = wire();
     bare.header = create(RosterSectionHeaderSchema, { label: { text: "Head" } });
     expect(() =>
-      drawHeadedSection(bare, sidebarContext(), "p", { ...SHAPE, leftOut: { when: () => true, attribute: "data-test-empty" } }),
+      draw(bare, sidebarContext(), "p", { ...SHAPE, leftOut: { when: () => true, attribute: "data-test-empty" } }),
     ).toThrow(MalformedView);
   });
 
@@ -647,23 +573,12 @@ describe("hidden workspaces", () => {
     expect([section.hidden, section.querySelector(".sb-label")]).toEqual([true, null]);
   });
 
-  it("keeps the section out of the rail when its only row is closed", () => {
+  it("keeps the section out of the rail when it counts no workspace", () => {
     const drawn = drawWorkspaceRoster(
-      roster({ hidden: hiddenSection([row({ id: "ws-gone", closed: true })], 0) }),
+      roster({ hidden: hiddenSection([], 0) }),
       sidebarContext(),
     );
     expect((pane(drawn).querySelector(".hidden-section") as HTMLElement).hidden).toBe(true);
-  });
-
-  it("drops a closed row and keeps the open one", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({ hidden: hiddenSection([row({ id: "ws-gone", closed: true }), HIDDEN_ROW], 1) }),
-      sidebarContext(),
-    );
-    const section = pane(drawn).querySelector(".hidden-section") as HTMLElement;
-    expect([...section.querySelectorAll("[data-roster-row]")].map((r) => r.getAttribute("data-roster-row"))).toEqual([
-      "ws-8",
-    ]);
   });
 
   it("refuses a roster with no hidden section as a malformed view", () => {
@@ -736,7 +651,7 @@ describe("a malformed roster", () => {
   it("refuses a repository section with no key", () => {
     const malformed = create(RosterRepoSectionSchema, {
       header: { label: { text: "doom" } },
-      rows: { rows: [] },
+      openRows: { rows: [] },
       fold: { case: "expanded", value: {} },
     });
     expect(() =>
@@ -748,7 +663,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: { label: { text: "doom" } },
-      rows: { rows: [] },
+      openRows: { rows: [] },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -758,7 +673,7 @@ describe("a malformed roster", () => {
   it("refuses a repository section with no header", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
-      rows: { rows: [] },
+      openRows: { rows: [] },
       fold: { case: "expanded", value: {} },
     });
     expect(() =>
@@ -781,7 +696,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: {},
-      rows: { rows: [] },
+      openRows: { rows: [] },
       fold: { case: "expanded", value: {} },
     });
     expect(() =>
@@ -1389,7 +1304,7 @@ describe("the repository label's divergence hover", () => {
     const section = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo/repo-1" } },
       header: { label: { text: "repo-1" }, count: { workspaces: 0 } },
-      rows: { rows: [] },
+      openRows: { rows: [] },
       fold: { case: "expanded", value: {} },
     });
     const wire = roster({ repos: [] });
@@ -1913,7 +1828,7 @@ describe("the recently-merged band: rows out of view are not drawn", () => {
     const record = await forwardedRecord(capture, "sidebar.row.reveal-undecodable");
     expect([record.level.case, record.context?.path]).toEqual([
       "error",
-      `WorkspaceRoster.recently_merged.groups[0].rows.rows[${MERGED_DRAWN_AT_ONCE}].status`,
+      `WorkspaceRoster.recently_merged.groups[0].merged_rows.rows[${MERGED_DRAWN_AT_ONCE}].row.status`,
     ]);
   });
 });
@@ -1960,7 +1875,7 @@ describe("the open rows' tab numbers", () => {
     const kept = first.querySelector("[data-roster-row='x']");
 
     // Act
-    const second = drawer.draw(roster({ repos, tabs: [{ id: "y", drawn: "withheldHidden" }, { id: "x" }] }));
+    const second = drawer.draw(roster({ repos, tabs: [{ id: "y", drawn: "withheldCollapsed" }, { id: "x" }] }));
 
     // Assert
     expect([second.querySelector("[data-roster-row='x']") === kept, numberOf(second, "x")]).toEqual([true, "1"]);
@@ -1977,16 +1892,18 @@ describe("the open rows' tab numbers", () => {
     expect([numberOf(drawn, "x"), drawn.querySelector("[data-roster-row='x'] .sb-num")?.textContent]).toEqual([null, ""]);
   });
 
-  it("refuses a roster with no tab bar as a malformed view", () => {
+  it("refuses an open row with no tab as a malformed view", () => {
     // Arrange
     const u = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })] });
-    u.tabBar = undefined;
+    const open = u.repository?.sections[0]?.openRows?.rows[0];
+    if (open === undefined) throw new Error("the fixture has its open row");
+    open.tab = undefined;
 
     // Act
     const draw = (): unknown => createRosterDrawer(sidebarContext()).draw(u);
 
     // Assert
-    expect(draw).toThrow(/WorkspaceRoster\.tab_bar/);
+    expect(draw).toThrow(/open_rows\.rows\[0\]\.tab/);
   });
 });
 

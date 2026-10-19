@@ -2,7 +2,7 @@
 // A repository section's rows drawn each under its own scope. See src/sidebar/keyed-rows.ts.
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { RosterRowsSchema, type RosterRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterOpenRowsSchema, RosterOpenRowTabSchema, type RosterRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   disposeKeyedRows,
   drawKeyedRows,
@@ -10,9 +10,9 @@ import {
   patchKeyedRows,
   type KeyedRows,
 } from "../../src/sidebar/keyed-rows.js";
-import { appContext, fakeTicker, NOW, row, sidebarContext } from "./harness.js";
+import { appContext, fakeTicker, NOW, openRow, row, sidebarContext } from "./harness.js";
 
-const rows = (...r: RosterRow[]) => create(RosterRowsSchema, { rows: r });
+const rows = (...r: RosterRow[]) => create(RosterOpenRowsSchema, { rows: r.map(openRow) });
 const ticking = (id: string, current = false): RosterRow =>
   row({ id, current, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
 const elementOf = (box: HTMLElement, id: string): Element | null => box.querySelector(`[data-roster-row='${id}']`);
@@ -22,17 +22,39 @@ describe("keyed rows", () => {
     // Arrange
     const rail = sidebarContext();
     const kept: KeyedRows = { entries: [] };
-    const box = drawKeyedRows(rows(row({ id: "a", current: true }), row({ id: "b" }), row({ id: "c" })), rail, "r", true, "grouping", kept);
+    const box = drawKeyedRows(rows(row({ id: "a", current: true }), row({ id: "b" }), row({ id: "c" })), rail, "r", "grouping", kept);
     const [a, b, c] = ["a", "b", "c"].map((id) => elementOf(box, id));
 
     // Act
-    const patched = patchKeyedRows(kept, rows(row({ id: "a" }), row({ id: "b", current: true }), row({ id: "c" })), rail, "r", true, "grouping");
+    const patched = patchKeyedRows(kept, rows(row({ id: "a" }), row({ id: "b", current: true }), row({ id: "c" })), rail, "r", "grouping");
 
     // Assert
     expect(patched).toBe(true);
     expect([elementOf(box, "a") === a, elementOf(box, "b") === b, elementOf(box, "c") === c]).toEqual([false, false, true]);
     expect([...box.querySelectorAll("[data-current]")].map((el) => el.getAttribute("data-roster-row"))).toEqual(["b"]);
     expect([...box.children].map((el) => el.getAttribute("data-roster-row"))).toEqual(["a", "b", "c"]);
+  });
+
+  it("redraws no row when only the tabs were renumbered, a child's included", () => {
+    // Arrange
+    const rail = sidebarContext();
+    const kept: KeyedRows = { entries: [] };
+    const numbered = (n: number) => ({ tab: { case: "numbered" as const, value: { number: n } } });
+    const first = rows(row({ id: "a", children: [row({ id: "a1" })] }), row({ id: "b" }));
+    first.rows[0]!.tab = create(RosterOpenRowTabSchema, numbered(1));
+    first.rows[0]!.children[0]!.tab = create(RosterOpenRowTabSchema, numbered(2));
+    first.rows[1]!.tab = create(RosterOpenRowTabSchema, numbered(3));
+    const box = drawKeyedRows(first, rail, "r", "grouping", kept);
+    const before = ["a", "a1", "b"].map((id) => elementOf(box, id));
+    const next = rows(row({ id: "a", children: [row({ id: "a1" })] }), row({ id: "b" }));
+    next.rows[0]!.tab = create(RosterOpenRowTabSchema, numbered(4));
+    next.rows[0]!.children[0]!.tab = create(RosterOpenRowTabSchema, numbered(5));
+
+    // Act
+    const patched = patchKeyedRows(kept, next, rail, "r", "grouping");
+
+    // Assert
+    expect([patched, ["a", "a1", "b"].map((id) => elementOf(box, id))]).toEqual([true, before]);
   });
 
   it.each([
@@ -43,11 +65,11 @@ describe("keyed rows", () => {
     // Arrange
     const rail = sidebarContext();
     const kept: KeyedRows = { entries: [] };
-    const box = drawKeyedRows(rows(row({ id: "a" }), row({ id: "b" })), rail, "r", true, "grouping", kept);
+    const box = drawKeyedRows(rows(row({ id: "a" }), row({ id: "b" })), rail, "r", "grouping", kept);
     const before = [...box.children];
 
     // Act
-    const patched = patchKeyedRows(kept, rows(...next), rail, "r", true, "grouping");
+    const patched = patchKeyedRows(kept, rows(...next), rail, "r", "grouping");
 
     // Assert
     expect([patched, [...box.children]]).toEqual([false, before]);
@@ -58,11 +80,11 @@ describe("keyed rows", () => {
     const ticker = fakeTicker();
     const rail = sidebarContext(appContext(undefined, ticker));
     const kept: KeyedRows = { entries: [] };
-    drawKeyedRows(rows(ticking("a"), ticking("b")), rail, "r", true, "grouping", kept);
+    drawKeyedRows(rows(ticking("a"), ticking("b")), rail, "r", "grouping", kept);
     const drawnOnce = ticker.subscribers();
 
     // Act
-    patchKeyedRows(kept, rows(ticking("a", true), ticking("b")), rail, "r", true, "grouping");
+    patchKeyedRows(kept, rows(ticking("a", true), ticking("b")), rail, "r", "grouping");
 
     // Assert
     expect(ticker.subscribers()).toBe(drawnOnce);
@@ -74,7 +96,7 @@ describe("keyed rows", () => {
     const rail = sidebarContext(appContext(undefined, ticker));
     const before = ticker.subscribers();
     const kept: KeyedRows = { entries: [] };
-    drawKeyedRows(rows(ticking("a"), ticking("b")), rail, "r", true, "grouping", kept);
+    drawKeyedRows(rows(ticking("a"), ticking("b")), rail, "r", "grouping", kept);
 
     // Act
     disposeKeyedRows(kept);
@@ -90,8 +112,8 @@ describe("keyed regions", () => {
     const rail = sidebarContext();
     const own: KeyedRows = { entries: [] };
     const sub: KeyedRows = { entries: [] };
-    const ownBox = drawKeyedRows(rows(row({ id: "a", current: true })), rail, "own", true, "grouping", own);
-    const subBox = drawKeyedRows(rows(row({ id: "b" })), rail, "sub", true, "grouping", sub);
+    const ownBox = drawKeyedRows(rows(row({ id: "a", current: true })), rail, "own", "grouping", own);
+    const subBox = drawKeyedRows(rows(row({ id: "b" })), rail, "sub", "grouping", sub);
 
     // Act
     const patched = patchKeyedRegions(
@@ -100,7 +122,6 @@ describe("keyed regions", () => {
         { kept: sub, rows: rows(row({ id: "b", current: true })), path: "sub" },
       ],
       rail,
-      true,
       "grouping",
     );
 
@@ -118,8 +139,8 @@ describe("keyed regions", () => {
     const rail = sidebarContext();
     const own: KeyedRows = { entries: [] };
     const sub: KeyedRows = { entries: [] };
-    const ownBox = drawKeyedRows(rows(row({ id: "a", current: true })), rail, "own", true, "grouping", own);
-    drawKeyedRows(rows(row({ id: "b" })), rail, "sub", true, "grouping", sub);
+    const ownBox = drawKeyedRows(rows(row({ id: "a", current: true })), rail, "own", "grouping", own);
+    drawKeyedRows(rows(row({ id: "b" })), rail, "sub", "grouping", sub);
     const before = [...ownBox.children];
 
     // Act
@@ -129,7 +150,6 @@ describe("keyed regions", () => {
         { kept: sub, rows: rows(), path: "sub" },
       ],
       rail,
-      true,
       "grouping",
     );
 

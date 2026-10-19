@@ -92,7 +92,12 @@ import {
   whileInFlight,
 } from "../cards/controls.js";
 import { callFailure, refusalOf, type Cause, type SentenceTable } from "../../rpc/refuse.js";
-import { buildKillWorkspaceRequest, buildSetWorkspaceHiddenRequest } from "../../sidebar/verbs.js";
+import {
+  buildKillWorkspaceRequest,
+  buildSetWorkspaceHiddenRequest,
+  KILL_WORKSPACE_SENTENCES,
+  SET_WORKSPACE_HIDDEN_SENTENCES,
+} from "../../sidebar/verbs.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
@@ -689,6 +694,7 @@ function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly C
     rpc: "SetWorkspaceHidden",
     call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
     schema: SetWorkspaceHiddenResponseSchema,
+    own: SET_WORKSPACE_HIDDEN_SENTENCES,
   });
 }
 
@@ -705,13 +711,14 @@ function killWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly C
     // never `accepted`.
     call: (client) => client.killWorkspace(buildKillWorkspaceRequest(rc.ctx.workspace)),
     schema: KillWorkspaceResponseSchema,
+    own: KILL_WORKSPACE_SENTENCES,
   });
 }
 
 /**
  * ONE WORKSPACE VERB FROM THE GATE'S ROW, which is not a remediation: logged
  * under `feed.asks.cold-gate.<verb>` with the workspace it acts on, and refused
- * with only the cross-cutting four, which is all a workspace verb answers.
+ * with the cross-cutting four and the verb's own arms (SPEC.own).
  */
 export async function workspaceVerbFromGate<Res extends GateResponse>(
   rc: RowContext,
@@ -723,6 +730,8 @@ export async function workspaceVerbFromGate<Res extends GateResponse>(
     rpc: string;
     call: (client: AgentReplClient) => Promise<Res>;
     schema: DescMessage;
+    /** The verb's own arms, worded as the sidebar words the same verb. */
+    own: SentenceTable;
   },
 ): Promise<void> {
   log.info(spec.message, {
@@ -733,7 +742,7 @@ export async function workspaceVerbFromGate<Res extends GateResponse>(
     rpc: spec.rpc,
     call: spec.call,
     schema: spec.schema,
-    own: {},
+    own: spec.own,
     malformedOperation: `feed.asks.cold-gate.${spec.verb}.malformed-refusal`,
   });
 }

@@ -29,7 +29,7 @@
  * so a status change elsewhere cannot throw away what is being typed.
  */
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
-import type { RosterRepoSection, RosterRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterOpenRows, RosterRepoSection, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { childrenMatching, queryAll } from "../dom.js";
 import { OPEN_REGION_CLASS, SUBSECTION_SLOT_CLASS } from "./band-fit.js";
@@ -71,7 +71,7 @@ export function drawRosterSubsections(
   u: RosterRepoSection,
   sc: SidebarContext,
   path: string,
-  drawRows: (rows: RosterRows, path: string, index: number) => HTMLElement,
+  drawRows: (rows: RosterOpenRows, path: string, index: number) => HTMLElement,
 ): HTMLElement | null {
   if (u.subsections.length === 0) return null;
   const box = document.createElement("div");
@@ -88,7 +88,7 @@ export function drawRosterSubsection(
   u: RosterSubsection,
   sc: SidebarContext,
   path: string,
-  drawRows: (rows: RosterRows, path: string) => HTMLElement,
+  drawRows: (rows: RosterOpenRows, path: string) => HTMLElement,
 ): DrawnSubsection {
   const id = requireMessage(u.key, `${path}.key`).subsectionId;
   const header = requireMessage(u.header, `${path}.header`);
@@ -129,7 +129,7 @@ export function drawRosterSubsection(
   head.append(label, shown, remove);
   element.appendChild(head);
 
-  const rows = drawRows(requireMessage(u.rows, `${path}.rows`), `${path}.rows`);
+  const rows = drawRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`);
   rows.setAttribute(BUCKET_ATTRIBUTE, id);
   element.appendChild(rows);
   const empty = document.createElement("div");
