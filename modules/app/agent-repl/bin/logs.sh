@@ -445,4 +445,8 @@ for base_index in "${!bases[@]}"; do
     )
 done
 
-exec "$binary" "${helper_args[@]}"
+# THE ARGUMENTS GO THROUGH A FILE DESCRIPTOR, NOT THE COMMAND LINE: every
+# workspace's name and every selected log's six flags outgrew the kernel's
+# argument limit (ARG_MAX) at 522 workspaces and 3205 log files, and every
+# --all read failed. `printf` is a builtin, so no exec carries them.
+exec "$binary" --args-from <(printf '%s\0' "${helper_args[@]}")

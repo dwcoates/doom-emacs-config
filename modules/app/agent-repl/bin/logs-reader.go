@@ -155,7 +155,13 @@ func run() error {
 	flag.IntVar(&opts.sampleN, "sample-n", 0, "representative records per group (0 disables sampling)")
 	flag.StringVar(&opts.fields, "fields", "", "comma-separated field projection")
 	flag.IntVar(&opts.width, "width", 120, "message truncation width for compact renderers")
-	flag.Parse()
+	args, err := argsFrom(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	if err := flag.CommandLine.Parse(args); err != nil {
+		return err
+	}
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument %q", flag.Arg(0))
 	}
@@ -1272,4 +1278,30 @@ func nameWorkspaces(records []record, names map[string]string) error {
 		records[i].raw = append(named, '}')
 	}
 	return nil
+}
+
+// argsFrom answers the reader's arguments. `--args-from PATH` alone reads them
+// from PATH, NUL-separated, which is how bin/logs.sh hands them over: every
+// daemon workspace's name and every selected log's six flags outgrew the
+// kernel's argument limit (ARG_MAX, 1 MiB here) on 2026-10-19, at 522
+// workspaces and 3205 log files, and every --all read failed. Anything else is
+// the arguments themselves.
+func argsFrom(args []string) ([]string, error) {
+	if len(args) == 0 || args[0] != "--args-from" {
+		return args, nil
+	}
+	if len(args) != 2 {
+		return nil, fmt.Errorf("--args-from takes exactly one path and nothing after it, got %q", args[1:])
+	}
+	data, err := os.ReadFile(args[1])
+	if err != nil {
+		return nil, fmt.Errorf("read the arguments file: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if data[len(data)-1] != 0 {
+		return nil, errors.New("the arguments file does not end with a NUL")
+	}
+	return strings.Split(string(data[:len(data)-1]), "\x00"), nil
 }
