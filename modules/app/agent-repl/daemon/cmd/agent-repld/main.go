@@ -163,6 +163,10 @@ const envStoreSocket = "AGENT_REPL_STORE_SOCKET"
 // environment names one.
 const defaultStoreSocket = "~/.cache/agent-repl/sock/store.sock"
 
+// processStarted is when this process started, taken as the package
+// initializes, before main: every boot phase is timed from it.
+var processStarted = time.Now()
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == deployVerb {
 		// THE VERB STARTS NOTHING: it asks the serving daemon to deploy and

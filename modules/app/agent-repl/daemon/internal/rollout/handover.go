@@ -162,7 +162,8 @@ func (c *controller) abandonHandover(ctx context.Context, slot *handoverSlot, fi
 // EVERY FAILURE PAST THE CLAIM ABANDONS THE HANDOVER through one door
 // (abandonHandover), which stops whatever successor the spawn started before
 // it lets the slot go.
-func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPlan, error) {
+func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan, error) {
+	force := ask.Force
 	slot, err := c.claimHandover()
 	if err != nil {
 		// INFO, NOT WARN: the refusal is the contract's own answer to a caller
@@ -253,6 +254,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	manifest := c.manifest(ctx, address, workspaces, snapshot)
 	manifest.Forced = force
 	manifest.Deploy = true
+	manifest.DeployStartedAt = ask.DeployStartedAt
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		// THE ANNOUNCEMENT HAS GONE OUT, and there is no arm that retracts it:
 		// a client that dialed the successor sees it stop, and goes on being
@@ -302,7 +304,7 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 	requested := 0
 	for _, ws := range plan.workspaces {
 		ws := ws
-		req := bounce.Request{
+		req := c.timeTransfer(ws.ID, bounce.Request{
 			Reason:       string(ReasonHandoverTransfer),
 			Force:        plan.forced,
 			KeepDraining: true,
@@ -311,7 +313,7 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 				return c.transfer(runCtx, ws, plan, &windows)
 			},
 			Done: func(err error) { outcomes <- transferOutcome{ws: ws.ID, err: err} },
-		}
+		})
 		decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, req)
 		if err != nil {
 			c.log.Error(opTransfer, "the bounce registry refused the workspace's transfer; the handover cannot finish while this daemon still serves it",
@@ -969,7 +971,7 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 	outcome := make(chan error, 1)
 	// NEVER FORCED, a forced handover's included: a forced transfer runs at
 	// once, mid-work again, and the successor would refuse it again.
-	decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, bounce.Request{
+	decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, c.timeTransfer(ws.ID, bounce.Request{
 		Reason:       string(ReasonHandoverTransfer),
 		KeepDraining: true,
 		WaitFor:      bounce.GateFreeness,
@@ -977,7 +979,7 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 			return c.transfer(runCtx, ws, plan, windows)
 		},
 		Done: func(err error) { outcome <- err },
-	})
+	}))
 	if err != nil {
 		c.log.Error(opTransfer, "the bounce registry refused the transfer at freeness; the workspace stays served here", dlog.WithCause(fields, err))
 		return true

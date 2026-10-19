@@ -58,9 +58,18 @@ export default defineConfig({
     // contended max. A test hitting this timeout is hung, not merely slow —
     // raise it only with a new measured reason, never to paper over a hang.
     //
+    // RAISED TO 10s, 2026-10-19, on a new measurement. The suite's normal
+    // condition is now the merge queue's gate, which runs every suite of the
+    // repository at once, not this suite's seven files alone. Across the 726
+    // gate runs archived under ~/.claude-emacs/merge-logs, the 43,386 passing
+    // test durations here had p50 481ms, p99 2.3s, p99.9 4.05s and a max of
+    // 5.14s, and 31 runs timed a test out at 5s: a restarted-shim keep-alive
+    // test that spawns two shims passed at up to 4.7s and failed at 5s. 10s
+    // is ~2x that contended max, so a hang still fails fast.
+    //
     // Hooks share the test budget: the only one is `afterEach(cleanupShims)`
     // (SIGKILL + temp-dir removal), far cheaper than any test body.
-    testTimeout: 5_000,
+    testTimeout: 10_000,
     hookTimeout: 5_000,
     teardownTimeout: 10_000,
   },

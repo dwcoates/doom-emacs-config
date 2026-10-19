@@ -243,14 +243,30 @@ Every series below is queryable through `/metrics-agent-repl`.
 | `agentrepl_host_disk_free_bytes`, `..._disk_total_bytes` | gauge | | daemon (`procmetrics`) |
 | `agentrepl_host_on_battery` | gauge, 0 or 1 | | daemon (`procmetrics`) |
 | `agentrepl_vendor_bytes_sent_total`, `..._received_total` | counter | `workspace` | daemon, folded from shims; published by no shim yet (judgement call 6) |
+| `agentrepl_restart_seconds` | histogram | `restart`, `phase`, `cause`, `outcome` | daemon (`restarttiming`), timed where each restart starts and ends (below) |
+| `agentrepl_workspace_restart_last_seconds` | gauge | `restart`, `phase`, `workspace` | daemon: each workspace's latest duration of a per-workspace restart phase |
 
 Process groups (`process`): `daemon`, `daemon_tools`, `store`, `sidecar`,
 `shim` and `shim_tools` (by `workspace`), `emacs`, `webkit_webcontent`,
 `webkit_networking`, `webkit_gpu`.
+
+Restarts (`restart`, then its `phase`; added 2026-10-19 on the owner's ask
+for metrics that show where restart time goes and when it regressed):
+
+| `restart` | `phase` | `cause` | Timed by |
+|---|---|---|---|
+| `deploy` | `build`, `install`, `restart_services`, `decide`, `total` | | the deploying daemon |
+| `deploy` | `handover`, `total` of a deploy that moved the daemon | | the successor, from the instants the intent manifest carries (judgement call 10) |
+| `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
+| `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
+| `workspace_start` | `start`, `wake` | `boot`, `takeover`, `editor_open` | the bring-up, per workspace |
+| `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |
+| `handover_transfer` | `wait`, `run` | | the outgoing daemon, per workspace |
 
 Not built, each recorded with its reason:
 
 - `prompt_echo`, `workspace_open`, `prompt_first_output` stay profile-only
   (`docs/protobuf-design/runtime-metrics.md`, entry 3).
 - Vendor bytes: no shim counts them (judgement call 6).
-- Emacs reports no latency of its own (judgement call 8).
+- Emacs reports no latency of its own (judgement call 8), so Emacs's own
+  restart (its launch, an elisp reload) is not timed (judgement call 9).

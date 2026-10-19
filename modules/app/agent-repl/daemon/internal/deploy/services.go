@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/restarttiming"
 )
 
 // The launchd labels of the two services a deploy restarts.
@@ -94,11 +95,28 @@ type Restarter struct {
 	ReportDir string
 	// Alive reports whether a process is running; nil is the kernel's answer.
 	Alive func(pid int) bool
+	// Restarts records how long each store and sidecar restart took
+	// (restarttiming.ServiceRestart). REQUIRED; runtimemetrics.Surface is
+	// the production one.
+	Restarts restarttiming.Recorder
+}
+
+// timed runs restart and records how long it took as service's restart.
+func (r *Restarter) timed(service restarttiming.Service, restart func() error) error {
+	began := r.Clock.Now()
+	err := restart()
+	r.Restarts.ObserveRestart(restarttiming.OfService(service, restarttiming.OutcomeOf(err), r.Clock.Now().Sub(began)))
+	return err
 }
 
 // RestartStore restarts the store — and, because its socket is out while it
-// restarts, the sidecar with it — in the recorded safe order.
+// restarts, the sidecar with it — in the recorded safe order. It is timed as
+// the store's restart, from the sidecar's stop to its bootstrap back.
 func (r *Restarter) RestartStore(ctx context.Context) error {
+	return r.timed(restarttiming.Store, func() error { return r.restartStore(ctx) })
+}
+
+func (r *Restarter) restartStore(ctx context.Context) error {
 	plist := filepath.Join(r.PlistDir, SidecarLabel+".plist")
 	fields := dlog.Context{"store": StoreLabel, "sidecar": SidecarLabel, "sidecar_plist": plist}
 
@@ -315,6 +333,10 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 // RestartSidecar restarts the sidecar alone. The store never moved, so its
 // socket is up throughout and a plain kickstart loses nothing.
 func (r *Restarter) RestartSidecar(ctx context.Context) error {
+	return r.timed(restarttiming.Sidecar, func() error { return r.restartSidecar(ctx) })
+}
+
+func (r *Restarter) restartSidecar(ctx context.Context) error {
 	fields := dlog.Context{"sidecar": SidecarLabel}
 	if err := r.Launchd.Kickstart(ctx, SidecarLabel); err != nil {
 		r.failed("the sidecar kickstart failed", fields, err)

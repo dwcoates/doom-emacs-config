@@ -40,6 +40,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/wsm"
@@ -156,8 +157,8 @@ func (e *ServiceRestartFailed) Error() string {
 
 // Rollout is the slice of the rollout controller a deploy acts through.
 type Rollout interface {
-	HandOver(ctx context.Context, force bool) (rollout.HandoverAcceptance, error)
-	Restart(ctx context.Context, force bool) (rollout.HandoverAcceptance, error)
+	HandOver(ctx context.Context, ask rollout.Ask) (rollout.HandoverAcceptance, error)
+	Restart(ctx context.Context, ask rollout.Ask) (rollout.HandoverAcceptance, error)
 	CheckStaleness(ctx context.Context, ws ids.WorkspaceID, force bool) (rollout.StaleCheck, error)
 	Joining() bool
 	RollingOut() ([]ids.WorkspaceID, bool)
@@ -259,6 +260,10 @@ type Deps struct {
 	// way through: the metrics surface re-resolves the deployed version
 	// (runtimemetrics.VersionLoop.Kick). Nil tells nobody.
 	Deployed func()
+	// Restarts records how long each deploy phase took, and the whole deploy
+	// when this daemon stays (restarttiming.Deploy). runtimemetrics.Surface
+	// is the production one.
+	Restarts restarttiming.Recorder
 	Log      dlog.Surfaces
 }
 
@@ -305,6 +310,8 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: the progress sink is required")
 	case deps.Faults == nil:
 		return nil, errors.New("deploy: the fault recorder is required")
+	case deps.Restarts == nil:
+		return nil, errors.New("deploy: the restart recorder is required; every deploy phase is timed")
 	case deps.DaemonBuild == "":
 		return nil, errors.New("deploy: this daemon's own build is required")
 	case deps.StagingRoot == "" || deps.ReportDir == "":
@@ -368,6 +375,16 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// none, so a landing it was asked for stays owed.
 	d.commit()
 	committed = true
+	// THE DEPLOY IS TIMED FROM ITS COMMIT. A deploy that fails is timed to
+	// its failure here; one that stays is timed to `updated` below; one that
+	// moves the daemon hands this instant to its successor, which times it
+	// once it has taken over.
+	began := d.deps.Clock.Now()
+	defer func() {
+		if err != nil {
+			d.timePhase(restarttiming.DeployTotal, began, err)
+		}
+	}()
 	// EVERY LANDING REPORT OWED BEFORE THIS INSTANT IS THIS DEPLOY'S TO PAY:
 	// what it builds carries those landings. A cover that fails is recorded
 	// by its owner, and the reports wait for the next deploy.
@@ -415,6 +432,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	d.log.Info(opDeploy, "deploying: building every component into staging", fields)
 
 	if err = d.deps.Builder.Build(ctx, staging); err != nil {
+		d.timePhase(restarttiming.DeployBuild, began, err)
 		var failed *BuildFailed
 		if !errors.As(err, &failed) {
 			failed = &BuildFailed{Step: "build", Detail: err.Error()}
@@ -430,24 +448,32 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		d.log.Error(opDeploy, "a staged artifact could not be hashed; NOTHING WAS DEPLOYED", dlog.WithCause(fields, err))
 		return Result{}, err
 	}
+	d.timePhase(restarttiming.DeployBuild, began, nil)
 	d.log.Info(opDeploy, "built", dlog.Merge(fields, dlog.Context{"builds": fresh.fields()}))
 	d.stepSucceeded(ctx, health.DeployStepBuild)
 
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
-	if err = d.install(Staged{Dir: staging}, fresh, nonce, prev); err != nil {
+	installing := d.deps.Clock.Now()
+	err = d.install(Staged{Dir: staging}, fresh, nonce, prev)
+	d.timePhase(restarttiming.DeployInstall, installing, err)
+	if err != nil {
 		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", dlog.WithCause(fields, err))
 		return Result{}, err
 	}
 	d.stepSucceeded(ctx, health.DeployStepInstall)
 
+	restarting := d.deps.Clock.Now()
 	services, err := d.services(ctx, fresh, prev)
+	d.timePhase(restarttiming.DeployServices, restarting, err)
 	result.Outcomes = append(result.Outcomes, services...)
 	if err != nil {
 		return result, err
 	}
 	d.stepSucceeded(ctx, health.DeployStepRestartServices)
+	deciding := d.deps.Clock.Now()
 	result.Outcomes = append(result.Outcomes, d.elisp(fresh))
-	rest, err := d.daemonShimWebapp(ctx, Staged{Dir: staging}, fresh, force)
+	rest, err := d.daemonShimWebapp(ctx, Staged{Dir: staging}, fresh, rollout.Ask{Force: force, DeployStartedAt: began})
+	d.timePhase(restarttiming.DeployDecide, deciding, err)
 	result.Outcomes = append(result.Outcomes, rest...)
 	if err != nil {
 		return result, err
@@ -462,9 +488,16 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	if !movesDaemon(result) {
 		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
 		// leaves `updated` to its successor, whose streams are the ones left.
+		d.timePhase(restarttiming.DeployTotal, began, nil)
 		d.progress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferredNotes(result)})
 	}
 	return result, nil
+}
+
+// timePhase records how long a deploy phase that began at since took, and
+// how it ended.
+func (d *Deployer) timePhase(phase restarttiming.DeployPhase, since time.Time, err error) {
+	d.deps.Restarts.ObserveRestart(restarttiming.OfDeploy(phase, restarttiming.OutcomeOf(err), d.deps.Clock.Now().Sub(since)))
 }
 
 // builtComponents are the running components a deploy's build stages, named
@@ -894,7 +927,8 @@ func (d *Deployer) elisp(fresh builds) Outcome {
 // stale daemon is HANDED OVER, and its successor takes the shims and the
 // webviews onto the fresh build; otherwise each stale shim goes to the bounce
 // registry and each stale webview is told to reload.
-func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh builds, force bool) ([]Outcome, error) {
+func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh builds, ask rollout.Ask) ([]Outcome, error) {
+	force := ask.Force
 	daemon := Outcome{Component: ComponentDaemon, Build: fresh.daemon, Kind: UpToDate}
 	if fresh.daemon != d.deps.DaemonBuild {
 		// THE FRESH BINARY IS ASKED WHICH LAYOUT IT WRITES before anything is
@@ -918,7 +952,7 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 			d.log.Info(opDecide, "this daemon runs an older build whose state layout the fresh one changes by a breaking step; restarting it rather than handing over", fields)
 			d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
 				Components: []deployprogress.Component{deployprogress.Daemon}, Draining: !force})
-			accepted, err := d.deps.Rollout.Restart(ctx, force)
+			accepted, err := d.deps.Rollout.Restart(ctx, ask)
 			if err != nil {
 				d.log.Error(opDecide, "the restart was not accepted", dlog.WithCause(fields, err))
 				return []Outcome{daemon}, err
@@ -933,7 +967,7 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		}
 		d.log.Info(opDecide, "this daemon runs an older build; handing over", fields)
 		d.progress(&deployprogress.Progress{Phase: deployprogress.HandingOver, Draining: !force})
-		accepted, err := d.deps.Rollout.HandOver(ctx, force)
+		accepted, err := d.deps.Rollout.HandOver(ctx, ask)
 		if err != nil {
 			d.log.Error(opDecide, "the handover was not accepted", dlog.WithCause(dlog.Context{"forced": force}, err))
 			return []Outcome{daemon}, err

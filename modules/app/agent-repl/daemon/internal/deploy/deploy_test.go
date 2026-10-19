@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 )
@@ -1421,5 +1422,108 @@ func TestTheDeployedHookHearsOnlyADeployThatGotThrough(t *testing.T) {
 				t.Fatalf("Deployed heard %d deploys, want %d", h.deployed, tc.want)
 			}
 		})
+	}
+}
+
+// ---- restart timing ---------------------------------------------------------
+
+// deployPhases answers the deploy phases timed, each as phase:outcome.
+func deployPhases(h *harness) []string {
+	var out []string
+	for _, o := range h.restarts.Of(restarttiming.Deploy) {
+		out = append(out, o.Phase()+":"+string(o.Outcome()))
+	}
+	return out
+}
+
+func TestEachDeployPhaseIsTimed(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+		want    []string
+	}{
+		{
+			name:    "a deploy that stays is timed to its end",
+			arrange: func(*testing.T, *harness) {},
+			want:    []string{"build:ok", "install:ok", "restart_services:ok", "decide:ok", "total:ok"},
+		},
+		{
+			name:    "a deploy that hands over leaves its total to the successor",
+			arrange: func(t *testing.T, h *harness) { h.d.deps.DaemonBuild = hashOf(t, theOld.daemon) },
+			want:    []string{"build:ok", "install:ok", "restart_services:ok", "decide:ok"},
+		},
+		{
+			name: "a failed build is timed to its failure",
+			arrange: func(_ *testing.T, h *harness) {
+				h.builder.fail = &BuildFailed{Step: "webapp", Detail: "tsc: 3 errors"}
+			},
+			want: []string{"build:failed", "total:failed"},
+		},
+		{
+			name: "a refused handover fails the decision and the deploy",
+			arrange: func(t *testing.T, h *harness) {
+				h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+				h.rollout.handErr = errors.New("refused")
+			},
+			want: []string{"build:ok", "install:ok", "restart_services:ok", "decide:failed", "total:failed"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(t, h)
+
+			// Act
+			_, _ = h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if got := strings.Join(deployPhases(h), ","); got != strings.Join(tc.want, ",") {
+				t.Fatalf("timed = %s, want %s", got, strings.Join(tc.want, ","))
+			}
+		})
+	}
+}
+
+func TestAHandoverCarriesTheDeploysStart(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{"a handover", func(*testing.T, *harness) {}},
+		{"a restart across a layout", func(_ *testing.T, h *harness) { h.freshLayout = runningLayout + 1 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+			tc.arrange(t, h)
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), true); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if len(h.rollout.asks) != 1 || !h.rollout.asks[0].DeployStartedAt.Equal(instant) || !h.rollout.asks[0].Force {
+				t.Fatalf("asks = %+v, want one forced ask carrying the deploy's start %v", h.rollout.asks, instant)
+			}
+		})
+	}
+}
+
+func TestNewRefusesAMissingRestartRecorder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.d.deps
+	deps.Restarts = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a Deployer with no restart recorder")
 	}
 }

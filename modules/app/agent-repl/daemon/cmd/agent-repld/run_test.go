@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/server"
 	"agent-repld/internal/wsm"
 
@@ -58,11 +59,17 @@ type testHooks struct {
 	// served records that the serve hook was reached, which is the spine
 	// having finished.
 	served chan struct{}
+	// restarts keeps the boot phases the spine timed.
+	restarts *restarttimingtest.Recorder
 }
 
 func newTestHooks() *testHooks {
-	th := &testHooks{served: make(chan struct{}, 1)}
+	th := &testHooks{served: make(chan struct{}, 1), restarts: &restarttimingtest.Recorder{}}
+	started := time.Now()
 	th.hooks = hooks{
+		Started:  started,
+		Now:      func() time.Time { return started.Add(3 * time.Second) },
+		Restarts: th.restarts,
 		Graph: func(context.Context, process) (*graph, error) {
 			return nil, errServed
 		},
@@ -1537,5 +1544,62 @@ func TestASecondDaemonBesideAServingIncumbentRefusesAtOnceAndSaysWhy(t *testing.
 	}
 	if found.Context.Verdict != string(daemonaddr.VerdictIncumbentServing) || !found.Context.Probed || found.Context.StateDir != root {
 		t.Fatalf("claim record = %+v, want verdict %q, probed, state_dir %q", found.Context, daemonaddr.VerdictIncumbentServing, root)
+	}
+}
+
+// TestTheBootTimesTheClaimFromTheProcessStart pins that the spine times its
+// boot claim from the process's start, as a cold boot or a successor's.
+func TestTheBootTimesTheClaimFromTheProcessStart(t *testing.T) {
+	tests := []struct {
+		name     string
+		joining  string
+		wantMode string
+	}{
+		{name: "an incumbent's boot is cold", wantMode: "cold"},
+		{name: "a successor's boot is a successor's", joining: "127.0.0.1:41111", wantMode: "successor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			root := shortRoot(t)
+			t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+			t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+			th := newTestHooks()
+
+			// Act
+			_ = run(context.Background(), options{stateDir: root, joining: tc.joining}, th.hooks)
+
+			// Assert
+			got := th.restarts.Observations()
+			if len(got) == 0 || got[0].Phase() != "claim" || got[0].Cause() != tc.wantMode || got[0].Seconds() != 3 {
+				t.Fatalf("boot phases = %+v, want the claim first, %s, 3s from the start", got, tc.wantMode)
+			}
+		})
+	}
+}
+
+// TestRunRefusesToBootWithoutItsStartOrAClock pins the required timing seams.
+func TestRunRefusesToBootWithoutItsStartOrAClock(t *testing.T) {
+	tests := []struct {
+		name  string
+		strip func(*hooks)
+	}{
+		{"no process start", func(h *hooks) { h.Started = time.Time{} }},
+		{"no clock", func(h *hooks) { h.Now = nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			th := newTestHooks()
+			tc.strip(&th.hooks)
+
+			// Act
+			err := run(context.Background(), options{stateDir: shortRoot(t)}, th.hooks)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "time its boot") {
+				t.Fatalf("run = %v, want the missing timing seam refused", err)
+			}
+		})
 	}
 }

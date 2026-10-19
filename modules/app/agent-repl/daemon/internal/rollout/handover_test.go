@@ -22,7 +22,7 @@ import (
 // The clock is driven rather than waited out: nothing in this package sleeps.
 func runHandover(t *testing.T, h *harness, workspaces int) error {
 	t.Helper()
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		return err
 	}
 	for range workspaces {
@@ -121,7 +121,7 @@ func TestHandoverNeverAnnouncesWhenTheSuccessorDoesNotComeUp(t *testing.T) {
 	h.spawner.err = errFake
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if err == nil {
@@ -185,7 +185,7 @@ func TestATransferWhoseHandOverFailsPushesNoTransferNotice(t *testing.T) {
 	h.fleet.handOverErr[ws] = errors.New("the watches would not close")
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -464,7 +464,7 @@ func TestHandoverSkipsASessionlessForeignWorkspaceAtDebug(t *testing.T) {
 // workspace's next offer is waiting out its pacing delay.
 func expireAdoption(t *testing.T, h *harness) {
 	t.Helper()
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -612,7 +612,7 @@ func TestAnUncleanTakeBackIsNotOfferedAgainAndHoldsTheHandover(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	setAdoptErr(h.fleet, ws, errors.New("the shim would not answer the re-attach"))
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -705,7 +705,7 @@ func TestAWorkspaceTheSuccessorClaimedKeepsItsTransferNotice(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -732,7 +732,7 @@ func TestAWorkspaceTheSuccessorClaimedIsNotTakenBack(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -767,7 +767,7 @@ func TestATransferWhoseShimWillNotDetachReleasesItsHold(t *testing.T) {
 	h.fleet.handOverErr[ws] = errFake
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -787,7 +787,7 @@ func TestATransferWhoseServingReleaseFailsTakesTheWorkspaceBack(t *testing.T) {
 	fail.Store(true)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -813,7 +813,7 @@ func TestATransferTakenBackGivesTheFleetItsWorkspaceBack(t *testing.T) {
 	fail.Store(true)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -848,7 +848,7 @@ func TestAnAdoptionThatLandedRecordsNoFault(t *testing.T) {
 	successor := ids.InstanceID("daemon-successor")
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -892,7 +892,7 @@ func TestTheIncumbentDoesNotExitBeforeTheSuccessorDrainsTheHandedHold(t *testing
 		}
 	})
 	ws, _ = h.workspace(t)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -992,7 +992,7 @@ func TestAHandoverAsksEveryTransferForTheDispatchQuietGate(t *testing.T) {
 	h.freeness.SetFree(busy, false)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -1016,7 +1016,7 @@ func TestAForcedHandoverTransfersEveryWorkspaceNow(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	accepted, err := h.c.HandOver(context.Background(), true)
+	accepted, err := h.c.HandOver(context.Background(), forcedAsk)
 	if err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestAHandoverWithATransferTheRegistryRefusedDoesNotExit(t *testing.T) {
 	h.registry.err = errFake
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -1070,7 +1070,7 @@ func TestAHandoverWithAFailedTransferDoesNotExit(t *testing.T) {
 	h.workspace(t)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -1436,7 +1436,7 @@ func TestASuccessorThatDiesBeforeItIsReadyIsHandedNothing(t *testing.T) {
 	h.spawner.readyErr = &SuccessorExitedError{PID: fakeSuccessorPID, Exit: "exit status 1"}
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	var exited *SuccessorExitedError
@@ -1465,7 +1465,7 @@ func TestAHandoverThatFailsAfterTheSpawnStopsItsSuccessorAndReleasesTheSlot(t *t
 			tc.arm(t, h, fail)
 
 			// Act
-			_, err := h.c.HandOver(context.Background(), false)
+			_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 			// Assert
 			if err == nil {
@@ -1493,13 +1493,13 @@ func TestTheDeployAfterAFailedHandoverNeverHasTwoSuccessors(t *testing.T) {
 			ws, _ := h.workspace(t)
 			h.freeness.SetFree(ws, false)
 			tc.arm(t, h, fail)
-			if _, err := h.c.HandOver(context.Background(), false); err == nil {
+			if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 				t.Fatalf("the first HandOver succeeded through the failure")
 			}
 			tc.heal(t, h, fail)
 
 			// Act
-			_, err := h.c.HandOver(context.Background(), false)
+			_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 			// Assert
 			if err != nil {
@@ -1528,7 +1528,7 @@ func TestAnAbandonedHandoverDisarmsTheRendezvousItsAnnouncementArmed(t *testing.
 	manifestFailure.arm(t, h, &atomic.Bool{})
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("HandOver succeeded with an unwritable manifest")
 	}
 
@@ -1551,14 +1551,14 @@ func TestAHandoverWhoseSuccessorWillNotStopStaysInFlight(t *testing.T) {
 	h.spawner.err = errFake
 	h.spawner.startedThenFailed = true
 	h.spawner.stopErr = errors.New("the successor was killed but not reaped")
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("the first HandOver succeeded with a successor that never reported")
 	}
 	h.spawner.err = nil
 	h.spawner.startedThenFailed = false
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	var inFlight *ErrAlreadyRollingOut
@@ -1580,7 +1580,7 @@ func TestASpawnThatStartedNothingIsNotStopped(t *testing.T) {
 	h.spawner.err = errFake
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if err == nil {
@@ -1660,7 +1660,7 @@ func TestATransferWhoseMergeWillNotSuspendIsTakenBack(t *testing.T) {
 	h.merges.suspendErr = errors.New("the merge did not let go")
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -1737,7 +1737,7 @@ func TestAFailedTransferNeverTellsTheWorkspacesLogTheSuccessorOwnsIt(t *testing.
 	h.fleet.handOverErr[ws] = errors.New("the watches would not close")
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()

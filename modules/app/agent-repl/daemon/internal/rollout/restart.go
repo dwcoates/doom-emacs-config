@@ -63,13 +63,18 @@ func replacementArgv(config []string) []string {
 }
 
 // Restart implements Controller.
-func (c *controller) Restart(ctx context.Context, force bool) (HandoverAcceptance, error) {
+func (c *controller) Restart(ctx context.Context, ask Ask) (HandoverAcceptance, error) {
+	force := ask.Force
 	fields := dlog.Context{"forced": force, "restart": true}
+	if ask.DeployStartedAt.IsZero() {
+		c.log.Error(opRollOut, "refused a restart asked without its deploy's start", fields)
+		return HandoverAcceptance{}, ErrNoDeployStart
+	}
 	if c.Joining() {
 		c.log.Info(opRollOut, "refused a restart asked of a successor that is still joining", fields)
 		return HandoverAcceptance{}, ErrJoining
 	}
-	plan, err := c.beginRestart(context.WithoutCancel(ctx), force)
+	plan, err := c.beginRestart(context.WithoutCancel(ctx), ask)
 	if err != nil {
 		return HandoverAcceptance{}, err
 	}
@@ -90,7 +95,8 @@ func (c *controller) Restart(ctx context.Context, force bool) (HandoverAcceptanc
 // replacement's boot accounts its adopted shims against. It spawns nothing:
 // the replacement is spawned at the very end, when every workspace stood
 // down.
-func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPlan, error) {
+func (c *controller) beginRestart(ctx context.Context, ask Ask) (*handoverPlan, error) {
+	force := ask.Force
 	slot, err := c.claimHandover()
 	if err != nil {
 		c.log.Info(opHandover, "refused a restart while a rollout is already in flight",
@@ -113,6 +119,7 @@ func (c *controller) beginRestart(ctx context.Context, force bool) (*handoverPla
 	manifest := c.manifest(ctx, "", workspaces, snapshot)
 	manifest.Forced = force
 	manifest.Deploy = true
+	manifest.DeployStartedAt = ask.DeployStartedAt
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		c.log.Error(opHandover, "the intent manifest could not be written; the restart is abandoned before anything was announced",
 			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))

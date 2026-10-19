@@ -13,7 +13,7 @@ import (
 // runRestart runs a restart of every workspace and joins it to its end.
 func runRestart(t *testing.T, h *harness) {
 	t.Helper()
-	if _, err := h.c.Restart(context.Background(), false); err != nil {
+	if _, err := h.c.Restart(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 	h.registry.wait()
@@ -56,7 +56,7 @@ func TestARestartWritesTheIntentManifestForTheReplacementsAccounting(t *testing.
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	if _, err := h.c.Restart(context.Background(), false); err != nil {
+	if _, err := h.c.Restart(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 	got, found, err := ReadManifest(h.c.deps.IntentManifest)
@@ -180,12 +180,12 @@ func TestARestartIsRefusedWhileAHandoverIsInFlight(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 
 	// Act
-	_, err := h.c.Restart(context.Background(), false)
+	_, err := h.c.Restart(context.Background(), unforcedAsk)
 
 	// Assert
 	var inFlight *ErrAlreadyRollingOut
@@ -255,7 +255,7 @@ func TestARestartStandDownDoesNotWaitForWork(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	if _, err := h.c.Restart(context.Background(), false); err != nil {
+	if _, err := h.c.Restart(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 

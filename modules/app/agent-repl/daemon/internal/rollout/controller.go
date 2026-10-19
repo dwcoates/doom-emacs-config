@@ -115,6 +115,11 @@ type controller struct {
 	// deployTakeover is the handover the successor joined was a DEPLOY's, so
 	// this daemon says `updated` on the footer once it has taken over.
 	deployTakeover bool
+	// deployStartedAt and handoverStartedAt are when the deploy the
+	// successor joined began and when its handover wrote the manifest, from
+	// that manifest; the successor times both once it has taken over. Zero
+	// when the manifest did not say (an older daemon wrote it).
+	deployStartedAt, handoverStartedAt time.Time
 	// claimedAdoptions counts the adoptions past their serving claim that have
 	// not yet made the workspace owned here, and claimedIdle closes when the
 	// count falls to zero (adopt.go, awaitClaimedOwned). Guarded by mu.

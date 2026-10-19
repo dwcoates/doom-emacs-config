@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 )
@@ -70,6 +71,7 @@ func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 		Store:     "/sock/store.sock",
 		Workspace: func() []ids.WorkspaceID { return nil },
 		Getenv:    envOf(map[string]string{"AGENT_REPL_LOCK_DIR": t.TempDir()}),
+		Restarts:  &restarttimingtest.Recorder{},
 	}
 }
 
@@ -106,11 +108,11 @@ func TestADeployerIsNotBuiltWithoutARollout(t *testing.T) {
 // idleRollout is a rollout controller with nothing in flight.
 type idleRollout struct{}
 
-func (idleRollout) HandOver(context.Context, bool) (rollout.HandoverAcceptance, error) {
+func (idleRollout) HandOver(context.Context, rollout.Ask) (rollout.HandoverAcceptance, error) {
 	return rollout.HandoverAcceptance{}, nil
 }
 
-func (idleRollout) Restart(context.Context, bool) (rollout.HandoverAcceptance, error) {
+func (idleRollout) Restart(context.Context, rollout.Ask) (rollout.HandoverAcceptance, error) {
 	return rollout.HandoverAcceptance{}, nil
 }
 

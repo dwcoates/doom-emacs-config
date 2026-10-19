@@ -9,7 +9,7 @@ user guide"). Controls that predate this guide are not all listed yet.
 Run `bash .claude/install.sh` from this repository, or ask an agent to run
 `/install-agent-repl`. It installs everything agent-repl needs that is missing:
 Emacs with xwidgets, the Go and Node toolchains, `terminal-notifier`,
-`hunspell` and the input window's spelling dictionary, the Claude Code skills, the git hook, and the store and sidecar services. It then
+`hunspell` and the input window's spelling dictionary, the Claude Code skills, the git hook, and the store, sidecar and metrics-store (VictoriaMetrics) services. It then
 lists what only you can provide. `bash .claude/install.sh check` reports the
 same thing without changing anything, and `doom doctor` reports it too.
 

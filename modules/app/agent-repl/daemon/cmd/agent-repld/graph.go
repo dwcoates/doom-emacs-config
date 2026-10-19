@@ -59,6 +59,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/retarget"
 	"agent-repld/internal/revealpace"
 	"agent-repld/internal/rollout"
@@ -640,7 +641,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	opens, err := opentabs.New(opentabs.Deps{
 		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
 		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
-			editorBringUp(fleet, p.DB, ownership, bringingUp, log, pending, done)
+			editorBringUp(fleet, p.DB, ownership, bringingUp, p.Metrics, log, pending, done)
 		},
 		Opening:          sidebarResolver.SetOpening,
 		ReadConversation: feedResolver.ReadNewest,
@@ -940,6 +941,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}
 	rolloutController, err := rollout.New(rollout.Deps{
+		Restarts:         p.Metrics,
 		Reports:          detachedRef,
 		Merges:           mergeMover,
 		HoldoutWarnEvery: holdoutWarnEvery,
@@ -1011,6 +1013,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Joining:    p.Opts.joining != "",
 		Getenv:     os.Getenv,
 		Deployed:   deployedVersion.Kick,
+		Restarts:   p.Metrics,
 	})
 	if err != nil {
 		return nil, err
@@ -1454,6 +1457,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Log:               p.Surfaces,
 		},
 		Boot: boot.Deps{
+			Restarts:               p.Metrics,
 			BindViews:              verbs.BindViews,
 			RestoreMissingWorktree: verbs.RestoreMissingWorktree,
 			Layout:                 p.Layout,
@@ -2026,7 +2030,7 @@ type editorRecords interface {
 	Workspace(ctx context.Context, ws ids.WorkspaceID) (wsm.Workspace, error)
 }
 
-func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), log dlog.Logger,
+func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), restarts restarttiming.Recorder, log dlog.Logger,
 	pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
 	records := make([]wsm.Workspace, 0, len(pending))
 	for _, ws := range pending {
@@ -2084,6 +2088,9 @@ func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Owne
 			BringingUp: marker,
 			Log:        log,
 			Operation:  opEditorBringUp,
+			Via:        restarttiming.StartEditor,
+			Restarts:   restarts,
+			Now:        time.Now,
 			Done:       done,
 		}, records)
 	})

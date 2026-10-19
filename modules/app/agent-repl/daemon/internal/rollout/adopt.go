@@ -111,7 +111,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	}
 	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
-	c.recordDeployTakeover(m.Deploy)
+	c.recordDeployTakeover(m)
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
 	// here by construction, so the no-manifest accounting cannot apply.
 	_, _, landed, err := c.reconcile(ctx, Survivors{})
@@ -331,7 +331,7 @@ func (c *controller) armFromManifest() error {
 	}
 	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
-	c.recordDeployTakeover(m.Deploy)
+	c.recordDeployTakeover(m)
 	added := c.armSessions(m.Daemon, m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",

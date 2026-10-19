@@ -26,8 +26,13 @@ var ErrJoining = errors.New("rollout: this daemon is a successor still joining; 
 // queue's bounce registry, at the workspace's own freeness. A FORCED one
 // transfers every workspace at once; the running shims are detached, never
 // killed, and the successor adopts them with their turns still in flight.
-func (c *controller) HandOver(ctx context.Context, force bool) (HandoverAcceptance, error) {
+func (c *controller) HandOver(ctx context.Context, ask Ask) (HandoverAcceptance, error) {
+	force := ask.Force
 	fields := dlog.Context{"forced": force}
+	if ask.DeployStartedAt.IsZero() {
+		c.log.Error(opRollOut, "refused a handover asked without its deploy's start", fields)
+		return HandoverAcceptance{}, ErrNoDeployStart
+	}
 	if c.Joining() {
 		c.log.Info(opRollOut, "refused a handover asked of a successor that is still joining", fields)
 		return HandoverAcceptance{}, ErrJoining
@@ -41,7 +46,7 @@ func (c *controller) HandOver(ctx context.Context, force bool) (HandoverAcceptan
 	// THE BOUNDED HALF SURVIVES THE CALLER. A caller that gives up between the
 	// spawn and the manifest must not leave a successor standing with nothing
 	// announced.
-	plan, err := c.beginHandover(context.WithoutCancel(ctx), force)
+	plan, err := c.beginHandover(context.WithoutCancel(ctx), ask)
 	if err != nil {
 		return HandoverAcceptance{}, err
 	}

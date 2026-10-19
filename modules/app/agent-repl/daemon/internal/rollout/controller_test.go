@@ -186,3 +186,17 @@ func TestNewRefusesWithoutTheOwedLandingReports(t *testing.T) {
 		t.Fatalf("New = %v, want the missing reports refused", err)
 	}
 }
+
+func TestNewRefusesWithoutARestartRecorder(t *testing.T) {
+	// Arrange
+	deps := newHarness(t).c.deps
+	deps.Restarts = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "restart recorder is required") {
+		t.Fatalf("New = %v, want the missing restart recorder refused", err)
+	}
+}

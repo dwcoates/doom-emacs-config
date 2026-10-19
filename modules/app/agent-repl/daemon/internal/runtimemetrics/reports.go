@@ -43,6 +43,7 @@ func (s *Surface) ForgetWorkspace(ws ids.WorkspaceID) {
 		return
 	}
 	s.latencies.forget(ws)
+	s.restarts.forget(ws)
 }
 
 // ObserveForgets answers db with Forget also deleting the workspace's

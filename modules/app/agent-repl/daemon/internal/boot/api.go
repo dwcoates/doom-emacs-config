@@ -28,6 +28,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
@@ -299,6 +300,10 @@ type Deps struct {
 	// ShimAlive reports whether a recorded spawned pid names a live process;
 	// nil means startingshim.Alive, which is kill(pid, 0).
 	ShimAlive func(pid int) bool
+	// Restarts records how long each workspace's start in the bring-up took
+	// (restarttiming.WorkspaceStart). runtimemetrics.Surface is the
+	// production one.
+	Restarts restarttiming.Recorder
 	// Log is the boot logger.
 	Log dlog.Surfaces
 }
@@ -379,6 +384,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a missing-worktree restorer")
 	case deps.RunDir == "":
 		return nil, missing("a kernel-lock run directory")
+	case deps.Restarts == nil:
+		return nil, missing("a restart recorder")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	}

@@ -75,6 +75,15 @@ func (h *histogram) observe(seconds float64) {
 	h.sum += seconds
 }
 
+// metric answers the histogram as one constant series of desc.
+func (h *histogram) metric(desc *prometheus.Desc, labels ...string) prometheus.Metric {
+	buckets := make(map[float64]uint64, len(h.buckets))
+	for i, b := range h.buckets {
+		buckets[b] = h.counts[i]
+	}
+	return prometheus.MustNewConstHistogram(desc, h.count, h.sum, buckets, labels...)
+}
+
 // seriesKey names one series.
 type seriesKey struct {
 	latency   string
@@ -336,12 +345,7 @@ func (l *latencies) Collect(ch chan<- prometheus.Metric) {
 		return keys[i].workspace < keys[j].workspace
 	})
 	for _, k := range keys {
-		h := l.series[k]
-		buckets := make(map[float64]uint64, len(h.buckets))
-		for i, b := range h.buckets {
-			buckets[b] = h.counts[i]
-		}
-		ch <- prometheus.MustNewConstHistogram(l.latencyDesc, h.count, h.sum, buckets, k.latency, string(k.workspace))
+		ch <- l.series[k].metric(l.latencyDesc, k.latency, string(k.workspace))
 	}
 	workspaces := make([]ids.WorkspaceID, 0, len(l.traffic))
 	for ws := range l.traffic {

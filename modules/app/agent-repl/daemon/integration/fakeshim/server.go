@@ -24,9 +24,12 @@ type hub[T any] struct {
 	mu   sync.Mutex
 	next int
 	subs map[int]chan T
+	// joined is closed, and replaced, each time a subscriber joins: the
+	// latch awaitSubscriber waits on.
+	joined chan struct{}
 }
 
-func newHub[T any]() *hub[T] { return &hub[T]{subs: map[int]chan T{}} }
+func newHub[T any]() *hub[T] { return &hub[T]{subs: map[int]chan T{}, joined: make(chan struct{})} }
 
 func (h *hub[T]) subscribe() (int, chan T) {
 	h.mu.Lock()
@@ -35,7 +38,28 @@ func (h *hub[T]) subscribe() (int, chan T) {
 	h.next++
 	ch := make(chan T, 256)
 	h.subs[id] = ch
+	close(h.joined)
+	h.joined = make(chan struct{})
 	return id, ch
+}
+
+// awaitSubscriber returns once the hub has a subscriber, or with ctx's error
+// once ctx ends first.
+func (h *hub[T]) awaitSubscriber(ctx context.Context) error {
+	for {
+		h.mu.Lock()
+		if len(h.subs) > 0 {
+			h.mu.Unlock()
+			return nil
+		}
+		joined := h.joined
+		h.mu.Unlock()
+		select {
+		case <-joined:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func (h *hub[T]) unsubscribe(id int) {

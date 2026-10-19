@@ -110,6 +110,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpSilenceReannouncement},
 		},
 		{
+			name: "await_agent_watch takes no arguments",
+			line: `{"op":"await_agent_watch"}`,
+			want: Command{Op: OpAwaitAgentWatch},
+		},
+		{
 			name: "silence_bash addresses a detached work id",
 			line: `{"op":"silence_bash","work":"w-1"}`,
 			want: Command{Op: OpSilenceBash, Work: "w-1"},

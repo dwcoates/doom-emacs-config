@@ -1,6 +1,6 @@
 ---
 name: metrics-agent-repl
-description: Read agent-repl's always-on runtime metrics — user-facing latencies (workspace switches, page boots, vendor first output), CPU, memory, disk, energy and descriptors per process group, host load, and the deployed version — from the 30 days of history the metrics store keeps; find the version where a latency regressed or the day a process started to climb; and add a new metric the right way. Use when the user investigates performance or asks how fast, heavy or hot something is, when a latency or resource question needs history rather than a live profile, when the user wants a feature or UI element measured, or invokes /metrics-agent-repl.
+description: Read agent-repl's always-on runtime metrics — user-facing latencies (workspace switches, page boots, vendor first output), how long restarts take (deploys and their phases, daemon boots, store and sidecar restarts, each workspace's session start, shim replacements, handover transfers), CPU, memory, disk, energy and descriptors per process group, host load, and the deployed version — from the 30 days of history the metrics store keeps; find the version where a latency or a restart regressed or the day a process started to climb; and add a new metric the right way. Use when the user investigates performance or asks how fast, heavy or hot something is, when a latency or resource question needs history rather than a live profile, when the user wants a feature or UI element measured, or invokes /metrics-agent-repl.
 allowed-tools: Bash(<skill_base_dir>/run.sh:*)
 ---
 
@@ -17,6 +17,8 @@ Answers performance questions about agent-repl from stored history: what a laten
 | `latency <name> [days]` | The latency's p95 per deployed version over the last `days` (default 30). |
 | `regression <name> [seconds] [days]` | The first deployed version whose p95 of the latency went over `seconds` (default: the latency's own threshold). |
 | `trend <process> [days]` | A process group's daily mean CPU and memory. |
+| `restarts [days]` | Every restart phase's ok and failed counts and its p50 and p95 over the last `days` (default 7). |
+| `restart <restart> <phase> [days]` | The restart phase's p95 per deployed version over the last `days` (default 30). |
 | `query <promql>` | Evaluate PromQL now. |
 | `add <what>` | Add a metric for `what`, per step 4. |
 | (none) | Run `status`, then answer the user's question with the steps below. |
@@ -35,12 +37,15 @@ Answers performance questions about agent-repl from stored history: what a laten
   - a. A latency, by name, per version: call `<skill_base_dir>/run.sh --latency-by-version <latency> [days]`.
   - b. "When did it get slow", "which change made it slow": call `<skill_base_dir>/run.sh --first-version-over <latency> [seconds] [days]`.
   - c. A process group's CPU or memory over time: call `<skill_base_dir>/run.sh --process-trend <process> [days]`.
-  - d. Anything else: call `<skill_base_dir>/run.sh --catalog` to find the metric, then `--query <promql>`, or `--range <promql> <hours> <step>` for a series over time.
+  - d. How long restarts take, or which phase of a restart is slow: call `<skill_base_dir>/run.sh --restarts [days]`.
+  - e. When a restart phase got slow: call `<skill_base_dir>/run.sh --restart-by-version <restart> <phase> [days]`.
+  - f. Anything else: call `<skill_base_dir>/run.sh --catalog` to find the metric, then `--query <promql>`, or `--range <promql> <hours> <step>` for a series over time.
   - React to every verb above:
     - `EXIT CODE 0:` the answer is printed as a table. Continue to step 2.
     - `EXIT CODE 1:` nothing matched: no series, no runtime advertising a surface, or no version over the threshold (the versions seen are printed). Say so plainly, then continue to step 3.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
   - *NOTE*: latency names are the `latency` label: `switch_repeat`, `switch_first`, `page_boot`, `vendor_first_output`. Process groups are the `process` label: `daemon`, `daemon_tools`, `store`, `sidecar`, `shim`, `shim_tools`, `emacs`, `webkit_webcontent`, `webkit_networking`, `webkit_gpu`.
+  - *NOTE*: restarts are the `restart` label, each with its `phase` label: `deploy` (`build`, `install`, `restart_services`, `decide`, `handover`, `total`), `daemon_boot` (`claim`, `reconciled`, `serving`, `sessions_up`, each from the process start), `service_restart` (`store`, `sidecar`), `workspace_start` (`start`, `wake`), `shim_restart` (`wait`, `prelaunch`, `stand_down`, `resume`, `run`) and `handover_transfer` (`wait`, `run`). The slowest workspace of the latest restart is `topk(5, agentrepl_workspace_restart_last_seconds{restart="workspace_start"})` through `--query`.
   - *NOTE*: a version reads `0.129.0` for a landing and `0.129.0+<commit>` for a build between landings; `git log` between two versions names the changes to read.
 
 2. Report.
@@ -57,6 +62,7 @@ Answers performance questions about agent-repl from stored history: what a laten
     - ii. The runtime that sees the interaction END measures it, from a start instant handed to it through the channel that already carries the interaction. NEVER pair a start from one runtime with an end from another anywhere else.
     - iii. Report it: a page or Emacs through `ReportLatencies` (a new `ReportedLatencyKind`), the shim through its measurements frame (a new `ShimLatencyKind` and histogram). A new kind is a contract change: follow `/create-or-update-protobufs`.
     - iv. Add the kind to the daemon's kind table; its vocabulary test fails until the two agree.
+  - a2. A restart or a restart phase: add it to the daemon's restart vocabulary, and time it in the code that sees it start and end, in the one process that runs it.
   - b. A daemon-side counter, gauge or histogram: register it on the daemon's metrics registry in the package that owns the measured thing. Recording on a hot path MUST be a single atomic update, never a lock request handling takes, never I/O.
   - c. A store or sidecar metric: register it on that service's own registry.
   - d. Labels: only `program`, `process`, `workspace` (by id), `latency`, `method`, `outcome`, `model`. NEVER a prompt, a path, a session id or a version.

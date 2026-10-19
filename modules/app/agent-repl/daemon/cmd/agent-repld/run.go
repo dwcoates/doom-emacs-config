@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/pprofsurface"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/server"
@@ -92,6 +93,14 @@ type hooks struct {
 	// state root, daemon.lock and daemon.addr are still there; zero means
 	// stateRootCheckEvery.
 	StateCheckEvery time.Duration
+	// Started is when this process started, and Now reads the clock; the
+	// boot's phases are timed between them (restarttiming.BootTimer). Both
+	// REQUIRED.
+	Started time.Time
+	Now     func() time.Time
+	// Restarts records the boot's phases; nil records them on the daemon's
+	// own metrics surface, which is what production does.
+	Restarts restarttiming.Recorder
 }
 
 // productionHooks are the real seams.
@@ -102,6 +111,8 @@ func productionHooks() hooks {
 		Serve:     serve,
 		BootStall: bootStallBound,
 		ClaimWait: daemonaddr.ClaimWaitBound,
+		Started:   processStarted,
+		Now:       time.Now,
 	}
 }
 
@@ -124,6 +135,9 @@ func productionHooks() hooks {
 //  8. the component graph, the boot reconciliation, and the Connect surface;
 //  9. an orderly exit that withdraws the advertisement and closes the streams.
 func run(ctx context.Context, opts options, h hooks) error {
+	if h.Started.IsZero() || h.Now == nil {
+		return errors.New("agent-repld: the process's start and a clock are required to time its boot")
+	}
 	contracts := envc.Load()
 	if opts.fake {
 		contracts = contracts.WithFake(true)
@@ -196,6 +210,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("agent-repld: open the metrics surface: %w", err)
 	}
 	defer metricsSurface.Close()
+	bootRestarts := h.Restarts
+	if bootRestarts == nil {
+		bootRestarts = metricsSurface
+	}
+	timedAs := restarttiming.BootCold
+	if joining {
+		timedAs = restarttiming.BootSuccessor
+	}
+	bootTimer := restarttiming.NewBootTimer(bootRestarts, timedAs, h.Started, h.Now)
 	if err := metricsSurface.RegisterProcesses(procmetrics.Kernel{}, layout.SockDir(), layout.Dir(), hostOnBattery); err != nil {
 		log.Error(runtimemetrics.Operation, "the process collector was refused", dlog.Context{"error": err.Error()})
 		return fmt.Errorf("agent-repld: %w", err)
@@ -271,6 +294,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("agent-repld: claim the daemon address: %w", err)
 	}
 	defer teardown.step("claim_close", func() { claim.Close() })
+	bootTimer.Reached(restarttiming.BootClaim)
 	// THE WAIT IS SAID. A held claim is an outgoing daemon still exiting, and
 	// a replacement waiting it out was a silent gap in the run log.
 	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{
@@ -510,6 +534,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if err != nil {
 		return err
 	}
+	bootTimer.Reached(restarttiming.BootReconciled)
 	log.Info("daemon.cmd.boot", "the boot reconciliation completed", dlog.Context{
 		"adopted":              len(report.Adopted),
 		"orphans_closed":       len(report.Orphaned),
@@ -586,6 +611,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// the state client under it.
 	loops.Go("bring_up", func() {
 		sequence.BringUp(serving, report.PendingBringUp)
+		bootTimer.Reached(restarttiming.BootSessionsUp)
 		// A FRESH BOOT'S LANDING REPORTS ARE PAID ONCE ITS SESSIONS ARE UP:
 		// what this daemon runs carries every landing before it started.
 		if built.SettleBoot != nil {
@@ -633,6 +659,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"address": claim.Address(),
 		"joining": joining,
 	})
+	bootTimer.Reached(restarttiming.BootServing)
 	// THE ACCEPT LOOP IS WRAPPED, and its errors are the daemon's own. A
 	// listener that stops accepting while this process keeps running is a
 	// daemon that is listening and dead — the state Emacs cannot tell from a

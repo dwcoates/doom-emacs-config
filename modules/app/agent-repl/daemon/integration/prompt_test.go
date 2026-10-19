@@ -1404,6 +1404,7 @@ func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.
 	f := newOpened(t, harness.Opts{})
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 	feed := f.watchRootFeed()
+	f.shim.AwaitAgentWatch()
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-gone", "act-gone")},
 	}))
@@ -1436,6 +1437,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 		t.Parallel()
 		f := newOpened(t, harness.Opts{})
 		feed := f.watchRootFeed()
+		f.shim.AwaitAgentWatch()
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 			Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-once", "act-once")},
 		}))
@@ -1488,6 +1490,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 		t.Parallel()
 		f := newOpened(t, harness.Opts{})
 		feed := f.watchRootFeed()
+		f.shim.AwaitAgentWatch()
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 			Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-deny", "act-deny")},
 		}))

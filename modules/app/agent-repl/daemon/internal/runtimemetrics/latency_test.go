@@ -12,6 +12,9 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 func openSurface(t *testing.T) (*Surface, *dlog.TestLogger) {
@@ -63,6 +66,36 @@ func TestValidateReportedLatency(t *testing.T) {
 				t.Fatalf("ValidateReportedLatency = (%v, %v), want %s", kind, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestAHistogramIsServedAsOneCumulativeSeries(t *testing.T) {
+	// Arrange
+	h := newHistogram([]float64{1, 2})
+	h.observe(0.5)
+	h.observe(1.5)
+	h.observe(3)
+	desc := prometheus.NewDesc("x_seconds", "x", []string{"label"}, nil)
+
+	// Act
+	var got dto.Metric
+	if err := h.metric(desc, "a").Write(&got); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Assert
+	hist := got.GetHistogram()
+	if hist.GetSampleCount() != 3 || hist.GetSampleSum() != 5 {
+		t.Fatalf("count %d sum %v, want 3 and 5", hist.GetSampleCount(), hist.GetSampleSum())
+	}
+	want := map[float64]uint64{1: 1, 2: 2}
+	for _, b := range hist.GetBucket() {
+		if want[b.GetUpperBound()] != b.GetCumulativeCount() {
+			t.Fatalf("bucket %v holds %d, want %d", b.GetUpperBound(), b.GetCumulativeCount(), want[b.GetUpperBound()])
+		}
+	}
+	if l := got.GetLabel(); len(l) != 1 || l[0].GetValue() != "a" {
+		t.Fatalf("labels = %v, want label=a", l)
 	}
 }
 

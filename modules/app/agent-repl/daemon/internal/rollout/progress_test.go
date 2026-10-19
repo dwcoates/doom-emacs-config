@@ -2,11 +2,14 @@ package rollout
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/wsm"
 )
 
@@ -24,7 +27,7 @@ func TestASuccessorThatTookOverFromADeploySaysUpdated(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.workspace(t)
-	h.c.recordDeployTakeover(true)
+	h.c.recordDeployTakeover(deployManifest)
 
 	// Act
 	takeOver(h)
@@ -41,7 +44,7 @@ func TestTheUpdatedLineNotesAStaleShimRegisteredBehindItsWork(t *testing.T) {
 	h := newHarness(t)
 	ws := staleReported(t, h)
 	h.freeness.SetFree(ws, false)
-	h.c.recordDeployTakeover(true)
+	h.c.recordDeployTakeover(deployManifest)
 
 	// Act
 	takeOver(h)
@@ -75,7 +78,7 @@ func TestTheDeployStoryIsFinishedOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.workspace(t)
-	h.c.recordDeployTakeover(true)
+	h.c.recordDeployTakeover(deployManifest)
 	takeOver(h)
 
 	// Act
@@ -93,7 +96,7 @@ func TestTheManifestAHandoverWritesNamesTheDeploy(t *testing.T) {
 	h.workspace(t)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 
@@ -120,7 +123,7 @@ func TestASuccessorThatWillNotStartIsAFault(t *testing.T) {
 			tc.arrange(h)
 
 			// Act
-			_, err := h.c.HandOver(context.Background(), false)
+			_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 			// Assert
 			if err == nil {
@@ -139,13 +142,13 @@ func TestASuccessorThatServesClosesTheStandingFault(t *testing.T) {
 	h := newHarness(t)
 	h.workspace(t)
 	h.spawner.readyErr = errFake
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("the first HandOver succeeded")
 	}
 	h.spawner.readyErr = nil
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 
@@ -162,7 +165,7 @@ func TestALaterFailedHandoverSupersedesTheStandingFault(t *testing.T) {
 	h := newHarness(t)
 	h.workspace(t)
 	h.spawner.readyErr = errFake
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("the first HandOver succeeded")
 	}
 	first := successorFaults(t, h)
@@ -171,7 +174,7 @@ func TestALaterFailedHandoverSupersedesTheStandingFault(t *testing.T) {
 	}
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("the second HandOver succeeded")
 	}
 
@@ -236,7 +239,7 @@ func TestAHandoverThatCannotFinishTakesTheLineDown(t *testing.T) {
 	h.workspace(t)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -348,4 +351,62 @@ func TestAFreshBootThatStandsDownBeforeJudgingSaysSoAtInfo(t *testing.T) {
 	if hasRecord(h, opStaleness, "error", "could not list the workspaces to check for stale shims") {
 		t.Fatal("a stand-down was recorded as a failed listing at ERROR")
 	}
+}
+
+// deployTimings answers the deploy phases a successor timed, each as
+// phase=seconds.
+func deployTimings(h *harness) []string {
+	var out []string
+	for _, o := range h.restarts.Of(restarttiming.Deploy) {
+		out = append(out, fmt.Sprintf("%s=%v", o.Phase(), o.Seconds()))
+	}
+	return out
+}
+
+func TestASuccessorTimesTheDeployItTookOverFrom(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest *Manifest
+		want     []string
+	}{
+		{name: "a deploy's manifest times its handover and the whole deploy", manifest: &deployManifest, want: []string{"handover=20", "total=60"}},
+		{name: "a manifest that does not say when the deploy began times nothing", manifest: &Manifest{Deploy: true, WrittenAt: instant}},
+		{name: "a takeover no deploy asked for times nothing"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.workspace(t)
+			if tc.manifest != nil {
+				h.c.recordDeployTakeover(*tc.manifest)
+			}
+
+			// Act
+			takeOver(h)
+
+			// Assert
+			if got := strings.Join(deployTimings(h), ","); got != strings.Join(tc.want, ",") {
+				t.Fatalf("timed = %s, want %s", got, strings.Join(tc.want, ","))
+			}
+		})
+	}
+}
+
+func TestAnUntimedDeployTakeoverSaysWhy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.c.recordDeployTakeover(Manifest{Deploy: true, WrittenAt: instant})
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Operation == opProgress && strings.Contains(r.Message, "is not timed") {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the untimed deploy said", h.log.Records())
 }

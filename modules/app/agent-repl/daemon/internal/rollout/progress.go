@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
@@ -34,14 +35,16 @@ import (
 const opProgress = "daemon.rollout.progress"
 
 // recordDeployTakeover latches that the handover this successor joins was a
-// deploy's, so it says `updated` once it has taken over.
-func (c *controller) recordDeployTakeover(deploy bool) {
-	if !deploy {
+// deploy's, so it says `updated` once it has taken over, and when that deploy
+// and its handover began, so it times them then.
+func (c *controller) recordDeployTakeover(m Manifest) {
+	if !m.Deploy {
 		return
 	}
 	c.mu.Lock()
 	before := c.deployTakeover
 	c.deployTakeover = true
+	c.deployStartedAt, c.handoverStartedAt = m.DeployStartedAt, m.WrittenAt
 	c.mu.Unlock()
 	if !before {
 		c.log.Info(opProgress, "the handover being joined is a deploy's; this daemon says updated once it has taken over", nil)
@@ -60,12 +63,15 @@ func shimDeferred(check StaleCheck) bool {
 func (c *controller) finishDeployStory(deferred map[ids.WorkspaceID][]deployprogress.Note, fields dlog.Context) {
 	c.mu.Lock()
 	deploy := c.deployTakeover
+	deployStarted, handoverStarted := c.deployStartedAt, c.handoverStartedAt
 	c.deployTakeover = false
+	c.deployStartedAt, c.handoverStartedAt = time.Time{}, time.Time{}
 	c.mu.Unlock()
 	if !deploy {
 		c.log.Debug(opProgress, "this takeover was no deploy's; there is no deploy story to finish", fields)
 		return
 	}
+	c.timeDeployTakeover(deployStarted, handoverStarted, fields)
 	c.log.Info(opProgress, "took over from a deploy's handover; saying updated on every strip",
 		dlog.Merge(fields, dlog.Context{"shims_when_idle": len(deferred)}))
 	c.deps.Progress.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferred})

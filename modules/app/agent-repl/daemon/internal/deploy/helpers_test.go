@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 )
@@ -176,7 +177,9 @@ type fakeRollout struct {
 	tookOverAsked chan struct{}
 	rolling       []ids.WorkspaceID
 	handovers     []bool
-	handErr       error
+	// asks is every handover's and restart's ask, in order.
+	asks    []rollout.Ask
+	handErr error
 	// onHandOver runs inside the handover, before it answers.
 	onHandOver func()
 	restarts   []bool
@@ -190,10 +193,12 @@ type fakeRollout struct {
 	acceptance rollout.HandoverAcceptance
 }
 
-func (r *fakeRollout) HandOver(_ context.Context, force bool) (rollout.HandoverAcceptance, error) {
+func (r *fakeRollout) HandOver(_ context.Context, ask rollout.Ask) (rollout.HandoverAcceptance, error) {
+	force := ask.Force
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.handovers = append(r.handovers, force)
+	r.asks = append(r.asks, ask)
 	if r.onHandOver != nil {
 		r.onHandOver()
 	}
@@ -202,10 +207,12 @@ func (r *fakeRollout) HandOver(_ context.Context, force bool) (rollout.HandoverA
 	return acc, r.handErr
 }
 
-func (r *fakeRollout) Restart(_ context.Context, force bool) (rollout.HandoverAcceptance, error) {
+func (r *fakeRollout) Restart(_ context.Context, ask rollout.Ask) (rollout.HandoverAcceptance, error) {
+	force := ask.Force
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.restarts = append(r.restarts, force)
+	r.asks = append(r.asks, ask)
 	acc := r.acceptance
 	acc.Forced = force
 	return acc, r.restartErr
@@ -348,6 +355,7 @@ func (s *fakeServices) Calls() []string {
 
 // harness is one Deployer over a temp checkout, a temp cache-bin, and fakes.
 type harness struct {
+	restarts  *restarttimingtest.Recorder
 	d         *Deployer
 	live      Live
 	builder   *fakeBuilder
@@ -560,6 +568,7 @@ func newHarness(t *testing.T) *harness {
 		migrationKind: wsm.MigrationBreaking,
 		progress:      &fakeProgress{},
 		faults:        newFakeFaults(),
+		restarts:      &restarttimingtest.Recorder{},
 	}
 	h.reports = &fakeReports{builder: h.builder}
 	// Both services run the FRESH build unless a test says otherwise.
@@ -596,6 +605,7 @@ func newHarness(t *testing.T) *harness {
 		},
 		RunningLayout: runningLayout,
 		Deployed:      func() { h.deployed++ },
+		Restarts:      h.restarts,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -43,6 +43,9 @@ key="$(printf '%s' "$path" | tr '/' '_')"
 case "$query" in
   *agentrepl_process_cpu*) key="${key}_cpu" ;;
   *agentrepl_process_footprint*) key="${key}_mem" ;;
+  *agentrepl_restart_seconds_count*) key="${key}_counts" ;;
+  *"histogram_quantile(0.5,"*agentrepl_restart_seconds*) key="${key}_p50" ;;
+  *"histogram_quantile(0.95,"*agentrepl_restart_seconds*) key="${key}_p95" ;;
 esac
 if [ -f "$CASE_DIR/answers/$key" ]; then cat "$CASE_DIR/answers/$key"; exit 0; fi
 exit 7
@@ -164,6 +167,41 @@ test_catalog_says_when_nothing_advertises() {
   new_case
   run --catalog
   if [ "$RC" -eq 1 ] && has "no runtime advertises"; then pass "catalog says when no runtime advertises a surface"; else fail "catalog empty" "rc=$RC" "$OUT"; fi
+}
+
+test_restarts_summarizes_each_restart_phase() {
+  new_case
+  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total","outcome":"ok"},"value":[1,"3"]},{"metric":{"restart":"deploy","phase":"total","outcome":"failed"},"value":[1,"1"]},{"metric":{"restart":"shim_restart","phase":"run","outcome":"ok"},"value":[1,"12.0001"]}]}}'
+  answer api_v1_query_p50 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"41.2345"]},{"metric":{"restart":"shim_restart","phase":"run"},"value":[1,"NaN"]}]}}'
+  answer api_v1_query_p95 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"88.5"]}]}}'
+  run --restarts 7
+  if [ "$RC" -eq 0 ] && has $'deploy\ttotal\t3\t1\t41.23\t88.5' && has $'shim_restart\trun\t12\t0\t-\t-'; then
+    pass "restarts prints each restart phase's ok and failed counts and its p50 and p95"
+  else fail "restarts" "rc=$RC" "$OUT"; fi
+}
+
+test_restarts_with_none_recorded_says_so() {
+  new_case
+  answer api_v1_query_counts '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_p50 '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_p95 '{"status":"success","data":{"result":[]}}'
+  run --restarts
+  if [ "$RC" -eq 1 ]; then pass "restarts exits 1 when no restart was recorded"; else fail "restarts empty" "rc=$RC" "$OUT"; fi
+}
+
+test_restart_by_version_reads_the_phase_s_ok_series() {
+  new_case; answer api_v1_query_range_p95 "$BY_VERSION"
+  run --restart-by-version shim_restart run 2
+  if [ "$RC" -eq 0 ] && grep -q $'^0.129.0\t.*\t0.3\t1$' <<<"$OUT" \
+     && grep -qF 'agentrepl_restart_seconds_bucket{restart="shim_restart",phase="run",outcome="ok"}' "$CASE/requests"; then
+    pass "restart-by-version lists each version's p95 of the phase's ok restarts"
+  else fail "restart by version" "rc=$RC" "$OUT" "$(cat "$CASE/requests")"; fi
+}
+
+test_restart_by_version_needs_a_restart_and_a_phase() {
+  new_case
+  run --restart-by-version shim_restart
+  if [ "$RC" -eq 2 ] && has "needs a restart and a phase"; then pass "restart-by-version refuses a missing phase"; else fail "restart by version usage" "rc=$RC" "$OUT"; fi
 }
 
 test_an_unknown_verb_prints_usage() {
