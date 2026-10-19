@@ -144,7 +144,8 @@ the module."
        :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace
        :desc "Merge current workspace (one-shot: closes once it lands)" "M" #'agent-repl-merge-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace
-       :desc "Switch to the workspace that most recently finished" "TAB" #'agent-repl-switch-to-last-finished-workspace
+       :desc "Switch to the previously selected workspace" "TAB" #'agent-repl-switch-to-previous-workspace
+       :desc "Switch to the workspace that most recently finished" "g" #'agent-repl-switch-to-last-finished-workspace
        :desc "Swap workspace with tab (digit, 0 = 10)" "p" #'agent-repl-workspace-swap))
 
 ;; Tabs follow ROSTER ORDER strictly (the resolver orders them, priority
@@ -212,6 +213,9 @@ the module."
     (define-key map (vector 'remap (intern (format "+workspace/switch-to-%d" i)))
                 (intern (format "agent-repl-switch-to-workspace-%d" (1+ i)))))
   (define-key map [remap +workspace/switch-to-final] 'agent-repl-switch-to-last-workspace)
+  ;; `SPC TAB `' is Doom's `+workspace/other', the previous perspective in
+  ;; persp-mode's own history; it agrees with `SPC TAB TAB' instead.
+  (define-key map [remap +workspace/other] 'agent-repl-switch-to-previous-workspace)
   ;; `evil-make-intercept-map' with no STATE, written as the data it writes.
   (define-key map [intercept-state] 'all))
 
