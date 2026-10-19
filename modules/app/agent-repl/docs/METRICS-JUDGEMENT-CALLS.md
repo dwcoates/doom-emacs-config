@@ -137,3 +137,42 @@ Each entry says what was decided, why, and what it departs from.
   (`agent-repl-webhost-note-switch`), and Emacs's CPU and memory come from
   the daemon's process collector. So no Emacs encoder for the rpc was
   written; the first Emacs-measured latency adds one to `lisp/rpc.el`.
+
+## 9. Emacs's own restart is not timed
+
+- Asked (2026-10-19): metrics for restarts, the whole process and each
+  workspace.
+- Every restart the daemon runs or sees end is timed: deploys and their
+  phases, the daemon's boot, store and sidecar restarts, each workspace's
+  session start, shim replacements and handover transfers. A workspace an
+  editor's opening starts is timed as `workspace_start{cause="editor_open"}`,
+  which covers the workspaces an Emacs relaunch brings back.
+- Emacs's own launch and a deploy's `reload_elisp` end inside Emacs, which
+  reports nothing yet (call 8). Timing them needs Emacs's encoder for
+  `ReportLatencies` and new kinds, a contract change left for when a restart
+  investigation needs them. A deploy's webview reload is already timed: the
+  reloaded page reports `page_boot`.
+
+## 10. A moved deploy is timed by its successor
+
+- A deploy that hands the daemon over cannot see its own end: the outgoing
+  daemon's footer says nothing after the transfer, and the successor says
+  `updated`. So the successor times the deploy's `handover` and `total`.
+- The deploy's start instant reaches it through the one thing the two
+  daemons share, the intent manifest (`deploy_started_at` beside
+  `written_at`), carried there by the deploy's ask
+  (`rollout.Ask.DeployStartedAt`). Both instants are this host's wall clock,
+  so the durations are directly comparable; the daemon never pairs a start
+  from one process with an end from another by guessing.
+- A handover or restart asked without the instant is refused
+  (`rollout.ErrNoDeployStart`): only a deploy asks for either.
+
+## 11. Restart histograms carry no workspace label
+
+- Per-workspace restarts (`workspace_start`, `shim_restart`,
+  `handover_transfer`) feed one histogram per phase without a `workspace`
+  label, so a regression is read across every workspace at once and a
+  closed workspace leaves no histogram behind.
+- Which workspace was slow is `agentrepl_workspace_restart_last_seconds`, the
+  latest duration of each phase per workspace, deleted when the workspace
+  leaves the registry.
