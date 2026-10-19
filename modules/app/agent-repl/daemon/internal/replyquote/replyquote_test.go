@@ -259,3 +259,83 @@ func TestRequoteRefusesAnEditCarryingAQuote(t *testing.T) {
 		t.Fatalf("Requote answered %v alongside its refusal", got)
 	}
 }
+
+func TestSplit(t *testing.T) {
+	cases := []struct {
+		name     string
+		markdown string
+		prompt   bool
+		want     Parts
+	}{
+		{
+			name:     "a quoted response splits into its heading, its markdown and the closing marker",
+			markdown: "The capital is Paris.",
+			want:     Parts{Heading: HeadingResponse, Quoted: "The capital is Paris.", Closing: ClosingMarker},
+		},
+		{
+			name:     "a quoted prompt splits under the prompt heading",
+			markdown: "text of p2",
+			prompt:   true,
+			want:     Parts{Heading: HeadingPrompt, Quoted: "text of p2", Closing: ClosingMarker},
+		},
+		{
+			name:     "a quoted code fence comes back without the longer fence around it",
+			markdown: "```sh\nmake test\n```",
+			want:     Parts{Heading: HeadingResponse, Quoted: "```sh\nmake test\n```", Closing: ClosingMarker},
+		},
+		{
+			name:     "an empty quote splits to empty markdown",
+			markdown: "",
+			want:     Parts{Heading: HeadingResponse, Quoted: "", Closing: ClosingMarker},
+		},
+		{
+			name:     "a multi-line quote keeps every line",
+			markdown: "1 root\n├── 1.1 a\n└── 1.2 b",
+			want:     Parts{Heading: HeadingResponse, Quoted: "1 root\n├── 1.1 a\n└── 1.2 b", Closing: ClosingMarker},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			composed := Block(tc.markdown, tc.prompt).GetQuote().GetText()
+
+			// Act.
+			got, err := Split(composed)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Split(%q) error = %v, want none", composed, err)
+			}
+			if got != tc.want {
+				t.Fatalf("Split(%q) = %+v, want %+v", composed, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSplitRefusesTextBlockDidNotCompose(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{name: "no heading", text: "the quote"},
+		{name: "a heading with no closing marker", text: "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```"},
+		{name: "an unfenced quote", text: "⟢ Replying to an earlier response of yours:\n\nParis.\n\n⟢ My message:\n"},
+		{name: "a fence that does not close", text: "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n\n⟢ My message:\n"},
+		{name: "a fence too short for the quote", text: "⟢ Replying to an earlier response of yours:\n\n```\n```go\nx\n```\n```\n\n⟢ My message:\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got, err := Split(tc.text)
+
+			// Assert.
+			if !errors.Is(err, ErrNotComposed) {
+				t.Fatalf("Split(%q) error = %v, want ErrNotComposed", tc.text, err)
+			}
+			if got != (Parts{}) {
+				t.Fatalf("Split(%q) = %+v, want the zero Parts", tc.text, got)
+			}
+		})
+	}
+}

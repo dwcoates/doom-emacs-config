@@ -25,14 +25,21 @@ import (
 // is the contract with the agent (and asserted character for character by the
 // tests), so a change here is a change to what the model is told.
 const (
+	// HeadingResponse names a quoted response of the agent's.
+	HeadingResponse = "⟢ Replying to an earlier response of yours"
+	// HeadingPrompt names a quoted PROMPT: it was not the agent's response.
+	HeadingPrompt = "⟢ Replying to an earlier prompt in this conversation"
+	// ClosingMarker introduces the person's own words.
+	ClosingMarker = "⟢ My message"
+
 	// openingResponse introduces a quoted response of the agent's.
-	openingResponse = "⟢ Replying to an earlier response of yours:\n\n"
-	// openingPrompt introduces a quoted PROMPT: it was not the agent's response.
-	openingPrompt = "⟢ Replying to an earlier prompt in this conversation:\n\n"
+	openingResponse = HeadingResponse + ":\n\n"
+	// openingPrompt introduces a quoted PROMPT.
+	openingPrompt = HeadingPrompt + ":\n\n"
 	// closing introduces the person's own words. It ENDS IN A NEWLINE because
 	// the blocks of a prompt are delivered joined by one, so the person's words
 	// follow it after a blank line.
-	closing = "\n\n⟢ My message:\n"
+	closing = "\n\n" + ClosingMarker + ":\n"
 )
 
 // minFence is the shortest code fence markdown recognizes.
@@ -75,6 +82,49 @@ func Block(markdown string, prompt bool) *conversationv1.UserContentBlock {
 	return &conversationv1.UserContentBlock{
 		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text}},
 	}
+}
+
+// Parts is a composed quote taken apart again: the heading naming what is
+// quoted (HeadingResponse or HeadingPrompt, without its colon), the quoted
+// markdown unfenced, and the marker introducing the person's words
+// (ClosingMarker, without its colon). A client draws each part in its own
+// place, so it never parses the composed text itself.
+type Parts struct {
+	Heading string
+	Quoted  string
+	Closing string
+}
+
+// ErrNotComposed refuses a text Block did not compose: a quote block's text
+// is only ever Block's, so one that does not split is a defect upstream.
+var ErrNotComposed = errors.New("the quote text was not composed by replyquote.Block")
+
+// Split is TEXT, a quote Block composed, taken apart into its Parts: the
+// inverse of Block, so Split(Block(m, p).text).Quoted is m for every m. TEXT
+// that Block could not have composed is refused (ErrNotComposed).
+func Split(text string) (Parts, error) {
+	var heading, rest string
+	switch {
+	case strings.HasPrefix(text, openingResponse):
+		heading, rest = HeadingResponse, text[len(openingResponse):]
+	case strings.HasPrefix(text, openingPrompt):
+		heading, rest = HeadingPrompt, text[len(openingPrompt):]
+	default:
+		return Parts{}, ErrNotComposed
+	}
+	fencedText, ok := strings.CutSuffix(rest, closing)
+	if !ok {
+		return Parts{}, ErrNotComposed
+	}
+	fence, body, ok := strings.Cut(fencedText, "\n")
+	if !ok || !strings.HasSuffix(body, "\n"+fence) {
+		return Parts{}, ErrNotComposed
+	}
+	quoted := body[:len(body)-len("\n"+fence)]
+	if Fenced(quoted) != fencedText {
+		return Parts{}, ErrNotComposed
+	}
+	return Parts{Heading: heading, Quoted: quoted, Closing: ClosingMarker}, nil
 }
 
 // Quote is SAID replying to a selected bubble: the bubble's quote ahead of
