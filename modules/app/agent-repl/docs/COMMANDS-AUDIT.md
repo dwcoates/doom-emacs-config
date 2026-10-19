@@ -104,7 +104,6 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-open-most-recent-workspace` | Switch to the most recently selected workspace not yet visited. | `SPC TAB R` | leader | leader |
 | `agent-repl-switch-to-previous-workspace` | Switch to the workspace selected before the one shown, however it was selected. | `SPC TAB TAB`, `` SPC TAB ` `` | leader | leader |
 | `agent-repl-switch-to-last-finished-workspace` | Switch to the workspace that most recently went from working to done. | `SPC TAB g` | leader | leader |
-| `agent-repl-workspace-push-to-back` | Push the current tab to the back of the tab order. | - | - | - |
 
 ## 8. Workspace creation
 

@@ -273,15 +273,19 @@ func rosterRowJSON(id, dir, name string, current bool) map[string]any {
 }
 
 // rosterJSON is one WatchWorkspaceRosterResponse carrying ROWS in one
-// repository section at REPO_DIR, the tab bar drawing them in that order (as
-// the daemon always sends one), and CURRENT (a row's id) as the current
-// workspace when set.
+// repository section at REPO_DIR, as the daemon lists them: each an open row
+// whose tab is numbered in that order (the Open section is the tab bar), and
+// CURRENT (a row's id) as the current workspace when set.
 func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawMessage {
-	tabs := make([]any, 0, len(rows))
+	open := make([]any, 0, len(rows))
 	var currentRef any
-	for _, row := range rows {
+	for i, row := range rows {
 		ref := row["workspace"].(map[string]any)["workspace"]
-		tabs = append(tabs, map[string]any{"workspace": ref, "drawn": map[string]any{}})
+		open = append(open, map[string]any{
+			"row":      row,
+			"tab":      map[string]any{"numbered": map[string]any{"number": i + 1}},
+			"children": []any{},
+		})
 		if current != "" && ref.(map[string]any)["id"] == current {
 			currentRef = ref
 		}
@@ -291,16 +295,16 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 			"sections": []any{map[string]any{
 				"key":        map[string]any{"repository": map[string]any{"id": "repo-doom", "dir": repoDir}},
 				"header":     map[string]any{"label": map[string]any{"text": filepath.Base(repoDir)}, "count": map[string]any{"workspaces": len(rows)}},
-				"rows":       map[string]any{"rows": rows},
+				"openRows":   map[string]any{"rows": open},
 				"divergence": map[string]any{"pending": map[string]any{}},
 				"expanded":   map[string]any{},
 			}},
 			"openCount": map[string]any{"workspaces": len(rows)},
 		},
 		"open":           map[string]any{"label": map[string]any{"text": "Open"}, "expanded": map[string]any{}},
-		"hidden":         map[string]any{"header": map[string]any{"label": map[string]any{"text": "Hidden"}, "count": map[string]any{"workspaces": 0}}, "rows": map[string]any{"rows": []any{}}, "expanded": map[string]any{}},
+		"hidden":         map[string]any{"header": map[string]any{"label": map[string]any{"text": "Hidden"}, "count": map[string]any{"workspaces": 0}}, "hiddenRows": map[string]any{"rows": []any{}}, "expanded": map[string]any{}},
 		"recentlyMerged": map[string]any{"header": map[string]any{"label": map[string]any{"text": "recently merged"}, "count": map[string]any{"workspaces": 0}}, "groups": []any{}, "collapsed": map[string]any{}},
-		"tabBar":         map[string]any{"tabs": tabs},
+		"closed":         map[string]any{"rows": []any{}},
 	}
 	if currentRef != nil {
 		roster["current"] = map[string]any{"workspace": currentRef}

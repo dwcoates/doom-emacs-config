@@ -197,11 +197,12 @@ func TestEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
 	}
 }
 
-// TestEmacsDeprioCloseShufflesTheTab is scenario 16. The two close variants
-// differing is the whole reason both commands exist, so the claim is exactly
-// the difference: `SPC o C` records `:saved-tab-index` and pushes the
-// workspace's tab to the back.
-func TestEmacsDeprioCloseShufflesTheTab(t *testing.T) {
+// TestEmacsKillCloseLeavesTheTabOrderAlone is scenario 16. `SPC o C` closes
+// the panels and kills the session, and NO CLOSE REORDERS THE TABS: only the
+// daemon orders them (owner ruling, 2026-10-19). The kill may take the tab
+// away once the daemon accepts it, so the claim is that the workspace either
+// keeps its place or is gone, and never moves to the back.
+func TestEmacsKillCloseLeavesTheTabOrderAlone(t *testing.T) {
 	t.Parallel()
 	w, _ := emacsPanelWorld(t, 2)
 	e := w.Emacs
@@ -210,23 +211,37 @@ func TestEmacsDeprioCloseShufflesTheTab(t *testing.T) {
 	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
 	openPanel(e)
 	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+	before := e.EvalStrings(emacsTabOrderForm)
 
 	if want, got := "agent-repl", e.LeaderBinding("o C"); got != want {
 		t.Fatalf("SPC o C resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
 	}
 	e.Leader("o C")
 
-	e.AwaitEvalFor(panelSettleBound, "the deprio close to record a saved tab index",
-		`(agent-repl--ws-get `+elispString(current)+` :saved-tab-index)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	after := e.EvalStrings(emacsTabOrderForm)
+	if !keptPlaceOrGone(before, after, current) {
+		t.Fatalf("the kill close moved %q in the tab order: %q -> %q; no close reorders the tabs", current, before, after)
+	}
+}
 
-	order := e.EvalStrings(emacsTabOrderForm)
-	if len(order) < 2 {
-		t.Fatalf("the tab order holds %d entries, need two for a push-to-back to be observable: %q", len(order), order)
+// keptPlaceOrGone reports whether AFTER is BEFORE with WS either in the same
+// place or removed, every other tab in its order.
+func keptPlaceOrGone(before, after []string, ws string) bool {
+	if strings.Join(before, "\x00") == strings.Join(after, "\x00") {
+		return true
 	}
-	if order[len(order)-1] != current {
-		t.Fatalf("the deprio'd workspace %q is not last in the tab order %q", current, order)
+	var without []string
+	for _, name := range before {
+		if name != ws {
+			without = append(without, name)
+		}
 	}
+	return strings.Join(without, "\x00") == strings.Join(after, "\x00")
 }
 
 // TestEmacsFocusInputSelectsTheComposer is scenario 17.
