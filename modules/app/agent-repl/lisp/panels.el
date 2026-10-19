@@ -71,6 +71,7 @@
 (declare-function agent-repl-window--delete-buffer-windows "window")
 (declare-function agent-repl-window--delete-or-neutralize "window")
 (declare-function agent-repl-window--delete-where "window")
+(declare-function agent-repl-window-focus-input-when-panels-alone "window" (&optional frame))
 (declare-function agent-repl-window--ensure-layout "window")
 (declare-function agent-repl-window--panel-buffer "window")
 (defvar agent-repl--global-log-scope)
@@ -1382,11 +1383,13 @@ Sweeps orphaned panels drifted in from other workspaces
 \(`agent-repl--sync-panels'), then reconciles the current workspace's
 own two-panel layout (`agent-repl-window--ensure-layout') so a window
 change that knocked exactly one of the view/input pair off the frame
-heals back to the canonical shape.  It also used to refresh the
-hide-overlay that blanked the vterm's bottom rows (the TUI drew its
-own input box there, which Emacs's input panel replaced); the webview
-hides its composer declaratively instead, so there is nothing left to
-refresh."
+heals back to the canonical shape, and finally hands focus to the
+input window when that change left the panels standing alone
+\(`agent-repl-window-focus-input-when-panels-alone').  It also used to
+refresh the hide-overlay that blanked the vterm's bottom rows (the TUI
+drew its own input box there, which Emacs's input panel replaced); the
+webview hides its composer declaratively instead, so there is nothing
+left to refresh."
   (let* ((log-ws (agent-repl--ws-current-log-name))
          (scope (agent-repl--ws-log-scope (agent-repl--ws-current-name))))
     (agent-repl--with-log-context
@@ -1404,7 +1407,8 @@ refresh."
                                     "on-window-change: minibuffer active — deferring reconcile")
          (agent-repl--log-verbose log-ws "on-window-change")
          (agent-repl--sync-panels)
-         (agent-repl-window--ensure-layout))))))
+         (agent-repl-window--ensure-layout)
+         (agent-repl-window-focus-input-when-panels-alone))))))
 
 (defmacro agent-repl--deferred (timer-var fn)
   "Return a lambda that debounces calls to FN via TIMER-VAR.
