@@ -16,7 +16,16 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
-import { appContext, hiddenSection, primaryPointer, repoSection, roster, row, sidebarContext } from "./harness.js";
+import {
+  appContext,
+  hiddenSection,
+  primaryPointer,
+  repoSection,
+  roster,
+  row,
+  settleOwedDragClick,
+  sidebarContext,
+} from "./harness.js";
 
 /** Every ArrangeSidebar request the daemon received, and a context over it. */
 function arranged(): { sc: RailContext & SidebarContext; sent: ArrangeSidebarRequest[] } {
@@ -79,6 +88,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  settleOwedDragClick();
   document.body.replaceChildren();
 });
 
@@ -541,11 +551,7 @@ describe("a subsection's fold", () => {
     return { sc, asked };
   }
 
-  /**
-   * Click EL as a pointer does: pressed and released first, which clears the
-   * click a finished drag swallows (`drag.ts`), so an earlier test's drag
-   * cannot eat this click.
-   */
+  /** Click EL as a pointer does: pressed and released first. */
   const click = (el: HTMLElement): void => {
     pointer("pointerdown", el, 0);
     pointer("pointerup", window, 0);

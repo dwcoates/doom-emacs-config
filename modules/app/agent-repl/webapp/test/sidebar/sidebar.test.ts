@@ -37,6 +37,7 @@ import {
   fakeTimers,
   mergedSection,
   primaryPointer,
+  settleOwedDragClick,
   repoSection,
   roster,
   rosterStream,
@@ -1451,6 +1452,7 @@ describe("the rail holds its drawing while a row is dragged", () => {
   const nameOf = (host: HTMLElement): string | null | undefined =>
     host.querySelector("[data-roster-row='ws-2'] > .row .name")?.textContent;
   const pointer = primaryPointer;
+  afterEach(settleOwedDragClick);
 
   it("draws no push while the drag stands, and the newest once it is cancelled", async () => {
     // Arrange: a drag lifts ws-1, and a push renames ws-2 meanwhile.

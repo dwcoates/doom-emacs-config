@@ -27,7 +27,9 @@
  * A DRAG IS NOT A CLICK. The click a browser fires after the release would
  * select the row or fold the section under the pointer, so the first click
  * after a drag is swallowed. It is forgotten at the next press, so a release
- * that fires no click cannot swallow a later, real one.
+ * that fires no click cannot swallow a later, real one. The guard belongs to
+ * the WINDOW the drag happens in and stands only until it has done its one
+ * job (`swallowTheNextClick`).
  */
 import { queryAll } from "../dom.js";
 import { nextFrame } from "../frame.js";
@@ -80,30 +82,32 @@ interface Spot {
   next: Node | null;
 }
 
-/** The click a finished drag leaves behind is swallowed; see the file comment. */
-let swallowNextClick = false;
-let clickGuardInstalled = false;
+/** The window ITEM is drawn in. A drawn item always has one. */
+function windowOf(item: HTMLElement): Window {
+  const win = item.ownerDocument.defaultView;
+  if (win === null) throw new Error("invariant: a dragged item is drawn in a window");
+  return win;
+}
 
-function installClickGuard(): void {
-  if (clickGuardInstalled) return;
-  clickGuardInstalled = true;
-  window.addEventListener(
-    "pointerdown",
-    () => {
-      swallowNextClick = false;
-    },
-    true,
-  );
-  window.addEventListener(
-    "click",
-    (event) => {
-      if (!swallowNextClick) return;
-      swallowNextClick = false;
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    true,
-  );
+/**
+ * Swallow the next click in WIN, the one a finished drag leaves behind,
+ * unless a press comes first; see the file comment. THE GUARD STANDS ONLY
+ * WHILE A CLICK IS OWED: the swallowed click or the next press takes it
+ * down, so nothing is installed for the page's life that could outlive the
+ * listeners it relies on.
+ */
+export function swallowTheNextClick(win: Window): void {
+  const forget = (): void => {
+    win.removeEventListener("click", swallow, true);
+    win.removeEventListener("pointerdown", forget, true);
+  };
+  const swallow = (event: Event): void => {
+    forget();
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  win.addEventListener("click", swallow, true);
+  win.addEventListener("pointerdown", forget, true);
 }
 
 /**
@@ -111,7 +115,7 @@ function installClickGuard(): void {
  * the threshold, or lets go first and the press stays an ordinary click.
  */
 export function pressToDrag(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): void {
-  installClickGuard();
+  const win = windowOf(spec.item);
   const startX = down.clientX;
   const startY = down.clientY;
   let lifted: Lifted | null = null;
@@ -144,16 +148,16 @@ export function pressToDrag(arrange: ArrangeContext, spec: DragSpec, down: Point
     lifted.cancel("Escape");
   };
   const stop = (): void => {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", end);
-    window.removeEventListener("pointercancel", end);
-    window.removeEventListener("keydown", key, true);
+    win.removeEventListener("pointermove", move);
+    win.removeEventListener("pointerup", end);
+    win.removeEventListener("pointercancel", end);
+    win.removeEventListener("keydown", key, true);
     document.removeEventListener("selectstart", noSelect, true);
   };
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", end);
-  window.addEventListener("pointercancel", end);
-  window.addEventListener("keydown", key, true);
+  win.addEventListener("pointermove", move);
+  win.addEventListener("pointerup", end);
+  win.addEventListener("pointercancel", end);
+  win.addEventListener("keydown", key, true);
   document.addEventListener("selectstart", noSelect, true);
 }
 
@@ -224,7 +228,7 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
     ghost.remove();
     item.classList.remove(DRAG_SLOT_CLASS);
     arrange.layer.ownerDocument.documentElement.classList.remove(DRAGGING_CLASS);
-    swallowNextClick = true;
+    swallowTheNextClick(windowOf(item));
   };
 
   const follow = (x: number, y: number): void => {

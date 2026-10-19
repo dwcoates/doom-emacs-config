@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 // The sidebar tests' shared harness. See test/sidebar/harness.ts.
-import { describe, expect, it } from "vitest";
-import { primaryPointer } from "./harness.js";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { swallowTheNextClick } from "../../src/sidebar/drag.js";
+import { codeOf } from "../source-text.js";
+import { primaryPointer, settleOwedDragClick } from "./harness.js";
 
 describe("primaryPointer", () => {
   it("dispatches a bubbling primary left-button pointer event at the height asked", () => {
@@ -32,5 +36,34 @@ describe("primaryPointer", () => {
 
     // Assert
     expect(handRolled).toEqual([]);
+  });
+});
+
+describe("settleOwedDragClick", () => {
+  it("takes down a guard a drag left owed, so the next test's click goes through", () => {
+    // Arrange
+    swallowTheNextClick(window);
+
+    // Act
+    settleOwedDragClick();
+
+    // Assert
+    const reached = vi.fn();
+    document.body.addEventListener("click", reached);
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.body.removeEventListener("click", reached);
+    expect(reached).toHaveBeenCalledTimes(1);
+  });
+
+  it("is called after each test by every sidebar test file that drags", () => {
+    // A file that drags without it hands its owed click to whatever test runs next.
+    const dir = __dirname;
+    const offenders = readdirSync(dir)
+      .filter((name) => name.endsWith(".test.ts"))
+      .filter((name) => {
+        const code = codeOf(readFileSync(join(dir, name), "utf8"));
+        return /"pointermove"/.test(code) && !code.includes("settleOwedDragClick");
+      });
+    expect(offenders).toEqual([]);
   });
 });
