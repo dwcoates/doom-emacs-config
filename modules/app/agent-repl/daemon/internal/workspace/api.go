@@ -49,6 +49,11 @@ type CreateSpec struct {
 	InitialPrompt string
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
+	// FromOrigin cuts a primary workspace from origin's primary branch,
+	// fetched as the create runs, rather than from the local primary branch
+	// (agentrepl.v1.WorkspaceTopologyPrimary.from_origin). Never set with a
+	// Parent: only a primary workspace is cut from the primary branch.
+	FromOrigin bool
 	// ContextWorkspace, set only on a one-shot, is the registered workspace
 	// the commission is about: the one-shot's first message opens with the
 	// one-shot context note naming it as the workspace the cited issue

@@ -130,11 +130,13 @@ func (s *server) CreateWorkspace(
 		spec.Name = standard.GetName()
 		spec.MergeActions = s.mergeActions(standard.GetMergeActions())
 		spec.Parent, spec.OwnerNotice = topologyOwner(standard.GetTopology())
+		spec.FromOrigin = standard.GetTopology().GetPrimary().GetFromOrigin() != nil
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
 		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
 		spec.Parent, spec.OwnerNotice = topologyOwner(oneShot.GetTopology())
+		spec.FromOrigin = oneShot.GetTopology().GetPrimary().GetFromOrigin() != nil
 		if about := oneShot.GetContext(); about != nil {
 			// The context must be a registered workspace this daemon serves; a
 			// refusal names it on the create's own arm.

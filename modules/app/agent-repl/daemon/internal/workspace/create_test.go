@@ -1833,3 +1833,67 @@ func TestCreateFailsWhenTheOwnerItMustReopenWillNotOpen(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure logged at error", f.log.logger.Records())
 	}
 }
+
+func TestCreateFromOriginCutsFromOriginsPrimaryBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	spec := standardSpec(t, f)
+	spec.FromOrigin = true
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.fetched) != 1 || f.git.fetched[0] != spec.RepoDir+" origin" {
+		t.Fatalf("fetched %v, want origin fetched once in %s", f.git.fetched, spec.RepoDir)
+	}
+	if f.git.created[0].BaseRef != "origin/main" {
+		t.Fatalf("base ref = %q, want origin/main", f.git.created[0].BaseRef)
+	}
+}
+
+func TestCreateNotFromOriginFetchesNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.fetched) != 0 {
+		t.Fatalf("fetched %v, want nothing fetched", f.git.fetched)
+	}
+}
+
+func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.fetchErr = errors.New("could not resolve host")
+	spec := standardSpec(t, f)
+	spec.FromOrigin = true
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != ArmOriginFetchFailed || refusal.Fields["detail"] != "could not resolve host" {
+		t.Fatalf("Create = %v, want origin_fetch_failed naming git's failure", err)
+	}
+	if len(f.git.created) != 0 || len(f.db.putJobs) != 0 {
+		t.Fatalf("worktrees %v, jobs %d: want nothing built or recorded", f.git.created, len(f.db.putJobs))
+	}
+	logged := false
+	for _, r := range f.log.logger.Records() {
+		logged = logged || (r.Context["arm"] == ArmOriginFetchFailed && r.Context["arm_detail"] == "could not resolve host")
+	}
+	if !logged {
+		t.Fatalf("records = %+v, want the refusal recorded with git's failure", f.log.logger.Records())
+	}
+}
+

@@ -746,3 +746,31 @@ func TestInterruptRefusesBothFlags(t *testing.T) {
 		t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
 	}
 }
+
+func TestCreateOriginMasterCutsFromOrigin(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "/repo", "-topology", "primary", "-origin-master", "-context", "fresh", "-prompt", "fix it")
+
+	// Assert
+	req := only[*agentreplv1.CreateWorkspaceRequest](t, f)
+	if code != exitSuccess || req.GetStandard().GetTopology().GetPrimary().GetFromOrigin() == nil {
+		t.Fatalf("exit %d, request %v; want a primary cut from origin", code, req)
+	}
+}
+
+func TestCreateOriginMasterRefusesAChild(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "/repo", "-topology", "child", "-owner", "peer", "-origin-master", "-context", "fresh")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), "-origin-master") {
+		t.Fatalf("exit %d, requests %v, stderr %q; want the flag refused for a child", code, f.client.requests, f.errOut.String())
+	}
+}
+

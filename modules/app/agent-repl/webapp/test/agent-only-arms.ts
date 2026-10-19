@@ -26,6 +26,7 @@ export const AGENT_ONLY_REFUSAL_ARMS = {
     "asyncMergeRequesterQueued",
     "asyncMergeRequesterMerging",
     "asyncMergeRequesterSessionDeleted",
+    "originFetchFailed",
   ]),
   submitPrompt: new Set<string>(["slashCommandFromAgent", "unknownSender"]),
 } as const satisfies Record<string, ReadonlySet<string>>;

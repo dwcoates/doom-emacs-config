@@ -27,7 +27,10 @@ refusal's printed arm rather than guessing. This skill says WHEN and WHY.
 NOTHING IS IMPLIED. Every create names its repository (`-repository here` or
 a main-checkout directory), its topology and its context:
 
-- `-topology primary` is cut from the main branch and lands on it.
+- `-topology primary` is cut from the main branch and lands on it. Add
+  `-origin-master` to cut it from origin's main branch, fetched as the create
+  runs, when the work must start from what is pushed rather than the local
+  main branch.
   `-topology child -owner WS` is cut from WS's branch and lands into WS.
 - `-context fresh` starts an empty conversation. `-context fork -fork WS`
   copies WS's conversation (cut at its last concluded turn).

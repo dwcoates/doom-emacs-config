@@ -93,6 +93,9 @@ const (
 	// ArmUnknownOwner is a create whose child topology names an owner the
 	// registry does not hold in the create's repository.
 	ArmUnknownOwner = "unknown_owner"
+	// ArmOriginFetchFailed is a primary create cut from origin whose fetch of
+	// origin's primary branch failed.
+	ArmOriginFetchFailed = "origin_fetch_failed"
 	// ArmUnknownForkSource is a create whose context forks a workspace the
 	// registry does not hold in the create's repository.
 	ArmUnknownForkSource = "unknown_fork_source"

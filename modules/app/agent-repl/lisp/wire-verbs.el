@@ -776,8 +776,9 @@ The requesting workspace is not in the daemon\='s registry."
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field.  The
-async-merge arms are not decoded: an async merge is an agent\='s request,
-never the editor\='s, so one answering an editor create is a breach."
+async-merge arms and `origin_fetch_failed' are not decoded: an async
+merge and a create cut from origin are an agent\='s requests, never the
+editor\='s, so one answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
     (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen))
     (list :cause

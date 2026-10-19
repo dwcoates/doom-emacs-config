@@ -241,6 +241,20 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if baseRef == "" {
 		baseRef = defaultBranch
 	}
+	// A WORKSPACE CUT FROM ORIGIN starts at origin's primary branch, fetched
+	// now, and lands onto the local primary branch like any primary
+	// workspace.
+	if spec.FromOrigin {
+		if parent != nil {
+			panic(fmt.Sprintf("workspace: create %q is a child of %q and cut from origin; only a primary workspace is cut from the primary branch", branch, *parent))
+		}
+		if err := v.deps.Git.Fetch(ctx, repoDir, originRemote); err != nil {
+			return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmOriginFetchFailed,
+				fmt.Sprintf("origin's primary branch could not be fetched in %s", repoDir), false,
+				map[string]any{"detail": err.Error()})
+		}
+		baseRef = originRemote + "/" + defaultBranch
+	}
 	// A base ref that does not resolve is REFUSED before anything is recorded
 	// or materialized: git would otherwise fail halfway through `worktree add`
 	// and leave the creation job standing for a workspace that cannot exist.
@@ -1007,6 +1021,9 @@ func (v *verbs) inRepository(ctx context.Context, log dlog.Logger, id ids.Worksp
 	}
 	return &record, nil
 }
+
+// originRemote is the remote a workspace cut from origin is fetched from.
+const originRemote = "origin"
 
 // resolveBase answers the commit baseRef names. Every base is the owner's
 // branch, the default branch, or a merge workspace's branch its hand-off just

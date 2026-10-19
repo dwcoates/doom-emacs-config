@@ -91,9 +91,19 @@ message WorkspaceTopology {
     WorkspaceTopologyChild child = 2;
   }
 }
-// From the primary branch, onto the primary branch. No fields: the
-// repository names its primary branch.
-message WorkspaceTopologyPrimary {}
+// From the primary branch, onto the primary branch. The repository names its
+// primary branch.
+message WorkspaceTopologyPrimary {
+  // SET: cut from the primary branch's tip on the remote `origin`, fetched as
+  // the create runs, rather than from the local primary branch's tip. The
+  // workspace still lands onto the local primary branch. A fetch that fails
+  // refuses the create (CreateWorkspaceError.origin_fetch_failed). UNSET: the
+  // local primary branch's tip.
+  optional WorkspaceTopologyPrimaryFromOrigin from_origin = 1;
+}
+// The create is cut from origin's primary branch. DELIBERATELY EMPTY: presence
+// is the fact.
+message WorkspaceTopologyPrimaryFromOrigin {}
 // A child of another workspace: from its branch, into its branch.
 //
 // WHO LANDS A CHILD depends on whose context it starts with. A child whose

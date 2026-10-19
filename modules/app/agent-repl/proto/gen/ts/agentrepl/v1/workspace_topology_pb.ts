@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_topology.proto.
  */
 export const file_agentrepl_v1_workspace_topology: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3RvcG9sb2d5LnByb3RvEgxhZ2VudHJlcGwudjEikwEKEldvcmtzcGFjZVJlcXVlc3RlchI0CgR1c2VyGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlclVzZXJIABI+Cgl3b3Jrc3BhY2UYAiABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyV29ya3NwYWNlSABCBwoFYXNrZXIiGAoWV29ya3NwYWNlUmVxdWVzdGVyVXNlciJMChtXb3Jrc3BhY2VSZXF1ZXN0ZXJXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKYAQoWV29ya3NwYWNlQ29udGV4dE9yaWdpbhI6CgVmcmVzaBgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDb250ZXh0T3JpZ2luRnJlc2hIABI4CgRmb3JrGAIgASgLMiguYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNvbnRleHRPcmlnaW5Gb3JrSABCCAoGb3JpZ2luIh0KG1dvcmtzcGFjZUNvbnRleHRPcmlnaW5GcmVzaCJLChpXb3Jrc3BhY2VDb250ZXh0T3JpZ2luRm9yaxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIo4BChFXb3Jrc3BhY2VUb3BvbG9neRI5CgdwcmltYXJ5GAEgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5UHJpbWFyeUgAEjUKBWNoaWxkGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5Q2hpbGRIAEIHCgVzaGFwZSIaChhXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnkioAEKFldvcmtzcGFjZVRvcG9sb2d5Q2hpbGQSKQoFb3duZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkoKDG93bmVyX25vdGljZRgCIAEoCzIvLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VUb3BvbG9neUNoaWxkT3duZXJOb3RpY2VIAIgBAUIPCg1fb3duZXJfbm90aWNlIjEKIVdvcmtzcGFjZVRvcG9sb2d5Q2hpbGRPd25lck5vdGljZRIMCgR0ZXh0GAEgASgJIo4BChNNZXJnZVF1ZXVlUGxhY2VtZW50EjUKBGJhY2sYASABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEJhY2tIABI3CgVmcm9udBgCIAEoCzImLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUGxhY2VtZW50RnJvbnRIAEIHCgVwbGFjZSIZChdNZXJnZVF1ZXVlUGxhY2VtZW50QmFjayIaChhNZXJnZVF1ZXVlUGxhY2VtZW50RnJvbnRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3RvcG9sb2d5LnByb3RvEgxhZ2VudHJlcGwudjEikwEKEldvcmtzcGFjZVJlcXVlc3RlchI0CgR1c2VyGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlclVzZXJIABI+Cgl3b3Jrc3BhY2UYAiABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyV29ya3NwYWNlSABCBwoFYXNrZXIiGAoWV29ya3NwYWNlUmVxdWVzdGVyVXNlciJMChtXb3Jrc3BhY2VSZXF1ZXN0ZXJXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKYAQoWV29ya3NwYWNlQ29udGV4dE9yaWdpbhI6CgVmcmVzaBgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDb250ZXh0T3JpZ2luRnJlc2hIABI4CgRmb3JrGAIgASgLMiguYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNvbnRleHRPcmlnaW5Gb3JrSABCCAoGb3JpZ2luIh0KG1dvcmtzcGFjZUNvbnRleHRPcmlnaW5GcmVzaCJLChpXb3Jrc3BhY2VDb250ZXh0T3JpZ2luRm9yaxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIo4BChFXb3Jrc3BhY2VUb3BvbG9neRI5CgdwcmltYXJ5GAEgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5UHJpbWFyeUgAEjUKBWNoaWxkGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5Q2hpbGRIAEIHCgVzaGFwZSJ2ChhXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnkSSgoLZnJvbV9vcmlnaW4YASABKAsyMC5hZ2VudHJlcGwudjEuV29ya3NwYWNlVG9wb2xvZ3lQcmltYXJ5RnJvbU9yaWdpbkgAiAEBQg4KDF9mcm9tX29yaWdpbiIkCiJXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnlGcm9tT3JpZ2luIqABChZXb3Jrc3BhY2VUb3BvbG9neUNoaWxkEikKBW93bmVyGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhJKCgxvd25lcl9ub3RpY2UYAiABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlVG9wb2xvZ3lDaGlsZE93bmVyTm90aWNlSACIAQFCDwoNX293bmVyX25vdGljZSIxCiFXb3Jrc3BhY2VUb3BvbG9neUNoaWxkT3duZXJOb3RpY2USDAoEdGV4dBgBIAEoCSKOAQoTTWVyZ2VRdWV1ZVBsYWNlbWVudBI1CgRiYWNrGAEgASgLMiUuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCYWNrSAASNwoFZnJvbnQYAiABKAsyJi5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEZyb250SABCBwoFcGxhY2UiGQoXTWVyZ2VRdWV1ZVBsYWNlbWVudEJhY2siGgoYTWVyZ2VRdWV1ZVBsYWNlbWVudEZyb250QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * Who asked. Workspace rpcs act differently for an agent asking from inside a
@@ -231,12 +231,22 @@ export const WorkspaceTopologySchema: GenMessage<WorkspaceTopology> = /*@__PURE_
   messageDesc(file_agentrepl_v1_workspace_topology, 6);
 
 /**
- * From the primary branch, onto the primary branch. No fields: the
- * repository names its primary branch.
+ * From the primary branch, onto the primary branch. The repository names its
+ * primary branch.
  *
  * @generated from message agentrepl.v1.WorkspaceTopologyPrimary
  */
 export type WorkspaceTopologyPrimary = Message<"agentrepl.v1.WorkspaceTopologyPrimary"> & {
+  /**
+   * SET: cut from the primary branch's tip on the remote `origin`, fetched as
+   * the create runs, rather than from the local primary branch's tip. The
+   * workspace still lands onto the local primary branch. A fetch that fails
+   * refuses the create (CreateWorkspaceError.origin_fetch_failed). UNSET: the
+   * local primary branch's tip.
+   *
+   * @generated from field: optional agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin from_origin = 1;
+   */
+  fromOrigin?: WorkspaceTopologyPrimaryFromOrigin | undefined;
 };
 
 /**
@@ -245,6 +255,22 @@ export type WorkspaceTopologyPrimary = Message<"agentrepl.v1.WorkspaceTopologyPr
  */
 export const WorkspaceTopologyPrimarySchema: GenMessage<WorkspaceTopologyPrimary> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_workspace_topology, 7);
+
+/**
+ * The create is cut from origin's primary branch. DELIBERATELY EMPTY: presence
+ * is the fact.
+ *
+ * @generated from message agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin
+ */
+export type WorkspaceTopologyPrimaryFromOrigin = Message<"agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin.
+ * Use `create(WorkspaceTopologyPrimaryFromOriginSchema)` to create a new message.
+ */
+export const WorkspaceTopologyPrimaryFromOriginSchema: GenMessage<WorkspaceTopologyPrimaryFromOrigin> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_topology, 8);
 
 /**
  * A child of another workspace: from its branch, into its branch.
@@ -289,7 +315,7 @@ export type WorkspaceTopologyChild = Message<"agentrepl.v1.WorkspaceTopologyChil
  * Use `create(WorkspaceTopologyChildSchema)` to create a new message.
  */
 export const WorkspaceTopologyChildSchema: GenMessage<WorkspaceTopologyChild> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 8);
+  messageDesc(file_agentrepl_v1_workspace_topology, 9);
 
 /**
  * The requester's notice to a child's owner.
@@ -311,7 +337,7 @@ export type WorkspaceTopologyChildOwnerNotice = Message<"agentrepl.v1.WorkspaceT
  * Use `create(WorkspaceTopologyChildOwnerNoticeSchema)` to create a new message.
  */
 export const WorkspaceTopologyChildOwnerNoticeSchema: GenMessage<WorkspaceTopologyChildOwnerNotice> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 9);
+  messageDesc(file_agentrepl_v1_workspace_topology, 10);
 
 /**
  * Where a merge joins its repository's queue once it is put in line.
@@ -351,7 +377,7 @@ export type MergeQueuePlacement = Message<"agentrepl.v1.MergeQueuePlacement"> & 
  * Use `create(MergeQueuePlacementSchema)` to create a new message.
  */
 export const MergeQueuePlacementSchema: GenMessage<MergeQueuePlacement> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 10);
+  messageDesc(file_agentrepl_v1_workspace_topology, 11);
 
 /**
  * The back of the queue. No fields.
@@ -366,7 +392,7 @@ export type MergeQueuePlacementBack = Message<"agentrepl.v1.MergeQueuePlacementB
  * Use `create(MergeQueuePlacementBackSchema)` to create a new message.
  */
 export const MergeQueuePlacementBackSchema: GenMessage<MergeQueuePlacementBack> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 11);
+  messageDesc(file_agentrepl_v1_workspace_topology, 12);
 
 /**
  * The front of the queue. No fields.
@@ -381,5 +407,5 @@ export type MergeQueuePlacementFront = Message<"agentrepl.v1.MergeQueuePlacement
  * Use `create(MergeQueuePlacementFrontSchema)` to create a new message.
  */
 export const MergeQueuePlacementFrontSchema: GenMessage<MergeQueuePlacementFront> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 12);
+  messageDesc(file_agentrepl_v1_workspace_topology, 13);
 

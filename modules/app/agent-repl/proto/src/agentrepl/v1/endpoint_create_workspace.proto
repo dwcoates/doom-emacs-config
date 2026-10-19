@@ -465,6 +465,9 @@ message CreateWorkspaceError {
     // The requester's session was deleted, so the merge's report could never
     // reach it. Nothing was recorded.
     CreateWorkspaceAsyncMergeRequesterSessionDeleted async_merge_requester_session_deleted = 38;
+    // A primary create cut from origin (WorkspaceTopologyPrimary.from_origin)
+    // could not fetch origin's primary branch. Nothing was created.
+    CreateWorkspaceOriginFetchFailed origin_fetch_failed = 39;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -616,4 +619,10 @@ message CreateWorkspaceNamingFailed {
   // The last answer the model gave, when there was one. Empty when the call
   // never answered.
   string answer = 4;
+}
+
+// Origin's primary branch could not be fetched.
+message CreateWorkspaceOriginFetchFailed {
+  // The fetch's own failure, as git stated it.
+  string detail = 1;
 }

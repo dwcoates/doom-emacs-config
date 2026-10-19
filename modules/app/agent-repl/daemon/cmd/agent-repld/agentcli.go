@@ -130,7 +130,7 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":      {usage: "create -repository here|DIR -topology primary|child [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-before-merge TEXT] [-after-merge TEXT] [-as-user]", run: workspaceCreate},
+		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-before-merge TEXT] [-after-merge TEXT] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-before-merge TEXT] [-after-merge TEXT] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
 		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-as-user]", run: workspaceSet},
@@ -440,6 +440,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	repository := fs.String("repository", "", "here, or the repository's main checkout")
 	topology := fs.String("topology", "", "primary, or child of -owner")
+	originMaster := fs.Bool("origin-master", false, "cut a primary workspace from origin's primary branch, fetched now")
 	owner := fs.String("owner", "", "the owner a child is cut from and lands into")
 	ownerNotice := fs.String("owner-notice", "", "the notice to an owner that lands the child")
 	contextOrigin := fs.String("context", "", "fresh, or fork of -fork")
@@ -459,6 +460,9 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if len(positionals) != 0 || *repository == "" || *topology == "" || *contextOrigin == "" {
 		return c.usageFailed("-repository, -topology and -context are required, and nothing is positional")
 	}
+	if *originMaster && *topology != "primary" {
+		return c.usageFailed("-origin-master cuts a primary workspace; a child is cut from its owner")
+	}
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
@@ -473,7 +477,11 @@ func workspaceCreate(c *cliCall, args []string) int {
 	shape := &agentreplv1.WorkspaceTopology{}
 	switch *topology {
 	case "primary":
-		shape.Shape = &agentreplv1.WorkspaceTopology_Primary{Primary: &agentreplv1.WorkspaceTopologyPrimary{}}
+		primary := &agentreplv1.WorkspaceTopologyPrimary{}
+		if *originMaster {
+			primary.FromOrigin = &agentreplv1.WorkspaceTopologyPrimaryFromOrigin{}
+		}
+		shape.Shape = &agentreplv1.WorkspaceTopology_Primary{Primary: primary}
 	case "child":
 		ownerRef, ok := c.named(*owner)
 		if *owner == "" || !ok {

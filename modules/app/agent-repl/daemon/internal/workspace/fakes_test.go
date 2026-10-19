@@ -999,6 +999,9 @@ type fakeGit struct {
 
 	created   []createdWorktree
 	createErr error
+	// fetched records each Fetch as "dir remote"; fetchErr fails every one.
+	fetched  []string
+	fetchErr error
 	nuked     []nukedWorktree
 	nukeErr   error
 
@@ -1106,6 +1109,11 @@ func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
 
 func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
 	return g.defaultBranch, g.defaultErr
+}
+
+func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
+	g.fetched = append(g.fetched, dir+" "+remote)
+	return g.fetchErr
 }
 
 func (g *fakeGit) CreateWorktree(_ context.Context, repoDir, branch, baseRef, worktreeDir string) error {

@@ -482,10 +482,16 @@ func (*WorkspaceTopology_Primary) isWorkspaceTopology_Shape() {}
 
 func (*WorkspaceTopology_Child) isWorkspaceTopology_Shape() {}
 
-// From the primary branch, onto the primary branch. No fields: the
-// repository names its primary branch.
+// From the primary branch, onto the primary branch. The repository names its
+// primary branch.
 type WorkspaceTopologyPrimary struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SET: cut from the primary branch's tip on the remote `origin`, fetched as
+	// the create runs, rather than from the local primary branch's tip. The
+	// workspace still lands onto the local primary branch. A fetch that fails
+	// refuses the create (CreateWorkspaceError.origin_fetch_failed). UNSET: the
+	// local primary branch's tip.
+	FromOrigin    *WorkspaceTopologyPrimaryFromOrigin `protobuf:"bytes,1,opt,name=from_origin,json=fromOrigin,proto3,oneof" json:"from_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -520,6 +526,51 @@ func (*WorkspaceTopologyPrimary) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *WorkspaceTopologyPrimary) GetFromOrigin() *WorkspaceTopologyPrimaryFromOrigin {
+	if x != nil {
+		return x.FromOrigin
+	}
+	return nil
+}
+
+// The create is cut from origin's primary branch. DELIBERATELY EMPTY: presence
+// is the fact.
+type WorkspaceTopologyPrimaryFromOrigin struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceTopologyPrimaryFromOrigin) Reset() {
+	*x = WorkspaceTopologyPrimaryFromOrigin{}
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceTopologyPrimaryFromOrigin) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceTopologyPrimaryFromOrigin) ProtoMessage() {}
+
+func (x *WorkspaceTopologyPrimaryFromOrigin) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceTopologyPrimaryFromOrigin.ProtoReflect.Descriptor instead.
+func (*WorkspaceTopologyPrimaryFromOrigin) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{8}
+}
+
 // A child of another workspace: from its branch, into its branch.
 //
 // WHO LANDS A CHILD depends on whose context it starts with. A child whose
@@ -550,7 +601,7 @@ type WorkspaceTopologyChild struct {
 
 func (x *WorkspaceTopologyChild) Reset() {
 	*x = WorkspaceTopologyChild{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +613,7 @@ func (x *WorkspaceTopologyChild) String() string {
 func (*WorkspaceTopologyChild) ProtoMessage() {}
 
 func (x *WorkspaceTopologyChild) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +626,7 @@ func (x *WorkspaceTopologyChild) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceTopologyChild.ProtoReflect.Descriptor instead.
 func (*WorkspaceTopologyChild) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WorkspaceTopologyChild) GetOwner() *v1.WorkspaceRef {
@@ -604,7 +655,7 @@ type WorkspaceTopologyChildOwnerNotice struct {
 
 func (x *WorkspaceTopologyChildOwnerNotice) Reset() {
 	*x = WorkspaceTopologyChildOwnerNotice{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +667,7 @@ func (x *WorkspaceTopologyChildOwnerNotice) String() string {
 func (*WorkspaceTopologyChildOwnerNotice) ProtoMessage() {}
 
 func (x *WorkspaceTopologyChildOwnerNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +680,7 @@ func (x *WorkspaceTopologyChildOwnerNotice) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use WorkspaceTopologyChildOwnerNotice.ProtoReflect.Descriptor instead.
 func (*WorkspaceTopologyChildOwnerNotice) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WorkspaceTopologyChildOwnerNotice) GetText() string {
@@ -656,7 +707,7 @@ type MergeQueuePlacement struct {
 
 func (x *MergeQueuePlacement) Reset() {
 	*x = MergeQueuePlacement{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +719,7 @@ func (x *MergeQueuePlacement) String() string {
 func (*MergeQueuePlacement) ProtoMessage() {}
 
 func (x *MergeQueuePlacement) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +732,7 @@ func (x *MergeQueuePlacement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacement.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacement) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MergeQueuePlacement) GetPlace() isMergeQueuePlacement_Place {
@@ -738,7 +789,7 @@ type MergeQueuePlacementBack struct {
 
 func (x *MergeQueuePlacementBack) Reset() {
 	*x = MergeQueuePlacementBack{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -750,7 +801,7 @@ func (x *MergeQueuePlacementBack) String() string {
 func (*MergeQueuePlacementBack) ProtoMessage() {}
 
 func (x *MergeQueuePlacementBack) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -763,7 +814,7 @@ func (x *MergeQueuePlacementBack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacementBack.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacementBack) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{12}
 }
 
 // The front of the queue. No fields.
@@ -775,7 +826,7 @@ type MergeQueuePlacementFront struct {
 
 func (x *MergeQueuePlacementFront) Reset() {
 	*x = MergeQueuePlacementFront{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -787,7 +838,7 @@ func (x *MergeQueuePlacementFront) String() string {
 func (*MergeQueuePlacementFront) ProtoMessage() {}
 
 func (x *MergeQueuePlacementFront) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -800,7 +851,7 @@ func (x *MergeQueuePlacementFront) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacementFront.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacementFront) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{13}
 }
 
 var File_agentrepl_v1_workspace_topology_proto protoreflect.FileDescriptor
@@ -825,8 +876,12 @@ const file_agentrepl_v1_workspace_topology_proto_rawDesc = "" +
 	"\x11WorkspaceTopology\x12B\n" +
 	"\aprimary\x18\x01 \x01(\v2&.agentrepl.v1.WorkspaceTopologyPrimaryH\x00R\aprimary\x12<\n" +
 	"\x05child\x18\x02 \x01(\v2$.agentrepl.v1.WorkspaceTopologyChildH\x00R\x05childB\a\n" +
-	"\x05shape\"\x1a\n" +
-	"\x18WorkspaceTopologyPrimary\"\xb4\x01\n" +
+	"\x05shape\"\x82\x01\n" +
+	"\x18WorkspaceTopologyPrimary\x12V\n" +
+	"\vfrom_origin\x18\x01 \x01(\v20.agentrepl.v1.WorkspaceTopologyPrimaryFromOriginH\x00R\n" +
+	"fromOrigin\x88\x01\x01B\x0e\n" +
+	"\f_from_origin\"$\n" +
+	"\"WorkspaceTopologyPrimaryFromOrigin\"\xb4\x01\n" +
 	"\x16WorkspaceTopologyChild\x120\n" +
 	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\x12W\n" +
 	"\fowner_notice\x18\x02 \x01(\v2/.agentrepl.v1.WorkspaceTopologyChildOwnerNoticeH\x00R\vownerNotice\x88\x01\x01B\x0f\n" +
@@ -852,41 +907,43 @@ func file_agentrepl_v1_workspace_topology_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_topology_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_topology_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_agentrepl_v1_workspace_topology_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_workspace_topology_proto_goTypes = []any{
-	(*WorkspaceRequester)(nil),                // 0: agentrepl.v1.WorkspaceRequester
-	(*WorkspaceRequesterUser)(nil),            // 1: agentrepl.v1.WorkspaceRequesterUser
-	(*WorkspaceRequesterWorkspace)(nil),       // 2: agentrepl.v1.WorkspaceRequesterWorkspace
-	(*WorkspaceContextOrigin)(nil),            // 3: agentrepl.v1.WorkspaceContextOrigin
-	(*WorkspaceContextOriginFresh)(nil),       // 4: agentrepl.v1.WorkspaceContextOriginFresh
-	(*WorkspaceContextOriginFork)(nil),        // 5: agentrepl.v1.WorkspaceContextOriginFork
-	(*WorkspaceTopology)(nil),                 // 6: agentrepl.v1.WorkspaceTopology
-	(*WorkspaceTopologyPrimary)(nil),          // 7: agentrepl.v1.WorkspaceTopologyPrimary
-	(*WorkspaceTopologyChild)(nil),            // 8: agentrepl.v1.WorkspaceTopologyChild
-	(*WorkspaceTopologyChildOwnerNotice)(nil), // 9: agentrepl.v1.WorkspaceTopologyChildOwnerNotice
-	(*MergeQueuePlacement)(nil),               // 10: agentrepl.v1.MergeQueuePlacement
-	(*MergeQueuePlacementBack)(nil),           // 11: agentrepl.v1.MergeQueuePlacementBack
-	(*MergeQueuePlacementFront)(nil),          // 12: agentrepl.v1.MergeQueuePlacementFront
-	(*v1.WorkspaceRef)(nil),                   // 13: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                 // 0: agentrepl.v1.WorkspaceRequester
+	(*WorkspaceRequesterUser)(nil),             // 1: agentrepl.v1.WorkspaceRequesterUser
+	(*WorkspaceRequesterWorkspace)(nil),        // 2: agentrepl.v1.WorkspaceRequesterWorkspace
+	(*WorkspaceContextOrigin)(nil),             // 3: agentrepl.v1.WorkspaceContextOrigin
+	(*WorkspaceContextOriginFresh)(nil),        // 4: agentrepl.v1.WorkspaceContextOriginFresh
+	(*WorkspaceContextOriginFork)(nil),         // 5: agentrepl.v1.WorkspaceContextOriginFork
+	(*WorkspaceTopology)(nil),                  // 6: agentrepl.v1.WorkspaceTopology
+	(*WorkspaceTopologyPrimary)(nil),           // 7: agentrepl.v1.WorkspaceTopologyPrimary
+	(*WorkspaceTopologyPrimaryFromOrigin)(nil), // 8: agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin
+	(*WorkspaceTopologyChild)(nil),             // 9: agentrepl.v1.WorkspaceTopologyChild
+	(*WorkspaceTopologyChildOwnerNotice)(nil),  // 10: agentrepl.v1.WorkspaceTopologyChildOwnerNotice
+	(*MergeQueuePlacement)(nil),                // 11: agentrepl.v1.MergeQueuePlacement
+	(*MergeQueuePlacementBack)(nil),            // 12: agentrepl.v1.MergeQueuePlacementBack
+	(*MergeQueuePlacementFront)(nil),           // 13: agentrepl.v1.MergeQueuePlacementFront
+	(*v1.WorkspaceRef)(nil),                    // 14: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_workspace_topology_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WorkspaceRequester.user:type_name -> agentrepl.v1.WorkspaceRequesterUser
 	2,  // 1: agentrepl.v1.WorkspaceRequester.workspace:type_name -> agentrepl.v1.WorkspaceRequesterWorkspace
-	13, // 2: agentrepl.v1.WorkspaceRequesterWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 2: agentrepl.v1.WorkspaceRequesterWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
 	4,  // 3: agentrepl.v1.WorkspaceContextOrigin.fresh:type_name -> agentrepl.v1.WorkspaceContextOriginFresh
 	5,  // 4: agentrepl.v1.WorkspaceContextOrigin.fork:type_name -> agentrepl.v1.WorkspaceContextOriginFork
-	13, // 5: agentrepl.v1.WorkspaceContextOriginFork.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 5: agentrepl.v1.WorkspaceContextOriginFork.workspace:type_name -> workspace.v1.WorkspaceRef
 	7,  // 6: agentrepl.v1.WorkspaceTopology.primary:type_name -> agentrepl.v1.WorkspaceTopologyPrimary
-	8,  // 7: agentrepl.v1.WorkspaceTopology.child:type_name -> agentrepl.v1.WorkspaceTopologyChild
-	13, // 8: agentrepl.v1.WorkspaceTopologyChild.owner:type_name -> workspace.v1.WorkspaceRef
-	9,  // 9: agentrepl.v1.WorkspaceTopologyChild.owner_notice:type_name -> agentrepl.v1.WorkspaceTopologyChildOwnerNotice
-	11, // 10: agentrepl.v1.MergeQueuePlacement.back:type_name -> agentrepl.v1.MergeQueuePlacementBack
-	12, // 11: agentrepl.v1.MergeQueuePlacement.front:type_name -> agentrepl.v1.MergeQueuePlacementFront
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	9,  // 7: agentrepl.v1.WorkspaceTopology.child:type_name -> agentrepl.v1.WorkspaceTopologyChild
+	8,  // 8: agentrepl.v1.WorkspaceTopologyPrimary.from_origin:type_name -> agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin
+	14, // 9: agentrepl.v1.WorkspaceTopologyChild.owner:type_name -> workspace.v1.WorkspaceRef
+	10, // 10: agentrepl.v1.WorkspaceTopologyChild.owner_notice:type_name -> agentrepl.v1.WorkspaceTopologyChildOwnerNotice
+	12, // 11: agentrepl.v1.MergeQueuePlacement.back:type_name -> agentrepl.v1.MergeQueuePlacementBack
+	13, // 12: agentrepl.v1.MergeQueuePlacement.front:type_name -> agentrepl.v1.MergeQueuePlacementFront
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_topology_proto_init() }
@@ -906,8 +963,9 @@ func file_agentrepl_v1_workspace_topology_proto_init() {
 		(*WorkspaceTopology_Primary)(nil),
 		(*WorkspaceTopology_Child)(nil),
 	}
-	file_agentrepl_v1_workspace_topology_proto_msgTypes[8].OneofWrappers = []any{}
-	file_agentrepl_v1_workspace_topology_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_topology_proto_msgTypes[7].OneofWrappers = []any{}
+	file_agentrepl_v1_workspace_topology_proto_msgTypes[9].OneofWrappers = []any{}
+	file_agentrepl_v1_workspace_topology_proto_msgTypes[11].OneofWrappers = []any{
 		(*MergeQueuePlacement_Back)(nil),
 		(*MergeQueuePlacement_Front)(nil),
 	}
@@ -917,7 +975,7 @@ func file_agentrepl_v1_workspace_topology_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_topology_proto_rawDesc), len(file_agentrepl_v1_workspace_topology_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
