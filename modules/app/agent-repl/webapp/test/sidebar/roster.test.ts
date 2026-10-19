@@ -1257,6 +1257,22 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
   });
 
+  it("declares the one rail row vertical padding", () => {
+    expect(css).toContain("#ws-sidebar { --row-pad-y: 0.14rem; }");
+  });
+
+  it("pads every rail row with the shared vertical padding", () => {
+    expect(css).toContain("  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;");
+  });
+
+  it("builds a merged row's height out of the shared vertical padding", () => {
+    expect(css).toContain("--merged-row-h: calc(var(--row-pad-y) * 2 + var(--merged-row-line-h));");
+  });
+
+  it("restates no row vertical padding of its own", () => {
+    expect(css).not.toContain("--merged-row-pad-y");
+  });
+
   it("draws the selection's bar and the merge-today bar at the shared width", () => {
     const bar = (selector: string): string | undefined =>
       css.split(`${selector} {\n`)[1]?.split("}")[0];
