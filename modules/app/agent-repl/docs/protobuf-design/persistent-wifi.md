@@ -104,3 +104,26 @@ that every protobuf decision be made without their input (2026-10-01).
     (see the Setup section of `docs/USER-GUIDE.md`).
   - The energy mode is written, never read back, so the standing does not
     carry it.
+
+### 6. The hotspot failover (2026-10-19, no wire change)
+
+- WHAT: while the mode is on, every re-read that finds the Wi-Fi interface
+  joined to nothing joins the configured hotspot
+  (`daemon/internal/persistentwifi/failover.go`). A join that does not take is
+  tried again on the next re-read, so the hotspot is rejoined within one
+  cadence of it coming back in reach.
+- WHY: the owner asked that persistent wifi mode guarantee the hotspot is
+  joined once Wi-Fi connectivity is lost.
+- Consequences:
+  - The failover runs on the controller's re-read beat, under the same lock as
+    `UpdatePersistentWifiMode`, so a beat never joins on a reading a mode change
+    overturned.
+  - The boot's Prime read (`Refresh`) never joins, so serving never waits on a
+    Wi-Fi join; the first beat after boot does.
+  - Only "joined to nothing" triggers it. Another joined network, including one
+    whose name macOS withholds, is left alone.
+  - Each distinct cause of a failover that cannot take is recorded once (WARN,
+    or ERROR for an unconfigured hotspot), repeats at DEBUG, and the end of the
+    failover at INFO.
+  - The standing it publishes is the existing `PersistentWifiState`, so Emacs
+    echoes the rejoin and the topbar chip turns green with no new message.

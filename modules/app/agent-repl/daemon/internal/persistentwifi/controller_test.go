@@ -238,8 +238,9 @@ func TestRefreshRecordsARecoveredFactAtInfo(t *testing.T) {
 }
 
 func TestRunRereadsOnEveryTickAndEndsWithItsContext(t *testing.T) {
-	// Arrange.
-	h := newHarness(t).standing(pmsetOff, summary(false, ""))
+	// Arrange: a network stays joined, so the hotspot failover has nothing to
+	// do once the mode turns on.
+	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
 	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
 	h.c.Refresh(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())

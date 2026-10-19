@@ -9,7 +9,9 @@
 // standing, which the script only half did: whether the Wi-Fi interface is
 // joined to a network, and whether sleep is disabled. The controller re-reads
 // both on a fixed cadence and after every change, and publishes the standing
-// on one topic that the daemon-level stream and the topbar both take.
+// on one topic that the daemon-level stream and the topbar both take. While
+// the mode is on, every re-read that finds no network joined joins the hotspot
+// (failover.go).
 //
 // EVERY HOST TOOL RUNS THROUGH ONE INJECTED RUNNER, by absolute path, so a
 // unit test scripts every answer and no test ever touches the real machine's

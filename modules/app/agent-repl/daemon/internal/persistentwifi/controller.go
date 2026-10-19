@@ -25,7 +25,8 @@ const (
 
 // DefaultEvery is how often the standing is re-read. It bounds how long a
 // change made OUTSIDE agent-repl (a network dropping, `pmset` run by hand)
-// takes to reach the topbar and Emacs; a change made through Update is
+// takes to reach the topbar and Emacs, and how long a dropped network goes
+// unanswered by the hotspot failover; a change made through Update is
 // published at once. Each read is three short-lived local tools.
 const DefaultEvery = 5 * time.Second
 
@@ -69,6 +70,9 @@ type Controller struct {
 	// fact, so a failure that persists is recorded once rather than on every
 	// re-read.
 	wifiCause, modeCause string
+	// failoverCause is why the hotspot failover last could not take; empty
+	// while it has nothing standing against it (failoverLocked).
+	failoverCause string
 }
 
 // New builds the controller.
@@ -108,16 +112,19 @@ func (c *Controller) Topic() *publish.Topic[*agentreplv1.PersistentWifiState] { 
 
 // Refresh reads the standing once and publishes it. The composition root calls
 // it before anything is served, so no stream or topbar is ever drawn from a
-// standing nobody read.
+// standing nobody read. It only reads: the hotspot failover is Run's, so the
+// boot never waits on a Wi-Fi join.
 func (c *Controller) Refresh(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.readLocked(ctx)
 }
 
-// Run re-reads the standing every cadence until ctx ends.
+// Run re-reads the standing every cadence until ctx ends, and on each beat
+// holds the hotspot failover to what it read (tick): with the mode on and no
+// network joined, the hotspot is joined.
 func (c *Controller) Run(ctx context.Context) error {
-	clock.Repeat(ctx, c.clock, c.every, c.every, c.Refresh)
+	clock.Repeat(ctx, c.clock, c.every, c.every, c.tick)
 	return nil
 }
 
