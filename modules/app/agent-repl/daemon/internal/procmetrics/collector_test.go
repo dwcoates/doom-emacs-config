@@ -282,13 +282,32 @@ func TestTheHostAndItsPowerAreServed(t *testing.T) {
 	get := h.scrape(t)
 
 	// Assert
-	mustValue(t, get, 9, "agentrepl_host_cpu_seconds_total", "mode", "idle")
+	mustValue(t, get, 0, "agentrepl_host_cpu_seconds_total", "mode", "idle")
 	mustValue(t, get, 4, "agentrepl_host_memory_bytes", "state", "wired")
 	mustValue(t, get, 16, "agentrepl_host_memory_total_bytes")
 	mustValue(t, get, 1, "agentrepl_host_memory_pressure")
 	mustValue(t, get, 3, "agentrepl_host_disk_free_bytes")
 	mustValue(t, get, 10, "agentrepl_host_disk_total_bytes")
 	mustValue(t, get, 1, "agentrepl_host_on_battery")
+}
+
+func TestTheHostsCPUCountsFromTheDaemonsFirstRead(t *testing.T) {
+	// Arrange: the host has run 9 idle seconds before the daemon's first read.
+	reader := newWorld()
+	h := newHarness(t, reader)
+	h.scrape(t)
+	reader.mu.Lock()
+	reader.host.CPUSeconds = map[string]float64{"user": 3, "idle": 14, "system": 2}
+	reader.mu.Unlock()
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert: each mode counts its growth since then, a mode first seen now
+	// starting from zero.
+	mustValue(t, get, 5, "agentrepl_host_cpu_seconds_total", "mode", "idle")
+	mustValue(t, get, 2, "agentrepl_host_cpu_seconds_total", "mode", "user")
+	mustValue(t, get, 0, "agentrepl_host_cpu_seconds_total", "mode", "system")
 }
 
 func errorRecords(log *dlog.TestLogger) []dlog.Record {

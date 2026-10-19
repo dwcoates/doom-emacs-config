@@ -62,6 +62,11 @@ type Collector struct {
 	primed bool
 	seen   map[int]pidState
 	totals map[Group]*totals
+	// hostBase is each CPU mode's host total at the first host read, so the
+	// host's CPU counts from the daemon's start like every other counter
+	// here: a counter since the host's boot read as all of the host's
+	// history the first time a new run's series was queried.
+	hostBase map[string]float64
 
 	cpu, read, write, energy             *prometheus.Desc
 	resident, footprint, threads, fds    *prometheus.Desc
@@ -82,6 +87,7 @@ func New(deps Deps) (*Collector, error) {
 		deps:            deps,
 		seen:            map[int]pidState{},
 		totals:          map[Group]*totals{},
+		hostBase:        map[string]float64{},
 		cpu:             desc("agentrepl_process_cpu_seconds_total", "CPU seconds (user and system) a group of agent-repl processes used since the daemon started.", labels),
 		read:            desc("agentrepl_process_disk_read_bytes_total", "Bytes a group read from disk since the daemon started.", labels),
 		write:           desc("agentrepl_process_disk_written_bytes_total", "Bytes a group wrote to disk since the daemon started.", labels),
@@ -91,7 +97,7 @@ func New(deps Deps) (*Collector, error) {
 		threads:         desc("agentrepl_process_threads", "Threads in a group's live processes.", labels),
 		fds:             desc("agentrepl_process_open_fds", "Open file descriptors in a group's live processes.", labels),
 		count:           desc("agentrepl_process_count", "Live processes in a group.", labels),
-		hostCPU:         desc("agentrepl_host_cpu_seconds_total", "CPU seconds every processor spent in each mode since boot.", []string{"mode"}),
+		hostCPU:         desc("agentrepl_host_cpu_seconds_total", "CPU seconds every processor spent in each mode since the daemon started.", []string{"mode"}),
 		hostMemory:      desc("agentrepl_host_memory_bytes", "Physical memory by state.", []string{"state"}),
 		hostMemoryTotal: desc("agentrepl_host_memory_total_bytes", "All physical memory.", nil),
 		hostPressure:    desc("agentrepl_host_memory_pressure", "The kernel's memory pressure level: 1 normal, 2 warning, 4 critical.", nil),
@@ -243,7 +249,7 @@ func (c *Collector) collectHost(ch chan<- prometheus.Metric) {
 		return
 	}
 	for _, mode := range sortedKeys(h.CPUSeconds) {
-		ch <- prometheus.MustNewConstMetric(c.hostCPU, prometheus.CounterValue, h.CPUSeconds[mode], mode)
+		ch <- prometheus.MustNewConstMetric(c.hostCPU, prometheus.CounterValue, c.hostCPUSinceStart(mode, h.CPUSeconds[mode]), mode)
 	}
 	for _, state := range sortedKeys(h.MemoryBytes) {
 		ch <- prometheus.MustNewConstMetric(c.hostMemory, prometheus.GaugeValue, float64(h.MemoryBytes[state]), state)
@@ -252,6 +258,19 @@ func (c *Collector) collectHost(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.hostPressure, prometheus.GaugeValue, float64(h.MemoryPressure))
 	ch <- prometheus.MustNewConstMetric(c.hostDiskFree, prometheus.GaugeValue, float64(h.DiskFreeBytes))
 	ch <- prometheus.MustNewConstMetric(c.hostDiskTotal, prometheus.GaugeValue, float64(h.DiskTotalBytes))
+}
+
+// hostCPUSinceStart answers mode's host CPU seconds since the first host read
+// that carried the mode.
+func (c *Collector) hostCPUSinceStart(mode string, total float64) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	base, ok := c.hostBase[mode]
+	if !ok {
+		c.hostBase[mode] = total
+		return 0
+	}
+	return nonNegative(total - base)
 }
 
 func (c *Collector) collectPower(ch chan<- prometheus.Metric) {

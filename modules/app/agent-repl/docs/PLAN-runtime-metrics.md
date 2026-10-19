@@ -240,7 +240,7 @@ run, judgement call 12).
 | `agentrepl_process_energy_joules_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
 | `agentrepl_process_resident_bytes`, `..._footprint_bytes` | gauge | `process`, `workspace` | daemon (`procmetrics`) |
 | `agentrepl_process_threads`, `..._open_fds`, `..._count` | gauge | `process`, `workspace` | daemon (`procmetrics`) |
-| `agentrepl_host_cpu_seconds_total` | counter | `mode` | daemon (`procmetrics`) |
+| `agentrepl_host_cpu_seconds_total` | counter | `mode` | daemon (`procmetrics`), since the daemon started like every counter here, so `increase_pure` reads it right |
 | `agentrepl_host_memory_bytes`, `..._memory_total_bytes`, `..._memory_pressure` | gauge | `state` | daemon (`procmetrics`) |
 | `agentrepl_host_disk_free_bytes`, `..._disk_total_bytes` | gauge | | daemon (`procmetrics`) |
 | `agentrepl_host_on_battery` | gauge, 0 or 1 | | daemon (`procmetrics`) |
