@@ -36,14 +36,14 @@
  * the slot is empty rather than one this end fills with a placeholder.
  *
  * HIDING THE WORKSPACE IS NOT A REMEDIATION (owner request, 2026-10-13). The
- * grey "hide workspace" button at the end of the row sends `SetWorkspaceHidden`
+ * light grey "hide workspace" button past pay sends `SetWorkspaceHidden`
  * — the same hide `SPC TAB h` sends, which moves the workspace into the
  * sidebar's hidden section and lands the user elsewhere — and answers nothing
  * about the gate: the gate keeps standing for whenever the workspace is shown
  * again.
  *
  * KILLING THE WORKSPACE IS NOT A REMEDIATION EITHER (owner request,
- * 2026-10-17). The grey "kill workspace" button beside hide sends
+ * 2026-10-17). The grey "kill workspace" button ending the row sends
  * `KillWorkspace` — the same forced session death the sidebar's Kill sends,
  * which leaves the worktree and branch standing — and answers nothing about the
  * gate.
@@ -438,13 +438,13 @@ function drawActions(
   // PAY GOES LAST OF THE REMEDIATIONS, in red (owner request, 2026-10-06): it
   // is the weightiest choice on the gate, so it takes the end of their run and
   // the red border; clear takes the place and the border pay had.
-  // HIDE WORKSPACE ENDS THE ROW, in grey (owner request, 2026-10-13): it is
-  // not a remediation, so it sits past pay, the last of them.
-  // KILL WORKSPACE SITS BETWEEN PAY AND HIDE, in the same grey (owner request,
-  // 2026-10-17): it is not a remediation either.
-  const kill = gateButton("cold-gate-kill", ["data-cold-gate-kill", ""], COLD_GATE_COPY.kill, buttons);
+  // HIDE AND KILL WORKSPACE FOLLOW PAY, in grey (owner requests, 2026-10-13
+  // and 2026-10-17): neither is a remediation, so both sit past pay, the last
+  // of them. KILL ENDS THE ROW, with hide to its left in a lighter grey (owner
+  // request, 2026-10-19).
   const hide = gateButton("cold-gate-hide", ["data-cold-gate-hide", ""], COLD_GATE_COPY.hide, buttons);
-  row.append(clear, pay, kill, hide);
+  const kill = gateButton("cold-gate-kill", ["data-cold-gate-kill", ""], COLD_GATE_COPY.kill, buttons);
+  row.append(clear, pay, hide, kill);
   pay.addEventListener("click", () => {
     void answer(rc, actions, buttons, progress, { kind: "pay" });
   });
