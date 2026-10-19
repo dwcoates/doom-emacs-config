@@ -38,7 +38,9 @@ type subject struct {
 	// workspace, the repository's main worktree otherwise.
 	targetDir string
 	// closes is the workspace that closes once the branch lands, empty when
-	// none does.
+	// none does. It and closesAlso are read from wsm.MergeSource.LandingCloses,
+	// the one statement of what a merge closes, which the family rules read
+	// too.
 	closes ids.WorkspaceID
 	// closesAlso is ANOTHER workspace an async merge closes once it lands
 	// (wsm.MergeOrigin.CloseOnLanding), empty when it closes none.
@@ -79,19 +81,14 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 			return subject{}, err
 		}
 		s := subject{branch: branch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir}
-		if !r.source.KeepOpen {
-			s.closes = r.ws
-		}
 		// A MERGE WORKSPACE CARRIES ITS ASYNC REQUEST'S LANDING EFFECTS.
 		record, err := o.deps.DB.Workspace(ctx, r.ws)
 		if err != nil {
 			return subject{}, fmt.Errorf("merge: reading workspace %s for its landing effects: %w", r.ws, err)
 		}
-		if origin := record.MergeOf; origin != nil {
-			s.closesAlso = origin.CloseOnLanding
-			if origin.CleanupWorktree {
-				s.cleanupDir = origin.CleanupDir
-			}
+		s.closes, s.closesAlso = r.source.LandingCloses(r.ws, record.MergeOf)
+		if origin := record.MergeOf; origin != nil && origin.CleanupWorktree {
+			s.cleanupDir = origin.CleanupDir
 		}
 		return s, nil
 	case wsm.MergeSourceWorkspace:
@@ -103,9 +100,10 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		if err != nil {
 			return subject{}, err
 		}
+		closes, _ := r.source.LandingCloses(r.ws, nil)
 		return subject{
 			branch: branch, dir: job.Layout.SourceDir, targetDir: job.Layout.TargetDir,
-			closes: r.source.Workspace, other: r.source.Workspace,
+			closes: closes, other: r.source.Workspace,
 		}, nil
 	case wsm.MergeSourceBranch:
 		return o.branchSubject(ctx, r)
@@ -122,7 +120,8 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		if err != nil {
 			return subject{}, err
 		}
-		return subject{branch: branch, targetDir: main, closes: r.ws}, nil
+		closes, _ := r.source.LandingCloses(r.ws, nil)
+		return subject{branch: branch, targetDir: main, closes: closes}, nil
 	default:
 		return subject{}, fmt.Errorf("merge: the undeclared source %s", r.source.Kind)
 	}
