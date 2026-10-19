@@ -1525,9 +1525,10 @@ describe("mountBubble: the tool-card framing", () => {
     expect(head?.classList.contains("async-ticker")).toBe(false);
   });
 
-  it("takes the shared track cap rather than the full feed-area width", () => {
+  it("takes the tool card cap rather than the full feed-area width", () => {
     // Arrange: the cap rule is `.feed-item > .tool-card`, so the outer must sit
-    // as a direct child of a feed item exactly as the feed mounts it.
+    // as a direct child of a feed item exactly as the feed mounts it. A subagent
+    // bubble is a tool card, so it takes the inset cap (owner request, 2026-10-19).
     const remove = installStylesheet();
     try {
       const { bubble } = mount(subagentRow("b1"));
@@ -1535,9 +1536,9 @@ describe("mountBubble: the tool-card framing", () => {
       item.className = "feed-item";
       item.append(bubble.element);
       document.body.replaceChildren(item);
-      // Act / Assert: the shared column cap, never 100%.
+      // Act / Assert: the tool card cap, never 100%.
       expect(window.getComputedStyle(bubble.element).maxWidth).toBe(
-        "var(--agent-bubble-cap)",
+        "var(--tool-card-cap)",
       );
     } finally {
       remove();
