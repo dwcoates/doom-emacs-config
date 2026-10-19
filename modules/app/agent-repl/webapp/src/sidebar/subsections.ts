@@ -32,7 +32,7 @@ import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterRepoSection, RosterRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { childrenMatching, queryAll } from "../dom.js";
-import { OPEN_REGION_CLASS } from "./band-fit.js";
+import { OPEN_REGION_CLASS, SUBSECTION_SLOT_CLASS } from "./band-fit.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import { sendArrangement, type ArrangeChange } from "./arrange.js";
@@ -133,7 +133,7 @@ export function drawRosterSubsection(
   rows.setAttribute(BUCKET_ATTRIBUTE, id);
   element.appendChild(rows);
   const empty = document.createElement("div");
-  empty.className = "sb-subsection-empty";
+  empty.className = SUBSECTION_SLOT_CLASS;
   empty.textContent = "drag workspaces here";
   element.appendChild(empty);
   return { element, rows };

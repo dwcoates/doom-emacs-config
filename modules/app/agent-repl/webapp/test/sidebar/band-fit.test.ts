@@ -266,6 +266,25 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["repo-head", "row"]);
   });
 
+  it("counts an empty subsection's drop slot as a line", () => {
+    // Arrange: the stylesheet draws the slot only while the subsection has no rows.
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="sb-subsection"><div class="sb-subsection-head"></div><div class="rows"></div><div class="sb-subsection-empty"></div></div><div class="row"></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-subsection-head, .sb-subsection-empty, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["sb-subsection-empty", "row"]);
+  });
+
+  it("counts a filled subsection's hidden drop slot as no line", () => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="sb-subsection"><div class="sb-subsection-head"></div><div class="rows"><div class="row"></div></div><div class="sb-subsection-empty"></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-subsection-head, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    (box.querySelector(".sb-subsection-empty") as HTMLElement).getBoundingClientRect = () => rect(0, 0);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["row"]);
+  });
+
   it("counts an expanded repository's header as no line", () => {
     // Arrange
     const box = document.createElement("div");
