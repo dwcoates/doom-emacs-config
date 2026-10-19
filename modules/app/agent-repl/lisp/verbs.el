@@ -1935,7 +1935,10 @@ workspace, and a fork -- ask for a prompt and nothing else: the repository
 is the repository the CURRENT workspace sits in, taken off that repo's
 MAIN (default) branch, and the daemon mints the name.  So the repository
 is READ from the roster section the current workspace's row sits in, and
-never picked.  Only the static mode asks for a repository.
+never picked.  Only the static mode asks for a repository.  The
+exceptions are the one-shots bound to FIXED repositories (owner ruling,
+2026-10-19): `SPC TAB o\=' always lands in agent-repl\='s own repository
+and `SPC TAB O\=' in explanation-engine\='s; `SPC TAB C-o\=' derives.
 
 COMMAND names the mode in the refusal, which is raised when the current
 buffer has no workspace to derive from -- a dynamic create has nothing to
@@ -2419,9 +2422,13 @@ THE FORK IS NOT SELECTED."
 ;; Everything the old doom / explanation-engine one-shot commands did by
 ;; hand is now one CreateWorkspace request whose form arm says one_shot.
 ;;
-;; THERE IS ONE ONE-SHOT COMMAND, because there is no finish to choose
-;; between (owner ruling, 2026-09-12): the repository states in one file
-;; what is to be done on completion, and the agent carries it out.
+;; THERE IS ONE ONE-SHOT COMMAND PER REPOSITORY, because there is no finish
+;; to choose between (owner ruling, 2026-09-12): the repository states in
+;; one file what is to be done on completion, and the agent carries it out.
+;; The repository is FIXED, not the current workspace's (owner ruling,
+;; 2026-10-19): `SPC TAB o' lands in agent-repl's own repository and
+;; `SPC TAB O' in explanation-engine's.  Only `SPC TAB C-o', a one-shot
+;; ABOUT the current workspace, takes the current workspace's repository.
 
 (defcustom agent-repl-oneshot-model-candidates '("opus" "sonnet" "haiku")
   "The models offered when creating a ONE-SHOT workspace, in order.
@@ -2461,12 +2468,13 @@ which is what asks the daemon to choose.  A nil setting seeds nothing."
 
 (defun agent-repl-create-oneshot (&optional pick-model)
   "Create a ONE-SHOT workspace for a commission read from the minibuffer.
-A one-shot is a DYNAMIC mode (owner ruling, 2026-09-12): it asks for its
-commission and nothing else -- the repository is the current workspace\='s,
-off that repo\='s main branch, and the daemon mints the name.  The
-commission prompt starts EMPTY: unlike every other creation prompt it is
-never seeded from the composer, whose draft belongs to the current
-workspace rather than to the new one-shot.
+A one-shot asks for its commission and nothing else: the repository is
+ALWAYS agent-repl\='s own (`agent-repl-verbs--agent-repl-repository\='),
+whichever workspace (or none) this runs from, off its main branch, and the
+daemon mints the name.  `SPC TAB O\=' is the explanation-engine
+counterpart.  The commission prompt starts EMPTY: unlike every other
+creation prompt it is never seeded from the composer, whose draft belongs
+to the current workspace rather than to the new one-shot.
 
 There is no finish to choose.  The repository states, in one plain-English
 file of its own policy directory, what is to be done when the work is
@@ -2476,7 +2484,7 @@ out itself.
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
   (agent-repl-verbs--create-oneshot
-   'agent-repl-create-oneshot pick-model nil #'agent-repl-verbs--oneshot-repository))
+   'agent-repl-create-oneshot pick-model nil #'agent-repl-verbs--agent-repl-repository))
 
 (defun agent-repl-create-oneshot-for-current-workspace (&optional pick-model)
   "Create a ONE-SHOT that fixes something wrong with the CURRENT workspace.
@@ -2487,7 +2495,8 @@ daemon opens the commission with a note saying the issue it cites -- a bug
 in \"the feed\", say -- is that workspace\='s, by name, worktree and
 branch.  The one-shot is still top-level, cut from and merging into the
 primary branch; nothing of the current workspace\='s conversation or
-worktree is carried over.
+worktree is carried over.  Unlike `SPC TAB o\=', its repository is the
+current workspace\='s (`agent-repl-verbs--oneshot-repository\=').
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
@@ -2496,14 +2505,13 @@ A prefix argument PICK-MODEL asks for the model."
    #'agent-repl-verbs--oneshot-repository))
 
 (defun agent-repl-verbs--oneshot-repository ()
-  "Return the current workspace\='s repository, the one a one-shot is cut in.
-Every one-shot command but the explanation-engine one targets it."
+  "Return the current workspace\='s repository, the one `SPC TAB C-o\=' is cut in."
   (agent-repl-verbs--dynamic-repository "a one-shot"))
 
-;; THE EXPLANATION-ENGINE ONE-SHOT (`SPC TAB O') is the one one-shot whose
-;; repository is FIXED: it is commissioned from any workspace, doom's
-;; included, and always lands in the explanation-engine checkout.  What it
-;; does on completion is still that repository's own policy
+;; THE EXPLANATION-ENGINE ONE-SHOT (`SPC TAB O') is the one-shot whose
+;; repository is explanation-engine's: it is commissioned from any
+;; workspace, doom's included, and always lands in the explanation-engine
+;; checkout.  What it does on completion is still that repository's own policy
 ;; (`docs/ONE-SHOT-POLICY.md'): its `.agent-repl/prompts/' at the main
 ;; checkout states the completion directive and the after-merge
 ;; `/create-or-update-pr --add-to-merge-queue'.  Emacs chooses no finish.
@@ -2637,28 +2645,30 @@ current workspace\='s finds it here."
                         (agent-repl-verbs--repo-sections))))
     (agent-repl-verbs--section-ref section)))
 
-(defun agent-repl-verbs--help-repository ()
+(defun agent-repl-verbs--agent-repl-repository ()
   "Return the `RepositoryRef' of the repository agent-repl\='s source lives in.
 The repository is found by its main worktree: the parent of the git
 common-dir of the module root (the directory holding
 `agent-repl-metaprompt-file'), so a module loaded from a linked worktree
 still names its main checkout.  It is matched against the roster\='s
-repository sections by canonical directory.
+repository sections by canonical directory.  Every creation FIXED to
+agent-repl\='s own repository finds it here.
 
 Refuses when the module root is not in a git repository, or when that
-repository is not on the roster -- the help workspace has nowhere else to
-go, and registering the repository (`SPC TAB C-n') is the user\='s act."
+repository is not on the roster -- a creation fixed to it has nowhere
+else to go, and registering the repository (`SPC TAB C-n') is the
+user\='s act."
   (let* ((module-root (file-name-directory agent-repl-metaprompt-file))
          (main (agent-repl--main-worktree-for-dir module-root)))
     (unless main
       (agent-repl--error agent-repl-verbs--create-log-scope
-                         "elisp.verbs.help-repository-unresolved module-root=%s cause=not-a-git-repository"
+                         "elisp.verbs.agent-repl-repository-unresolved module-root=%s cause=not-a-git-repository"
                          module-root)
       (user-error "agent-repl: agent-repl's source at %s is in no git repository" module-root))
     (or (agent-repl-verbs--roster-repository-at main)
         (progn
           (agent-repl--warn agent-repl-verbs--create-log-scope
-                            "elisp.verbs.help-repository-unregistered module-root=%s main=%s"
+                            "elisp.verbs.agent-repl-repository-unregistered module-root=%s main=%s"
                             module-root main)
           (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
                       main)))))
@@ -2667,7 +2677,7 @@ go, and registering the repository (`SPC TAB C-n') is the user\='s act."
   "Create a HELP workspace (`SPC o h\='): a question about agent-repl.
 Asks for the question alone, defaulting to the composer\='s text, and
 creates a standard workspace in agent-repl\='s own repository
-\(`agent-repl-verbs--help-repository\=') whose opening prompt is the
+\(`agent-repl-verbs--agent-repl-repository\=') whose opening prompt is the
 question behind `agent-repl-help-preamble'.  The daemon mints the name.
 
 THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
@@ -2676,7 +2686,7 @@ THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
   (let ((command 'agent-repl-create-help-workspace))
     (agent-repl-verbs--create-invoked command)
     (let* ((repository (agent-repl-verbs--read-for
-                        command 'repository #'agent-repl-verbs--help-repository))
+                        command 'repository #'agent-repl-verbs--agent-repl-repository))
            (question (agent-repl-verbs--read-for
                       command 'prompt
                       (lambda ()

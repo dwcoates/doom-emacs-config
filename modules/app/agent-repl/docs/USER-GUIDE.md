@@ -355,6 +355,17 @@ The input window underlines misspelled words as you type.
   - The agent-repl log names what is missing, once.
   - `bash .claude/install.sh` installs both.
 
+## A one-shot in agent-repl
+
+`SPC TAB o` makes a one-shot in agent-repl's own repository, whichever workspace you press it in.
+
+- The repository is the one agent-repl's source lives in, by its main checkout.
+  - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
+- It asks for the commission alone, and the daemon names the workspace.
+  - `SPC u SPC TAB o` asks for the model too.
+- It is cut from the repository's primary branch and merges back into it.
+- What happens when the work is done is the repository's own policy, in `.agent-repl/prompts/` at its main checkout.
+
 ## A one-shot that fixes the current workspace
 
 `SPC TAB C-o` makes a one-shot about the workspace you press it in.
@@ -364,6 +375,7 @@ The input window underlines misspelled words as you type.
 - The daemon opens the one-shot's commission with a note naming this workspace.
   - The note gives its name, worktree and branch.
   - It tells the agent that the issue you describe is this workspace's, not the one-shot's own.
+- Unlike `SPC TAB o`, the one-shot is in this workspace's repository.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
   - It is cut from the primary branch and merges back into it.
   - It copies nothing from this workspace's conversation or worktree.
