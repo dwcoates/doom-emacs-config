@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -3895,27 +3896,15 @@ func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
 // and forgot another fails here.
 func TestEveryBringUpTakesTheRecordThroughWithRecord(t *testing.T) {
 	// Arrange.
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob the package: %v", err)
-	}
 	handCopied := regexp.MustCompile(`(HoldKeepalive|WorkspaceName)\s*[:=]\s*record\.`)
 	helperBody := regexp.MustCompile(`(?s)func \(src source\) withRecord\(.*?\n}\n`)
 
 	// Act.
 	var found []string
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
+	for _, file := range sourcescan.Production(t) {
 		// withRecord's own body is the one copy there is meant to be.
-		body := helperBody.ReplaceAll(raw, nil)
-		if handCopied.Match(body) {
-			found = append(found, path)
+		if handCopied.Match(helperBody.ReplaceAll(file.Source, nil)) {
+			found = append(found, file.Name)
 		}
 	}
 
