@@ -67,3 +67,41 @@ func TestEveryRuntimeOpensItsMetricsThroughTheSharedHelpers(t *testing.T) {
 		}
 	}
 }
+
+// TestTheDaemonBuildsEveryHistogramSeriesInOnePlace pins the daemon's one
+// conversion of its own running histograms into served series
+// (runtimemetrics histogram.metric): a collector that built its constant
+// histogram by hand could serve its buckets differently from every other.
+func TestTheDaemonBuildsEveryHistogramSeriesInOnePlace(t *testing.T) {
+	// Arrange
+	dir := filepath.Join(moduleRootDir(t), "daemon", "internal")
+	direct := regexp.MustCompile(`\bprometheus\.MustNewConstHistogram\(`)
+
+	// Act
+	var uses []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for range direct.FindAll(raw, -1) {
+			uses = append(uses, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	want := filepath.Join(dir, "runtimemetrics", "latency.go")
+	if len(uses) != 1 || uses[0] != want {
+		t.Fatalf("prometheus.MustNewConstHistogram is called in %v, want only in %s (histogram.metric)", uses, want)
+	}
+}
