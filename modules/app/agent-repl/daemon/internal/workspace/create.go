@@ -222,12 +222,8 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		// which is the guarantee. A merge workspace is no open child, so its
 		// requester is not asked.
 		if origin == nil {
-			if err := v.deps.DB.RequireOpenParent(ctx, *parent); err != nil {
-				if refusedByFamily(global, opCreate, err) {
-					return wsm.Workspace{}, err
-				}
-				global.Error(opCreate, "could not read whether the parent is open", dlog.Context{"parent": string(*parent), "cause": err.Error()})
-				return wsm.Workspace{}, fmt.Errorf("create %q: parent workspace %q: %w", branch, *parent, err)
+			if err := v.requireOpenParent(ctx, global, opCreate, *parent); err != nil {
+				return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
 			}
 		}
 		if baseRef == "" {

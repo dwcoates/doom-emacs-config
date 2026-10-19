@@ -1,12 +1,15 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -257,5 +260,52 @@ func TestRefusedByFamilyAnswersOnlyTheFamilyRules(t *testing.T) {
 				t.Fatalf("refusedByFamily = %v (recorded %v), want %v", got, recorded, tt.want)
 			}
 		})
+	}
+}
+
+func TestRequireOpenParent(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantErr   bool
+		wantLevel string
+	}{
+		{name: "an open parent", err: nil},
+		{name: "a parent that is not open", err: errParentNotOpen, wantErr: true, wantLevel: dlog.LevelInfo},
+		{name: "a read that failed", err: errors.New("disk I/O error"), wantErr: true, wantLevel: dlog.LevelError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.openParentErr = tt.err
+
+			// Act
+			err := f.verbs.(*verbs).requireOpenParent(context.Background(), f.log.logger, "daemon.workspace.test", "parent")
+
+			// Assert
+			if (err != nil) != tt.wantErr || (tt.err != nil && !errors.Is(err, tt.err)) {
+				t.Fatalf("requireOpenParent = %v, want %v", err, tt.err)
+			}
+			if tt.wantErr {
+				if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.workspace.test"}); !ok {
+					t.Fatalf("no %s record under the operation", tt.wantLevel)
+				}
+			}
+			if !slices.Equal(f.db.openParentAsked, []ids.WorkspaceID{"parent"}) {
+				t.Fatalf("asked about %v, want [parent]", f.db.openParentAsked)
+			}
+		})
+	}
+}
+
+func TestEveryParentPreCheckGoesThroughRequireOpenParent(t *testing.T) {
+	// Act.
+	direct := sourcescan.Count(t, "v.deps.DB.RequireOpenParent(")
+	shared := sourcescan.Count(t, "v.requireOpenParent(ctx, ")
+
+	// Assert.
+	if direct != 1 || shared != 2 {
+		t.Fatalf("direct reads = %d, shared calls = %d; want Open and Create both through the one helper", direct, shared)
 	}
 }

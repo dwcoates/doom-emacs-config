@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
 )
@@ -385,6 +387,19 @@ func refusedByFamily(log dlog.Logger, op string, err error) bool {
 	}
 	log.Info(op, "a family rule refused the request; nothing was written", dlog.Context{"cause": err.Error()})
 	return true
+}
+
+// requireOpenParent asks the family rules whether PARENT is open, ahead of
+// work a refused request must not have done (wsm.DB.RequireOpenParent). It
+// answers the rule's refusal (recorded at INFO under OP), a read that failed
+// (recorded at ERROR under OP), or nil for an open parent.
+func (v *verbs) requireOpenParent(ctx context.Context, log dlog.Logger, op string, parent ids.WorkspaceID) error {
+	err := v.deps.DB.RequireOpenParent(ctx, parent)
+	if err == nil || refusedByFamily(log, op, err) {
+		return err
+	}
+	log.Error(op, "could not read whether the parent is open", dlog.Context{"parent": string(parent), "cause": err.Error()})
+	return fmt.Errorf("read whether parent %q is open: %w", parent, err)
 }
 
 // refuseUnrestorable refuses RPC with ArmWorktreeUnrestorable for RECORD:

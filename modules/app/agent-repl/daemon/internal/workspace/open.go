@@ -55,12 +55,8 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	// starts nothing; the re-open below checks again in its own transaction,
 	// which is the guarantee.
 	if record.Closed && record.Parent != nil {
-		if err := v.deps.DB.RequireOpenParent(ctx, *record.Parent); err != nil {
-			if refusedByFamily(log, opOpen, err) {
-				return err
-			}
-			log.Error(opOpen, "could not read whether the workspace's parent is open", dlog.Context{"cause": err.Error()})
-			return fmt.Errorf("open %q: read the parent: %w", ws, err)
+		if err := v.requireOpenParent(ctx, log, opOpen, *record.Parent); err != nil {
+			return fmt.Errorf("open %q: %w", ws, err)
 		}
 	}
 	reportOpenStage(progress, OpenStageCheckingWorktree)
