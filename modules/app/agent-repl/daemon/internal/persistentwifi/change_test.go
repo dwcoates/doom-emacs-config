@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/usersetup"
 )
 
 func TestPmsetAllRunsTheGrantedInvocation(t *testing.T) {
@@ -60,5 +62,15 @@ func TestApplyPowerWritesEverySettingThroughPmsetAll(t *testing.T) {
 	}
 	if got := h.r.ran(); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls = %v, want %v", got, want)
+	}
+}
+
+func TestErrNoHotspotIsAUserSetupErrorNamingTheVariable(t *testing.T) {
+	// Act.
+	err := errNoHotspot()
+
+	// Assert.
+	if !strings.Contains(err.Error(), EnvHotspot) || !strings.Contains(err.Error(), usersetup.Doc) {
+		t.Fatalf("errNoHotspot() = %v, want a user-setup error naming %s", err, EnvHotspot)
 	}
 }

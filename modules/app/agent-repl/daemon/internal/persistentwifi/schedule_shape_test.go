@@ -18,3 +18,15 @@ func TestTheScheduleIsClockRepeat(t *testing.T) {
 		t.Fatalf("clock.Repeat( appears %d times and a hand-rolled .After( wait %d times; want one Repeat and no own wait", repeats, waits)
 	}
 }
+
+// TestTheNoHotspotFaultIsBuiltOnce pins the no-hotspot configuration fault to
+// errNoHotspot: a step that spells its own fault beside it fails here.
+func TestTheNoHotspotFaultIsBuiltOnce(t *testing.T) {
+	// Act.
+	built := sourcescan.Count(t, "usersetup.Errorf(")
+
+	// Assert.
+	if built != 1 {
+		t.Fatalf("usersetup.Errorf( appears %d times; want only errNoHotspot's", built)
+	}
+}

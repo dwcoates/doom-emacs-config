@@ -147,7 +147,8 @@ push of the same standing then reads as unchanged."
 (defun agent-repl-persistent-wifi-mode-toggle ()
   "Turn the machine's persistent wifi mode (lid-closed operation) over.
 On: join the phone hotspot, disable system sleep, switch to Low Power
-Mode, dim the display.  Off: leave the hotspot, enable sleep, switch to
+Mode, dim the display; while on, the daemon rejoins the hotspot whenever
+Wi-Fi is lost.  Off: leave the hotspot, enable sleep, switch to
 High Power Mode, restore the display.  The daemon reads
 the mode and turns it; a refusal (no sudo grant for pmset) is reported as
 the daemon's refusal."

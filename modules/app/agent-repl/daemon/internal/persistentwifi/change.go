@@ -32,12 +32,19 @@ const (
 // access. The sudoers grant names each of these exact invocations.
 var powerSettings = []string{"disablesleep", "networkoversleep", "womp"}
 
+// errNoHotspot is THE ONE configuration fault of a host that named no hotspot:
+// a user-setup error naming the variable, for every step that needs the
+// hotspot.
+func errNoHotspot() error {
+	return usersetup.Errorf("persistentwifi: no hotspot is configured; set %s to the phone hotspot's name", EnvHotspot)
+}
+
 // noHotspotConfigured is the hotspot step of a host that named no hotspot. It
 // is a configuration fault, recorded at ERROR and answered as a failed hotspot
 // step whose detail names the variable and the user guide; the power step runs
 // regardless, exactly as it does after any other failed hotspot step.
 func (c *Controller) noHotspotConfigured(on bool) *agentreplv1.UpdatePersistentWifiModeHotspot {
-	err := usersetup.Errorf("persistentwifi: no hotspot is configured; set %s to the phone hotspot's name", EnvHotspot)
+	err := errNoHotspot()
 	c.log.Error(opUpdate, "no hotspot is configured; the hotspot step was skipped and the power step runs regardless",
 		dlog.Context{"on": on, "env": EnvHotspot, "cause": err.Error()})
 	return &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: hotspotFailed("", err.Error())}
