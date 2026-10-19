@@ -364,6 +364,14 @@ The input window underlines misspelled words as you type.
   - The agent-repl log names what is missing, once.
   - `bash .claude/install.sh` installs both.
 
+## Completing workspace names in the input window
+
+- A word you type in the input window completes to the name of any open workspace it begins.
+  - Typing `agent-repl-ski` offers `agent-repl-skill-migration` while that workspace is open.
+  - Closed workspaces are never offered.
+- A word matches a name only from the name's start, so ordinary prose doesn't offer workspaces.
+- A word that begins with `/` completes against slash commands instead.
+
 ## A one-shot in agent-repl
 
 `SPC TAB o` makes a one-shot in agent-repl's own repository, whichever workspace you press it in.

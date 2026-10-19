@@ -255,6 +255,18 @@ it leaves `:pending'."
   "Return non-nil when ROW is CLOSED: no tab, whatever its lifecycle."
   (eq (plist-get (plist-get row :closed) :closed) t))
 
+(defun agent-repl-roster-open-workspace-names ()
+  "Return the name of every OPEN workspace the last accepted push carried.
+Open is every row not closed (`agent-repl-roster-row-closed-p'), hidden
+ones included, in no particular order.  The composer completes workspace
+names against it (workspace-completion.el)."
+  (let (names)
+    (maphash (lambda (_id row)
+               (unless (agent-repl-roster-row-closed-p row)
+                 (push (agent-repl-roster-row-name row) names)))
+             agent-repl-roster--rows-by-id)
+    (delete-dups (delq nil names))))
+
 (defun agent-repl-roster-row-closed-by-user-at (row)
   "Return the epoch-ms instant the USER closed ROW, or nil.
 Nil for an open row, for one the daemon, an agent or a merge closed, and

@@ -334,6 +334,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; rpc.el and resolves the workspace's ref and connection through host.el,
 ;; both loaded above.
 (agent-repl--load-module "command-completion")
+;; WHY: workspace-completion.el is the composer's workspace-name completion
+;; (`agent-repl-input-mode' installs its capf).  It reads the open workspaces
+;; out of roster.el, loaded above.
+(agent-repl--load-module "workspace-completion")
 ;; WHY: clipboard-image.el binds `agent-repl-attach-clipboard-image' into
 ;; `agent-repl-input-mode-map' (input.el) and writes captured images under
 ;; the workspace dir via `agent-repl--ws-dir' (status.el) -- both already

@@ -107,6 +107,7 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-command-completion-at-point "command-completion" ())
 (declare-function agent-repl--command-completion-on-change "command-completion" (beg end len))
+(declare-function agent-repl-workspace-completion-at-point "workspace-completion" ())
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-host-standing-ask "agent-repl-host" (ws))
 (declare-function agent-repl-rpc-update-question-draft "agent-repl-rpc" (conn request &rest keys))
@@ -288,6 +289,9 @@ The standing notice first, then the held-prompt waiting line."
   ;; and a known one is marked purple (command-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-command-completion-at-point nil t)
   (add-hook 'after-change-functions #'agent-repl--command-completion-on-change nil t)
+  ;; A WORD THAT BEGINS AN OPEN WORKSPACE'S NAME completes to it
+  ;; (workspace-completion.el).
+  (add-hook 'completion-at-point-functions #'agent-repl-workspace-completion-at-point nil t)
   (add-hook 'kill-buffer-hook #'agent-repl--input-cancel-flash-timer nil t))
 
 (defun agent-repl--input-buffer (ws)
