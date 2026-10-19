@@ -222,6 +222,14 @@ test_every_counter_query_counts_a_series_first_sample() {
   else fail "counter functions" "$(cat "$CASE/requests")"; fi
 }
 
+test_a_version_is_joined_on_the_series_own_run() {
+  new_case; answer api_v1_query_range "$BY_VERSION"
+  run --latency-by-version switch_repeat 1
+  if grep -qF 'on(run) group_left(version) agentrepl_deployed_version_info' "$CASE/requests"; then
+    pass "a latency is joined to the version of its own process run"
+  else fail "version join" "$(cat "$CASE/requests")"; fi
+}
+
 test_an_unknown_verb_prints_usage() {
   new_case
   run --teleport

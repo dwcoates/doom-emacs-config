@@ -100,9 +100,11 @@ range_args() {
 
 # p95_by_version HISTOGRAM SELECTOR DAYS — the hourly p95 of the histogram's
 # series matching SELECTOR, each sample labeled with the version deployed then.
+# A series is joined to the version of its own process run (the `run` target
+# label): two daemons overlap during a handover, each with its own version.
 p95_by_version() {
   local histogram="$1" selector="$2" days="$3" promql
-  promql="histogram_quantile(0.95, sum by (le, version) (increase_pure(${histogram}_bucket{$selector}[1h]) * on() group_left(version) agentrepl_deployed_version_info))"
+  promql="histogram_quantile(0.95, sum by (le, version) (increase_pure(${histogram}_bucket{$selector}[1h]) * on(run) group_left(version) agentrepl_deployed_version_info))"
   range_args $((days * 24)) 1h
   promql_data query_range "$promql" "${RANGE_ARGS[@]}"
 }

@@ -176,3 +176,21 @@ Each entry says what was decided, why, and what it departs from.
 - Which workspace was slow is `agentrepl_workspace_restart_last_seconds`, the
   latest duration of each phase per workspace, deleted when the workspace
   leaves the registry.
+
+## 12. Each process run is its own set of series
+
+- Found in the metrics loop of 2026-10-19: a handover's successor booted
+  once and started 17 workspaces, and the stored history showed neither. Its
+  boot counter (1) continued the old daemon's identical series, and its 17
+  starts read as the old daemon's 18 dropping to 17, which no query counts.
+- Cause: every target was labeled only by its program, so every process of
+  a program wrote one series, while every counter starts from zero with its
+  process. A restart was visible only when a counter went down.
+- Decided: every target also carries `run`, the process's pid and start
+  instant (`agentrepl/logging/metrics.Run`). Each run starts its own series
+  from zero, which is exactly what `increase_pure` reads, and a version is
+  joined to the series of its own run (`on(run)`).
+- Cost: a program's series are minted again at each of its restarts, mostly
+  the daemon's at each deploy. VictoriaMetrics keeps an ended run's series
+  only as history, and the 30-day retention bounds it.
+
