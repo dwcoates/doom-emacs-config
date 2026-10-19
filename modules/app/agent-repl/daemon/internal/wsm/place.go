@@ -134,9 +134,12 @@ func reland(ctx context.Context, tx *sql.Tx, id WorkspaceID, p *Priority) (int64
 
 // SwapPlaces exchanges the places of workspaces ws and target in one
 // transaction: ws takes target's place, target takes ws's, and every other
-// workspace keeps its own. An unknown id is refused (ErrNotFound), and two
-// workspaces of different repositories (ErrOtherRepository), with nothing
-// written.
+// workspace keeps its own. An unknown id is refused (ErrNotFound), two
+// workspaces of different repositories (ErrOtherRepository), and two that are
+// not siblings (ErrNotSiblings: neither both top-level nor children of one
+// parent), with nothing written. A CHILD NEVER LEAVES ITS PARENT'S RUN: its
+// tab follows its parent's, so the only places it can take are its
+// siblings'.
 func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 	const op = "daemon.wsm.swap_places"
 	fields := dlog.Context{"workspace": string(ws), "target": string(target)}
@@ -160,10 +163,14 @@ func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 		if fromRepo != toRepo {
 			return ErrOtherRepository
 		}
+		if fromParent != toParent {
+			return ErrNotSiblings
+		}
 		// TWO ROOTS EXCHANGE THEIR SUBSECTIONS TOO (arrange.go), so each lands
-		// on the tab the other held even across subsections. A swap across
-		// families exchanges places alone: a child sits wherever its root does.
-		if !fromParent.Valid && !toParent.Valid {
+		// on the tab the other held even across subsections. Two children of
+		// one parent exchange places alone: a child sits wherever its root
+		// does.
+		if !fromParent.Valid {
 			for id, sub := range map[WorkspaceID]sql.NullString{ws: toSubsection, target: fromSubsection} {
 				if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, sub, id); err != nil {
 					return err

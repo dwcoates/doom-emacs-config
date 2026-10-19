@@ -1218,6 +1218,26 @@ func TestSwapRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	}
 }
 
+func TestSwapRefusesTwoWorkspacesThatAreNotSiblings(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.db.swapErr = wsm.ErrNotSiblings
+
+	// Act.
+	err := f.verbs.Swap(context.Background(), "w1", "w2")
+
+	// Assert.
+	asRefusal(t, err, ArmNotSiblings)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("a refused swap republished %d times", len(f.sidebar.registries))
+	}
+	if loggedAtError(f, opSwap) {
+		t.Fatal("a refused swap was logged at error")
+	}
+}
+
 func TestSwapRefusesTwoRepositories(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

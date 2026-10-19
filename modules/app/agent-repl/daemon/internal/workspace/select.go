@@ -405,15 +405,19 @@ func (v *verbs) ownedPair(ctx context.Context, rpc string, ws, target ids.Worksp
 // Swap exchanges the places of workspaces ws and target in the registry order,
 // every other workspace keeping its own (wsm's SwapPlaces). The sidebar and the
 // tab bar are both views of the registry, so one swap shows on both; two
-// workspaces of different repositories are refused other_repository.
+// workspaces of different repositories are refused other_repository, and two
+// that are not siblings not_siblings.
 func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
 	log, err := v.ownedPair(ctx, "SwapWorkspaces", ws, target)
 	if err != nil {
 		return err
 	}
 	if err := v.deps.DB.SwapPlaces(ctx, ws, target); err != nil {
-		if errors.Is(err, wsm.ErrOtherRepository) {
+		switch {
+		case errors.Is(err, wsm.ErrOtherRepository):
 			return refuse(log, "SwapWorkspaces", ArmOtherRepository, err.Error(), false)
+		case errors.Is(err, wsm.ErrNotSiblings):
+			return refuse(log, "SwapWorkspaces", ArmNotSiblings, err.Error(), false)
 		}
 		log.Error(opSwap, "could not swap the workspaces' places", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("swap %q with %q: %w", ws, target, err)

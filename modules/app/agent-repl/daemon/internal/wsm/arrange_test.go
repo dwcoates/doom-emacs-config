@@ -966,30 +966,67 @@ func TestAnUnknownSubsectionIsNamedByItsError(t *testing.T) {
 	}
 }
 
-func TestSwapPlacesWithAChildExchangesPlacesAlone(t *testing.T) {
-	// Arrange -- a child stores no subsection, so the swap writes none.
+func TestSwapPlacesRefusesTwoWorkspacesThatAreNotSiblingsWritingNothing(t *testing.T) {
+	// Arrange -- a child's tab follows its parent's, so the only places it can
+	// take are its siblings'.
 	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
 	child := registerChild(t, s, repoDir, "child", parent.ID)
-	root := registerIn(t, s, repoDir, "root", nil)
-	later := mustSubsection(t, s, root.Repo, "later")
-	mustPlace(t, s, root.ID, &later.ID, nil)
+	other := registerIn(t, s, repoDir, "other", nil)
+	cousin := registerChild(t, s, repoDir, "cousin", other.ID)
+	cases := []struct {
+		name       string
+		ws, target WorkspaceID
+	}{
+		{"a child with a root", child.ID, other.ID},
+		{"a root with a child", other.ID, child.ID},
+		{"children of two parents", child.ID, cousin.ID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := placesByName(t, s)
+
+			// Act
+			err := s.SwapPlaces(context.Background(), tc.ws, tc.target)
+
+			// Assert
+			if !errors.Is(err, ErrNotSiblings) {
+				t.Fatalf("SwapPlaces = %v, want ErrNotSiblings", err)
+			}
+			if got := placesByName(t, s); !maps.Equal(got, before) {
+				t.Fatalf("places = %v after a refused swap, want %v unchanged", got, before)
+			}
+		})
+	}
+}
+
+func TestSwapPlacesOfTwoChildrenOfOneParentExchangesPlacesAlone(t *testing.T) {
+	// Arrange -- a child stores no subsection, so the swap writes none.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	later := mustSubsection(t, s, parent.Repo, "later")
+	mustPlace(t, s, parent.ID, &later.ID, nil)
+	a := registerChild(t, s, repoDir, "a", parent.ID)
+	b := registerChild(t, s, repoDir, "b", parent.ID)
 	before := placesByName(t, s)
 
 	// Act
-	err := s.SwapPlaces(context.Background(), child.ID, root.ID)
+	err := s.SwapPlaces(context.Background(), a.ID, b.ID)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("SwapPlaces: %v", err)
 	}
 	got := placesByName(t, s)
-	if got["child"] != before["root"] || got["root"] != before["child"] {
-		t.Fatalf("places = %v, want child and root exchanged from %v", got, before)
+	if got["a"] != before["b"] || got["b"] != before["a"] {
+		t.Fatalf("places = %v, want a and b exchanged from %v", got, before)
 	}
-	if sub := subsectionOf(t, s, root.ID); !sameSubsection(sub, &later.ID) {
-		t.Fatalf("root's subsection = %v, want it kept as %q", sub, later.ID)
+	for _, ws := range []WorkspaceID{a.ID, b.ID} {
+		if sub := subsectionOf(t, s, ws); !sameSubsection(sub, &later.ID) {
+			t.Fatalf("%s's subsection = %v, want its parent's %q", ws, sub, later.ID)
+		}
 	}
 }
 

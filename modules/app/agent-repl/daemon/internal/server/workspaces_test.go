@@ -1743,6 +1743,24 @@ func TestSwapWorkspacesAnswersOtherRepository(t *testing.T) {
 	}
 }
 
+func TestSwapWorkspacesAnswersNotSiblings(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+	h.Verbs.swapErr = &workspace.Refusal{Rpc: "SwapWorkspaces", Arm: workspace.ArmNotSiblings, Reason: "a child and a root"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspaces: %v", err)
+	}
+	if resp.Msg.GetError().GetNotSiblings() == nil {
+		t.Fatalf("result = %v, want not_siblings", resp.Msg.GetResult())
+	}
+}
+
 func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	// Arrange.
 	h, target := swapHarness(t)
