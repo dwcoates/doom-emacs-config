@@ -46,6 +46,12 @@
 
 set -uo pipefail
 
+# EVERY COUNTER IS READ WITH increase_pure, NEVER rate OR increase. Every
+# agentrepl_* counter starts from zero when its process starts, often with
+# its first counts already in it by the first scrape (a boot's restarts, a
+# takeover's workspace starts); rate and increase skip a series' first
+# sample, and read those counts as nothing.
+
 SELF_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 STORE="${AGENT_REPL_METRICS_URL:-http://127.0.0.1:8428}"
 ROOT="${AGENT_REPL_METRICS_ROOT:-$HOME/.cache/agent-repl/metrics}"
@@ -96,7 +102,7 @@ range_args() {
 # series matching SELECTOR, each sample labeled with the version deployed then.
 p95_by_version() {
   local histogram="$1" selector="$2" days="$3" promql
-  promql="histogram_quantile(0.95, sum by (le, version) (rate(${histogram}_bucket{$selector}[1h]) * on() group_left(version) agentrepl_deployed_version_info))"
+  promql="histogram_quantile(0.95, sum by (le, version) (increase_pure(${histogram}_bucket{$selector}[1h]) * on() group_left(version) agentrepl_deployed_version_info))"
   range_args $((days * 24)) 1h
   promql_data query_range "$promql" "${RANGE_ARGS[@]}"
 }
@@ -212,7 +218,7 @@ case "${1:-}" in
     days="${3:-30}"
     [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
     range_args $((days * 24)) 1d
-    cpu="$(promql_data query_range "sum(rate(agentrepl_process_cpu_seconds_total{process=\"$2\"}[1d]))" "${RANGE_ARGS[@]}")" || exit 2
+    cpu="$(promql_data query_range "sum(increase_pure(agentrepl_process_cpu_seconds_total{process=\"$2\"}[1d])) / 86400" "${RANGE_ARGS[@]}")" || exit 2
     mem="$(promql_data query_range "sum(avg_over_time(agentrepl_process_footprint_bytes{process=\"$2\"}[1d]))" "${RANGE_ARGS[@]}")" || exit 2
     lines="$(jq -rn --argjson cpu "$cpu" --argjson mem "$mem" '
       ([$cpu[0].values // [] | .[] | {key: (.[0] | tostring), value: .[1]}] | from_entries) as $c
@@ -228,9 +234,9 @@ case "${1:-}" in
     days="${2:-7}"
     [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
     window="${days}d"
-    counts="$(promql_data query "sum by (restart, phase, outcome) (increase(agentrepl_restart_seconds_count[$window]))")" || exit 2
-    p50="$(promql_data query "histogram_quantile(0.5, sum by (restart, phase, le) (increase(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
-    p95="$(promql_data query "histogram_quantile(0.95, sum by (restart, phase, le) (increase(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
+    counts="$(promql_data query "sum by (restart, phase, outcome) (increase_pure(agentrepl_restart_seconds_count[$window]))")" || exit 2
+    p50="$(promql_data query "histogram_quantile(0.5, sum by (restart, phase, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
+    p95="$(promql_data query "histogram_quantile(0.95, sum by (restart, phase, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
     lines="$(jq -rn --argjson c "$counts" --argjson p50 "$p50" --argjson p95 "$p95" '
       def key: "\(.metric.restart)|\(.metric.phase)";
       def num: (.value[1] | if . == "NaN" then "-" else (tonumber * 100 | round / 100 | tostring) end);

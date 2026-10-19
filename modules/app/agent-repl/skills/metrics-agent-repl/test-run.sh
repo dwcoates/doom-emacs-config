@@ -204,6 +204,24 @@ test_restart_by_version_needs_a_restart_and_a_phase() {
   if [ "$RC" -eq 2 ] && has "needs a restart and a phase"; then pass "restart-by-version refuses a missing phase"; else fail "restart by version usage" "rc=$RC" "$OUT"; fi
 }
 
+test_every_counter_query_counts_a_series_first_sample() {
+  new_case
+  answer api_v1_query_range "$BY_VERSION"
+  answer api_v1_query_range_p95 "$BY_VERSION"
+  answer api_v1_query_range_cpu '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_range_mem '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_counts '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_p50 '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_p95 '{"status":"success","data":{"result":[]}}'
+  run --latency-by-version switch_repeat 1
+  run --restart-by-version deploy total 1
+  run --restarts 1
+  run --process-trend daemon 1
+  if [ -s "$CASE/requests" ] && ! grep -qE '(^|[^_])(rate|increase)\(' "$CASE/requests" && grep -q 'increase_pure(' "$CASE/requests"; then
+    pass "every counter query reads its counter with increase_pure, never rate or increase"
+  else fail "counter functions" "$(cat "$CASE/requests")"; fi
+}
+
 test_an_unknown_verb_prints_usage() {
   new_case
   run --teleport
