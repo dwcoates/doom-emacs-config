@@ -289,7 +289,7 @@ describe("the highlight and the receded styling", () => {
       token("--row-current-gutter"),
     ]).toEqual([
       true,
-      "color-mix(in srgb, var(--card) 45%, var(--sidebar-bg))",
+      "color-mix(in srgb, var(--card) 30%, var(--sidebar-bg))",
       "color-mix(in srgb, var(--muted) 64%, var(--sidebar-bg))",
     ]);
   });
