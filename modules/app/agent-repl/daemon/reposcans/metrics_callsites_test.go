@@ -1,6 +1,7 @@
 package reposcans
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -103,5 +104,44 @@ func TestTheDaemonBuildsEveryHistogramSeriesInOnePlace(t *testing.T) {
 	want := filepath.Join(dir, "runtimemetrics", "latency.go")
 	if len(uses) != 1 || uses[0] != want {
 		t.Fatalf("prometheus.MustNewConstHistogram is called in %v, want only in %s (histogram.metric)", uses, want)
+	}
+}
+
+// TestTheStoreFileNamesTheStoreTheServiceRuns pins metrics/store.json, the
+// address every runtime pushes its final values to, to the store the
+// launchd plist runs and the job its scrape config names: a push to another
+// port is lost, and a push under another job writes series no scrape writes.
+func TestTheStoreFileNamesTheStoreTheServiceRuns(t *testing.T) {
+	// Arrange
+	root := moduleRootDir(t)
+	read := func(rel string) string {
+		raw, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		return string(raw)
+	}
+	var store struct {
+		ImportURL string `json:"import_url"`
+		Job       string `json:"job"`
+	}
+	if err := json.Unmarshal([]byte(read("metrics/store.json")), &store); err != nil {
+		t.Fatalf("decode metrics/store.json: %v", err)
+	}
+	listen := regexp.MustCompile(`-httpListenAddr=([0-9.]+:[0-9]+)`).FindStringSubmatch(read("launchd/com.agentrepl.victoriametrics.plist"))
+	job := regexp.MustCompile(`(?m)^\s*-\s*job_name:\s*(\S+)`).FindStringSubmatch(read("metrics/scrape.yml"))
+
+	// Act
+	wantURL := ""
+	if listen != nil {
+		wantURL = "http://" + listen[1] + "/api/v1/import/prometheus"
+	}
+
+	// Assert
+	if listen == nil || store.ImportURL != wantURL {
+		t.Fatalf("store.json import_url = %q, want %q (the plist's -httpListenAddr)", store.ImportURL, wantURL)
+	}
+	if job == nil || store.Job != job[1] {
+		t.Fatalf("store.json job = %q, want scrape.yml's job_name %v", store.Job, job)
 	}
 }

@@ -194,3 +194,23 @@ Each entry says what was decided, why, and what it departs from.
   the daemon's at each deploy. VictoriaMetrics keeps an ended run's series
   only as history, and the 30-day retention bounds it.
 
+## 13. A surface pushes its final values when it closes
+
+- Found in the metrics loop of 2026-10-19: two handovers in one half hour
+  recorded no `handover_transfer` at all, and the deploys that moved the
+  daemon recorded no `decide` phase.
+- Cause: the outgoing daemon times both after the handover, and by then its
+  target file names the successor, so the store never scrapes it again. The
+  same loss hit every exit: whatever a process recorded after its last
+  scrape went with it.
+- Decided: closing a metrics surface pushes everything its registry holds to
+  the store's import endpoint, labeled exactly as its scrapes are (`job`,
+  `instance`, `run`). The endpoint and job are one installed file,
+  `metrics/store.json`, which `daemon/reposcans` pins to the plist's port and
+  `scrape.yml`'s job. A push that fails is recorded through the runtime's
+  canonical logger and never holds the exit.
+- Not chosen: keeping the outgoing daemon scraped until it exits. Its target
+  file is the successor's from the takeover, and waiting on one more scrape
+  would hold the exit for up to two scrape intervals for nothing a push
+  does not already deliver.
+

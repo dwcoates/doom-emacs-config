@@ -30,6 +30,10 @@
         {
           "from": "metrics/scrape.yml",
           "to": "metrics/scrape.yml"
+        },
+        {
+          "from": "metrics/store.json",
+          "to": "metrics/store.json"
         }
       ]
     }
