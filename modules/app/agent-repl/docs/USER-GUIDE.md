@@ -429,6 +429,15 @@ A workspace that fails to be created is reported in two places.
   - The merge queue reports that one's failure back to the workspace that asked for the merge.
 - The request's wording is `prompts/workspace-create-failed.md`.
 
+## The default model
+
+A new session you did not pick a model for starts on a default.
+
+- A session on the work account starts on Sonnet.
+  - The work account is the one `$MULTI_REPO_ROOT` routes to (see Setup), or the one you pick in the top bar's account cell.
+- Every other session starts on Opus.
+- A model you picked, for example with `SPC u SPC TAB o`, always wins over the default.
+
 ## Changing the reasoning effort
 
 The top bar's effort selector sits between the model selector and the permission-mode picker.

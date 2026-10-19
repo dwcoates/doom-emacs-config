@@ -1543,23 +1543,77 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// TestStartFreshOfAnUnmodeledSessionAsksTheShimForOpus is the same ruling from
-// the daemon's side: the launch request names opus when the row modeled none.
-func TestStartFreshOfAnUnmodeledSessionAsksTheShimForOpus(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
-
-	// Act.
-	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
-		t.Fatalf("Start: %v", err)
+// TestStartFreshNamesTheAccountsDefaultModel is the default-model rulings
+// from the daemon's side: an unmodeled launch names opus (2026-09-14) unless
+// the session spends as the work account, which names sonnet (2026-10-19),
+// and a recorded choice outranks both.
+func TestStartFreshNamesTheAccountsDefaultModel(t *testing.T) {
+	cases := []struct {
+		name      string
+		routedDir string
+		session   wsm.Session
+		want      string
+	}{
+		{name: "an unmodeled personal session launches under opus", routedDir: "/personal",
+			want: DefaultLaunchModel},
+		{name: "an unmodeled session routed to the work account launches under sonnet", routedDir: "/work",
+			want: WorkDefaultLaunchModel},
+		{name: "an unmodeled session whose reader picked the work account launches under sonnet", routedDir: "/personal",
+			session: wsm.Session{SelectedConfigDir: "/work"}, want: WorkDefaultLaunchModel},
+		{name: "an unmodeled work-routed session whose reader picked personal launches under opus", routedDir: "/work",
+			session: wsm.Session{SelectedConfigDir: "/personal"}, want: DefaultLaunchModel},
+		{name: "a modeled work-account session launches under its own choice", routedDir: "/work",
+			session: wsm.Session{Model: "haiku"}, want: "haiku"},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			f.accounts.configDir = tc.routedDir
+			f.accounts.multiRepoDir = "/work"
+			ws := f.workspace("w1")
+			session := tc.session
+			session.Workspace = ws.ID
+			f.db.sessions[ws.ID] = session
 
-	// Assert.
-	fresh := f.client.requests[0].GetFresh()
-	if fresh == nil || fresh.GetModel().GetName() != DefaultLaunchModel {
-		t.Fatalf("StartSession request = %v, want an unmodeled start launched under opus", f.client.requests[0])
+			// Act.
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			fresh := f.client.requests[0].GetFresh()
+			if fresh == nil || fresh.GetModel().GetName() != tc.want {
+				t.Fatalf("StartSession request = %v, want a fresh start launched under %q", f.client.requests[0], tc.want)
+			}
+		})
+	}
+}
+
+// TestFreshModel pins freshModel's precedence: the recorded choice, then the
+// account's default.
+func TestFreshModel(t *testing.T) {
+	cases := []struct {
+		name        string
+		recorded    string
+		workAccount bool
+		want        string
+	}{
+		{name: "unrecorded personal is opus", want: "opus"},
+		{name: "unrecorded work is sonnet", workAccount: true, want: "sonnet"},
+		{name: "recorded personal is the record", recorded: "haiku", want: "haiku"},
+		{name: "recorded work is the record", recorded: "opus", workAccount: true, want: "opus"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := freshModel(tc.recorded, tc.workAccount)
+
+			// Assert.
+			if got.GetName() != tc.want {
+				t.Fatalf("freshModel(%q, %v) = %q, want %q", tc.recorded, tc.workAccount, got.GetName(), tc.want)
+			}
+		})
 	}
 }
 
