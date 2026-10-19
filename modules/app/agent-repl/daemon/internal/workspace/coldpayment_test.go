@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -311,5 +314,20 @@ func TestCoversColdReadNamesOneRead(t *testing.T) {
 				t.Fatalf("coversColdRead = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEveryPayAnswerResumesWithOnePayRemediation pins that the gate's own pay
+// answer and the bring-up paying a paid read resume with the one remediation.
+func TestEveryPayAnswerResumesWithOnePayRemediation(t *testing.T) {
+	// Arrange.
+	answer := &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}}}
+
+	// Act.
+	got, err := coldRemediation(dlog.NewTestLogger(), ServedColdGate{}, answer)
+
+	// Assert.
+	if err != nil || !proto.Equal(got, payRemediation()) {
+		t.Fatalf("coldRemediation(pay) = %v, %v, want payRemediation()", got, err)
 	}
 }
