@@ -978,7 +978,8 @@ with a record saying so."
 (defun agent-repl-verb-swap (ws target)
   "Exchange the places of WS and TARGET in the registry order.
 WS takes TARGET's place and TARGET takes WS's; every other workspace keeps
-its own.  The tab bar and the sidebar are both views of the registry, and
+its own.  The two must belong to one repository; another repository's tab
+is refused and said in words (`agent-repl-verbs--no-tab-to-take').  The tab bar and the sidebar are both views of the registry, and
 the new order arrives on the roster stream, so success changes no editor
 state."
   (agent-repl-verbs--send
@@ -987,7 +988,9 @@ state."
    :ws ws :op "swap"
    :on-success
    (lambda (_)
-     (message "agent-repl: swapped %s with %s" ws target))))
+     (message "agent-repl: swapped %s with %s" ws target))
+   :on-error
+   (lambda (value) (agent-repl-verbs--no-tab-to-take "swap" ws target value))))
 
 (defun agent-repl-verbs--no-tab-to-take (op ws target value)
   "Claim refusal VALUE of tab-slot gesture OP when it says no tab can be taken.

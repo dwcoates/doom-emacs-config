@@ -698,8 +698,15 @@ declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_swap_workspaces.pb.go" "SwapWorkspacesError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "otherRepository")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-swap-error-other-repository-arm ()
+  "SwapWorkspacesError's `other_repository' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
+                    (agent-repl-test-wire-verbs--parse "{\"otherRepository\":{}}"))
+                   '(:cause (:arm :other-repository :value nil))))))
 
 
 ;;;; ---- MoveWorkspace ---------------------------------------------

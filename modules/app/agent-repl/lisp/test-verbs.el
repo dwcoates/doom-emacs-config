@@ -1083,6 +1083,21 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
       (agent-repl-verbs--no-tab-to-take "swap" "a" "b" '(:cause (:arm :other-repository :value nil))))
     (should (equal infos '("elisp.verbs.swap-no-tab ws=a target=b arm=:other-repository")))))
 
+(ert-deftest agent-repl-verbs-swap-to-another-repository-is-said-in-words ()
+  "An `other_repository' answer to a swap names why the tab cannot be taken."
+  (agent-repl-test-verbs--with
+      '((:swap . (:response (:arm :error :value (:cause (:arm :other-repository :value nil))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-swap "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two are in different repositories")))))
+
+(ert-deftest agent-repl-verbs-tab-slot-verbs-share-the-no-tab-answer ()
+  "The swap and the move both answer no tab to take through one helper."
+  (dolist (verb '(agent-repl-verb-swap agent-repl-verb-move))
+    (should (string-match-p "agent-repl-verbs--no-tab-to-take" (format "%S" (symbol-function verb))))))
+
 ;;;; ---- MoveWorkspace ----
 
 (ert-deftest agent-repl-verbs-move-carries-both-refs ()

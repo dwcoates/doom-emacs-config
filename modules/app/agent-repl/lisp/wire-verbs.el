@@ -2292,19 +2292,29 @@ JSON."
   "Decode SwapWorkspacesError's `not_yet_adopted' cause arm from JSON."
   (agent-repl-wire-decode-swap-workspaces-not-yet-adopted json))
 
+(defun agent-repl-wire-decode-swap-workspaces-other-repository (json)
+  "Decode SwapWorkspacesOtherRepository from JSON.  Empty: the two
+workspaces belong to different repositories, whose tabs never interleave."
+  (agent-repl-wire-verbs--decode-empty "SwapWorkspacesOtherRepository" json))
+
+(defun agent-repl-wire-decode-swap-workspaces-error-other-repository (json)
+  "Decode SwapWorkspacesError's `other_repository' cause arm from JSON."
+  (agent-repl-wire-decode-swap-workspaces-other-repository json))
+
 (defun agent-repl-wire-decode-swap-workspaces-error (json)
   "Decode SwapWorkspacesError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SwapWorkspacesError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted otherRepository))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-swap-workspaces-error-unknown-workspace)
                  (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-swap-workspaces-error-workspace-ref-mismatch)
                  (list 'transferringAway :transferring-away #'agent-repl-wire-decode-swap-workspaces-error-transferring-away)
-                 (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-swap-workspaces-error-not-yet-adopted))))))
+                 (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-swap-workspaces-error-not-yet-adopted)
+                 (list 'otherRepository :other-repository #'agent-repl-wire-decode-swap-workspaces-error-other-repository))))))
 
 (defun agent-repl-wire-decode-swap-workspaces-response-success (json)
   "Decode SwapWorkspacesResponse's `success' arm from JSON."
