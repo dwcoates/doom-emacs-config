@@ -224,6 +224,30 @@ test_all() {
     fi
 }
 
+test_all_beyond_the_argument_limit() {
+    # 2500 daemon-known workspaces, each with a long directory and a daemon
+    # sink: the reader's arguments come to several MiB, past ARG_MAX, which is
+    # what failed every --all read on 2026-10-19 (522 workspaces, 3205 logs).
+    local many="$TMP/many" rows_many="$TMP/many-rows.tsv" i dir out last
+    mkdir -p "$many"
+    : >"$rows_many"
+    for i in $(seq 1 2500); do
+        dir="$many/workspace-with-a-long-enough-directory-name-to-fill-the-argument-list-$i"
+        mkdir -p "$dir/.claude/emacs"
+        : >"$targets/many-$i-daemon.log"
+        ln -s "$targets/many-$i-daemon.log" "$dir/.claude/emacs/daemon.log"
+        printf 'ws-many-%s\t%s\tmany-%s\n' "$i" "$dir" "$i" >>"$rows_many"
+    done
+    last="$many/workspace-with-a-long-enough-directory-name-to-fill-the-argument-list-2500"
+    printf '{"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"daemon","pid":60,"level":"warn","verbosity":"normal","operation":"daemon.many","message":"the last of many","context":{},"workspace_dir":"%s","workspace_id":"ws-many-2500"}\n' "$last" >"$targets/many-2500-daemon.log"
+    out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_many" run_logs --all --level warn --json 2>/dev/null)" || true
+    if grep_in "$out" -q '"operation":"daemon.many"'; then
+        pass "--all reads past the kernel's argument limit"
+    else
+        fail "--all reads past the kernel's argument limit"
+    fi
+}
+
 test_since_rfc3339() {
     local out
     out="$(run_logs --workspace "$workspace_a" --runtime daemon --since 2026-09-10T10:02:00Z --json)"
@@ -859,6 +883,22 @@ test_reader_refuses_a_malformed_or_repeated_workspace_name() {
     fi
 }
 
+test_reader_refuses_a_malformed_arguments_file() {
+    local reader rc1=0 rc2=0 rc3=0 err1 err2 err3 unterminated="$TMP/unterminated-args"
+    reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
+    printf -- '--mode\0json' >"$unterminated"
+    err1="$("$reader" --args-from "$TMP/no-such-args" 2>&1)" || rc1=$?
+    err2="$("$reader" --args-from "$unterminated" --mode json 2>&1)" || rc2=$?
+    err3="$("$reader" --args-from "$unterminated" 2>&1)" || rc3=$?
+    if [ "$rc1" -ne 0 ] && grep_in "$err1" -q 'read the arguments file' &&
+        [ "$rc2" -ne 0 ] && grep_in "$err2" -q 'takes exactly one path' &&
+        [ "$rc3" -ne 0 ] && grep_in "$err3" -q 'does not end with a NUL'; then
+        pass "the reader refuses a missing, trailed or unterminated --args-from"
+    else
+        fail "the reader refuses a missing, trailed or unterminated --args-from"
+    fi
+}
+
 test_workspace_directory_and_default_format
 test_workspace_id
 test_workspace_name
@@ -866,6 +906,7 @@ test_ambiguous_workspace_name
 test_central
 test_central_default_emacs_sink
 test_all
+test_all_beyond_the_argument_limit
 test_since_rfc3339
 test_since_duration
 test_until
@@ -881,6 +922,7 @@ test_fields_projects_the_workspace_name
 test_an_unknown_workspace_keeps_its_id
 test_an_unnamed_daemon_workspace_is_refused
 test_reader_refuses_a_malformed_or_repeated_workspace_name
+test_reader_refuses_a_malformed_arguments_file
 test_harvest
 test_empty_harvest_window
 test_harvest_incomplete_workspace_attribution
