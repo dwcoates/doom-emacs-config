@@ -366,6 +366,14 @@ func (p *process) apply(line []byte) Reply {
 	case OpCount:
 		return Reply{OK: true, Count: p.rec.Count(cmd.RPC)}
 
+	case OpAwaitAgentWatch:
+		ctx, cancel := commandContext(cmd)
+		defer cancel()
+		if err := p.srv.agents.awaitSubscriber(ctx); err != nil {
+			return Reply{Error: fmt.Sprintf("fakeshim: no WatchAgent stream subscribed: %v", err)}
+		}
+		return Reply{OK: true, Count: p.srv.agents.count()}
+
 	case OpExpect:
 		ctx, cancel := commandContext(cmd)
 		defer cancel()

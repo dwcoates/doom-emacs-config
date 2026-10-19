@@ -859,6 +859,15 @@ func (s *ShimControl) SetLiveWork(live ...*conversationv1.AgentDetachedWork) {
 	s.send(controlCommand{Op: "set_live_work", Payload: encode(s.t, &conversationv1.SessionStarted{LiveWork: live})})
 }
 
+// AwaitAgentWatch returns once the daemon holds a WatchAgent stream on the
+// fake. The daemon watches its agents TAIL-ONLY, so a frame pushed before its
+// watch subscribes reaches no one: a test that pushes the moment a workspace
+// is open waits on this first.
+func (s *ShimControl) AwaitAgentWatch() {
+	s.t.Helper()
+	s.send(controlCommand{Op: "await_agent_watch"})
+}
+
 // SilenceBash makes every later WatchBash open for work go unanswered: no
 // opening frame, ever, as the real shim's WatchBash on a run with no row.
 func (s *ShimControl) SilenceBash(work string) {

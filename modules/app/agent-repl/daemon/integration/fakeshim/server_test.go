@@ -915,3 +915,49 @@ func TestFakeTranscriptWritesShareOneHelper(t *testing.T) {
 		t.Errorf("server.go opens or writes a transcript path %d times, want once, in appendTranscriptLine", writes)
 	}
 }
+
+// TestAwaitSubscriberAnswersOnceAWatchSubscribes pins the latch a test waits
+// on before pushing to a tail-only watch.
+func TestAwaitSubscriberAnswersOnceAWatchSubscribes(t *testing.T) {
+	// Arrange
+	h := newHub[agentFrame]()
+	answered := make(chan error, 1)
+	go func() { answered <- h.awaitSubscriber(context.Background()) }()
+
+	// Act
+	h.subscribe()
+
+	// Assert
+	if err := <-answered; err != nil {
+		t.Fatalf("awaitSubscriber = %v, want nil once a watch subscribed", err)
+	}
+}
+
+func TestAwaitSubscriberAnswersAtOnceWhenAWatchIsAlreadySubscribed(t *testing.T) {
+	// Arrange
+	h := newHub[agentFrame]()
+	h.subscribe()
+
+	// Act
+	err := h.awaitSubscriber(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("awaitSubscriber = %v, want nil", err)
+	}
+}
+
+func TestAwaitSubscriberEndsWithItsContext(t *testing.T) {
+	// Arrange
+	h := newHub[agentFrame]()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	err := h.awaitSubscriber(ctx)
+
+	// Assert
+	if err != context.Canceled {
+		t.Fatalf("awaitSubscriber = %v, want context.Canceled", err)
+	}
+}
