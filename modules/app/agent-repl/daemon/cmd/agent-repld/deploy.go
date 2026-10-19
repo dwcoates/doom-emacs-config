@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 )
 
@@ -69,6 +70,8 @@ type deployerParams struct {
 	Getenv  func(string) string
 	// Deployed is told each time a deploy gets all the way through.
 	Deployed func()
+	// Restarts records how long each deploy phase and service restart took.
+	Restarts restarttiming.Recorder
 }
 
 // deployPaths are the host locations a deploy works against.
@@ -134,8 +137,10 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Log:         log,
 		CacheBin:    where.cacheBin,
 		ReportDir:   where.reportDir,
+		Restarts:    p.Restarts,
 	}
 	deployer, err := deploy.New(deploy.Deps{
+		Restarts: p.Restarts,
 		Live: deploy.Live{
 			ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
 			Shim: p.ShimMain, Webapp: p.WebappDist,

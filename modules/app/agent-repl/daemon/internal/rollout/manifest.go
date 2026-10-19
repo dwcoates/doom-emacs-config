@@ -89,6 +89,10 @@ type Manifest struct {
 	// exist for the deploy alone, so both set it; a manifest an older daemon
 	// wrote carries none, and no line is drawn for it.
 	Deploy bool `json:"deploy"`
+	// DeployStartedAt is when the deploy that wrote this manifest began, so
+	// the successor times the whole deploy once it has taken over. Zero on a
+	// manifest an older daemon wrote, which is then not timed.
+	DeployStartedAt time.Time `json:"deploy_started_at,omitzero"`
 	// Sessions is one record per session, in workspace order.
 	Sessions []ManifestSession `json:"sessions"`
 }

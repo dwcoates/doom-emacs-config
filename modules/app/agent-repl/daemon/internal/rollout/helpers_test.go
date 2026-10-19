@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -1087,6 +1088,8 @@ func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 // harness is one controller under test with every fake reachable.
 type harness struct {
 	c *controller
+	// restarts keeps what the controller timed.
+	restarts *restarttimingtest.Recorder
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
 	// "adopt <ws>"; suspendErr and adoptErr fail them.
 	merges  *fakeMerges
@@ -1241,6 +1244,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		progress:     &fakeProgress{},
 		startErr:     make(map[ids.WorkspaceID]error),
 		merges:       &fakeMerges{order: order},
+		restarts:     &restarttimingtest.Recorder{},
 	}
 	h.reports = &fakeReports{registry: h.registry}
 	deps := Deps{
@@ -1368,6 +1372,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		HoldoutWarnEvery: 10 * time.Minute,
 		StandDownWindow:  30 * time.Second,
 		Clock:            h.clock,
+		Restarts:         h.restarts,
 		Progress:         h.progress,
 		Log:              log,
 		Lifetime:         lifetime,
@@ -1585,3 +1590,17 @@ func (f *fakeMerges) called() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
 }
+
+// deployStart is the instant every test deploy began.
+var deployStart = instant.Add(-time.Minute)
+
+// unforcedAsk and forcedAsk are a test deploy's asks of a handover or a
+// layout restart.
+var (
+	unforcedAsk = Ask{DeployStartedAt: deployStart}
+	forcedAsk   = Ask{Force: true, DeployStartedAt: deployStart}
+)
+
+// deployManifest is the manifest a test deploy's handover wrote, twenty
+// seconds before the harness's instant.
+var deployManifest = Manifest{Deploy: true, WrittenAt: instant.Add(-20 * time.Second), DeployStartedAt: deployStart}

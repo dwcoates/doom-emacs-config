@@ -17,6 +17,8 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 )
 
 // fakeLaunchd scripts launchd. NO TEST EVER REACHES THE LIVE LAUNCHD: this is
@@ -113,11 +115,12 @@ func (l *fakeLaunchd) Bootstrap(_ context.Context, plist string) error {
 
 // restarterHarness is one Restarter over a temp socket dir and plist dir.
 type restarterHarness struct {
-	r       *Restarter
-	launchd *fakeLaunchd
-	log     *dlog.TestLogger
-	sock    string
-	alive   map[int]bool
+	restarts *restarttimingtest.Recorder
+	r        *Restarter
+	launchd  *fakeLaunchd
+	log      *dlog.TestLogger
+	sock     string
+	alive    map[int]bool
 }
 
 func newRestarter(t *testing.T) *restarterHarness {
@@ -140,7 +143,8 @@ func newRestarter(t *testing.T) *restarterHarness {
 	plists := t.TempDir()
 	writeFile(t, filepath.Join(plists, SidecarLabel+".plist"), "<plist/>")
 	log := dlog.NewTestLogger()
-	h := &restarterHarness{launchd: newFakeLaunchd(), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{}}
+	h := &restarterHarness{launchd: newFakeLaunchd(), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{},
+		restarts: &restarttimingtest.Recorder{}}
 	h.r = &Restarter{
 		CacheBin:    t.TempDir(),
 		ReportDir:   t.TempDir(),
@@ -152,6 +156,7 @@ func newRestarter(t *testing.T) *restarterHarness {
 		Windows:     DefaultServiceWindows,
 		Clock:       newStepClock(),
 		Log:         log,
+		Restarts:    h.restarts,
 	}
 	return h
 }
@@ -377,6 +382,61 @@ func TestRestartSidecarSurfacesAFailedKickstart(t *testing.T) {
 	// Assert
 	if err == nil || !loggedTo(h.log, "error", "the sidecar kickstart failed") {
 		t.Fatalf("RestartSidecar = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
+	}
+}
+
+func TestEachServiceRestartIsTimedWithItsOutcome(t *testing.T) {
+	cases := []struct {
+		name        string
+		arrange     func(t *testing.T, h *restarterHarness)
+		restart     func(h *restarterHarness) error
+		wantService string
+		wantOutcome restarttiming.Outcome
+	}{
+		{
+			name:        "a store restart that serves",
+			arrange:     func(t *testing.T, h *restarterHarness) { h.launchd.onKickstart = func() { h.bindSocket(t) } },
+			restart:     func(h *restarterHarness) error { return h.r.RestartStore(context.Background()) },
+			wantService: "store", wantOutcome: restarttiming.OK,
+		},
+		{
+			name: "a store restart that fails",
+			arrange: func(t *testing.T, h *restarterHarness) {
+				if err := os.Remove(filepath.Join(h.r.PlistDir, SidecarLabel+".plist")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			restart:     func(h *restarterHarness) error { return h.r.RestartStore(context.Background()) },
+			wantService: "store", wantOutcome: restarttiming.Failed,
+		},
+		{
+			name:        "a sidecar restart",
+			arrange:     func(*testing.T, *restarterHarness) {},
+			restart:     func(h *restarterHarness) error { return h.r.RestartSidecar(context.Background()) },
+			wantService: "sidecar", wantOutcome: restarttiming.OK,
+		},
+		{
+			name:        "a sidecar restart that fails",
+			arrange:     func(_ *testing.T, h *restarterHarness) { h.launchd.kickErr = errors.New("kickstart refused") },
+			restart:     func(h *restarterHarness) error { return h.r.RestartSidecar(context.Background()) },
+			wantService: "sidecar", wantOutcome: restarttiming.Failed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			tc.arrange(t, h)
+
+			// Act
+			_ = tc.restart(h)
+
+			// Assert
+			got := h.restarts.Of(restarttiming.ServiceRestart)
+			if len(got) != 1 || got[0].Phase() != tc.wantService || got[0].Outcome() != tc.wantOutcome {
+				t.Fatalf("service restarts = %+v, want one %s restart, %s", got, tc.wantService, tc.wantOutcome)
+			}
+		})
 	}
 }
 

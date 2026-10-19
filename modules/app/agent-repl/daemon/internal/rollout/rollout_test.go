@@ -17,7 +17,7 @@ func TestHandOverIsRefusedOnASuccessorThatIsStillJoining(t *testing.T) {
 	h.c.mu.Unlock()
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if !errors.Is(err, ErrJoining) {
@@ -72,7 +72,7 @@ func TestASuccessorThatFinishedJoiningTakesTheNextHandover(t *testing.T) {
 	h.c.mu.Unlock()
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if err != nil {
@@ -90,7 +90,7 @@ func TestHandOverAnswersBeforeABusyWorkspaceFallsFree(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	accepted, err := h.c.HandOver(context.Background(), false)
+	accepted, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if err != nil {
@@ -109,7 +109,7 @@ func TestHandOverTransfersABusyWorkspaceAtOnceWithoutEndingItsWork(t *testing.T)
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -129,7 +129,7 @@ func TestHandOverOfABusyWorkspaceCompletesWhileItsWorkRuns(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestHandOverSurvivesTheCallerGivingUp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Act
-	if _, err := h.c.HandOver(ctx, false); err != nil {
+	if _, err := h.c.HandOver(ctx, unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	cancel()
@@ -172,12 +172,12 @@ func TestASecondHandOverIsRefusedWhileOneIsInFlight(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("first HandOver: %v", err)
 	}
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	var inFlight *ErrAlreadyRollingOut
@@ -194,12 +194,12 @@ func TestARefusedSecondHandOverSpawnsNoSecondSuccessor(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("first HandOver: %v", err)
 	}
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("the second HandOver was accepted")
 	}
 
@@ -214,13 +214,13 @@ func TestAHandoverThatNeverSpawnedDoesNotRefuseTheNextOne(t *testing.T) {
 	h := newHarness(t)
 	h.workspace(t)
 	h.spawner.err = errors.New("the successor binary would not start")
-	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err == nil {
 		t.Fatalf("the first HandOver succeeded with a spawner that fails")
 	}
 	h.spawner.err = nil
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if err != nil {
@@ -234,7 +234,7 @@ func TestRollingOutNamesWhatTheHandoverInFlightWaitsOn(t *testing.T) {
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
 	_, before := h.c.RollingOut()
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 
@@ -290,7 +290,7 @@ func TestAHandoverWaitsForTheTakeoversOwnBringUp(t *testing.T) {
 	// Act
 	result := make(chan error, 1)
 	go func() {
-		_, err := h.c.HandOver(context.Background(), false)
+		_, err := h.c.HandOver(context.Background(), unforcedAsk)
 		result <- err
 	}()
 	awaitRecord(t, h, opRollOut, "a handover waits for this daemon's own takeover to settle before it plans anything")
@@ -341,7 +341,7 @@ func TestAHandoverWhoseCallerLeavesBeforeTheTakeoverSettlesStartsNothing(t *test
 	cancel()
 
 	// Act
-	_, err = h.c.HandOver(ctx, false)
+	_, err = h.c.HandOver(ctx, unforcedAsk)
 
 	// Assert
 	if !errors.Is(err, context.Canceled) {
@@ -358,7 +358,7 @@ func TestADaemonThatNeverJoinedPlansAHandoverAtOnce(t *testing.T) {
 	h.workspace(t)
 
 	// Act
-	_, err := h.c.HandOver(context.Background(), false)
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
 
 	// Assert
 	if err != nil {

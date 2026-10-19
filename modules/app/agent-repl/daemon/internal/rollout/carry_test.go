@@ -427,7 +427,7 @@ func sealedCarry(t *testing.T, h *harness, ws ids.WorkspaceID) Carry {
 // transfer to arm the adoption window, which is after the carry is written.
 func handOverUntilWindow(t *testing.T, h *harness) {
 	t.Helper()
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)
@@ -574,7 +574,7 @@ func TestASealThatFailsTakesTheWorkspaceBack(t *testing.T) {
 	h.registry.sealErr = errFake
 
 	// Act
-	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
@@ -764,7 +764,7 @@ func TestAForcedHandoverFallsBackToAnUnforcedTransferAtFreeness(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	if _, err := h.c.HandOver(context.Background(), true); err != nil {
+	if _, err := h.c.HandOver(context.Background(), forcedAsk); err != nil {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.clock.awaitArmed(t, adoptionWindow)

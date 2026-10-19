@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -58,6 +60,15 @@ type Deps struct {
 	// Operation names the records, so a boot's bring-up and a takeover's
 	// are told apart in the log.
 	Operation string
+	// Via names the bring-up for the start timings: a boot's, a takeover's,
+	// or an editor's opening of its tabs.
+	Via restarttiming.StartVia
+	// Restarts records how long each workspace's start took
+	// (restarttiming.WorkspaceStart). runtimemetrics.Surface is the
+	// production one.
+	Restarts restarttiming.Recorder
+	// Now reads the clock each start is timed on.
+	Now func() time.Time
 	// Done, when set, is told how each workspace's start ended (nil for a
 	// session that came up or a workspace already being served), the moment
 	// it ends rather than when the whole bring-up does. The editor's OpenTabs
@@ -115,6 +126,12 @@ func (d Deps) Validate() error {
 		return errors.New("bringup: a logger is required")
 	case d.Operation == "":
 		return errors.New("bringup: an operation name is required")
+	case d.Via == "":
+		return errors.New("bringup: the bring-up's kind is required")
+	case d.Restarts == nil:
+		return errors.New("bringup: a restart recorder is required")
+	case d.Now == nil:
+		return errors.New("bringup: a clock is required")
 	}
 	return nil
 }
@@ -213,7 +230,14 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 		return Failed, fmt.Errorf("bringup: read the session record of %q: %w", ws.ID, err)
 	}
 	hibernated := exists && session.Hibernated()
-	if err := deps.StartSession(startCtx, ws.ID); err != nil {
+	phase := restarttiming.StartFresh
+	if hibernated {
+		phase = restarttiming.StartWake
+	}
+	began := deps.Now()
+	err = deps.StartSession(startCtx, ws.ID)
+	took := deps.Now().Sub(began)
+	if err != nil {
 		fields["error"] = err.Error()
 		// A START THIS DAEMON STOOD THE SHIM DOWN UNDER IS NOT A FAILED
 		// BRING-UP. An exit's drain force-stops every workspace session, and
@@ -224,12 +248,16 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 		// daemon generations.
 		if errors.Is(err, shimclient.ErrStandDownOrdered) || errors.Is(err, shimclient.ErrStandingDown) ||
 			errors.Is(err, ErrNotServed) {
+			// NOT TIMED: a start this daemon cut short says nothing about how
+			// long a start takes.
 			log.Debug(deps.Operation, "an open workspace's start ended in a stand-down this daemon ordered", fields)
 			return StoodDown, err
 		}
+		deps.Restarts.ObserveRestart(restarttiming.OfWorkspaceStart(ws.ID, phase, deps.Via, restarttiming.Failed, took))
 		log.Error(deps.Operation, "an open workspace's session did not come up; the bring-up goes on", fields)
 		return Failed, err
 	}
+	deps.Restarts.ObserveRestart(restarttiming.OfWorkspaceStart(ws.ID, phase, deps.Via, restarttiming.OK, took))
 	if hibernated {
 		log.Debug(deps.Operation, "a hibernated workspace was woken", fields)
 		return Woken, nil

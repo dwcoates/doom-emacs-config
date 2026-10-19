@@ -15,6 +15,7 @@ import (
 
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
@@ -587,6 +588,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "no adoption installer", breakDep: func(d *Deps) { d.Adopted = nil }},
 		{name: "no run directory", breakDep: func(d *Deps) { d.RunDir = "" }},
 		{name: "no log surfaces", breakDep: func(d *Deps) { d.Log = nil }},
+		{name: "no restart recorder", breakDep: func(d *Deps) { d.Restarts = nil }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1315,6 +1317,23 @@ func TestABootStartsANonAdoptedOpenWorkspace(t *testing.T) {
 	}
 	if len(brought.BroughtUp) != 1 || brought.BroughtUp[0] != ws.ID {
 		t.Fatalf("BroughtUp = %v, want [%v]", brought.BroughtUp, ws.ID)
+	}
+}
+
+// TestABootTimesEachWorkspaceItStarts pins that the boot's bring-up states
+// each workspace's start as a boot's (restarttiming.StartBoot).
+func TestABootTimesEachWorkspaceItStarts(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	got := h.restarts.Of(restarttiming.WorkspaceStart)
+	if len(got) != 1 || got[0].Workspace() != ws.ID || got[0].Cause() != string(restarttiming.StartBoot) {
+		t.Fatalf("workspace starts = %+v, want one boot start of %v", got, ws.ID)
 	}
 }
 

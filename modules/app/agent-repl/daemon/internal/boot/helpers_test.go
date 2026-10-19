@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
@@ -266,6 +267,8 @@ type bringingEdge struct {
 
 // harness is one boot sequence under test with every fake reachable.
 type harness struct {
+	// restarts keeps what the boot's bring-up timed.
+	restarts *restarttimingtest.Recorder
 	// onFile is whether db is a real wsm.db in the state root (newFileHarness).
 	onFile bool
 	// binds counts the boot's BindViews calls; bindErr is what they answer.
@@ -391,6 +394,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 		socketProbes:    map[string]shimsocket.State{},
 		socketProbeErrs: map[string]error{},
 		startErrs:       map[ids.WorkspaceID]error{},
+		restarts:        &restarttimingtest.Recorder{},
 	}
 	h.rollout.boundNow = func() bool { return h.binds.Load() > 0 }
 	h.queue.db = func() wsm.DB { return h.deps.DB }
@@ -413,6 +417,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 		Merge:      h.merge,
 		Rollout:    h.rollout,
 		RunDir:     filepath.Join(root, "run"),
+		Restarts:   h.restarts,
 		Probe: func(_, dir string) (sessionlock.State, error) {
 			if err, ok := h.probeErrs[dir]; ok {
 				return sessionlock.StateUnknown, err

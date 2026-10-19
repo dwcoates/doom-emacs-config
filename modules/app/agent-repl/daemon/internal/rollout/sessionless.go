@@ -5,6 +5,7 @@ import (
 
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/wsm"
 )
 
@@ -89,6 +90,9 @@ func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Conte
 			BringingUp:   c.deps.BringingUp,
 			Log:          c.log,
 			Operation:    opBringUp,
+			Via:          restarttiming.StartTakeover,
+			Restarts:     c.deps.Restarts,
+			Now:          c.deps.Clock.Now,
 		}, pending)
 	}()
 }

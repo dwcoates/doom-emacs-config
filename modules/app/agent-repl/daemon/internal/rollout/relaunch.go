@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -33,7 +34,7 @@ const FaultRelaunchFailed = health.KindResumeFailed
 // the engine itself (shimBounce).
 func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
-	decision, err := c.deps.Bounces.RequestBounce(ctx, ws, bounce.Request{
+	decision, err := c.deps.Bounces.RequestBounce(ctx, ws, c.timeShimBounce(ws, reason, bounce.Request{
 		Reason:       string(reason),
 		Force:        force,
 		Run:          c.shimBounce(reason, force),
@@ -67,7 +68,7 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 				done(err)
 			}
 		},
-	})
+	}))
 	if err != nil {
 		c.log.Error(opBounce, "the bounce registry refused the shim bounce", dlog.WithCause(fields, err))
 		return bounce.Decision{}, fmt.Errorf("rollout: bounce the shim of %q: %w", ws, err)
@@ -180,11 +181,13 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	// kernel lock -- by ruling the shim takes both inside StartSession, not
 	// at startup -- so a second process for one workspace comes up beside
 	// the first, costing nothing until the swap.
+	began := c.deps.Clock.Now()
 	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
 	if err != nil {
 		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", dlog.WithCause(fields, err))
 		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
 	}
+	c.shimStep(ws, reason, restarttiming.ShimPrelaunch, began)
 	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
 
 	if *lease == nil && !*mergeHeld {
@@ -221,6 +224,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 		if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
 			return nil, Resumed{}, err
 		}
+		stoodDown := c.deps.Clock.Now()
 		if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
 			c.retirePrelaunch(ctx, fresh, reason, fields)
 			if bounce.OutcomeOf(err) == bounce.OutcomeDeferred {
@@ -228,6 +232,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 			}
 			return nil, Resumed{}, err
 		}
+		c.shimStep(ws, reason, restarttiming.ShimStandDown, stoodDown)
 	} else {
 		c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
 	}
@@ -251,6 +256,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 
 	// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
 	// and the prelaunched one takes them at its StartSession.
+	installed := c.deps.Clock.Now()
 	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
 		c.log.Error(opRelaunch, "could not install the prelaunched shim", dlog.WithCause(fields, err))
 		c.retirePrelaunch(ctx, fresh, reason, fields)
@@ -265,6 +271,7 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 		c.recordRelaunchFault(ctx, ws, err, fields)
 		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
 	}
+	c.shimStep(ws, reason, restarttiming.ShimResume, installed)
 	return fresh, resumed, nil
 }
 

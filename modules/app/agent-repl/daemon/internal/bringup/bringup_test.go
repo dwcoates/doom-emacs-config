@@ -8,9 +8,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -39,13 +43,21 @@ type fixture struct {
 	startErr map[ids.WorkspaceID]error
 	sessions *fakeSessions
 	log      *dlog.TestLogger
+	clock    *clocktest.Scripted
+	// startTakes is how far each start moves the clock.
+	startTakes time.Duration
+	restarts   *restarttimingtest.Recorder
 }
+
+var epoch = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 
 func newFixture() *fixture {
 	return &fixture{
 		startErr: map[ids.WorkspaceID]error{},
 		sessions: &fakeSessions{records: map[ids.WorkspaceID]wsm.Session{}, errs: map[ids.WorkspaceID]error{}},
 		log:      dlog.NewTestLogger(),
+		clock:    clocktest.New(epoch),
+		restarts: &restarttimingtest.Recorder{},
 	}
 }
 
@@ -57,6 +69,7 @@ func (f *fixture) deps() Deps {
 			defer f.mu.Unlock()
 			f.starts = append(f.starts, ws)
 			f.marker = append(f.marker, "start:"+string(ws))
+			f.clock.Set(f.clock.Now().Add(f.startTakes))
 			return f.startErr[ws]
 		},
 		BringingUp: func(ws ids.WorkspaceID, up bool) {
@@ -66,6 +79,9 @@ func (f *fixture) deps() Deps {
 		},
 		Log:       f.log,
 		Operation: testOp,
+		Via:       restarttiming.StartBoot,
+		Restarts:  f.restarts,
+		Now:       f.clock.Now,
 	}
 }
 
@@ -311,6 +327,9 @@ func TestDepsValidateRefusesAMissingCollaborator(t *testing.T) {
 		{"no marker", func(d *Deps) { d.BringingUp = nil }},
 		{"no logger", func(d *Deps) { d.Log = nil }},
 		{"no operation", func(d *Deps) { d.Operation = "" }},
+		{"no bring-up kind", func(d *Deps) { d.Via = "" }},
+		{"no restart recorder", func(d *Deps) { d.Restarts = nil }},
+		{"no clock", func(d *Deps) { d.Now = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -389,5 +408,94 @@ func TestRunTellsDoneOfAStartNeverBegun(t *testing.T) {
 	// Assert
 	if told == nil || !errors.Is(told, context.Canceled) {
 		t.Fatalf("Done = %v, want the daemon leaving", told)
+	}
+}
+
+func TestRunTimesEachStartedWorkspace(t *testing.T) {
+	cases := []struct {
+		name        string
+		arrange     func(f *fixture)
+		wantPhase   string
+		wantOutcome restarttiming.Outcome
+	}{
+		{"a start is timed as a start", func(*fixture) {}, "start", restarttiming.OK},
+		{
+			"a wake is timed as a wake",
+			func(f *fixture) {
+				f.sessions.records["a"] = wsm.Session{Workspace: "a", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+			},
+			"wake", restarttiming.OK,
+		},
+		{
+			"a failed start is timed as failed",
+			func(f *fixture) { f.startErr["a"] = errors.New("arranged: the shim never answered") },
+			"start", restarttiming.Failed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			f.startTakes = 7 * time.Second
+			tc.arrange(f)
+
+			// Act
+			Run(context.Background(), f.deps(), workspaces("a"))
+
+			// Assert
+			got := f.restarts.Of(restarttiming.WorkspaceStart)
+			if len(got) != 1 {
+				t.Fatalf("observations = %+v, want one workspace start", got)
+			}
+			o := got[0]
+			if o.Workspace() != "a" || o.Phase() != tc.wantPhase || o.Cause() != "boot" || o.Outcome() != tc.wantOutcome || o.Seconds() != 7 {
+				t.Fatalf("observation = %+v, want a %s of a via boot, %s, 7s", o, tc.wantPhase, tc.wantOutcome)
+			}
+		})
+	}
+}
+
+func TestRunDoesNotTimeAStartItNeverRanOrCutShort(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(f *fixture) context.Context
+	}{
+		{
+			"a start this daemon stood down",
+			func(f *fixture) context.Context {
+				f.startErr["a"] = fmt.Errorf("start: %w", shimclient.ErrStandDownOrdered)
+				return context.Background()
+			},
+		},
+		{
+			"a start never begun because the daemon is leaving",
+			func(*fixture) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+		},
+		{
+			"a workspace whose session record could not be read",
+			func(f *fixture) context.Context {
+				f.sessions.errs["a"] = errors.New("arranged: database is locked")
+				return context.Background()
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			ctx := tc.arrange(f)
+
+			// Act
+			Run(ctx, f.deps(), workspaces("a"))
+
+			// Assert
+			if got := f.restarts.Observations(); len(got) != 0 {
+				t.Fatalf("observations = %+v, want none", got)
+			}
+		})
 	}
 }

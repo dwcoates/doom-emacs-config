@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
@@ -910,6 +911,9 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		BringingUp:   s.deps.BringingUp,
 		Log:          log,
 		Operation:    "daemon.boot.bring_up",
+		Via:          restarttiming.StartBoot,
+		Restarts:     s.deps.Restarts,
+		Now:          s.now,
 	}, pending)
 	if err := <-sidecar; err != nil {
 		if ctx.Err() != nil {

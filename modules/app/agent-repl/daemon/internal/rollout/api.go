@@ -36,6 +36,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -65,6 +66,20 @@ const (
 	ReasonHandoverTransfer RelaunchReason = "handover_transfer"
 )
 
+// Ask is what a deploy asks of a handover or a layout restart.
+type Ask struct {
+	// Force moves every workspace at once, ending running turns.
+	Force bool
+	// DeployStartedAt is when the asking deploy began. REQUIRED: the
+	// manifest carries it to the successor, which times the whole deploy
+	// from it once it has taken over (restarttiming.DeployTotal).
+	DeployStartedAt time.Time
+}
+
+// ErrNoDeployStart refuses a handover or restart asked without the instant
+// its deploy began.
+var ErrNoDeployStart = errors.New("rollout: a handover or restart is asked by a deploy, which must say when it began")
+
 // Controller is the rollout surface.
 type Controller interface {
 	// HandOver begins a blue-green handover: spawn the successor with
@@ -74,7 +89,7 @@ type Controller interface {
 	// It answers the handover's ACCEPTANCE; the transfers and the exit run on
 	// the daemon's lifetime. It refuses with *ErrAlreadyRollingOut while a
 	// handover is in flight, and with ErrJoining on a joining successor.
-	HandOver(ctx context.Context, force bool) (HandoverAcceptance, error)
+	HandOver(ctx context.Context, ask Ask) (HandoverAcceptance, error)
 	// Restart rolls a fresh build out STOP-THEN-START, for a build whose
 	// state layout differs from this one's (a joining successor cannot carry
 	// an older layout forward on its read-only handle). Every served
@@ -84,7 +99,7 @@ type Controller interface {
 	// claim, and this daemon exits. A restart that cannot finish takes every
 	// workspace back and keeps serving. It shares HandOver's one slot and
 	// refusals.
-	Restart(ctx context.Context, force bool) (HandoverAcceptance, error)
+	Restart(ctx context.Context, ask Ask) (HandoverAcceptance, error)
 	// BounceShim asks the bounce registry to replace one workspace's shim with
 	// a fresh one on the installed bundle: at once when nothing is in flight or
 	// force is set, else when the workspace's work ends. done, when set, is
@@ -352,6 +367,10 @@ type Deps struct {
 	FactsBound time.Duration
 	// Clock is the controller's view of time.
 	Clock Clock
+	// Restarts records how long shim replacements, transfers, a successor's
+	// takeover and its sessions' starts took (internal/restarttiming).
+	// runtimemetrics.Surface is the production one.
+	Restarts restarttiming.Recorder
 	// Lifetime is the daemon's serving lifetime. Work the controller runs past
 	// the rpc that started it ends with it. Nil leaves such work bounded by the
 	// process alone.
@@ -662,6 +681,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.BringingUp == nil {
 		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")
+	}
+	if deps.Restarts == nil {
+		return nil, errors.New("rollout: a restart recorder is required; every shim replacement and transfer is timed")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}

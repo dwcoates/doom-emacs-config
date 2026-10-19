@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -131,7 +132,7 @@ func TestEditorBringUpStartsOnlyWorkspacesThisDaemonServes(t *testing.T) {
 			done := &ebDone{errs: map[ids.WorkspaceID]error{}}
 
 			// Act.
-			editorBringUp(fleet, ebRecords{}, own, func(ids.WorkspaceID, bool) {}, log, []ids.WorkspaceID{"w1"}, done.done)
+			editorBringUp(fleet, ebRecords{}, own, func(ids.WorkspaceID, bool) {}, &restarttimingtest.Recorder{}, log, []ids.WorkspaceID{"w1"}, done.done)
 
 			// Assert.
 			if got := len(fleet.started) == 1; got != tt.wantStarted {
@@ -160,7 +161,7 @@ func TestEditorBringUpStandsDownAStartAHandoverTook(t *testing.T) {
 	done := &ebDone{errs: map[ids.WorkspaceID]error{}}
 
 	// Act.
-	editorBringUp(fleet, ebRecords{}, own, func(ids.WorkspaceID, bool) {}, log, []ids.WorkspaceID{"w1"}, done.done)
+	editorBringUp(fleet, ebRecords{}, own, func(ids.WorkspaceID, bool) {}, &restarttimingtest.Recorder{}, log, []ids.WorkspaceID{"w1"}, done.done)
 
 	// Assert.
 	if done.errs["w1"] == nil || log.count(dlog.LevelError) != 0 {
@@ -176,7 +177,7 @@ func TestEditorBringUpReportsAStartThatFailedWhileStillServed(t *testing.T) {
 	done := &ebDone{errs: map[ids.WorkspaceID]error{}}
 
 	// Act.
-	editorBringUp(fleet, ebRecords{}, own, func(ids.WorkspaceID, bool) {}, log, []ids.WorkspaceID{"w1"}, done.done)
+	editorBringUp(fleet, ebRecords{}, own, func(ids.WorkspaceID, bool) {}, &restarttimingtest.Recorder{}, log, []ids.WorkspaceID{"w1"}, done.done)
 
 	// Assert.
 	if done.errs["w1"] == nil || log.count(dlog.LevelError) != 1 {
