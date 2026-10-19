@@ -893,6 +893,27 @@ describe("a section's folded count", () => {
     expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("inline");
   });
 
+  it.each([
+    { name: "size", property: "font-size" },
+    { name: "color", property: "color" },
+    { name: "border", property: "border-top-style" },
+    { name: "padding", property: "padding-left" },
+  ])("draws the hidden workspaces section's count in Recently Merged's today count's $name", ({ property }) => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        hidden: hiddenSection([HIDDEN_ROW], 1, false),
+        merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })], 1, false),
+      }),
+      sidebarContext(),
+    );
+    const today = pane(drawn).querySelector(".merged-section .sb-today-count") as HTMLElement;
+    const [hidden, merged] = inRail(drawn, () => [
+      cascadedValue(countOf(drawn, ".hidden-section"), property),
+      cascadedValue(today, property),
+    ]);
+    expect(hidden).toBe(merged);
+  });
+
   it("draws the hidden workspaces section's count as every row it holds", () => {
     const rows = [row({ id: "ws-h1" }), row({ id: "ws-h2" }), row({ id: "ws-h3" })];
     const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection(rows, 3, false) }), sidebarContext());
@@ -927,17 +948,23 @@ describe("a section's folded count", () => {
     expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "font-size"))).toBe("0.85em");
   });
 
-  it("draws the count in the label's own color", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }),
-      sidebarContext(),
-    );
-    expect(
-      inRail(drawn, () => [
-        cascadedValue(countOf(drawn, ".repo-section"), "color"),
-        cascadedValue(countOf(drawn, ".repo-section").previousElementSibling!, "color"),
-      ]),
-    ).toEqual(["var(--repo-head-collapsed)", "var(--repo-head-collapsed)"]);
+  it.each([
+    { name: "a folded repository section's", selector: ".repo-section .sb-count", r: () => roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }) },
+    { name: "an unfolded repository section's", selector: ".repo-section .sb-count", r: () => roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: false })] }) },
+    { name: "Hidden Workspaces'", selector: ".hidden-section .sb-count", r: () => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }) },
+    { name: "a folded Recently Merged's", selector: ".merged-section .sb-count", r: () => roster({ merged: mergedSection([MERGED_ROW], 1, true) }) },
+    { name: "an unfolded Recently Merged's today", selector: ".merged-section .sb-today-count", r: () => roster({ merged: mergedSection([MERGED_ROW], 1, false) }) },
+  ])("draws $name count in grey a step smaller than its label", ({ selector, r }) => {
+    const drawn = drawWorkspaceRoster(r(), sidebarContext());
+    const got = inRail(drawn, () => {
+      const count = pane(drawn).querySelector(selector) as HTMLElement;
+      return [cascadedValue(count, "color"), cascadedValue(count, "font-size")];
+    });
+    expect(got).toEqual(["var(--muted)", "0.85em"]);
+  });
+
+  it("draws no section count inside a badge", () => {
+    expect(css).not.toMatch(/\.sb-count[^{]*\{[^}]*(border|padding)/);
   });
 
   it("refuses a header whose count is unset", () => {

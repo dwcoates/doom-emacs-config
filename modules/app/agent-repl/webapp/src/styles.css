@@ -860,13 +860,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    under it), and a section or merged group it leaves no row in. */
 #ws-sidebar .sb-search-miss,
 #ws-sidebar .sb-search-empty { display: none; }
-#ws-sidebar .sb-count {
-  font-size: 0.72rem;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 0.45em;
-}
 /* The transient failure note (WorkspaceSidebar.showError): the rail's FOOTER
    is its one fixed error slot, so every failed sidebar gesture — view
    selector, task control, row switch, repo fold — reports in the same place
@@ -934,33 +927,31 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo-head .tri { font-size: 1.05rem; line-height: 1; }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
 #ws-sidebar .repo.folded .rows { display: none; }
-/* THE FOLDED COUNT "(N)" (frontend.v1.RosterSectionHeader.count): between the
-   label and the add control, a step smaller than the label and in its color,
-   and present only while the section is folded (owner request, 2026-10-02).
-   A repository section under OPEN shows its count folded or not (owner
-   request, 2026-10-15), and so does Hidden Workspaces, whose count is every
-   row it holds, scrolled out of its viewport or not (owner request,
-   2026-10-19). */
-#ws-sidebar .repo-head .sb-count {
-  display: none;
-  font-size: 0.85em;
-  color: inherit;
-}
-#ws-sidebar .repo.folded > .repo-head .sb-count,
-#ws-sidebar .repo.repo-section > .repo-head .sb-count,
-#ws-sidebar .repo.hidden-section > .repo-head .sb-count { display: inline; }
-/* THE OPEN RECENTLY MERGED BAND'S COUNT "(K today)": the merges that landed today,
-   hidden rows included (src/sidebar/roster.ts drawMergedTodayCount), sized as
-   the folded count and drawn grey, present only while the band is unfolded,
-   where the folded count is not (owner request, 2026-10-11). */
-/* THE OPEN WORKSPACES SECTION'S COUNT "(N)" takes the same size and grey
-   (owner request, 2026-10-13), and shows whether the section is folded or
-   not (src/sidebar/roster.ts drawRosterOpenSection). */
+/* EVERY SECTION HEADER'S COUNT IS ONE TEXT (owner request, 2026-10-19): a
+   step smaller than the label (0.85em), in grey, with no badge around it.
+   - The folded count "(N)" (frontend.v1.RosterSectionHeader.count) sits
+     between the label and the add control, present while the section is
+     folded (owner request, 2026-10-02). A repository section under OPEN shows
+     it folded or not (owner request, 2026-10-15), and so does Hidden
+     Workspaces, whose count is every row it holds, scrolled out of its
+     viewport or not (owner request, 2026-10-19).
+   - The open Recently Merged band's "(K today)" counts the merges that landed
+     today, hidden rows included (src/sidebar/roster.ts drawMergedTodayCount),
+     present only while the band is unfolded, where the folded count is not
+     (owner request, 2026-10-11).
+   - The open workspaces section's "(N)" shows whether the section is folded
+     or not (owner request, 2026-10-13; src/sidebar/roster.ts
+     drawRosterOpenSection). */
+#ws-sidebar .repo-head .sb-count,
 #ws-sidebar .repo-head .sb-today-count,
 #ws-sidebar .repo-head .sb-open-count {
   font-size: 0.85em;
   color: var(--muted);
 }
+#ws-sidebar .repo-head .sb-count { display: none; }
+#ws-sidebar .repo.folded > .repo-head .sb-count,
+#ws-sidebar .repo.repo-section > .repo-head .sb-count,
+#ws-sidebar .repo.hidden-section > .repo-head .sb-count { display: inline; }
 #ws-sidebar .repo.folded > .repo-head .sb-today-count { display: none; }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
