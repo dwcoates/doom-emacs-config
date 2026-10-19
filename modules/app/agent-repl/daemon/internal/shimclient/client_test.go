@@ -1274,7 +1274,7 @@ func TestAUnaryCallInsideAnOrderedStandDownIsNotAFault(t *testing.T) {
 			if tt.standDown {
 				c.standDown.Store(true)
 			}
-			req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+			req := &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 				Fresh: &shimv1.StartSessionFresh{PermissionMode: &conversationv1.AgentPermissionMode{
 					Mode: &conversationv1.AgentPermissionMode_Plan{Plan: &conversationv1.AgentPermissionModePlan{}},
 				}},

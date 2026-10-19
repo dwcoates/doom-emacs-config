@@ -61,33 +61,40 @@ func TestValidateStartSessionRequest(t *testing.T) {
 	}{
 		{
 			name:  "no source arm",
-			req:   &shimv1.StartSessionRequest{},
+			req:   &shimv1.StartSessionRequest{WorkspaceName: "parser-fix"},
 			field: "StartSessionRequest.source",
 		},
 		{
-			name: "fresh with a model whose name is empty",
+			name: "no workspace name",
 			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+				Fresh: &shimv1.StartSessionFresh{Model: validModel(), PermissionMode: validMode()},
+			}},
+			field: "StartSessionRequest.workspace_name",
+		},
+		{
+			name: "fresh with a model whose name is empty",
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 				Fresh: &shimv1.StartSessionFresh{Model: &conversationv1.AgentModel{}, PermissionMode: validMode()},
 			}},
 			field: "StartSessionRequest.fresh.model.name",
 		},
 		{
 			name: "fresh without a permission mode",
-			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 				Fresh: &shimv1.StartSessionFresh{Model: validModel()},
 			}},
 			field: "StartSessionRequest.fresh.permission_mode",
 		},
 		{
 			name: "resume without a vendor id",
-			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Resume{
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
 				Resume: &shimv1.StartSessionResume{},
 			}},
 			field: "StartSessionRequest.resume.vendor_session_id",
 		},
 		{
 			name: "cold remediation with no arm",
-			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Resume{
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
 				Resume: &shimv1.StartSessionResume{
 					VendorSessionId: "vendor-1",
 					ColdRemediation: &conversationv1.SessionColdRemediation{},
@@ -110,7 +117,7 @@ func TestValidateStartSessionRequest(t *testing.T) {
 // TestValidateStartSessionRequestAccepts asserts a legal fresh start passes.
 func TestValidateStartSessionRequestAccepts(t *testing.T) {
 	// Arrange.
-	req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+	req := &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 		Fresh: &shimv1.StartSessionFresh{Model: validModel(), PermissionMode: validMode()},
 	}}
 
@@ -529,7 +536,7 @@ func assertInvalidField(t *testing.T, err error, field string) {
 // rather than a missing required field.
 func TestValidateStartSessionFreshAcceptsAnUnsetModel(t *testing.T) {
 	// Arrange.
-	req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+	req := &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 		Fresh: &shimv1.StartSessionFresh{PermissionMode: validMode()},
 	}}
 

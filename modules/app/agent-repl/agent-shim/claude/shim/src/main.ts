@@ -849,6 +849,7 @@ export function queryFactory(
       return vendors.real(
         {
           cwd,
+          workspaceName: spec.workspaceName,
           claudeConfigDir: environment.claudeConfigDir,
           binding: spec.binding,
           permissionMode: spec.permissionMode,

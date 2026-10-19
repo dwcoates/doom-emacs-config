@@ -404,6 +404,7 @@ function harness(
 
 function freshRequest(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
+    workspaceName: "parser-fix",
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -419,6 +420,7 @@ function freshRequest(): shimv1.StartSessionRequest {
 /** A fresh start naming NEITHER model nor permission mode. */
 function freshRequestNoFacts(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
+    workspaceName: "parser-fix",
     source: { case: "fresh", value: create(shimv1.StartSessionFreshSchema, {}) },
   });
 }
@@ -426,6 +428,7 @@ function freshRequestNoFacts(): shimv1.StartSessionRequest {
 /** A fresh start naming NO model: the SDK's own default takes effect. */
 function freshRequestNoModel(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
+    workspaceName: "parser-fix",
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -443,6 +446,7 @@ function resumeRequest(
   options: { rebind?: boolean; rolledBackTurns?: readonly string[] } = {},
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
+    workspaceName: "parser-fix",
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {
@@ -590,6 +594,15 @@ describe("StartSession, fresh", () => {
     await started(h);
 
     expect(h.queries[0]?.spec.binding.kind).toBe("fresh");
+  });
+
+  it("hands the query the workspace's name StartSession stated", async () => {
+    // Arrange, Act.
+    const h = harness();
+    await started(h);
+
+    // Assert.
+    expect(h.queries[0]?.spec.workspaceName).toBe("parser-fix");
   });
 
   it("declares the pre-minted AgentId absent from the store, so no book is asked for", async () => {
@@ -10628,6 +10641,17 @@ describe("the cold gate's COMPACT remediation", () => {
         emitSummary(query, "77777777-7777-4777-8777-777777777777");
       },
     });
+
+  it("hands the summarizing query and the session's own query the workspace's name", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    await compactedResume(h);
+
+    // Assert: both queries are handed the one system prompt.
+    expect(h.queries.map((q) => q.spec.workspaceName)).toEqual(["parser-fix", "parser-fix"]);
+  });
 
   it("pushes SUMMARIZING before the summarizing query is created", async () => {
     // Arrange: the compaction happens inside StartSession, so the frame that

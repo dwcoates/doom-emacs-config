@@ -83,6 +83,8 @@ export type VendorBinding =
 export interface RealQuerySpec {
   /** The workspace directory. The session's cwd; never derived from process.cwd() here. */
   readonly cwd: string;
+  /** The workspace's name, which the system prompt states (metaprompt.ts, workspaceSection). */
+  readonly workspaceName: string;
   /** The account root the vendor binary must read, passed through in `env`. */
   readonly claudeConfigDir: string;
   /** Fresh (pre-minted id) or resume (existing vendor id). */
@@ -233,7 +235,7 @@ function defaultSpawn(options: SpawnOptions): SpawnedProcess {
  */
 export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string, McpServerConfig>): Options {
   const options: Options = {
-    systemPrompt: systemPromptOption(spec.home),
+    systemPrompt: systemPromptOption(spec.workspaceName, spec.home),
     mcpServers,
     allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
     settingSources: ["user", "project", "local"],

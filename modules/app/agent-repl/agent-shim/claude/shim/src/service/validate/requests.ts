@@ -46,6 +46,11 @@ function refuse(rpc: string, err: unknown): never {
 /** `shim.v1.StartSessionRequest` — fresh or resume, never neither. */
 export function validateStartSessionRequest(request: shimv1.StartSessionRequest): void {
   try {
+    // THE SYSTEM PROMPT NAMES THE WORKSPACE, so a start that names none is a
+    // daemon that forgot to say, never a workspace with no name.
+    if (request.workspaceName === "") {
+      throw invalidArgument("start_session.workspace_name is empty; the system prompt names the workspace the session runs in");
+    }
     switch (request.source.case) {
       case "fresh": {
         const fresh = request.source.value;

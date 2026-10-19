@@ -957,6 +957,7 @@ describe("queryFactory", () => {
   function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
     return {
       binding: { kind: "fresh", sessionId: "session-1" },
+      workspaceName: "parser-fix",
       permissionMode: "default",
       canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
       abortController: new AbortController(),
@@ -1572,6 +1573,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
   function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
     return {
       binding: { kind: "fresh", sessionId: "session-1" },
+      workspaceName: "parser-fix",
       permissionMode: "default",
       canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
       abortController: new AbortController(),
@@ -1684,6 +1686,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Act.
     await factory(true, env, cwd)({
       binding,
+      workspaceName: "parser-fix",
       permissionMode: "default",
       canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
       abortController: new AbortController(),
@@ -1699,6 +1702,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Act.
     await factory(true, env, cwd)({
       binding: { kind: "resume", resumeSessionId: "vendor-old" },
+      workspaceName: "parser-fix",
       permissionMode: "default",
       canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
       abortController: new AbortController(),
@@ -1729,6 +1733,7 @@ describe("queryFactory under --fake", () => {
     // Act.
     const query = await create({
       binding: { kind: "resume", resumeSessionId: "vendor-old" },
+      workspaceName: "parser-fix",
       permissionMode: "plan",
       canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
       abortController: new AbortController(),

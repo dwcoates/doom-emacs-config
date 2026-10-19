@@ -19,6 +19,9 @@ func validateStartSessionRequest(req *shimv1.StartSessionRequest) error {
 	if req == nil {
 		return invalid(m, m, "request is nil")
 	}
+	if req.GetWorkspaceName() == "" {
+		return invalid(m, m+".workspace_name", "the session's system prompt names its workspace, and the name is empty")
+	}
 	switch source := req.GetSource().(type) {
 	case *shimv1.StartSessionRequest_Fresh:
 		return validateStartSessionFresh(m+".fresh", source.Fresh)

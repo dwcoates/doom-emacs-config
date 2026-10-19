@@ -52,6 +52,13 @@ type StartSessionRequest struct {
 	// shim sends no keep-alive and states the projected lapse on the session
 	// stream from its start. Unset, the cadence runs. Presence is the fact.
 	HoldKeepalive *StartSessionHoldKeepalive `protobuf:"bytes,3,opt,name=hold_keepalive,json=holdKeepalive,proto3,oneof" json:"hold_keepalive,omitempty"`
+	// THE WORKSPACE'S NAME, as the sidebar draws it. REQUIRED: never empty, and
+	// a request without one is refused as invalid. The shim appends it to the
+	// session's system prompt, after the metaprompt, so the agent knows it runs
+	// in an agent-repl workspace and the name the user, other workspaces and the
+	// agent API (`agent-repld workspace ...`) call that workspace by. A
+	// workspace's name never changes, so it holds for the session's life.
+	WorkspaceName string `protobuf:"bytes,4,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -116,6 +123,13 @@ func (x *StartSessionRequest) GetHoldKeepalive() *StartSessionHoldKeepalive {
 		return x.HoldKeepalive
 	}
 	return nil
+}
+
+func (x *StartSessionRequest) GetWorkspaceName() string {
+	if x != nil {
+		return x.WorkspaceName
+	}
+	return ""
 }
 
 type isStartSessionRequest_Source interface {
@@ -1154,11 +1168,12 @@ var File_shim_v1_endpoint_start_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\n" +
-	"$shim/v1/endpoint_start_session.proto\x12\ashim.v1\x1a\x19conversation/v1/api.proto\x1a conversation/v1/permission.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\xed\x01\n" +
+	"$shim/v1/endpoint_start_session.proto\x12\ashim.v1\x1a\x19conversation/v1/api.proto\x1a conversation/v1/permission.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\x94\x02\n" +
 	"\x13StartSessionRequest\x122\n" +
 	"\x05fresh\x18\x01 \x01(\v2\x1a.shim.v1.StartSessionFreshH\x00R\x05fresh\x125\n" +
 	"\x06resume\x18\x02 \x01(\v2\x1b.shim.v1.StartSessionResumeH\x00R\x06resume\x12N\n" +
-	"\x0ehold_keepalive\x18\x03 \x01(\v2\".shim.v1.StartSessionHoldKeepaliveH\x01R\rholdKeepalive\x88\x01\x01B\b\n" +
+	"\x0ehold_keepalive\x18\x03 \x01(\v2\".shim.v1.StartSessionHoldKeepaliveH\x01R\rholdKeepalive\x88\x01\x01\x12%\n" +
+	"\x0eworkspace_name\x18\x04 \x01(\tR\rworkspaceNameB\b\n" +
 	"\x06sourceB\x11\n" +
 	"\x0f_hold_keepalive\"\x1b\n" +
 	"\x19StartSessionHoldKeepalive\"\xa4\x01\n" +

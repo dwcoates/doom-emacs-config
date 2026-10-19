@@ -155,6 +155,10 @@ These clicks jump to an entry in the feed:
 
 ## What agents can do with workspaces
 
+Every agent knows which workspace it runs in.
+- Its system prompt ends by saying it runs in an agent-repl workspace, and gives that workspace's name.
+- That part is added when the session starts, after `metaprompt.md`, and is not in the file.
+
 Agents work with agent-repl through the `agent-repld` command line and four skills:
 
 - `/agent-repl-workspaces` creates workspaces, prompts them, reads their status, closes and compacts them, and follows them.

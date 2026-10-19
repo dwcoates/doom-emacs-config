@@ -209,6 +209,12 @@ export interface QuerySpec {
   readonly binding:
     | { readonly kind: "fresh"; readonly sessionId: string }
     | { readonly kind: "resume"; readonly resumeSessionId: string };
+  /**
+   * The workspace's name, as StartSession stated it
+   * (`shim.v1.StartSessionRequest.workspace_name`). Every query of the session
+   * carries it, so every one is handed the same system prompt.
+   */
+  readonly workspaceName: string;
   readonly model?: string;
   readonly permissionMode: PermissionModeLike;
   readonly canUseTool: CanUseToolLike;
@@ -957,6 +963,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     fromVendorPermissionMode(DEFAULT_PERMISSION_MODE);
   let modelCatalog: conversationv1.ModelOption[] = [];
   let started = false;
+  /** The workspace's name, as StartSession stated it; unset until then. */
+  let workspaceName: string | undefined;
   /**
    * The `SessionStarted` this session announced, kept for re-announcement.
    *
@@ -1266,6 +1274,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (open !== undefined && !open.keepalive) return open.id;
     if (adopted !== undefined) return adopted.id;
     return stopCommand?.turn;
+  }
+
+  /**
+   * The workspace's name StartSession stated. A query is only ever created
+   * after StartSession has recorded it, so its absence is a defect.
+   */
+  function requireWorkspaceName(): string {
+    if (workspaceName === undefined) {
+      throw new Error("shim session: a query was created before StartSession named the workspace");
+    }
+    return workspaceName;
   }
 
   function requireIdentity(): SessionIdentity {
@@ -4748,6 +4767,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const controller = new AbortController();
     const created = await deps.createQuery({
       binding,
+      workspaceName: requireWorkspaceName(),
       permissionMode: toVendorPermissionMode(permissionMode),
       canUseTool: gate.canUseTool,
       abortController: controller,
@@ -4967,6 +4987,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (source.case === undefined) {
       throw new Error("shim session: StartSession reached the engine with no source");
     }
+    // THE NAME IS RECORDED BEFORE ANY QUERY: every query this session creates
+    // states it in the system prompt.
+    workspaceName = request.workspaceName;
     // WHEN THIS ATTEMPT BEGAN, for the failed start's record: how long the
     // vendor was given before the start was refused is half its diagnosis.
     const startBeganMs = deps.nowMs();
@@ -5530,6 +5553,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       throwaway = await deps.createQuery({
         binding: { kind: "resume", resumeSessionId: vendorSessionId },
+        workspaceName: requireWorkspaceName(),
         // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at
         // the transcript's tail is neither summarized nor chained under it.
         ...resumeAtLiveEnd(vendorSessionId),

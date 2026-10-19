@@ -39,6 +39,13 @@ message StartSessionRequest {
   // shim sends no keep-alive and states the projected lapse on the session
   // stream from its start. Unset, the cadence runs. Presence is the fact.
   optional StartSessionHoldKeepalive hold_keepalive = 3;
+  // THE WORKSPACE'S NAME, as the sidebar draws it. REQUIRED: never empty, and
+  // a request without one is refused as invalid. The shim appends it to the
+  // session's system prompt, after the metaprompt, so the agent knows it runs
+  // in an agent-repl workspace and the name the user, other workspaces and the
+  // agent API (`agent-repld workspace ...`) call that workspace by. A
+  // workspace's name never changes, so it holds for the session's life.
+  string workspace_name = 4;
 }
 
 // The session starts with its keep-alives held. DELIBERATELY EMPTY: presence
