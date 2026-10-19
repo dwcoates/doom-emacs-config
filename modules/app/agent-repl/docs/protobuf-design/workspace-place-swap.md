@@ -315,3 +315,19 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   place_workspace`. That needs a read of the arrangement before the write, and
   `place_workspace` places only top-level workspaces, so siblings could not
   move at all.
+
+## A swap stays inside one repository (owner, 2026-10-19)
+
+- **Ruling:** `SPC TAB p` must not work across repositories. This supersedes
+  "any two workspaces can swap" (2026-10-17) for pairs of different
+  repositories.
+- **What:** `agentrepl.v1.SwapWorkspacesError.other_repository`, an empty
+  arm; the request comment states the one-repository rule.
+- **Why:** the tab bar groups by repository, so a swap across repositories
+  exchanged stored places and moved no tab.
+- **Consequences:** `wsm.SwapPlaces` reads both repositories in its
+  transaction and refuses `ErrOtherRepository` before writing; the workspace
+  verb answers `other_repository`; Emacs says so in words at info.
+- **Still open:** a swap of a child with a workspace outside its family
+  exchanges places and moves no tab; whether it is refused too (as
+  `MoveWorkspace` refuses `not_siblings`) is put to the owner.

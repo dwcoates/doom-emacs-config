@@ -29,9 +29,12 @@ const (
 
 // Exchange two workspaces' places in the registry order: `workspace` takes
 // `target`'s place and `target` takes `workspace`'s, and every other workspace
-// keeps its own. Any two workspaces may swap, whatever their repositories or
-// parents. The sidebar and the tab bar both redraw from the registry, so the
-// swap shows on both.
+// keeps its own. Two top-level workspaces of one repository also exchange
+// their subsections, so each takes the other's tab across subsections. The
+// two must belong to ONE repository: the tab bar never interleaves
+// repositories, so no tab of one is a place for a workspace of another
+// (`other_repository`). The sidebar and the tab bar both redraw from the
+// registry, so the swap shows on both.
 type SwapWorkspacesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// One of the two workspaces, as the roster served it; the editor sends the
@@ -223,6 +226,7 @@ type SwapWorkspacesError struct {
 	//	*SwapWorkspacesError_WorkspaceRefMismatch
 	//	*SwapWorkspacesError_TransferringAway
 	//	*SwapWorkspacesError_NotYetAdopted
+	//	*SwapWorkspacesError_OtherRepository
 	Cause         isSwapWorkspacesError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -301,6 +305,15 @@ func (x *SwapWorkspacesError) GetNotYetAdopted() *SwapWorkspacesNotYetAdopted {
 	return nil
 }
 
+func (x *SwapWorkspacesError) GetOtherRepository() *SwapWorkspacesOtherRepository {
+	if x != nil {
+		if x, ok := x.Cause.(*SwapWorkspacesError_OtherRepository); ok {
+			return x.OtherRepository
+		}
+	}
+	return nil
+}
+
 type isSwapWorkspacesError_Cause interface {
 	isSwapWorkspacesError_Cause()
 }
@@ -325,6 +338,12 @@ type SwapWorkspacesError_NotYetAdopted struct {
 	NotYetAdopted *SwapWorkspacesNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type SwapWorkspacesError_OtherRepository struct {
+	// The two workspaces belong to different repositories, whose tabs never
+	// interleave, so neither can take the other's place.
+	OtherRepository *SwapWorkspacesOtherRepository `protobuf:"bytes,5,opt,name=other_repository,json=otherRepository,proto3,oneof"`
+}
+
 func (*SwapWorkspacesError_UnknownWorkspace) isSwapWorkspacesError_Cause() {}
 
 func (*SwapWorkspacesError_WorkspaceRefMismatch) isSwapWorkspacesError_Cause() {}
@@ -332,6 +351,8 @@ func (*SwapWorkspacesError_WorkspaceRefMismatch) isSwapWorkspacesError_Cause() {
 func (*SwapWorkspacesError_TransferringAway) isSwapWorkspacesError_Cause() {}
 
 func (*SwapWorkspacesError_NotYetAdopted) isSwapWorkspacesError_Cause() {}
+
+func (*SwapWorkspacesError_OtherRepository) isSwapWorkspacesError_Cause() {}
 
 // Names the ref the registry does not hold.
 type SwapWorkspacesUnknownWorkspace struct {
@@ -518,6 +539,44 @@ func (*SwapWorkspacesNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDescGZIP(), []int{7}
 }
 
+// The two workspaces belong to different repositories. DELIBERATELY EMPTY:
+// the arm is the fact, and the request already names both workspaces.
+type SwapWorkspacesOtherRepository struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SwapWorkspacesOtherRepository) Reset() {
+	*x = SwapWorkspacesOtherRepository{}
+	mi := &file_agentrepl_v1_endpoint_swap_workspaces_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SwapWorkspacesOtherRepository) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SwapWorkspacesOtherRepository) ProtoMessage() {}
+
+func (x *SwapWorkspacesOtherRepository) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_swap_workspaces_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SwapWorkspacesOtherRepository.ProtoReflect.Descriptor instead.
+func (*SwapWorkspacesOtherRepository) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDescGZIP(), []int{8}
+}
+
 var File_agentrepl_v1_endpoint_swap_workspaces_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDesc = "" +
@@ -530,12 +589,13 @@ const file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.SwapWorkspacesSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.SwapWorkspacesErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15SwapWorkspacesSuccess\"\x97\x03\n" +
+	"\x15SwapWorkspacesSuccess\"\xf1\x03\n" +
 	"\x13SwapWorkspacesError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.SwapWorkspacesUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.SwapWorkspacesWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2,.agentrepl.v1.SwapWorkspacesTransferringAwayH\x00R\x10transferringAway\x12S\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2).agentrepl.v1.SwapWorkspacesNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2).agentrepl.v1.SwapWorkspacesNotYetAdoptedH\x00R\rnotYetAdopted\x12X\n" +
+	"\x10other_repository\x18\x05 \x01(\v2+.agentrepl.v1.SwapWorkspacesOtherRepositoryH\x00R\x0fotherRepositoryB\a\n" +
 	"\x05cause\"Z\n" +
 	"\x1eSwapWorkspacesUnknownWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x81\x01\n" +
@@ -544,7 +604,8 @@ const file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDesc = "" +
 	"\fregistry_dir\x18\x02 \x01(\tR\vregistryDir\":\n" +
 	"\x1eSwapWorkspacesTransferringAway\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bSwapWorkspacesNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1bSwapWorkspacesNotYetAdopted\"\x1f\n" +
+	"\x1dSwapWorkspacesOtherRepositoryB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDescOnce sync.Once
@@ -558,7 +619,7 @@ func file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_swap_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agentrepl_v1_endpoint_swap_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_swap_workspaces_proto_goTypes = []any{
 	(*SwapWorkspacesRequest)(nil),              // 0: agentrepl.v1.SwapWorkspacesRequest
 	(*SwapWorkspacesResponse)(nil),             // 1: agentrepl.v1.SwapWorkspacesResponse
@@ -568,24 +629,26 @@ var file_agentrepl_v1_endpoint_swap_workspaces_proto_goTypes = []any{
 	(*SwapWorkspacesWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SwapWorkspacesWorkspaceRefMismatch
 	(*SwapWorkspacesTransferringAway)(nil),     // 6: agentrepl.v1.SwapWorkspacesTransferringAway
 	(*SwapWorkspacesNotYetAdopted)(nil),        // 7: agentrepl.v1.SwapWorkspacesNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                    // 8: workspace.v1.WorkspaceRef
+	(*SwapWorkspacesOtherRepository)(nil),      // 8: agentrepl.v1.SwapWorkspacesOtherRepository
+	(*v1.WorkspaceRef)(nil),                    // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_swap_workspaces_proto_depIdxs = []int32{
-	8,  // 0: agentrepl.v1.SwapWorkspacesRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	8,  // 1: agentrepl.v1.SwapWorkspacesRequest.target:type_name -> workspace.v1.WorkspaceRef
+	9,  // 0: agentrepl.v1.SwapWorkspacesRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 1: agentrepl.v1.SwapWorkspacesRequest.target:type_name -> workspace.v1.WorkspaceRef
 	2,  // 2: agentrepl.v1.SwapWorkspacesResponse.success:type_name -> agentrepl.v1.SwapWorkspacesSuccess
 	3,  // 3: agentrepl.v1.SwapWorkspacesResponse.error:type_name -> agentrepl.v1.SwapWorkspacesError
 	4,  // 4: agentrepl.v1.SwapWorkspacesError.unknown_workspace:type_name -> agentrepl.v1.SwapWorkspacesUnknownWorkspace
 	5,  // 5: agentrepl.v1.SwapWorkspacesError.workspace_ref_mismatch:type_name -> agentrepl.v1.SwapWorkspacesWorkspaceRefMismatch
 	6,  // 6: agentrepl.v1.SwapWorkspacesError.transferring_away:type_name -> agentrepl.v1.SwapWorkspacesTransferringAway
 	7,  // 7: agentrepl.v1.SwapWorkspacesError.not_yet_adopted:type_name -> agentrepl.v1.SwapWorkspacesNotYetAdopted
-	8,  // 8: agentrepl.v1.SwapWorkspacesUnknownWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	8,  // 9: agentrepl.v1.SwapWorkspacesWorkspaceRefMismatch.workspace:type_name -> workspace.v1.WorkspaceRef
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	8,  // 8: agentrepl.v1.SwapWorkspacesError.other_repository:type_name -> agentrepl.v1.SwapWorkspacesOtherRepository
+	9,  // 9: agentrepl.v1.SwapWorkspacesUnknownWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 10: agentrepl.v1.SwapWorkspacesWorkspaceRefMismatch.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_swap_workspaces_proto_init() }
@@ -602,6 +665,7 @@ func file_agentrepl_v1_endpoint_swap_workspaces_proto_init() {
 		(*SwapWorkspacesError_WorkspaceRefMismatch)(nil),
 		(*SwapWorkspacesError_TransferringAway)(nil),
 		(*SwapWorkspacesError_NotYetAdopted)(nil),
+		(*SwapWorkspacesError_OtherRepository)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -609,7 +673,7 @@ func file_agentrepl_v1_endpoint_swap_workspaces_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDesc), len(file_agentrepl_v1_endpoint_swap_workspaces_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
