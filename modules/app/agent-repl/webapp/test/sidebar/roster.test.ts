@@ -951,16 +951,27 @@ describe("a section's folded count", () => {
   it.each([
     { name: "a folded repository section's", selector: ".repo-section .sb-count", r: () => roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: true })] }) },
     { name: "an unfolded repository section's", selector: ".repo-section .sb-count", r: () => roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: false })] }) },
-    { name: "Hidden Workspaces'", selector: ".hidden-section .sb-count", r: () => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }) },
     { name: "a folded Recently Merged's", selector: ".merged-section .sb-count", r: () => roster({ merged: mergedSection([MERGED_ROW], 1, true) }) },
-    { name: "an unfolded Recently Merged's today", selector: ".merged-section .sb-today-count", r: () => roster({ merged: mergedSection([MERGED_ROW], 1, false) }) },
-  ])("draws $name count in grey a step smaller than its label", ({ selector, r }) => {
+  ])("draws $name count in its label's color", ({ selector, r }) => {
     const drawn = drawWorkspaceRoster(r(), sidebarContext());
     const got = inRail(drawn, () => {
       const count = pane(drawn).querySelector(selector) as HTMLElement;
-      return [cascadedValue(count, "color"), cascadedValue(count, "font-size")];
+      return [cascadedValue(count, "color"), cascadedValue(count.previousElementSibling!, "color")];
     });
-    expect(got).toEqual(["var(--muted)", "0.85em"]);
+    expect(got[0]).toBe(got[1]);
+  });
+
+  it.each([
+    { name: "Hidden Workspaces'", selector: ".hidden-section .sb-count", r: () => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }) },
+    { name: "an unfolded Recently Merged's today", selector: ".merged-section .sb-today-count", r: () => roster({ merged: mergedSection([MERGED_ROW], 1, false) }) },
+  ])("draws $name count in grey", ({ selector, r }) => {
+    const drawn = drawWorkspaceRoster(r(), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(pane(drawn).querySelector(selector) as HTMLElement, "color"))).toBe("var(--muted)");
+  });
+
+  it("keeps a repository section's count a step smaller than its name", () => {
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", count: 2, collapsed: false })] }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "font-size"))).toBe("0.85em");
   });
 
   it("draws no section count inside a badge", () => {
