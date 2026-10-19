@@ -69,14 +69,26 @@ export const BUBBLE_VARIANTS = {
 } as const satisfies Record<ResponseVariant | PromptVariant, BubbleRole>;
 
 /**
- * A CAPPED bubble's collapsed line limit: the shared feed cap, five lines (a
- * subagent prompt), three lines (a user prompt), one line (a held prompt),
- * or none past the header strip (a peer message). Each kind states its limit itself, never through another kind's
- * constant, so changing one kind's cap never moves another's. A closed set,
- * because the stylesheet maps each value to its line count
- * (`.bubble[data-cap-lines=…]`) and styles.test.ts holds the two together.
+ * A CAPPED bubble's collapsed line limit: the shared feed cap, no limit at all
+ * (`BUBBLE_FOLD_UNBOUNDED`: a user or subagent prompt), one line (a held
+ * prompt), or none past the header strip (a peer message). Each kind states
+ * its limit itself, never through another kind's constant, so changing one
+ * kind's cap never moves another's. A closed set, because the stylesheet maps
+ * each value to its line count, or lifts the cap for the unbounded fold
+ * (`.bubble[data-cap-lines=…]`), and styles.test.ts holds the two together.
  */
-export type CappedLines = "feed" | 5 | 3 | 1 | 0;
+export type CappedLines = "feed" | typeof BUBBLE_FOLD_UNBOUNDED | 1 | 0;
+
+/**
+ * THE UNBOUNDED FOLD (owner request, 2026-10-19): a bubble that is still a
+ * fold — its box wears `.bubble-scroll`, so a click opens and closes it and
+ * the expand-only content (a reply's quote, src/bubble/quote.ts) shows only
+ * while it is open — but whose collapsed face has NO line limit, so the whole
+ * text shows folded. Its open face lifts the 50vh ceiling too, so opening it
+ * can only add what the fold hid and never shrinks it (the monotone rule,
+ * styles.css FIX1). Unlike `BUBBLE_UNCAPPED`, which is no fold at all.
+ */
+export const BUBBLE_FOLD_UNBOUNDED = "unbounded";
 
 /**
  * THE UNCAPPED MODE (owner request, 2026-09-27): a bubble shown at its FULL
@@ -93,7 +105,7 @@ export const BUBBLE_UNCAPPED = "none";
 export type BubbleCapLines = CappedLines | typeof BUBBLE_UNCAPPED;
 
 /** Every CAPPED value, each of which the stylesheet must map to a line count. */
-export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", 5, 3, 1, 0];
+export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", BUBBLE_FOLD_UNBOUNDED, 1, 0];
 
 /** Whether CAP limits the bubble at all (anything but `BUBBLE_UNCAPPED`). */
 export function isCapped(cap: BubbleCapLines): cap is CappedLines {
@@ -125,18 +137,18 @@ export type BubbleMore = typeof BUBBLE_MORE_FADE | typeof BUBBLE_MORE_ELLIPSIS;
 export const ELLIPSIS_CAP_LINES = 1 satisfies CappedLines;
 
 /**
- * A subagent prompt's collapsed line limit (owner request, 2026-09-28): FIVE
- * lines, far below the shared feed cap a response keeps, so a long prompt
- * never pushes its answer off the screen.
+ * A subagent prompt's collapsed line limit (owner request, 2026-10-19): NONE,
+ * the unbounded fold, so the folded prompt shows its whole text and the fold
+ * hides only a reply's quote.
  */
-export const AGENT_PROMPT_CAP_LINES = 5 satisfies CappedLines;
+export const AGENT_PROMPT_CAP_LINES = BUBBLE_FOLD_UNBOUNDED satisfies CappedLines;
 
 /**
- * A user prompt's collapsed line limit (owner request, 2026-10-14): THREE
- * lines, tighter than a subagent prompt's, so the person's own prompt takes
- * even less of the feed before it is opened.
+ * A user prompt's collapsed line limit (owner request, 2026-10-19): NONE, the
+ * unbounded fold, so the folded prompt shows everything the person typed and
+ * the fold hides only a reply's quote.
  */
-export const USER_PROMPT_CAP_LINES = 3 satisfies CappedLines;
+export const USER_PROMPT_CAP_LINES = BUBBLE_FOLD_UNBOUNDED satisfies CappedLines;
 
 /** The class every bubble wears, and the class every header strip element wears. */
 export const BUBBLE_CLASS = "bubble";

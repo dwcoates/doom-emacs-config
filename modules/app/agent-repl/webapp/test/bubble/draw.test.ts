@@ -22,6 +22,7 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
   ELLIPSIS_CAP_LINES,
   AGENT_PROMPT_CAP_LINES,
+  BUBBLE_FOLD_UNBOUNDED,
   USER_PROMPT_CAP_LINES,
   SAYS_ATTRIBUTE,
   drawBubble,
@@ -234,19 +235,31 @@ describe("drawBubble: the uncapped mode", () => {
     expect(BUBBLE_CAP_LINES.every((cap) => isCapped(cap))).toBe(true);
   });
 
-  it("caps a subagent prompt at five collapsed lines", () => {
+  it("folds a subagent prompt with no line limit", () => {
     // Arrange / Act / Assert
-    expect(AGENT_PROMPT_CAP_LINES).toBe(5);
+    expect(AGENT_PROMPT_CAP_LINES).toBe(BUBBLE_FOLD_UNBOUNDED);
   });
 
-  it("caps a user prompt at three collapsed lines", () => {
+  it("folds a user prompt with no line limit", () => {
     // Arrange / Act / Assert
-    expect(USER_PROMPT_CAP_LINES).toBe(3);
+    expect(USER_PROMPT_CAP_LINES).toBe(BUBBLE_FOLD_UNBOUNDED);
   });
 
-  it.each([AGENT_PROMPT_CAP_LINES, USER_PROMPT_CAP_LINES])("lists the %s-line prompt cap among the capped values the stylesheet maps", (cap) => {
+  it("lists the unbounded fold among the capped values the stylesheet maps", () => {
     // Arrange / Act / Assert
-    expect(BUBBLE_CAP_LINES).toContain(cap);
+    expect(BUBBLE_CAP_LINES).toContain(BUBBLE_FOLD_UNBOUNDED);
+  });
+
+  it("answers the unbounded fold as capped, so it keeps its fold", () => {
+    // Arrange / Act / Assert
+    expect(isCapped(BUBBLE_FOLD_UNBOUNDED)).toBe(true);
+  });
+
+  it("builds the unbounded fold's box as a scroll box, so a click can open it", () => {
+    // Arrange / Act
+    const { box } = drawBubble({ role: "prompt", variant: "user", waving: false, content: [], capLines: BUBBLE_FOLD_UNBOUNDED });
+    // Assert
+    expect(box.classList.contains("bubble-scroll")).toBe(true);
   });
 
   it("answers the uncapped mode as not capped", () => {

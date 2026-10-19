@@ -2833,16 +2833,14 @@ html[data-page-unshown] *::after {
    `BubbleCapLines` value (`BUBBLE_CAP_LINES`, src/bubble/draw.ts; styles.test.ts
    holds the two together). The uncapped mode (`data-cap-lines="none"`) has no
    entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
-   reach it. The shared feed cap for most capped bubbles, five lines for a
-   subagent prompt (`AGENT_PROMPT_CAP_LINES`), three for a user prompt
-   (`USER_PROMPT_CAP_LINES`), one line for a held
+   reach it. The shared feed cap for most capped bubbles, one line for a held
    prompt, and NONE past the header strip for a
-   peer message, whose label is the whole of its collapsed face. The cap rides
+   peer message, whose label is the whole of its collapsed face. The unbounded
+   fold (`BUBBLE_FOLD_UNBOUNDED`: a user or subagent prompt) has no line count;
+   its rule, after the expanded rule below, lifts the cap instead. The cap rides
    the SCROLL BOX, so the strip above it never scrolls away from the text it
    labels, and it is counted in the one bubble leading. */
 .bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
-.bubble[data-cap-lines="5"] { --bubble-cap-lines: 5; }
-.bubble[data-cap-lines="3"] { --bubble-cap-lines: 3; }
 .bubble[data-cap-lines="1"] { --bubble-cap-lines: 1; }
 .bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
@@ -2916,6 +2914,16 @@ html[data-page-unshown] *::after {
    `.expanded` on the sibling scroll box, so the click that opens the text
    opens this too, and no second fold exists. */
 .bubble-scroll:not(.expanded) ~ .bubble-expand-only { display: none; }
+/* THE UNBOUNDED FOLD (`BUBBLE_FOLD_UNBOUNDED`, src/bubble/draw.ts; owner
+   request, 2026-10-19): a user or subagent prompt shows its whole text folded
+   and open alike. The collapsed face takes no line cap, and the open face no
+   50vh ceiling, so opening it only adds what the fold hides (a reply's quote,
+   below) and never shrinks the bubble (FIX1's monotone rule). The open arm
+   outranks the expanded rule's (0,3,0). */
+.bubble[data-cap-lines="unbounded"] > .bubble-scroll,
+.bubble[data-cap-lines="unbounded"] > .bubble-scroll.expanded {
+  max-height: none;
+}
 /* A REPLY'S QUOTE (src/bubble/quote.ts): the earlier bubble a prompt replied
    to, a block among the prompt's own, shown ONLY once the bubble is opened
    (owner request, 2026-10-08), so a collapsed prompt is the person's words

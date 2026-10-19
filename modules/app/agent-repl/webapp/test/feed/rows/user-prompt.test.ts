@@ -216,7 +216,7 @@ describe("drawFeedUserPrompt: its spec", () => {
     expect(el.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("user");
   });
 
-  it("collapses at the three-line user prompt cap", () => {
+  it("folds at the user prompt cap, which has no line limit", () => {
     const el = drawFeedUserPrompt(prompt([]));
     expect(el.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(USER_PROMPT_CAP_LINES));
   });
@@ -235,6 +235,35 @@ describe("drawFeedUserPrompt: its spec", () => {
     expect(box?.classList.contains(EXPANDED_CLASS)).toBe(true);
     uninstall();
     host.remove();
+  });
+});
+
+describe("drawFeedUserPrompt: the whole prompt, folded or open", () => {
+  /** A prompt of forty lines, mounted with the real stylesheet; CHECK reads its scroll box. */
+  function withTallPrompt(check: (box: HTMLElement) => void): void {
+    const restore = installStylesheet();
+    const text = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n\n");
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text } } }]));
+    document.body.append(el);
+    try {
+      check(el.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`) as HTMLElement);
+    } finally {
+      el.remove();
+      restore();
+    }
+  }
+
+  it("puts no height cap on the folded bubble", () => {
+    // Arrange / Act / Assert
+    withTallPrompt((box) => expect(cascadedValue(box, "max-height")).toBe("none"));
+  });
+
+  it("puts no height cap on the open bubble, so opening it never shrinks it", () => {
+    // Arrange / Act / Assert
+    withTallPrompt((box) => {
+      box.classList.add(EXPANDED_CLASS);
+      expect(cascadedValue(box, "max-height")).toBe("none");
+    });
   });
 });
 

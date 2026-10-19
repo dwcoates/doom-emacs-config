@@ -23,6 +23,7 @@ import { colorValuesStylesheet } from "../src/vocab.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
+  BUBBLE_FOLD_UNBOUNDED,
   BUBBLE_EXPAND_ONLY_CLASS,
   BUBBLE_FOOTER_CLASS,
   BUBBLE_MORE_ELLIPSIS,
@@ -3468,11 +3469,26 @@ describe("the one bubble rule set", () => {
     expect(copies.flatMap((rule) => rule.selectors)).toEqual([".md pre.md-code"]);
   });
 
-  it.each(BUBBLE_CAP_LINES.map((cap) => [String(cap)]))("maps the %s cap to a line count", (cap) => {
+  it.each(BUBBLE_CAP_LINES.filter((cap) => cap !== BUBBLE_FOLD_UNBOUNDED).map((cap) => [String(cap)]))("maps the %s cap to a line count", (cap) => {
     // Arrange / Act
     const rule = declarationsOf(`.bubble[data-cap-lines="${cap}"]`) ?? "";
     // Assert
     expect(rule).toMatch(cap === "feed" ? /--bubble-cap-lines:\s*var\(--feed-cap-lines\)/ : new RegExp(`--bubble-cap-lines:\\s*${cap}\\s*;`));
+  });
+
+  it("lifts both the folded and the open cap on the unbounded fold", () => {
+    // Arrange / Act
+    const lift = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes(`.bubble[data-cap-lines="${BUBBLE_FOLD_UNBOUNDED}"] > .bubble-scroll`),
+    );
+    // Assert
+    expect([lift?.selectors, lift?.declarations.trim()]).toEqual([
+      [
+        `.bubble[data-cap-lines="${BUBBLE_FOLD_UNBOUNDED}"] > .bubble-scroll`,
+        `.bubble[data-cap-lines="${BUBBLE_FOLD_UNBOUNDED}"] > .bubble-scroll.expanded`,
+      ],
+      "max-height: none;",
+    ]);
   });
 
   it("caps the scroll box in the one leading, at most the 50vh the expanded box takes", () => {
