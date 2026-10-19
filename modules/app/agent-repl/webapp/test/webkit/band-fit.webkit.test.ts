@@ -89,6 +89,8 @@ interface Fitted {
   railScrolls: boolean;
   /** The rail's room left under the pane, in px. */
   slack: number;
+  /** Recently Merged's viewport's computed mask, as fitted and once scrolled to its end. */
+  mergedMask: { fitted: string; atEnd: string };
 }
 
 /** Draw a rail, fit its bands with the real module, and measure. */
@@ -97,7 +99,11 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
     document.body.innerHTML = html;
     const scroller = document.querySelector(".sb-scroll") as HTMLElement;
     const pane = document.querySelector(".sb-pane") as HTMLElement;
-    const api = (window as unknown as { BandFit: { fitBands: (s: HTMLElement, p: HTMLElement, nowMs: number) => unknown } }).BandFit;
+    const api = (
+      window as unknown as {
+        BandFit: { fitBands: (s: HTMLElement, p: HTMLElement, nowMs: number) => unknown; paintBandMore: (region: HTMLElement) => void };
+      }
+    ).BandFit;
     api.fitBands(scroller, pane, Date.now());
     const measure = (region: HTMLElement): Viewport => {
       const box = region.getBoundingClientRect();
@@ -127,6 +133,13 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
         Number.parseFloat(getComputedStyle(scroller).paddingBottom) -
         Number.parseFloat(getComputedStyle(scroller).borderBottomWidth) -
         pane.getBoundingClientRect().bottom,
+      mergedMask: (() => {
+        const rows = region(".merged-section > .rows");
+        const fitted = getComputedStyle(rows).maskImage;
+        rows.scrollTop = rows.scrollHeight;
+        api.paintBandMore(rows);
+        return { fitted, atEnd: getComputedStyle(rows).maskImage };
+      })(),
     };
   }, markup);
 }
@@ -297,6 +310,16 @@ describe("the band fit in WebKit", () => {
       if (Math.abs(got.slack) > 0.5) short.push(height);
     }
     expect(short).toEqual([]);
+  });
+
+  it("fades the foot of Recently Merged's viewport while it cuts a line", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    expect(got.mergedMask.fitted).toContain("linear-gradient");
+  });
+
+  it("drops the fade once Recently Merged is scrolled to its end", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
+    expect(got.mergedMask.atEnd).toBe("none");
   });
 
   it("reaches the rail's foot when every line fits", async () => {

@@ -1306,6 +1306,16 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
   });
 
+  it("fades the foot of the stretched section's viewport only while rows lie below it", () => {
+    expect(css).toContain(
+      "#ws-sidebar .repo[data-band-stretched][data-band-more] > .rows {\n  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);",
+    );
+  });
+
+  it("fades the Open section's viewport foot when it is the stretched one", () => {
+    expect(css).toContain("#ws-sidebar .repo[data-band-stretched][data-band-more] > .sb-sections,");
+  });
+
   it("declares the one rail row vertical padding", () => {
     expect(css).toContain("#ws-sidebar { --row-pad-y: 0.14rem; }");
   });
