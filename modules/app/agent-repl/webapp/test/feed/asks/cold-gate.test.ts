@@ -303,8 +303,8 @@ describe("the standing gate", () => {
       COLD_GATE_COPY.compact.hint,
       COLD_GATE_COPY.clear.hint,
       COLD_GATE_COPY.pay.hint,
-      COLD_GATE_COPY.kill.hint,
       COLD_GATE_COPY.hide.hint,
+      COLD_GATE_COPY.kill.hint,
     ]);
   });
 
@@ -319,8 +319,8 @@ describe("the standing gate", () => {
       COLD_GATE_COPY.compact.label,
       COLD_GATE_COPY.clear.label,
       COLD_GATE_COPY.pay.label,
-      COLD_GATE_COPY.kill.label,
       COLD_GATE_COPY.hide.label,
+      COLD_GATE_COPY.kill.label,
     ]);
   });
 
@@ -1127,8 +1127,8 @@ describe("the compact-and-resume button", () => {
       COLD_GATE_COPY.compactAndResume.label,
       COLD_GATE_COPY.clear.label,
       COLD_GATE_COPY.pay.label,
-      COLD_GATE_COPY.kill.label,
       COLD_GATE_COPY.hide.label,
+      COLD_GATE_COPY.kill.label,
     ]);
   });
 
@@ -1224,14 +1224,19 @@ describe("the hide workspace button", () => {
     return create(SetWorkspaceHiddenResponseSchema, { result: { case: "error", value: { cause } } });
   }
 
-  it("ends the row, past pay", () => {
+  it("sits between pay and kill", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    expect(el.querySelector(".cold-gate-buttons > :last-child")).toBe(hideButton(el));
+    const row = [...(el.querySelector(".cold-gate-buttons")?.children ?? [])];
+    expect(row.slice(-3).map((b) => b.textContent)).toEqual([
+      COLD_GATE_COPY.pay.label,
+      "hide workspace",
+      COLD_GATE_COPY.kill.label,
+    ]);
   });
 
-  it("ends the row on a gate that offers no compaction", () => {
+  it("sits left of kill on a gate that offers no compaction", () => {
     const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
-    expect(el.querySelector(".cold-gate-buttons > :last-child")).toBe(hideButton(el));
+    expect(hideButton(el)?.nextElementSibling).toBe(el.querySelector("[data-cold-gate-kill]"));
   });
 
   it("is labelled \"hide workspace\"", () => {
@@ -1239,10 +1244,28 @@ describe("the hide workspace button", () => {
     expect(hideButton(el)?.textContent).toBe("hide workspace");
   });
 
-  it("is drawn grey", () => {
+  it("is drawn in its own grey", () => {
     expect(
-      css.includes(".cold-gate-buttons > ar-button:is(.cold-gate-hide, .cold-gate-kill) { color: var(--muted); border-color: var(--muted); }"),
+      css.includes(".cold-gate-buttons > ar-button.cold-gate-hide { color: var(--cold-gate-hide-grey); border-color: var(--cold-gate-hide-grey); }"),
     ).toBe(true);
+  });
+
+  it.each([
+    ["light", "--muted: #6b7280;", "--cold-gate-hide-grey: #a3a8b1;"],
+    ["dark", "--muted: #898782;", "--cold-gate-hide-grey: #bdbbb5;"],
+  ])("wears a grey noticeably lighter than kill's in the %s theme", (_theme, muted, hide) => {
+    // Arrange
+    const lightness = (decl: string): number => {
+      const hex = /#([0-9a-f]{6});$/.exec(decl)?.[1];
+      if (hex === undefined) throw new Error(`no hex color in ${decl}`);
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+      return (Math.max(r, g, b) + Math.min(r, g, b)) / 2 / 255;
+    };
+    // Act
+    const declared = [css.includes(muted), css.includes(hide)];
+    // Assert
+    expect(declared).toEqual([true, true]);
+    expect(lightness(hide) - lightness(muted)).toBeGreaterThan(0.12);
   });
 
   it("is not a remediation the gate answers with", () => {
@@ -1388,14 +1411,14 @@ describe("the kill workspace button", () => {
     return create(KillWorkspaceResponseSchema, { result: { case: "error", value: { cause } } });
   }
 
-  it("sits between pay and hide", () => {
+  it("ends the row, past hide", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    const row = [...(el.querySelector(".cold-gate-buttons")?.children ?? [])];
-    expect(row.slice(-3).map((b) => b.textContent)).toEqual([
-      COLD_GATE_COPY.pay.label,
-      "kill workspace",
-      COLD_GATE_COPY.hide.label,
-    ]);
+    expect(el.querySelector(".cold-gate-buttons > :last-child")).toBe(killButton(el));
+  });
+
+  it("ends the row on a gate that offers no compaction", () => {
+    const el = drawFeedColdGate(gate(standing({ noCompact: true })), askHarness().rc);
+    expect(el.querySelector(".cold-gate-buttons > :last-child")).toBe(killButton(el));
   });
 
   it("is labelled \"kill workspace\"", () => {
@@ -1405,7 +1428,7 @@ describe("the kill workspace button", () => {
 
   it("is drawn grey", () => {
     expect(
-      css.includes(".cold-gate-buttons > ar-button:is(.cold-gate-hide, .cold-gate-kill) { color: var(--muted); border-color: var(--muted); }"),
+      css.includes(".cold-gate-buttons > ar-button.cold-gate-kill { color: var(--muted); border-color: var(--muted); }"),
     ).toBe(true);
   });
 

@@ -110,6 +110,9 @@
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
   --cold-gate-compact-border: #128a3d;
+  /* The cold gate's hide button: a grey noticeably lighter than the
+     `--muted` grey kill wears (owner request, 2026-10-19). */
+  --cold-gate-hide-grey: #a3a8b1;
   /* --err, the red status: render-colors.json#color_values (src/vocab.ts). */
   /* THE CLASSIC DIFF's line backgrounds (owner request, 2026-10-08;
      src/feed/cards/diff-view.ts): an added line on a soft green, a removed
@@ -579,6 +582,8 @@
     --merge-border: #e0b603;
     /* A white wash, lighter than the dark bubble (see the :root note). */
     --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
+    /* Lighter than this theme's `--muted`, as in the :root note. */
+    --cold-gate-hide-grey: #bdbbb5;
   }
 }
 
@@ -7101,9 +7106,11 @@ ar-button.outcome-marker-pill {
 .cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }
 .cold-gate-buttons > ar-button.hibernation-direct { border-color: var(--err); }
 /* HIDE AND KILL WORKSPACE ARE GREY (owner requests, 2026-10-13 and
-   2026-10-17): last on the row, and not remediations, so they wear the muted
-   grey rather than any remediation's color. */
-.cold-gate-buttons > ar-button:is(.cold-gate-hide, .cold-gate-kill) { color: var(--muted); border-color: var(--muted); }
+   2026-10-17): last on the row, and not remediations, so they wear grey
+   rather than any remediation's color. Kill wears the muted grey; hide, a
+   noticeably lighter one (owner request, 2026-10-19). */
+.cold-gate-buttons > ar-button.cold-gate-kill { color: var(--muted); border-color: var(--muted); }
+.cold-gate-buttons > ar-button.cold-gate-hide { color: var(--cold-gate-hide-grey); border-color: var(--cold-gate-hide-grey); }
 /* Borders half again as thick as the shared 1px (owner request, 2026-10-03). */
 .cold-gate-buttons > ar-button { border-width: 1.5px; }
 /* A little more room under the buttons, so the gate stands a touch taller
