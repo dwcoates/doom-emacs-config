@@ -165,9 +165,15 @@ func resultOf(stdout string) (string, error) {
 		return "", fmt.Errorf("the json envelope did not parse: %w", err)
 	}
 	if env.IsError {
-		return "", fmt.Errorf("the cli reported an error (%s): %s", env.Subtype, strings.TrimSpace(env.Result))
+		return "", fmt.Errorf("the cli reported an error %s", env.account())
 	}
 	return env.Result, nil
+}
+
+// account words an error envelope's own account of its failure: its subtype
+// and its result. Every site that reports an envelope's error words it here.
+func (env envelope) account() string {
+	return fmt.Sprintf("(%s): %s", env.Subtype, strings.TrimSpace(env.Result))
 }
 
 // exitAccount is what a run that exited non-zero said on stdout, worded to
@@ -186,7 +192,7 @@ func exitAccount(format, stdout string) string {
 	if format == FormatJSON {
 		var env envelope
 		if err := json.Unmarshal([]byte(said), &env); err == nil && env.IsError {
-			return fmt.Sprintf("; the cli said (%s): %s", env.Subtype, strings.TrimSpace(env.Result))
+			return "; the cli said " + env.account()
 		}
 	}
 	return "; the cli said: " + said

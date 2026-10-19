@@ -189,6 +189,39 @@ func TestRunRefusesAnEnvelopeThatReportsItsOwnError(t *testing.T) {
 	}
 }
 
+func TestEnvelopeAccountWordsItsSubtypeAndTrimmedResult(t *testing.T) {
+	// Arrange.
+	env := envelope{Subtype: "error_during_execution", Result: "  credit balance too low\n", IsError: true}
+
+	// Act.
+	got := env.account()
+
+	// Assert.
+	if want := "(error_during_execution): credit balance too low"; got != want {
+		t.Fatalf("account() = %q, want %q", got, want)
+	}
+}
+
+// TestEveryEnvelopeErrorIsWordedByAccount pins that the two sites reporting an
+// error envelope share one wording: a hand-rolled site would drift from it.
+func TestEveryEnvelopeErrorIsWordedByAccount(t *testing.T) {
+	// Arrange.
+	env := envelope{Subtype: "error_max_turns", Result: "ran out", IsError: true}
+	raw := `{"subtype":"error_max_turns","result":"ran out","is_error":true}`
+
+	// Act.
+	_, parsed := resultOf(raw)
+	exited := exitAccount(FormatJSON, raw)
+
+	// Assert.
+	if parsed == nil || !strings.HasSuffix(parsed.Error(), env.account()) {
+		t.Fatalf("resultOf error = %v, want it to end with %q", parsed, env.account())
+	}
+	if !strings.HasSuffix(exited, env.account()) {
+		t.Fatalf("exitAccount = %q, want it to end with %q", exited, env.account())
+	}
+}
+
 func TestRunReportsAnExitFailureAsAnExitStatus(t *testing.T) {
 	// Arrange.
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "", errors.New("exit status 3"))
