@@ -77,6 +77,7 @@ import {
   type FeedPage,
   type FeedRow,
   type FeedSelection,
+  type FeedToolCardClock,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker, type Ticker } from "../../src/clock.js";
@@ -625,7 +626,7 @@ export function interimRow(id: string, markdown = "meanwhile"): FeedRow {
 export function toolCallRow(
   id: string,
   state: "running" | "returned",
-  opts: { turn?: string; beatAtMs?: bigint; tool?: string } = {},
+  opts: { turn?: string; beatAtMs?: bigint; tool?: string; clock?: FeedToolCardClock } = {},
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -639,6 +640,7 @@ export function toolCallRow(
           value: {
             name: { text: opts.tool ?? "Bash" },
             input: { text: "$ ls" },
+            clock: opts.clock,
             outcome:
               state === "running"
                 ? { case: "running", value: { lastProgress: { atMs: opts.beatAtMs ?? 0n } } }

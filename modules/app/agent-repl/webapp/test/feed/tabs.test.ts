@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
+import { createTicker } from "../../src/clock.js";
 import { describe, expect, it, vi } from "vitest";
 import stylesheet from "../../src/styles.css?raw";
 import {
   FEED_TAB_CLASS,
   FEED_TAB_STRIP_CLASS,
+  FEED_TABLINE_CLASS,
+  FEED_TABLINE_CLOCK_CLASS,
   drawFeedTab,
+  drawFeedTabline,
   drawFeedTabStrip,
+  setFeedTablineClock,
 } from "../../src/feed/tabs.js";
+import { tick } from "../../src/feed/ticking.js";
+import { countingTicker } from "./harness.js";
 import { createToolGroupStore, groupKey } from "../../src/feed/tool-group.js";
 import { isControl } from "../../src/control.js";
 
@@ -26,6 +33,75 @@ describe("drawFeedTabStrip", () => {
     expect(match).not.toBeNull();
     expect(match?.[1]).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
     expect(match?.[1]).not.toMatch(/position\s*:/);
+  });
+});
+
+describe("drawFeedTabline", () => {
+  /** A stand-in clock element. */
+  function clockSpan(text: string): HTMLElement {
+    const el = document.createElement("span");
+    el.textContent = text;
+    return el;
+  }
+
+  it("draws the strip, then the clock slot holding the clock", () => {
+    // Arrange
+    const strip = drawFeedTabStrip();
+    const clock = clockSpan("4s");
+    // Act
+    const line = drawFeedTabline(strip, clock);
+    // Assert
+    expect(line.className).toBe(FEED_TABLINE_CLASS);
+    expect(line.firstElementChild).toBe(strip);
+    expect(line.lastElementChild?.className).toBe(FEED_TABLINE_CLOCK_CLASS);
+    expect(line.lastElementChild?.firstElementChild).toBe(clock);
+  });
+
+  it("draws an empty clock slot when the card states no clock", () => {
+    // Act
+    const line = drawFeedTabline(drawFeedTabStrip(), null);
+    // Assert
+    expect(line.querySelector(`.${FEED_TABLINE_CLOCK_CLASS}`)?.childElementCount).toBe(0);
+  });
+
+  it("lays the strip and its clock out as one row, the clock after the tabs", () => {
+    // Arrange
+    const line = /\.feed-tabline\s*\{([^}]*)\}/.exec(stylesheet);
+    const strip = /\.feed-tabline > \.feed-tab-strip\s*\{([^}]*)\}/.exec(stylesheet);
+    // Assert
+    expect(line?.[1]).toMatch(/(^|[;\s])display\s*:\s*flex\s*;/);
+    expect(strip?.[1]).toMatch(/(^|[;\s])flex\s*:\s*1 1 auto\s*;/);
+  });
+});
+
+describe("setFeedTablineClock", () => {
+  it("replaces the slot's clock with the given one", () => {
+    // Arrange
+    const line = drawFeedTabline(drawFeedTabStrip(), document.createElement("span"));
+    const next = document.createElement("span");
+    // Act
+    setFeedTablineClock(line, next);
+    // Assert
+    expect([...(line.querySelector(`.${FEED_TABLINE_CLOCK_CLASS}`)?.children ?? [])]).toEqual([next]);
+  });
+
+  it("stops the ticking clock it drops", () => {
+    // Arrange
+    const ticker = countingTicker();
+    const live = document.createElement("span");
+    tick(live, ticker, () => {});
+    const line = drawFeedTabline(drawFeedTabStrip(), live);
+    // Act
+    setFeedTablineClock(line, null);
+    // Assert
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("throws on a row with no clock slot", () => {
+    // Arrange
+    const notTabline = document.createElement("div");
+    // Act / Assert
+    expect(() => setFeedTablineClock(notTabline, null)).toThrow(/no clock slot/);
   });
 });
 
@@ -79,13 +155,28 @@ describe("drawFeedTab", () => {
   });
 });
 
+describe("every tabbed card draws the shared tabline", () => {
+  it("the tool group's tabline is the shared one", () => {
+    // Arrange -- a hand-rolled tabline that drifted from the shared one fails here.
+    const members = ["a", "b"].map((id) => ({ id, element: document.createElement("article") }));
+    const expected = drawFeedTabline(drawFeedTabStrip(), null);
+    // Act
+    const wrapper = createToolGroupStore(createTicker()).arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    // Assert
+    const line = wrapper.querySelector(`.${FEED_TABLINE_CLASS}`);
+    expect([...(line?.children ?? [])].map((c) => c.classList[0])).toEqual(
+      [...expected.children].map((c) => c.classList[0]),
+    );
+  });
+});
+
 describe("the tool group draws the shared tab", () => {
   it("draws its strip and every tab exactly as the shared builders do", () => {
     // Arrange -- a hand-rolled tab that drifted from the shared one fails here.
     const members = ["a", "b"].map((id) => ({ id, element: document.createElement("article") }));
     const expectedTab = drawFeedTab({ icon: "$", index: 1, active: false, onPick: () => {} });
     // Act
-    const wrapper = createToolGroupStore().arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    const wrapper = createToolGroupStore(createTicker()).arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Assert
     const strip = wrapper.querySelector(".feed-group-strip");
     expect(strip?.classList.contains(FEED_TAB_STRIP_CLASS)).toBe(true);

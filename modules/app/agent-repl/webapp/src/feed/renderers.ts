@@ -42,6 +42,7 @@ import { stopTicking } from "./ticking.js";
 import {
   createToolGroupStore,
   groupKindOf,
+  memberClockOf,
   groupKey,
   type GroupMember,
   type ToolGroupStore,
@@ -224,7 +225,7 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   // ONE GROUP STORE PER BODY (so per open feed). It outlives every redraw, which
   // is what lets a reader's tab pick and a run's identity survive the re-arrange
   // each live push triggers.
-  const groups = createToolGroupStore();
+  const groups = createToolGroupStore(rc.ctx.ticker);
 
   const draw = (): void => {
     drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
@@ -350,7 +351,7 @@ export function arrangeSubfeedRows(
           const el = view.drawRow(member);
           const id = member.id?.value ?? "";
           if (member.id !== undefined) placed.set(id, el);
-          members.push({ id, element: el });
+          members.push({ id, element: el, clock: memberClockOf(member) });
         }
         // `groups` is defined here — `kind` is non-null only when it is.
         top.push(groups!.arrange(groupKey(kind, members[0].id), kind, members));

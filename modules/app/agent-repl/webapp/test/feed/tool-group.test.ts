@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { type Control } from "../../src/control.js";
+import { createTicker } from "../../src/clock.js";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import stylesheet from "../../src/styles.css?raw";
@@ -8,14 +9,19 @@ import { orderFor } from "../feed-order.js";
 import {
   FEED_GROUP_CLASS,
   GROUP_TAB_MEMBER_ATTRIBUTE,
-  STRIP_HEIGHT_PROPERTY,
+  TABLINE_HEIGHT_PROPERTY,
   activateGroupedMember,
   createToolGroupStore,
   groupGlyph,
   groupKey,
   groupKindOf,
+  memberClockOf,
   type GroupMember,
 } from "../../src/feed/tool-group.js";
+import { FEED_TABLINE_CLASS, FEED_TABLINE_CLOCK_CLASS } from "../../src/feed/tabs.js";
+import { runningClock, stoppedClock } from "./cards/tool-card-head-shape.js";
+import { countingTicker } from "./harness.js";
+import type { FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   feedId,
   responseRow,
@@ -25,12 +31,12 @@ import {
 } from "./harness.js";
 import { fireResize } from "../resize-observer.js";
 
-/** A FeedRow carrying one activity unit, by arm name, with an empty value. */
-function activityRow(id: string, unit: string): FeedRow {
+/** A FeedRow carrying one activity unit, by arm name, with VALUE (empty by default). */
+function activityRow(id: string, unit: string, value: object = {}): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
     order: orderFor(id),
-    row: { case: "activity", value: { unit: { case: unit, value: {} } } } as never,
+    row: { case: "activity", value: { unit: { case: unit, value } } } as never,
   });
 }
 
@@ -136,7 +142,7 @@ describe("groupGlyph", () => {
 describe("createToolGroupStore", () => {
   it("draws ONE container with one tab per member, each icon + 1-based index", () => {
     // Arrange
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const members = [member("a"), member("b"), member("c")];
     // Act
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
@@ -157,7 +163,7 @@ describe("createToolGroupStore", () => {
 
   it("re-attaches no member already in place when the run grows", () => {
     // Arrange -- a re-attached member would lose the reader's scroll inside it.
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const members = [member("a"), member("b")];
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     const panel = wrapper.querySelector(".feed-group-panel");
@@ -171,7 +177,7 @@ describe("createToolGroupStore", () => {
   });
 
   it("moves every member's own element into the group's panel", () => {
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const members = [member("a"), member("b")];
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     expect(wrapper.querySelector('.feed-group-panel > [data-feed-row="a"]')).toBe(
@@ -180,7 +186,7 @@ describe("createToolGroupStore", () => {
   });
 
   it("shows the NEWEST member of a brand-new group and hides the rest", () => {
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const members = [member("a"), member("b"), member("c")];
     store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     expect([members[0].element.hidden, members[1].element.hidden, members[2].element.hidden]).toEqual(
@@ -190,7 +196,7 @@ describe("createToolGroupStore", () => {
 
   it("shows the member whose tab the reader selects", () => {
     // Arrange
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const members = [member("a"), member("b"), member("c")];
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Act: click the first tab.
@@ -203,7 +209,7 @@ describe("createToolGroupStore", () => {
 
   it("keeps a member's own body untouched inside its tab, so its expand survives", () => {
     // Arrange: a member whose body is an expanded `.tool-fold` card.
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const fold = document.createElement("div");
     fold.className = "tool-fold expanded";
     const members = [member("a", fold), member("b")];
@@ -216,7 +222,7 @@ describe("createToolGroupStore", () => {
 
   it("PRESERVES the reader's selected tab across a live append", () => {
     // Arrange: the reader selects tab a in a two-member group.
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const a = member("a");
     const b = member("b");
     const key = groupKey("tool:Bash", "a");
@@ -230,7 +236,7 @@ describe("createToolGroupStore", () => {
   });
 
   it("reuses the SAME wrapper for a group placed again, so its state survives", () => {
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const key = groupKey("tool:Bash", "a");
     const first = store.arrange(key, "tool:Bash", [member("a"), member("b")]);
     const second = store.arrange(key, "tool:Bash", [member("a"), member("b"), member("c")]);
@@ -239,7 +245,7 @@ describe("createToolGroupStore", () => {
 
   it("disposes a group not placed since the previous prune", () => {
     // Arrange: a group placed and kept through one pass.
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const host = document.createElement("div");
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
       member("a"),
@@ -255,30 +261,30 @@ describe("createToolGroupStore", () => {
   });
 });
 
-describe("the strip's measured height", () => {
-  /** The group's strip, and the `.feed-group` it sizes. */
+describe("the tabline's measured height", () => {
+  /** The group's tabline, and the `.feed-group` it sizes. */
   function partsOf(wrapper: HTMLElement): { group: HTMLElement; strip: HTMLElement } {
     const group = wrapper.querySelector<HTMLElement>(`.${FEED_GROUP_CLASS}`);
-    const strip = wrapper.querySelector<HTMLElement>(".feed-group-strip");
-    if (group === null || strip === null) throw new Error("the group drew no strip");
+    const strip = wrapper.querySelector<HTMLElement>(".feed-group-tabline");
+    if (group === null || strip === null) throw new Error("the group drew no tabline");
     return { group, strip };
   }
 
-  it("carries the strip's height onto the group when the strip resizes", () => {
-    // Arrange: a strip laid out 18px tall (jsdom performs no layout).
-    const store = createToolGroupStore();
+  it("carries the tabline's height onto the group when the tabline resizes", () => {
+    // Arrange: a tabline laid out 18px tall (jsdom performs no layout).
+    const store = createToolGroupStore(createTicker());
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), member("b")]);
     const { group, strip } = partsOf(wrapper);
     Object.defineProperty(strip, "offsetHeight", { configurable: true, value: 18 });
     // Act
     fireResize(strip);
     // Assert
-    expect(group.style.getPropertyValue(STRIP_HEIGHT_PROPERTY)).toBe("18px");
+    expect(group.style.getPropertyValue(TABLINE_HEIGHT_PROPERTY)).toBe("18px");
   });
 
-  it("follows the strip when its tabs wrap onto another row", () => {
-    // Arrange: a measured strip that then grows to two rows.
-    const store = createToolGroupStore();
+  it("follows the tabline when its tabs wrap onto another row", () => {
+    // Arrange: a measured tabline that then grows to two rows.
+    const store = createToolGroupStore(createTicker());
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), member("b")]);
     const { group, strip } = partsOf(wrapper);
     Object.defineProperty(strip, "offsetHeight", { configurable: true, value: 18 });
@@ -287,18 +293,18 @@ describe("the strip's measured height", () => {
     // Act
     fireResize(strip);
     // Assert
-    expect(group.style.getPropertyValue(STRIP_HEIGHT_PROPERTY)).toBe("36px");
+    expect(group.style.getPropertyValue(TABLINE_HEIGHT_PROPERTY)).toBe("36px");
   });
 
-  it("stops watching the strip once the group is disposed", () => {
+  it("stops watching the tabline once the group is disposed", () => {
     // Arrange: a group dropped by a pass that did not place it.
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), member("b")]);
     const { strip } = partsOf(wrapper);
     store.prune();
     // Act
     store.prune();
-    // Assert: nothing observes the strip any more.
+    // Assert: nothing observes the tabline any more.
     expect(() => fireResize(strip)).toThrow(/no ResizeObserver/);
   });
 });
@@ -306,7 +312,7 @@ describe("the strip's measured height", () => {
 describe("activateGroupedMember", () => {
   it("brings the tab holding an element to the front", () => {
     // Arrange: a group showing its newest member (b), with a hidden member a.
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const a = member("a");
     const b = member("b");
     store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [a, b]);
@@ -325,7 +331,7 @@ describe("activateGroupedMember", () => {
   });
 
   it("does nothing for an element that is in a group but names no row", () => {
-    const store = createToolGroupStore();
+    const store = createToolGroupStore(createTicker());
     const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
       member("a"),
       member("b"),
@@ -343,7 +349,7 @@ describe("the tab strip's size (styles.css)", () => {
   // QUARTER (2026-09-21) — the type, the icon gap and both paddings alike, so
   // the tab scales evenly rather than stretching in one direction. Pinned here,
   // alongside the module that draws them, so a future resize of
-  // `.feed-group-strip`/`.feed-group-tab` is a deliberate edit to this test
+  // `.feed-group-tabline`/`.feed-group-tab` is a deliberate edit to this test
   // rather than a silent drift.
   /** The declaration block for SELECTOR, exactly as it appears in the sheet. */
   function ruleBodyOf(selector: string): string {
@@ -369,20 +375,20 @@ describe("the tab strip's size (styles.css)", () => {
   });
 
   it("draws no line between the tabs and the card's content", () => {
-    expect(ruleBodyOf(".feed-group-strip")).not.toMatch(/border/);
+    expect(ruleBodyOf(".feed-group-tabline")).not.toMatch(/border/);
   });
 
-  it("lays the strip over the member card, inset by the card's border and padding", () => {
-    const body = ruleBodyOf(".feed-group-strip");
+  it("lays the tabline over the member card, inset by the card's border and padding", () => {
+    const body = ruleBodyOf(".feed-group-tabline");
     expect(body).toMatch(/(^|[;\s])position\s*:\s*absolute\s*;/);
     expect(body).toMatch(/(^|[;\s])top\s*:\s*calc\(1px \+ 0\.3rem\)\s*;/);
     expect(body).toMatch(/(^|[;\s])left\s*:\s*calc\(1px \+ 0\.75rem\)\s*;/);
   });
 
-  it("grows the member card's top padding by the strip's measured height", () => {
+  it("grows the member card's top padding by the tabline's measured height", () => {
     const body = ruleBodyOf(".feed-group-panel > .feed-item > .tool-card");
     expect(body).toMatch(
-      new RegExp(`padding-top\\s*:\\s*calc\\(0\\.3rem \\+ var\\(${STRIP_HEIGHT_PROPERTY}\\) \\+ 0\\.3rem\\)\\s*;`),
+      new RegExp(`padding-top\\s*:\\s*calc\\(0\\.3rem \\+ var\\(${TABLINE_HEIGHT_PROPERTY}\\) \\+ 0\\.3rem\\)\\s*;`),
     );
   });
 
@@ -391,5 +397,145 @@ describe("the tab strip's size (styles.css)", () => {
     expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
     expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.094rem 0\.281rem\s*;/);
     expect(body).toMatch(/(^|[;\s])font-size\s*:\s*0\.625em\s*;/);
+  });
+});
+
+/** A member clocked by CLOCK at the inline tool call's path. */
+function clockedMember(id: string, clock: FeedToolCardClock): GroupMember {
+  return { ...member(id), clock: { clock, path: "FeedSimpleToolCall.clock" } };
+}
+
+/** The text of the group's tabline clock, or null when its slot is empty. */
+function tablineClockOf(wrapper: HTMLElement): string | null {
+  const slot = wrapper.querySelector(`.feed-group-tabline > .${FEED_TABLINE_CLOCK_CLASS}`);
+  if (slot === null) throw new Error("the group drew no tabline clock slot");
+  return slot.firstElementChild === null ? null : (slot.firstElementChild.textContent ?? "");
+}
+
+describe("memberClockOf", () => {
+  it.each([
+    ["simpleToolCall", "FeedSimpleToolCall.clock"],
+    ["skill", "FeedSkill.clock"],
+    ["hook", "FeedHook.clock"],
+  ])("reads a %s's tool card clock at its renderer's path", (unit, path) => {
+    // Arrange
+    const clock = stoppedClock(0, 4_000);
+    // Act
+    const got = memberClockOf(activityRow("a", unit, { clock }));
+    // Assert
+    expect(got).toEqual({ clock, path });
+  });
+
+  it("reads no clock from a tool card whose producer stated none", () => {
+    expect(memberClockOf(activityRow("a", "simpleToolCall"))).toBeUndefined();
+  });
+
+  it("reads no clock from a subagent bubble, which heads with its own", () => {
+    expect(memberClockOf(subagentRow("a"))).toBeUndefined();
+  });
+
+  it("reads no clock from a row that is not an activity", () => {
+    expect(memberClockOf(rowArm("a", "shellHead"))).toBeUndefined();
+  });
+});
+
+describe("the tabline's clock", () => {
+  it("draws the shown member's clock on the tabline", () => {
+    // Arrange
+    const store = createToolGroupStore(createTicker());
+    // Act
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
+      clockedMember("a", stoppedClock(0, 4_000)),
+      clockedMember("b", stoppedClock(0, 9_000)),
+    ]);
+    // Assert: b, the newest, is shown.
+    expect(tablineClockOf(wrapper)).toBe("9s");
+  });
+
+  it("draws the clock after the tabs, in the tabline row", () => {
+    // Arrange
+    const store = createToolGroupStore(createTicker());
+    // Act
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
+      clockedMember("a", stoppedClock(0, 4_000)),
+      clockedMember("b", stoppedClock(0, 9_000)),
+    ]);
+    // Assert
+    const tabline = wrapper.querySelector(".feed-group-tabline");
+    expect(tabline?.classList.contains(FEED_TABLINE_CLASS)).toBe(true);
+    expect([...(tabline?.children ?? [])].map((c) => c.classList[0])).toEqual(["feed-tab-strip", FEED_TABLINE_CLOCK_CLASS]);
+  });
+
+  it("follows the reader's tab pick to the picked member's clock", () => {
+    // Arrange
+    const store = createToolGroupStore(createTicker());
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
+      clockedMember("a", stoppedClock(0, 4_000)),
+      clockedMember("b", stoppedClock(0, 9_000)),
+    ]);
+    // Act
+    wrapper.querySelector<Control>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
+    // Assert
+    expect(tablineClockOf(wrapper)).toBe("4s");
+  });
+
+  it("leaves the slot empty when the shown member states no clock", () => {
+    // Arrange
+    const store = createToolGroupStore(createTicker());
+    // Act
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
+      clockedMember("a", stoppedClock(0, 4_000)),
+      member("b"),
+    ]);
+    // Assert
+    expect(tablineClockOf(wrapper)).toBeNull();
+  });
+
+  it("draws no clock for a malformed one, whose row draw already reported it", () => {
+    // Arrange: a clock stopping before its start.
+    const store = createToolGroupStore(createTicker());
+    // Act
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
+      member("a"),
+      clockedMember("b", stoppedClock(9_000, 4_000)),
+    ]);
+    // Assert
+    expect(tablineClockOf(wrapper)).toBeNull();
+  });
+
+  it("stops the running clock it drops when the shown member changes", () => {
+    // Arrange
+    const ticker = countingTicker();
+    const store = createToolGroupStore(ticker);
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
+      clockedMember("a", stoppedClock(0, 4_000)),
+      clockedMember("b", runningClock(0)),
+    ]);
+    expect(ticker.live()).toBe(1);
+    // Act
+    wrapper.querySelector<Control>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
+    // Assert
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("stops its running clock once the group is disposed", () => {
+    // Arrange
+    const ticker = countingTicker();
+    const store = createToolGroupStore(ticker);
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), clockedMember("b", runningClock(0))]);
+    store.prune();
+    // Act
+    store.prune();
+    // Assert
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("hides the clock a grouped member's own head draws (styles.css)", () => {
+    // Arrange
+    const pattern = /\.feed-group-panel > \.feed-item > \.tool-card > \.tool-head > \.tool-clock\s*\{([^}]*)\}/;
+    // Act
+    const match = pattern.exec(stylesheet);
+    // Assert
+    expect(match?.[1]).toMatch(/(^|[;\s])display\s*:\s*none\s*;/);
   });
 });

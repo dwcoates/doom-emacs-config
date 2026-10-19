@@ -31,7 +31,15 @@ import {
   TAB_GLYPHS,
   TYPED_LABEL,
 } from "../../../src/feed/asks/question.js";
-import { drawFeedTab, FEED_TAB_CLASS, FEED_TAB_STRIP_CLASS } from "../../../src/feed/tabs.js";
+import {
+  drawFeedTab,
+  drawFeedTabline,
+  drawFeedTabStrip,
+  FEED_TAB_CLASS,
+  FEED_TAB_STRIP_CLASS,
+  FEED_TABLINE_CLASS,
+  FEED_TABLINE_CLOCK_CLASS,
+} from "../../../src/feed/tabs.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { ASK_WAITING_WORD } from "../../../src/feed/asks/ask-words.js";
@@ -127,6 +135,69 @@ describe("the card's chrome", () => {
 
     // Assert
     expect(toolCardHeadParts(el)).toEqual([`title:${QUESTION_TITLE}`, `badge:${ASK_WAITING_WORD}`, "clock:30s"]);
+  });
+
+  it("keeps the clock on the head and draws no tabline for a lone question", () => {
+    // Arrange
+    vi.setSystemTime(30_000);
+    const u = open([item()]);
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedQuestion(u, askHarness().rc);
+
+    // Assert
+    expect([toolCardHeadParts(el).at(-1), el.querySelector(`.${FEED_TABLINE_CLASS}`)]).toEqual(["clock:30s", null]);
+  });
+
+  it("moves the clock off the head when the batch has tabs", () => {
+    // Arrange
+    vi.setSystemTime(30_000);
+    const u = open(singles(2));
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedQuestion(u, askHarness().rc);
+
+    // Assert
+    expect(toolCardHeadParts(el)).toEqual([`title:${QUESTION_TITLE}`, `badge:${ASK_WAITING_WORD}`]);
+  });
+
+  it("draws the clock on the tabline, after the tabs, when the batch has tabs", () => {
+    // Arrange
+    vi.setSystemTime(30_000);
+    const u = open(singles(2));
+    u.clock = runningClock(0);
+
+    // Act
+    const el = drawFeedQuestion(u, askHarness().rc);
+
+    // Assert
+    const line = el.querySelector(`.${FEED_TABLINE_CLASS}`);
+    expect(line?.firstElementChild?.hasAttribute("data-question-tabs")).toBe(true);
+    expect(line?.querySelector(`.${FEED_TABLINE_CLOCK_CLASS} .tool-clock`)?.textContent).toBe("30s");
+  });
+
+  it("draws an empty tabline clock slot for a tabbed batch that states no clock", () => {
+    // Act
+    const el = drawFeedQuestion(open(singles(2)), askHarness().rc);
+
+    // Assert
+    expect(el.querySelector(`.${FEED_TABLINE_CLOCK_CLASS}`)?.childElementCount).toBe(0);
+  });
+
+  it("draws its tabline as the shared one", () => {
+    // Arrange -- a hand-rolled tabline that drifted from the shared one fails here.
+    const expected = drawFeedTabline(drawFeedTabStrip(), null);
+
+    // Act
+    const el = drawFeedQuestion(open(singles(2)), askHarness().rc);
+
+    // Assert
+    const line = el.querySelector(`.${FEED_TABLINE_CLASS}`);
+    expect([...(line?.children ?? [])].map((c) => c.classList[0])).toEqual(
+      [...expected.children].map((c) => c.classList[0]),
+    );
   });
 
   it("heads with the answered badge and the stopped clock once answered", () => {
@@ -379,7 +450,8 @@ describe("the answers given so far", () => {
       askHarness().rc,
     );
     const order = [...el.querySelector(".q-tabbed")!.children].map((c) =>
-      c.hasAttribute("data-question-tabs") ? "tabs" : c.hasAttribute("data-question-given-so-far") ? "given" : c.className,
+      // The tabs ride the batch's tabline, the row they share with the clock.
+      c.querySelector(":scope > [data-question-tabs]") !== null ? "tabs" : c.hasAttribute("data-question-given-so-far") ? "given" : c.className,
     );
     expect(order.slice(0, 3)).toEqual(["tabs", "given", "q-panels"]);
   });

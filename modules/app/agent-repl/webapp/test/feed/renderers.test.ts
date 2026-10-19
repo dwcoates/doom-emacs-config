@@ -31,6 +31,7 @@ import {
 } from "../../src/feed/tool-group.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../src/clock.js";
+import { stoppedClock } from "./cards/tool-card-head-shape.js";
 import { tick } from "../../src/feed/ticking.js";
 import type { RowRenderers } from "../../src/feed/renderers.js";
 import { orderFor } from "../feed-order.js";
@@ -264,7 +265,7 @@ describe("arrangeSubfeedRows leaves placed rows in the document", () => {
   it("removes no grouped member when its group is re-arranged", () => {
     // Arrange
     const host = document.createElement("div");
-    const groups = createToolGroupStore();
+    const groups = createToolGroupStore(createTicker());
     const view = viewOf([toolCallRow("t1", "running"), toolCallRow("t2", "running")]);
     arrangeSubfeedRows(host, view, groups);
     if (host.querySelector(".feed-group") === null) throw new Error("the fixture formed no group");
@@ -295,7 +296,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
     const host = document.createElement("div");
     const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
     // Act
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // Assert: one top-level child, a group with two tabs.
     expect(host.children).toHaveLength(1);
     expect(host.querySelector(".feed-group")).not.toBeNull();
@@ -305,7 +306,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
   it("does not leave grouped members as separate TOP-LEVEL bubbles", () => {
     const host = document.createElement("div");
     const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // The members are inside the group's panel, not direct children of the host.
     expect(host.querySelector(':scope > [data-feed-row="a"]')).toBeNull();
     expect(host.querySelector('.feed-group-panel [data-feed-row="a"]')).not.toBeNull();
@@ -313,9 +314,32 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
 
   it("leaves a LONE tool card ungrouped, rendered exactly as today", () => {
     const host = document.createElement("div");
-    arrangeSubfeedRows(host, viewOf([toolCallRow("a", "returned")]), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf([toolCallRow("a", "returned")]), createToolGroupStore(createTicker()));
     expect(host.querySelector(".feed-group")).toBeNull();
     expect(host.querySelector(':scope > [data-feed-row="a"]')).not.toBeNull();
+  });
+
+  it("hands each grouped member's clock to the group's tabline", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [
+      toolCallRow("a", "returned", { clock: stoppedClock(0, 4_000) }),
+      toolCallRow("b", "returned", { clock: stoppedClock(0, 9_000) }),
+    ];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
+    // Assert: b, the newest, is shown, so its clock rides the tabline.
+    expect(host.querySelector(".feed-group-tabline > .feed-tabline-clock")?.textContent).toBe("9s");
+  });
+
+  it("draws no tabline for a LONE tool card, whose clock stays on its head", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [toolCallRow("a", "returned", { clock: stoppedClock(0, 4_000) })];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
+    // Assert
+    expect(host.querySelector(".feed-tabline")).toBeNull();
   });
 
   it("breaks a run on a KIND change (Bash,Bash,Edit,Bash)", () => {
@@ -328,7 +352,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
       toolCallRow("d", "returned", { tool: "Bash" }),
     ];
     // Act
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // Assert: one group of two Bash, then a lone Edit, then a lone Bash.
     expect(host.children).toHaveLength(3);
     expect(host.children[0].querySelectorAll(".feed-group-tab")).toHaveLength(2);
@@ -343,7 +367,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
       responseRow("mid"),
       toolCallRow("b", "returned"),
     ];
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // No group forms; three lone top-level rows.
     expect(host.querySelector(".feed-group")).toBeNull();
     expect(host.children).toHaveLength(3);
@@ -359,7 +383,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
       toolCallRow("d", "returned", { turn: "t2" }),
     ];
     // Act
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // Assert: one group per turn, never one across them.
     expect([...host.children].map((child) => child.querySelectorAll(".feed-group-tab").length)).toEqual([2, 2]);
   });
@@ -369,7 +393,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
     const host = document.createElement("div");
     const rows = [toolCallRow("a", "returned", { turn: "t1" }), toolCallRow("b", "returned")];
     // Act
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // Assert
     expect(host.querySelector(".feed-group")).toBeNull();
   });
@@ -379,7 +403,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
     const host = document.createElement("div");
     const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
     // Act
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // Assert
     expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(2);
   });
@@ -387,7 +411,7 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
   it("groups a run of subagent bubbles into tabs", () => {
     const host = document.createElement("div");
     const rows = [subagentRow("a"), subagentRow("b"), subagentRow("c")];
-    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(3);
   });
 
