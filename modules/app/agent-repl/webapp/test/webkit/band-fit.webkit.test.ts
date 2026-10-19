@@ -4,7 +4,8 @@
  * The rail never scrolls. Once it is out of room, the Open section lengthens
  * until Hidden Workspaces and Recently Merged are left three lines each, the
  * two sharing those six lines and Recently Merged claiming only today's
- * merges, and each section scrolls the rest. jsdom lays nothing out, so this draws a rail in
+ * merges, any room the Open section cannot use goes to Hidden Workspaces and
+ * then Recently Merged, and each section scrolls the rest. jsdom lays nothing out, so this draws a rail in
  * the shape the sidebar draws it, in real headless WebKit over the real
  * stylesheet, runs the REAL `fitBands` (src/sidebar/band-fit.ts, bundled), and
  * measures the viewports the engine draws.
@@ -275,8 +276,23 @@ describe("the band fit in WebKit", () => {
     expect(await unsettled(page, heights, { live: 12, hidden: 9, merged: 9, today: 4 })).toEqual([]);
   });
 
-  it("grows the bands into the room a whole Open section leaves", async () => {
+  it("grows Hidden Workspaces, not Recently Merged, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40 }));
-    expect([got.hidden.whole > 3, got.merged.whole > 3, got.railScrolls]).toEqual([true, true, false]);
+    expect([got.hidden.whole > 3, got.merged.whole, got.railScrolls]).toEqual([true, 3, false]);
+  });
+
+  it("grows Recently Merged into the room a whole Open section and Hidden Workspaces leave", async () => {
+    const got = await fit(page, rail(880, { live: 2, hidden: 4, merged: 40 }));
+    expect([got.hidden.whole, got.merged.whole > 3, got.railScrolls]).toEqual([4, true, false]);
+  });
+
+  it("leaves no room a band's line fits in while a band scrolls", async () => {
+    const heights = Array.from({ length: 31 }, (_, i) => 400 + i * 7);
+    const wasted: number[] = [];
+    for (const height of heights) {
+      const got = await fit(page, rail(height, { live: 12, repos: 4, hidden: 20, merged: 20, today: 0 }));
+      if ((got.hidden.scrolls || got.merged.scrolls) && got.slack >= got.rowHeight) wasted.push(height);
+    }
+    expect(wasted).toEqual([]);
   });
 });

@@ -15,10 +15,12 @@
  *     to the other, so a Recently Merged of one merge today leaves Hidden
  *     Workspaces five.
  *   - Recently Merged claims its share only for the lines that reach TODAY's
- *     merges. An older merge has no claim against the Open section or Hidden
- *     Workspaces: it shows only in room both leave once they are whole.
- *   - Room the whole Open section leaves grows the bands one line at a time,
- *     Hidden Workspaces first, then Recently Merged's older merges.
+ *     merges. An older merge has no claim against the Open section: it shows
+ *     only in room the Open section cannot use.
+ *   - NO ROOM IS LEFT UNUSED (owner request, 2026-10-19). Room the Open
+ *     section leaves, whole or stopped short by a line taller than the room
+ *     (a repository's header riding with its first row), fills Hidden
+ *     Workspaces as far as its lines fit, then Recently Merged.
  *   - A rail too short for the bands' share shrinks the bands, the longer one
  *     first, Recently Merged on a tie, and shows the Open section no lines.
  *
@@ -148,19 +150,8 @@ export function allocateSectionLines(room: number, stops: SectionStops): Section
   }
   let o = 0;
   while (o < totalO && fits(o + 1, h, m)) o += 1;
-  if (o < totalO) return { open: o, hidden: h, merged: m };
-  for (let grew = true; grew; ) {
-    grew = false;
-    if (h < totalH && fits(o, h + 1, m)) {
-      h += 1;
-      grew = true;
-    }
-    if (m < today && fits(o, h, m + 1)) {
-      m += 1;
-      grew = true;
-    }
-  }
-  if (h === totalH) while (m < totalM && fits(o, h, m + 1)) m += 1;
+  while (h < totalH && fits(o, h + 1, m)) h += 1;
+  while (m < totalM && fits(o, h, m + 1)) m += 1;
   return { open: o, hidden: h, merged: m };
 }
 

@@ -201,11 +201,29 @@ describe("allocateSectionLines", () => {
     { name: "the lines reaching today's merges, older ones above them", room: 20 * ROW, s: sections(40, 40, 10, 2), want: { open: 14, hidden: 4, merged: 2 } },
     { name: "older merges the room a whole Open and Hidden leave", room: 10 * ROW, s: sections(3, 2, 30, 0), want: { open: 3, hidden: 2, merged: 5 } },
     { name: "Hidden Workspaces grown before older merges", room: 10 * ROW, s: sections(2, 10, 10, 0), want: { open: 2, hidden: 8, merged: 0 } },
-    { name: "spare room to each band in turn, Hidden Workspaces first", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, hidden: 6, merged: 5 } },
-    { name: "today's merges grown before older ones", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, hidden: 1, merged: 11 } },
+    { name: "Hidden Workspaces grown before today's merges", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, hidden: 8, merged: 3 } },
+    { name: "every merge the room a whole Hidden Workspaces leaves", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, hidden: 1, merged: 11 } },
     { name: "a short rail's bands shrunk, the longer first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 3, merged: 2 } },
     { name: "nothing in no room at all", room: -100, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 0 } },
     { name: "a folded Open section's room to the bands", room: 9 * ROW, s: sections(0, 5, 40, 0), want: { open: 0, hidden: 5, merged: 4 } },
+    {
+      name: "the room a tall Open line cannot use to Hidden Workspaces",
+      room: 10 * ROW,
+      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(10), merged: stops(10), mergedToday: 0 },
+      want: { open: 2, hidden: 8, merged: 0 },
+    },
+    {
+      name: "the room a tall Open line and a whole Hidden Workspaces leave to Recently Merged",
+      room: 8 * ROW,
+      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(4), merged: stops(10), mergedToday: 0 },
+      want: { open: 2, hidden: 4, merged: 2 },
+    },
+    {
+      name: "the room a tall Hidden line cannot use to Recently Merged",
+      room: 9 * ROW,
+      s: { open: stops(1), hidden: [0, ROW, 2 * ROW, 3 * ROW, 4 * ROW, 8 * ROW], merged: stops(10), mergedToday: 3 },
+      want: { open: 1, hidden: 4, merged: 4 },
+    },
   ])("allocates $name", ({ room, s, want }) => {
     // Arrange / Act
     const got = allocateSectionLines(room, s);
