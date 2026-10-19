@@ -883,9 +883,20 @@ describe("a section's folded count", () => {
     expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".repo-section"), "display"))).toBe("inline");
   });
 
-  it("hides the count while the hidden workspaces section is unfolded", () => {
+  it("shows the count while the hidden workspaces section is unfolded", () => {
     const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1, false) }), sidebarContext());
-    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("none");
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("inline");
+  });
+
+  it("shows the count while the hidden workspaces section is folded", () => {
+    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1, true) }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(countOf(drawn, ".hidden-section"), "display"))).toBe("inline");
+  });
+
+  it("draws the hidden workspaces section's count as every row it holds", () => {
+    const rows = [row({ id: "ws-h1" }), row({ id: "ws-h2" }), row({ id: "ws-h3" })];
+    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection(rows, 3, false) }), sidebarContext());
+    expect([countOf(drawn, ".hidden-section").textContent, pane(drawn).querySelectorAll(".hidden-section .row").length]).toEqual(["(3)", 3]);
   });
 
   it("draws Recently Merged's count beside its label", () => {
