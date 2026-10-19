@@ -1218,10 +1218,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    a hover (--card) still lifts the selected row; then the fill (45%) and the
    gutter bar (64% of --muted) were both taken a few steps less intense, with
    the Emacs tab bar's selected grey (owner ruling, 2026-10-18;
-   design-selection-less-intense.html beside this module). */
+   design-selection-less-intense.html beside this module). The fill was
+   then taken down again to 30% (owner request, 2026-10-19: "a bit darker
+   and less intense"), sitting closer still to the rail's ground. */
 #ws-sidebar {
   --row-current-gutter: color-mix(in srgb, var(--muted) 64%, var(--sidebar-bg));
-  --row-current-tint: color-mix(in srgb, var(--card) 45%, var(--sidebar-bg));
+  --row-current-tint: color-mix(in srgb, var(--card) 30%, var(--sidebar-bg));
 }
 #ws-sidebar .ws.current > .row {
   background-color: var(--row-current-tint);
