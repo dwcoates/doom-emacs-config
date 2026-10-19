@@ -1109,8 +1109,9 @@ that stores a subsection of its own.
 - The sidebar and the Emacs tab bar walk ONE order (`resolve/sidebar/arrangement.go`):
   repository by repository, its unsectioned families, then each subsection's,
   each family depth-first, so a child always sits right of its parent.
-- `SwapWorkspaces` exchanges any two workspaces' places; two roots of one
-  repository also exchange their subsections, so each lands on the other's tab.
+- `SwapWorkspaces` exchanges two workspaces' places within one repository
+  (`other_repository` otherwise); two roots also exchange their subsections,
+  so each lands on the other's tab.
 - `MoveWorkspace` (`SPC TAB P`) puts a workspace onto a sibling's tab, the tabs
   between shifting over; two repositories are `other_repository`, any other
   non-sibling pair `not_siblings`.

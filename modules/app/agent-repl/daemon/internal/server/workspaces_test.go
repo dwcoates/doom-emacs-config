@@ -1725,6 +1725,24 @@ func TestSwapWorkspacesNamesTheMismatchedRef(t *testing.T) {
 	}
 }
 
+func TestSwapWorkspacesAnswersOtherRepository(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+	h.Verbs.swapErr = &workspace.Refusal{Rpc: "SwapWorkspaces", Arm: workspace.ArmOtherRepository, Reason: "two repositories"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspaces: %v", err)
+	}
+	if resp.Msg.GetError().GetOtherRepository() == nil {
+		t.Fatalf("result = %v, want other_repository", resp.Msg.GetResult())
+	}
+}
+
 func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	// Arrange.
 	h, target := swapHarness(t)

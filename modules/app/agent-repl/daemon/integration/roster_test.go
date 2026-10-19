@@ -197,6 +197,23 @@ func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
 	})
 }
 
+func TestSwapWorkspacesIsRefusedAcrossRepositories(t *testing.T) {
+	t.Parallel()
+	// Arrange: one workspace in each of two repositories.
+	d := newDaemon(t, harness.Opts{})
+	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
+
+	// Act.
+	resp, err := d.Client().SwapWorkspaces(d.Ctx(), connect.NewRequest(
+		&agentreplv1.SwapWorkspacesRequest{Workspace: two, Target: one}))
+
+	// Assert: the tab bar keeps each repository's workspaces together.
+	if err != nil || resp.Msg.GetError().GetOtherRepository() == nil {
+		t.Fatalf("SwapWorkspaces = (%v, %v), want other_repository", resp, err)
+	}
+}
+
 func TestMoveWorkspaceIsRefusedAcrossRepositories(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.

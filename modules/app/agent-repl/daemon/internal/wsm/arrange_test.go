@@ -837,8 +837,9 @@ func TestTheStoreRefusesAWorkspaceInAnotherRepositorysSubsection(t *testing.T) {
 	}
 }
 
-func TestSwapPlacesAcrossRepositoriesExchangesPlacesAlone(t *testing.T) {
-	// Arrange -- any two workspaces may swap (owner ruling, 2026-10-17).
+func TestSwapPlacesRefusesTwoRepositoriesWritingNothing(t *testing.T) {
+	// Arrange -- the tab bar never interleaves repositories (owner ruling,
+	// 2026-10-19), so no tab of one is a place for a workspace of another.
 	s, _ := testStore(t)
 	ws := registerIn(t, s, arrangeRepo(t, "repo"), "w", nil)
 	other := registerIn(t, s, arrangeRepo(t, "other"), "o", nil)
@@ -850,12 +851,11 @@ func TestSwapPlacesAcrossRepositoriesExchangesPlacesAlone(t *testing.T) {
 	err := s.SwapPlaces(context.Background(), ws.ID, other.ID)
 
 	// Assert
-	if err != nil {
-		t.Fatalf("SwapPlaces: %v", err)
+	if !errors.Is(err, ErrOtherRepository) {
+		t.Fatalf("SwapPlaces = %v, want ErrOtherRepository", err)
 	}
-	got := placesByName(t, s)
-	if got["w"] != before["o"] || got["o"] != before["w"] {
-		t.Fatalf("places = %v, want w and o exchanged from %v", got, before)
+	if got := placesByName(t, s); !maps.Equal(got, before) {
+		t.Fatalf("places = %v after a refused swap, want %v unchanged", got, before)
 	}
 	if sub := subsectionOf(t, s, ws.ID); !sameSubsection(sub, &later.ID) {
 		t.Fatalf("w's subsection = %v, want it kept as %q", sub, later.ID)
