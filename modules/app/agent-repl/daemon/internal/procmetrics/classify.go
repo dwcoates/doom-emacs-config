@@ -16,10 +16,29 @@ const (
 	ProcessShim        = "shim"
 	ProcessShimTools   = "shim_tools"
 	ProcessEmacs       = "emacs"
-	// processWebKitPrefix prefixes a WebKit process's lowercased role:
-	// webkit_webcontent, webkit_networking, webkit_gpu.
-	processWebKitPrefix = "webkit_"
+	// The WebKit processes Emacs is responsible for, by role.
+	ProcessWebKitWebContent = "webkit_webcontent"
+	ProcessWebKitNetworking = "webkit_networking"
+	ProcessWebKitGPU        = "webkit_gpu"
 )
+
+// webkitRoles maps a WebKit process's role, the first name segment after
+// "com.apple.WebKit.", to its group. It is the closed set of WebKit groups:
+// a development build's processes ("com.apple.WebKit.GPU.Development", which
+// the kernel truncates) are their role's ordinary group, and a role not named
+// here is no group at all (classification.unknownWebKit).
+var webkitRoles = map[string]string{
+	"WebContent": ProcessWebKitWebContent,
+	"Networking": ProcessWebKitNetworking,
+	"GPU":        ProcessWebKitGPU,
+}
+
+// webkitGroup answers the group of the WebKit process named name.
+func webkitGroup(name string) (string, bool) {
+	role, _, _ := strings.Cut(strings.TrimPrefix(name, webkitName), ".")
+	group, ok := webkitRoles[role]
+	return group, ok
+}
 
 // The binaries' process names (buildreport.ServiceStore and ServiceSidecar
 // name the same binaries).
@@ -41,10 +60,13 @@ type Group struct {
 }
 
 // classification is one scrape's answer: each agent-repl process's group,
-// and the argv reads that failed for a reason other than the process exiting.
+// the argv reads that failed for a reason other than the process exiting,
+// and the names of Emacs's WebKit processes whose role webkitRoles does not
+// name, which are measured in no group.
 type classification struct {
-	groups map[int]Group
-	errs   []error
+	groups        map[int]Group
+	errs          []error
+	unknownWebKit []string
 }
 
 // classify sorts the host's processes into agent-repl's groups (see the
@@ -76,7 +98,12 @@ func classify(ids map[int]Identity, self int, sockDir string, args func(int) ([]
 		case id.PPID == launchdPID && id.Name == sidecarName:
 			out.groups[pid] = Group{Process: ProcessSidecar}
 		case emacs != 0 && id.Responsible == emacs && strings.HasPrefix(id.Name, webkitName):
-			out.groups[pid] = Group{Process: processWebKitPrefix + strings.ToLower(strings.TrimPrefix(id.Name, webkitName))}
+			group, ok := webkitGroup(id.Name)
+			if !ok {
+				out.unknownWebKit = append(out.unknownWebKit, id.Name)
+				continue
+			}
+			out.groups[pid] = Group{Process: group}
 		case id.Name == nodeName:
 			argv, err := args(pid)
 			if err != nil {

@@ -3,6 +3,7 @@ package procmetrics
 import (
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 
 	"agent-repld/internal/causelog"
@@ -144,6 +145,7 @@ func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 	c.note("identity", identityErr)
 	classified := classify(ids, c.deps.Self, c.deps.SockDir, c.deps.Reader.Args)
 	c.note("argv", errors.Join(classified.errs...))
+	c.noteUnknownWebKit(classified.unknownWebKit)
 
 	live := map[int]pidState{}
 	var usageErr error
@@ -277,6 +279,26 @@ func (c *Collector) note(step string, err error) bool {
 		c.deps.Log.Info(Operation, "a process metrics read succeeds again", dlog.Context{"step": step})
 	}
 	return true
+}
+
+// noteUnknownWebKit records, once per set of names, Emacs's WebKit processes
+// whose role no WebKit group names: they are measured nowhere until the
+// closed set (webkitRoles) names their role.
+func (c *Collector) noteUnknownWebKit(names []string) {
+	const step = "webkit_role"
+	if len(names) == 0 {
+		if c.causes.Succeeded(step) {
+			c.deps.Log.Info(Operation, "every WebKit process of Emacs's is in a WebKit group again", dlog.Context{"step": step})
+		}
+		return
+	}
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	if c.causes.Failed(step, strings.Join(sorted, ",")) {
+		c.deps.Log.Error(Operation, "a WebKit process of Emacs's has a role no WebKit group names; it is measured in no group", dlog.Context{
+			"step": step, "names": sorted,
+		})
+	}
 }
 
 func sortedKeys[V any](m map[string]V) []string {

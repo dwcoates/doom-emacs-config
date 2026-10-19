@@ -349,6 +349,40 @@ func TestARecoveredListingIsRecorded(t *testing.T) {
 	}
 }
 
+func TestAnUnknownWebKitRoleIsRecordedOnceAndItsRecoveryToo(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	reader.ids[20] = Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.Model", Responsible: testEmacs, StartUnixMicros: 5}
+	reader.usage[20] = Usage{CPUSeconds: 1}
+	h := newHarness(t, reader)
+
+	// Act
+	h.scrape(t)
+	get := h.scrape(t)
+	reader.mu.Lock()
+	delete(reader.ids, 20)
+	reader.mu.Unlock()
+	h.scrape(t)
+
+	// Assert
+	if _, ok := get("agentrepl_process_count", "process", "webkit_model"); ok {
+		t.Fatalf("an unknown WebKit role became a group")
+	}
+	errs := errorRecords(h.log)
+	if len(errs) != 1 || errs[0].Context["step"] != "webkit_role" {
+		t.Fatalf("error records = %+v, want one webkit_role record across two scrapes", errs)
+	}
+	var recovered bool
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Context["step"] == "webkit_role" {
+			recovered = true
+		}
+	}
+	if !recovered {
+		t.Fatalf("no recovery record in %+v", h.log.Records())
+	}
+}
+
 func TestAFailedUsageReadIsRecordedAndAGoneProcessIsNot(t *testing.T) {
 	// Arrange
 	reader := newWorld()
