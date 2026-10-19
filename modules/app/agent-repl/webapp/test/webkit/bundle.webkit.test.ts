@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { rejectionOf } from "./rejection";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,10 +20,7 @@ describe("bundlePage", () => {
 
   beforeAll(async () => {
     code = await bundlePage(path.join(here, "fixtures/bundle-entry.ts"), "bundleEntry");
-    refusal = await bundlePage(path.join(here, "fixtures/no-such-entry.ts"), "missing").then(
-      () => null,
-      (err: unknown) => err,
-    );
+    refusal = await rejectionOf(bundlePage(path.join(here, "fixtures/no-such-entry.ts"), "missing"));
   });
 
   it("assigns the entry's exports to the named global", () => {

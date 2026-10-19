@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { webkit, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootPage, pageAssets } from "./boot-page";
+import { rejectionOf } from "./rejection";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -83,14 +84,8 @@ describe("bootPage", () => {
     await sized.page.close();
 
     const script = `${PUBLISHES} throw new Error("the mount broke");`;
-    seen.bootFailure = await bootPage(browser, {
-      script,
-      css: NO_RULES,
-      global: "sample",
-      viewport: { width: 300, height: 200 },
-    }).then(
-      () => null,
-      (err: unknown) => err,
+    seen.bootFailure = await rejectionOf(
+      bootPage(browser, { script, css: NO_RULES, global: "sample", viewport: { width: 300, height: 200 } }),
     );
 
     const { page, errors } = await bootPage(browser, {
