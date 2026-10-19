@@ -263,6 +263,11 @@
      replies to, or a prompt the rollback keys act on — so the one selected
      bubble is unmistakable among those around it. */
   --selected-bubble-bg: #f5f5f7;
+  /* THE SELECTED PROMPT's fill (owner request, 2026-10-19): a prompt bubble
+     that is not held is selected in a darker blue than the user prompt's own
+     --user (#b8d2ff), rather than the grey every other selected bubble
+     wears. */
+  --selected-prompt-bg: #8fb8ff;
   /* THE EXPANDED RESPONSE's border (owner ruling, 2026-09-27): eggshell white,
      worn by every response bubble while its scroll box is open, over whatever
      the ladder would otherwise draw. A shade deeper than true eggshell here,
@@ -558,6 +563,8 @@
     /* A moderate grey a little lighter than the dark --assistant (the dark
        --panel-bg, #1a1a19). */
     --selected-bubble-bg: #313130;
+    /* A darker blue than the dark --user (#0764c2). */
+    --selected-prompt-bg: #044a91;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
@@ -2282,6 +2289,14 @@ html[data-page-unshown] *::after {
 .bubble.entry-selected {
   --bubble-bg: var(--selected-bubble-bg) !important;
 }
+/* THE SELECTED PROMPT (owner request, 2026-10-19): a prompt bubble that is not
+   held (a user prompt, an agent-addressed prompt, a peer message) is filled
+   with a darker blue than a user prompt's own (--selected-prompt-bg) instead
+   of the grey. The role and variant keys outrank the rule above's specificity,
+   both `!important`. A held prompt keeps the grey. */
+.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected {
+  --bubble-bg: var(--selected-prompt-bg) !important;
+}
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it
    wears. Only a CAPPED response has a scroll box to open — a thinking bubble,
@@ -2940,6 +2955,20 @@ html[data-page-unshown] *::after {
    in; child combinators keep an open bubble from showing the quotes of a
    bubble nested inside it. */
 .bubble-scroll:not(.expanded) > .bubble-body > .bubble-quote { display: none; }
+/* A FEED PROMPT'S QUOTE is drawn from its parts (src/bubble/quote.ts
+   `QUOTE_PARTS_CLASS`): its HEADING shows folded too (owner request,
+   2026-10-19), and every other part (the heading's colon, the quoted code
+   block, the closing marker) hides with the fold. The parts sit inside the
+   quote block, which holds no bubble, so the descendant combinator reaches no
+   nested bubble's quote. */
+.bubble-scroll:not(.expanded) > .bubble-body > .bubble-quote-parts .bubble-quote { display: none; }
+/* The heading and the closing marker are slightly smaller and greyer than the
+   prompt's own words (owner request, 2026-10-19): a grey partway from the text
+   color to --muted, so it still reads on the prompt's blue in both themes. */
+.prompt-quote-marker {
+  font-size: 0.88em;
+  color: color-mix(in srgb, var(--fg) 55%, var(--muted));
+}
 
 /* THE CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool-call and a skill card
    are ONE click-to-expand unit: `.tool-fold` is the whole card, the feed-wide

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -131,8 +133,9 @@ func TestDeliverMirrorsAReplysQuoteAsItsOwnBlock(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("the mirrored row carries %d blocks, want the quote and the words: %v", len(blocks), blocks)
 	}
-	if got, want := blocks[0].GetQuote().GetText(), said.GetContent().GetBlocks()[0].GetQuote().GetText(); got != want {
-		t.Fatalf("the mirrored quote = %q, want %q", got, want)
+	want := &frontendv1.FeedQuoteBlock{Heading: replyquote.HeadingResponse, Quoted: "Paris.", Closing: replyquote.ClosingMarker}
+	if got := blocks[0].GetQuote(); !proto.Equal(got, want) {
+		t.Fatalf("the mirrored quote = %v, want %v", got, want)
 	}
 	if got := blocks[1].GetText().GetText(); got != "and its population?" {
 		t.Fatalf("the mirrored words = %q, want the person's own", got)

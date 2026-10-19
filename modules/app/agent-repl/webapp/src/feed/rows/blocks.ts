@@ -16,7 +16,8 @@
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
 import { markdownSlot, type SlotMark } from "../../bubble/body.js";
-import { quoteSlot } from "../../bubble/quote.js";
+import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
+import { codeBlockHtml } from "../../markdown.js";
 import { armName } from "../renderers.js";
 import type {
   FeedImageBlock,
@@ -86,15 +87,37 @@ export function drawFeedUnsupportedBlock(block: FeedUnsupportedBlock): HTMLEleme
 }
 
 /**
- * A reply's quote of an earlier bubble: a markdown slot drawn only while the
- * bubble is expanded (src/bubble/quote.ts), its daemon-composed text verbatim.
+ * A reply's quote of an earlier bubble, from the parts the daemon took it
+ * apart into (src/bubble/quote.ts): the heading, shown folded and open alike,
+ * then, only while the bubble is expanded, the heading's colon, the quoted
+ * text as a code block (never as markdown, so a quoted tree is the code it was
+ * fenced as), and the closing marker.
  */
 export function drawFeedQuoteBlock(block: FeedQuoteBlock): HTMLElement {
   log.info("drawing a prompt quote block", {
     operation: "feed.draw-quote-block",
-    context: { characters: block.text.length },
+    context: { heading: block.heading, characters: block.quoted.length },
   });
-  return quoteSlot("prompt-block prompt-block-quote", block.text);
+  const el = document.createElement("div");
+  el.className = `prompt-block prompt-block-quote ${QUOTE_PARTS_CLASS}`;
+  const colon = expandOnly("span", ":");
+  const heading = document.createElement("div");
+  heading.className = QUOTE_MARKER_CLASS;
+  heading.append(block.heading, colon);
+  const quoted = expandOnly("div", "");
+  quoted.innerHTML = codeBlockHtml(block.quoted, "");
+  const closing = expandOnly("div", `${block.closing}:`);
+  closing.classList.add(QUOTE_MARKER_CLASS);
+  el.append(heading, quoted, closing);
+  return el;
+}
+
+/** A TAG holding TEXT that the collapsed bubble hides (`BUBBLE_QUOTE_CLASS`). */
+function expandOnly(tag: "span" | "div", text: string): HTMLElement {
+  const el = document.createElement(tag);
+  el.className = BUBBLE_QUOTE_CLASS;
+  el.textContent = text;
+  return el;
 }
 
 /**

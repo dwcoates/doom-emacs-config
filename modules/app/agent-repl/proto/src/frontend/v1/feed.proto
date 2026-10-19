@@ -2575,15 +2575,26 @@ message FeedUnsupportedBlock {
 }
 
 // AN EARLIER BUBBLE THE PROMPT REPLIED TO (conversation.v1.UserQuoteBlock),
-// resolved for drawing. It belongs to the bubble's EXPANDED view only: a
-// collapsed prompt bubble shows the person's own words and hides every quote
-// block, and expanding the bubble shows each quote in its place among the
-// blocks, ahead of the words it introduces.
+// resolved for drawing: the daemon takes the composed quote apart into its
+// parts, so a client draws each part in its own place and never parses text.
+// The HEADING shows in both views (owner request, 2026-10-19), and the quoted
+// text and closing marker only in the bubble's EXPANDED view: a collapsed
+// prompt bubble shows the heading and the person's own words.
 message FeedQuoteBlock {
-  // The quote as the agent received it — the reply preamble, the quoted text
-  // inside a code fence, and the marker introducing the person's message —
-  // drawn as markdown, verbatim. Never parsed.
-  string text = 1;
+  // Tag 1 (`text`, the whole composed quote drawn as markdown) is RETIRED:
+  // drawn as markdown, a quoted metaprompt tree drew as a tree rather than as
+  // the code block it was fenced in, and the heading could not be told apart.
+  reserved 1;
+  reserved "text";
+  // What is quoted, as the agent was told it, without its trailing colon:
+  // e.g. "⟢ Replying to an earlier response of yours". Never empty.
+  string heading = 2;
+  // The quoted bubble's markdown, unfenced. A client draws it verbatim as a
+  // code block, never as markdown. May be empty.
+  string quoted = 3;
+  // The marker introducing the person's words, as the agent was told it,
+  // without its trailing colon: "⟢ My message". Never empty.
+  string closing = 4;
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,

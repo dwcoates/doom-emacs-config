@@ -35,7 +35,7 @@ import {
 } from "../src/bubble/draw.js";
 import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
-import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
+import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
@@ -2002,7 +2002,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule).toMatch(/--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important/);
   });
 
-  it("keeps the ring off a selected prompt, whose fill turns grey", () => {
+  it("keeps the ring off a selected prompt, whose fill is its mark", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble user entry-selected";
@@ -2037,6 +2037,48 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
 
     // Assert
     expect(selected).toBeGreaterThan(response);
+  });
+
+  it.each([
+    ["a user prompt", "user", "var(--selected-prompt-bg)"],
+    ["an agent-addressed prompt", "agent", "var(--selected-prompt-bg)"],
+    ["a peer message", "peer", "var(--selected-prompt-bg)"],
+    ["a held prompt", "held", "var(--selected-bubble-bg)"],
+  ])("fills a selected %s with its selection token", (_kind, variant, want) => {
+    // Arrange
+    const bubble = selectedBubble("bubble entry-selected", "prompt", variant);
+    // Act
+    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
+    // Assert
+    expect(fill).toBe(want);
+  });
+
+  it("fills a selected response with the grey selection token, never the prompt's blue", () => {
+    // Arrange
+    const bubble = selectedBubble("bubble final-response entry-selected", "response", "response");
+    // Act
+    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
+    // Assert
+    expect(fill).toBe("var(--selected-bubble-bg)");
+  });
+
+  it("sets the selected prompt's fill alone, so selecting a prompt never reflows it", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected') ?? "";
+
+    // Assert
+    expect(rule.trim()).toBe("--bubble-bg: var(--selected-prompt-bg) !important;");
+  });
+
+  it.each(THEME_BLOCKS)("fills a selected prompt a darker blue than a user prompt in the %s theme", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [prompt, selected] = [themeRgbOf(css, "--user"), rgbOf(css, "--selected-prompt-bg")];
+
+    // Assert: darker, and still blue (its blue channel leads).
+    expect([luminance(selected) < luminance(prompt), selected[2] > selected[0] && selected[2] > selected[1]]).toEqual([true, true]);
   });
 
   it("defines the --selected-entry token so the blue rule resolves", () => {
@@ -3395,12 +3437,13 @@ describe("the one bubble rule set", () => {
     // Assert — the base rule paints the role's token; the roles choose it, and
     // so do the owner-named fills: the held variant's (2026-09-23), the
     // page-colored thinking and interim fill (2026-10-08), the selected
-    // bubble's grey (2026-10-11) and the agent-to-agent bubbles' final-response
-    // fill (2026-10-17).
+    // bubble's grey (2026-10-11), the agent-to-agent bubbles' final-response
+    // fill (2026-10-17) and the selected prompt's darker blue (2026-10-19).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
         ".bubble.entry-selected",
+        '.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected',
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
         '.bubble[data-variant="agent"]',
@@ -3672,6 +3715,15 @@ describe("the response bubble's fill", () => {
 });
 
 /** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */
+/** A bubble of CLASSNAME, ROLE and VARIANT, as the selection tests mount one. */
+function selectedBubble(className: string, role: string, variant: string): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = className;
+  bubble.setAttribute("data-role", role);
+  bubble.setAttribute("data-variant", variant);
+  return bubble;
+}
+
 function rgbOf(block: string, token: string): [number, number, number] {
   const hex = new RegExp(`${token}:\\s*#([0-9a-fA-F]{6})\\s*;`).exec(block)?.[1];
   if (hex === undefined) throw new Error(`no six-digit ${token} in the block`);
@@ -3798,14 +3850,31 @@ describe("a reply's quote in a prompt bubble", () => {
     // Arrange / Act
     const selectors = quoteRules().flatMap((rule) => rule.selectors);
     // Assert
-    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_QUOTE_CLASS}`]);
+    expect(selectors).toEqual([
+      `.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_QUOTE_CLASS}`,
+      `.bubble-scroll:not(.expanded) > .bubble-body > .${QUOTE_PARTS_CLASS} .${BUBBLE_QUOTE_CLASS}`,
+    ]);
   });
 
   it("takes the hidden quote out of layout", () => {
     // Arrange / Act
     const declarations = quoteRules().map((rule) => rule.declarations.trim());
     // Assert
-    expect(declarations).toEqual(["display: none;"]);
+    expect(declarations).toEqual(["display: none;", "display: none;"]);
+  });
+
+  it("draws the quote's heading and closing marker smaller than the prompt's words", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.${QUOTE_MARKER_CLASS}`) ?? "";
+    // Assert
+    expect(rule).toMatch(/font-size:\s*0\.88em/);
+  });
+
+  it("draws the quote's heading and closing marker greyer than the prompt's words", () => {
+    // Arrange / Act
+    const rule = declarationsOf(`.${QUOTE_MARKER_CLASS}`) ?? "";
+    // Assert
+    expect(rule).toMatch(/color:\s*color-mix\(in srgb, var\(--fg\) 55%, var\(--muted\)\)/);
   });
 });
 

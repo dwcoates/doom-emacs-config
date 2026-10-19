@@ -249,10 +249,20 @@ md.renderer.rules.fence = (tokens, idx, _options, env): string => {
   if (treeCols !== undefined && isTreeFence(lang, body)) {
     return `<div class="mp-tree">${renderTreeHtml(body, inline, treeCols())}</div>`;
   }
+  return codeBlockHtml(body, lang);
+};
+
+/**
+ * BODY as the one code block every fence draws as: escaped, highlighted when
+ * LANG is a known language, inside `pre.md-code`. Exported so a block drawn as
+ * code without being parsed as markdown (a reply's quoted text) is the same
+ * code block a fence is.
+ */
+export function codeBlockHtml(body: string, lang: string): string {
   const html = highlightCode(body, lang);
   const langClass = lang === "" ? "" : ` lang-${escapeHtml(lang)}`;
   return `<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`;
-};
+}
 
 /**
  * Render markdown to HTML. TREECOLS, when given, is the measured column budget a

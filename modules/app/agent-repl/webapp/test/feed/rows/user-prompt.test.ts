@@ -17,7 +17,7 @@ import {
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
-import { BUBBLE_QUOTE_CLASS } from "../../../src/bubble/quote.js";
+import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { KNOWN_COMMAND_CLASS } from "../../../src/feed/rows/known-commands.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
@@ -312,7 +312,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
   /** A reply: the quote block, then the person's words. */
   const reply = () =>
     prompt([
-      { block: { case: "quote", value: { text: "⟢ Replying:\n\n```\nParis.\n```\n\n⟢ My message:\n" } } },
+      { block: { case: "quote", value: { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" } } },
       { block: { case: "text", value: { text: "and its population?" } } },
     ]);
 
@@ -321,28 +321,33 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
     const el = drawFeedUserPrompt(reply());
     // Assert
     const body = el.querySelector(".bubble-body");
-    expect([...(body?.children ?? [])].map((child) => child.classList.contains(BUBBLE_QUOTE_CLASS))).toEqual([true, false]);
+    expect([...(body?.children ?? [])].map((child) => child.classList.contains(QUOTE_PARTS_CLASS))).toEqual([true, false]);
   });
 
-  it("hides the quote while the bubble is collapsed, leaving the words", () => {
+  /** The display of every expand-only part of EL's quote, its heading, and its words. */
+  const displays = (el: HTMLElement) => ({
+    parts: [...el.querySelectorAll(`.${BUBBLE_QUOTE_CLASS}`)].map((part) => cascadedValue(part, "display") === "none"),
+    heading: cascadedValue(el.querySelector(`.${QUOTE_MARKER_CLASS}`) as Element, "display") === "none",
+    words: cascadedValue(el.querySelector(".prompt-block-text") as Element, "display") === "none",
+  });
+
+  it("hides the quote but its heading while the bubble is collapsed, leaving the words", () => {
     // Arrange
     const restore = installStylesheet();
     const el = drawFeedUserPrompt(reply());
     document.body.append(el);
     try {
       // Act
-      const quote = el.querySelector(`.${BUBBLE_QUOTE_CLASS}`) as Element;
-      const words = el.querySelector(".prompt-block-text") as Element;
+      const shown = displays(el);
       // Assert
-      expect(cascadedValue(quote, "display")).toBe("none");
-      expect(cascadedValue(words, "display")).not.toBe("none");
+      expect(shown).toEqual({ parts: [true, true, true], heading: false, words: false });
     } finally {
       el.remove();
       restore();
     }
   });
 
-  it("shows the quote once the bubble is expanded", () => {
+  it("shows the whole quote once the bubble is expanded", () => {
     // Arrange
     const restore = installStylesheet();
     const el = drawFeedUserPrompt(reply());
@@ -351,7 +356,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
       // Act
       el.querySelector(`.${BUBBLE_SCROLL_CLASS}`)?.classList.add(EXPANDED_CLASS);
       // Assert
-      expect(cascadedValue(el.querySelector(`.${BUBBLE_QUOTE_CLASS}`) as Element, "display")).not.toBe("none");
+      expect(displays(el)).toEqual({ parts: [false, false, false], heading: false, words: false });
     } finally {
       el.remove();
       restore();

@@ -17,7 +17,7 @@ import {
   drawPromptBlockArm,
 } from "../../../src/feed/rows/blocks.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
-import { BUBBLE_QUOTE_CLASS } from "../../../src/bubble/quote.js";
+import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
 
 /** Paint BLOCK through the one bubble body, as a prompt bubble does. */
@@ -49,14 +49,64 @@ describe("drawFeedTextBlock", () => {
 });
 
 describe("drawFeedQuoteBlock", () => {
-  it("is a quote slot, the block the collapsed bubble hides", () => {
-    const el = drawFeedQuoteBlock(create(FeedQuoteBlockSchema, { text: "the quote" }));
-    expect(el.classList.contains(BUBBLE_QUOTE_CLASS)).toBe(true);
+  /** A quote of RESPONSE's markdown, taken apart as the daemon does. */
+  const quote = (quoted: string) =>
+    drawFeedQuoteBlock(
+      create(FeedQuoteBlockSchema, {
+        heading: "⟢ Replying to an earlier response of yours",
+        quoted,
+        closing: "⟢ My message",
+      }),
+    );
+
+  it("draws the heading, its colon, the quoted text and the closing marker in order", () => {
+    expect(quote("Paris.").textContent).toBe("⟢ Replying to an earlier response of yours:Paris.⟢ My message:");
   });
 
-  it("renders the quote's fenced text as a code block, verbatim", () => {
-    const el = painted(drawFeedQuoteBlock(create(FeedQuoteBlockSchema, { text: "⟢ Replying:\n\n```\nParis.\n```" })));
-    expect(el.querySelector("pre code")?.textContent).toBe("Paris.");
+  it("draws the quoted text as a code block, verbatim", () => {
+    expect(quote("Paris.").querySelector("pre.md-code code")?.textContent).toBe("Paris.");
+  });
+
+  it("draws a quoted metaprompt tree as code rather than as a tree", () => {
+    // Arrange
+    const tree = "Response (👀 no changes made)\n\n1 🔎 a root\n├── 1.1 a child\n└── 1.2 another";
+    // Act
+    const el = painted(quote(tree));
+    // Assert
+    expect([el.querySelector(".mp-tree"), el.querySelector("pre code")?.textContent]).toEqual([null, tree]);
+  });
+
+  it("escapes the quoted text rather than reading it as markup", () => {
+    expect(quote("<b>raw</b>").querySelector("pre code")?.innerHTML).toBe("&lt;b&gt;raw&lt;/b&gt;");
+  });
+
+  it("marks the heading and the closing marker, and only those, as the quote's markers", () => {
+    const markers = [...quote("Paris.").querySelectorAll(`.${QUOTE_MARKER_CLASS}`)].map((el) => el.textContent);
+    expect(markers).toEqual(["⟢ Replying to an earlier response of yours:", "⟢ My message:"]);
+  });
+
+  it("hides with the fold every part but the heading's words", () => {
+    const hidden = [...quote("Paris.").querySelectorAll(`.${BUBBLE_QUOTE_CLASS}`)].map((el) => el.textContent);
+    expect(hidden).toEqual([":", "Paris.", "⟢ My message:"]);
+  });
+
+  it("is not itself hidden by the fold, so its heading shows collapsed", () => {
+    const el = quote("Paris.");
+    expect([el.classList.contains(BUBBLE_QUOTE_CLASS), el.classList.contains(QUOTE_PARTS_CLASS)]).toEqual([false, true]);
+  });
+
+  it("records the quote it draws at info, with its heading and length", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    quote("Paris.");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-quote-block");
+    expect([record.level.case, record.context?.heading, record.context?.characters]).toEqual([
+      "info",
+      "⟢ Replying to an earlier response of yours",
+      6,
+    ]);
   });
 });
 
@@ -126,7 +176,7 @@ describe("drawPromptBlockArm", () => {
 
   it("draws the quote arm", () => {
     const el = drawPromptBlockArm(
-      { case: "quote", value: create(FeedQuoteBlockSchema, { text: "q" }) },
+      { case: "quote", value: create(FeedQuoteBlockSchema, { heading: "h", quoted: "q", closing: "c" }) },
       "p",
     );
     expect(el.className).toContain("prompt-block-quote");

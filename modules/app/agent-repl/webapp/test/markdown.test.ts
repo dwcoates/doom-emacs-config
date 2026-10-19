@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { hasFencedTree, inline, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
+import { codeBlockHtml, hasFencedTree, inline, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
 
 describe("renderMarkdown blocks", () => {
   it("renders headings at their level", () => {
@@ -132,6 +132,19 @@ describe("renderMarkdown fenced code", () => {
     expect(renderMarkdown(src)).toBe(
       `<pre class="md-code"><code class="hljs lang-klingon">&lt;qapla&gt; &amp; stuff</code></pre>`,
     );
+  });
+
+  it("draws every non-tree fence as the shared code block (codeBlockHtml)", () => {
+    // Arrange
+    const cases: Array<[string, string]> = [
+      ["", "<b>raw</b>"],
+      ["klingon", "<qapla> & stuff"],
+      ["ts", "class Foo {}"],
+    ];
+    // Act + Assert
+    for (const [lang, body] of cases) {
+      expect(renderMarkdown("```" + lang + "\n" + body + "\n```")).toBe(codeBlockHtml(body, lang));
+    }
   });
 
   it("renders a language-less fence as plain escaped text", () => {
@@ -554,5 +567,15 @@ describe("a file link draws its file name, not its path", () => {
 
   it("keeps the full path as the href", () => {
     expect(renderMarkdown("[~/a/b.ts:4](~/a/b.ts:4)")).toContain('href="~/a/b.ts:4"');
+  });
+});
+
+describe("codeBlockHtml", () => {
+  it("escapes a language-less body inside pre.md-code", () => {
+    expect(codeBlockHtml("<b>x</b>", "")).toBe(`<pre class="md-code"><code class="hljs">&lt;b&gt;x&lt;/b&gt;</code></pre>`);
+  });
+
+  it("names the language on the code element", () => {
+    expect(codeBlockHtml("x", "klingon")).toBe(`<pre class="md-code"><code class="hljs lang-klingon">x</code></pre>`);
   });
 });
