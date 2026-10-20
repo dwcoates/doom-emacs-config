@@ -29,13 +29,10 @@ import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage } from "../rpc/strict.js";
 import type { HeldContext } from "./context.js";
 import type { EditorIngressEntry } from "./editor-ingress.js";
-import { HELD_BADGE_CLASS, drawQueuedAge, drawUserSaid } from "./held-prompt.js";
+import { drawHeldBadgePill, drawQueuedAge, drawUserSaid, type HeldBadgeTone } from "./held-prompt.js";
 
 /** The attribute an ingress card carries: who drew it, `daemon` or `editor`. */
 export const INGRESS_SOURCE_ATTRIBUTE = "data-held-ingress";
-
-/** The attribute an ingress card carries its badge's status by. */
-export const INGRESS_STATUS_ATTRIBUTE = "data-held-status";
 
 /** What an ingress card's badge stands for: the daemon's arms, and the page's own. */
 export type IngressStatus = NonNullable<HeldIngressPromptBadge["standsFor"]["case"]> | "daemonUnreachable";
@@ -54,7 +51,7 @@ export const INGRESS_STATUS_BADGES = {
   movedAway: "amber",
   refused: "err",
   daemonUnreachable: "teal",
-} as const satisfies Record<IngressStatus, string>;
+} as const satisfies Record<IngressStatus, HeldBadgeTone>;
 
 /** The page's own badge words for an editor entry: the daemon is out of reach. */
 export const DAEMON_UNREACHABLE_LABEL = "waiting for the daemon";
@@ -121,10 +118,7 @@ function drawIngressCard(card: IngressCard, tc: HeldContext, path: string, previ
   });
   const head = document.createElement("div");
   head.className = "queued-head";
-  const pill = document.createElement("span");
-  pill.className = `badge ${HELD_BADGE_CLASS} ${INGRESS_STATUS_BADGES[card.status]}`;
-  pill.setAttribute(INGRESS_STATUS_ATTRIBUTE, card.status);
-  pill.textContent = card.label;
+  const pill = drawHeldBadgePill(card.label, INGRESS_STATUS_BADGES[card.status], card.status);
   if (card.detail !== null) pill.title = card.detail;
   head.append(pill, drawQueuedAge(card.queuedAtMs, tc, `${path}.queued_at`));
   const element = drawBubble(

@@ -1228,9 +1228,18 @@ export const HELD_BADGE_CLASS = "held-badge";
 
 /**
  * The classes a badge for STATUS wears. A status the table does not name is a
- * malformed view, logged here and thrown, never a badge in some default color.
+ * malformed view, logged and thrown (`heldStatusTone`), never a badge in some
+ * default color.
  */
 export function heldBadgeClasses(status: string): string {
+  return heldBadgeToneClasses(heldStatusTone(status));
+}
+
+/**
+ * The color the table gives STATUS. A status the table does not name is a
+ * malformed view, logged here and thrown.
+ */
+function heldStatusTone(status: string): HeldBadgeTone {
   if (!Object.hasOwn(HELD_STATUS_BADGES, status)) {
     log.error(`a held prompt status has no badge: ${status}`, {
       operation: "held.held-prompt.badge-unknown-status",
@@ -1241,17 +1250,33 @@ export function heldBadgeClasses(status: string): string {
       `status '${status}' has no badge`,
     );
   }
-  const tone: HeldBadgeTone = HELD_STATUS_BADGES[status as HeldStatus];
+  return HELD_STATUS_BADGES[status as HeldStatus];
+}
+
+/** The classes a held badge in TONE wears. */
+function heldBadgeToneClasses(tone: HeldBadgeTone): string {
   return `badge ${HELD_BADGE_CLASS} ${tone}`;
+}
+
+/** The attribute a held card's badge names the fact it stands for by. */
+export const HELD_STATUS_ATTRIBUTE = "data-held-status";
+
+/**
+ * A held card's one status badge: LABEL verbatim, in TONE's color, naming
+ * STATUS, the fact it stands for. Every held card's badge is drawn here, a
+ * held prompt's and an ingress prompt's (ingress-prompt.ts) alike.
+ */
+export function drawHeldBadgePill(label: string, tone: HeldBadgeTone, status: string): HTMLElement {
+  const pill = document.createElement("span");
+  pill.className = heldBadgeToneClasses(tone);
+  pill.setAttribute(HELD_STATUS_ATTRIBUTE, status);
+  pill.textContent = label;
+  return pill;
 }
 
 /** The status badge: the daemon's label verbatim, and the table's color for STATUS. */
 function badge(label: string, status: HeldStatus): HTMLElement {
-  const pill = document.createElement("span");
-  pill.className = heldBadgeClasses(status);
-  pill.setAttribute("data-held-status", status);
-  pill.textContent = label;
-  return pill;
+  return drawHeldBadgePill(label, heldStatusTone(status), status);
 }
 
 /** The class a note on a fact the badge does not show wears, a quiet pill in the strip. */

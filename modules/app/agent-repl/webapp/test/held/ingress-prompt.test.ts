@@ -15,11 +15,10 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import type { Ticker } from "../../src/clock.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { drawHeldPrompt } from "../../src/held/held-prompt.js";
+import { HELD_STATUS_ATTRIBUTE, drawHeldPrompt } from "../../src/held/held-prompt.js";
 import {
   DAEMON_UNREACHABLE_LABEL,
   INGRESS_SOURCE_ATTRIBUTE,
-  INGRESS_STATUS_ATTRIBUTE,
   INGRESS_STATUS_BADGES,
   drawEditorIngressEntry,
   drawHeldIngressPrompt,
@@ -70,8 +69,8 @@ describe("drawHeldIngressPrompt", () => {
     // Act
     const card = drawHeldIngressPrompt(ingress(arm, "the words"), heldContext());
     // Assert
-    const pill = card.querySelector(`[${INGRESS_STATUS_ATTRIBUTE}]`);
-    expect([pill?.textContent, pill?.getAttribute(INGRESS_STATUS_ATTRIBUTE), pill?.classList.contains(INGRESS_STATUS_BADGES[arm as keyof typeof INGRESS_STATUS_BADGES])]).toEqual([
+    const pill = card.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`);
+    expect([pill?.textContent, pill?.getAttribute(HELD_STATUS_ATTRIBUTE), pill?.classList.contains(INGRESS_STATUS_BADGES[arm as keyof typeof INGRESS_STATUS_BADGES])]).toEqual([
       "the words",
       arm,
       true,
@@ -92,7 +91,7 @@ describe("drawHeldIngressPrompt", () => {
     // Act
     const card = drawHeldIngressPrompt(ingress("refused", "not yet queued", "keeps trying"), heldContext());
     // Assert
-    expect((card.querySelector(`[${INGRESS_STATUS_ATTRIBUTE}]`) as HTMLElement).title).toBe("keeps trying");
+    expect((card.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`) as HTMLElement).title).toBe("keeps trying");
   });
 
   it("marks the card as the daemon's and draws no controls", () => {
@@ -119,11 +118,11 @@ describe("drawEditorIngressEntry", () => {
     // Act
     const card = drawEditorIngressEntry(editorIngressEntry("k-1", "sent offline"), heldContext());
     // Assert
-    const pill = card.querySelector(`[${INGRESS_STATUS_ATTRIBUTE}]`);
+    const pill = card.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`);
     expect([
       card.getAttribute(INGRESS_SOURCE_ATTRIBUTE),
       pill?.textContent,
-      pill?.getAttribute(INGRESS_STATUS_ATTRIBUTE),
+      pill?.getAttribute(HELD_STATUS_ATTRIBUTE),
       card.textContent?.includes("sent offline"),
     ]).toEqual(["editor", DAEMON_UNREACHABLE_LABEL, "daemonUnreachable", true]);
   });
@@ -147,5 +146,26 @@ describe("the queued age every held card shares", () => {
     // Assert
     const shape = (el: Element | null) => [el?.className, el?.hasAttribute("data-queued"), el?.textContent];
     expect(shape(card.querySelector("[data-queued]"))).toEqual(shape(held.querySelector("[data-queued]")));
+  });
+});
+
+describe("the badge every held card shares", () => {
+  it("draws a held prompt's badge and an ingress card's as the one element", () => {
+    // Arrange
+    const held = drawHeldPrompt(
+      create(HeldPromptSchema, {
+        turn: { value: "t1" },
+        said: { content: { blocks: [{ block: { case: "text", value: { text: "x" } } }] } },
+        queuedAt: { atMs: 0n },
+        classification: { case: "classifying", value: {} },
+        badge: { label: "classifying", standsFor: { case: "classifying", value: {} } },
+      }),
+      heldContext(),
+    );
+    // Act
+    const card = drawHeldIngressPrompt(ingress("noSession", "waiting for the session"), heldContext());
+    // Assert
+    const shape = (el: Element | null) => [el?.tagName, [...(el?.classList ?? [])].slice(0, 2)];
+    expect(shape(card.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`))).toEqual(shape(held.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`)));
   });
 });
