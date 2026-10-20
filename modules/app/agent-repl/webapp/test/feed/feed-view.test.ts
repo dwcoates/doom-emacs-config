@@ -8,6 +8,7 @@ import {
   FeedIdSchema,
   FeedPageSchema,
   FeedRowRemovedSchema,
+  FeedRowRolledBackSchema,
   FeedRowSchema,
   FeedSelectionSchema,
   FeedTurnEndedInterruptedInterjectionSchema,
@@ -628,6 +629,15 @@ function removedRow(id: string): FeedRow {
     id: feedId(id),
     order: orderFor(id),
     row: { case: "removed", value: create(FeedRowRemovedSchema, {}) },
+  });
+}
+
+/** A removal the daemon made because the row's turn is being rolled back. */
+function rolledBackRow(id: string): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    row: { case: "removed", value: create(FeedRowRemovedSchema, { rolledBack: create(FeedRowRolledBackSchema, {}) }) },
   });
 }
 
@@ -1648,6 +1658,7 @@ describe("createFeedController: following the tail", () => {
       promptSent: park("promptSent"),
       initialPlacement: park("initialPlacement"),
       replaceRestore: park("replaceRestore"),
+      rolledBack: park("rolledBack"),
       prependCompensation: (grown: number) => shifts.push(grown),
     };
     return { box, tail, acts, parkedOver, shifts };
@@ -1724,6 +1735,30 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
     // Assert
     expect(acts).toEqual(["initialPlacement"]);
+  });
+
+  it("parks at the tail as rolledBack once a rolled-back row is removed", () => {
+    // Arrange
+    const { controller, acts, parkedOver } = scrolled(false);
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    acts.length = 0;
+    parkedOver.length = 0;
+    // Act
+    controller.upsert(rolledBackRow("b"));
+    // Assert
+    expect(acts).toEqual(["rolledBack"]);
+    expect(parkedOver).toEqual([["a"]]);
+  });
+
+  it("does not park for a removal no rollback made", () => {
+    // Arrange
+    const { controller, acts } = scrolled(false);
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    acts.length = 0;
+    // Act
+    controller.upsert(removedRow("b"));
+    // Assert
+    expect(acts).toEqual([]);
   });
 
   it("lands a later replace at the tail as replaceRestore", () => {

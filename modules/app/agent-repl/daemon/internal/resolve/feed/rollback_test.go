@@ -750,6 +750,53 @@ func TestWithholdingDrawnRowsTakesTheHeldTurnsRowsOffTheFeed(t *testing.T) {
 	}
 }
 
+// removalsOf reads ROWS until it has seen N removals, and answers them.
+func removalsOf(t *testing.T, rows <-chan *frontendv1.FeedRow, n int) []*frontendv1.FeedRow {
+	t.Helper()
+	var out []*frontendv1.FeedRow
+	for len(out) < n {
+		if row := <-rows; row.GetRemoved() != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func TestRollbackRemovalsSayTheirTurnWasRolledBack(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(h *harness)
+	}{
+		{name: "withheld when the cut is made", act: func(h *harness) { cutMade(h, "t3") }},
+		{name: "retired for good by RollBackTurns", act: func(h *harness) {
+			if err := h.resolver.RollBackTurns(testWorkspace, []ids.TurnID{"t3"}); err != nil {
+				h.t.Fatalf("RollBackTurns: %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			threeTurns(h)
+			rows := h.openRootTail()
+
+			// Act
+			tc.act(h)
+
+			// Assert
+			for _, removal := range removalsOf(t, rows, 2) {
+				if removal.GetRemoved().GetRolledBack() == nil {
+					t.Fatalf("removal of %s carries no rolled_back, want the rollback stated", removal.GetId().GetValue())
+				}
+			}
+			if !h.hasRecordWith("info", "daemon.feed.row_retired", "rolled_back", true) {
+				t.Fatalf("records = %+v, want the retirement recorded as a rollback's", h.records())
+			}
+		})
+	}
+}
+
 func TestWithholdingDrawnRowsLeavesATurnNotHeldDrawn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -401,7 +401,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the twelve causes the owner rules allow", () => {
+  it("names exactly the thirteen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -411,6 +411,7 @@ describe("SCROLL_CAUSES", () => {
       "entryJumped",
       "initialPlacement",
       "replaceRestore",
+      "rolledBack",
       "workspaceSelected",
       "lastBubbleExpanded",
       "lastBubbleCollapsed",
@@ -426,6 +427,7 @@ describe("TailFollow's parking causes", () => {
     ["a newly held prompt", (tail) => tail.promptHeld(), "promptHeld"],
     ["a first placement", (tail) => tail.initialPlacement(), "initialPlacement"],
     ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
+    ["a rolled-back row's removal", (tail) => tail.rolledBack(), "rolledBack"],
     ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
     ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
   ];
@@ -3681,6 +3683,32 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     // Assert
     const record = await forwardedRecord(capture, "scroll.click-hold-ended");
     expect(record.context).toMatchObject({ by: "workspaceSelected", held_top: 700 });
+  });
+
+  it.each<[string, (tail: TailFollow) => void]>([
+    ["promptSent", (tail) => tail.promptSent()],
+    ["promptHeld", (tail) => tail.promptHeld()],
+    ["initialPlacement", (tail) => tail.initialPlacement()],
+    ["replaceRestore", (tail) => tail.replaceRestore()],
+    ["rolledBack", (tail) => tail.rolledBack()],
+    ["workspaceSelected", (tail) => tail.workspaceSelected()],
+  ])("ends a standing hold under %s and parks at the tail", async (cause, act) => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("info");
+    // Act
+    act(f.tail);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-hold-ended");
+    expect([record.context, f.tail.isFollowing()]).toMatchObject([{ by: cause }, true]);
+  });
+
+  it("hand-rolls no click supersede followed by a park outside parkSuperseding", () => {
+    // Arrange + Act
+    const pairs = scrollSource.match(/this\.supersedeClick\((\w+|"\w+")\);\s*this\.park\(\1\)/g) ?? [];
+    // Assert -- the one pair left is parkSuperseding's own body.
+    expect(pairs).toEqual(["this.supersedeClick(cause);\n    this.park(cause)"]);
   });
 
   it("records no hold ending when no hold stands", async () => {
