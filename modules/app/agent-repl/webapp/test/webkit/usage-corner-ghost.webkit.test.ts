@@ -505,16 +505,16 @@ describe("an interim opened under its reveal in WebKit", () => {
       async ({ change, read }) => {
         const measured = document.querySelector<HTMLElement>(read === "height" ? ".bubble-scroll" : ".bubble")!;
         const size = (): number => measured.getBoundingClientRect()[read];
-        const frames = [size()];
+        const sizes = [size()];
         if (change === "open") document.querySelector(".bubble-scroll")!.classList.add("expanded");
         else document.querySelector<HTMLElement>(".usage-corner")!.focus();
         let rested = false;
         while (!rested) {
           await new Promise((resolve) => requestAnimationFrame(resolve));
-          frames.push(size());
+          sizes.push(size());
           rested = document.getAnimations().length === 0;
         }
-        return frames;
+        return sizes;
       },
       { change, read },
     );
