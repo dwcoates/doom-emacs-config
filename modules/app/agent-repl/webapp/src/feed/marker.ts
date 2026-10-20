@@ -4,19 +4,26 @@
  * message — how a turn ended, a permission the user denied, a plan episode
  * that broke, a compaction that failed.
  *
- * A small inline pill, left-aligned in the feed column, no wider than its text
- * and truncating rather than overflowing: the family's GLYPH, the LABEL, then
- * the optional DETAIL. Color is only on the glyph and a thin left edge; the
- * text keeps the normal foreground. No bubble, no background fill.
+ * TWO DRAWINGS, chosen by the family (owner request, 2026-10-20). A NEUTRAL
+ * marker is a small inline pill, left-aligned in the feed column, no wider
+ * than its text and truncating rather than overflowing. A FAULT marker is a
+ * CARD (`drawOutcomeCard`), as wide as a tool card and framed by a hairline in
+ * the family's color: its closed face is the head, the vendor's message and
+ * the vendor's notices, and it opens in place on a click exactly as a tool
+ * card does, through the same card-level fold (`.tool-fold`, expand.ts). A
+ * vendor notice drawn on its own (frontend.v1.FeedResponseNotice) is the same
+ * card under a neutral head, with the notice's words as its face.
+ *
+ * Either way the head is the family's GLYPH, the LABEL, then the optional
+ * DETAIL, and the words keep the normal foreground.
  *
  * THE FAMILY DECIDES THE GLYPH AND THE COLOR, from the shared vocabulary
  * (`render-colors.json#feed_outcome_marker` and `…_glyphs`, read through
- * `src/vocab.ts`), never from a table here. ONLY A FAULT FAMILY EXPANDS: the
- * neutral arm carries no expansion in the contract, so it draws no chevron and
- * nothing to open. A fault's pill is a button that opens its expansion in
- * place, inside the column. Every word of the expansion is the daemon's,
- * drawn verbatim; the captions beside them and the formatting of an instant
- * are this renderer's.
+ * `src/vocab.ts`), never from a table here. The family follows the workspace
+ * status its event raised, so a card's border is that status's color. ONLY A
+ * FAULT FAMILY EXPANDS: the neutral arm carries no expansion in the contract.
+ * Every word of the card is the daemon's, drawn verbatim; the captions beside
+ * them and the formatting of an instant are this renderer's.
  *
  * TWO ACTIONS REUSE EXISTING REQUESTS: "sign in" opens the workspace's login
  * flow (agentrepl.v1.OpenLogin, the topbar account cell's request, reached
@@ -65,57 +72,91 @@ export const MARKER_GLYPH_CHARS: Readonly<Record<string, string>> = Object.freez
   cross: "✕",
 });
 
-/** The chevron a fault's pill draws, closed and open. */
-const CHEVRON_CLOSED = "›";
-const CHEVRON_OPEN = "⌄";
-
 /** What a marker needs from the page it is drawn on. */
 export interface MarkerContext {
   /** The page's one context: client, workspace, ticker. */
   ctx: AppContext;
-  /** The marker's previous draw, whose expanded state a re-push keeps. */
-  previous?: Element | null;
 }
+
+/** The class a fault marker's and a notice's card wears. */
+export const OUTCOME_CARD_CLASS = "outcome-card";
 
 /** The outcome marker. PATH is the message tree path, for refusals. */
 export function drawOutcomeMarker(m: FeedOutcomeMarker, mc: MarkerContext, path: string): HTMLElement {
   const family = requireCase(m.family, `${path}.family`);
-  const label = requireMessage(m.label, `${path}.label`);
-  const root = markerRoot(m, path);
+  if (family.case !== "neutral") return drawOutcomeCard(m, mc, path, []);
 
-  const fault = family.case !== "neutral";
-  // A FAULT'S PILL IS A CONTROL (the one control, never a <button>); a
-  // neutral pill is plain text with nothing to open.
-  const pill = fault ? createControl() : document.createElement("span");
+  const root = markerRoot(m, path);
+  const pill = document.createElement("span");
   pill.className = "outcome-marker-pill";
   pill.append(...markerHead(m, path));
   root.append(pill);
+  log.debug("drew a neutral outcome marker", {
+    operation: "feed.outcome-marker",
+    context: { family: family.case, label: requireMessage(m.label, `${path}.label`).text },
+  });
+  return root;
+}
+
+/**
+ * THE OUTCOME CARD: a fault marker, or a vendor notice drawn on its own under
+ * its neutral head. The closed face is the head, then the vendor's message,
+ * then the marker's notices, then FACE (a standalone notice's own words); a
+ * fault's expansion follows, hidden until the card is opened. A FAULT CARD IS
+ * THE TOOL CARD'S FOLD (`.tool-fold`, its expansion the `.tool-output`), so
+ * the feed-wide click handler opens and closes it, and a redraw keeps the
+ * reader's choice, exactly as it does for a tool card.
+ */
+export function drawOutcomeCard(
+  m: FeedOutcomeMarker,
+  mc: MarkerContext,
+  path: string,
+  face: readonly string[],
+): HTMLElement {
+  const family = requireCase(m.family, `${path}.family`);
+  const root = markerRoot(m, path);
+  root.classList.add(OUTCOME_CARD_CLASS, "tool-card");
+  const head = document.createElement("div");
+  head.className = "outcome-card-head";
+  head.append(...markerHead(m, path));
+  root.append(head);
+
+  const said: string[] = [];
+  if (family.case === "vendorFault") {
+    const message = requireMessage(family.value.expansion, `${path}.vendor_fault.expansion`).message;
+    if (message !== undefined) said.push(message.text);
+  }
+  said.push(...m.notices.map((n) => n.text), ...face);
+  for (const text of said) {
+    const line = document.createElement("div");
+    line.className = "outcome-card-said";
+    line.textContent = text;
+    root.append(line);
+  }
 
   switch (family.case) {
     case "neutral":
-      log.debug("drew a neutral outcome marker", {
-        operation: "feed.outcome-marker",
-        context: { family: family.case, label: label.text },
-      });
-      return root;
+      break;
     case "vendorFault":
-      attachExpansion(root, pill, drawVendorExpansion(
+      root.append(foldExpansion(drawVendorExpansion(
         requireMessage(family.value.expansion, `${path}.vendor_fault.expansion`), mc, `${path}.vendor_fault.expansion`,
-      ), mc);
+      )));
+      root.classList.add("tool-fold");
       break;
     case "agentReplFault":
-      attachExpansion(root, pill, drawAgentReplExpansion(
+      root.append(foldExpansion(drawAgentReplExpansion(
         requireMessage(family.value.expansion, `${path}.agent_repl_fault.expansion`), mc, `${path}.agent_repl_fault.expansion`,
-      ), mc);
+      )));
+      root.classList.add("tool-fold");
       break;
     default: {
       const other: { case: string } = family;
       return unreachableArm(`${path}.family`, other.case);
     }
   }
-  log.debug("drew a fault outcome marker", {
-    operation: "feed.outcome-marker",
-    context: { family: family.case, label: label.text },
+  log.debug("drew an outcome card", {
+    operation: "feed.outcome-card",
+    context: { family: family.case, said: said.length, notices: m.notices.length },
   });
   return root;
 }
@@ -158,32 +199,10 @@ function markerHead(m: FeedOutcomeMarker, path: string): HTMLElement[] {
   return [glyph, text];
 }
 
-/**
- * Give a fault's pill its chevron and its expansion, opened or closed as the
- * previous draw left it: a re-push never undoes the reader's own click.
- */
-function attachExpansion(root: HTMLElement, pill: HTMLElement, expansion: HTMLElement, mc: MarkerContext): void {
-  const chevron = document.createElement("span");
-  chevron.className = "outcome-marker-chevron";
-  pill.append(chevron);
-  root.append(expansion);
-  const wasOpen = mc.previous?.querySelector(`.outcome-marker-pill`)?.getAttribute("aria-expanded") === "true";
-  const show = (open: boolean): void => {
-    pill.setAttribute("aria-expanded", String(open));
-    expansion.hidden = !open;
-    chevron.textContent = open ? CHEVRON_OPEN : CHEVRON_CLOSED;
-    root.toggleAttribute("data-expanded", open);
-  };
-  show(wasOpen);
-  pill.addEventListener("click", (event) => {
-    event.preventDefault();
-    const open = pill.getAttribute("aria-expanded") !== "true";
-    show(open);
-    log.info(open ? "opened an outcome marker's expansion" : "closed an outcome marker's expansion", {
-      operation: "feed.outcome-marker-toggle",
-      context: { family: root.getAttribute("data-family"), open },
-    });
-  });
+/** A fault's expansion as the card fold's hidden section. */
+function foldExpansion(expansion: HTMLElement): HTMLElement {
+  expansion.classList.add("tool-output");
+  return expansion;
 }
 
 /** One captioned line of an expansion. */
@@ -222,7 +241,7 @@ function drawVendorExpansion(x: FeedOutcomeVendorFaultExpansion, mc: MarkerConte
   if (x.time !== undefined) box.append(line("time", "time", formatMarkerTime(msOf(x.time.atMs, `${path}.time.at_ms`))));
   const type = requireMessage(x.errorType, `${path}.error_type`);
   box.append(line("error-type", "error", type.text));
-  if (x.message !== undefined) box.append(line("message", "message", x.message.text));
+  // THE MESSAGE IS THE CARD'S FACE (drawOutcomeCard), never repeated here.
   if (x.retries !== undefined) box.append(line("retries", "retries made", String(x.retries.count)));
   if (x.retryAt !== undefined) {
     box.append(line("retry", "retry", drawRetryCountdown(msOf(x.retryAt.atMs, `${path}.retry_at.at_ms`), mc)));

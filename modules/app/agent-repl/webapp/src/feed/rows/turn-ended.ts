@@ -164,7 +164,7 @@ export function drawFeedTurnEndedErrored(
   el.append(
     drawOutcomeMarker(
       requireMessage(errored.marker, `${PATH}.errored.marker`),
-      { ctx: rc.ctx, previous: rc.previous },
+      { ctx: rc.ctx },
       `${PATH}.errored.marker`,
     ),
   );
@@ -201,7 +201,7 @@ export function drawFeedTurnEndedInterrupted(
       el.append(
         drawOutcomeMarker(
           requireMessage(interrupted.marker, `${PATH}.interrupted.marker`),
-          { ctx: rc.ctx, previous: rc.previous },
+          { ctx: rc.ctx },
           `${PATH}.interrupted.marker`,
         ),
       );

@@ -105,6 +105,7 @@ import { heatColor } from "../../heat.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
+import { drawOutcomeCard } from "../marker.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -161,6 +162,9 @@ export const RESPONSE_PROSE_CLASS = "response-prose";
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const path = "FeedResponse";
   const result = requireCase(u.result, `${path}.result`);
+  // A VENDOR NOTICE IS NOT THE AGENT'S PROSE, so it is never a bubble: it is
+  // the notice's outcome card, the drawing a fault ending's notices take.
+  if (u.notice !== undefined) return drawFeedResponseNotice(u.notice, result.value.prose?.markdown ?? "", rc, `${path}.notice`);
 
   // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
   // the prose is intermediate reasoning is orthogonal to whether it is still
@@ -181,14 +185,6 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   if (u.finalAnswer && !u.thinking) hooks.push(FINAL_RESPONSE_CLASS);
   if (isInterimResponse(u)) hooks.push(INTERIM_RESPONSE_CLASS);
 
-  // The heading is the header strip, outside the body: the body is rewritten
-  // by the prose painters (and by every frame of the type-out), so a heading
-  // placed inside it would be wiped by the first repaint of an arriving response.
-  const strip: HTMLElement[] = [];
-  if (u.notice !== undefined) {
-    hooks.push("response-notice");
-    strip.push(drawFeedResponseNotice(u.notice, `${path}.notice`));
-  }
   if (result.case === "error") hooks.push("response-cut-short");
 
   // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
@@ -265,7 +261,6 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       variant: u.thinking ? "thinking" : "response",
       state: result.case,
       hooks,
-      strip,
       ...(corner === undefined ? {} : { corner }),
       content: [prose],
       footer: result.case === "error" ? cutShortFooter(result.value) : [],
@@ -286,7 +281,6 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     easeIntoLook(bubble, turningInterim);
   }
   bubble.toggleAttribute("data-thinking", u.thinking);
-  bubble.toggleAttribute("data-notice", u.notice !== undefined);
   if (result.case === "update") {
     log.debug("drawing an arriving response", {
       operation: "feed.cards.response.update",
@@ -390,7 +384,6 @@ function recordDraw(
     first_draw: first,
     settled,
     usage: u.usage !== undefined,
-    notice: u.notice !== undefined,
   };
   // THE THINKING SIDE OF THE EMIT-VS-DRAW CORRELATION. The daemon logs
   // `daemon.feed.thinking_emitted` when it hands a thinking row to the feed
@@ -444,23 +437,16 @@ export function drawFeedResponseProse(u: FeedResponseProse, path: string): strin
 }
 
 /**
- * The notice register's heading, drawn verbatim above the prose.
- *
- * The daemon composes it because only the daemon knows what kind of remark the
- * prose is; this end states it and adds nothing — no glyph of its own invention,
- * no re-wording, no per-notice branch.
+ * A vendor notice drawn on its own: its outcome card, headed by the notice's
+ * neutral marker, with the vendor's words verbatim as its face. The daemon
+ * composes the head; this end states it and adds nothing.
  */
-export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTMLElement {
-  log.debug("drawing a response notice heading", {
+export function drawFeedResponseNotice(u: FeedResponseNotice, words: string, rc: RowContext, path: string): HTMLElement {
+  log.debug("drawing a vendor notice as its card", {
     operation: "feed.cards.response.notice",
-    context: { path },
+    context: { path, length: words.length },
   });
-  const heading = document.createElement("div");
-  heading.className = "response-notice-heading";
-  heading.textContent = u.heading;
-  // What it says, so an in-place redraw keeps a heading that did not change.
-  heading.setAttribute(SAYS_ATTRIBUTE, u.heading);
-  return heading;
+  return drawOutcomeCard(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx }, `${path}.marker`, [words]);
 }
 
 /** The class the corner wears while its timestamp is revealed. */

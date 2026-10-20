@@ -158,7 +158,7 @@ export function drawFeedPlanFailed(u: FeedPlanFailed, rc: RowContext, path: stri
   });
   const el = document.createElement("div");
   el.className = "plan-failed";
-  el.append(drawOutcomeMarker(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx, previous: rc.previous }, `${path}.marker`));
+  el.append(drawOutcomeMarker(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx }, `${path}.marker`));
   return el;
 }
 

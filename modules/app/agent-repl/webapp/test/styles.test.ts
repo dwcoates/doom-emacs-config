@@ -5796,3 +5796,25 @@ describe("the repository's subsections and the drag", () => {
     expect(declarationsOf("#ws-sidebar .sb-subsection-popup")).toMatch(/position:\s*fixed/);
   });
 });
+
+/**
+ * THE OUTCOME CARD (styles.css; owner request, 2026-10-20): a fault marker and
+ * a vendor notice share the tool card's shell and width, framed by the
+ * response bubble's 0.3px hairline in the family's color, which the root's
+ * `.tone-*` sets as currentColor.
+ */
+describe("the outcome card", () => {
+  it("frames the card with the response's hairline in the family's color", () => {
+    expect(declarationsOf(".tool-card.outcome-card")).toMatch(/border:\s*0\.3px solid currentColor/);
+  });
+
+  it("draws the vendor's words as wrapped plain text in the foreground", () => {
+    const rule = declarationsOf(".outcome-card-said") ?? "";
+    expect([/white-space:\s*pre-wrap/.test(rule), /color:\s*var\(--fg\)/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("leaves no rule for the retired notice bubble or the fault pill's chevron", () => {
+    const selectors = rulesOf(stylesheet).flatMap((r) => r.selectors);
+    expect(selectors.filter((sel) => /response-notice|outcome-marker-chevron|ar-button\.outcome-marker-pill/.test(sel))).toEqual([]);
+  });
+});

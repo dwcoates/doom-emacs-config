@@ -258,8 +258,8 @@ describe("drawFeedTurnEnded: every error arm", () => {
 
   it.each(schemaArms)("draws %s as its outcome marker alone", (arm) => {
     const el = drawFeedTurnEnded(errored(arm), contextWithRow(null));
-    expect(el.querySelector(`.${OUTCOME_MARKER_CLASS} .outcome-marker-pill`)?.textContent).toBe(
-      `◆vendor error · ${arm}›`,
+    expect(el.querySelector(`.${OUTCOME_MARKER_CLASS} .outcome-card-head`)?.textContent).toBe(
+      `◆vendor error · ${arm}`,
     );
   });
 

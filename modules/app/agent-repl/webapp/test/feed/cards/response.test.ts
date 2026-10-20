@@ -15,6 +15,7 @@ import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
+import { OUTCOME_CARD_CLASS } from "../../../src/feed/marker.js";
 import { heatColor } from "../../../src/heat.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
@@ -1054,145 +1055,63 @@ describe("the usage corner's first-line float", () => {
   });
 });
 
-describe("the notice register", () => {
+describe("a vendor notice draws as its outcome card", () => {
   /** Every state arm: the notice is a FIELD, so it rides all of them. */
   const STATES = (
     FeedResponseSchema.oneofs.find((oneof) => oneof.name === "result")?.fields ?? []
   ).map((field) => field.localName);
 
+  /** The notice's neutral head, as the daemon composes it. */
+  const NOTICE = { marker: { label: { text: "vendor notice" }, detail: { text: "allowance exhausted" }, family: { case: "neutral" as const, value: {} } } };
+
   it("covers every state arm the schema declares", () => {
     expect([...STATES].sort()).toEqual(["error", "success", "update"].sort());
   });
 
-  it.each(STATES)("marks the bubble as a notice in the %s state", (arm) => {
+  it.each(STATES)("draws the card and no bubble in the %s state", (arm) => {
     const el = drawFeedResponse(
-      response({
-        notice: { heading: "the turn was interrupted" },
-        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
-      }),
+      response({ notice: NOTICE, result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
       rowContext(),
     );
-    expect(el.hasAttribute("data-notice")).toBe(true);
+    expect([el.classList.contains(OUTCOME_CARD_CLASS), el.classList.contains("bubble")]).toEqual([true, false]);
   });
 
-  it.each(STATES)("draws the daemon's heading verbatim in the %s state", (arm) => {
+  it.each(STATES)("draws the vendor's words verbatim as the face in the %s state", (arm) => {
     const el = drawFeedResponse(
-      response({
-        notice: { heading: "the turn was interrupted" },
-        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
-      }),
+      response({ notice: NOTICE, result: { case: arm as never, value: { prose: { markdown: "You've hit your **limit**" } } as never } }),
       rowContext(),
     );
-    expect(el.querySelector(".response-notice-heading")?.textContent).toBe(
-      "the turn was interrupted",
-    );
+    expect([...el.querySelectorAll(".outcome-card-said")].map((line) => line.textContent)).toEqual(["You've hit your **limit**"]);
   });
 
-  it.each(STATES)("draws the heading ABOVE the prose in the %s state", (arm) => {
+  it("heads the card with the daemon's marker verbatim", () => {
     const el = drawFeedResponse(
-      response({
-        notice: { heading: "a system remark" },
-        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
-      }),
+      response({ notice: NOTICE, result: { case: "success", value: { prose: { markdown: "hi" } } } }),
       rowContext(),
     );
-    // The body is no longer the bubble's own child: it hangs in the shared
-    // scroll box (owner ruling, 2026-09-14), so the prose's position among the
-    // bubble's children IS that box's position.
-    const children = [...el.children];
-    const heading = children.findIndex((c) => c.classList.contains("response-notice-heading"));
-    const body = children.findIndex((c) => c.classList.contains("bubble-box"));
-    expect(heading).toBeLessThan(body);
+    expect(el.querySelector(".outcome-card-head")?.textContent).toBe("◼vendor notice · allowance exhausted");
   });
 
-  it.each(STATES)("keeps the heading outside the body the prose rewrites (%s)", (arm) => {
+  it("draws a notice card that does not open: a notice has nothing behind it", () => {
     const el = drawFeedResponse(
-      response({
-        notice: { heading: "a system remark" },
-        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
-      }),
+      response({ notice: NOTICE, result: { case: "success", value: { prose: { markdown: "hi" } } } }),
       rowContext(),
     );
-    expect(el.querySelector(".bubble-body .response-notice-heading")).toBeNull();
+    expect([el.classList.contains("tool-fold"), el.querySelector(".outcome-marker-expansion")]).toEqual([false, null]);
   });
 
-  it.each(STATES)("keeps the notice register's own class in the %s state", (arm) => {
-    const el = drawFeedResponse(
-      response({
-        notice: { heading: "a system remark" },
-        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
-      }),
-      rowContext(),
-    );
-    expect(el.classList.contains("response-notice")).toBe(true);
+  it("refuses a notice with no marker", () => {
+    expect(() =>
+      drawFeedResponse(response({ notice: {}, result: { case: "success", value: { prose: { markdown: "hi" } } } }), rowContext()),
+    ).toThrow(MalformedView);
   });
 
-  // The arriving state is excluded here on purpose: its prose is PACED, so at
-  // draw time the body is empty (nothing revealed yet; the state's own suite
-  // covers the type-out). The next test asserts the notice leaves that pacing
-  // alone.
-  it.each(["success", "error"])("draws the prose itself in the %s state, notice or not", (arm) => {
-    const el = drawFeedResponse(
-      response({
-        notice: { heading: "a system remark" },
-        result: { case: arm as never, value: { prose: { markdown: "the words" } } as never },
-      }),
-      rowContext(),
-    );
-    expect(el.querySelector(".bubble-body")?.textContent).toContain("the words");
-  });
-
-  it("leaves the arriving state's pacing alone under a notice", () => {
-    const el = drawFeedResponse(
-      response({
-        notice: { heading: "a system remark" },
-        result: { case: "update", value: { prose: { markdown: "the words" }, revealPace: PACE } },
-      }),
-      rowContext(),
-    );
-    // The notice is drawn, and the arriving prose is still PACED (nothing
-    // revealed yet at draw time) — the notice does not disturb the type-out.
-    expect(el.classList.contains("response-notice")).toBe(true);
-    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("0");
-  });
-
-  it.each(STATES)("marks no notice on an ordinary %s response", (arm) => {
+  it.each(STATES)("draws an ordinary %s response as a bubble, no card", (arm) => {
     const el = drawFeedResponse(
       response({ result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
       rowContext(),
     );
-    expect(el.hasAttribute("data-notice")).toBe(false);
-  });
-
-  it.each(STATES)("draws no heading on an ordinary %s response", (arm) => {
-    const el = drawFeedResponse(
-      response({ result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
-      rowContext(),
-    );
-    expect(el.querySelector(".response-notice-heading")).toBeNull();
-  });
-
-  it("keeps the state's own marker beside the notice", () => {
-    const el = drawFeedResponse(
-      response({
-        notice: { heading: "cut short by a stop" },
-        result: { case: "error", value: { prose: { markdown: "hi" } } },
-      }),
-      rowContext(),
-    );
-    expect(el.classList.contains("response-cut-short")).toBe(true);
-  });
-
-  it("draws the usage stamp beside a notice heading", () => {
-    const el = drawFeedResponse(
-      response({
-        notice: { heading: "a system remark" },
-        usage: { text: "2.1k", heat: { position: 0.5 } },
-        result: { case: "success", value: { prose: { markdown: "hi" } } },
-      }),
-      rowContext(),
-    );
-    expect(el.querySelector(".bubble-box .usage-stamp")?.textContent).toBe("2.1k");
+    expect([el.classList.contains("bubble"), el.classList.contains(OUTCOME_CARD_CLASS)]).toEqual([true, false]);
   });
 });
 
@@ -2979,7 +2898,6 @@ describe("a re-push updates the bubble in place", () => {
   /** What a re-push may carry besides its prose. */
   interface Extra {
     usage?: { text: string; atMs?: bigint; heat?: { position: number } };
-    notice?: { heading: string };
   }
 
   /** An arriving response carrying MARKDOWN. */
@@ -3105,16 +3023,6 @@ describe("a re-push updates the bubble in place", () => {
     const { after } = redraw(broken, broken);
     // Assert
     expect(after.querySelectorAll(".response-cut-short-marker")).toHaveLength(1);
-  });
-
-  it("drops the notice heading when a re-push carries none", () => {
-    // Arrange + Act
-    const { after } = redraw(settledAs("hi", { notice: { heading: "interrupted" } }), settledAs("hi"));
-    // Assert
-    expect([after.querySelector(".response-notice-heading"), after.hasAttribute("data-notice")]).toEqual([
-      null,
-      false,
-    ]);
   });
 
   it("leaves the bubble untouched when a re-push is malformed", () => {

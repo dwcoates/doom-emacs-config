@@ -236,28 +236,29 @@ export const RESPONSE_STATES = ["update", "success", "error"] as const;
 export type ResponseState = (typeof RESPONSE_STATES)[number];
 
 /** The heading a vendor-synthesized notice carries; suites echo it verbatim. */
-export const RESPONSE_NOTICE_HEADING = "the turn was interrupted";
+/** The label a vendor notice's card is headed by. */
+export const RESPONSE_NOTICE_LABEL = "vendor notice";
 
 export const responseUnit = (
   state: ResponseState,
   markdown = "the answer",
   usageText = "1.2k in / 340 out",
-  /** SET = the prose is a vendor notice, drawn in the notice register. */
+  /** SET = the prose is a vendor notice, headed by this label. */
   notice?: string,
 ): ActivityUnit => ({
   case: "response",
   value: {
     usage: { text: usageText, heat: { position: 0.5 } },
     result: { case: state, value: { prose: { markdown } } },
-    notice: notice === undefined ? undefined : { heading: notice },
+    notice: notice === undefined ? undefined : { marker: { label: { text: notice }, family: { case: "neutral", value: {} } } },
   },
 });
 
-/** A response bubble in the NOTICE register: vendor-synthesized, not the agent's. */
+/** A vendor notice: vendor-synthesized, not the agent's, drawn as its card. */
 export const responseNoticeUnit = (
   state: ResponseState = "success",
-  heading = RESPONSE_NOTICE_HEADING,
-): ActivityUnit => responseUnit(state, "the vendor's remark", undefined, heading);
+  label = RESPONSE_NOTICE_LABEL,
+): ActivityUnit => responseUnit(state, "the vendor's remark", undefined, label);
 
 export const responseRow = (
   state: ResponseState,
