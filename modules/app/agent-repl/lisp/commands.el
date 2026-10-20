@@ -1291,42 +1291,58 @@ CURRENT has no tab or nothing is drawn."
             (setq remaining (1- remaining))))
         (and (zerop remaining) (nth at all))))))
 
-(defun agent-repl--workspace-cycle (n)
-  "Switch N places from the current workspace along the DRAWN tab order.
-Wraps at both ends, so `s-{' and `s-}' match the bar in both directions.
+(defun agent-repl--step-workspace (n ring-fn op trigger)
+  "Request the DRAWN tab N steps from the current workspace along a ring.
+RING-FN is called with the workspace the step starts from and answers
+every tab in the ring's order (`agent-repl--cycle-target''s ALL); the drawn
+tabs are the ones the step may land on.  OP names the gesture's records
+\(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
+switch request's (`agent-repl-host-request-switch').
 
 THE STEP STARTS FROM THE MOST RECENT REQUEST while one is unanswered
 \(`agent-repl-host-pending-selection'), not from the tab shown: the frame
-moves only when the roster says so, and `s-}' pressed twice before it does
-must land two tabs over, not one.  The target is REQUESTED, never switched
-to here (`agent-repl-host-request-switch').
+moves only when the roster says so, and a key pressed twice before it does
+must land two steps over, not one.  The target is REQUESTED, never
+switched to here.
 
-A bar with no tabs, and a current workspace that is not ON the bar (a
-pseudo perspective, or a workspace whose tab the roster has torn down),
-are LOGGED NO-OPS: there is no slot to count from, and inventing one would
+A bar with no tabs, and a start that is not in the ring (a pseudo
+perspective, or a workspace whose tab the roster has torn down), are
+LOGGED NO-OPS: there is no slot to count from, and inventing one would
 land the user somewhere the picture never offered.
 
-THE RECORD IS `info', NOT `debug'.  A cycle is an action a PERSON took, and
+THE RECORD IS `info', NOT `debug'.  A step is an action a PERSON took, and
 the durable threshold is `info' by default, so on the debug rung every switch
 the user made left nothing on disk: realtest 4 drove four real chords, every
 one switched correctly, and not one could be read back afterwards.  A routine
 action is never promoted to `warn' to make it easier to find -- the realtest
 harvest fails a run on every warning."
   (let* ((names (agent-repl--drawn-tab-names))
-         (all (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order)))
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
+         (all (funcall ring-fn current))
          ;; Standing on a placeholder (a startup before its first tab
          ;; opened) names no workspace sink: the record takes an explicit one.
          (log-ws (or (agent-repl--ws-log-name shown)
-                     '(:agent-repl-context "a cycle from a placeholder names no workspace")))
+                     (list :agent-repl-context
+                           (format "a %s from a placeholder names no workspace" op))))
          (target (agent-repl--cycle-target all names current n)))
     (if (null target)
-        (agent-repl--info log-ws "elisp.commands.cycle-no-position n=%d tabs=%d from=%s"
+        (agent-repl--info log-ws (format "elisp.commands.%s-no-position n=%%d tabs=%%d from=%%s" op)
                           n (length names) current)
-      (agent-repl--info log-ws "elisp.commands.cycle n=%d from=%s target=%s"
+      (agent-repl--info log-ws (format "elisp.commands.%s n=%%d from=%%s target=%%s" op)
                         n current target)
-      (agent-repl-host-request-switch target 'cycle))))
+      (agent-repl-host-request-switch target trigger))))
+
+(defun agent-repl--workspace-cycle (n)
+  "Switch N places from the current workspace along the DRAWN tab order.
+Wraps at both ends, so `s-{' and `s-}' match the bar in both directions.
+The ring is the roster's whole tab order, hidden tabs included, so a
+current workspace whose repository is collapsed still steps to its drawn
+neighbours (`agent-repl--step-workspace')."
+  (agent-repl--step-workspace
+   n (lambda (_current)
+       (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order)))
+   "cycle" 'cycle))
 
 (defun agent-repl-switch-left ()
   "Switch to the tab LEFT of the current one on the tab bar, wrapping."

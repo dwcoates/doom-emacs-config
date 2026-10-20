@@ -964,6 +964,79 @@ highlighted. The drawn order cannot carry either name."
     (agent-repl-switch-right)
     (should-not agent-repl-test-commands--switched)))
 
+;;;; ---- The one step helper every adjacent-tab gesture shares ----
+
+(defmacro agent-repl-test-commands--with-step (drawn shown pending &rest body)
+  "Run BODY with DRAWN tabs, SHOWN on screen and PENDING requested.
+Binds `requests' to the (WS TRIGGER) pairs requested and `records' to the
+formatted `info' records, newest first."
+  (declare (indent 3))
+  `(let ((requests nil) (records nil))
+     (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () ,drawn))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+               ((symbol-function 'agent-repl-host-pending-selection) (lambda () ,pending))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (push (list ws trigger) requests) t))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) records))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-step-hands-the-ring-the-pending-start ()
+  "The ring is built from the pending request, not the tab shown."
+  ;; Arrange
+  (let ((seen nil))
+    (agent-repl-test-commands--with-step '("a" "b" "c") "a" "b"
+      ;; Act
+      (agent-repl--step-workspace 1 (lambda (from) (setq seen from) '("a" "b" "c"))
+                                  "probe" 'probe)
+      ;; Assert
+      (should (equal seen "b"))
+      (should (equal requests '(("c" probe)))))))
+
+(ert-deftest agent-repl-test-commands-step-records-under-its-op ()
+  "A landing records `elisp.commands.OP' with the step, start and target."
+  (agent-repl-test-commands--with-step '("a" "b") "a" nil
+    ;; Act
+    (agent-repl--step-workspace 1 (lambda (_) '("a" "b")) "probe" 'probe)
+    ;; Assert
+    (should (member "elisp.commands.probe n=1 from=a target=b" records))))
+
+(ert-deftest agent-repl-test-commands-step-off-the-ring-is-a-logged-no-op ()
+  "A start the ring does not hold requests nothing and records its op's no-position."
+  (agent-repl-test-commands--with-step '("a" "b") "elsewhere" nil
+    ;; Act
+    (agent-repl--step-workspace -1 (lambda (_) '("a" "b")) "probe" 'probe)
+    ;; Assert
+    (should-not requests)
+    (should (member "elisp.commands.probe-no-position n=-1 tabs=2 from=elsewhere" records))))
+
+(ert-deftest agent-repl-test-commands-step-from-a-placeholder-names-its-op-scope ()
+  "A step from a placeholder records under a scope naming its gesture."
+  ;; Arrange
+  (let ((scopes nil))
+    (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+              ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (_) nil))
+              ((symbol-function 'agent-repl--info) (lambda (scope &rest _) (push scope scopes))))
+      ;; Act
+      (agent-repl--step-workspace 1 (lambda (_) nil) "probe" 'probe)
+      ;; Assert
+      (should (equal scopes '((:agent-repl-context "a probe from a placeholder names no workspace")))))))
+
+(ert-deftest agent-repl-test-commands-cycle-steps-through-the-shared-helper ()
+  "`s-{' / `s-}' go through `agent-repl--step-workspace', never a hand-rolled walk."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--step-workspace)
+               (lambda (n _ring op trigger) (push (list n op trigger) calls))))
+      ;; Act
+      (agent-repl-switch-left)
+      (agent-repl-switch-right)
+      ;; Assert
+      (should (equal calls '((1 "cycle" cycle) (-1 "cycle" cycle)))))))
+
 ;;;; ---- A switch is a REQUEST; the roster moves the frame ----
 
 (ert-deftest agent-repl-test-commands-cycle-steps-from-the-pending-request ()
