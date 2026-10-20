@@ -40,6 +40,10 @@ enum ReportedLatencyKind {
   // A page's boot, from the page starting to its feed first painted.
   // Measured by the webapp alone.
   REPORTED_LATENCY_KIND_PAGE_BOOT = 3;
+  // A prompt's echo, from the person submitting it to its row drawn on the
+  // page. Measured by the webapp from the submit instant the daemon hands it
+  // (WatchWebWorkspaceResponse.prompt_echo), on the host's wall clock.
+  REPORTED_LATENCY_KIND_PROMPT_ECHO = 4;
 }
 
 // One finished interaction.

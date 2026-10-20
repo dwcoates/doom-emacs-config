@@ -589,7 +589,7 @@ gate is the point, so it is exercised here rather than bypassed."
   "A plain bounce's announced outage is WAITED OUT, not polled through."
   (agent-repl-test-link--with-harness
     ;; Arrange
-    (setq agent-repl-link--quiet-until-ms (+ (agent-repl-link--now-ms) 60000)
+    (setq agent-repl-link--quiet-until-ms (+ (agent-repl--now-unix-ms) 60000)
           agent-repl-test-link--address "127.0.0.1:9002"
           agent-repl-test-link--addr-reads 0)
     ;; Act
@@ -601,7 +601,7 @@ gate is the point, so it is exercised here rather than bypassed."
   "An elapsed quiet window releases the poll."
   (agent-repl-test-link--with-harness
     ;; Arrange
-    (setq agent-repl-link--quiet-until-ms (- (agent-repl-link--now-ms) 1)
+    (setq agent-repl-link--quiet-until-ms (- (agent-repl--now-unix-ms) 1)
           agent-repl-test-link--address "127.0.0.1:9002")
     ;; Act
     (agent-repl-link--reconnect-tick)
@@ -983,7 +983,7 @@ gate is the point, so it is exercised here rather than bypassed."
        conn (list :arm :shutdown-announced
                   :value (agent-repl-test-link--announcement
                           :cause (list :arm :self-merge-rollout :value nil)
-                          :minted-at-ms (agent-repl-link--now-ms)
+                          :minted-at-ms (agent-repl--now-unix-ms)
                           :expected-outage-ms 60000)))
       ;; Assert
       (should (equal agent-repl-link-drain-segment
@@ -1003,7 +1003,7 @@ the user is owed (audit finding 11)."
                           :cause (list :arm :scheduled-drain
                                        :value (list :reason (list :arm :deploy
                                                                   :value nil)))
-                          :minted-at-ms (agent-repl-link--now-ms)
+                          :minted-at-ms (agent-repl--now-unix-ms)
                           :expected-outage-ms 60000)))
       ;; Assert
       (should (equal agent-repl-link-drain-segment
@@ -1021,7 +1021,7 @@ the user is owed (audit finding 11)."
                           :cause (list :arm :immediate
                                        :value (list :reason (list :arm :maintenance
                                                                   :value nil)))
-                          :minted-at-ms (agent-repl-link--now-ms)
+                          :minted-at-ms (agent-repl--now-unix-ms)
                           :expected-outage-ms 60000)))
       ;; Assert
       (should (equal agent-repl-link-drain-segment
@@ -1042,7 +1042,7 @@ text an operator-caused bounce can be described by."
                                        :value (list :reason
                                                     (list :arm :operator
                                                           :value (list :note "cable work"))))
-                          :minted-at-ms (agent-repl-link--now-ms)
+                          :minted-at-ms (agent-repl--now-unix-ms)
                           :expected-outage-ms 60000)))
       ;; Assert
       (should (equal agent-repl-link-drain-segment
@@ -1059,7 +1059,7 @@ as if it were understood."
        conn (list :arm :shutdown-announced
                   :value (agent-repl-test-link--announcement
                           :cause (list :arm :no-such-arm :value nil)
-                          :minted-at-ms (agent-repl-link--now-ms)
+                          :minted-at-ms (agent-repl--now-unix-ms)
                           :expected-outage-ms 60000)))
       ;; Assert
       (should (equal agent-repl-link-drain-segment "daemon restarting (unknown)")))))

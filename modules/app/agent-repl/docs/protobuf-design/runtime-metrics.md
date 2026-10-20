@@ -126,7 +126,7 @@ owner's delegation.
     kernel network-statistics sockets
     (`docs/protobuf-design/drop-vendor-traffic.md`).
 
-### 3. Prompt echo is not reported yet
+### 3. Prompt echo is not reported yet (superseded by entry 8)
 
 - What: `prompt_echo` (Emacs submit to the webapp drawing the prompt) has no
   kind in either enum.
@@ -211,3 +211,33 @@ owner's delegation.
 - Consequences: the daemon's `ShimKinds` table gains the kind (its vocabulary
   test pins the buckets), and the daemon exposes `agentrepl_shim_heap_bytes`
   by workspace and kind (`used`, `total`, `external`).
+
+### 8. Prompt echo rides the web stream as an event, keyed by turn
+
+- What:
+  - `agentrepl.v1.SubmitPromptRequest` gains `optional int64
+    submitted_at_unix_ms`, which Emacs sets on a person's send and leaves
+    unset on a retry.
+  - `agentrepl.v1.WatchWebWorkspaceResponse` gains the push arm
+    `prompt_echo = 4`, carrying `agentrepl.v1.WebWorkspacePromptEcho` (the
+    minted `conversation.v1.TurnId` and the submit instant).
+  - `agentrepl.v1.ReportedLatencyKind` gains `PROMPT_ECHO`, and
+    `prompt_echo` in `proto/vocab/latencies.json` is now `measured_by:
+    webapp` with navigation buckets.
+- Why an event and not an element on the feed row (entry 3's proposal): the
+  accepted prompt's row is upserted into feed state and replayed to every
+  page that opens later, so a stamp on the row would be timed again by a
+  reload against a stale instant. The echo is an event on `publish.Events`,
+  never replayed: a page that did not see the prompt land times nothing.
+- Why keyed by turn and not by row id: the row's id is minted by the feed
+  resolver from the turn's placement, while every user-prompt row already
+  carries `frontend.v1.FeedRow.turn`. The daemon answers the turn it minted,
+  and the page matches it against the row without a second identity.
+- Why only a prompt drawn at submit: a delivered prompt and one folded into
+  the running turn are drawn by the acceptance mirror before `SubmitPrompt`
+  answers; a held prompt draws when it is delivered later, so its time to
+  draw is the hold, not the echo.
+- The page pairs the push and its row's first draw in either order, because
+  they travel different streams; both waits are bounded.
+- Decided under the owner's delegation; additive, so no consumer breaks.
+

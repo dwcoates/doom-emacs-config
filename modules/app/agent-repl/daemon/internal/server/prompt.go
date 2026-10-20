@@ -107,6 +107,11 @@ func (s *server) SubmitPrompt(
 		return nil, fail(subject.Log, rpc, err)
 	}
 	cerr := s.encodeSubmitOutcome(subject.Log, resp, outcome)
+	// A SEND THE PERSON MADE IS TIMED TO ITS ECHO by the page (webecho.go),
+	// once its row is drawn.
+	if echo, ok := promptEchoOf(req.Msg, outcome); ok && cerr == nil && resp.GetError() == nil {
+		s.pushPromptEcho(subject.Log, subject.Record.ID, echo)
+	}
 	// AN ACCEPTED PROMPT ENDS THE SELECTION it was sent with, a reply target
 	// or a prompt alike (a genuine success — a minted turn, a hold, a command
 	// answer — never a refusal arm or a transport error), and the webapp

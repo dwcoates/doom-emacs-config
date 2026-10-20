@@ -1,6 +1,9 @@
 package server
 
 import (
+	"time"
+
+	"agent-repld/internal/runtimemetrics"
 	"context"
 	"errors"
 	"fmt"
@@ -440,6 +443,7 @@ func (s *server) OpenWorkspace(
 	req *connect.Request[agentreplv1.OpenWorkspaceRequest],
 ) (*connect.Response[agentreplv1.OpenWorkspaceResponse], error) {
 	const rpc = "OpenWorkspace"
+	began := time.Now()
 	resp := &agentreplv1.OpenWorkspaceResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
@@ -462,6 +466,9 @@ func (s *server) OpenWorkspace(
 	if err := open(ctx, subject.Record.ID, progress); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// THE OPEN IS TIMED TO ITS SESSION BEING UP, which is when the verb
+	// returns: the live workspace_open latency.
+	s.deps.Latencies.ObserveLatency(subject.Record.ID, runtimemetrics.WorkspaceOpen, time.Since(began).Seconds())
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
 	s.PublishHostWorkspace(ctx, subject.Record.ID)

@@ -29,11 +29,11 @@
       "description": "prompt echo (submit to the prompt drawn)",
       "start": "Emacs submits a prompt (elisp.input.submit)",
       "end": "the webapp draws the user prompt (feed.draw-user-prompt)",
-      "measured_by": "profile",
+      "measured_by": "webapp",
       "threshold_ms": 100,
       "reason": "a keystroke's echo; anything past ~100ms reads as lag",
-      "reported_as": null,
-      "buckets_seconds": null
+      "reported_as": "REPORTED_LATENCY_KIND_PROMPT_ECHO",
+      "buckets_seconds": [0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5]
     },
     {
       "name": "switch_repeat",
@@ -71,13 +71,13 @@
     {
       "name": "workspace_open",
       "description": "workspace open (tab opened to session up)",
-      "start": "Emacs opens the tab (elisp.roster.tab-open)",
-      "end": "the daemon's session is up (daemon.workspace.bring_up)",
-      "measured_by": "profile",
+      "start": "Emacs opens the tab (elisp.roster.tab-open); live, the daemon receives its OpenWorkspace",
+      "end": "the daemon's session is up (daemon.workspace.bring_up); live, OpenWorkspace answers success",
+      "measured_by": "daemon",
       "threshold_ms": 300,
       "reason": "the workspace is visible but not usable meanwhile",
-      "reported_as": null,
-      "buckets_seconds": null
+      "reported_as": "DAEMON_WORKSPACE_OPEN",
+      "buckets_seconds": [0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 13, 30]
     },
     {
       "name": "prompt_first_output",

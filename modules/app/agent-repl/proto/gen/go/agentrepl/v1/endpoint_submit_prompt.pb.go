@@ -122,9 +122,18 @@ type SubmitPromptRequest struct {
 	// one other delivery the daemon honors (SubmitPromptDelivery). Additive and
 	// mutually compatible with every existing field. Set to UNSPECIFIED, the
 	// request is refused as InvalidArgument.
-	Delivery      *SubmitPromptDelivery `protobuf:"varint,7,opt,name=delivery,proto3,enum=agentrepl.v1.SubmitPromptDelivery,oneof" json:"delivery,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Delivery *SubmitPromptDelivery `protobuf:"varint,7,opt,name=delivery,proto3,enum=agentrepl.v1.SubmitPromptDelivery,oneof" json:"delivery,omitempty"`
+	// OPTIONAL: when the person submitted this prompt, in the host's wall-clock
+	// Unix milliseconds. Set by the editor on a send the person made, ABSENT on
+	// a retry or a re-drive (the wait before it is not the prompt's echo). Set,
+	// the daemon hands it back to the workspace's page as a prompt echo
+	// (WatchWebWorkspaceResponse.prompt_echo) once the prompt's row is drawn at
+	// submit, so the page that draws the row measures the echo
+	// (ReportedLatencyKind PROMPT_ECHO). It is metrics only: it never changes how
+	// the prompt is handled. Not positive is InvalidArgument.
+	SubmittedAtUnixMs *int64 `protobuf:"varint,8,opt,name=submitted_at_unix_ms,json=submittedAtUnixMs,proto3,oneof" json:"submitted_at_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SubmitPromptRequest) Reset() {
@@ -197,6 +206,13 @@ func (x *SubmitPromptRequest) GetDelivery() SubmitPromptDelivery {
 		return *x.Delivery
 	}
 	return SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED
+}
+
+func (x *SubmitPromptRequest) GetSubmittedAtUnixMs() int64 {
+	if x != nil && x.SubmittedAtUnixMs != nil {
+		return *x.SubmittedAtUnixMs
+	}
+	return 0
 }
 
 // THE ARM IS THE OUTCOME.
@@ -1785,16 +1801,18 @@ var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\x88\x03\n" +
+	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\xd7\x03\n" +
 	"\x13SubmitPromptRequest\x128\n" +
 	"\tworkspace\x18\x05 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12-\n" +
 	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12,\n" +
 	"\x04feed\x18\x03 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01\x125\n" +
 	"\x06origin\x18\x04 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\x12C\n" +
-	"\bdelivery\x18\a \x01(\x0e2\".agentrepl.v1.SubmitPromptDeliveryH\x01R\bdelivery\x88\x01\x01B\a\n" +
+	"\bdelivery\x18\a \x01(\x0e2\".agentrepl.v1.SubmitPromptDeliveryH\x01R\bdelivery\x88\x01\x01\x124\n" +
+	"\x14submitted_at_unix_ms\x18\b \x01(\x03H\x02R\x11submittedAtUnixMs\x88\x01\x01B\a\n" +
 	"\x05_feedB\v\n" +
-	"\t_deliveryJ\x04\b\x06\x10\aR\x19reference_response_feedid\"\x98\x01\n" +
+	"\t_deliveryB\x17\n" +
+	"\x15_submitted_at_unix_msJ\x04\b\x06\x10\aR\x19reference_response_feedid\"\x98\x01\n" +
 	"\x14SubmitPromptResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.SubmitPromptSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\x05errorB\b\n" +

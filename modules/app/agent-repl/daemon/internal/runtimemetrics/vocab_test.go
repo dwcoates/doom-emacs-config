@@ -15,7 +15,7 @@ type vocabLatency struct {
 	Buckets    []float64 `json:"buckets_seconds"`
 }
 
-// TestTheKindTablesMatchTheVocabulary pins the daemon's two kind tables to
+// TestTheKindTablesMatchTheVocabulary pins the daemon's kind tables to
 // proto/vocab/latencies.json: every live-reported entry is in exactly one
 // table under its wire name, with the vocabulary's name and buckets, and the
 // tables hold nothing the vocabulary does not.
@@ -37,6 +37,9 @@ func TestTheKindTablesMatchTheVocabulary(t *testing.T) {
 	}
 	for k, v := range ShimKinds {
 		tables[k.String()] = v
+	}
+	for k, v := range DaemonKinds {
+		tables[k] = v
 	}
 
 	// Act / Assert

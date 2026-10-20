@@ -44,6 +44,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (defvar agent-repl--color-merging-purple)
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -1076,7 +1077,7 @@ daemon-minted and there is no spelling of it Emacs could construct."
     (let* ((choice (completing-read (if all "Switch to any workspace: "
                                       "Switch to workspace: ")
                                     (agent-repl--switch-table
-                                     candidates (truncate (* 1000 (float-time))))
+                                     candidates (agent-repl--now-unix-ms))
                                     nil t))
            (entry (cdr (assoc choice candidates)))
            (ws (plist-get entry :ws))

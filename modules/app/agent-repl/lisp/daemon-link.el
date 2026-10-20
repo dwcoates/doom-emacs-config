@@ -56,6 +56,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-persistent-wifi-handle "persistent-wifi" (state))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
@@ -322,12 +323,6 @@ connection is closed is never answered."
   (let ((primary agent-repl-link--primary))
     (and primary (agent-repl-connect-connection-alive-p primary) primary)))
 
-(defun agent-repl-link--now-ms ()
-  "Return the current instant as epoch milliseconds.
-The wire carries instants, never durations-since-now, so every comparison
-in this file is against this one clock reading."
-  (truncate (* 1000 (float-time))))
-
 ;;;; ---- Connecting ----
 
 (defun agent-repl-link--open (address on-open)
@@ -484,7 +479,7 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
 (defun agent-repl-link--quiet-p ()
   "Return non-nil while the announced plain-bounce outage has not elapsed."
   (and agent-repl-link--quiet-until-ms
-       (< (agent-repl-link--now-ms) agent-repl-link--quiet-until-ms)))
+       (< (agent-repl--now-unix-ms) agent-repl-link--quiet-until-ms)))
 
 (defun agent-repl-link--reconnect-tick ()
   "One poll of the reconnect loop: the timer's whole body.
@@ -502,7 +497,7 @@ dependence on the scheduler and no sleep anywhere."
     (agent-repl-link--schedule-reconnect))
    ((agent-repl-link--quiet-p)
     (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-quiet until=%S now=%S"
-                     agent-repl-link--quiet-until-ms (agent-repl-link--now-ms))
+                     agent-repl-link--quiet-until-ms (agent-repl--now-unix-ms))
     (agent-repl-link--schedule-reconnect))
    (t
     (let ((address (condition-case err

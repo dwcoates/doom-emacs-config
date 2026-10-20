@@ -65,6 +65,7 @@
 (declare-function agent-repl--frontend-webview-buffer-name "frontend" (ws))
 (declare-function evil-normal-state "evil-states" (&optional arg))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -1994,7 +1995,11 @@ value Emacs constructs from a path."
         ;; selection to the prompt and ends it, pushing the result.
         (append (list :said said :idempotency-key key
                       :origin origin :workspace ref)
-                (when delivery (list :delivery delivery)))
+                (when delivery (list :delivery delivery))
+                ;; THE PERSON'S SEND IS TIMED TO ITS ECHO on the page
+                ;; (webapp/src/prompt-echo.ts); a retry's wait is not.
+                (when first-attempt
+                  (list :submitted-at-unix-ms (agent-repl--now-unix-ms))))
         :on-response
         (lambda (response)
           (agent-repl--with-log-context

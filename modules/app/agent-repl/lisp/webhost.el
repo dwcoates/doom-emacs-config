@@ -40,6 +40,7 @@
 (require 'cl-lib)
 (require 'json)
 
+(declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
@@ -344,7 +345,7 @@ its conversation drawn on a first show (webapp/src/switch-latency.ts), and
 reports it to the daemon\='s metrics.  The instant is the host\='s wall
 clock in Unix milliseconds, the clock the page reads too."
   (setq agent-repl--webhost-switch-started
-        (cons ws (truncate (* 1000 (float-time))))))
+        (cons ws (agent-repl--now-unix-ms))))
 
 (defun agent-repl--webhost-take-switch-start (ws)
   "The noted switch start for WS in Unix milliseconds, or nil; always cleared."
@@ -508,7 +509,7 @@ once."
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d"
                         (length (car lanes)) (length (cdr lanes)))))
   (when (and agent-repl--webhost-log-level
-             (> (cdr agent-repl--webhost-log-level) (* 1000 (float-time))))
+             (> (cdr agent-repl--webhost-log-level) (agent-repl--now-unix-ms)))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
                               (cdr agent-repl--webhost-log-level))))
 

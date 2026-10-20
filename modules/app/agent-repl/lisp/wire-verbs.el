@@ -2643,7 +2643,9 @@ unknown keyword is refused before anything is built."
 REQUEST is (:workspace REF :said SAID :idempotency-key STRING :origin
 KEYWORD) plus the OPTIONAL :delivery KEYWORD
 \(`agent-repl-wire-submit-prompt-deliveries'; absent is the ordinary
-delivery, so it is appended only when set).  The first
+delivery, so it is appended only when set) and the OPTIONAL
+:submitted-at-unix-ms INTEGER, the instant the person submitted, which the
+page times the prompt's echo from (absent on a retry).  The first
 four are required: the workspace names WHICH workspace the submission
 belongs to and is echoed verbatim like every other per-workspace request
 (it is required even though `feed' is not, because the root feed has no id
@@ -2656,7 +2658,8 @@ absent field IS that fact.
 No reply target rides the request: the daemon holds the feed's selection
 (SelectFeedRow) and applies its own when the prompt is sent."
   (let ((message "SubmitPromptRequest")
-        (delivery (plist-get request :delivery)))
+        (delivery (plist-get request :delivery))
+        (submitted-at (plist-get request :submitted-at-unix-ms)))
     (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-submit-prompt-request origin=%s delivery=%S"
                       (plist-get request :origin) delivery)
     (append
@@ -2675,7 +2678,11 @@ No reply target rides the request: the daemon holds the feed's selection
                                                            (plist-get request :origin)))))
      ;; OPTIONAL field: its absence is the ordinary delivery.
      (when delivery
-       (list (cons 'delivery (agent-repl-wire-encode-submit-prompt-delivery delivery)))))))
+       (list (cons 'delivery (agent-repl-wire-encode-submit-prompt-delivery delivery))))
+     ;; OPTIONAL field: absent on a retry, whose wait is not the echo.
+     (when submitted-at
+       (list (cons 'submittedAtUnixMs
+                   (agent-repl-wire-verbs--encode-int64 message "submitted_at_unix_ms" submitted-at)))))))
 
 
 ;;;; ---- SubmitPrompt: decode -------------------------------------------

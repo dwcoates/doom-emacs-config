@@ -50,6 +50,17 @@ var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_REPEAT: {Name: "switch_repeat", Buckets: navigationBuckets},
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:  {Name: "switch_first", Buckets: navigationBuckets},
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:     {Name: "page_boot", Buckets: pageBootBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:   {Name: "prompt_echo", Buckets: navigationBuckets},
+}
+
+// WorkspaceOpen is the daemon-measured latency from an OpenWorkspace's
+// arrival to its success, when the workspace's session is up.
+var WorkspaceOpen = LatencyKind{Name: "workspace_open", Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 13, 30}}
+
+// DaemonKinds are the latencies the daemon measures itself, keyed by the
+// vocabulary's reported_as spelling.
+var DaemonKinds = map[string]LatencyKind{
+	"DAEMON_WORKSPACE_OPEN": WorkspaceOpen,
 }
 
 // ShimKinds are the latencies the shim measures.

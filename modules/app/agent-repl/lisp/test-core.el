@@ -7130,3 +7130,24 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   ;; Arrange, Act, Assert.
   (should (equal (agent-repl-format-age 5000 1000) "0s ago")))
 
+
+;;;; ---- The wall clock in Unix milliseconds ----
+
+(ert-deftest agent-repl-test-core-now-unix-ms-reads-the-wall-clock-in-milliseconds ()
+  "The instant is the wall clock's seconds times 1000, truncated to an integer."
+  (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1700000000.1239)))
+    (should (equal (agent-repl--now-unix-ms) 1700000000123))))
+
+(ert-deftest agent-repl-test-core-every-unix-ms-instant-reads-the-one-helper ()
+  "No source but core.el converts the wall clock to milliseconds by hand.
+Every instant Emacs stamps or compares in Unix milliseconds goes through
+`agent-repl--now-unix-ms', so none can drift from the clock the daemon and
+the page read."
+  (let (offenders)
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (unless (equal (file-name-nondirectory file) "core.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward "(\\* 1000 (float-time))" nil t)
+            (push (file-name-nondirectory file) offenders)))))
+    (should-not offenders)))

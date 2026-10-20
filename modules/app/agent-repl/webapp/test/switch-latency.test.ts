@@ -135,7 +135,7 @@ describe("watchSwitchLatency", () => {
 
     // Assert
     expect(recorded).toEqual([]);
-    const record = await forwardedRecord(capture, "latency.switch-clock-stepped");
+    const record = await forwardedRecord(capture, "latency.clock-stepped");
     expect(record.level.case).toBe("warn");
   });
 });

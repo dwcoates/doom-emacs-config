@@ -185,6 +185,9 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 	if _, err := prompthandler.DeliveryOf(req.Delivery); err != nil {
 		return invalid("delivery", err.Error())
 	}
+	if req.SubmittedAtUnixMs != nil && req.GetSubmittedAtUnixMs() <= 0 {
+		return invalid("submitted_at_unix_ms", "a submit instant must be positive Unix milliseconds")
+	}
 	return nil
 }
 

@@ -59,6 +59,10 @@ const (
 	// A page's boot, from the page starting to its feed first painted.
 	// Measured by the webapp alone.
 	ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT ReportedLatencyKind = 3
+	// A prompt's echo, from the person submitting it to its row drawn on the
+	// page. Measured by the webapp from the submit instant the daemon hands it
+	// (WatchWebWorkspaceResponse.prompt_echo), on the host's wall clock.
+	ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO ReportedLatencyKind = 4
 )
 
 // Enum value maps for ReportedLatencyKind.
@@ -68,12 +72,14 @@ var (
 		1: "REPORTED_LATENCY_KIND_SWITCH_REPEAT",
 		2: "REPORTED_LATENCY_KIND_SWITCH_FIRST",
 		3: "REPORTED_LATENCY_KIND_PAGE_BOOT",
+		4: "REPORTED_LATENCY_KIND_PROMPT_ECHO",
 	}
 	ReportedLatencyKind_value = map[string]int32{
 		"REPORTED_LATENCY_KIND_UNSPECIFIED":   0,
 		"REPORTED_LATENCY_KIND_SWITCH_REPEAT": 1,
 		"REPORTED_LATENCY_KIND_SWITCH_FIRST":  2,
 		"REPORTED_LATENCY_KIND_PAGE_BOOT":     3,
+		"REPORTED_LATENCY_KIND_PROMPT_ECHO":   4,
 	}
 )
 
@@ -721,12 +727,13 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	"#ReportLatenciesWorkspaceRefMismatch\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12!\n" +
 	"\freported_dir\x18\x02 \x01(\tR\vreportedDir\x12!\n" +
-	"\fregistry_dir\x18\x03 \x01(\tR\vregistryDir*\xb2\x01\n" +
+	"\fregistry_dir\x18\x03 \x01(\tR\vregistryDir*\xd9\x01\n" +
 	"\x13ReportedLatencyKind\x12%\n" +
 	"!REPORTED_LATENCY_KIND_UNSPECIFIED\x10\x00\x12'\n" +
 	"#REPORTED_LATENCY_KIND_SWITCH_REPEAT\x10\x01\x12&\n" +
 	"\"REPORTED_LATENCY_KIND_SWITCH_FIRST\x10\x02\x12#\n" +
-	"\x1fREPORTED_LATENCY_KIND_PAGE_BOOT\x10\x03B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fREPORTED_LATENCY_KIND_PAGE_BOOT\x10\x03\x12%\n" +
+	"!REPORTED_LATENCY_KIND_PROMPT_ECHO\x10\x04B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_report_latencies_proto_rawDescOnce sync.Once

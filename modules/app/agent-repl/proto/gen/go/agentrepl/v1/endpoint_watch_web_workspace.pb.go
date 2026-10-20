@@ -20,6 +20,7 @@
 package agentreplv1
 
 import (
+	v12 "agentrepl/proto/conversation/v1"
 	v11 "agentrepl/proto/frontend/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -104,6 +105,7 @@ type WatchWebWorkspaceResponse struct {
 	//	*WatchWebWorkspaceResponse_Transferred
 	//	*WatchWebWorkspaceResponse_SessionIdentity
 	//	*WatchWebWorkspaceResponse_RevealRow
+	//	*WatchWebWorkspaceResponse_PromptEcho
 	Push          isWatchWebWorkspaceResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -173,6 +175,15 @@ func (x *WatchWebWorkspaceResponse) GetRevealRow() *WebWorkspaceRevealRow {
 	return nil
 }
 
+func (x *WatchWebWorkspaceResponse) GetPromptEcho() *WebWorkspacePromptEcho {
+	if x != nil {
+		if x, ok := x.Push.(*WatchWebWorkspaceResponse_PromptEcho); ok {
+			return x.PromptEcho
+		}
+	}
+	return nil
+}
+
 type isWatchWebWorkspaceResponse_Push interface {
 	isWatchWebWorkspaceResponse_Push()
 }
@@ -214,11 +225,26 @@ type WatchWebWorkspaceResponse_RevealRow struct {
 	RevealRow *WebWorkspaceRevealRow `protobuf:"bytes,3,opt,name=reveal_row,json=revealRow,proto3,oneof"`
 }
 
+type WatchWebWorkspaceResponse_PromptEcho struct {
+	// A PROMPT'S ECHO TO TIME: a SubmitPrompt that carried its submit instant
+	// (`submitted_at_unix_ms`) was accepted and its prompt row drawn at once
+	// (delivered, or folded into the running turn; a held prompt draws later
+	// and is not timed). The page times the echo from that instant to its
+	// first draw of the user-prompt row stamped with the turn, whichever of
+	// the push and the row arrives first, and reports it as PROMPT_ECHO.
+	//
+	// AN EVENT, NEVER REPLAYED: a page that attaches later did not see the
+	// echo happen, so it times nothing.
+	PromptEcho *WebWorkspacePromptEcho `protobuf:"bytes,4,opt,name=prompt_echo,json=promptEcho,proto3,oneof"`
+}
+
 func (*WatchWebWorkspaceResponse_Transferred) isWatchWebWorkspaceResponse_Push() {}
 
 func (*WatchWebWorkspaceResponse_SessionIdentity) isWatchWebWorkspaceResponse_Push() {}
 
 func (*WatchWebWorkspaceResponse_RevealRow) isWatchWebWorkspaceResponse_Push() {}
+
+func (*WatchWebWorkspaceResponse_PromptEcho) isWatchWebWorkspaceResponse_Push() {}
 
 // The row a selection asked this workspace's page to reveal.
 type WebWorkspaceRevealRow struct {
@@ -265,6 +291,62 @@ func (x *WebWorkspaceRevealRow) GetRow() *v11.FeedId {
 	return nil
 }
 
+// A submitted prompt whose row was drawn at submit, and when it was submitted.
+type WebWorkspacePromptEcho struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The turn the prompt minted: the `FeedRow.turn` its user-prompt row is
+	// stamped with.
+	Turn *v12.TurnId `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
+	// The submit instant, verbatim from SubmitPromptRequest.submitted_at_unix_ms.
+	SubmittedAtUnixMs int64 `protobuf:"varint,2,opt,name=submitted_at_unix_ms,json=submittedAtUnixMs,proto3" json:"submitted_at_unix_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *WebWorkspacePromptEcho) Reset() {
+	*x = WebWorkspacePromptEcho{}
+	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WebWorkspacePromptEcho) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WebWorkspacePromptEcho) ProtoMessage() {}
+
+func (x *WebWorkspacePromptEcho) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WebWorkspacePromptEcho.ProtoReflect.Descriptor instead.
+func (*WebWorkspacePromptEcho) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WebWorkspacePromptEcho) GetTurn() *v12.TurnId {
+	if x != nil {
+		return x.Turn
+	}
+	return nil
+}
+
+func (x *WebWorkspacePromptEcho) GetSubmittedAtUnixMs() int64 {
+	if x != nil {
+		return x.SubmittedAtUnixMs
+	}
+	return 0
+}
+
 type WebWorkspaceTransferred struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The new daemon's socket address, verbatim.
@@ -275,7 +357,7 @@ type WebWorkspaceTransferred struct {
 
 func (x *WebWorkspaceTransferred) Reset() {
 	*x = WebWorkspaceTransferred{}
-	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -287,7 +369,7 @@ func (x *WebWorkspaceTransferred) String() string {
 func (*WebWorkspaceTransferred) ProtoMessage() {}
 
 func (x *WebWorkspaceTransferred) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +382,7 @@ func (x *WebWorkspaceTransferred) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebWorkspaceTransferred.ProtoReflect.Descriptor instead.
 func (*WebWorkspaceTransferred) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *WebWorkspaceTransferred) GetAddress() string {
@@ -329,7 +411,7 @@ type WebWorkspaceSessionIdentity struct {
 
 func (x *WebWorkspaceSessionIdentity) Reset() {
 	*x = WebWorkspaceSessionIdentity{}
-	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -341,7 +423,7 @@ func (x *WebWorkspaceSessionIdentity) String() string {
 func (*WebWorkspaceSessionIdentity) ProtoMessage() {}
 
 func (x *WebWorkspaceSessionIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -354,7 +436,7 @@ func (x *WebWorkspaceSessionIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebWorkspaceSessionIdentity.ProtoReflect.Descriptor instead.
 func (*WebWorkspaceSessionIdentity) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WebWorkspaceSessionIdentity) GetAgentReplSessionId() string {
@@ -375,18 +457,23 @@ var File_agentrepl_v1_endpoint_watch_web_workspace_proto protoreflect.FileDescri
 
 const file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDesc = "" +
 	"\n" +
-	"/agentrepl/v1/endpoint_watch_web_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"w\n" +
+	"/agentrepl/v1/endpoint_watch_web_workspace.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"w\n" +
 	"\x18WatchWebWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12!\n" +
-	"\fwebapp_build\x18\x02 \x01(\tR\vwebappBuild\"\x8c\x02\n" +
+	"\fwebapp_build\x18\x02 \x01(\tR\vwebappBuild\"\xd5\x02\n" +
 	"\x19WatchWebWorkspaceResponse\x12I\n" +
 	"\vtransferred\x18\x01 \x01(\v2%.agentrepl.v1.WebWorkspaceTransferredH\x00R\vtransferred\x12V\n" +
 	"\x10session_identity\x18\x02 \x01(\v2).agentrepl.v1.WebWorkspaceSessionIdentityH\x00R\x0fsessionIdentity\x12D\n" +
 	"\n" +
-	"reveal_row\x18\x03 \x01(\v2#.agentrepl.v1.WebWorkspaceRevealRowH\x00R\trevealRowB\x06\n" +
+	"reveal_row\x18\x03 \x01(\v2#.agentrepl.v1.WebWorkspaceRevealRowH\x00R\trevealRow\x12G\n" +
+	"\vprompt_echo\x18\x04 \x01(\v2$.agentrepl.v1.WebWorkspacePromptEchoH\x00R\n" +
+	"promptEchoB\x06\n" +
 	"\x04push\">\n" +
 	"\x15WebWorkspaceRevealRow\x12%\n" +
-	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"3\n" +
+	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"v\n" +
+	"\x16WebWorkspacePromptEcho\x12+\n" +
+	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12/\n" +
+	"\x14submitted_at_unix_ms\x18\x02 \x01(\x03R\x11submittedAtUnixMs\"3\n" +
 	"\x17WebWorkspaceTransferred\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"|\n" +
 	"\x1bWebWorkspaceSessionIdentity\x121\n" +
@@ -405,27 +492,31 @@ func file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_watch_web_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentrepl_v1_endpoint_watch_web_workspace_proto_goTypes = []any{
 	(*WatchWebWorkspaceRequest)(nil),    // 0: agentrepl.v1.WatchWebWorkspaceRequest
 	(*WatchWebWorkspaceResponse)(nil),   // 1: agentrepl.v1.WatchWebWorkspaceResponse
 	(*WebWorkspaceRevealRow)(nil),       // 2: agentrepl.v1.WebWorkspaceRevealRow
-	(*WebWorkspaceTransferred)(nil),     // 3: agentrepl.v1.WebWorkspaceTransferred
-	(*WebWorkspaceSessionIdentity)(nil), // 4: agentrepl.v1.WebWorkspaceSessionIdentity
-	(*v1.WorkspaceRef)(nil),             // 5: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                  // 6: frontend.v1.FeedId
+	(*WebWorkspacePromptEcho)(nil),      // 3: agentrepl.v1.WebWorkspacePromptEcho
+	(*WebWorkspaceTransferred)(nil),     // 4: agentrepl.v1.WebWorkspaceTransferred
+	(*WebWorkspaceSessionIdentity)(nil), // 5: agentrepl.v1.WebWorkspaceSessionIdentity
+	(*v1.WorkspaceRef)(nil),             // 6: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                  // 7: frontend.v1.FeedId
+	(*v12.TurnId)(nil),                  // 8: conversation.v1.TurnId
 }
 var file_agentrepl_v1_endpoint_watch_web_workspace_proto_depIdxs = []int32{
-	5, // 0: agentrepl.v1.WatchWebWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	3, // 1: agentrepl.v1.WatchWebWorkspaceResponse.transferred:type_name -> agentrepl.v1.WebWorkspaceTransferred
-	4, // 2: agentrepl.v1.WatchWebWorkspaceResponse.session_identity:type_name -> agentrepl.v1.WebWorkspaceSessionIdentity
+	6, // 0: agentrepl.v1.WatchWebWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	4, // 1: agentrepl.v1.WatchWebWorkspaceResponse.transferred:type_name -> agentrepl.v1.WebWorkspaceTransferred
+	5, // 2: agentrepl.v1.WatchWebWorkspaceResponse.session_identity:type_name -> agentrepl.v1.WebWorkspaceSessionIdentity
 	2, // 3: agentrepl.v1.WatchWebWorkspaceResponse.reveal_row:type_name -> agentrepl.v1.WebWorkspaceRevealRow
-	6, // 4: agentrepl.v1.WebWorkspaceRevealRow.row:type_name -> frontend.v1.FeedId
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	3, // 4: agentrepl.v1.WatchWebWorkspaceResponse.prompt_echo:type_name -> agentrepl.v1.WebWorkspacePromptEcho
+	7, // 5: agentrepl.v1.WebWorkspaceRevealRow.row:type_name -> frontend.v1.FeedId
+	8, // 6: agentrepl.v1.WebWorkspacePromptEcho.turn:type_name -> conversation.v1.TurnId
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_web_workspace_proto_init() }
@@ -437,6 +528,7 @@ func file_agentrepl_v1_endpoint_watch_web_workspace_proto_init() {
 		(*WatchWebWorkspaceResponse_Transferred)(nil),
 		(*WatchWebWorkspaceResponse_SessionIdentity)(nil),
 		(*WatchWebWorkspaceResponse_RevealRow)(nil),
+		(*WatchWebWorkspaceResponse_PromptEcho)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -444,7 +536,7 @@ func file_agentrepl_v1_endpoint_watch_web_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

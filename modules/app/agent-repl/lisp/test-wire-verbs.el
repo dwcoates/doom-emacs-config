@@ -914,6 +914,34 @@ wire."
                                      :origin :deferred-prompt :delivery :deferred))))
                    "SUBMIT_PROMPT_DELIVERY_DEFERRED"))))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-omits-the-submit-instant-when-absent ()
+  "A retry spells no submit instant: its wait is not the prompt's echo."
+  (agent-repl-test-wire-verbs--with-common
+    (should-not (assq 'submittedAtUnixMs
+                      (agent-repl-wire-encode-submit-prompt-request
+                       (list :workspace agent-repl-test-wire-verbs--ref
+                             :said '(:text "hi") :idempotency-key "k-1"
+                             :origin :user-sent))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-carries-the-submit-instant ()
+  "A person's send spells its submit instant in Unix milliseconds."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (assq 'submittedAtUnixMs
+                              (agent-repl-wire-encode-submit-prompt-request
+                               (list :workspace agent-repl-test-wire-verbs--ref
+                                     :said '(:text "hi") :idempotency-key "k-1"
+                                     :origin :user-sent :submitted-at-unix-ms 1700000000123))))
+                   1700000000123))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-refuses-a-non-integer-submit-instant ()
+  "A submit instant that is not an int64 is refused before the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :said '(:text "hi") :idempotency-key "k-1"
+                         :origin :user-sent :submitted-at-unix-ms 1.5))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-delivery-refuses-unspecified ()
   "UNSPECIFIED has no elisp spelling, so an unknown keyword is refused."
   (agent-repl-test-wire-verbs--with-common

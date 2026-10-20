@@ -309,6 +309,13 @@ the test suite sets it to a temp dir to isolate state.")
   "Fallback root for agent-repl state when `agent-repl--state-dir-env' is unset.
 A fixed sibling of the Claude CLI config dir (~/.claude).")
 
+(defun agent-repl--now-unix-ms ()
+  "The host\='s wall clock now, in Unix milliseconds.
+The one spelling of the instants agent-repl puts on the wire and compares:
+the daemon and the page read the same host clock, so an instant stamped
+here measures against theirs."
+  (truncate (* 1000 (float-time))))
+
 (defun agent-repl--global-state-dir ()
   "Return agent-repl's canonical state directory (with trailing slash).
 Resolves the `agent-repl--state-dir-env' override, else

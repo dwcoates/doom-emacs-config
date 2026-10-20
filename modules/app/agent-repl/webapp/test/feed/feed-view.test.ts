@@ -17,6 +17,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { installPromptEcho } from "../../src/prompt-echo.js";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
 import {
   forgetOwnTurns,
@@ -249,6 +250,15 @@ describe("createFeedController: painting a page", () => {
     expect(
       host.querySelector('[data-feed-row="a"]')?.getAttribute("data-turn"),
     ).toBe("turn-7");
+  });
+
+  it("tells the prompt echo timing it drew a user prompt, naming the row's turn", () => {
+    const drawn: string[] = [];
+    const uninstall = installPromptEcho({ echoed: () => undefined, drawn: (turn) => drawn.push(turn) });
+    const { controller } = fixture();
+    controller.applyPage(page([userPromptRow("a", "1", "turn-7"), responseRow("r1")]), "replace");
+    uninstall();
+    expect(drawn).toEqual(["turn-7"]);
   });
 
   it("marks a row whose turn this page submitted", () => {
