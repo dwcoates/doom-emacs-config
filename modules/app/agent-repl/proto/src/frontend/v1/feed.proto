@@ -2627,8 +2627,9 @@ message FeedQuoteBlock {
   // the code block it was fenced in, and the heading could not be told apart.
   reserved 1;
   reserved "text";
-  // What is quoted, as the agent was told it, without its trailing colon:
-  // e.g. "⟢ Replying to an earlier response of yours". Never empty.
+  // The label naming what is quoted, without its trailing colon: e.g.
+  // "⟢ Replying to earlier response". It may be shorter than the heading the
+  // agent was told. Never empty.
   string heading = 2;
   // The quoted bubble's markdown, unfenced. A client draws it verbatim as a
   // code block, never as markdown. May be empty.

@@ -270,7 +270,7 @@ func TestSplit(t *testing.T) {
 		{
 			name:     "a quoted response splits into its heading, its markdown and the closing marker",
 			markdown: "The capital is Paris.",
-			want:     Parts{Heading: HeadingResponse, Quoted: "The capital is Paris.", Closing: ClosingMarker},
+			want:     Parts{Heading: LabelResponse, Quoted: "The capital is Paris.", Closing: ClosingMarker},
 		},
 		{
 			name:     "a quoted prompt splits under the prompt heading",
@@ -281,17 +281,17 @@ func TestSplit(t *testing.T) {
 		{
 			name:     "a quoted code fence comes back without the longer fence around it",
 			markdown: "```sh\nmake test\n```",
-			want:     Parts{Heading: HeadingResponse, Quoted: "```sh\nmake test\n```", Closing: ClosingMarker},
+			want:     Parts{Heading: LabelResponse, Quoted: "```sh\nmake test\n```", Closing: ClosingMarker},
 		},
 		{
 			name:     "an empty quote splits to empty markdown",
 			markdown: "",
-			want:     Parts{Heading: HeadingResponse, Quoted: "", Closing: ClosingMarker},
+			want:     Parts{Heading: LabelResponse, Quoted: "", Closing: ClosingMarker},
 		},
 		{
 			name:     "a multi-line quote keeps every line",
 			markdown: "1 root\n├── 1.1 a\n└── 1.2 b",
-			want:     Parts{Heading: HeadingResponse, Quoted: "1 root\n├── 1.1 a\n└── 1.2 b", Closing: ClosingMarker},
+			want:     Parts{Heading: LabelResponse, Quoted: "1 root\n├── 1.1 a\n└── 1.2 b", Closing: ClosingMarker},
 		},
 	}
 	for _, tc := range cases {

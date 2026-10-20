@@ -16385,8 +16385,9 @@ func (x *FeedUnsupportedBlock) GetKind() string {
 // prompt bubble shows the heading and the person's own words.
 type FeedQuoteBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// What is quoted, as the agent was told it, without its trailing colon:
-	// e.g. "⟢ Replying to an earlier response of yours". Never empty.
+	// The label naming what is quoted, without its trailing colon: e.g.
+	// "⟢ Replying to earlier response". It may be shorter than the heading the
+	// agent was told. Never empty.
 	Heading string `protobuf:"bytes,2,opt,name=heading,proto3" json:"heading,omitempty"`
 	// The quoted bubble's markdown, unfenced. A client draws it verbatim as a
 	// code block, never as markdown. May be empty.
