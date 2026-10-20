@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
@@ -369,7 +369,7 @@ func TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck(t *testing.T) {
 	// Act: RegisterWorkspace re-announces the SAME workspace, on a context
 	// bounded by harness.DefaultTimeout -- the harness's ONE-WAIT failure
 	// bound -- rather than the whole run budget.
-	ctx, cancel := context.WithTimeout(successor.Ctx(), harness.DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(successor.Ctx(), harness.DefaultTimeout)
 	defer cancel()
 	resp, err := successor.Client().RegisterWorkspace(ctx, connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: f.repo.Dir}))
 

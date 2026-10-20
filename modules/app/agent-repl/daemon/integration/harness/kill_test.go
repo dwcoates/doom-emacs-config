@@ -591,7 +591,9 @@ func TestAwaitKilledLeaderReportsAStuckExitAndKeepsWaiting(t *testing.T) {
 				if tt.failWith != nil {
 					return false, tt.failWith
 				}
-				if _, bounded := ctx.Deadline(); bounded && tt.exitsAfter {
+				// The first wait is bounded (on the granted clock, which has no
+				// wall deadline); the second waits on context.Background.
+				if bounded := ctx.Done() != nil; bounded && tt.exitsAfter {
 					<-ctx.Done()
 					return false, context.DeadlineExceeded
 				}

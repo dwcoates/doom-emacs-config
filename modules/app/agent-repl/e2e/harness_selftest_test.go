@@ -433,7 +433,7 @@ func TestEmacsclientChargesItsBoundOnlyGrantedTime(t *testing.T) {
 			stall: &stallScript{failAt: 1}, wantErr: "to start a granted clock: EIO", wantCalls: 0},
 		{name: "a stall that stops being readable stops the call",
 			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{block: true} },
-			stall: &stallScript{failAt: 2}, wantErr: "read the container's CPU stall: EIO (emacsclient, stopped for it: signal: killed)", wantCalls: 1},
+			stall: &stallScript{failAt: 2}, wantErr: "read the CPU stall: EIO (emacsclient, stopped for it: signal: killed)", wantCalls: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

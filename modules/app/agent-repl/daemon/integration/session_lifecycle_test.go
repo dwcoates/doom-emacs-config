@@ -16,6 +16,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
@@ -1184,13 +1185,18 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 	// runs at boot, off the rpc path, so there is nothing else to wait on.
 	successor.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.sessionwatcher.watch_session", 1)
 	// The daemon's own record and the fake's counter are two observers of the
-	// same open, and neither orders the other; the counter is polled to the
-	// suite's deadline rather than sampled once.
-	deadline := time.Now().Add(10 * time.Second)
+	// same open, and neither orders the other; the counter is polled within
+	// one granted wait rather than sampled once.
+	wait, cancelWait := successor.WaitCtx()
+	defer cancelWait()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for shim.Count(harness.RPCWatchSession) <= watchesBefore {
-		if time.Now().After(deadline) {
-			t.Fatalf("WatchSession count = %d after adoption, want more than the pre-crash count %d (the successor re-subscribes)",
-				shim.Count(harness.RPCWatchSession), watchesBefore)
+		select {
+		case <-wait.Done():
+			t.Fatalf("WatchSession count = %d after adoption, want more than the pre-crash count %d (the successor re-subscribes): %v",
+				shim.Count(harness.RPCWatchSession), watchesBefore, grantedclock.Explain(wait))
+		case <-poll.C:
 		}
 	}
 

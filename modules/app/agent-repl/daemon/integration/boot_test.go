@@ -17,6 +17,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 	"agent-repld/internal/rollout"
 
@@ -795,22 +796,29 @@ func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
 func awaitSessionFault(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 
-	deadline := time.Now().Add(harness.DefaultTimeout)
+	wait, cancelWait := d.WaitCtx()
+	defer cancelWait()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	var last string
-	for time.Now().Before(deadline) {
-		resp, err := d.Client().SessionHealth(d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
+	for {
+		resp, err := d.Client().SessionHealth(wait, connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
 		if err != nil {
 			last = err.Error()
-			continue
-		}
-		for _, fault := range resp.Msg.GetSuccess().GetUnhealthy().GetFaults() {
-			if fault.GetShimReported() != nil {
-				return
+		} else {
+			for _, fault := range resp.Msg.GetSuccess().GetUnhealthy().GetFaults() {
+				if fault.GetShimReported() != nil {
+					return
+				}
 			}
+			last = resp.Msg.String()
 		}
-		last = resp.Msg.String()
+		select {
+		case <-wait.Done():
+			t.Fatalf("SessionHealth never carried the adopted shim's fault (%v); last answer %s", grantedclock.Explain(wait), last)
+		case <-poll.C:
+		}
 	}
-	t.Fatalf("SessionHealth never carried the adopted shim's fault; last answer %s", last)
 }
 
 // TestBootClosesAWorkspaceWhoseDirectoryIsGone pins the owner's ruling. The
@@ -1093,7 +1101,7 @@ func TestBootAnswersHealthWhileTheOpenWorkspacesSessionsComeUp(t *testing.T) {
 
 	// Act: the identity query Emacs recognizes a replacement by, under the
 	// bound Emacs gives it.
-	ctx, cancel := context.WithTimeout(d2.Ctx(), healthAnswerBound)
+	ctx, cancel := grantedclock.WithBound(d2.Ctx(), healthAnswerBound)
 	defer cancel()
 	if _, err := d2.Client().DaemonHealth(ctx, healthRequest()); err != nil {
 		t.Fatalf("DaemonHealth within %s = %v, want the replacement to answer while its sessions come up", healthAnswerBound, err)

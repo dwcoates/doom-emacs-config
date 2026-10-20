@@ -20,6 +20,8 @@ import (
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -103,7 +105,7 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 // bound. It is still a child of the daemon's whole-run budget.
 func (d *Daemon) AwaitLogRecordWithin(path, what string, bound time.Duration, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
-	wait, cancelWait := context.WithTimeout(d.ctx, bound)
+	wait, cancelWait := grantedclock.WithBound(d.ctx, bound)
 	defer cancelWait()
 	own := filepath.Clean(path) == filepath.Clean(d.RunLogPath())
 	return awaitLogRecord(d.t, wait, path, what, func(r LogRecord) bool {
@@ -536,7 +538,7 @@ func (d *Daemon) AwaitWorkspaceLogRecordInState(what string, pred func(LogRecord
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, wait.Err())
+			d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -592,7 +594,7 @@ func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, 
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, wait.Err())
+			d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -612,7 +614,7 @@ func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Mes
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, wait.Err())
+			d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -658,7 +660,7 @@ func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string,
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, wait.Err())
+			d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -776,7 +778,7 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operati
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, wait.Err())
+			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -819,7 +821,7 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogMessageCount(workspaceDir, operation
 		select {
 		case <-ticker.C:
 		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %d cumulative %q records under %s for workspace %s (saw %d): %v", n, substr, operation, workspaceDir, seen, d.ctx.Err())
+			d.t.Fatalf("waiting for %d cumulative %q records under %s for workspace %s (saw %d): %v", n, substr, operation, workspaceDir, seen, grantedclock.Explain(d.ctx))
 		}
 	}
 }
@@ -866,7 +868,7 @@ func (d *Daemon) AwaitShimVerbOrder(workspaceDir string, verbs ...string) []stri
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, wait.Err())
+			d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, grantedclock.Explain(wait))
 		}
 	}
 }

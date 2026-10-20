@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
@@ -41,5 +42,29 @@ func AwaitProcessExit(t testing.TB, ctx context.Context, pid int) {
 	t.Helper()
 	if err := WaitProcessExit(ctx, pid); err != nil {
 		t.Fatalf("process %d did not exit: %v", pid, err)
+	}
+}
+
+// awakenOnEnd runs WAKE once ctx ends, until the release it answers is called:
+// how an exit wait blocked in the kernel learns that its context ended.
+//
+// NO WAKE OUTLIVES THE WAIT. The release stops the wake, and one already
+// running finishes before the release returns, so the caller may close the
+// descriptor the wake writes to as soon as the release is back.
+func awakenOnEnd(ctx context.Context, wake func()) (release func()) {
+	var mu sync.Mutex
+	released := false
+	stop := context.AfterFunc(ctx, func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if !released {
+			wake()
+		}
+	})
+	return func() {
+		stop()
+		mu.Lock()
+		released = true
+		mu.Unlock()
 	}
 }

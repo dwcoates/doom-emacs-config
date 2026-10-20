@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/internal/workspace"
 )
 
@@ -47,12 +48,12 @@ func (h *WatcherStartHold) Env() string {
 	return workspace.EnvTestHoldFirstWatcherStart + "=" + h.socket
 }
 
-// AwaitHeld waits, within DefaultTimeout of CTX, for the daemon to reach the
+// AwaitHeld waits, within DefaultTimeout granted of CTX, for the daemon to reach the
 // hold: once it answers, the session is marked started and its watcher is not
 // open, and it stays that way until Release.
 func (h *WatcherStartHold) AwaitHeld(ctx context.Context) {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(ctx, DefaultTimeout)
 	defer cancel()
 	conn, err := h.accept(ctx)
 	if err != nil {
@@ -70,7 +71,7 @@ func (h *WatcherStartHold) accept(ctx context.Context) (net.Conn, error) {
 		if conn != nil {
 			_ = conn.Close()
 		}
-		return nil, fmt.Errorf("no daemon reached the watcher-start hold at %s: %w", h.socket, ctx.Err())
+		return nil, fmt.Errorf("no daemon reached the watcher-start hold at %s: %w", h.socket, grantedclock.Explain(ctx))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("accept the watcher-start hold at %s: %w", h.socket, err)

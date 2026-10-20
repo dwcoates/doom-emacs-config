@@ -14,6 +14,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
+
 	"connectrpc.com/connect"
 )
 
@@ -47,7 +49,7 @@ func (s *Stream[T]) AwaitHeaders(t testing.TB, ctx context.Context, what string)
 	case h := <-s.headers:
 		return h
 	case <-ctx.Done():
-		t.Fatalf("waiting for %s to flush its response headers: %v", what, ctx.Err())
+		t.Fatalf("waiting for %s to flush its response headers: %v", what, grantedclock.Explain(ctx))
 		return nil
 	}
 }
@@ -98,7 +100,7 @@ func AwaitView[T any](t testing.TB, ctx context.Context, s *Stream[T], what stri
 				return v
 			}
 		case <-ctx.Done():
-			t.Fatalf("waiting for %s: %v", what, ctx.Err())
+			t.Fatalf("waiting for %s: %v", what, grantedclock.Explain(ctx))
 			return zero
 		}
 	}
@@ -513,7 +515,7 @@ func AwaitProcessGone(t testing.TB, ctx context.Context, pid int) {
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			t.Fatalf("process %d did not exit: %v", pid, ctx.Err())
+			t.Fatalf("process %d did not exit: %v", pid, grantedclock.Explain(ctx))
 		}
 	}
 }

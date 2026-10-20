@@ -19,6 +19,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
@@ -192,7 +193,7 @@ func awaitPageFrame(
 	what string,
 ) *agentreplv1.WatchPageResponse {
 	t.Helper()
-	wait, cancel := context.WithTimeout(ctx, harness.DefaultTimeout)
+	wait, cancel := grantedclock.WithBound(ctx, harness.DefaultTimeout)
 	defer cancel()
 	select {
 	case frame, ok := <-frames:

@@ -982,7 +982,7 @@ merge gates failed that way:
 - `TestEmacsSubmitWithNoDaemonIsRefusedLoudly` had its registry await's eval
   killed at 2.6s of wall while Emacs itself sat in state R.
 
-The clock (`e2e/grantedclock_test.go`) is wall time less the container's
+The clock (`daemon/integration/grantedclock/`) is wall time less the container's
 cumulative CPU stall: the "some" total of the cgroup's own `cpu.pressure`
 (PSI), which is the time at least one task in the container was runnable
 without a CPU. It counts the container's own quota throttling and a Docker
