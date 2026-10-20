@@ -94,7 +94,7 @@ func OpenRotating(path string, capBytes int64, backups int) (*RotatingFile, erro
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create rotating log directory %q: %w", dir, err)
 	}
-	f, err := openLocked(path)
+	f, err := openLocked(path, appendFlags)
 	if err != nil {
 		return nil, err
 	}
@@ -109,15 +109,27 @@ func OpenRotating(path string, capBytes int64, backups int) (*RotatingFile, erro
 	return &RotatingFile{path: path, cap: capBytes, backups: backups, retention: DefaultRetention, f: f, size: info.Size()}, nil
 }
 
-// openLocked opens path for append and takes the shared lock on it, then
+// appendFlags open a rotating log's current file: created when absent, every
+// write appended.
+const appendFlags = os.O_CREATE | os.O_APPEND | os.O_WRONLY
+
+// CreateLocked creates (or truncates) the log file at path for writing and
+// holds the shared lock on it until the file is closed, so PruneDirectory
+// never removes it while it is being written. It is for a log written once,
+// start to finish, rather than appended to and rolled.
+func CreateLocked(path string) (*os.File, error) {
+	return openLocked(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY)
+}
+
+// openLocked opens path with flag and takes the shared lock on it, then
 // checks that the path STILL names the file it locked. A pruner that holds the
 // exclusive lock may unlink the path between this open and this lock; the
 // check catches that, and the second open creates a fresh file no pruner can
 // take (a fresh file is not expired). A second miss is therefore not a race to
 // wait out but a broken invariant, and it is refused.
-func openLocked(path string) (*os.File, error) {
+func openLocked(path string, flag int) (*os.File, error) {
 	for attempt := 1; attempt <= 2; attempt++ {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(path, flag, 0o644)
 		if err != nil {
 			return nil, fmt.Errorf("open rotating log %q: %w", path, err)
 		}
@@ -211,7 +223,7 @@ func (r *RotatingFile) rollLocked() error {
 	if err := rotateGenerations(r.path, r.backups); err != nil {
 		return closeAfter(retiring, err)
 	}
-	f, err := openLocked(r.path)
+	f, err := openLocked(r.path, appendFlags)
 	if err != nil {
 		return closeAfter(retiring, fmt.Errorf("reopen rotating log after the roll: %w", err))
 	}

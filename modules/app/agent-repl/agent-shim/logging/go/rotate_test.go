@@ -210,3 +210,45 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+func TestCreateLockedHoldsTheSharedLockUntilClosed(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "run-tests-1.log")
+	if err := os.WriteFile(path, []byte("an earlier run\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Act.
+	f, err := CreateLocked(path)
+	if err != nil {
+		t.Fatalf("CreateLocked: %v", err)
+	}
+	heldWhileOpen := lockOutcomeOf(t, path)
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert: locked while open, free once closed, and truncated.
+	if heldWhileOpen != lockHeld {
+		t.Errorf("lock outcome while open = %v, want held", heldWhileOpen)
+	}
+	if got := lockOutcomeOf(t, path); got != lockTaken {
+		t.Errorf("lock outcome once closed = %v, want free", got)
+	}
+	if got := readFile(t, path); got != "" {
+		t.Errorf("the file holds %q, want it truncated", got)
+	}
+}
+
+func TestCreateLockedRefusesAnUnwritablePath(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "absent-dir", "run-tests-1.log")
+
+	// Act.
+	_, err := CreateLocked(path)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("CreateLocked in a missing directory succeeded, want it refused")
+	}
+}
