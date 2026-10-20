@@ -35,7 +35,7 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		return nil, err
 	}
 	out := &agentreplv1.WorkspaceStatus{
-		Workspace:   &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir},
+		Workspace:   record.Ref(),
 		Name:        record.Name,
 		Branch:      record.Branch,
 		MergeTarget: target,

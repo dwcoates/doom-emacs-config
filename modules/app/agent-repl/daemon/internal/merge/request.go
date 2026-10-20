@@ -313,7 +313,7 @@ func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, 
 	for _, other := range workspaces {
 		if other.Repo == requester.Repo && other.Branch == source.Branch {
 			refusal := refuse(ArmBranchOwned, ws, "branch %q is the workspace %s's own, which lands it itself", source.Branch, other.ID)
-			refusal.Fields = map[string]any{"branch": source.Branch, "owner": &workspacev1.WorkspaceRef{Id: string(other.ID), Dir: other.Dir}}
+			refusal.Fields = map[string]any{"branch": source.Branch, "owner": other.Ref()}
 			return wsm.MergeSource{}, refusal
 		}
 	}

@@ -8,7 +8,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
@@ -81,7 +80,7 @@ func (k *Keeper) SendHiddenKeepalives(ctx context.Context) *agentreplv1.SendHidd
 // it went.
 func (k *Keeper) beat(ctx context.Context, ws wsm.Workspace) *agentreplv1.SendHiddenKeepalivesWorkspace {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws.ID)})
-	out := &agentreplv1.SendHiddenKeepalivesWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}}
+	out := &agentreplv1.SendHiddenKeepalivesWorkspace{Workspace: ws.Ref()}
 	shim, ok := k.deps.Shim(ws.ID)
 	if !ok {
 		log.Info(opBeat, "no session is served for the hidden workspace; it has no cache to keep", nil)

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -22,6 +21,8 @@ type rowContext struct {
 	selected *ids.WorkspaceID
 	// cause is the operation whose fact is being rendered.
 	cause string
+	// children are each workspace's children, by parent (childrenOf).
+	children map[ids.WorkspaceID][]wsm.Workspace
 }
 
 // row composes one workspace's row, as every list draws it. Its family is
@@ -80,11 +81,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 
 	out := &frontendv1.RosterRow{
 		Workspace: &frontendv1.RosterRowWorkspace{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(rec.ID), Dir: rec.Dir}},
+			Workspace: rec.Ref()},
 		Name:    &frontendv1.RosterRowName{Text: rec.Name},
 		Current: &frontendv1.RosterRowCurrent{Current: current},
 		When:    when(rec, r.footer.MergeStartedAt(rec.ID), r.footer.TurnClock(rec.ID)),
-		Detail:  detail(rec, s.summary),
+		Detail:  detail(rec, s.summary, rc),
 		Closed:  &frontendv1.RosterRowClosed{Closed: closed},
 		// ALWAYS SET: an editor opens the workspace only once this leaves
 		// `pending`, so a row without it would never be opened.
@@ -322,7 +323,7 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 // rather than a string on the panel. The commit count is the record's as the
 // last turn close (or, merged, the landing) left it; a workspace never counted
 // carries no count line.
-func detail(rec wsm.Workspace, summary string) *frontendv1.RosterRowDetail {
+func detail(rec wsm.Workspace, summary string, rc rowContext) *frontendv1.RosterRowDetail {
 	out := &frontendv1.RosterRowDetail{}
 	if rec.Branch != "" {
 		out.Branch = &frontendv1.RosterRowDetailBranch{Name: rec.Branch}
@@ -335,6 +336,33 @@ func detail(rec wsm.Workspace, summary string) *frontendv1.RosterRowDetail {
 	}
 	if rec.CommitCount != nil {
 		out.Commits = &frontendv1.RosterRowDetailCommits{Count: *rec.CommitCount}
+	}
+	for _, child := range rc.children[rec.ID] {
+		item := &frontendv1.RosterRowDetailChild{
+			Workspace: child.Ref(),
+			Name:      child.Name,
+		}
+		if recedes(child, rc.sessions[child.ID]) {
+			item.Receded = &frontendv1.RosterRowDetailChildReceded{}
+		}
+		out.Children = append(out.Children, item)
+	}
+	return out
+}
+
+// childrenOf answers each workspace's children over the WHOLE registry, in
+// roster order: every workspace whose recorded parent is that workspace,
+// whichever section draws it. Unlike nest, which nests a row only under a
+// parent drawn beside it, the detail panel names every child. A hidden merge
+// workspace is drawn nowhere and is no one's listed child; a workspace
+// recorded as its own parent is ill-formed and lists nothing.
+func childrenOf(in []wsm.Workspace) map[ids.WorkspaceID][]wsm.Workspace {
+	out := map[ids.WorkspaceID][]wsm.Workspace{}
+	for _, ws := range sortWorkspaces(in) {
+		if ws.MergeHidden() || ws.Parent == nil || *ws.Parent == ws.ID {
+			continue
+		}
+		out[*ws.Parent] = append(out[*ws.Parent], ws)
 	}
 	return out
 }

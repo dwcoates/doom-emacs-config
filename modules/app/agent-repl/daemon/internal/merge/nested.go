@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
@@ -198,7 +197,7 @@ func (l rebaseLine) drawn() *frontendv1.FeedMergeRebaseLine {
 	p := l.Replaying
 	target := &frontendv1.FeedMergeRebaseTarget{Branch: p.TargetBranch, RepositoryDir: p.TargetDir}
 	if p.TargetWorkspace != nil {
-		target.Workspace = &workspacev1.WorkspaceRef{Id: string(p.TargetWorkspace.ID), Dir: p.TargetWorkspace.Dir}
+		target.Workspace = wsm.FamilyRef(*p.TargetWorkspace).Ref()
 	}
 	return &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Replaying{Replaying: &frontendv1.FeedMergeRebaseReplaying{
 		Commits: uint32(p.Commits), Branch: p.Branch, Target: target, Tip: p.Tip, TipShortSha: short(p.Tip),

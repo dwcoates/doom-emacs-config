@@ -547,6 +547,110 @@ func TestRowDetailOmitsTheCommitCountWhenNeverCounted(t *testing.T) {
 	}
 }
 
+func TestRowDetailListsTheWorkspacesChildren(t *testing.T) {
+	later := epoch.Add(time.Minute)
+	parent := workspace("w-parent", "parent")
+	child := func(id, name string, place int64, mutate func(*wsm.Workspace)) wsm.Workspace {
+		ws := placed(workspace(id, name), place)
+		ws.Parent = &parent.ID
+		if mutate != nil {
+			mutate(&ws)
+		}
+		return ws
+	}
+	type listed struct {
+		name    string
+		receded bool
+	}
+	tests := []struct {
+		name     string
+		children []wsm.Workspace
+		sessions []wsm.Session
+		want     []listed
+	}{
+		{name: "a childless workspace lists none"},
+		{
+			name:     "an open child is listed, not receded",
+			children: []wsm.Workspace{child("w-a", "a", 1, nil)},
+			want:     []listed{{name: "a"}},
+		},
+		{
+			name:     "children are listed in roster order",
+			children: []wsm.Workspace{child("w-b", "b", 2, nil), child("w-a", "a", 1, nil)},
+			want:     []listed{{name: "a"}, {name: "b"}},
+		},
+		{
+			name:     "a hidden child is listed",
+			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Hidden, ws.HiddenAt = true, &later })},
+			want:     []listed{{name: "a"}},
+		},
+		{
+			name:     "a closed child is listed receded",
+			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) { ws.Closed = true })},
+			want:     []listed{{name: "a", receded: true}},
+		},
+		{
+			name: "a merged child is listed receded",
+			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) {
+				ws.Closed, ws.MergedAt = true, &later
+			})},
+			want: []listed{{name: "a", receded: true}},
+		},
+		{
+			name:     "a child whose session was killed is listed receded",
+			children: []wsm.Workspace{child("w-a", "a", 1, nil)},
+			sessions: []wsm.Session{{Workspace: "w-a", Terminal: &wsm.SessionTerminal{Kind: "killed", At: epoch}}},
+			want:     []listed{{name: "a", receded: true}},
+		},
+		{
+			name: "a hidden merge workspace is not listed",
+			children: []wsm.Workspace{child("w-a", "a", 1, func(ws *wsm.Workspace) {
+				ws.MergeOf = &wsm.MergeOrigin{}
+			})},
+		},
+		{
+			name: "a grandchild is its parent's child, not the grandparent's",
+			children: []wsm.Workspace{
+				child("w-a", "a", 1, nil),
+				child("w-g", "g", 2, func(ws *wsm.Workspace) { id := ids.WorkspaceID("w-a"); ws.Parent = &id }),
+			},
+			want: []listed{{name: "a"}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(append([]wsm.Workspace{placed(parent, 0)}, tc.children...)...)
+			reg.Sessions = tc.sessions
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert.
+			row := rowFor(rosterwalk.AllRows(latest(t, r)), string(parent.ID))
+			if row == nil {
+				t.Fatal("the roster drew no row for the parent")
+			}
+			var got []listed
+			for _, c := range row.GetDetail().GetChildren() {
+				got = append(got, listed{name: c.GetName(), receded: c.GetReceded() != nil})
+				if want := "/repos/one/w-" + c.GetName(); c.GetWorkspace().GetDir() != want || c.GetWorkspace().GetId() != "w-"+c.GetName() {
+					t.Fatalf("child %q workspace = %v, want its own ref", c.GetName(), c.GetWorkspace())
+				}
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("children = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("children = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestRowDetailCarriesTheSummary(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
