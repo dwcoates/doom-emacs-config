@@ -966,9 +966,7 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
 	f.submit("long running work", "k-restart-forced", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
@@ -1077,10 +1075,8 @@ func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
 	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"FAKESHIM_BUILD_SHA=older-build"}})
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{NoTranscriptUntilTurn: true})
 	// The sweep covers every test; the declared records are evidence of the bounce's stand-down, the abandoned conversation the classifier records, and the shim death the bounce drives.
-	f.d.ExpectWarnings("daemon.account.find_transcript", "daemon.health.open_fault",
-		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.reopen",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.shimclient.redial",
+	f.d.ExpectWorkspaceRestartWarnings()
+	f.d.ExpectWarnings("daemon.account.find_transcript",
 		"daemon.workspace.bring_up", "daemon.workspace.kill",
 		// The fake's replacement reports the SAME older build (its
 		// FAKESHIM_BUILD_SHA outlives the bounce), which the staleness judge
@@ -1283,9 +1279,7 @@ func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, the shim death the stand-down drives, the shim link it severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.rollout.relaunch",
-		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
 	oldPID := f.shim.Info().PID
 
@@ -1313,10 +1307,7 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.rollout.relaunch",
-		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit",
-		"daemon.shimclient.kill_session", "daemon.shimclient.redial")
+	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
 	f.submit("long running work", "k-restart-forced-no-redrive", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()

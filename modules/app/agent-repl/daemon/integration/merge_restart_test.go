@@ -27,9 +27,7 @@ func TestARestartOverAMergeWaitingForItsWorkspaceRestartsAndTheMergeLands(t *tes
 	f, d, _, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
-	d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault",
-		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	d.ExpectWorkspaceRestartWarnings()
 	workspaceLog := harness.WorkspaceLogPath(f.ws.GetDir(), "daemon")
 	tail := f.watchRootFeed()
 	f.submit("keep going", "k-restart-over-merge", origin)

@@ -395,6 +395,29 @@ func (d *Daemon) ExpectWarnings(operations ...string) {
 	d.mu.Unlock()
 }
 
+// WorkspaceRestartWarnings are the operations a workspace restart's own
+// stand-down of its shim writes at WARN or ERROR: the KillSession the fake
+// shim answers by exiting, the link the exit severs, and the watches and
+// redials that follow it until the replacement shim is up.
+var WorkspaceRestartWarnings = []string{
+	"daemon.health.open_fault",
+	"daemon.rollout.relaunch",
+	"daemon.sessionwatcher.link_fault",
+	"daemon.sessionwatcher.reopen",
+	"daemon.sessionwatcher.watch_agent",
+	"daemon.sessionwatcher.watch_session",
+	"daemon.shimclient.exit",
+	"daemon.shimclient.kill_session",
+	"daemon.shimclient.redial",
+}
+
+// ExpectWorkspaceRestartWarnings declares WorkspaceRestartWarnings with
+// ExpectWarnings, for a test that restarts a workspace's shim.
+func (d *Daemon) ExpectWorkspaceRestartWarnings() {
+	d.t.Helper()
+	d.ExpectWarnings(WorkspaceRestartWarnings...)
+}
+
 // RequireWarnings declares operations exactly as ExpectWarnings does AND
 // requires each to have produced at least one WARN or ERROR record by the end
 // of the test. A declaration nothing produces fails the sweep.

@@ -1139,9 +1139,7 @@ func TestAModelSwitchSurvivesAWorkspaceRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session switched to sonnet.
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	f.d.ExpectWorkspaceRestartWarnings()
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the initial model", func(v *frontendv1.TopbarView) bool {
 		return v.GetModelSelector().GetSelected().GetModel().GetName() != ""
@@ -1841,9 +1839,7 @@ func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the
 	// restart's own stand-down of the shim, which the fake answers by exiting.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
-		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
 	f.submit("start the work", "k-running-restart", origin)
 	f.shim.ExpectStartTurn()
