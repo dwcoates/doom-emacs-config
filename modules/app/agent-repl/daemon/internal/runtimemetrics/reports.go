@@ -2,8 +2,12 @@ package runtimemetrics
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"time"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/wsm"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -14,6 +18,38 @@ import (
 // the kind it names. Every error wraps ErrInvalidLatency.
 func ValidateReportedLatency(l *agentreplv1.ReportedLatency) (LatencyKind, error) {
 	return validateReported(l)
+}
+
+// editorMilestones maps each reported editor startup milestone to its phase.
+var editorMilestones = map[agentreplv1.EditorStartupMilestone]restarttiming.EditorMilestone{
+	agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT:          restarttiming.EditorInit,
+	agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_DAEMON_LINKED: restarttiming.EditorDaemonLinked,
+	agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_FIRST_TAB:     restarttiming.EditorFirstTab,
+	agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_ALL_TABS:      restarttiming.EditorAllTabs,
+}
+
+// ValidateEditorStartup checks one reported editor startup milestone and
+// answers the restart observation it records: a known milestone, a daemon arm
+// set, and a finite, non-negative time since the editor's process start.
+func ValidateEditorStartup(m *agentreplv1.ReportedEditorStartup) (restarttiming.Observation, error) {
+	milestone, ok := editorMilestones[m.GetMilestone()]
+	if !ok {
+		return restarttiming.Observation{}, fmt.Errorf("%w: milestone %v is not an editor startup milestone", ErrInvalidLatency, m.GetMilestone())
+	}
+	var daemon restarttiming.EditorDaemon
+	switch m.GetDaemon().(type) {
+	case *agentreplv1.ReportedEditorStartup_Spawned:
+		daemon = restarttiming.EditorSpawned
+	case *agentreplv1.ReportedEditorStartup_Running:
+		daemon = restarttiming.EditorRunning
+	default:
+		return restarttiming.Observation{}, fmt.Errorf("%w: milestone %s names no way the editor came to a daemon", ErrInvalidLatency, milestone)
+	}
+	s := m.GetSecondsSinceProcessStart()
+	if math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+		return restarttiming.Observation{}, fmt.Errorf("%w: milestone %s came %v seconds after the process start", ErrInvalidLatency, milestone, s)
+	}
+	return restarttiming.OfEditorStart(milestone, daemon, time.Duration(s*float64(time.Second))), nil
 }
 
 // Enabled reports whether the surface records anything.
