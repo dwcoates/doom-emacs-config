@@ -226,6 +226,24 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
     no turn, so a restart never draws it working. The Bash call that ran the
     command still draws as its tool card.
 
+19. AN AGENT'S PROMPT REACHES THE AGENT AS A PEER MESSAGE (2026-10-20).
+    `shim.v1.StartTurnRequest.sent_by` (`StartTurnSentBy`: the sender's
+    workspace id, its name, unset when the daemon can no longer name it, and
+    its own permission mode, unset when the daemon holds no session record
+    for it) is set exactly when the origin is `PROMPT_ORIGIN_AGENT_SENT`. The
+    shim wraps such a prompt in the vendor's cross-session envelope with
+    `origin.kind` peer, from `agent-repl:<name>`, and the SENDER's honest
+    permission class; it never sets `crossSessionInbound` and never states
+    the recipient's class. A message the vendor holds (the classes differ, or
+    the recipient's settings hold peer messages) is refused `vendor_refused`
+    rather than waited on. The vendor echoes no client uuid for a peer
+    message's turn, so the shim attributes it by the `command_lifecycle`
+    frames naming the uuid it stamped, beside the echo every other send keeps.
+    The prompt row is the daemon's as for every prompt, so the stream plane
+    and the sidecar withhold the vendor's own copy of an `agent-repl:` peer
+    record. DECISION: the mode travels, not the class; the vendor's class rule
+    is a vendor fact and lives in the shim, its adapter.
+
 Not changed, deliberately: queue racing (its removal is its own change);
 `SetWorkspaceParent` (the retarget; the daemon re-applies the ownership rules
 when it runs, and `agent-repld workspace set` calls it); hiding and showing

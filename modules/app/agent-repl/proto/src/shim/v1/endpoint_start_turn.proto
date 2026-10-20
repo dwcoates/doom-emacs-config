@@ -8,6 +8,7 @@ syntax = "proto3";
 package shim.v1;
 
 import "conversation/v1/history.proto";
+import "conversation/v1/permission.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "conversation/v1/prompt_origin.proto";
@@ -95,6 +96,47 @@ message StartTurnRequest {
   // this prompt changing its work rather than as a rejection of it. UNSET for
   // every other prompt.
   optional string vendor_note = 7;
+  // THE WORKSPACE WHOSE AGENT SENT THIS PROMPT (agentrepl.v1
+  // SubmitPromptRequest.sent_by). SET EXACTLY WHEN `origin` IS
+  // PROMPT_ORIGIN_AGENT_SENT, and unset for every other origin; a request
+  // breaking either half is refused as InvalidArgument.
+  //
+  // SUCH A PROMPT REACHES THE AGENT AS ANOTHER SESSION'S MESSAGE, not as words
+  // the user typed: the shim delivers it in the vendor's own cross-session
+  // envelope, marked as a peer message from `agent-repl:<the sender's name>`
+  // and declaring the SENDER's permission class (`permission_mode`). The
+  // prompt row still carries `said` exactly, under this request's id and
+  // origin, as every prompt's does; the shim's transcript readers never draw
+  // the vendor's copy of it a second time.
+  //
+  // A PEER MESSAGE THE VENDOR HOLDS IS REFUSED, never waited on. The vendor
+  // parks a peer message instead of running it when the sender's declared
+  // class is not the recipient's, or when the recipient's settings hold
+  // cross-session messages, and a parked message is dropped unread minutes
+  // later. The shim waits for the vendor to say whether it queued the message
+  // or held it, and answers a hold with `vendor_refused`, its `detail`
+  // naming the cause. The same holds for `join_running_turn`.
+  StartTurnSentBy sent_by = 9;
+}
+
+// The workspace whose agent sent a prompt, as the shim declares it to the
+// vendor.
+message StartTurnSentBy {
+  // The sending workspace's id (workspace.v1.WorkspaceRef.id). Never empty.
+  // It is the vendor envelope's address only when `workspace_name` is unset.
+  string workspace_id = 1;
+  // The sending workspace's name, as the roster names it: the address the
+  // agent reads (`agent-repl:<name>`) and the one it answers through
+  // `agent-repld workspace prompt`. UNSET when the daemon can no longer name
+  // the sender (one forgotten since it sent), never a stand-in; the address
+  // is then `agent-repl:<workspace_id>`. Never empty when set.
+  optional string workspace_name = 2;
+  // THE SENDER'S OWN permission mode, as the daemon holds it when it starts
+  // the turn: the sender's honest declaration, which the shim maps to the
+  // vendor's permission class (bypass for `bypass`, prompting for every other
+  // mode). Never the recipient's. UNSET when the daemon holds no session
+  // record for the sender, and the shim then declares no class.
+  conversation.v1.AgentPermissionMode permission_mode = 3;
 }
 
 // THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
