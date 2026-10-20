@@ -270,6 +270,7 @@ for metrics that show where restart time goes and when it regressed):
 | `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
 | `workspace_start` | `start`, `wake` | `boot`, `takeover`, `editor_open` | the bring-up, per workspace |
+| `session_start` | `shim`, `slot_wait`, `vendor`, `watch`, `total`, each its own duration (`slot_wait` and `vendor` once per attempt) | `fresh`, `resume`, `wake`, `adopted`, `relaunch`, `cold_answer` | the session fleet, per workspace, whoever asked for the start |
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |
 | `handover_transfer` | `wait`, `run` | | the outgoing daemon, per workspace |
 | `workspace_reconnect` | `host`, `web` | `cold`, `successor`, `webapp_reload` | the daemon, per workspace: from a boot's start, a handover's manifest or a webview reload's push until the workspace's Emacs host or webview stream opens on it |

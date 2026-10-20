@@ -261,3 +261,17 @@ Each entry says what was decided, why, and what it departs from.
   row is drawn (`docs/protobuf-design/runtime-metrics.md`, entry 8). A held
   prompt is not timed: it draws when delivered, so its time is the hold.
 
+## 16. A session's start is timed step by step
+
+- Asked (2026-10-20): very solid visibility into every area of startup.
+- Found: `workspace_start` timed a bring-up's session start as one number,
+  and a wake's p99 was 221 s with nothing to say where it went.
+- Built: `session_start`, timed inside the session fleet, so every start is
+  covered whoever asked for it: the shim (spawned, adopted or reused, until
+  its first healthy diagnostics), each wait for a vendor-start slot, each
+  StartSession attempt, the watches, and the whole start.
+- Each step is its own duration rather than a time since the start began,
+  so the slow step is read off directly. A start parked at its cold gate
+  records no total, since it is neither up nor failed, and a step cut short
+  by a stand-down this daemon ordered is not timed.
+
