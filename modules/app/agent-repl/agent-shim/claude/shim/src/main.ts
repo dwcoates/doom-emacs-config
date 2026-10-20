@@ -94,6 +94,7 @@ import { ensureWorkspaceTrusted } from "./trust.js";
 import { randomUUID } from "node:crypto";
 import { shimRoutes } from "./service/routes.js";
 import { serve, type ShimServer } from "./service/server.js";
+import { backgroundTimerWait } from "./engine/measurements.js";
 
 export {
   MAIN_LIFECYCLE_OPERATION,
@@ -1049,6 +1050,9 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
     runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
     nowMs: () => Date.now(),
+    // THE EVENT LOOP IS SAMPLED FOR THE PROCESS'S WHOLE LIFE, on a timer that
+    // never holds the process open.
+    eventLoopSampling: { wait: backgroundTimerWait, monoMs: () => performance.now(), signal: new AbortController().signal },
     ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
     ...(coldGateLaterMs === undefined ? {} : { coldGateLaterMs }),
     ...(watcherConclusionBudgetMs === undefined ? {} : { watcherConclusionBudgetMs }),

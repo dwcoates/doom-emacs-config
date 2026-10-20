@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { backgroundTimerWait } from "../src/engine/measurements.js";
 import { logRecordsDuring } from "./log-records.js";
 import { keepGeneratedProtosAcrossResets } from "./stateless-modules.js";
 import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
@@ -1477,6 +1478,21 @@ describe("main", () => {
     // Assert.
     expect(record.fields["fake"]).toBe(true);
     expect(h.engineDeps()["createQuery"]).toBeTypeOf("function");
+  });
+
+  it("hands the engine the process's own event-loop sampling, on a timer that never holds the process", async () => {
+    // Arrange.
+    const h = await harness([...SERVING]);
+
+    // Act.
+    h.run();
+    await h.reached("startup_arguments_validated");
+
+    // Assert.
+    const sampling = h.engineDeps()["eventLoopSampling"] as { wait: unknown; monoMs: () => number; signal: AbortSignal } | undefined;
+    expect(sampling?.wait).toBe(backgroundTimerWait);
+    expect(sampling?.signal.aborted).toBe(false);
+    expect(typeof sampling?.monoMs()).toBe("number");
   });
 
   it("hands the engine the keep-alive cadence the fake environment named", async () => {
