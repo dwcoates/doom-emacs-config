@@ -22,7 +22,7 @@ import type {
   FeedUserPromptBody,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { SlotMark } from "../../bubble/body.js";
-import { drawPromptBlockArm } from "./blocks.js";
+import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { markKnownCommands } from "./known-commands.js";
 
 /** The path prefix every refusal from this file is reported under. */
@@ -52,7 +52,8 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
 
   const result = requireCase(msg.result, `${PATH}.result`);
   switch (result.case) {
-    case "success":
+    case "success": {
+      const body = requireMessage(result.value.body, `${PATH}.success.body`);
       // PREVIOUS, the row's last draw, is updated in place (drawBubble), so a
       // re-push never replaces the box a reader is scrolled inside.
       return drawBubble(
@@ -61,15 +62,16 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           variant: "user",
           hooks: ["user"],
           waving: promptWaves(msg),
-          content: drawFeedUserPromptBody(
-            requireMessage(result.value.body, `${PATH}.success.body`),
-            `${PATH}.success.body`,
-            knownCommandsMark(msg),
+          corner: drawPromptCopyControl(
+            body.blocks.map((block) => block.block),
+            `${PATH}.success.body.blocks`,
           ),
+          content: drawFeedUserPromptBody(body, `${PATH}.success.body`, knownCommandsMark(msg)),
           capLines: USER_PROMPT_CAP_LINES,
         },
         previous,
       ).bubble;
+    }
     default:
       return unreachableArm(`${PATH}.result`, result.case);
   }

@@ -29,7 +29,7 @@ import type {
   FeedAgentPromptBlock,
   FeedAgentPromptBody,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { drawPromptBlockArm } from "./blocks.js";
+import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { drawPeerArrow } from "./peer-arrow.js";
 
 const PATH = "FeedAgentPrompt";
@@ -50,6 +50,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
   // prompt is addressed to and nothing under it. PREVIOUS, the row's last draw,
   // is updated in place.
   const strip = [drawFeedAgentPromptAddress(address)];
+  const body = requireMessage(msg.body, `${PATH}.body`);
   return drawBubble(
     {
       role: "prompt",
@@ -57,7 +58,11 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
       hooks: ["user", "prompt-agent"],
       waving: promptWaves(msg),
       strip,
-      content: drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
+      corner: drawPromptCopyControl(
+        body.blocks.map((block) => block.block),
+        `${PATH}.body.blocks`,
+      ),
+      content: drawFeedAgentPromptBody(body, `${PATH}.body`),
       capLines: AGENT_PROMPT_CAP_LINES,
     },
     previous,

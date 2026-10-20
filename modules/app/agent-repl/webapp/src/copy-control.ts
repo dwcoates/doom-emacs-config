@@ -1,6 +1,6 @@
 /**
  * THE ONE COPY CONTROL: the small icon that copies a piece of the feed to the
- * clipboard (owner request, 2026-10-20). Every kind of it (`CopyKind`) is the
+ * clipboard (owner requests, 2026-10-20). Every kind of it (`CopyKind`) is the
  * same `<ar-button>` with the same two icons, the same check-mark moment after
  * it copied, and the same click handler; a kind decides only WHAT it copies,
  * through the resolver `installCopyControls` is handed for it.
@@ -23,8 +23,8 @@ export const COPY_CONTROL_CLASS = "copy-control";
 /** The attribute naming what a copy control copies: its `CopyKind`. */
 export const COPY_KIND_ATTRIBUTE = "data-copies";
 
-/** What a copy control copies: a code block's code. */
-export const COPY_KINDS = ["code"] as const;
+/** What a copy control copies: a code block's code, or a whole prompt. */
+export const COPY_KINDS = ["code", "prompt"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
 
 /** The attribute a copy control wears for a moment after it copied. */
@@ -57,6 +57,36 @@ export function copyControlHtml(kind: CopyKind, className: string, label: string
     `<ar-button class="${COPY_CONTROL_CLASS} ${className}" ${COPY_KIND_ATTRIBUTE}="${kind}" ` +
     `title="${label}" aria-label="${label}">${COPY_ICON}${COPIED_ICON}</ar-button>`
   );
+}
+
+/** The text each control built by `boundCopyControl` copies. */
+const boundText = new WeakMap<Element, string>();
+
+/**
+ * The copy control of KIND as an element that copies TEXT, for a kind whose
+ * text is not read off the page around the control (a prompt's, which is the
+ * person's markdown rather than what it renders as). Its resolver is
+ * `boundCopyText`.
+ */
+export function boundCopyControl(kind: CopyKind, className: string, label: string, text: string): HTMLElement {
+  const template = document.createElement("template");
+  template.innerHTML = copyControlHtml(kind, className, label);
+  const control = template.content.firstElementChild;
+  if (!(control instanceof HTMLElement)) throw new Error("copyControlHtml drew no element");
+  boundText.set(control, text);
+  return control;
+}
+
+/**
+ * The text a control built by `boundCopyControl` copies. A control of a bound
+ * kind with no text bound to it is a bug, and throws.
+ */
+export function boundCopyText(control: Element): CopiedText {
+  const text = boundText.get(control);
+  if (text === undefined) {
+    throw new Error(`a ${control.getAttribute(COPY_KIND_ATTRIBUTE)} copy control has no text bound to it`);
+  }
+  return { text, context: {} };
 }
 
 /** What a copy control copies, and what its log record names it by. */

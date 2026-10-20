@@ -175,7 +175,10 @@ interface BubbleSpecBase {
   hooks?: readonly string[];
   /** The header strip: drawn above the scroll box, full width, in this order. */
   strip?: readonly HTMLElement[];
-  /** The response's usage corner, floated top-right inside the scroll box. */
+  /**
+   * The corner, floated top-right inside the scroll box: a response's usage
+   * corner, or a selectable prompt's copy control.
+   */
   corner?: HTMLElement;
   /** The content: nodes, markdown slots among them (see body.ts). */
   content: readonly ChildNode[];

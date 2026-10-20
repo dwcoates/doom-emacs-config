@@ -18,6 +18,7 @@ import { log } from "../../log.js";
 import { markdownSlot, type SlotMark } from "../../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
 import { codeBlockHtml } from "../../code-block.js";
+import { boundCopyControl } from "../../copy-control.js";
 import { armName } from "../renderers.js";
 import type {
   FeedImageBlock,
@@ -141,4 +142,43 @@ export function drawPromptBlockArm(arm: PromptBlockArm, path: string, mark?: Slo
     default:
       return unreachableArm(path, armName(block));
   }
+}
+
+/**
+ * One block of either prompt kind as the text its prompt's copy control
+ * copies: a text block's markdown as the person wrote it, a quote as its
+ * heading, quoted text and closing marker, and a block with no text as the
+ * bracketed name of what it is.
+ */
+export function promptBlockCopyText(arm: PromptBlockArm, path: string): string {
+  const block = requireCase(arm, path);
+  switch (block.case) {
+    case "text":
+      return block.value.text;
+    case "image":
+      return block.value.alt === "" ? "[image]" : `[image: ${block.value.alt}]`;
+    case "unsupported":
+      return `[unsupported block: ${block.value.kind}]`;
+    case "quote":
+      return [`${block.value.heading}:`, block.value.quoted, `${block.value.closing}:`]
+        .filter((part) => part !== "")
+        .join("\n\n");
+    default:
+      return unreachableArm(path, armName(block));
+  }
+}
+
+/** The class a prompt bubble's copy control wears, which places it in the bubble. */
+export const PROMPT_COPY_CLASS = "prompt-copy";
+
+/**
+ * A PROMPT BUBBLE'S COPY CONTROL (owner request, 2026-10-20): the one copy
+ * control (copy-control.ts), of kind `prompt`, copying the whole prompt, its
+ * BLOCKS' copy text in order, a blank line apart. The bubble floats it at its
+ * top right (the spec's `corner`), and the stylesheet shows it only while the
+ * bubble is the selected entry. PATH names the blocks' field.
+ */
+export function drawPromptCopyControl(blocks: readonly PromptBlockArm[], path: string): HTMLElement {
+  const text = blocks.map((arm, index) => promptBlockCopyText(arm, `${path}[${index}].block`)).join("\n\n");
+  return boundCopyControl("prompt", PROMPT_COPY_CLASS, "Copy prompt", text);
 }

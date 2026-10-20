@@ -15,7 +15,11 @@ import {
   drawFeedTextBlock,
   drawFeedUnsupportedBlock,
   drawPromptBlockArm,
+  drawPromptCopyControl,
+  PROMPT_COPY_CLASS,
+  promptBlockCopyText,
 } from "../../../src/feed/rows/blocks.js";
+import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
@@ -234,5 +238,85 @@ describe("the records of the drawn blocks", () => {
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-image-block");
     expect(record.level.case).toBe("info");
+  });
+});
+
+describe("promptBlockCopyText", () => {
+  it("copies a text block as the markdown the person wrote", () => {
+    // Act / Assert
+    expect(promptBlockCopyText({ case: "text", value: create(FeedTextBlockSchema, { text: "**fix** `a.ts`" }) }, "b")).toBe(
+      "**fix** `a.ts`",
+    );
+  });
+
+  it("copies an image block as its bracketed alt text", () => {
+    // Act / Assert
+    expect(promptBlockCopyText({ case: "image", value: create(FeedImageBlockSchema, { alt: "shot.png" }) }, "b")).toBe(
+      "[image: shot.png]",
+    );
+  });
+
+  it("copies an image block with no alt text as a bare bracketed image", () => {
+    // Act / Assert
+    expect(promptBlockCopyText({ case: "image", value: create(FeedImageBlockSchema, {}) }, "b")).toBe("[image]");
+  });
+
+  it("copies an unsupported block as its bracketed kind, as it is drawn", () => {
+    // Act / Assert
+    expect(
+      promptBlockCopyText({ case: "unsupported", value: create(FeedUnsupportedBlockSchema, { kind: "document" }) }, "b"),
+    ).toBe("[unsupported block: document]");
+  });
+
+  it("copies a quote as its heading, quoted text and closing marker", () => {
+    // Arrange
+    const quote = create(FeedQuoteBlockSchema, { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" });
+    // Act / Assert
+    expect(promptBlockCopyText({ case: "quote", value: quote }, "b")).toBe("⟢ Replying:\n\nParis.\n\n⟢ My message:");
+  });
+
+  it("leaves an empty quoted text out of a quote's copy", () => {
+    // Arrange
+    const quote = create(FeedQuoteBlockSchema, { heading: "⟢ Replying", quoted: "", closing: "⟢ My message" });
+    // Act / Assert
+    expect(promptBlockCopyText({ case: "quote", value: quote }, "b")).toBe("⟢ Replying:\n\n⟢ My message:");
+  });
+
+  it("refuses an unset block, naming its field", () => {
+    // Act / Assert
+    expect(() => promptBlockCopyText({ case: undefined }, "FeedUserPrompt.body.blocks[0].block")).toThrow(MalformedView);
+  });
+});
+
+describe("drawPromptCopyControl", () => {
+  it("is the one copy control, of the prompt kind, placed as the prompt's", () => {
+    // Act
+    const control = drawPromptCopyControl([], "p");
+    // Assert
+    expect([
+      control.classList.contains(COPY_CONTROL_CLASS),
+      control.classList.contains(PROMPT_COPY_CLASS),
+      control.getAttribute(COPY_KIND_ATTRIBUTE),
+      control.title,
+    ]).toEqual([true, true, "prompt", "Copy prompt"]);
+  });
+
+  it("copies every block in order, a blank line apart", () => {
+    // Arrange
+    const blocks = [
+      { case: "quote" as const, value: create(FeedQuoteBlockSchema, { heading: "H", quoted: "Q", closing: "C" }) },
+      { case: "text" as const, value: create(FeedTextBlockSchema, { text: "my words" }) },
+    ];
+    // Act
+    const control = drawPromptCopyControl(blocks, "p");
+    // Assert
+    expect(boundCopyText(control).text).toBe("H:\n\nQ\n\nC:\n\nmy words");
+  });
+
+  it("refuses an unset block, naming its index under the field", () => {
+    // Act / Assert
+    expect(() => drawPromptCopyControl([{ case: undefined }], "FeedUserPrompt.body.blocks")).toThrow(
+      "FeedUserPrompt.body.blocks[0].block",
+    );
   });
 });

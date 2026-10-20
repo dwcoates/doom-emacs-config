@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODE_COPY_CLASS, codeBlockHtml, codeOfCopyControl } from "../src/code-block.js";
-import { COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, installCopyControls } from "../src/copy-control.js";
+import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, installCopyControls } from "../src/copy-control.js";
 import { renderMarkdown } from "../src/markdown.js";
 import { codeUnder } from "./files-under.js";
 
@@ -30,7 +30,7 @@ function drawn(body: string, lang = ""): HTMLElement {
 /** Install the copy controls with the code resolver, recording what each copy wrote. */
 function installRecording(): string[] {
   const written: string[] = [];
-  teardown = installCopyControls(document, { code: codeOfCopyControl }, (text) => {
+  teardown = installCopyControls(document, { code: codeOfCopyControl, prompt: boundCopyText }, (text) => {
     written.push(text);
     return true;
   });

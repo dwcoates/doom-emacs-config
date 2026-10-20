@@ -19,6 +19,9 @@ import {
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { KNOWN_COMMAND_CLASS } from "../../../src/feed/rows/known-commands.js";
+import { PROMPT_COPY_CLASS } from "../../../src/feed/rows/blocks.js";
+import { boundCopyText } from "../../../src/copy-control.js";
+import { SELECTED_ENTRY_CLASS } from "../../../src/feed/selected-entry.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
 
@@ -357,6 +360,73 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
       el.querySelector(`.${BUBBLE_SCROLL_CLASS}`)?.classList.add(EXPANDED_CLASS);
       // Assert
       expect(displays(el)).toEqual({ parts: [false, false, false], heading: false, words: false });
+    } finally {
+      el.remove();
+      restore();
+    }
+  });
+});
+
+describe("drawFeedUserPrompt: the copy control", () => {
+  /** The prompt bubble drawn from BLOCKS, and its copy control. */
+  function copyControlOf(blocks: unknown[]): { el: HTMLElement; control: HTMLElement } {
+    const el = drawFeedUserPrompt(prompt(blocks));
+    const control = el.querySelector<HTMLElement>(`.${PROMPT_COPY_CLASS}`);
+    if (control === null) throw new Error("the prompt drew no copy control");
+    return { el, control };
+  }
+
+  it("floats in the scroll box ahead of the body, as the bubble's corner", () => {
+    // Act
+    const { control } = copyControlOf([{ block: { case: "text", value: { text: "hi" } } }]);
+    // Assert
+    expect([control.parentElement?.classList.contains("bubble-box"), control.nextElementSibling?.className]).toEqual([
+      true,
+      "bubble-body",
+    ]);
+  });
+
+  it("copies the whole prompt, quote and words", () => {
+    // Act
+    const { control } = copyControlOf([
+      { block: { case: "quote", value: { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" } } },
+      { block: { case: "text", value: { text: "and *Rome*?" } } },
+    ]);
+    // Assert
+    expect(boundCopyText(control).text).toBe("⟢ Replying:\n\nParis.\n\n⟢ My message:\n\nand *Rome*?");
+  });
+
+  it("copies what the latest push says, after a redraw in place", () => {
+    // Arrange
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "old" } } }]));
+    // Act
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "new" } } }]), first);
+    // Assert
+    const controls = el.querySelectorAll(`.${PROMPT_COPY_CLASS}`);
+    expect([controls.length, boundCopyText(controls[0]).text]).toEqual([1, "new"]);
+  });
+
+  it("adds no text to the bubble", () => {
+    // Act
+    const { el, control } = copyControlOf([{ block: { case: "text", value: { text: "just this" } } }]);
+    const withControl = el.textContent;
+    // Assert
+    control.remove();
+    expect(el.textContent).toBe(withControl);
+  });
+
+  it.each([
+    ["hidden while the bubble is not selected", false, "none"],
+    ["shown while the bubble is selected", true, "inline-flex"],
+  ])("is %s", (_name, selected, display) => {
+    // Arrange
+    const restore = installStylesheet();
+    const { el, control } = copyControlOf([{ block: { case: "text", value: { text: "hi" } } }]);
+    el.classList.toggle(SELECTED_ENTRY_CLASS, selected);
+    document.body.append(el);
+    try {
+      // Act / Assert
+      expect(cascadedValue(control, "display")).toBe(display);
     } finally {
       el.remove();
       restore();

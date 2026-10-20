@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  boundCopyControl,
+  boundCopyText,
   COPIED_ATTRIBUTE,
   COPIED_MS,
   COPY_CONTROL_CLASS,
@@ -41,7 +43,10 @@ function installRecording(outcome: boolean): string[] {
   const written: string[] = [];
   teardown = installCopyControls(
     document,
-    { code: (control) => ({ text: control.parentElement?.getAttribute("data-text") ?? "", context: { lang: "go" } }) },
+    {
+      code: (control) => ({ text: control.parentElement?.getAttribute("data-text") ?? "", context: { lang: "go" } }),
+      prompt: boundCopyText,
+    },
     (text) => {
       written.push(text);
       return outcome;
@@ -84,6 +89,43 @@ describe("copyControlHtml", () => {
       .map(([file]) => file);
     // Assert
     expect(handRolled).toEqual([]);
+  });
+});
+
+describe("boundCopyControl", () => {
+  it("is the one copy control, of the kind it was given", () => {
+    // Act
+    const control = boundCopyControl("prompt", "placed", "Copy it", "x");
+    // Assert
+    expect([control.localName, control.className, control.getAttribute(COPY_KIND_ATTRIBUTE), control.title]).toEqual([
+      "ar-button",
+      `${COPY_CONTROL_CLASS} placed`,
+      "prompt",
+      "Copy it",
+    ]);
+  });
+
+  it("copies the text bound to it", () => {
+    // Arrange
+    const written = installRecording(true);
+    const control = boundCopyControl("prompt", "placed", "Copy it", "the whole **prompt**");
+    document.body.append(control);
+    // Act
+    control.click();
+    // Assert
+    expect(written).toEqual(["the whole **prompt**"]);
+  });
+});
+
+describe("boundCopyText", () => {
+  it("answers the text bound to the control, with no further context", () => {
+    // Act / Assert
+    expect(boundCopyText(boundCopyControl("prompt", "placed", "Copy it", "abc"))).toEqual({ text: "abc", context: {} });
+  });
+
+  it("throws for a control with no text bound to it", () => {
+    // Act / Assert
+    expect(() => boundCopyText(drawn())).toThrow("has no text bound to it");
   });
 });
 
