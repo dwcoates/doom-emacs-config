@@ -1192,12 +1192,20 @@ resets."
                         "elisp.commands.open-most-recent-cycle-reset")
       (message "All workspaces visited -- cycle reset"))))
 
+(defun agent-repl--gesture-log-ws (shown gesture)
+  "Return the log target of a navigation GESTURE made from SHOWN.
+SHOWN's own log name, or, standing on a placeholder (a startup before its
+first tab opened), an explicit context naming GESTURE, because a
+placeholder names no workspace sink.  The one target every navigation
+gesture logs under."
+  (or (agent-repl--ws-log-name shown)
+      (list :agent-repl-context
+            (format "a %s from a placeholder names no workspace" gesture))))
+
 (defun agent-repl--jump-log-ws (shown)
   "Return the log target of a jump made from SHOWN.
-SHOWN's own log name, or the context of a placeholder, which names no
-workspace.  The one target every recency jump logs under."
-  (or (agent-repl--ws-log-name shown)
-      '(:agent-repl-context "a jump from a placeholder names no workspace")))
+The target every recency jump logs under (`agent-repl--gesture-log-ws')."
+  (agent-repl--gesture-log-ws shown "jump"))
 
 (defun agent-repl-switch-to-previous-workspace ()
   "Switch to the workspace selected before the one shown.
@@ -1320,11 +1328,7 @@ harvest fails a run on every warning."
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
          (all (funcall ring-fn current))
-         ;; Standing on a placeholder (a startup before its first tab
-         ;; opened) names no workspace sink: the record takes an explicit one.
-         (log-ws (or (agent-repl--ws-log-name shown)
-                     (list :agent-repl-context
-                           (format "a %s from a placeholder names no workspace" op))))
+         (log-ws (agent-repl--gesture-log-ws shown op))
          (target (agent-repl--cycle-target all names current n)))
     (if (null target)
         (agent-repl--info log-ws (format "elisp.commands.%s-no-position n=%%d tabs=%%d from=%%s" op)
@@ -1460,9 +1464,7 @@ current workspace's own slot are REPORTED no-ops, recorded at `info' like
 every other navigation gesture."
   (let* ((names (agent-repl--drawn-tab-names))
          (current (agent-repl--ws-current-name))
-         (log-ws (or (agent-repl--ws-log-name current)
-                     (list :agent-repl-context
-                           (format "a %s from a placeholder names no workspace" op))))
+         (log-ws (agent-repl--gesture-log-ws current op))
          (target (and (<= 1 slot (length names)) (nth (1- slot) names))))
     (cond
      ((not (member current names))

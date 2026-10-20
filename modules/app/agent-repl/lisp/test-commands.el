@@ -734,6 +734,40 @@ order a close lands by."
 
 ;;;; ---- The log target every recency jump shares ----
 
+(ert-deftest agent-repl-test-commands-gesture-log-ws-is-the-shown-log-name ()
+  "A gesture from a workspace logs under that workspace's own log name."
+  (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (ws) (concat "log-" ws))))
+    (should (equal (agent-repl--gesture-log-ws "here" "probe") "log-here"))))
+
+(ert-deftest agent-repl-test-commands-gesture-log-ws-from-a-placeholder-names-the-gesture ()
+  "A gesture from a placeholder logs under a context naming the gesture."
+  (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (_) nil)))
+    (should (equal (agent-repl--gesture-log-ws nil "probe")
+                   '(:agent-repl-context "a probe from a placeholder names no workspace")))))
+
+(ert-deftest agent-repl-test-commands-navigation-gestures-share-the-gesture-log-ws ()
+  "Every navigation gesture names its log target through `agent-repl--gesture-log-ws'."
+  ;; Arrange
+  (let ((gestures nil))
+    (cl-letf (((symbol-function 'agent-repl--gesture-log-ws)
+               (lambda (_shown gesture) (push gesture gestures) "log"))
+              ((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl-roster-tab-order) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl-roster-selection-recency-order) (lambda (names) names))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+              ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
+              ((symbol-function 'agent-repl-host-request-switch) (lambda (&rest _) t))
+              ((symbol-function 'agent-repl--roster-recent-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl--info) #'ignore)
+              ((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl-switch-right)
+      (agent-repl-switch-older)
+      (agent-repl-switch-to-previous-workspace)
+      (agent-repl--act-on-tab-slot 2 "swap" #'ignore)
+      ;; Assert
+      (should (equal (reverse gestures) '("cycle" "recency-walk" "jump" "swap"))))))
+
 (ert-deftest agent-repl-test-commands-jump-log-ws-is-the-shown-log-name ()
   "A jump from a workspace logs under that workspace's log name."
   (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (ws) (concat "log-" ws))))
