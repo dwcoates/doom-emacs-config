@@ -20,6 +20,7 @@ import (
 
 	"agent-repld/internal/boot"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"testing"
 	"time"
@@ -663,5 +664,15 @@ func TestResolvePathsTakesTheLockDirectoryFromSessionlock(t *testing.T) {
 				t.Fatalf("resolvePaths() = (RunDir %q, %v), want %q", got.RunDir, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestTheGraphRegistersMergeTestLogsForRetention(t *testing.T) {
+	// Act.
+	registered := sourcescan.Count(t, "p.Surfaces.RetainDirectory(merge.TestLogsDir(p.Layout.Dir()), merge.IsTestLog)")
+
+	// Assert.
+	if registered != 1 {
+		t.Fatalf("the merge test logs directory is registered for retention %d times, want once", registered)
 	}
 }

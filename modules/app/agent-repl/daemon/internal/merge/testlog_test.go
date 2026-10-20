@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"agentrepl/logging"
 
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -137,6 +140,62 @@ func TestCreateTestLogRefusesWhenItsDirectoryCannotBeMade(t *testing.T) {
 	}
 }
 
+func TestACreatedTestLogIsHeldUntilClosed(t *testing.T) {
+	// Arrange.
+	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "00bfb96b635b498a-tests-1.log")}
+	file, err := createTestLog(log)
+	if err != nil {
+		t.Fatalf("createTestLog: %v", err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	old := time.Now().Add(-logging.DefaultRetention - time.Hour)
+	if err := os.Chtimes(log.path, old, old); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Act: a retention pass over the directory while the log is open.
+	report, err := logging.PruneDirectory(filepath.Dir(log.path), time.Now(), logging.DefaultRetention, IsTestLog)
+
+	// Assert.
+	if err != nil || len(report.Removed) != 0 || len(report.Held) != 1 {
+		t.Fatalf("PruneDirectory = (%+v, %v), want the open log held", report, err)
+	}
+}
+
+func TestIsTestLog(t *testing.T) {
+	cases := []struct {
+		base string
+		want bool
+	}{
+		{"00bfb96b635b498a-tests-1.log", true},
+		{"00bfb96b635b498a-tests-12.log", true},
+		{"00bfb96b635b498a-tests-1.log.1", false},
+		{"notes.txt", false},
+		{"00bfb96b635b498a-tests-.log", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.base, func(t *testing.T) {
+			// Act / Assert.
+			if got := IsTestLog(tc.base); got != tc.want {
+				t.Fatalf("IsTestLog(%q) = %v, want %v", tc.base, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryTestLogLivesInTestLogsDir(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	log := h.o.testLog("00bfb96b635b498a", 3)
+
+	// Assert.
+	if filepath.Dir(log.path) != TestLogsDir(h.o.deps.StateDir) || !IsTestLog(filepath.Base(log.path)) {
+		t.Fatalf("testLog path %q is not a test log in %q", log.path, TestLogsDir(h.o.deps.StateDir))
+	}
+}
+
 func TestWriteTestLogWritesTheWholeBody(t *testing.T) {
 	// Arrange.
 	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-2.log")}
@@ -157,8 +216,9 @@ func TestEveryTestLogIsCreatedThroughCreateTestLog(t *testing.T) {
 	byHand := sourcescan.Count(t, "os.Create(") + sourcescan.Count(t, "os.WriteFile(log.path")
 
 	// Assert: the gate run, writeTestLog and the helper's own definition, and
-	// the one os.Create inside the helper.
-	if viaHelper != 3 || byHand != 1 {
-		t.Fatalf("createTestLog( appears %d times and a hand-rolled create %d times; want 3 and 1", viaHelper, byHand)
+	// no hand-rolled create, which would write a log the retention pass could
+	// prune mid-run.
+	if viaHelper != 3 || byHand != 0 {
+		t.Fatalf("createTestLog( appears %d times and a hand-rolled create %d times; want 3 and 0", viaHelper, byHand)
 	}
 }

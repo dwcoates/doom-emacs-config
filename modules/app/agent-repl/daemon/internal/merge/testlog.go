@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"agentrepl/logging"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -41,16 +43,29 @@ type testLog struct {
 func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
 	return testLog{
 		token: fmt.Sprintf("%s/%d", lease, round),
-		path:  filepath.Join(o.deps.StateDir, mergeLogsDir, fmt.Sprintf("%s-tests-%d.log", lease, round)),
+		path:  filepath.Join(TestLogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", lease, round)),
 	}
 }
 
-// createTestLog creates (or truncates) one round's log, its directory first.
+// TestLogsDir is the directory every merge's test logs are written to, under
+// the state root stateDir. The daemon's log retention pass prunes it
+// (dlog.Surfaces.RetainDirectory) by IsTestLog.
+func TestLogsDir(stateDir string) string { return filepath.Join(stateDir, mergeLogsDir) }
+
+// testLogName matches the basename testLog gives a round's log.
+var testLogName = regexp.MustCompile(`^[0-9a-f]+-tests-[0-9]+\.log$`)
+
+// IsTestLog answers whether base names a round's test log.
+func IsTestLog(base string) bool { return testLogName.MatchString(base) }
+
+// createTestLog creates (or truncates) one round's log, its directory first,
+// under the shared lock the log retention pass honors, so a log is never
+// pruned while it is being written.
 func createTestLog(log testLog) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
 		return nil, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
 	}
-	file, err := os.Create(log.path)
+	file, err := logging.CreateLocked(log.path)
 	if err != nil {
 		return nil, fmt.Errorf("merge: creating the test log %s: %w", log.path, err)
 	}
