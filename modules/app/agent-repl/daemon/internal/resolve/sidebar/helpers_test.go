@@ -3,6 +3,7 @@ package sidebar_test
 import (
 	"agentrepl/protohelpers/rosterwalk"
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -323,7 +324,23 @@ func repoOpen(t *testing.T, roster *frontendv1.WorkspaceRoster) []*frontendv1.Ro
 	if len(sections) != 1 {
 		t.Fatalf("the repository view carried %d sections, want exactly 1", len(sections))
 	}
-	return sections[0].GetOpenRows().GetRows()
+	return rosterwalk.UnsectionedRows(sections[0])
+}
+
+// entryShape spells SECTION's entries in drawn order: a row by its name, a
+// subsection as [label: row row].
+func entryShape(section *frontendv1.RosterRepoSection) []string {
+	var out []string
+	for _, entry := range section.GetEntries() {
+		if row := entry.GetRow(); row != nil {
+			out = append(out, rowNames(innerRows([]*frontendv1.RosterOpenRow{row}))...)
+			continue
+		}
+		sub := entry.GetSubsection()
+		parts := append([]string{sub.GetHeader().GetLabel().GetText() + ":"}, rowNames(innerRows(sub.GetOpenRows().GetRows()))...)
+		out = append(out, "["+strings.Join(parts, " ")+"]")
+	}
+	return out
 }
 
 // repoRows reads the shared rows of the repository grouping's only section's

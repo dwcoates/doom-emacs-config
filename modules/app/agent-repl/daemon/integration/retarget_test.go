@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/integration/harness"
 )
@@ -145,9 +146,9 @@ func TestRosterNestsReadsOnlyTheParentsChildren(t *testing.T) {
 		}
 	}
 	roster := &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
-		Sections: []*frontendv1.RosterRepoSection{{OpenRows: &frontendv1.RosterOpenRows{Rows: []*frontendv1.RosterOpenRow{
+		Sections: []*frontendv1.RosterRepoSection{{Entries: rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{
 			row("p", row("c")), row("top"),
-		}}}},
+		})}},
 	}}
 	tests := []struct {
 		name          string

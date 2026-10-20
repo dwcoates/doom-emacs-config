@@ -10,6 +10,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/integration/harness"
 
@@ -116,7 +117,7 @@ func TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster(t *testing.T) {
 	// Assert
 	got := awaitRoster(t, d, roster, "a roster carrying the newly registered repository's workspace row",
 		func(r *frontendv1.WorkspaceRoster) bool {
-			return len(repoSectionByID(r, id).GetOpenRows().GetRows()) == 1
+			return len(rosterwalk.UnsectionedRows(repoSectionByID(r, id))) == 1
 		})
 	section := repoSectionByID(got, id)
 	if section.GetHeader().GetLabel().GetText() == "" {

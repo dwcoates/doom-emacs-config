@@ -540,11 +540,21 @@ message RosterRepoSection {
   // The header box: label and fold toggle.
   RosterSectionHeader header = 2;
   // `rows` (field 3) is RETIRED and reserved: rows of every state shared one
-  // type. The section's rows are open rows (`open_rows`).
-  reserved 3;
-  reserved "rows";
-  // The repository's open workspaces in no subsection, drawn below the header.
-  RosterOpenRows open_rows = 8;
+  // type. `open_rows` (field 8) and `subsections` (field 7) are RETIRED and
+  // reserved: they carried the unsectioned rows and the subsections as two
+  // lists, which could only say "the rows, then the subsections". The
+  // section's body is `entries`, one list in drawn order.
+  reserved 3, 7, 8;
+  reserved "rows", "open_rows", "subsections";
+  // THE SECTION'S BODY, IN DRAWN ORDER, below the header: the repository's
+  // top-level open rows in no subsection and its subsections, INTERLEAVED as
+  // the user arranged them (agentrepl.v1.ArrangeSidebar), so a subsection may
+  // sit between two unsectioned rows. Every subsection is listed, one with no
+  // rows included, so a workspace can be dragged into it. The Emacs tab bar
+  // walks the same order: entry by entry, a subsection's rows where the
+  // subsection stands. The section's header count covers every entry's rows,
+  // and its fold folds them all.
+  repeated RosterRepoEntry entries = 9;
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because two
   // surfaces draw it: the sidebar hides a collapsed section's rows, and the
   // Emacs tab bar hides that repository's workspaces from its tabs, numbering
@@ -562,12 +572,19 @@ message RosterRepoSection {
   // startup and every five minutes after, so it may be up to that old. Always
   // set: a repository not yet measured carries the pending arm.
   RosterRepoDivergence divergence = 6;
-  // THE REPOSITORY'S SUBSECTIONS, in their stored order, drawn below `rows`
-  // (agentrepl.v1.ArrangeSidebar). `rows` holds only the workspaces in no
-  // subsection. A subsection with no rows still draws, so a workspace can be
-  // dragged into it. The section's header count covers every subsection's
-  // rows as well as its own, and its fold folds them all.
-  repeated RosterSubsection subsections = 7;
+}
+
+// One entry of a repository section's body: a top-level row in no
+// subsection, or a subsection with its own rows below its header.
+message RosterRepoEntry {
+  // THE ARM IS WHAT STANDS AT THIS POINT OF THE SECTION. Unset is malformed.
+  oneof entry {
+    // One top-level open workspace in no subsection, its family nested
+    // under it.
+    RosterOpenRow row = 1;
+    // One subsection.
+    RosterSubsection subsection = 2;
+  }
 }
 
 // One named subsection of a repository's section: identity, header, rows.

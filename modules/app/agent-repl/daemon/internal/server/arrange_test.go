@@ -39,6 +39,16 @@ func moveRepository(repo string, before *workspacev1.RepositoryRef) *agentreplv1
 	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepository{MoveRepository: move}}
 }
 
+// placeBeforeSubsection is a place_workspace change of WS into no
+// subsection, just before subsection SUB.
+func placeBeforeSubsection(ws *workspacev1.WorkspaceRef, sub string) *agentreplv1.ArrangeSidebarRequest {
+	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+		Workspace: ws,
+		Into:      &agentreplv1.ArrangePlaceWorkspace_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
+		At:        &agentreplv1.ArrangePlaceWorkspace_BeforeSubsection{BeforeSubsection: subRef(sub)},
+	}}}
+}
+
 func placeWorkspace(ws *workspacev1.WorkspaceRef, into string, before *workspacev1.WorkspaceRef) *agentreplv1.ArrangeSidebarRequest {
 	place := &agentreplv1.ArrangePlaceWorkspace{Workspace: ws}
 	if into == "" {
@@ -77,21 +87,34 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 		{name: "delete a subsection", want: "DeleteSubsection sub-1",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_DeleteSubsection{
 				DeleteSubsection: &agentreplv1.ArrangeDeleteSubsection{Subsection: subRef("sub-1")}}}},
-		{name: "move a subsection before another", want: "MoveSubsection sub-1 sub-2",
+		{name: "move a subsection before another", want: "MoveSubsection sub-1 before subsection sub-2",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveSubsection{
 				MoveSubsection: &agentreplv1.ArrangeMoveSubsection{Subsection: subRef("sub-1"),
 					To: &agentreplv1.ArrangeMoveSubsection_Before{Before: subRef("sub-2")}}}}},
-		{name: "move a subsection to the end", want: "MoveSubsection sub-1 ",
+		{name: "move a subsection before a workspace", want: "MoveSubsection sub-1 before workspace ws-2",
+			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveSubsection{
+				MoveSubsection: &agentreplv1.ArrangeMoveSubsection{Subsection: subRef("sub-1"),
+					To: &agentreplv1.ArrangeMoveSubsection_BeforeWorkspace{BeforeWorkspace: other}}}}},
+		{name: "move a subsection to the end", want: "MoveSubsection sub-1 end",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveSubsection{
 				MoveSubsection: &agentreplv1.ArrangeMoveSubsection{Subsection: subRef("sub-1"),
 					To: &agentreplv1.ArrangeMoveSubsection_End{End: endPlace()}}}}},
 		{name: "move a repository before another", req: moveRepository("repo-2", repoRef("repo-1")), want: "MoveRepository repo-2 repo-1"},
 		{name: "move a repository to the end", req: moveRepository("repo-1", nil), want: "MoveRepository repo-1 "},
 		{name: "place a workspace before another in a subsection", req: placeWorkspace(ref(), "sub-1", other),
-			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 ws-2"},
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 before workspace ws-2"},
 		{name: "place a workspace last among the unsectioned", req: placeWorkspace(ref(), "", nil),
-			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  "},
-		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 ",
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  end"},
+		{name: "place a workspace before a subsection", req: placeBeforeSubsection(ref(), "sub-2"),
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  before subsection sub-2"},
+		{name: "place several workspaces before a subsection", want: "PlaceWorkspaces [ws-2]  before subsection sub-2",
+			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
+				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
+					Workspaces: []*workspacev1.WorkspaceRef{other},
+					Into:       &agentreplv1.ArrangePlaceWorkspaces_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
+					At:         &agentreplv1.ArrangePlaceWorkspaces_BeforeSubsection{BeforeSubsection: subRef("sub-2")},
+				}}}},
+		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 end",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
 				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
 					Workspaces: []*workspacev1.WorkspaceRef{other, ref()},
@@ -269,6 +292,18 @@ func TestValidateArrangeSidebarRequestRefusesAnIncompleteRequest(t *testing.T) {
 		{"a bulk placement of nothing", bulk(nil, nil)},
 		{"a bulk placement naming one workspace twice", bulk([]*workspacev1.WorkspaceRef{ref(), ref()}, nil)},
 		{"a bulk placement before one of its own", bulk([]*workspacev1.WorkspaceRef{ref()}, ref())},
+		{"a subsection moved before a workspace with a blank id", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveSubsection{
+			MoveSubsection: &agentreplv1.ArrangeMoveSubsection{Subsection: subRef("sub-1"),
+				To: &agentreplv1.ArrangeMoveSubsection_BeforeWorkspace{BeforeWorkspace: &workspacev1.WorkspaceRef{}}}}}},
+		{"a placement before a subsection with a blank id", placeBeforeSubsection(ref(), "")},
+		{"a placement into a subsection before a subsection", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+			PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{Workspace: ref(),
+				Into: &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: subRef("sub-1")},
+				At:   &agentreplv1.ArrangePlaceWorkspace_BeforeSubsection{BeforeSubsection: subRef("sub-2")}}}}},
+		{"a bulk placement into a subsection before a subsection", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
+			PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{Workspaces: []*workspacev1.WorkspaceRef{ref()},
+				Into: &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subRef("sub-1")},
+				At:   &agentreplv1.ArrangePlaceWorkspaces_BeforeSubsection{BeforeSubsection: subRef("sub-2")}}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -382,11 +417,13 @@ func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
 	parent := ids.WorkspaceID("ws-p")
 	h.Verbs.arrangement = []sidebar.ArrangedRepository{{
 		Repository: wsm.Repository{ID: "repo-1", Dir: "/repos/one", Name: "one"},
-		Workspaces: []sidebar.ArrangedWorkspace{{
-			Workspace: wsm.Workspace{ID: "ws-p", Dir: "/w/p", Name: "p", Branch: "bp"},
-			Children:  []sidebar.ArrangedWorkspace{{Workspace: wsm.Workspace{ID: "ws-k", Dir: "/w/k", Name: "k", Parent: &parent, Hidden: true}}},
-		}},
-		Subsections: []sidebar.ArrangedSubsection{{Subsection: wsm.Subsection{ID: "sub-1", Repo: "repo-1", Name: "later", Place: 1}}},
+		Entries: []sidebar.ArrangedEntry{
+			{Subsection: &sidebar.ArrangedSubsection{Subsection: wsm.Subsection{ID: "sub-1", Repo: "repo-1", Name: "later", Place: 1}}},
+			{Workspace: sidebar.ArrangedWorkspace{
+				Workspace: wsm.Workspace{ID: "ws-p", Dir: "/w/p", Name: "p", Branch: "bp"},
+				Children:  []sidebar.ArrangedWorkspace{{Workspace: wsm.Workspace{ID: "ws-k", Dir: "/w/k", Name: "k", Parent: &parent, Hidden: true}}},
+			}},
+		},
 	}}
 
 	// Act
@@ -397,15 +434,16 @@ func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
 		t.Fatalf("GetSidebarArrangement: %v", err)
 	}
 	repo := resp.Msg.GetRepositories()[0]
-	root := repo.GetWorkspaces()[0]
+	sub := repo.GetEntries()[0].GetSubsection()
+	root := repo.GetEntries()[1].GetWorkspace()
 	child := root.GetChildren()[0]
 	got := []any{
-		repo.GetRepository().GetId(), repo.GetName(),
+		repo.GetRepository().GetId(), repo.GetName(), len(repo.GetEntries()),
+		sub.GetSubsection().GetId(), sub.GetName(),
 		root.GetWorkspace().GetId(), root.GetBranch(), root.Parent == nil,
 		child.GetWorkspace().GetId(), child.GetParent().GetId(), child.GetHidden(),
-		repo.GetSubsections()[0].GetSubsection().GetId(), repo.GetSubsections()[0].GetName(),
 	}
-	want := []any{"repo-1", "one", "ws-p", "bp", true, "ws-k", "ws-p", true, "sub-1", "later"}
+	want := []any{"repo-1", "one", 2, "sub-1", "later", "ws-p", "bp", true, "ws-k", "ws-p", true}
 	if !slices.Equal(got, want) {
 		t.Fatalf("arrangement = %v, want %v", got, want)
 	}

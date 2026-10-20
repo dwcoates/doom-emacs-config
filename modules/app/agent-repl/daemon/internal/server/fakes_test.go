@@ -1903,16 +1903,16 @@ func (v *fakeVerbs) DeleteSubsection(_ context.Context, id ids.SubsectionID) err
 	return v.arrange("DeleteSubsection " + string(id))
 }
 
-func (v *fakeVerbs) MoveSubsection(_ context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
-	return v.arrange("MoveSubsection " + string(id) + " " + ids.Optional(before))
+func (v *fakeVerbs) MoveSubsection(_ context.Context, id ids.SubsectionID, to wsm.Anchor) error {
+	return v.arrange("MoveSubsection " + string(id) + " " + wsm.AnchorField(to))
 }
 
 func (v *fakeVerbs) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
 	return v.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
-	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
+func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
 }
 
 func (v *fakeVerbs) SidebarArrangement(context.Context) ([]sidebar.ArrangedRepository, error) {

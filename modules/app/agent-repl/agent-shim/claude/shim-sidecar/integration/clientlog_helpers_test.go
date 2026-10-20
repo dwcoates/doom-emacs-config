@@ -21,6 +21,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -182,7 +183,7 @@ func fakeRoster(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRos
 	}
 	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			OpenRows: &frontendv1.RosterOpenRows{Rows: rows},
+			Entries: rosterwalk.RowEntries(rows),
 		}}},
 	}}}
 }

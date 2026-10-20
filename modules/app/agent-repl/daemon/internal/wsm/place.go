@@ -106,11 +106,19 @@ func landingPlace(ctx context.Context, tx *sql.Tx, p *Priority, self WorkspaceID
 // shiftFrom moves every place at or after `at` up by one, self left out, so
 // `at` is free. It runs through negatives so the unique index never sees two
 // rows on one place mid-statement.
+//
+// EVERY SUBSECTION SLOT PAST `at` SHIFTS WITH THEM (walk.go), so no root
+// crosses a subsection. A slot ON `at` stays: the root that stood there
+// moves up past it, and the one landing on `at` stands just after the
+// subsection, before the root it displaced.
 func shiftFrom(ctx context.Context, tx *sql.Tx, at int64, self WorkspaceID) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = -(place + 1) WHERE place >= ? AND id <> ?`, at, self); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = -place WHERE place < 0`)
+	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = -place WHERE place < 0`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE subsections SET slot = slot + 1 WHERE slot > ?`, at)
 	return err
 }
 

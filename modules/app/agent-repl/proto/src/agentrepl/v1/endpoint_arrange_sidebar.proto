@@ -2,21 +2,25 @@
 // grouping is ARRANGED. SIDEBAR section.
 //
 // THE ARRANGEMENT IS THE TAB BAR'S ORDER. The repository grouping draws its
-// repositories in their stored order; inside each repository, the workspaces
-// in no subsection first, then each subsection in its stored order with its
-// own workspaces below its header. The Emacs tab bar walks the open
-// workspaces in exactly that order (frontend.v1.RosterOpenRow.tab): every workspace of an earlier repository before any of a later
-// one, and inside a repository, the unsectioned workspaces, then the first
-// subsection's, then the next's. So every change here moves tabs as well as
-// rows, and the new order arrives on the roster stream for both.
+// repositories in their stored order; inside each repository, ONE ORDER OF
+// ENTRIES (frontend.v1.RosterRepoSection.entries): the workspaces in no
+// subsection and the subsections, interleaved as arranged, so a subsection
+// may stand between two unsectioned workspaces, each subsection with its own
+// workspaces below its header. The Emacs tab bar walks the open workspaces
+// in exactly that order (frontend.v1.RosterOpenRow.tab): every workspace of
+// an earlier repository before any of a later one, and inside a repository,
+// entry by entry, a subsection's workspaces where the subsection stands. So
+// every change here moves tabs as well as rows, and the new order arrives on
+// the roster stream for both.
 //
 // NOT VIEW STATE (endpoint_update_sidebar_view.proto): a fold or the grouping
 // shown changes what a page draws, while an arrangement changes the order
 // every surface walks.
 //
 // The arrangement is DURABLE: it survives a daemon restart. A NEW repository
-// lands after every other one; a NEW subsection lands after its repository's
-// other subsections; a NEW workspace lands in no subsection.
+// lands after every other one; a NEW subsection lands at the bottom of its
+// repository, after every entry; a NEW workspace lands in no subsection, at
+// the registry place it is created on.
 
 syntax = "proto3";
 
@@ -37,7 +41,7 @@ message ArrangeSidebarRequest {
     ArrangeRenameSubsection rename_subsection = 2;
     // Remove one subsection; its workspaces return to no subsection.
     ArrangeDeleteSubsection delete_subsection = 3;
-    // Move one subsection among its repository's subsections.
+    // Move one subsection among its repository's entries.
     ArrangeMoveSubsection move_subsection = 4;
     // Move one repository among the repositories.
     ArrangeMoveRepository move_repository = 5;
@@ -49,7 +53,8 @@ message ArrangeSidebarRequest {
   }
 }
 
-// Add a subsection named `name` after the repository's other subsections.
+// Add a subsection named `name` at the bottom of the repository, after
+// every entry.
 message ArrangeCreateSubsection {
   // The repository, echoed from frontend.v1.RosterRepoKey.
   workspace.v1.RepositoryRef repository = 1;
@@ -66,13 +71,14 @@ message ArrangeRenameSubsection {
 }
 
 // Remove one subsection. Its workspaces return to no subsection, keeping
-// their order among themselves, so they draw after the repository's other
-// unsectioned workspaces.
+// their order among themselves, and take the subsection's place among the
+// repository's entries: they draw where the subsection stood.
 message ArrangeDeleteSubsection {
   SubsectionRef subsection = 1;
 }
 
-// Move one subsection among its own repository's subsections.
+// Move one subsection among its own repository's entries: before another
+// subsection, before a workspace in no subsection, or to the bottom.
 message ArrangeMoveSubsection {
   SubsectionRef subsection = 1;
   // WHERE IT GOES. THE ARM IS THE PLACE; unset is malformed.
@@ -80,8 +86,12 @@ message ArrangeMoveSubsection {
     // Just before this subsection of the same repository. Naming the moved
     // subsection itself is malformed.
     SubsectionRef before = 2;
-    // After every other subsection of its repository.
+    // After every other entry of its repository.
     ArrangeEnd end = 3;
+    // Just before this ROOT workspace of the same repository, which sits in
+    // no subsection (anchor_elsewhere otherwise; other_repository for
+    // another repository's).
+    workspace.v1.WorkspaceRef before_workspace = 4;
   }
 }
 
@@ -110,7 +120,8 @@ message ArrangePlaceWorkspace {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHERE IT GOES. THE ARM IS THE DESTINATION; unset is malformed.
   oneof into {
-    // The repository's unsectioned workspaces, above its subsections.
+    // The repository's unsectioned workspaces, interleaved with its
+    // subsections.
     ArrangeNoSubsection no_subsection = 2;
     // One subsection of the workspace's own repository.
     SubsectionRef subsection = 3;
@@ -120,8 +131,13 @@ message ArrangePlaceWorkspace {
     // Just before this root workspace, which must already sit in the
     // destination. Naming the moved workspace itself is malformed.
     workspace.v1.WorkspaceRef before = 4;
-    // After every workspace already in the destination.
+    // After every entry of the destination: the bottom of a subsection, or,
+    // into no subsection, the bottom of the repository.
     ArrangeEnd end = 5;
+    // Just before this subsection of the workspace's own repository, in no
+    // subsection: the destination must be no_subsection (malformed
+    // otherwise).
+    SubsectionRef before_subsection = 6;
   }
 }
 
@@ -143,8 +159,10 @@ message ArrangePlaceWorkspaces {
     // Just before this root of the destination, which is none of the placed
     // workspaces (InvalidArgument otherwise).
     workspace.v1.WorkspaceRef before = 4;
-    // After every root already there.
+    // After every entry of the destination, as ArrangePlaceWorkspace.end.
     ArrangeEnd end = 5;
+    // Just before this subsection, as ArrangePlaceWorkspace.before_subsection.
+    SubsectionRef before_subsection = 6;
   }
 }
 
@@ -200,11 +218,12 @@ message ArrangeSidebarError {
     // A subsection's name is blank.
     ArrangeSidebarBlankName blank_name = 7;
     // The change relates two things of different repositories: a subsection
-    // placed before another repository's subsection, or a workspace put into
-    // another repository's subsection.
+    // placed before another repository's subsection or workspace, or a
+    // workspace put into or before another repository's subsection.
     ArrangeSidebarOtherRepository other_repository = 8;
     // A workspace was placed before one that is not a root of the
-    // destination (it moved since the roster the client drew from).
+    // destination, or a subsection before one that is not a root in no
+    // subsection (it moved since the roster the client drew from).
     ArrangeSidebarAnchorElsewhere anchor_elsewhere = 9;
     // A workspace with a recorded parent was placed on its own: it sits
     // wherever its parent does, and moves only with it.

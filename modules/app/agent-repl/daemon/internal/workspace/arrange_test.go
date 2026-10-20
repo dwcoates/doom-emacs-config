@@ -35,14 +35,23 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 			act: func(ctx context.Context, v Verbs) error { return v.RenameSubsection(ctx, "sub-1", "sooner") }},
 		{name: "delete a subsection", op: opDeleteSubsection, want: "DeleteSubsection sub-1",
 			act: func(ctx context.Context, v Verbs) error { return v.DeleteSubsection(ctx, "sub-1") }},
-		{name: "move a subsection", op: opMoveSubsection, want: "MoveSubsection sub-1 sub-2",
-			act: func(ctx context.Context, v Verbs) error { return v.MoveSubsection(ctx, "sub-1", subsectionID("sub-2")) }},
+		{name: "move a subsection", op: opMoveSubsection, want: "MoveSubsection sub-1 before subsection sub-2",
+			act: func(ctx context.Context, v Verbs) error {
+				return v.MoveSubsection(ctx, "sub-1", wsm.BeforeSubsection{ID: "sub-2"})
+			}},
+		{name: "move a subsection before a workspace", op: opMoveSubsection, want: "MoveSubsection sub-1 before workspace w2",
+			act: func(ctx context.Context, v Verbs) error {
+				return v.MoveSubsection(ctx, "sub-1", wsm.BeforeWorkspace{ID: "w2"})
+			}},
 		{name: "move a repository", op: opMoveRepository, want: "MoveRepository repo-1 ",
 			act: func(ctx context.Context, v Verbs) error { return v.MoveRepository(ctx, "repo-1", nil) }},
-		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 w2",
+		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 before workspace w2",
 			act: func(ctx context.Context, v Verbs) error {
-				before := ids.WorkspaceID("w2")
-				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), &before)
+				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.BeforeWorkspace{ID: "w2"})
+			}},
+		{name: "place workspaces before a subsection", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1]  before subsection sub-1",
+			act: func(ctx context.Context, v Verbs) error {
+				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, nil, wsm.BeforeSubsection{ID: "sub-1"})
 			}},
 	}
 	for _, tt := range tests {
@@ -94,7 +103,7 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 			f.db.arrangeErr = tt.err
 
 			// Act
-			err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), nil)
+			err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{})
 
 			// Assert
 			refusal := asRefusal(t, err, tt.arm)
@@ -161,7 +170,7 @@ func TestPlaceWorkspacesRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	f.owner.standing = StandingTransferringAway
 
 	// Act
-	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, nil)
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, wsm.AtEnd{})
 
 	// Assert
 	asRefusal(t, err, ArmTransferringAway)
@@ -177,12 +186,26 @@ func TestPlaceWorkspacesRefusesAnUnknownAnchor(t *testing.T) {
 	absent := ids.WorkspaceID("absent")
 
 	// Act
-	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, &absent)
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, wsm.BeforeWorkspace{ID: absent})
 
 	// Assert
 	asRefusal(t, err, ArmUnknownWorkspace)
 	if len(f.db.arrangements) != 0 {
 		t.Fatalf("a refused placement wrote %v", f.db.arrangements)
+	}
+}
+
+func TestMoveSubsectionRefusesAnUnknownWorkspaceAnchor(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.verbs.MoveSubsection(context.Background(), "sub-1", wsm.BeforeWorkspace{ID: "absent"})
+
+	// Assert
+	asRefusal(t, err, ArmUnknownWorkspace)
+	if len(f.db.arrangements) != 0 {
+		t.Fatalf("a refused move wrote %v", f.db.arrangements)
 	}
 }
 
@@ -225,7 +248,7 @@ func TestPlaceWorkspacesRefusesAnyWorkspaceThisDaemonDoesNotKnow(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1", "absent"}, nil, nil)
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1", "absent"}, nil, wsm.AtEnd{})
 
 	// Assert
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -246,7 +269,7 @@ func TestSidebarArrangementReadsTheRegistrysArrangement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SidebarArrangement: %v", err)
 	}
-	if len(got) != 1 || len(got[0].Workspaces) != 1 || got[0].Workspaces[0].Workspace.ID != "w1" {
+	if len(got) != 1 || len(got[0].Entries) != 1 || got[0].Entries[0].Workspace.Workspace.ID != "w1" {
 		t.Fatalf("arrangement = %+v, want the one workspace in its repository", got)
 	}
 }

@@ -569,16 +569,16 @@ func (d *fakeDB) DeleteSubsection(_ context.Context, id ids.SubsectionID) error 
 	return d.arrange("DeleteSubsection " + string(id))
 }
 
-func (d *fakeDB) MoveSubsection(_ context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
-	return d.arrange("MoveSubsection " + string(id) + " " + ids.Optional(before))
+func (d *fakeDB) MoveSubsection(_ context.Context, id ids.SubsectionID, to wsm.Anchor) error {
+	return d.arrange("MoveSubsection " + string(id) + " " + wsm.AnchorField(to))
 }
 
 func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
 	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
-	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
+func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
 }
 
 func (d *fakeDB) MoveWorkspace(_ context.Context, ws, target ids.WorkspaceID) error {

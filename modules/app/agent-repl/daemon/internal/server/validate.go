@@ -896,6 +896,8 @@ func validateArrangeMoveSubsection(move *agentreplv1.ArrangeMoveSubsection) *con
 		if to.Before.GetId() == move.GetSubsection().GetId() {
 			return invalid("move_subsection.before", "a subsection cannot move before itself")
 		}
+	case *agentreplv1.ArrangeMoveSubsection_BeforeWorkspace:
+		return validateWorkspaceRef("move_subsection.before_workspace", to.BeforeWorkspace)
 	}
 	return nil
 }
@@ -937,6 +939,21 @@ func validateArrangePlaceWorkspace(place *agentreplv1.ArrangePlaceWorkspace) *co
 		if at.Before.GetId() == place.GetWorkspace().GetId() {
 			return invalid("place_workspace.before", "a workspace cannot be placed before itself")
 		}
+	case *agentreplv1.ArrangePlaceWorkspace_BeforeSubsection:
+		return validateBeforeSubsection("place_workspace", at.BeforeSubsection, place.GetSubsection())
+	}
+	return nil
+}
+
+// validateBeforeSubsection refuses a placement before subsection REF that is
+// malformed, or that names a destination subsection INTO: only a workspace
+// in no subsection stands before a subsection.
+func validateBeforeSubsection(field string, ref, into *agentreplv1.SubsectionRef) *connect.Error {
+	if err := validateSubsectionRef(field+".before_subsection", ref); err != nil {
+		return err
+	}
+	if into != nil {
+		return invalid(field+".before_subsection", "only a workspace placed in no subsection stands before a subsection")
 	}
 	return nil
 }
@@ -976,6 +993,8 @@ func validateArrangePlaceWorkspaces(place *agentreplv1.ArrangePlaceWorkspaces) *
 		if seen[at.Before.GetId()] {
 			return invalid("place_workspaces.before", "the workspaces cannot be placed before one of themselves")
 		}
+	case *agentreplv1.ArrangePlaceWorkspaces_BeforeSubsection:
+		return validateBeforeSubsection("place_workspaces", at.BeforeSubsection, place.GetSubsection())
 	}
 	return nil
 }

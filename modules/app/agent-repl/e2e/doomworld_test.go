@@ -281,11 +281,11 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 	var currentRef any
 	for i, row := range rows {
 		ref := row["workspace"].(map[string]any)["workspace"]
-		open = append(open, map[string]any{
+		open = append(open, map[string]any{"row": map[string]any{
 			"row":      row,
 			"tab":      map[string]any{"numbered": map[string]any{"number": i + 1}},
 			"children": []any{},
-		})
+		}})
 		if current != "" && ref.(map[string]any)["id"] == current {
 			currentRef = ref
 		}
@@ -301,7 +301,7 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 			"sections": []any{map[string]any{
 				"key":        map[string]any{"repository": map[string]any{"id": "repo-doom", "dir": repoDir}},
 				"header":     map[string]any{"label": map[string]any{"text": filepath.Base(repoDir)}, "count": map[string]any{"workspaces": len(rows)}},
-				"openRows":   map[string]any{"rows": open},
+				"entries":    open,
 				"divergence": map[string]any{"pending": map[string]any{}},
 				"expanded":   collapse,
 			}},

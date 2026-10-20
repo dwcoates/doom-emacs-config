@@ -49,13 +49,14 @@ func (s *server) ArrangeSidebar(
 	case *agentreplv1.ArrangeSidebarRequest_DeleteSubsection:
 		err = s.deps.Verbs.DeleteSubsection(ctx, ids.SubsectionID(change.DeleteSubsection.GetSubsection().GetId()))
 	case *agentreplv1.ArrangeSidebarRequest_MoveSubsection:
-		move := change.MoveSubsection
-		var before *ids.SubsectionID
-		if ref := move.GetBefore(); ref != nil {
-			id := ids.SubsectionID(ref.GetId())
-			before = &id
+		var (
+			answered bool
+			cerr     *connect.Error
+		)
+		answered, cerr, err = s.moveSubsection(ctx, rpc, resp, change.MoveSubsection)
+		if answered {
+			return answer(resp, cerr)
 		}
-		err = s.deps.Verbs.MoveSubsection(ctx, ids.SubsectionID(move.GetSubsection().GetId()), before)
 	case *agentreplv1.ArrangeSidebarRequest_MoveRepository:
 		var (
 			answered bool
@@ -71,7 +72,7 @@ func (s *server) ArrangeSidebar(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, []*workspacev1.WorkspaceRef{place.GetWorkspace()}, place.GetSubsection(), place.GetBefore())
+		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, []*workspacev1.WorkspaceRef{place.GetWorkspace()}, place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -81,7 +82,7 @@ func (s *server) ArrangeSidebar(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, place.GetWorkspaces(), place.GetSubsection(), place.GetBefore())
+		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, place.GetWorkspaces(), place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -102,6 +103,30 @@ func (s *server) ArrangeSidebar(
 	}
 	resp.Result = &agentreplv1.ArrangeSidebarResponse_Success{Success: &agentreplv1.ArrangeSidebarSuccess{RosterRevision: revision, Created: created}}
 	return connect.NewResponse(resp), nil
+}
+
+// moveSubsection resolves the moved subsection's anchor, then moves it: a
+// workspace anchor is resolved as every workspace ref is, so an unknown or
+// mismatched one answers its own arm. `answered` says a resolution refused
+// and the caller answers at once with cerr; otherwise err is the verb's.
+func (s *server) moveSubsection(
+	ctx context.Context,
+	rpc string,
+	resp *agentreplv1.ArrangeSidebarResponse,
+	move *agentreplv1.ArrangeMoveSubsection,
+) (answered bool, cerr *connect.Error, err error) {
+	var to wsm.Anchor = wsm.AtEnd{}
+	switch anchor := move.GetTo().(type) {
+	case *agentreplv1.ArrangeMoveSubsection_Before:
+		to = wsm.BeforeSubsection{ID: ids.SubsectionID(anchor.Before.GetId())}
+	case *agentreplv1.ArrangeMoveSubsection_BeforeWorkspace:
+		subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, []*workspacev1.WorkspaceRef{anchor.BeforeWorkspace})
+		if done {
+			return true, refused, nil
+		}
+		to = wsm.BeforeWorkspace{ID: subjects[0].Record.ID}
+	}
+	return false, nil, s.deps.Verbs.MoveSubsection(ctx, ids.SubsectionID(move.GetSubsection().GetId()), to)
 }
 
 // moveRepository resolves the moved repository and its anchor, then moves it.
@@ -131,20 +156,22 @@ func (s *server) moveRepository(
 	return false, nil, s.deps.Verbs.MoveRepository(ctx, repository.ID, before)
 }
 
-// placeWorkspaces resolves the placed workspaces and their anchor, then
-// places them as one block. `answered` says a resolution refused and the
-// caller answers at once with cerr; otherwise err is the verb's.
+// placeWorkspaces resolves the placed workspaces and their anchor (a
+// workspace BEFORE, a subsection BEFORE_SUBSECTION, or neither: the end),
+// then places them as one block. `answered` says a resolution refused and
+// the caller answers at once with cerr; otherwise err is the verb's.
 func (s *server) placeWorkspaces(
 	ctx context.Context,
 	rpc string,
 	resp *agentreplv1.ArrangeSidebarResponse,
 	refs []*workspacev1.WorkspaceRef,
 	into *agentreplv1.SubsectionRef,
-	anchor *workspacev1.WorkspaceRef,
+	before *workspacev1.WorkspaceRef,
+	beforeSubsection *agentreplv1.SubsectionRef,
 ) (answered bool, cerr *connect.Error, err error) {
 	named := refs
-	if anchor != nil {
-		named = append(slices.Clone(refs), anchor)
+	if before != nil {
+		named = append(slices.Clone(refs), before)
 	}
 	subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, named)
 	if done {
@@ -154,22 +181,25 @@ func (s *server) placeWorkspaces(
 	for _, subject := range subjects[:len(refs)] {
 		placed = append(placed, subject.Record.ID)
 	}
-	var before *ids.WorkspaceID
-	if anchor != nil {
-		id := subjects[len(refs)].Record.ID
-		before = &id
+	var at wsm.Anchor = wsm.AtEnd{}
+	switch {
+	case before != nil:
+		at = wsm.BeforeWorkspace{ID: subjects[len(refs)].Record.ID}
+	case beforeSubsection != nil:
+		at = wsm.BeforeSubsection{ID: ids.SubsectionID(beforeSubsection.GetId())}
 	}
 	var destination *ids.SubsectionID
 	if into != nil {
 		id := ids.SubsectionID(into.GetId())
 		destination = &id
 	}
-	return false, nil, s.deps.Verbs.PlaceWorkspaces(ctx, placed, destination, before)
+	return false, nil, s.deps.Verbs.PlaceWorkspaces(ctx, placed, destination, at)
 }
 
 // GetSidebarArrangement answers the repository grouping's arrangement, for
-// an agent organizing it: repositories, their unsectioned families and their
-// subsections' families, in the order the sidebar draws them.
+// an agent organizing it: repositories, each with its families in no
+// subsection and its subsections interleaved, in the order the sidebar draws
+// them.
 func (s *server) GetSidebarArrangement(
 	ctx context.Context,
 	_ *connect.Request[agentreplv1.GetSidebarArrangementRequest],
@@ -184,14 +214,19 @@ func (s *server) GetSidebarArrangement(
 		out := &agentreplv1.ArrangedRepository{
 			Repository: &workspacev1.RepositoryRef{Id: string(repo.Repository.ID), Dir: repo.Repository.Dir},
 			Name:       repo.Repository.Name,
-			Workspaces: arrangedWorkspaces(repo.Workspaces),
 		}
-		for _, sub := range repo.Subsections {
-			out.Subsections = append(out.Subsections, &agentreplv1.ArrangedSubsection{
-				Subsection: &agentreplv1.SubsectionRef{Id: string(sub.Subsection.ID)},
-				Name:       sub.Subsection.Name,
-				Workspaces: arrangedWorkspaces(sub.Workspaces),
-			})
+		for _, entry := range repo.Entries {
+			if entry.Subsection == nil {
+				out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Workspace{
+					Workspace: arrangedWorkspaces([]sidebar.ArrangedWorkspace{entry.Workspace})[0]}})
+				continue
+			}
+			out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Subsection{
+				Subsection: &agentreplv1.ArrangedSubsection{
+					Subsection: &agentreplv1.SubsectionRef{Id: string(entry.Subsection.Subsection.ID)},
+					Name:       entry.Subsection.Subsection.Name,
+					Workspaces: arrangedWorkspaces(entry.Subsection.Workspaces),
+				}}})
 		}
 		resp.Repositories = append(resp.Repositories, out)
 	}

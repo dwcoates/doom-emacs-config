@@ -22,6 +22,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/stateroot"
@@ -161,7 +162,7 @@ func roster(rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
 		open = append(open, &frontendv1.RosterOpenRow{Row: row})
 	}
 	return &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
-		Sections: []*frontendv1.RosterRepoSection{{OpenRows: &frontendv1.RosterOpenRows{Rows: open}}},
+		Sections: []*frontendv1.RosterRepoSection{{Entries: rosterwalk.RowEntries(open)}},
 	}}
 }
 

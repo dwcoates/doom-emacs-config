@@ -118,17 +118,16 @@ func (x *GetSidebarArrangementResponse) GetRepositories() []*ArrangedRepository 
 	return nil
 }
 
-// One repository: its unsectioned families, then each subsection's.
+// One repository: its families in no subsection and its subsections, in
+// drawn order.
 type ArrangedRepository struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	Repository *v1.RepositoryRef      `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
 	// The repository's drawn name.
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	// The families in no subsection, root by root in drawn order.
-	Workspaces []*ArrangedWorkspace `protobuf:"bytes,3,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
-	// The repository's subsections, in their stored order, empty ones
-	// included.
-	Subsections   []*ArrangedSubsection `protobuf:"bytes,4,rep,name=subsections,proto3" json:"subsections,omitempty"`
+	// The repository's families in no subsection and its subsections, empty
+	// ones included, INTERLEAVED in drawn order.
+	Entries       []*ArrangedEntry `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -177,19 +176,98 @@ func (x *ArrangedRepository) GetName() string {
 	return ""
 }
 
-func (x *ArrangedRepository) GetWorkspaces() []*ArrangedWorkspace {
+func (x *ArrangedRepository) GetEntries() []*ArrangedEntry {
 	if x != nil {
-		return x.Workspaces
+		return x.Entries
 	}
 	return nil
 }
 
-func (x *ArrangedRepository) GetSubsections() []*ArrangedSubsection {
+// One entry of a repository's arrangement: a family in no subsection, or a
+// subsection.
+type ArrangedEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE ARM IS WHAT STANDS AT THIS POINT OF THE REPOSITORY. Never unset.
+	//
+	// Types that are valid to be assigned to Entry:
+	//
+	//	*ArrangedEntry_Workspace
+	//	*ArrangedEntry_Subsection
+	Entry         isArrangedEntry_Entry `protobuf_oneof:"entry"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArrangedEntry) Reset() {
+	*x = ArrangedEntry{}
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArrangedEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArrangedEntry) ProtoMessage() {}
+
+func (x *ArrangedEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[3]
 	if x != nil {
-		return x.Subsections
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArrangedEntry.ProtoReflect.Descriptor instead.
+func (*ArrangedEntry) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ArrangedEntry) GetEntry() isArrangedEntry_Entry {
+	if x != nil {
+		return x.Entry
 	}
 	return nil
 }
+
+func (x *ArrangedEntry) GetWorkspace() *ArrangedWorkspace {
+	if x != nil {
+		if x, ok := x.Entry.(*ArrangedEntry_Workspace); ok {
+			return x.Workspace
+		}
+	}
+	return nil
+}
+
+func (x *ArrangedEntry) GetSubsection() *ArrangedSubsection {
+	if x != nil {
+		if x, ok := x.Entry.(*ArrangedEntry_Subsection); ok {
+			return x.Subsection
+		}
+	}
+	return nil
+}
+
+type isArrangedEntry_Entry interface {
+	isArrangedEntry_Entry()
+}
+
+type ArrangedEntry_Workspace struct {
+	Workspace *ArrangedWorkspace `protobuf:"bytes,1,opt,name=workspace,proto3,oneof"`
+}
+
+type ArrangedEntry_Subsection struct {
+	Subsection *ArrangedSubsection `protobuf:"bytes,2,opt,name=subsection,proto3,oneof"`
+}
+
+func (*ArrangedEntry_Workspace) isArrangedEntry_Entry() {}
+
+func (*ArrangedEntry_Subsection) isArrangedEntry_Entry() {}
 
 // One subsection: its name and its families.
 type ArrangedSubsection struct {
@@ -204,7 +282,7 @@ type ArrangedSubsection struct {
 
 func (x *ArrangedSubsection) Reset() {
 	*x = ArrangedSubsection{}
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -216,7 +294,7 @@ func (x *ArrangedSubsection) String() string {
 func (*ArrangedSubsection) ProtoMessage() {}
 
 func (x *ArrangedSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -229,7 +307,7 @@ func (x *ArrangedSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangedSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangedSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ArrangedSubsection) GetSubsection() *SubsectionRef {
@@ -280,7 +358,7 @@ type ArrangedWorkspace struct {
 
 func (x *ArrangedWorkspace) Reset() {
 	*x = ArrangedWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -292,7 +370,7 @@ func (x *ArrangedWorkspace) String() string {
 func (*ArrangedWorkspace) ProtoMessage() {}
 
 func (x *ArrangedWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -305,7 +383,7 @@ func (x *ArrangedWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangedWorkspace.ProtoReflect.Descriptor instead.
 func (*ArrangedWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ArrangedWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -357,16 +435,20 @@ const file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc = "" +
 	"3agentrepl/v1/endpoint_get_sidebar_arrangement.proto\x12\fagentrepl.v1\x1a\x1dagentrepl/v1/subsection.proto\x1a\x1cworkspace/v1/workspace.proto\"\x1e\n" +
 	"\x1cGetSidebarArrangementRequest\"e\n" +
 	"\x1dGetSidebarArrangementResponse\x12D\n" +
-	"\frepositories\x18\x01 \x03(\v2 .agentrepl.v1.ArrangedRepositoryR\frepositories\"\xea\x01\n" +
+	"\frepositories\x18\x01 \x03(\v2 .agentrepl.v1.ArrangedRepositoryR\frepositories\"\xc1\x01\n" +
 	"\x12ArrangedRepository\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
 	"repository\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12?\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x125\n" +
+	"\aentries\x18\x05 \x03(\v2\x1b.agentrepl.v1.ArrangedEntryR\aentriesJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\n" +
+	"workspacesR\vsubsections\"\x9d\x01\n" +
+	"\rArrangedEntry\x12?\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1f.agentrepl.v1.ArrangedWorkspaceH\x00R\tworkspace\x12B\n" +
 	"\n" +
-	"workspaces\x18\x03 \x03(\v2\x1f.agentrepl.v1.ArrangedWorkspaceR\n" +
-	"workspaces\x12B\n" +
-	"\vsubsections\x18\x04 \x03(\v2 .agentrepl.v1.ArrangedSubsectionR\vsubsections\"\xa6\x01\n" +
+	"subsection\x18\x02 \x01(\v2 .agentrepl.v1.ArrangedSubsectionH\x00R\n" +
+	"subsectionB\a\n" +
+	"\x05entry\"\xa6\x01\n" +
 	"\x12ArrangedSubsection\x12;\n" +
 	"\n" +
 	"subsection\x18\x01 \x01(\v2\x1b.agentrepl.v1.SubsectionRefR\n" +
@@ -396,32 +478,34 @@ func file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP() []by
 	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_goTypes = []any{
 	(*GetSidebarArrangementRequest)(nil),  // 0: agentrepl.v1.GetSidebarArrangementRequest
 	(*GetSidebarArrangementResponse)(nil), // 1: agentrepl.v1.GetSidebarArrangementResponse
 	(*ArrangedRepository)(nil),            // 2: agentrepl.v1.ArrangedRepository
-	(*ArrangedSubsection)(nil),            // 3: agentrepl.v1.ArrangedSubsection
-	(*ArrangedWorkspace)(nil),             // 4: agentrepl.v1.ArrangedWorkspace
-	(*v1.RepositoryRef)(nil),              // 5: workspace.v1.RepositoryRef
-	(*SubsectionRef)(nil),                 // 6: agentrepl.v1.SubsectionRef
-	(*v1.WorkspaceRef)(nil),               // 7: workspace.v1.WorkspaceRef
+	(*ArrangedEntry)(nil),                 // 3: agentrepl.v1.ArrangedEntry
+	(*ArrangedSubsection)(nil),            // 4: agentrepl.v1.ArrangedSubsection
+	(*ArrangedWorkspace)(nil),             // 5: agentrepl.v1.ArrangedWorkspace
+	(*v1.RepositoryRef)(nil),              // 6: workspace.v1.RepositoryRef
+	(*SubsectionRef)(nil),                 // 7: agentrepl.v1.SubsectionRef
+	(*v1.WorkspaceRef)(nil),               // 8: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_depIdxs = []int32{
-	2, // 0: agentrepl.v1.GetSidebarArrangementResponse.repositories:type_name -> agentrepl.v1.ArrangedRepository
-	5, // 1: agentrepl.v1.ArrangedRepository.repository:type_name -> workspace.v1.RepositoryRef
-	4, // 2: agentrepl.v1.ArrangedRepository.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
-	3, // 3: agentrepl.v1.ArrangedRepository.subsections:type_name -> agentrepl.v1.ArrangedSubsection
-	6, // 4: agentrepl.v1.ArrangedSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
-	4, // 5: agentrepl.v1.ArrangedSubsection.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
-	7, // 6: agentrepl.v1.ArrangedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	4, // 7: agentrepl.v1.ArrangedWorkspace.children:type_name -> agentrepl.v1.ArrangedWorkspace
-	7, // 8: agentrepl.v1.ArrangedWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	2,  // 0: agentrepl.v1.GetSidebarArrangementResponse.repositories:type_name -> agentrepl.v1.ArrangedRepository
+	6,  // 1: agentrepl.v1.ArrangedRepository.repository:type_name -> workspace.v1.RepositoryRef
+	3,  // 2: agentrepl.v1.ArrangedRepository.entries:type_name -> agentrepl.v1.ArrangedEntry
+	5,  // 3: agentrepl.v1.ArrangedEntry.workspace:type_name -> agentrepl.v1.ArrangedWorkspace
+	4,  // 4: agentrepl.v1.ArrangedEntry.subsection:type_name -> agentrepl.v1.ArrangedSubsection
+	7,  // 5: agentrepl.v1.ArrangedSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	5,  // 6: agentrepl.v1.ArrangedSubsection.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
+	8,  // 7: agentrepl.v1.ArrangedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	5,  // 8: agentrepl.v1.ArrangedWorkspace.children:type_name -> agentrepl.v1.ArrangedWorkspace
+	8,  // 9: agentrepl.v1.ArrangedWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_init() }
@@ -430,14 +514,18 @@ func file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_init() {
 		return
 	}
 	file_agentrepl_v1_subsection_proto_init()
-	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[3].OneofWrappers = []any{
+		(*ArrangedEntry_Workspace)(nil),
+		(*ArrangedEntry_Subsection)(nil),
+	}
+	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc), len(file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
