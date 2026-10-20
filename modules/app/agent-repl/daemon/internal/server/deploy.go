@@ -269,6 +269,9 @@ func validateWatchDaemonRequest(req *agentreplv1.WatchDaemonRequest) *connect.Er
 		if client.Emacs.GetInstance().GetValue() == "" {
 			return invalid("client.emacs.instance", "this Emacs process's identity is required")
 		}
+		if p := client.Emacs.Process; p != nil && p.GetPid() <= 0 {
+			return invalid("client.emacs.process.pid", "a stated Emacs process must name a positive pid")
+		}
 		return nil
 	case *agentreplv1.WatchDaemonRequest_Webview:
 		return nil

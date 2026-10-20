@@ -128,13 +128,19 @@ type harness struct {
 	reg     *prometheus.Registry
 	battery bool
 	powErr  error
+	// emacs is the stream-scoped Emacs holder, standing testEmacs; release
+	// ends that stream.
+	emacs   *EmacsProcess
+	release func()
 }
 
 func newHarness(t *testing.T, reader *fakeReader) *harness {
 	t.Helper()
 	h := &harness{reader: reader, log: dlog.NewTestLogger(), reg: prometheus.NewRegistry()}
+	h.emacs = NewEmacsProcess(h.log)
+	h.release = h.emacs.Attach(testEmacs)
 	c, err := New(Deps{
-		Reader: reader, Self: testSelf, SockDir: testSock, DiskPath: "/state",
+		Reader: reader, Self: testSelf, Emacs: h.emacs, SockDir: testSock, DiskPath: "/state",
 		OnBattery: func() (bool, error) { return h.battery, h.powErr },
 		Log:       h.log,
 	})

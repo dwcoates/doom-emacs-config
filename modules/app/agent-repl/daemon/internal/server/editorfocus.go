@@ -52,3 +52,11 @@ func (s *server) ReportEditorFocus(
 func isFocused(focus *agentreplv1.EditorFocus) bool {
 	return focus.GetFocused() != nil
 }
+
+// EmacsMeasure measures the Emacs whose WatchDaemon stream stands
+// (runtimemetrics.Surface is the production one; its off surface measures
+// nothing).
+type EmacsMeasure interface {
+	// AttachEmacs measures the Emacs of pid until the returned release runs.
+	AttachEmacs(pid int) (release func())
+}

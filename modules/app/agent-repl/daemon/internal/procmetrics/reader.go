@@ -12,10 +12,10 @@
 // adopted from a previous daemon or a process a successor inherited is
 // counted exactly like one this daemon spawned:
 //   - the daemon is this process;
-//   - Emacs is the process macOS holds responsible for the daemon;
+//   - Emacs is the process whose WatchDaemon stream stands (EmacsProcess);
 //   - the WebKit processes are the ones macOS holds Emacs responsible for;
 //   - the store and the sidecar are the processes named for their binaries;
-//   - a shim is a node process Emacs is responsible for whose argv listens on
+//   - a shim is a node process whose argv listens on
 //     a shim socket, and the socket's name is its workspace;
 //   - a shim's descendants are its tools (the vendor CLI, shim-lock, every
 //     command the agent runs), the daemon's other descendants are its tools.

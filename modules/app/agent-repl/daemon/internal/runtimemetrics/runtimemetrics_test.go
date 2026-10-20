@@ -79,3 +79,31 @@ func TestOpenServesBuildInfoAndAdvertises(t *testing.T) {
 		t.Fatalf("an open surface has no registry")
 	}
 }
+
+func TestAttachEmacsMeasuresTheEmacsUntilItsRelease(t *testing.T) {
+	// Arrange
+	s, err := Open(dlog.NewTestLogger(), t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	// Act
+	release := s.AttachEmacs(4242)
+	during, standing := s.emacs.PID()
+	release()
+	_, after := s.emacs.PID()
+
+	// Assert
+	if !standing || during != 4242 || after {
+		t.Fatalf("during = %d (%v), after = %v; want 4242 while attached and nothing after", during, standing, after)
+	}
+}
+
+func TestTheOffSurfaceMeasuresNoEmacs(t *testing.T) {
+	// Arrange
+	var s *Surface
+
+	// Act / Assert: the release is callable and nothing panics.
+	s.AttachEmacs(4242)()
+}

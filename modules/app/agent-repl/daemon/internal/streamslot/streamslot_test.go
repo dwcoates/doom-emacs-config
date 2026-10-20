@@ -1,6 +1,8 @@
 package streamslot_test
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/streamslot"
@@ -79,6 +81,23 @@ func TestUpdateMovesOnlyAStandingValue(t *testing.T) {
 			v, ok := s.Get()
 			if attached != tt.wantOK || ok != tt.wantOK || v != tt.wantVal || gen != tt.wantGen {
 				t.Fatalf("Update = (%d, %v), Get = (%d, %v); want (%d, %v), (%d, %v)", gen, attached, v, ok, tt.wantGen, tt.wantOK, tt.wantVal, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestEveryStreamScopedHolderIsBuiltOnSlot pins the holders that keep a value
+// for one standing stream to the shared Slot: a holder that counted its own
+// generations would drift from the superseding rule.
+func TestEveryStreamScopedHolderIsBuiltOnSlot(t *testing.T) {
+	for _, file := range []string{"../desktopnotify/focus.go", "../procmetrics/emacs.go"} {
+		t.Run(file, func(t *testing.T) {
+			src, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(src), "streamslot.Slot[") || strings.Contains(string(src), "generation++") {
+				t.Fatalf("%s holds a stream-scoped value without streamslot.Slot", file)
 			}
 		})
 	}

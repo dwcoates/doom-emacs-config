@@ -34,6 +34,9 @@ type Surface struct {
 	rpcs      *prometheus.HistogramVec
 	records   *prometheus.CounterVec
 	merges    merges
+	// emacs is the Emacs whose WatchDaemon stream stands, which the process
+	// collector measures.
+	emacs *procmetrics.EmacsProcess
 }
 
 // Open opens, without advertising, the daemon's metrics surface under root.
@@ -60,7 +63,18 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg}, nil
+	return &Surface{srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg,
+		emacs: procmetrics.NewEmacsProcess(log)}, nil
+}
+
+// AttachEmacs measures the Emacs of pid while the WatchDaemon stream that
+// stated it stands, answering the release the stream calls when it ends. The
+// off surface measures nothing.
+func (s *Surface) AttachEmacs(pid int) (release func()) {
+	if s == nil {
+		return func() {}
+	}
+	return s.emacs.Attach(pid)
 }
 
 // Registry answers the registry every daemon collector registers on, nil
@@ -104,7 +118,7 @@ func (s *Surface) RegisterProcesses(reader procmetrics.Reader, sockDir, diskPath
 		return nil
 	}
 	c, err := procmetrics.New(procmetrics.Deps{
-		Reader: reader, Self: os.Getpid(), SockDir: sockDir, DiskPath: diskPath, OnBattery: onBattery, Log: s.log,
+		Reader: reader, Self: os.Getpid(), Emacs: s.emacs, SockDir: sockDir, DiskPath: diskPath, OnBattery: onBattery, Log: s.log,
 	})
 	if err != nil {
 		return fmt.Errorf("runtimemetrics: %w", err)

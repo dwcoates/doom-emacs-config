@@ -109,7 +109,16 @@ func TestClassify(t *testing.T) {
 			},
 		},
 		{
-			name: "a daemon no Emacs is responsible for has no Emacs and no WebKit",
+			name: "an Emacs that did not spawn the daemon is found from its stream",
+			ids: host(
+				Identity{PID: testSelf, PPID: 1, Name: "agent-repld", Responsible: 99},
+				Identity{PID: testEmacs, PPID: 1, Name: "Emacs", Responsible: testEmacs},
+				Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.WebContent", Responsible: testEmacs},
+			),
+			want: map[int]Group{testSelf: {Process: ProcessDaemon}, testEmacs: {Process: ProcessEmacs}, 20: {Process: "webkit_webcontent"}},
+		},
+		{
+			name: "an Emacs whose stream names a pid that has exited is nobody",
 			ids: host(
 				Identity{PID: testSelf, PPID: 1, Name: "agent-repld", Responsible: testSelf},
 				Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.WebContent", Responsible: testEmacs},
@@ -120,7 +129,7 @@ func TestClassify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := classify(tt.ids, testSelf, testSock, argvOf(tt.argv))
+			got := classify(tt.ids, testSelf, testEmacs, testSock, argvOf(tt.argv))
 
 			// Assert
 			if len(got.errs) != 0 {
@@ -149,7 +158,7 @@ func TestClassifyFoldsAWebKitDevelopmentBuildIntoItsRole(t *testing.T) {
 			ids := baseHost(Identity{PID: 20, PPID: 1, Name: tt.proc, Responsible: testEmacs})
 
 			// Act
-			got := classify(ids, testSelf, testSock, argvOf(nil))
+			got := classify(ids, testSelf, testEmacs, testSock, argvOf(nil))
 
 			// Assert
 			if got.groups[20] != (Group{Process: tt.want}) || len(got.unknownWebKit) != 0 {
@@ -164,7 +173,7 @@ func TestClassifyLeavesAWebKitRoleNoGroupNamesOutAndSaysWhich(t *testing.T) {
 	ids := baseHost(Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.Model", Responsible: testEmacs})
 
 	// Act
-	got := classify(ids, testSelf, testSock, argvOf(nil))
+	got := classify(ids, testSelf, testEmacs, testSock, argvOf(nil))
 
 	// Assert
 	if _, ok := got.groups[20]; ok {
@@ -181,7 +190,7 @@ func TestClassifyReportsAnArgvReadThatFailedForAnotherReason(t *testing.T) {
 	denied := errors.New("procmetrics: read the argv of pid 30: operation not permitted")
 
 	// Act
-	got := classify(ids, testSelf, testSock, func(int) ([]string, error) { return nil, denied })
+	got := classify(ids, testSelf, testEmacs, testSock, func(int) ([]string, error) { return nil, denied })
 
 	// Assert
 	if len(got.errs) != 1 || !errors.Is(got.errs[0], denied) {
@@ -218,3 +227,17 @@ func TestShimWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyWithNoEmacsStreamHasNoEmacsAndNoWebKit(t *testing.T) {
+	// Arrange
+	ids := baseHost(Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.WebContent", Responsible: testEmacs})
+
+	// Act
+	got := classify(ids, testSelf, 0, testSock, argvOf(nil))
+
+	// Assert
+	if want := map[int]Group{testSelf: {Process: ProcessDaemon}}; !reflect.DeepEqual(got.groups, want) {
+		t.Fatalf("groups = %v, want %v", got.groups, want)
+	}
+}
+
