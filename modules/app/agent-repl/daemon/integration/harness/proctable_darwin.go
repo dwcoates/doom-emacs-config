@@ -20,9 +20,17 @@ func processTable() ([]procEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the process table: %w", err)
 	}
+	parents := make(map[int]int, len(procs))
+	for _, p := range procs {
+		parents[int(p.Proc.P_pid)] = int(p.Eproc.Ppid)
+	}
+	self := os.Getpid()
 	entries := make([]procEntry, 0, len(procs))
 	for _, p := range procs {
 		pid := int(p.Proc.P_pid)
+		if !mayBeThisRunsStray(pid, parents, self) {
+			continue
+		}
 		args, live, err := procArgs(pid, readProcArgs2, readProcessState)
 		if err != nil {
 			return nil, fmt.Errorf("%w (%s)", err, kinfoIdentity(p))
@@ -33,6 +41,35 @@ func processTable() ([]procEntry, error) {
 		entries = append(entries, procEntry{pid: pid, args: args})
 	}
 	return entries, nil
+}
+
+// launchdPID is the parent of every orphan.
+const launchdPID = 1
+
+// mayBeThisRunsStray reports whether pid can be a process this test binary
+// left behind: a descendant of it (self), or an orphan reparented to launchd,
+// which is what a stray becomes once the daemon that spawned it is gone.
+//
+// ANOTHER RUN'S LIVE PROCESS IS NEVER READ. One whose parent chain reaches a
+// live process outside this binary's tree belongs to another test run, and
+// waiting on its argv held this run's listing hostage to that run's load:
+// another run's test binary sat between fork and exec past the wait's bound,
+// and every listing here failed (2026-10-20, `008.test`, its parent alive).
+func mayBeThisRunsStray(pid int, parents map[int]int, self int) bool {
+	if parents[pid] == launchdPID {
+		return true
+	}
+	for at, hops := pid, 0; hops <= len(parents); hops++ {
+		parent, known := parents[at]
+		switch {
+		case at == self:
+			return true
+		case !known || parent == launchdPID || parent == 0 || parent == at:
+			return false
+		}
+		at = parent
+	}
+	return false
 }
 
 // readProcArgs2 reads pid's raw kern.procargs2 buffer.
