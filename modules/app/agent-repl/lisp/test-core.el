@@ -298,6 +298,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
   '(("clipboard-image.el" agent-repl-attach-clipboard-image
      "agent-repl: attached image %s"
      "confirms the interactive attachment command")
+    ("commands.el" agent-repl--push-release-callback "agent-repl: %s"
+     "tells the user the release push they asked for landed, in the script's own words")
+    ("commands.el" agent-repl--push-release-callback "agent-repl: release push failed: %s"
+     "tells the user the release push they asked for failed, in the script's own words")
+    ("commands.el" agent-repl-push-release "agent-repl: pushing master to origin as a release..."
+     "acknowledges the interactive release push while it runs")
     ("commands.el" agent-repl-copy-reference "Copied: %s"
      "confirms an interactive clipboard write")
     ("commands.el" agent-repl-copy-workspace-name "Copied workspace name: %s"
