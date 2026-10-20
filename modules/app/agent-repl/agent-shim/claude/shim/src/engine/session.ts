@@ -189,7 +189,12 @@ import { VendorCadence } from "./vendor-cadence.js";
 import { type LoopPark, loopParkFields } from "./loop-park.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
 import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
-import { VendorErrorRetry, type UsageReading } from "./vendor-error-retry.js";
+import {
+  VendorErrorRetry,
+  retryVendorErrorNowResponse,
+  vendorErrorRetryUpdate,
+  type UsageReading,
+} from "./vendor-error-retry.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
@@ -838,6 +843,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   const vendorErrorRetry = new VendorErrorRetry({
     deliver: (prompt) => deliverShimPrompt(prompt, VENDOR_ERROR_RETRY_SOURCE),
+    // THE SCHEDULE RIDES THE SESSION STREAM as a replayed level
+    // (engine/pushes.ts), so the footer counts down to the next retry.
+    state: (scheduled) => {
+      pushes.push(vendorErrorRetryUpdate(scheduled));
+    },
     readUsage: () => readUsageForRetry(),
     nowMs: deps.nowMs,
     scheduler: deps.vendorErrorRetryScheduler ?? REAL_SCHEDULER,
@@ -2543,7 +2553,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnErrorResult(message);
     noteDetachedWork(message, attribution, verdict.turn);
     networkResume.observe(message);
-    if (!attribution.keepalive) vendorErrorRetry.observe(message);
     const reach = networkReach(message);
     if (reach !== undefined) noteNetworkReach(reach);
     // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
@@ -6799,6 +6808,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /**
+   * Make the scheduled vendor-error retry at once
+   * (shim.v1.RetryVendorErrorNow). The chain judges whether one is due; the
+   * new schedule follows on the session stream.
+   */
+  async function retryVendorErrorNow(): Promise<shimv1.RetryVendorErrorNowResponse> {
+    return retryVendorErrorNowResponse(await vendorErrorRetry.retryNow());
+  }
+
   /** The skipped answer, recorded once at INFO with its reason. */
   function skippedKeepalive(reason: AskedBeatRefusal | SendKeepaliveSkipReason): shimv1.SendKeepaliveResponse {
     const skip: SendKeepaliveSkipReason =
@@ -7614,6 +7632,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     hibernate: afterRestart(hibernate),
     setKeepalive: afterRestart(setKeepalive),
     sendKeepalive: afterRestart(sendKeepalive),
+    retryVendorErrorNow: afterRestart(retryVendorErrorNow),
     killSession: afterRestart(killSession),
     startTurn: afterRestart((request: shimv1.StartTurnRequest, signal?: AbortSignal) => turns.startTurn(request, signal)),
     watchAgent: (request, signal) => turns.watchAgent(request, signal),

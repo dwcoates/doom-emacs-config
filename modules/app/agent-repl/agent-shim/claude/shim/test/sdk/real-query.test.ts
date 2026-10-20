@@ -157,6 +157,14 @@ describe("realQueryOptions", () => {
     expect(options.env?.CLAUDE_CONFIG_DIR).toBe("/accounts/secondary");
   });
 
+  it("turns the vendor's own API retries off, so agent-repl owns the cadence", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(), NO_SERVERS);
+
+    // Assert.
+    expect(options.env?.CLAUDE_CODE_MAX_RETRIES).toBe("0");
+  });
+
   it("passes the rest of the environment through to the child", () => {
     // Arrange.
     process.env.AGENT_REPL_REAL_QUERY_PROBE = "kept";

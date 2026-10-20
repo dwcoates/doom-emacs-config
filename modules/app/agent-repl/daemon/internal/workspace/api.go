@@ -459,6 +459,10 @@ type Verbs interface {
 	// an effort change never puts a row in front of the reader, and the shim
 	// itself waits for the running turn to end.
 	SetEffort(ctx context.Context, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// RetryVendorError asks the workspace's shim for its scheduled
+	// vendor-error retry now (RET in an empty composer) and answers the
+	// shim's judgment whole.
+	RetryVendorError(ctx context.Context, ws ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error)
 	// SelectAccount makes the workspace's session spend as the named account
 	// root: the choice is recorded on the session row and the session is then
 	// bounced through the restart verb's own engine, which is what carries the
@@ -922,6 +926,9 @@ type Sessions interface {
 	// SetEffort asks the workspace's shim for an effort level and, once it
 	// confirms, states the level in effect to the topbar.
 	SetEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// RetryVendorError asks the workspace's shim for its scheduled
+	// vendor-error retry now.
+	RetryVendorError(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error)
 	// ResumeCold re-opens a session parked behind a standing cold gate,
 	// carrying the chosen remediation, and completes the SAME bring-up a cold
 	// start does: the session facts recorded, the session watcher installed,

@@ -60,6 +60,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"ReportLatencies":            func() proto.Message { return &v1.ReportLatenciesResponse{} },
 	"UpdatePersistentWifiMode":   func() proto.Message { return &v1.UpdatePersistentWifiModeResponse{} },
 	"SendHiddenKeepalives":       func() proto.Message { return &v1.SendHiddenKeepalivesResponse{} },
+	"RetryVendorError":           func() proto.Message { return &v1.RetryVendorErrorResponse{} },
 	"RegisterWorkspace":          func() proto.Message { return &v1.RegisterWorkspaceResponse{} },
 	"RegisterRepository":         func() proto.Message { return &v1.RegisterRepositoryResponse{} },
 	"SelectWorkspace":            func() proto.Message { return &v1.SelectWorkspaceResponse{} },

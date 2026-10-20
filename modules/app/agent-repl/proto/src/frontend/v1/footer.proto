@@ -1853,7 +1853,7 @@ message FooterStatusActivityRetrying {
   // The retry's status summary, verbatim.
   string status = 2;
   // When the vendor said the next attempt starts, so the line counts down to
-  // it and shows an attempt that is overdue. Unset when the vendor stated no
+  // it, holding at zero once it passes. Unset when the vendor stated no
   // schedule.
   optional FooterStatusActivityAt next_attempt = 3;
   // The last attempt the vendor will make before it gives up. Unset when the

@@ -733,6 +733,73 @@ that outcome answering the editor\='s close is a contract breach."
                    (agent-repl-test-wire-verbs--parse "{\"stillHidden\":{}}"))
                   :type 'agent-repl-wire-error)))
 
+;;;; ---- RetryVendorError -----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-request ()
+  "The retry asked for now carries the workspace and nothing else."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-retry-vendor-error-request
+                    (list :workspace agent-repl-test-wire-verbs--ref))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-without-workspace ()
+  "A retry naming no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-retry-vendor-error-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-retried ()
+  "A made retry decodes to the empty `retried' outcome."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-retry-vendor-error-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"retried\":{}}}"))
+                   '(:arm :success :value (:outcome (:arm :retried :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-nothing-scheduled ()
+  "No retry scheduled decodes to the empty `nothing_scheduled' outcome."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-retry-vendor-error-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"nothingScheduled\":{}}}"))
+                   '(:arm :success :value (:outcome (:arm :nothing-scheduled :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-busy ()
+  "A busy answer carries the shim's detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-retry-vendor-error-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"busy\":{\"detail\":\"a turn is in flight\"}}}"))
+                   '(:arm :success :value (:outcome (:arm :busy :value (:detail "a turn is in flight"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-ended ()
+  "An ended answer carries the shim's detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-retry-vendor-error-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"ended\":{\"detail\":\"standing down\"}}}"))
+                   '(:arm :success :value (:outcome (:arm :ended :value (:detail "standing down"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-no-session ()
+  "A workspace with no session decodes to the `no_session' refusal."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-retry-vendor-error-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"noSession\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :no-session :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-ownership-refusal ()
+  "A cross-cutting ownership refusal decodes with its fields."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-retry-vendor-error-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}"))
+                   '(:arm :error :value (:cause (:arm :transferring-away :value (:address "127.0.0.1:9"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-refuses-an-unknown-outcome ()
+  "An outcome this codec does not know is refused as an unknown field."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-retry-vendor-error-success
+                   (agent-repl-test-wire-verbs--parse "{\"postponed\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
 ;;;; ---- SwapWorkspaces ---------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-swap-request ()
@@ -4927,6 +4994,30 @@ three arms its own way."
          (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
     (should (= (agent-repl-test-wire-verbs--occurrences "(cons 'opId" source) 1))
     (should (= (agent-repl-test-wire-verbs--occurrences "'(success error accepted)" source) 1))))
+
+;;;; ---- The lone-`detail' decoder ----------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-decode-detail-carries-the-sentence ()
+  "A message carrying only `detail' decodes to (:detail SENTENCE)."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-detail
+                    "Anything" (agent-repl-test-wire-verbs--parse "{\"detail\":\"it broke\"}"))
+                   '(:detail "it broke")))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-detail-refuses-another-field ()
+  "A field beside `detail' is refused as unknown, never dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-detail
+                   "Anything" (agent-repl-test-wire-verbs--parse "{\"detail\":\"x\",\"cause\":\"y\"}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-no-codec-hand-rolls-a-lone-detail ()
+  "Every message carrying only `detail' decodes through the one helper.
+A hand-rolled site is a second spelling of the same shape, which drifts."
+  (let* ((file (file-name-with-extension
+                (symbol-file 'agent-repl-wire-verbs--decode-detail 'defun) "el"))
+         (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
+    (should (= (agent-repl-test-wire-verbs--occurrences "'(detail))" source) 1))))
 
 ;;;; ---- KillWorkspace / NukeWorkspace: the immediate ack --------------
 

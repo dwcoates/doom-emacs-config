@@ -158,6 +158,9 @@ type Client interface {
 	// SendKeepalive asks the session for one keep-alive now, leaving its
 	// cadence as it is (the user keeping a hidden workspace's cache warm).
 	SendKeepalive(ctx context.Context, req *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error)
+	// RetryVendorErrorNow asks the session for its scheduled vendor-error
+	// retry at once (the user pressed RET in an empty composer).
+	RetryVendorErrorNow(ctx context.Context, req *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error)
 	// KillSession ends the session, gracefully unless forced.
 	KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error)
 	// StartTurn opens a turn with the daemon's minted TurnId and the required

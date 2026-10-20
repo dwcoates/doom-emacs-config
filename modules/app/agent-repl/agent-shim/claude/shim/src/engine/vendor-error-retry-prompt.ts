@@ -1,7 +1,7 @@
 /**
  * engine/vendor-error-retry-prompt.ts — the prompt that asks the main agent to
- * continue a turn the vendor ended on an API error after its own retries ran
- * out (engine/vendor-error-retry.ts).
+ * continue a turn the vendor ended on a retryable API error
+ * (engine/vendor-error-retry.ts).
  *
  * DEPENDENCY-FREE ON PURPOSE, as the network-resume prompt is: a mocked vendor
  * may read it back to answer it, and must not pull the engine in to do so.
@@ -20,7 +20,7 @@ export const VENDOR_ERROR_RETRY_MARKER = "<!--agent-repl:vendor-error-retry-->";
 export function vendorErrorRetryPrompt(attempt: number): string {
   return [
     VENDOR_ERROR_RETRY_MARKER,
-    `agent-repl: your last turn ended on a vendor API error after the vendor's own retries ran out. This is automatic retry ${String(attempt)}.`,
+    `agent-repl: your last turn ended on a vendor API error. This is automatic retry ${String(attempt)}.`,
     "Continue exactly where you left off, with the same brief and the same finish.",
   ].join("\n");
 }

@@ -10479,7 +10479,7 @@ type FooterStatusActivityRetrying struct {
 	// The retry's status summary, verbatim.
 	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	// When the vendor said the next attempt starts, so the line counts down to
-	// it and shows an attempt that is overdue. Unset when the vendor stated no
+	// it, holding at zero once it passes. Unset when the vendor stated no
 	// schedule.
 	NextAttempt *FooterStatusActivityAt `protobuf:"bytes,3,opt,name=next_attempt,json=nextAttempt,proto3,oneof" json:"next_attempt,omitempty"`
 	// The last attempt the vendor will make before it gives up. Unset when the

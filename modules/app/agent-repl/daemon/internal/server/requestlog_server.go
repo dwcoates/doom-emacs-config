@@ -374,6 +374,13 @@ func (s *requestLoggingServer) SetEffort(
 	return serveUnary(s, ctx, "SetEffort", req, s.server.SetEffort)
 }
 
+func (s *requestLoggingServer) RetryVendorError(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RetryVendorErrorRequest],
+) (*connect.Response[agentreplv1.RetryVendorErrorResponse], error) {
+	return serveUnary(s, ctx, "RetryVendorError", req, s.server.RetryVendorError)
+}
+
 func (s *requestLoggingServer) SetPermissionMode(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetPermissionModeRequest],

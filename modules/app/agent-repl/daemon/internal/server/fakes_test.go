@@ -24,6 +24,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/classifierupdate"
@@ -401,6 +402,12 @@ type fakeVerbs struct {
 	setEffort    conversationv1.AgentEffortLevel
 	setEffortErr error
 
+	// retries counts every RetryVendorError, answered with retryResponse and
+	// retryErr.
+	retries       int
+	retryResponse *shimv1.RetryVendorErrorNowResponse
+	retryErr      error
+
 	answerPermissionErr error
 	answerQuestionErr   error
 	// draftEdits is every UpdateQuestionDraft call's ask and edit, in order;
@@ -508,6 +515,11 @@ func (f *fakeVerbs) Create(ctx context.Context, spec workspace.CreateSpec) (wsm.
 func (f *fakeVerbs) SetEffort(_ context.Context, _ ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {
 	f.setEffort = level
 	return f.setEffortErr
+}
+
+func (f *fakeVerbs) RetryVendorError(_ context.Context, _ ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error) {
+	f.retries++
+	return f.retryResponse, f.retryErr
 }
 
 func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {

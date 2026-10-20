@@ -12,6 +12,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_retry_vendor_error.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
 import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
 import "agentrepl/v1/endpoint_plan_rollback.proto";
@@ -156,6 +157,11 @@ service AgentRepl {
   // "Stop that": the running turn, or a detached bubble's work — the arm is
   // the target. See endpoint_interrupt.proto.
   rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+
+  // Retry the turn the vendor failed now, rather than at the end of the
+  // footer's countdown (RET in an empty composer). See
+  // endpoint_retry_vendor_error.proto.
+  rpc RetryVendorError(RetryVendorErrorRequest) returns (RetryVendorErrorResponse);
 
   // A reader clicked a piece on a feed chess board: the daemon asks the
   // board's CEE backend what the engine says about the square and hands the

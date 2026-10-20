@@ -152,6 +152,11 @@ func (r *resolver) vendorFaultActivity(s *wsState) *frontendv1.FooterStatusVendo
 		line = salient(s.authLine.at)
 		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_Authenticating{
 			Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}}
+	case s.vendorRetry != nil:
+		// AGENT-REPL WILL RETRY THE FAILED TURN: the countdown to its next
+		// try stands in place of the failure's own sentence.
+		line = salient(s.vendorRetry.at)
+		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_Retrying{Retrying: s.vendorRetry.line()}
 	case s.vendorTurnFault():
 		// HOW THE VENDOR ENDED THE LAST TURN: the per-cause sentence, with
 		// the vendor's wait counted down when it stated one.

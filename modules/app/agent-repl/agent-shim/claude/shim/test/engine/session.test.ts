@@ -16600,18 +16600,6 @@ describe("GetForkPoint and ForkSession", () => {
 });
 
 describe("the vendor-error retry", () => {
-  const API_RETRY = {
-    type: "system",
-    subtype: "api_retry",
-    attempt: 10,
-    max_retries: 10,
-    retry_delay_ms: 500,
-    error_status: 529,
-    error: "overloaded",
-    uuid: "00000000-0000-4000-8000-0000000000e1",
-    session_id: "s",
-  } as unknown as SdkMessage;
-
   const failure = (failed: conversationv1.AgentFailure["failure"]): conversationv1.AgentFrame["result"] => ({
     case: "failure",
     value: create(conversationv1.AgentFailureSchema, { failure: failed }),
@@ -16642,13 +16630,13 @@ describe("the vendor-error retry", () => {
     await drainTurns();
   }
 
-  it("schedules a retry after a turn the vendor retried and gave up on", async () => {
+  it("schedules a retry after a turn that failed on a retryable API failure", async () => {
     // Arrange
     const h = harness();
     await started(h);
 
     // Act
-    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
 
     // Assert
     expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
@@ -16659,7 +16647,7 @@ describe("the vendor-error retry", () => {
     const delivered: string[] = [];
     const h = harness({ drainPrompts: delivered });
     await started(h);
-    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
 
     // Act
     h.retryScheduler.fireTimeout();
@@ -16673,7 +16661,7 @@ describe("the vendor-error retry", () => {
     // Arrange
     const h = harness({ drainPrompts: [] });
     await started(h);
-    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
     const before = logSinkMark();
 
     // Act
@@ -16691,7 +16679,7 @@ describe("the vendor-error retry", () => {
     // Arrange
     const h = harness();
     await started(h);
-    await failedTurn(h, "turn-1", [API_RETRY], OVERLOADED);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
 
     // Act
     await realPrompt(h, "turn-2");
@@ -16700,14 +16688,14 @@ describe("the vendor-error retry", () => {
     expect(h.retryScheduler.pendingTimeout()).toBeUndefined();
   });
 
-  it("does not count a keep-alive's vendor retry", async () => {
+  it("does not retry a keep-alive's failed API call", async () => {
     // Arrange
     const h = harness();
     await started(h);
     h.fold.resultFor = () => OVERLOADED;
 
     // Act
-    await keepaliveTurn(h, [API_RETRY]);
+    await keepaliveTurn(h, []);
     await drainTurns();
 
     // Assert
@@ -16732,6 +16720,65 @@ describe("the vendor-error retry", () => {
 
     // Assert
     expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(76 * 60_000);
+  });
+
+  /** The latest vendor-error retry schedule a fresh session watch replays. */
+  async function replayedSchedule(h: Harness): Promise<conversationv1.SessionVendorErrorRetry | undefined> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    for (let index = 0; index < 16; index++) {
+      const step = await stream.next();
+      if (step.done === true) return undefined;
+      if (step.value.update.case === "vendorErrorRetry") return step.value.update.value;
+    }
+    return undefined;
+  }
+
+  it("states the scheduled retry on the session stream", async () => {
+    // Arrange
+    const h = harness({ nowMs: 1_000_100 });
+    await started(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Assert
+    expect((await replayedSchedule(h))?.scheduled).toEqual(
+      create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
+        attempt: 1,
+        nextAttemptAtMs: BigInt(1_000_100 + VENDOR_ERROR_RETRY_INTERVAL_MS),
+        status: "API Error: overloaded",
+      }),
+    );
+  });
+
+  it("retries at once when RetryVendorErrorNow asks", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Act
+    const response = await h.engine.retryVendorErrorNow(create(shimv1.RetryVendorErrorNowRequestSchema, {}));
+    await drainTurns();
+
+    // Assert
+    expect({ arm: response.outcome.case, retries: delivered.filter(isVendorErrorRetryPrompt).length }).toEqual({
+      arm: "retried",
+      retries: 1,
+    });
+  });
+
+  it("answers nothing_scheduled to RetryVendorErrorNow when no retry is due", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const response = await h.engine.retryVendorErrorNow(create(shimv1.RetryVendorErrorNowRequestSchema, {}));
+
+    // Assert
+    expect(response.outcome.case).toBe("nothingScheduled");
   });
 });
 

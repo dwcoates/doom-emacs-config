@@ -509,6 +509,10 @@ func (c *fakeClient) SetKeepalive(context.Context, *shimv1.SetKeepaliveRequest) 
 	panic("sessionwatcher must not call SetKeepalive")
 }
 
+func (c *fakeClient) RetryVendorErrorNow(context.Context, *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error) {
+	panic("sessionwatcher must not call RetryVendorErrorNow")
+}
+
 func (c *fakeClient) SendKeepalive(context.Context, *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
 	panic("sessionwatcher must not call SendKeepalive")
 }
@@ -1997,6 +2001,14 @@ func networkResumeWaitsUpdate() *conversationv1.SessionUpdate {
 				FailedAtMs:  1700000000000,
 				GivesUpAtMs: 1700001800000,
 			}},
+		},
+	}}
+}
+
+func vendorErrorRetryUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
+		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
+			Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: 1, NextAttemptAtMs: 1700000030000, Status: "Overloaded"},
 		},
 	}}
 }

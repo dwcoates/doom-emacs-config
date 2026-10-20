@@ -1445,18 +1445,23 @@ every shim-authored prompt shares, `src/engine/shim-prompt.ts`).
 | `AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS` | the probe beat |
 | `AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS` | the give-up window |
 
-## A main turn the vendor gave up on is retried (2026-10-14)
+## A main turn the vendor failed is retried by agent-repl (2026-10-14, 2026-10-20)
 
-Owner ruling. `src/engine/vendor-error-retry.ts` owns the rule, and
+Owner rulings. `src/engine/vendor-error-retry.ts` owns the rule, and
 `deliverShimPrompt` in `src/engine/session.ts` the delivery, the same one the
 network resume uses.
 
-- **A retried API failure is retried every five minutes for two hours.** A
-  main turn qualifies when its terminal is `AgentFailure.api_request_failed`
-  and the vendor stated `api_retry` during it: the vendor retried the call
-  (ten times by its own default) and gave up. The two hours run from the
-  chain's first `api_retry`. A failure the vendor never retried is not retried
-  here either.
+- **The vendor makes no API retry of its own** (owner ruling, 2026-10-20).
+  `src/sdk/real-query.ts` starts it with `CLAUDE_CODE_MAX_RETRIES=0`, so a
+  failed call ends the turn at once and every retry is agent-repl's, where the
+  footer counts down to it and the user can ask for it now.
+- **A retryable API failure is retried every thirty seconds for two hours.**
+  A main turn qualifies when its terminal is `AgentFailure.api_request_failed`
+  of a kind waiting can cure (`isRetryableApiFailure`): `overloaded`,
+  `internal`, `rate_limited`, and an `unmodeled` failure with no status, a
+  408, a 409 or any 5xx. A refusal of the request itself (400, auth,
+  permission, billing, not found, too large, too much output) is never
+  retried. The two hours run from the chain's first failure.
 - **An exhausted usage allowance waits for its reset instead.** A usage-limit
   terminal (a 429, `blocking_limit`, `rapid_refill_breaker`: the set the
   footer calls `usage_limit`) reads the account's usage afresh
@@ -1464,9 +1469,19 @@ network resume uses.
   session and weekly figures come from). The retry is made when the exhausted
   window resets: the five-hour session window, or a weekly one (the latest
   reset when several are exhausted). Should the vendor still refuse after
-  that reset, the retry repeats every five minutes for thirty minutes. A
-  usage-limit failure with no exhausted window on record falls to the rule
-  above when the vendor retried it, and is not retried otherwise.
+  that reset, the retry repeats every thirty seconds for thirty minutes. A 429
+  with no exhausted window on record is a passing rate limit, retried by the
+  rule above; a `blocking_limit` or `rapid_refill_breaker` with none is not
+  retried.
+- **The schedule is stated on the session stream**
+  (`SessionUpdate.vendor_error_retry`, a replayed level in
+  `src/engine/pushes.ts`): the retry made next, its instant and the failure
+  it retries, or none while no retry is due (the chain ended, its usage is
+  being read, or its latest retry runs as a turn).
+- **`RetryVendorErrorNow` makes the pending retry at once** (RET in an empty
+  composer). It answers `retried`, `nothing_scheduled`, `busy` (the main agent
+  was busy; asked again shortly) or `ended` (the chain could not deliver and
+  ended).
 - **The retry is an adopted turn with a marked prompt**
   (`src/engine/vendor-error-retry-prompt.ts`, `<!--agent-repl:vendor-error-retry-->`)
   asking the main agent to continue where it left off. It is delivered only on

@@ -552,6 +552,10 @@ type wsState struct {
 	// the next turn opens; while it stands with a turn in flight the status is
 	// `blocked · api_retrying` (retryBlocks).
 	retrying *retryState
+	// vendorRetry is agent-repl's own scheduled retry of a turn the vendor
+	// failed, as the shim last stated it (vendorretry.go); nil while none is
+	// scheduled.
+	vendorRetry *retryState
 	// authLine is the standing auth prompt line.
 	authLine *standing
 	// queryDied is the standing dead-query line. It is SESSION-scoped, not

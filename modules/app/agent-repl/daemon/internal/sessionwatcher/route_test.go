@@ -946,6 +946,12 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
+			// The countdown, and the hold it lifts, are the footer's.
+			name:   "agent-repl's scheduled vendor-error retry is the footer's alone",
+			update: vendorErrorRetryUpdate(),
+			want:   []string{"footer.OnSessionUpdate"},
+		},
+		{
 			name:   "a network-resume outcome is the footer's alone",
 			update: networkResumeOutcomeUpdate(),
 			want:   []string{"footer.OnSessionUpdate"},
@@ -2815,6 +2821,7 @@ func TestSessionArmNamesTheCompactionAndNetworkResumeArms(t *testing.T) {
 		{name: "the standing network-resume waits", update: networkResumeWaitsUpdate(), want: "network_resume_waits"},
 		{name: "a network-resume outcome", update: networkResumeOutcomeUpdate(), want: "network_resume_outcome"},
 		{name: "the vendor's effort", update: effortChangedUpdate(), want: "effort_changed"},
+		{name: "agent-repl's vendor-error retry", update: vendorErrorRetryUpdate(), want: "vendor_error_retry"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -83,14 +83,13 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { footerClockSpan } from "./clock-span.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
   drawFooterAllowance,
   drawGivesUpCountdown,
   enduringUsage,
+  footerCountdownSpan,
   orderedAllowances,
-  remainingLabel,
   type FooterActivity,
 } from "./activity.js";
 
@@ -1250,10 +1249,7 @@ function runtimeClock(startedAtMs: bigint, deps: ExpandedDeps, path: string): HT
 
 /** A ticking countdown to an instant on the wire. */
 export function countdownClock(atMs: bigint, deps: ExpandedDeps, path: string): HTMLElement {
-  const targetMs = msOf(atMs, path);
-  return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
-    span.textContent = remainingLabel(targetMs - nowMs);
-  });
+  return footerCountdownSpan(deps.ctx.ticker, "footer-row-clock", "", msOf(atMs, path));
 }
 
 /** A row's figures cell: its clock, and its caret on a jump row, in order. */

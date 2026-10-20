@@ -201,6 +201,16 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
+	case *conversationv1.SessionUpdate_VendorErrorRetry:
+		// THE SCHEDULE OF AGENT-REPL'S RETRY OF A FAILED TURN is the footer's
+		// to draw (its countdown) and to read (a scheduled retry holds no
+		// prompt, footer.Resolver.VendorBlock); no other rule reads it.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
+			"arm":       sessionArm(update),
+			"scheduled": u.VendorErrorRetry.GetScheduled() != nil,
+		})
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
+
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.session_update_unrouted", "a SessionUpdate arm has no route", dlog.Context{
@@ -295,6 +305,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "cache_lapse"
 	case *conversationv1.SessionUpdate_RollbackSettled:
 		return "rollback_settled"
+	case *conversationv1.SessionUpdate_VendorErrorRetry:
+		return "vendor_error_retry"
 	default:
 		return "unset"
 	}

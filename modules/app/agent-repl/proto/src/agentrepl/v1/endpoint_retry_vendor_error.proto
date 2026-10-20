@@ -1,0 +1,82 @@
+// endpoint_retry_vendor_error.proto — RetryVendorError: retry the failed turn
+// now. FEED section.
+//
+// RET IN AN EMPTY COMPOSER (owner ruling, 2026-10-20). While the footer counts
+// down to agent-repl's next retry of a turn the vendor failed
+// (`vendor_fault` with its "next try in" line), RET retries at once. With
+// text in the composer the prompt itself is sent at once (SubmitPrompt) and is
+// the retry; with none, this request asks the workspace's shim for the
+// scheduled retry now (shim.v1.RetryVendorErrorNow), and nothing is sent as
+// content.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RetryVendorErrorRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message RetryVendorErrorResponse {
+  oneof result {
+    RetryVendorErrorSuccess success = 1;
+    RetryVendorErrorError error = 2;
+  }
+}
+
+// The shim answered. THE ARM IS WHAT HAPPENED, as the shim judged it.
+message RetryVendorErrorSuccess {
+  oneof outcome {
+    // The retry was delivered: the main agent is continuing the failed turn.
+    RetryVendorErrorRetried retried = 1;
+    // No retry was scheduled, so none was made.
+    RetryVendorErrorNothingScheduled nothing_scheduled = 2;
+    // The main agent was busy; the retry asks again shortly.
+    RetryVendorErrorBusy busy = 3;
+    // The retry could not be made and the chain ended.
+    RetryVendorErrorEnded ended = 4;
+  }
+}
+message RetryVendorErrorRetried {}
+message RetryVendorErrorNothingScheduled {}
+message RetryVendorErrorBusy {
+  // What holds the slot, as the shim states it.
+  string detail = 1;
+}
+message RetryVendorErrorEnded {
+  // Why, as the shim states it.
+  string detail = 1;
+}
+
+// Validation failures (unset field, blank string) are Connect
+// InvalidArgument, never an arm.
+message RetryVendorErrorError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    RetryVendorErrorUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    RetryVendorErrorWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    RetryVendorErrorTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    RetryVendorErrorNotYetAdopted not_yet_adopted = 4;
+    // The workspace has no session to retry on.
+    RetryVendorErrorNoSession no_session = 5;
+  }
+}
+message RetryVendorErrorUnknownWorkspace {}
+message RetryVendorErrorWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message RetryVendorErrorTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message RetryVendorErrorNotYetAdopted {}
+message RetryVendorErrorNoSession {}

@@ -5077,7 +5077,7 @@ export type FooterStatusActivityRetrying = Message<"frontend.v1.FooterStatusActi
 
   /**
    * When the vendor said the next attempt starts, so the line counts down to
-   * it and shows an attempt that is overdue. Unset when the vendor stated no
+   * it, holding at zero once it passes. Unset when the vendor stated no
    * schedule.
    *
    * @generated from field: optional frontend.v1.FooterStatusActivityAt next_attempt = 3;

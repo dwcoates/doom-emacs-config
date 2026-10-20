@@ -62,6 +62,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("sendKeepalive")(request);
       return create(shimv1.SendKeepaliveResponseSchema, {});
     },
+    async retryVendorErrorNow(request) {
+      record("retryVendorErrorNow")(request);
+      return create(shimv1.RetryVendorErrorNowResponseSchema, {});
+    },
     async killSession(request) {
       record("killSession")(request);
       return create(shimv1.KillSessionResponseSchema, {});
@@ -157,6 +161,7 @@ describe("shimRoutes unary delegation", () => {
     ["hibernate", requests.hibernateRequest],
     ["setKeepalive", requests.setKeepaliveRequest],
     ["sendKeepalive", requests.sendKeepaliveRequest],
+    ["retryVendorErrorNow", requests.retryVendorErrorNowRequest],
     ["killSession", requests.killSessionRequest],
     ["startTurn", requests.startTurnRequest],
     ["updateAgent", requests.updateAgentRequest],

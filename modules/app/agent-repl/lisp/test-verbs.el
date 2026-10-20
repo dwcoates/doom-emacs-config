@@ -245,6 +245,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :daemon-health))
                 ((symbol-function 'agent-repl-rpc-send-hidden-keepalives)
                  (agent-repl-test-verbs--stub :hidden-keepalives))
+                ((symbol-function 'agent-repl-rpc-retry-vendor-error)
+                 (agent-repl-test-verbs--stub :retry-vendor-error))
                 ((symbol-function 'agent-repl-rpc-session-health)
                  (agent-repl-test-verbs--stub :session-health)))
        (agent-repl-test--recording-popups ,@body))))
@@ -809,6 +811,57 @@ still says where the question stands."
     (let ((request (agent-repl-test-verbs--request :set-hidden)))
       (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
       (should (eq (plist-get (plist-get request :visibility) :arm) :hide)))))
+
+;;;; ---- RetryVendorError (RET in an empty composer) ----------------------
+
+(defun agent-repl-test-verbs--retry-answer (arm &optional value)
+  "Return the answers alist for a RetryVendorError success with outcome ARM."
+  (list (cons :retry-vendor-error
+              (list :response (list :arm :success
+                                    :value (list :outcome (list :arm arm :value value)))))))
+
+(ert-deftest agent-repl-verbs-retry-vendor-error-names-the-workspace ()
+  "The retry asked for now names the workspace and nothing else."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--retry-answer :retried)
+    (agent-repl-verb-retry-vendor-error "ws-one")
+    (should (equal (agent-repl-test-verbs--request :retry-vendor-error)
+                   (list :workspace (agent-repl-test-verbs--ref))))))
+
+(ert-deftest agent-repl-verbs-retry-vendor-error-says-a-made-retry ()
+  "A retry the shim made says so in the echo area."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--retry-answer :retried)
+    (agent-repl-verb-retry-vendor-error "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: retrying now"))))
+
+(ert-deftest agent-repl-verbs-retry-vendor-error-says-nothing-when-none-was-scheduled ()
+  "RET in an empty composer with no retry scheduled stays the quiet no-op."
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--retry-answer :nothing-scheduled)
+    (agent-repl-verb-retry-vendor-error "ws-one")
+    (should-not (agent-repl-test-verbs--messaged-p "agent-repl: "))))
+
+(ert-deftest agent-repl-verbs-retry-vendor-error-words-each-outcome ()
+  "Each outcome the shim names has its own words, or none."
+  (dolist (case '((:retried nil "agent-repl: retrying now")
+                  (:nothing-scheduled nil nil)
+                  (:busy (:detail "a turn is in flight")
+                         "agent-repl: the session is busy (a turn is in flight); the retry follows shortly")
+                  (:ended (:detail "the session is standing down")
+                          "agent-repl: the retry could not be made (the session is standing down)")))
+    (should (equal (agent-repl-verbs--retry-outcome-text
+                    (list :arm (nth 0 case) :value (nth 1 case)))
+                   (nth 2 case)))))
+
+(ert-deftest agent-repl-verbs-retry-vendor-error-unknown-outcome-fails-loudly ()
+  "An outcome arm with no wording is a contract breach, never silence."
+  (should-error (agent-repl-verbs--retry-outcome-text (list :arm :mystery :value nil))))
+
+(ert-deftest agent-repl-verbs-retry-vendor-error-refusal-is-reported ()
+  "A workspace with no session reaches the generic refusal report."
+  (agent-repl-test-verbs--with
+      '((:retry-vendor-error
+         . (:response (:arm :error :value (:cause (:arm :no-session :value nil))))))
+    (agent-repl-verb-retry-vendor-error "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "retry-vendor-error refused"))))
 
 ;;;; ---- SendHiddenKeepalives (`SPC j R') ---------------------------------
 

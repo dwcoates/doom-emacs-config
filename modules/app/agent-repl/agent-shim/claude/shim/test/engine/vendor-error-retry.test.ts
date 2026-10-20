@@ -1,6 +1,7 @@
 /**
  * test/engine/vendor-error-retry.test.ts — which failed turns are retried,
- * the vendor-error cadence and its window, the usage-limit wait for the
+ * the vendor-error cadence and its window, the schedule stated on the session
+ * stream, the retry asked for now, the usage-limit wait for the
  * exhausted window's reset and its tail, and how a chain ends.
  *
  * No clock and no vendor: the scheduler is fired by hand, `nowMs` is a
@@ -15,12 +16,16 @@ import {
   VENDOR_ERROR_RETRY_WINDOW_MS,
   VendorErrorRetry,
   exhaustedWindow,
+  isRetryableApiFailure,
+  retryVendorErrorNowResponse,
+  vendorErrorRetryUpdate,
+  type ScheduledRetry,
   type UsageReading,
 } from "../../src/engine/vendor-error-retry.js";
 import { isVendorErrorRetryPrompt, vendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
 import type { ShimPromptDelivery } from "../../src/engine/shim-prompt.js";
-import { conversationv1 } from "../../src/proto.js";
-import type { AccountUsageLike, SdkMessage } from "../../src/sdk/types.js";
+import { conversationv1, shimv1 } from "../../src/proto.js";
+import type { AccountUsageLike } from "../../src/sdk/types.js";
 import { ManualScheduler } from "./fakes.js";
 import { logRecordsSince, logSinkMark, type LogRecord } from "../log-records.js";
 
@@ -30,18 +35,6 @@ const START = 1_000_000_000;
 // ---------------------------------------------------------------------------
 // Builders
 // ---------------------------------------------------------------------------
-
-const API_RETRY = {
-  type: "system",
-  subtype: "api_retry",
-  attempt: 1,
-  max_retries: 10,
-  retry_delay_ms: 500,
-  error_status: 529,
-  error: "overloaded",
-  uuid: "00000000-0000-4000-8000-000000000001",
-  session_id: "s",
-} as unknown as SdkMessage;
 
 function frame(result: conversationv1.AgentFrame["result"]): conversationv1.AgentFrame {
   return create(conversationv1.AgentFrameSchema, { result });
@@ -58,8 +51,12 @@ function apiFailed(kind: conversationv1.ApiRequestFailed["kind"]): conversationv
   });
 }
 
+const unmodeled = (type: string): conversationv1.AgentFrame =>
+  apiFailed({ case: "unmodeled", value: create(conversationv1.ApiUnmodeledErrorSchema, { type }) });
+
 const OVERLOADED = apiFailed({ case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) });
 const RATE_LIMITED = apiFailed({ case: "rateLimited", value: create(conversationv1.ApiRateLimitedSchema, {}) });
+const INVALID_REQUEST = apiFailed({ case: "invalidRequest", value: create(conversationv1.ApiInvalidRequestSchema, {}) });
 const BLOCKING_LIMIT = failed({ case: "blockingLimit", value: create(conversationv1.AgentStoppedAtBlockingLimitSchema, {}) });
 const MODEL_ERROR = failed({ case: "modelError", value: create(conversationv1.AgentModelErrorSchema, {}) });
 const COMPLETED = frame({
@@ -91,6 +88,8 @@ interface Harness {
   readonly scheduler: ManualScheduler;
   readonly clock: { now: number };
   readonly prompts: string[];
+  /** Every schedule the chain stated, in order. */
+  readonly states: (ScheduledRetry | undefined)[];
   delivery: ShimPromptDelivery | Error;
   reading: UsageReading;
   readings: number;
@@ -100,10 +99,12 @@ function harness(): Harness {
   const scheduler = new ManualScheduler();
   const clock = { now: START };
   const prompts: string[] = [];
+  const states: (ScheduledRetry | undefined)[] = [];
   const h: Harness = {
     scheduler,
     clock,
     prompts,
+    states,
     delivery: { kind: "delivered", turnId: "retry-1" },
     reading: { kind: "sampled", usage: usage({}) },
     readings: 0,
@@ -112,6 +113,9 @@ function harness(): Harness {
         prompts.push(prompt);
         const answer = h.delivery;
         return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+      },
+      state: (scheduled) => {
+        states.push(scheduled);
       },
       readUsage: () => {
         h.readings += 1;
@@ -129,9 +133,8 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
-/** A turn the vendor retried and then failed with TERMINAL. */
-async function retriedTurnEnds(h: Harness, turnId: string | undefined, terminal = OVERLOADED): Promise<void> {
-  h.retry.observe(API_RETRY);
+/** A turn the vendor failed with TERMINAL. */
+async function failedTurnEnds(h: Harness, turnId: string | undefined, terminal = OVERLOADED): Promise<void> {
   h.retry.turnEnded(turnId, terminal);
   await settle();
 }
@@ -238,23 +241,23 @@ describe("exhaustedWindow", () => {
 // ---------------------------------------------------------------------------
 
 describe("a failed turn", () => {
-  it("opens a chain when the vendor retried an API failure and gave up", async () => {
+  it("opens a chain on a retryable API failure", async () => {
     // Arrange
     const h = harness();
 
     // Act
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Assert
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
   });
 
-  it("opens no chain for an API failure the vendor never retried", () => {
+  it("opens no chain for an API refusal of the request itself", () => {
     // Arrange
     const h = harness();
 
     // Act
-    h.retry.turnEnded("turn-1", OVERLOADED);
+    h.retry.turnEnded("turn-1", INVALID_REQUEST);
 
     // Assert
     expect(h.retry.standing()).toBe(false);
@@ -263,7 +266,6 @@ describe("a failed turn", () => {
   it("opens no chain for a failure that is not an API failure", () => {
     // Arrange
     const h = harness();
-    h.retry.observe(API_RETRY);
 
     // Act
     h.retry.turnEnded("turn-1", MODEL_ERROR);
@@ -275,23 +277,9 @@ describe("a failed turn", () => {
   it("opens no chain for a completed turn", () => {
     // Arrange
     const h = harness();
-    h.retry.observe(API_RETRY);
 
     // Act
     h.retry.turnEnded("turn-1", COMPLETED);
-
-    // Assert
-    expect(h.retry.standing()).toBe(false);
-  });
-
-  it("forgets an earlier turn's vendor retry", () => {
-    // Arrange
-    const h = harness();
-    h.retry.observe(API_RETRY);
-    h.retry.turnEnded("turn-1", COMPLETED);
-
-    // Act
-    h.retry.turnEnded("turn-2", OVERLOADED);
 
     // Assert
     expect(h.retry.standing()).toBe(false);
@@ -303,7 +291,7 @@ describe("a failed turn", () => {
     const before = logSinkMark();
 
     // Act
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Assert
     const opened = recordsSaying(logRecordsSince(before), "the turn ended on a failure agent-repl retries; a retry chain opened");
@@ -319,7 +307,7 @@ describe("the vendor-error cadence", () => {
   it("delivers the first retry when the interval elapses", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Act
     await fire(h);
@@ -331,12 +319,12 @@ describe("the vendor-error cadence", () => {
   it("schedules the next retry when the retried turn fails the same way", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
     h.clock.now += 10 * MINUTE;
 
     // Act
-    await retriedTurnEnds(h, "retry-1");
+    await failedTurnEnds(h, "retry-1");
 
     // Assert
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
@@ -345,9 +333,9 @@ describe("the vendor-error cadence", () => {
   it("numbers each delivered retry", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
-    await retriedTurnEnds(h, "retry-1");
+    await failedTurnEnds(h, "retry-1");
     h.delivery = { kind: "delivered", turnId: "retry-2" };
 
     // Act
@@ -360,7 +348,7 @@ describe("the vendor-error cadence", () => {
   it("ends the chain when the retried turn is answered", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
 
     // Act
@@ -370,14 +358,14 @@ describe("the vendor-error cadence", () => {
     expect({ standing: h.retry.standing(), scheduled: h.retry.scheduled() }).toEqual({ standing: false, scheduled: false });
   });
 
-  it("ends the chain when the retried turn fails without a vendor retry", async () => {
+  it("ends the chain when the retried turn fails on a refusal", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
 
     // Act
-    h.retry.turnEnded("retry-1", OVERLOADED);
+    h.retry.turnEnded("retry-1", INVALID_REQUEST);
 
     // Assert
     expect(h.retry.standing()).toBe(false);
@@ -386,7 +374,7 @@ describe("the vendor-error cadence", () => {
   it("is not moved by another turn's end while the retry runs", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
 
     // Act
@@ -400,7 +388,7 @@ describe("the vendor-error cadence", () => {
   it("keeps waiting for the retry it delivered when another turn ends first", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
 
     // Act
@@ -413,7 +401,7 @@ describe("the vendor-error cadence", () => {
   it("is not moved by another turn's end while the retry waits to be delivered", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Act
     h.retry.turnEnded("vendor-turn", COMPLETED);
@@ -422,14 +410,15 @@ describe("the vendor-error cadence", () => {
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
   });
 
-  it("measures the window from the chain's first vendor retry", async () => {
-    // Arrange: the turn's first retry is two hours ago, less four minutes.
+  it("measures the window from the chain's first failure", async () => {
+    // Arrange: the chain's first failure is two hours ago, less a few seconds.
     const h = harness();
-    h.retry.observe(API_RETRY);
-    h.clock.now += VENDOR_ERROR_RETRY_WINDOW_MS - 4 * MINUTE;
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+    h.clock.now += VENDOR_ERROR_RETRY_WINDOW_MS - 5_000;
 
     // Act
-    h.retry.turnEnded("turn-1", OVERLOADED);
+    await failedTurnEnds(h, "retry-1");
 
     // Assert
     expect(h.scheduler.pendingTimeout()).toBeUndefined();
@@ -438,11 +427,12 @@ describe("the vendor-error cadence", () => {
   it("makes the last retry that starts inside the window", async () => {
     // Arrange
     const h = harness();
-    h.retry.observe(API_RETRY);
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
     h.clock.now += VENDOR_ERROR_RETRY_WINDOW_MS - VENDOR_ERROR_RETRY_INTERVAL_MS;
 
     // Act
-    h.retry.turnEnded("turn-1", OVERLOADED);
+    await failedTurnEnds(h, "retry-1");
 
     // Assert
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
@@ -451,13 +441,13 @@ describe("the vendor-error cadence", () => {
   it("gives up at ERROR once the window is spent", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
     h.clock.now += VENDOR_ERROR_RETRY_WINDOW_MS;
     const before = logSinkMark();
 
     // Act
-    await retriedTurnEnds(h, "retry-1");
+    await failedTurnEnds(h, "retry-1");
 
     // Assert
     const records = recordsSaying(
@@ -472,12 +462,12 @@ describe("the vendor-error cadence", () => {
   it("leaves no chain once the window is spent", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     await fire(h);
     h.clock.now += VENDOR_ERROR_RETRY_WINDOW_MS;
 
     // Act
-    await retriedTurnEnds(h, "retry-1");
+    await failedTurnEnds(h, "retry-1");
 
     // Assert
     expect(h.retry.standing()).toBe(false);
@@ -492,7 +482,7 @@ describe("delivering a retry", () => {
   it("asks again shortly while the main agent is busy", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     h.delivery = { kind: "busy", detail: "a keep-alive turn is open" };
 
     // Act
@@ -505,7 +495,7 @@ describe("delivering a retry", () => {
   it("ends the chain when the session can never take the prompt", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     h.delivery = { kind: "unavailable", detail: "the session is standing down" };
 
     // Act
@@ -518,7 +508,7 @@ describe("delivering a retry", () => {
   it("gives up at ERROR when the vendor refuses the prompt", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     h.delivery = new Error("the prompt queue is closed");
     const before = logSinkMark();
 
@@ -538,7 +528,7 @@ describe("delivering a retry", () => {
   it("leaves no chain when the vendor refuses the prompt", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     h.delivery = new Error("the prompt queue is closed");
 
     // Act
@@ -557,11 +547,11 @@ describe("delivering a retry", () => {
     });
     const retry = new VendorErrorRetry({
       deliver: () => pending,
+      state: () => undefined,
       readUsage: () => Promise.resolve({ kind: "unavailable", detail: "unused" }),
       nowMs: () => START,
       scheduler,
     });
-    retry.observe(API_RETRY);
     retry.turnEnded("turn-1", OVERLOADED);
     scheduler.fireTimeout();
     retry.promptSubmitted("turn-2");
@@ -613,13 +603,13 @@ describe("a usage-limit failure", () => {
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(weeklyReset - START);
   });
 
-  it("waits for the reset even when the vendor retried the 429", async () => {
+  it("waits for the reset of a 429 with an exhausted window", async () => {
     // Arrange
     const h = harness();
     h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
 
     // Act
-    await retriedTurnEnds(h, "turn-1", RATE_LIMITED);
+    await failedTurnEnds(h, "turn-1", RATE_LIMITED);
 
     // Assert
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(76 * MINUTE);
@@ -642,7 +632,7 @@ describe("a usage-limit failure", () => {
     const h = harness();
 
     // Act
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Assert
     expect(h.readings).toBe(0);
@@ -673,7 +663,7 @@ describe("a usage-limit failure", () => {
     h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: reset } }) };
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
     await settle();
-    h.clock.now = reset + USAGE_LIMIT_RETRY_TAIL_MS - 4 * MINUTE;
+    h.clock.now = reset + USAGE_LIMIT_RETRY_TAIL_MS - VENDOR_ERROR_RETRY_INTERVAL_MS / 2;
     await fire(h);
     const before = logSinkMark();
 
@@ -711,19 +701,19 @@ describe("a usage-limit failure", () => {
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(weeklyReset - reset);
   });
 
-  it("is retried as a vendor error when the vendor retried it and no window is exhausted", async () => {
+  it("retries a 429 with no exhausted window as a vendor error", async () => {
     // Arrange
     const h = harness();
     h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 40, resetsAtMs: START + 60 * MINUTE } }) };
 
     // Act
-    await retriedTurnEnds(h, "turn-1", RATE_LIMITED);
+    await failedTurnEnds(h, "turn-1", RATE_LIMITED);
 
     // Assert
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
   });
 
-  it("is not retried when the vendor never retried it and no window is exhausted", async () => {
+  it("does not retry a blocking limit with no exhausted window", async () => {
     // Arrange
     const h = harness();
     h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 40, resetsAtMs: START + 60 * MINUTE } }) };
@@ -777,7 +767,7 @@ describe("ending a chain", () => {
   it("yields to a submitted prompt", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Act
     h.retry.promptSubmitted("turn-2");
@@ -789,11 +779,11 @@ describe("ending a chain", () => {
   it("opens a fresh chain when the submitted prompt fails the same way", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     h.retry.promptSubmitted("turn-2");
 
     // Act
-    await retriedTurnEnds(h, "turn-2");
+    await failedTurnEnds(h, "turn-2");
 
     // Assert
     expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
@@ -802,7 +792,7 @@ describe("ending a chain", () => {
   it("cancels the pending retry at stand-down", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Act
     h.retry.stop("the session stood down");
@@ -814,7 +804,7 @@ describe("ending a chain", () => {
   it("records the abandoned chain at stand-down", async () => {
     // Arrange
     const h = harness();
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
     const before = logSinkMark();
 
     // Act
@@ -831,9 +821,305 @@ describe("ending a chain", () => {
     h.retry.stop("the session stood down");
 
     // Act
-    await retriedTurnEnds(h, "turn-1");
+    await failedTurnEnds(h, "turn-1");
 
     // Assert
     expect(h.retry.standing()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Which API failures waiting can cure
+// ---------------------------------------------------------------------------
+
+describe("isRetryableApiFailure", () => {
+  const api = (kind: conversationv1.ApiRequestFailed["kind"]): conversationv1.AgentFrame => apiFailed(kind);
+  const cases: { name: string; frame: conversationv1.AgentFrame; expected: boolean }[] = [
+    { name: "an overload", frame: OVERLOADED, expected: true },
+    { name: "the API's own error", frame: api({ case: "internal", value: create(conversationv1.ApiInternalSchema, {}) }), expected: true },
+    { name: "a rate limit", frame: RATE_LIMITED, expected: true },
+    { name: "a failure that stated no status", frame: unmodeled("unknown"), expected: true },
+    { name: "a 502", frame: unmodeled("http_502"), expected: true },
+    { name: "a 408", frame: unmodeled("http_408"), expected: true },
+    { name: "a 409", frame: unmodeled("http_409"), expected: true },
+    { name: "an unmodeled class with no status", frame: unmodeled("new_vendor_class"), expected: false },
+    { name: "a 418", frame: unmodeled("http_418"), expected: false },
+    { name: "a malformed request", frame: INVALID_REQUEST, expected: false },
+    {
+      name: "a rejected credential",
+      frame: api({ case: "authenticationFailed", value: create(conversationv1.ApiAuthenticationFailedSchema, {}) }),
+      expected: false,
+    },
+    { name: "a billing refusal", frame: api({ case: "billingError", value: create(conversationv1.ApiBillingErrorSchema, {}) }), expected: false },
+    { name: "a request too large", frame: api({ case: "requestTooLarge", value: create(conversationv1.ApiRequestTooLargeSchema, {}) }), expected: false },
+    { name: "a failure that is not an API failure", frame: MODEL_ERROR, expected: false },
+    { name: "a completed turn", frame: COMPLETED, expected: false },
+  ];
+
+  it.each(cases)("$name: $expected", ({ frame: terminal, expected }) => {
+    // Act
+    const retryable = isRetryableApiFailure(terminal);
+
+    // Assert
+    expect(retryable).toBe(expected);
+  });
+
+  it("throws on an API failure that carries no kind", () => {
+    // Arrange
+    const kindless = failed({ case: "apiRequestFailed", value: create(conversationv1.ApiRequestFailedSchema, { message: "x" }) });
+
+    // Act, Assert
+    expect(() => isRetryableApiFailure(kindless)).toThrow("an api_request_failed terminal carries no kind");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The stated schedule
+// ---------------------------------------------------------------------------
+
+describe("the stated schedule", () => {
+  it("states the first retry, its instant and the failure it retries", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    await failedTurnEnds(h, "turn-1");
+
+    // Assert
+    expect(h.states).toEqual([{ attempt: 1, atMs: START + VENDOR_ERROR_RETRY_INTERVAL_MS, status: "API Error" }]);
+  });
+
+  it("states that none is due once the retry is delivered", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect(h.states.at(-1)).toBeUndefined();
+  });
+
+  it("states the next attempt's number after a retried turn fails", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+
+    // Act
+    await failedTurnEnds(h, "retry-1");
+
+    // Assert
+    expect(h.states.at(-1)?.attempt).toBe(2);
+  });
+
+  it("states that none is due when a submitted prompt ends the chain", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    h.retry.promptSubmitted("turn-2");
+
+    // Assert
+    expect(h.states).toEqual([{ attempt: 1, atMs: START + VENDOR_ERROR_RETRY_INTERVAL_MS, status: "API Error" }, undefined]);
+  });
+
+  it("states the window's reset as the instant of a usage-limit retry", async () => {
+    // Arrange
+    const h = harness();
+    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+
+    // Act
+    h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
+    await settle();
+
+    // Assert
+    expect(h.states.at(-1)?.atMs).toBe(START + 76 * MINUTE);
+  });
+
+  it("states nothing for a failure it does not retry", () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    h.retry.turnEnded("turn-1", INVALID_REQUEST);
+
+    // Assert
+    expect(h.states).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The retry asked for now
+// ---------------------------------------------------------------------------
+
+describe("retryNow", () => {
+  it("delivers the pending retry at once", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect({ outcome, prompts: h.prompts }).toEqual({ outcome: { kind: "retried" }, prompts: [vendorErrorRetryPrompt(1)] });
+  });
+
+  it("cancels the timer it overtook", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    await h.retry.retryNow();
+
+    // Assert
+    expect(h.scheduler.pendingTimeout()).toBeUndefined();
+  });
+
+  it("makes nothing when no chain stands", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect({ outcome, prompts: h.prompts }).toEqual({ outcome: { kind: "nothing_scheduled" }, prompts: [] });
+  });
+
+  it("makes nothing while the latest retry runs as a turn", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect({ outcome, prompts: h.prompts.length }).toEqual({ outcome: { kind: "nothing_scheduled" }, prompts: 1 });
+  });
+
+  it("makes nothing after stand-down", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.retry.stop("the session stood down");
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect(outcome).toEqual({ kind: "nothing_scheduled" });
+  });
+
+  it("answers busy and asks again shortly when the main agent is busy", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = { kind: "busy", detail: "a keep-alive turn is open" };
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect({ outcome, delay: h.scheduler.pendingTimeout()?.delayMs }).toEqual({
+      outcome: { kind: "busy", detail: "a keep-alive turn is open" },
+      delay: VENDOR_ERROR_RETRY_BUSY_MS,
+    });
+  });
+
+  it("answers ended when the session cannot take the prompt", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = { kind: "unavailable", detail: "the session is standing down" };
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect({ outcome, standing: h.retry.standing() }).toEqual({
+      outcome: { kind: "ended", detail: "the session is standing down" },
+      standing: false,
+    });
+  });
+
+  it("answers ended when the vendor refuses the prompt", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = new Error("the prompt queue is closed");
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect(outcome).toEqual({ kind: "ended", detail: "the prompt queue is closed" });
+  });
+
+  it("records the retry asked for now", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    const before = logSinkMark();
+
+    // Act
+    await h.retry.retryNow();
+
+    // Assert
+    const records = recordsSaying(logRecordsSince(before), "a retry was asked for now; agent-repl makes it at once");
+    expect(records.map((record) => record.context["attempt"])).toEqual([1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The wire
+// ---------------------------------------------------------------------------
+
+describe("vendorErrorRetryUpdate", () => {
+  it("carries a scheduled retry whole", () => {
+    // Act
+    const update = vendorErrorRetryUpdate({ attempt: 3, atMs: START, status: "Overloaded" });
+
+    // Assert
+    expect(update.update.case === "vendorErrorRetry" ? update.update.value.scheduled : undefined).toEqual(
+      create(conversationv1.SessionVendorErrorRetryScheduledSchema, { attempt: 3, nextAttemptAtMs: BigInt(START), status: "Overloaded" }),
+    );
+  });
+
+  it("states no schedule when none is due", () => {
+    // Act
+    const update = vendorErrorRetryUpdate(undefined);
+
+    // Assert
+    expect(update.update.case === "vendorErrorRetry" ? update.update.value.scheduled : "wrong arm").toBeUndefined();
+  });
+});
+
+describe("retryVendorErrorNowResponse", () => {
+  it.each([
+    [{ kind: "retried" } as const, "retried"],
+    [{ kind: "nothing_scheduled" } as const, "nothingScheduled"],
+    [{ kind: "busy", detail: "d" } as const, "busy"],
+    [{ kind: "ended", detail: "d" } as const, "ended"],
+  ])("answers %o as its own arm", (outcome, arm) => {
+    // Act
+    const response = retryVendorErrorNowResponse(outcome);
+
+    // Assert
+    expect(response.outcome.case).toBe(arm);
+  });
+
+  it("carries the detail of a busy answer", () => {
+    // Act
+    const response = retryVendorErrorNowResponse({ kind: "busy", detail: "a turn is in flight" });
+
+    // Assert
+    expect(response.outcome.value).toEqual(create(shimv1.RetryVendorErrorNowBusySchema, { detail: "a turn is in flight" }));
   });
 });

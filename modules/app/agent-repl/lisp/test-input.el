@@ -44,6 +44,9 @@
 (defvar agent-repl-test-input--messages nil
   "Strings passed to `message' during a test.")
 
+(defvar agent-repl-test-input--retries nil
+  "Workspaces an empty send asked for the vendor-error retry now, newest first.")
+
 (defvar agent-repl-test-input--answer nil
   "The scripted answer: `(:response PLIST)' or `(:failure PLIST)'.")
 
@@ -74,6 +77,7 @@ fake would not exercise them."
          (agent-repl-test-input--hold-error nil)
          (agent-repl-test-input--refusals nil)
          (agent-repl-test-input--messages nil)
+         (agent-repl-test-input--retries nil)
          (agent-repl-test-input--answer (agent-repl-test-input--turn-answer))
          (agent-repl-test-input--gate :open)
          (agent-repl-test-input--buffer nil))
@@ -130,6 +134,8 @@ fake would not exercise them."
                          (push (if args (apply #'format fmt args) fmt)
                                agent-repl-test-input--messages)
                          nil))
+                      ((symbol-function 'agent-repl-verb-retry-vendor-error)
+                       (lambda (ws) (push ws agent-repl-test-input--retries)))
                       ((symbol-function 'agent-repl-rpc-submit-prompt)
                        (lambda (_conn request &rest keys)
                          (push request agent-repl-test-input--submitted)
@@ -526,6 +532,49 @@ fake would not exercise them."
     (agent-repl-test-input--type "   \n\t ")
     (should-not (agent-repl--send :user-sent))
     (should-not agent-repl-test-input--submitted)))
+
+;;;; ---- RET in an empty composer retries a failed turn now ----
+
+(ert-deftest agent-repl-input-empty-composer-send-asks-for-the-retry-now ()
+  "RET on an empty composer asks the workspace's shim for its retry now."
+  (agent-repl-test-input--with
+    ;; Arrange.
+    (agent-repl-test-input--type "")
+    ;; Act.
+    (agent-repl--send :user-sent)
+    ;; Assert.
+    (should (equal agent-repl-test-input--retries '("ws-one")))))
+
+(ert-deftest agent-repl-input-whitespace-only-send-asks-for-the-retry-now ()
+  "A composer holding only whitespace is empty, and RET retries."
+  (agent-repl-test-input--with
+    ;; Arrange.
+    (agent-repl-test-input--type "  \n ")
+    ;; Act.
+    (agent-repl--send :user-sent)
+    ;; Assert.
+    (should (equal agent-repl-test-input--retries '("ws-one")))))
+
+(ert-deftest agent-repl-input-a-send-with-words-asks-for-no-retry ()
+  "A prompt with words is itself the retry, so no retry is asked for."
+  (agent-repl-test-input--with
+    ;; Arrange.
+    (agent-repl-test-input--type "carry on")
+    ;; Act.
+    (agent-repl--send :user-sent)
+    ;; Assert.
+    (should-not agent-repl-test-input--retries)
+    (should agent-repl-test-input--submitted)))
+
+(ert-deftest agent-repl-input-an-empty-supplied-prompt-asks-for-no-retry ()
+  "Only the composer's RET retries: an empty prompt a caller composed does not."
+  (agent-repl-test-input--with
+    ;; Arrange.
+    (agent-repl-test-input--type "my draft")
+    ;; Act.
+    (agent-repl--send :command-update-pr "   ")
+    ;; Assert.
+    (should-not agent-repl-test-input--retries)))
 
 ;;;; ---- Every send site's own origin ----
 

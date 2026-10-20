@@ -103,6 +103,7 @@ import type {
   FooterMoney,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { formatAge, formatCountdown, formatTickedAge } from "../duration.js";
+import type { Ticker } from "../clock.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -1206,9 +1207,9 @@ export function drawFooterStatusActivityAuthenticating(
  * drawn only when it stated them.
  *
  * THE NEXT ATTEMPT IS SHIPPED AS AN INSTANT and counts down here on the shared
- * ticker. Once it passes with no newer attempt pushed, the line says so,
- * "next try overdue by 2m", rather than floor at zero: a vendor that promised
- * a retry and never made one reads as the stall it is.
+ * ticker. The line is always a countdown (owner ruling, 2026-10-20): once the
+ * instant passes with no newer attempt pushed, it holds at "next try in 0s"
+ * rather than counting up how late the vendor is.
  */
 export function drawFooterStatusActivityRetrying(
   u: FooterStatusActivityRetrying,
@@ -1238,25 +1239,18 @@ export function drawFooterStatusActivityRetrying(
 
 /**
  * "next try in 12s" ticking down to the vendor's promised instant at second
- * resolution, then "next try overdue by 2m" counting up once it has passed.
+ * resolution, holding at "next try in 0s" once it has passed.
  */
 function drawNextAttempt(
   u: FooterStatusActivityAt,
   deps: AllowanceDeps,
   path: string,
 ): HTMLElement {
-  const atMs = msOf(u.atMs, `${path}.at_ms`);
-  return footerClockSpan(
+  return footerCountdownSpan(
     deps.ctx.ticker,
-    "countdown",
     "footer-next-attempt",
-    (span, nowMs) => {
-      const overdue = nowMs >= atMs;
-      span.toggleAttribute("data-overdue", overdue);
-      span.textContent = overdue
-        ? `next try overdue by ${formatAge(nowMs - atMs)}`
-        : `next try in ${remainingLabel(atMs - nowMs)}`;
-    },
+    "next try in ",
+    msOf(u.atMs, `${path}.at_ms`),
   );
 }
 
@@ -1272,11 +1266,13 @@ export function drawFooterStatusActivityWakeup(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-wakeup";
-  const wakeAtMs = msOf(u.wakeAtMs, `${path}.wake_at_ms`);
   line.appendChild(
-    footerClockSpan(deps.ctx.ticker, "countdown", undefined, (span, nowMs) => {
-      span.textContent = `wakes in ${remainingLabel(wakeAtMs - nowMs)}`;
-    }),
+    footerCountdownSpan(
+      deps.ctx.ticker,
+      undefined,
+      "wakes in ",
+      msOf(u.wakeAtMs, `${path}.wake_at_ms`),
+    ),
   );
   if (u.reason !== undefined) {
     line.appendChild(document.createTextNode(` · ${u.reason.text}`));
@@ -1429,4 +1425,21 @@ export function drawFooterStatusActivityAt(
  */
 export function remainingLabel(ms: number): string {
   return formatAge(Math.max(0, ms));
+}
+
+/**
+ * A countdown to ATMS reading LABEL then the time remaining ("next try in
+ * 12s"), ticking down on the shared clock and holding at `0s` once the instant
+ * passes. Every footer countdown at second resolution is built here, so none
+ * of them counts up past its instant.
+ */
+export function footerCountdownSpan(
+  ticker: Ticker,
+  className: string | undefined,
+  label: string,
+  atMs: number,
+): HTMLElement {
+  return footerClockSpan(ticker, "countdown", className, (span, nowMs) => {
+    span.textContent = `${label}${remainingLabel(atMs - nowMs)}`;
+  });
 }
