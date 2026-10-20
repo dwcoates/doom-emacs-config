@@ -268,12 +268,13 @@
      replies to, or a prompt the rollback keys act on — so the one selected
      bubble is unmistakable among those around it. */
   --selected-bubble-bg: #f5f5f7;
-  /* THE SELECTED FINAL RESPONSE's fill (owner request, 2026-10-20): dimmed
+  /* THE SELECTED FINAL RESPONSE's fill (owner requests, 2026-10-20): dimmed
      to halfway between the selected grey and an unselected final response's
      own --assistant, so the answer's highlight reads softer than the other
-     selected bubbles'. Declared once: both themes resolve it from their own
-     two tokens. */
-  --selected-final-response-bg: color-mix(in srgb, var(--selected-bubble-bg), var(--assistant));
+     selected bubbles', then 25% dimmer again: the grey keeps 37.5% (0.75 of
+     the half). Declared once: both themes resolve it from their own two
+     tokens. */
+  --selected-final-response-bg: color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant));
   /* THE SELECTED PROMPT's fill (owner request, 2026-10-19): a prompt bubble
      that is not held is selected in a darker blue than the user prompt's own
      --user (#b8d2ff), rather than the grey every other selected bubble
@@ -2413,8 +2414,8 @@ html[data-page-unshown] *::after {
   --bubble-bg: var(--selected-bubble-bg) !important;
 }
 /* THE SELECTED FINAL RESPONSE (owner request, 2026-10-20): a final response
-   is filled with --selected-final-response-bg, the grey dimmed halfway back
-   to its own fill, instead of the grey. The extra class outranks the rule
+   is filled with --selected-final-response-bg, the grey dimmed most of the
+   way back to its own fill, instead of the grey. The extra class outranks the rule
    above's specificity, both `!important`. */
 .bubble.final-response.entry-selected {
   --bubble-bg: var(--selected-final-response-bg) !important;
