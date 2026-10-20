@@ -93,7 +93,6 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 		{name: "a blank name", err: wsm.ErrBlankSubsectionName, arm: ArmBlankName},
 		{name: "two repositories", err: wsm.ErrOtherRepository, arm: ArmOtherRepository},
 		{name: "an anchor elsewhere", err: wsm.ErrAnchorElsewhere, arm: ArmAnchorElsewhere},
-		{name: "a child placed alone", err: wsm.ErrHasParent, arm: ArmHasParent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

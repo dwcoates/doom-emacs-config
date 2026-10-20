@@ -3,9 +3,11 @@ package wsm
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // slotted is a subsection named NAME at PLACE standing at SLOT (nil: after
@@ -194,10 +196,6 @@ func TestMoveSubsectionBeforeAWorkspaceRefusals(t *testing.T) {
 	}{
 		{name: "a workspace in a subsection", want: ErrAnchorElsewhere,
 			anchor: func(_ *testing.T, _ *store, w walkWorld) WorkspaceID { return w.x.ID }},
-		{name: "a child", want: ErrAnchorElsewhere,
-			anchor: func(t *testing.T, s *store, w walkWorld) WorkspaceID {
-				return registerChild(t, s, arrangeRepoOf(t, s, w.a), "kid", w.a.ID).ID
-			}},
 		{name: "another repository's workspace", want: ErrOtherRepository,
 			anchor: func(t *testing.T, s *store, _ walkWorld) WorkspaceID {
 				return registerIn(t, s, arrangeRepo(t, "other"), "o", nil).ID
@@ -493,5 +491,361 @@ func TestTheSubsectionSlotsMigrationLeavesEverySubsectionAtTheBottom(t *testing.
 	s := handle.(*store)
 	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('subsections') WHERE name = 'slot' AND "notnull" = 0`); got != 1 {
 		t.Fatalf("subsections.slot (nullable) exists %d times after the migration, want 1", got)
+	}
+}
+
+// closeFor closes WS the way a daemon close does, which a parent with open
+// children can still meet (a gesture close of one is refused).
+func closeFor(t *testing.T, s *store, ws WorkspaceID) {
+	t.Helper()
+	if err := s.MarkClosed(context.Background(), ws, Closure{At: time.Unix(100, 0), By: CloseByDaemon}); err != nil {
+		t.Fatalf("MarkClosed(%s): %v", ws, err)
+	}
+}
+
+// standingOf answers what ID stands for, read in its own transaction.
+func standingOf(t *testing.T, s *store, id WorkspaceID) (WorkspaceID, error) {
+	t.Helper()
+	tx, err := s.db().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+	return standing(context.Background(), tx, id)
+}
+
+func TestStanding(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange builds the family and answers the workspace asked about and
+		// the one it should stand for.
+		arrange func(t *testing.T, s *store, repoDir string) (ask, want WorkspaceID)
+	}{
+		{name: "a root stands for itself", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			root := registerIn(t, s, repoDir, "root", nil)
+			return root.ID, root.ID
+		}},
+		{name: "a child of an open parent stands for itself", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			parent := registerIn(t, s, repoDir, "parent", nil)
+			child := registerChild(t, s, repoDir, "child", parent.ID)
+			return child.ID, child.ID
+		}},
+		{name: "a child of a closed root stands for the root", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			parent := registerIn(t, s, repoDir, "parent", nil)
+			child := registerChild(t, s, repoDir, "child", parent.ID)
+			closeFor(t, s, parent.ID)
+			return child.ID, parent.ID
+		}},
+		{name: "a grandchild under two closed generations stands for the root", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			root := registerIn(t, s, repoDir, "root", nil)
+			mid := registerChild(t, s, repoDir, "mid", root.ID)
+			kid := registerChild(t, s, repoDir, "kid", mid.ID)
+			closeFor(t, s, mid.ID)
+			closeFor(t, s, root.ID)
+			return kid.ID, root.ID
+		}},
+		{name: "a child of a closed parent under an open root stands for the closed parent", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			root := registerIn(t, s, repoDir, "root", nil)
+			mid := registerChild(t, s, repoDir, "mid", root.ID)
+			kid := registerChild(t, s, repoDir, "kid", mid.ID)
+			closeFor(t, s, mid.ID)
+			return kid.ID, mid.ID
+		}},
+		{name: "a child of a hidden root stands for the root", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			parent := registerIn(t, s, repoDir, "parent", nil)
+			child := registerChild(t, s, repoDir, "child", parent.ID)
+			if _, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET hidden = 1, hidden_at = 100 WHERE id = ?`, parent.ID); err != nil {
+				t.Fatalf("hide: %v", err)
+			}
+			return child.ID, parent.ID
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ask, want := tt.arrange(t, s, arrangeRepo(t, "repo"))
+
+			// Act
+			got, err := standingOf(t, s, ask)
+
+			// Assert
+			if err != nil || got != want {
+				t.Fatalf("standing = (%s, %v), want %s", got, err, want)
+			}
+		})
+	}
+}
+
+func TestStandingRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, s *store, repoDir string) WorkspaceID
+		want    string
+	}{
+		{name: "an unknown workspace", want: "not found",
+			arrange: func(*testing.T, *store, string) WorkspaceID { return "absent" }},
+		{name: "a parent chain that cycles through closed workspaces", want: "cycle",
+			arrange: func(t *testing.T, s *store, repoDir string) WorkspaceID {
+				a := registerIn(t, s, repoDir, "a", nil)
+				b := registerChild(t, s, repoDir, "b", a.ID)
+				closeFor(t, s, a.ID)
+				closeFor(t, s, b.ID)
+				if _, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET parent_id = ? WHERE id = ?`, b.ID, a.ID); err != nil {
+					t.Fatalf("cycle: %v", err)
+				}
+				return b.ID
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			id := tt.arrange(t, s, arrangeRepo(t, "repo"))
+
+			// Act
+			_, err := standingOf(t, s, id)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("standing = %v, want an error saying %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// hoistedWorld is the live case: a, then R (closed) drawn as its open child
+// ship, then [foo: x] at the bottom.
+type hoistedWorld struct {
+	a, r, ship, x Workspace
+	foo           Subsection
+	// siblings are ship's open siblings, drawn in r's place beside it.
+	siblings []Workspace
+}
+
+// newHoistedWorld builds the world, with one more open child of r per
+// name of SIBLINGS.
+func newHoistedWorld(t *testing.T, s *store, siblings ...string) hoistedWorld {
+	t.Helper()
+	repoDir := arrangeRepo(t, "repo")
+	var w hoistedWorld
+	w.a = registerIn(t, s, repoDir, "a", nil)
+	w.r = registerIn(t, s, repoDir, "r", nil)
+	w.ship = registerChild(t, s, repoDir, "ship", w.r.ID)
+	for _, name := range siblings {
+		w.siblings = append(w.siblings, registerChild(t, s, repoDir, name, w.r.ID))
+	}
+	w.x = registerIn(t, s, repoDir, "x", nil)
+	closeFor(t, s, w.r.ID)
+	w.foo = mustSubsection(t, s, w.a.Repo, "foo")
+	mustPlace(t, s, w.x.ID, &w.foo.ID, AtEnd{})
+	mustPlace(t, s, w.a.ID, nil, BeforeSubsection{ID: w.foo.ID})
+	mustPlace(t, s, w.r.ID, nil, BeforeSubsection{ID: w.foo.ID})
+	if got, want := walkShape(t, s, w.a.Repo), []string{"a", "r", "[foo: x]"}; !slices.Equal(got, want) {
+		t.Fatalf("the hoisted world = %v, want %v", got, want)
+	}
+	return w
+}
+
+func TestASubsectionDroppedBeforeAChildStandsBeforeItsFamily(t *testing.T) {
+	// Arrange -- a b c [s: x], b holding an open child.
+	s, _ := testStore(t)
+	w := newWalkWorld(t, s)
+	kid := registerChild(t, s, arrangeRepoOf(t, s, w.a), "kid", w.b.ID)
+
+	// Act
+	err := s.MoveSubsection(context.Background(), w.s.ID, BeforeWorkspace{ID: kid.ID})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveSubsection: %v", err)
+	}
+	if got, want := walkShape(t, s, w.a.Repo), []string{"a", "[s: x]", "b", "c"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
+	}
+}
+
+func TestARowDrawnInItsClosedParentsPlaceMovesItsFamilyIntoASubsection(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newHoistedWorld(t, s)
+
+	// Act -- the row the sidebar draws, ship, dragged into foo.
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.ship.ID}, &w.foo.ID, AtEnd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
+	}
+	if got, want := walkShape(t, s, w.a.Repo), []string{"a", "[foo: x r]"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
+	}
+	if got := subsectionOf(t, s, w.ship.ID); !sameSubsection(got, &w.foo.ID) {
+		t.Fatalf("ship sits in %v, want foo", got)
+	}
+}
+
+func TestASubsectionDroppedOnARowDrawnInItsClosedParentsPlaceStandsBeforeIt(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newHoistedWorld(t, s)
+
+	// Act -- foo dragged onto ship's line.
+	err := s.MoveSubsection(context.Background(), w.foo.ID, BeforeWorkspace{ID: w.ship.ID})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveSubsection: %v", err)
+	}
+	if got, want := walkShape(t, s, w.a.Repo), []string{"a", "[foo: x]", "r"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
+	}
+}
+
+func TestAWorkspaceDroppedBeforeARowDrawnInItsClosedParentsPlaceStandsBeforeIt(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newHoistedWorld(t, s)
+
+	// Act -- x dragged out of foo onto ship's line.
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.x.ID}, nil, BeforeWorkspace{ID: w.ship.ID})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
+	}
+	if got, want := walkShape(t, s, w.a.Repo), []string{"a", "x", "r", "[foo:]"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
+	}
+}
+
+func TestATabDrawnInItsClosedParentsPlaceMovesItsFamily(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newHoistedWorld(t, s)
+
+	// Act -- ship's tab onto a's.
+	err := s.MoveWorkspace(context.Background(), w.ship.ID, w.a.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if got, want := walkShape(t, s, w.a.Repo), []string{"r", "a", "[foo: x]"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
+	}
+}
+
+func TestSwappingATabDrawnInItsClosedParentsPlaceSwapsItsFamily(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newHoistedWorld(t, s)
+
+	// Act
+	err := s.SwapPlaces(context.Background(), w.ship.ID, w.a.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SwapPlaces: %v", err)
+	}
+	if got, want := walkShape(t, s, w.a.Repo), []string{"r", "a", "[foo: x]"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
+	}
+}
+
+func TestTwoTabsStandingForOneFamilyCannotTradePlaces(t *testing.T) {
+	// Arrange -- ship and its sibling both drawn in closed r's place.
+	s, _ := testStore(t)
+	w := newHoistedWorld(t, s, "sibling")
+	before := placesByName(t, s)
+
+	// Act
+	err := s.SwapPlaces(context.Background(), w.ship.ID, w.siblings[0].ID)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "stand for one family") {
+		t.Fatalf("SwapPlaces = %v, want a refusal naming one family", err)
+	}
+	if got := placesByName(t, s); !maps.Equal(got, before) {
+		t.Fatalf("places = %v after a refusal, want %v", got, before)
+	}
+}
+
+// familyRootOf answers ID's family root, read in its own transaction.
+func familyRootOf(t *testing.T, s *store, id WorkspaceID) (WorkspaceID, error) {
+	t.Helper()
+	tx, err := s.db().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+	return familyRoot(context.Background(), tx, id)
+}
+
+func TestFamilyRoot(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, s *store, repoDir string) (ask, want WorkspaceID)
+	}{
+		{name: "a root is its own", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			root := registerIn(t, s, repoDir, "root", nil)
+			return root.ID, root.ID
+		}},
+		{name: "a grandchild of open parents climbs to the root", arrange: func(t *testing.T, s *store, repoDir string) (WorkspaceID, WorkspaceID) {
+			root := registerIn(t, s, repoDir, "root", nil)
+			mid := registerChild(t, s, repoDir, "mid", root.ID)
+			kid := registerChild(t, s, repoDir, "kid", mid.ID)
+			return kid.ID, root.ID
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ask, want := tt.arrange(t, s, arrangeRepo(t, "repo"))
+
+			// Act
+			got, err := familyRootOf(t, s, ask)
+
+			// Assert
+			if err != nil || got != want {
+				t.Fatalf("familyRoot = (%s, %v), want %s", got, err, want)
+			}
+		})
+	}
+}
+
+func TestFamilyRootRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, s *store, repoDir string) WorkspaceID
+		want    string
+	}{
+		{name: "an unknown workspace", want: "not found",
+			arrange: func(*testing.T, *store, string) WorkspaceID { return "absent" }},
+		{name: "a parent chain that cycles", want: "cycle",
+			arrange: func(t *testing.T, s *store, repoDir string) WorkspaceID {
+				a := registerIn(t, s, repoDir, "a", nil)
+				b := registerChild(t, s, repoDir, "b", a.ID)
+				if _, err := s.db().ExecContext(context.Background(), `UPDATE workspaces SET parent_id = ? WHERE id = ?`, b.ID, a.ID); err != nil {
+					t.Fatalf("cycle: %v", err)
+				}
+				return b.ID
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			id := tt.arrange(t, s, arrangeRepo(t, "repo"))
+
+			// Act
+			_, err := familyRootOf(t, s, id)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("familyRoot = %v, want an error saying %q", err, tt.want)
+			}
+		})
 	}
 }

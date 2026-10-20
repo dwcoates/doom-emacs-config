@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_arrange_sidebar.proto.
  */
 export const file_agentrepl_v1_endpoint_arrange_sidebar: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXJyYW5nZV9zaWRlYmFyLnByb3RvEgxhZ2VudHJlcGwudjEi7wMKFUFycmFuZ2VTaWRlYmFyUmVxdWVzdBJCChFjcmVhdGVfc3Vic2VjdGlvbhgBIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlQ3JlYXRlU3Vic2VjdGlvbkgAEkIKEXJlbmFtZV9zdWJzZWN0aW9uGAIgASgLMiUuYWdlbnRyZXBsLnYxLkFycmFuZ2VSZW5hbWVTdWJzZWN0aW9uSAASQgoRZGVsZXRlX3N1YnNlY3Rpb24YAyABKAsyJS5hZ2VudHJlcGwudjEuQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb25IABI+Cg9tb3ZlX3N1YnNlY3Rpb24YBCABKAsyIy5hZ2VudHJlcGwudjEuQXJyYW5nZU1vdmVTdWJzZWN0aW9uSAASPgoPbW92ZV9yZXBvc2l0b3J5GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFycmFuZ2VNb3ZlUmVwb3NpdG9yeUgAEj4KD3BsYWNlX3dvcmtzcGFjZRgGIAEoCzIjLmFnZW50cmVwbC52MS5BcnJhbmdlUGxhY2VXb3Jrc3BhY2VIABJAChBwbGFjZV93b3Jrc3BhY2VzGAcgASgLMiQuYWdlbnRyZXBsLnYxLkFycmFuZ2VQbGFjZVdvcmtzcGFjZXNIAEIICgZjaGFuZ2UiWAoXQXJyYW5nZUNyZWF0ZVN1YnNlY3Rpb24SLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEgwKBG5hbWUYAiABKAkiWAoXQXJyYW5nZVJlbmFtZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEgwKBG5hbWUYAiABKAkiSgoXQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmIt4BChVBcnJhbmdlTW92ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEi0KBmJlZm9yZRgCIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIABI2ChBiZWZvcmVfd29ya3NwYWNlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAQgQKAnRvIqYBChVBcnJhbmdlTW92ZVJlcG9zaXRvcnkSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEi0KBmJlZm9yZRgCIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIAEIECgJ0byLUAgoVQXJyYW5nZVBsYWNlV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOgoNbm9fc3Vic2VjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5BcnJhbmdlTm9TdWJzZWN0aW9uSAASMQoKc3Vic2VjdGlvbhgDIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLAoGYmVmb3JlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBEicKA2VuZBgFIAEoCzIYLmFnZW50cmVwbC52MS5BcnJhbmdlRW5kSAESOAoRYmVmb3JlX3N1YnNlY3Rpb24YBiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgBQgYKBGludG9CBAoCYXQi1gIKFkFycmFuZ2VQbGFjZVdvcmtzcGFjZXMSLgoKd29ya3NwYWNlcxgBIAMoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOgoNbm9fc3Vic2VjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5BcnJhbmdlTm9TdWJzZWN0aW9uSAASMQoKc3Vic2VjdGlvbhgDIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLAoGYmVmb3JlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBEicKA2VuZBgFIAEoCzIYLmFnZW50cmVwbC52MS5BcnJhbmdlRW5kSAESOAoRYmVmb3JlX3N1YnNlY3Rpb24YBiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgBQgYKBGludG9CBAoCYXQiFQoTQXJyYW5nZU5vU3Vic2VjdGlvbiIMCgpBcnJhbmdlRW5kIo4BChZBcnJhbmdlU2lkZWJhclJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJTdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJFcnJvckgAQggKBnJlc3VsdCJvChVBcnJhbmdlU2lkZWJhclN1Y2Nlc3MSFwoPcm9zdGVyX3JldmlzaW9uGAEgASgEEjEKB2NyZWF0ZWQYAiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgAiAEBQgoKCF9jcmVhdGVkIvQFChNBcnJhbmdlU2lkZWJhckVycm9yEksKEnVua25vd25fcmVwb3NpdG9yeRgBIAEoCzItLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclVua25vd25SZXBvc2l0b3J5SAASSwoSdW5rbm93bl9zdWJzZWN0aW9uGAIgASgLMi0uYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyVW5rbm93blN1YnNlY3Rpb25IABJJChF1bmtub3duX3dvcmtzcGFjZRgDIAEoCzIsLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAQgASgLMjAuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgFIAEoCzIsLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBiABKAsyKS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJOb3RZZXRBZG9wdGVkSAASOwoKYmxhbmtfbmFtZRgHIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhckJsYW5rTmFtZUgAEkcKEG90aGVyX3JlcG9zaXRvcnkYCCABKAsyKy5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJPdGhlclJlcG9zaXRvcnlIABJHChBhbmNob3JfZWxzZXdoZXJlGAkgASgLMisuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyQW5jaG9yRWxzZXdoZXJlSAASOwoKaGFzX3BhcmVudBgKIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhckhhc1BhcmVudEgAQgcKBWNhdXNlIiEKH0FycmFuZ2VTaWRlYmFyVW5rbm93blJlcG9zaXRvcnkiUgofQXJyYW5nZVNpZGViYXJVbmtub3duU3Vic2VjdGlvbhIvCgpzdWJzZWN0aW9uGAEgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWYiTwoeQXJyYW5nZVNpZGViYXJVbmtub3duV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiaQoiQXJyYW5nZVNpZGViYXJXb3Jrc3BhY2VSZWZNaXNtYXRjaBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHJlZ2lzdHJ5X2RpchgCIAEoCSIxCh5BcnJhbmdlU2lkZWJhclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIdChtBcnJhbmdlU2lkZWJhck5vdFlldEFkb3B0ZWQiGQoXQXJyYW5nZVNpZGViYXJCbGFua05hbWUiHwodQXJyYW5nZVNpZGViYXJPdGhlclJlcG9zaXRvcnkiHwodQXJyYW5nZVNpZGViYXJBbmNob3JFbHNld2hlcmUiGQoXQXJyYW5nZVNpZGViYXJIYXNQYXJlbnRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXJyYW5nZV9zaWRlYmFyLnByb3RvEgxhZ2VudHJlcGwudjEi7wMKFUFycmFuZ2VTaWRlYmFyUmVxdWVzdBJCChFjcmVhdGVfc3Vic2VjdGlvbhgBIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlQ3JlYXRlU3Vic2VjdGlvbkgAEkIKEXJlbmFtZV9zdWJzZWN0aW9uGAIgASgLMiUuYWdlbnRyZXBsLnYxLkFycmFuZ2VSZW5hbWVTdWJzZWN0aW9uSAASQgoRZGVsZXRlX3N1YnNlY3Rpb24YAyABKAsyJS5hZ2VudHJlcGwudjEuQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb25IABI+Cg9tb3ZlX3N1YnNlY3Rpb24YBCABKAsyIy5hZ2VudHJlcGwudjEuQXJyYW5nZU1vdmVTdWJzZWN0aW9uSAASPgoPbW92ZV9yZXBvc2l0b3J5GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFycmFuZ2VNb3ZlUmVwb3NpdG9yeUgAEj4KD3BsYWNlX3dvcmtzcGFjZRgGIAEoCzIjLmFnZW50cmVwbC52MS5BcnJhbmdlUGxhY2VXb3Jrc3BhY2VIABJAChBwbGFjZV93b3Jrc3BhY2VzGAcgASgLMiQuYWdlbnRyZXBsLnYxLkFycmFuZ2VQbGFjZVdvcmtzcGFjZXNIAEIICgZjaGFuZ2UiWAoXQXJyYW5nZUNyZWF0ZVN1YnNlY3Rpb24SLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEgwKBG5hbWUYAiABKAkiWAoXQXJyYW5nZVJlbmFtZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEgwKBG5hbWUYAiABKAkiSgoXQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmIt4BChVBcnJhbmdlTW92ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEi0KBmJlZm9yZRgCIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIABI2ChBiZWZvcmVfd29ya3NwYWNlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAQgQKAnRvIqYBChVBcnJhbmdlTW92ZVJlcG9zaXRvcnkSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEi0KBmJlZm9yZRgCIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIAEIECgJ0byLUAgoVQXJyYW5nZVBsYWNlV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOgoNbm9fc3Vic2VjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5BcnJhbmdlTm9TdWJzZWN0aW9uSAASMQoKc3Vic2VjdGlvbhgDIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLAoGYmVmb3JlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBEicKA2VuZBgFIAEoCzIYLmFnZW50cmVwbC52MS5BcnJhbmdlRW5kSAESOAoRYmVmb3JlX3N1YnNlY3Rpb24YBiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgBQgYKBGludG9CBAoCYXQi1gIKFkFycmFuZ2VQbGFjZVdvcmtzcGFjZXMSLgoKd29ya3NwYWNlcxgBIAMoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOgoNbm9fc3Vic2VjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5BcnJhbmdlTm9TdWJzZWN0aW9uSAASMQoKc3Vic2VjdGlvbhgDIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLAoGYmVmb3JlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBEicKA2VuZBgFIAEoCzIYLmFnZW50cmVwbC52MS5BcnJhbmdlRW5kSAESOAoRYmVmb3JlX3N1YnNlY3Rpb24YBiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgBQgYKBGludG9CBAoCYXQiFQoTQXJyYW5nZU5vU3Vic2VjdGlvbiIMCgpBcnJhbmdlRW5kIo4BChZBcnJhbmdlU2lkZWJhclJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJTdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJFcnJvckgAQggKBnJlc3VsdCJvChVBcnJhbmdlU2lkZWJhclN1Y2Nlc3MSFwoPcm9zdGVyX3JldmlzaW9uGAEgASgEEjEKB2NyZWF0ZWQYAiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgAiAEBQgoKCF9jcmVhdGVkIskFChNBcnJhbmdlU2lkZWJhckVycm9yEksKEnVua25vd25fcmVwb3NpdG9yeRgBIAEoCzItLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclVua25vd25SZXBvc2l0b3J5SAASSwoSdW5rbm93bl9zdWJzZWN0aW9uGAIgASgLMi0uYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyVW5rbm93blN1YnNlY3Rpb25IABJJChF1bmtub3duX3dvcmtzcGFjZRgDIAEoCzIsLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAQgASgLMjAuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgFIAEoCzIsLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBiABKAsyKS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJOb3RZZXRBZG9wdGVkSAASOwoKYmxhbmtfbmFtZRgHIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhckJsYW5rTmFtZUgAEkcKEG90aGVyX3JlcG9zaXRvcnkYCCABKAsyKy5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJPdGhlclJlcG9zaXRvcnlIABJHChBhbmNob3JfZWxzZXdoZXJlGAkgASgLMisuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyQW5jaG9yRWxzZXdoZXJlSABCBwoFY2F1c2VKBAgKEAtSCmhhc19wYXJlbnQiIQofQXJyYW5nZVNpZGViYXJVbmtub3duUmVwb3NpdG9yeSJSCh9BcnJhbmdlU2lkZWJhclVua25vd25TdWJzZWN0aW9uEi8KCnN1YnNlY3Rpb24YASABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZiJPCh5BcnJhbmdlU2lkZWJhclVua25vd25Xb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiJpCiJBcnJhbmdlU2lkZWJhcldvcmtzcGFjZVJlZk1pc21hdGNoEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSFAoMcmVnaXN0cnlfZGlyGAIgASgJIjEKHkFycmFuZ2VTaWRlYmFyVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0FycmFuZ2VTaWRlYmFyTm90WWV0QWRvcHRlZCIZChdBcnJhbmdlU2lkZWJhckJsYW5rTmFtZSIfCh1BcnJhbmdlU2lkZWJhck90aGVyUmVwb3NpdG9yeSIfCh1BcnJhbmdlU2lkZWJhckFuY2hvckVsc2V3aGVyZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.ArrangeSidebarRequest
@@ -230,9 +230,9 @@ export type ArrangeMoveSubsection = Message<"agentrepl.v1.ArrangeMoveSubsection"
     case: "end";
   } | {
     /**
-     * Just before this ROOT workspace of the same repository, which sits in
-     * no subsection (anchor_elsewhere otherwise; other_repository for
-     * another repository's).
+     * Just before this workspace's family, of the same repository, whose
+     * root sits in no subsection (anchor_elsewhere otherwise;
+     * other_repository for another repository's).
      *
      * @generated from field: workspace.v1.WorkspaceRef before_workspace = 4;
      */
@@ -293,13 +293,14 @@ export const ArrangeMoveRepositorySchema: GenMessage<ArrangeMoveRepository> = /*
   messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 5);
 
 /**
- * Put one ROOT workspace (one with no recorded parent) into a subsection of
- * its own repository, or into none, at a place among the roots already there.
+ * Put one workspace's FAMILY into a subsection of its own repository, or into
+ * none, at a place among the roots already there.
  *
  * A FAMILY NEVER SPLITS ACROSS SUBSECTIONS (owner ruling, 2026-10-14): every
- * descendant sits wherever its root does, at every depth, so placing a root
- * moves its whole family, and a workspace with a parent cannot be placed on
- * its own (the has_parent arm).
+ * descendant sits wherever its root does, at every depth. A FAMILY MOVES WHOLE
+ * (owner request, 2026-10-20): the workspace named stands for its family's
+ * root, so placing a parent takes its descendants and placing a child takes
+ * its ancestors (and so their every descendant).
  *
  * @generated from message agentrepl.v1.ArrangePlaceWorkspace
  */
@@ -340,8 +341,8 @@ export type ArrangePlaceWorkspace = Message<"agentrepl.v1.ArrangePlaceWorkspace"
    */
   at: {
     /**
-     * Just before this root workspace, which must already sit in the
-     * destination. Naming the moved workspace itself is malformed.
+     * Just before this workspace's family, whose root must already sit in
+     * the destination. Naming the moved workspace itself is malformed.
      *
      * @generated from field: workspace.v1.WorkspaceRef before = 4;
      */
@@ -377,8 +378,8 @@ export const ArrangePlaceWorkspaceSchema: GenMessage<ArrangePlaceWorkspace> = /*
   messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 6);
 
 /**
- * Put several ROOT workspaces of one repository, in the order given, into a
- * subsection of it (or into none) as one block at a place among the roots
+ * Put several workspaces' FAMILIES of one repository, in the order given,
+ * into a subsection of it (or into none) as one block at a place among the roots
  * already there: ArrangePlaceWorkspace for many, applied whole or not at all.
  * The bulk form an agent files a batch of workspaces with.
  *
@@ -387,7 +388,8 @@ export const ArrangePlaceWorkspaceSchema: GenMessage<ArrangePlaceWorkspace> = /*
 export type ArrangePlaceWorkspaces = Message<"agentrepl.v1.ArrangePlaceWorkspaces"> & {
   /**
    * At least one; no workspace twice (InvalidArgument otherwise). Every one
-   * must be a root of the same repository (has_parent, other_repository).
+   * must be of the same repository (other_repository); each stands for its
+   * family's root, and two of one family place it once.
    *
    * @generated from field: repeated workspace.v1.WorkspaceRef workspaces = 1;
    */
@@ -419,8 +421,9 @@ export type ArrangePlaceWorkspaces = Message<"agentrepl.v1.ArrangePlaceWorkspace
    */
   at: {
     /**
-     * Just before this root of the destination, which is none of the placed
-     * workspaces (InvalidArgument otherwise).
+     * Just before this workspace's family, whose root sits in the
+     * destination; it is none of the placed workspaces (InvalidArgument
+     * otherwise).
      *
      * @generated from field: workspace.v1.WorkspaceRef before = 4;
      */
@@ -638,15 +641,6 @@ export type ArrangeSidebarError = Message<"agentrepl.v1.ArrangeSidebarError"> & 
      */
     value: ArrangeSidebarAnchorElsewhere;
     case: "anchorElsewhere";
-  } | {
-    /**
-     * A workspace with a recorded parent was placed on its own: it sits
-     * wherever its parent does, and moves only with it.
-     *
-     * @generated from field: agentrepl.v1.ArrangeSidebarHasParent has_parent = 10;
-     */
-    value: ArrangeSidebarHasParent;
-    case: "hasParent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -810,19 +804,4 @@ export type ArrangeSidebarAnchorElsewhere = Message<"agentrepl.v1.ArrangeSidebar
  */
 export const ArrangeSidebarAnchorElsewhereSchema: GenMessage<ArrangeSidebarAnchorElsewhere> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 21);
-
-/**
- * DELIBERATELY EMPTY: the arm is the fact.
- *
- * @generated from message agentrepl.v1.ArrangeSidebarHasParent
- */
-export type ArrangeSidebarHasParent = Message<"agentrepl.v1.ArrangeSidebarHasParent"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ArrangeSidebarHasParent.
- * Use `create(ArrangeSidebarHasParentSchema)` to create a new message.
- */
-export const ArrangeSidebarHasParentSchema: GenMessage<ArrangeSidebarHasParent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 22);
 

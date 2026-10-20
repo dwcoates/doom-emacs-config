@@ -157,6 +157,11 @@ func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		// Each tab stands for what the sidebar draws it as (standing).
+		ws, target, err := standingPair(ctx, tx, ws, target)
+		if err != nil {
+			return err
+		}
 		var from, to int64
 		var fromRepo, toRepo RepoID
 		var fromParent, toParent, fromSubsection, toSubsection sql.NullString
@@ -194,7 +199,7 @@ func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, from, target); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, to, ws)
+		_, err = tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, to, ws)
 		return err
 	})
 }

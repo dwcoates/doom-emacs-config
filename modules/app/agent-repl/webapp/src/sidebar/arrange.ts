@@ -59,8 +59,6 @@ export function arrangeSidebarRefusal(
       return "a workspace can only move within its own repository";
     case "anchorElsewhere":
       return "the sidebar changed under the drag; try again";
-    case "hasParent":
-      return "a child workspace moves only with its parent";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("ArrangeSidebarError.cause", other.case);

@@ -542,7 +542,8 @@ The top bar's effort selector sits between the model selector and the permission
 - **Drag a workspace's row to move it.**
   - Drop it among the repository's own rows, just above a subsection included, or into any of its subsections, an empty one included.
   - While the row is over a subsection, the subsection lights up: dropping there files the workspace into it.
-  - A workspace's children move with it, and a child cannot be moved on its own.
+  - A workspace's whole family moves with it.
+    - Dragging a parent takes its children, and dragging a child takes its parent and the rest of the family.
 - **Drag a subsection's header to move it among the repository's rows and subsections.**
   - Dropped on a row's line, it stands just above that row, so a subsection can sit between two of the repository's own workspaces.
 - **Drag a repository's header to reorder the repositories.**

@@ -6,6 +6,7 @@ import {
   type ArrangeSidebarRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { familyTop } from "../../src/sidebar/subsections.js";
 import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, DROP_TARGET_CLASS, REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
@@ -601,25 +602,81 @@ describe("dragging a subsection or a repository", () => {
   });
 });
 
-describe("what is not a grip", () => {
-  it("leaves a nested row to move with its parent", () => {
+describe("a nested row", () => {
+  it("lifts its family's top row, so a child takes its ancestors", () => {
     // Arrange
     const { sc } = arranged();
     const pane = mount(
       roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid" })] }), row({ id: "b" })] })] }),
       sc,
     );
-    layOut(pane.querySelector(".repo-section > .rows") as HTMLElement, 0);
+    layOut(sectionList(pane), 0);
 
     // Act
     pointer("pointerdown", rowLine(pane, "kid"), 25);
     pointer("pointermove", window, 60);
+    const slot = pane.querySelector(`.${DRAG_SLOT_CLASS}`)?.getAttribute("data-roster-row");
+    pointer("pointerup", window, 60);
 
     // Assert
-    expect([sc.arrange.hold.holding(), sc.arrange.layer.querySelector(`.${DRAG_GHOST_CLASS}`)]).toEqual([false, null]);
-    pointer("pointerup", window, 60);
+    expect(slot).toBe("a");
   });
 
+  it("places its family's top workspace into the subsection it is dropped in", async () => {
+    // Arrange -- a (with kid), then [foo: x]: foo spans 20 to 60.
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({
+        repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid" })] })], subsections: [{ id: "foo", rows: [row({ id: "x" })] }] })],
+      }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(rowLine(pane, "kid"), 10, 50);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect(
+      change?.case === "placeWorkspace"
+        ? [change.value.workspace?.id, change.value.into.case === "subsection" ? change.value.into.value.id : null]
+        : null,
+    ).toEqual(["a", "foo"]);
+  });
+});
+
+describe("familyTop", () => {
+  it.each([
+    ["a top-level row is its own", "a", "a"],
+    ["a child climbs to its parent", "kid", "a"],
+    ["a grandchild climbs to the top", "grand", "a"],
+  ])("%s", (_name, pressed, want) => {
+    // Arrange
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid", children: [row({ id: "grand" })] })] })] })] }),
+      sidebarContext(),
+    );
+
+    // Act
+    const got = familyTop(pane.querySelector(`[data-roster-row='${pressed}']`) as HTMLElement);
+
+    // Assert
+    expect(got?.getAttribute("data-roster-row")).toBe(want);
+  });
+
+  it("finds none for a row in no arranged list", () => {
+    // Arrange
+    const loose = document.createElement("div");
+    loose.setAttribute("data-roster-row", "z");
+    document.createElement("div").appendChild(loose);
+
+    // Act / Assert
+    expect(familyTop(loose)).toBeNull();
+  });
+});
+
+describe("what is not a grip", () => {
   it("leaves a hidden workspace's row alone", () => {
     // Arrange
     const { sc } = arranged();

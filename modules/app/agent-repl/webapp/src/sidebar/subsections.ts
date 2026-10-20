@@ -21,8 +21,9 @@
  * WHAT DRAGS. In the open workspaces' repository sections only, which are the
  * ones whose order the tab bar walks:
  *
- *   - a workspace row at the top of its list (a nested row moves with its
- *     parent), among its own repository's lists: the section's list, where
+ *   - a workspace row's family, by any of its rows (a nested row lifts its
+ *     family's top row, so a child takes its ancestors along), among its own
+ *     repository's lists: the section's list, where
  *     it may stand just above a subsection, and each subsection's rows. Over
  *     a subsection (its header or its rows) it lands in that subsection,
  *     which lights up (`DROP_TARGET_CLASS`) while it would;
@@ -301,12 +302,13 @@ function subsectionDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs):
  */
 function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSpec | null {
   const line = target.closest<HTMLElement>(".row");
-  const row = line?.parentElement ?? null;
-  // A NESTED ROW IS NO GRIP: it moves only with its parent, whose list is
-  // the one a bucket names.
-  if (row === null || !row.hasAttribute("data-roster-row") || row.parentElement?.hasAttribute(BUCKET_ATTRIBUTE) !== true) {
-    return null;
-  }
+  const pressed = line?.parentElement ?? null;
+  if (pressed === null || !pressed.hasAttribute("data-roster-row")) return null;
+  // A FAMILY MOVES WHOLE (owner request, 2026-10-20): a nested row is a grip
+  // for its family, so the press lifts the family's top row, the one a
+  // bucket's list holds, and a child dragged takes its ancestors along.
+  const row = familyTop(pressed);
+  if (row === null) return null;
   const section = row.closest<HTMLElement>(`[${REPOSITORY_ATTRIBUTE}]`);
   if (section === null) throw new Error("invariant: a bucketed row sits in its repository's section");
   const workspace = refs.workspace(rowId(row));
@@ -336,6 +338,18 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
       });
     },
   };
+}
+
+/**
+ * The top row of ROW's family: ROW itself, or the nearest ancestor row,
+ * that stands in a bucket's list. Null when none does (a row in no
+ * arranged list).
+ */
+export function familyTop(row: HTMLElement): HTMLElement | null {
+  for (let at: HTMLElement | null = row; at !== null; at = at.parentElement?.closest<HTMLElement>("[data-roster-row]") ?? null) {
+    if (at.parentElement?.hasAttribute(BUCKET_ATTRIBUTE) === true) return at;
+  }
+  return null;
 }
 
 /** A list's entries, in order: its top-level rows and, in a section's list, its subsections. */

@@ -651,30 +651,51 @@ func TestPlaceWorkspaceMovesItsNestedFamilyWithIt(t *testing.T) {
 	}
 }
 
-func TestPlaceWorkspaceRefusesAChild(t *testing.T) {
-	// Arrange -- a child sits wherever its parent does (owner ruling, 2026-10-14).
-	s, log := testStore(t)
+func TestPlacingAChildMovesItsWholeFamily(t *testing.T) {
+	// Arrange -- a family moves whole (owner request, 2026-10-20).
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	child := registerChild(t, s, repoDir, "child", parent.ID)
+	grandchild := registerChild(t, s, repoDir, "grandchild", child.ID)
+	sibling := registerChild(t, s, repoDir, "sibling", parent.ID)
+	bystander := registerIn(t, s, repoDir, "bystander", nil)
+	later := mustSubsection(t, s, parent.Repo, "later")
+
+	// Act -- the grandchild dragged into later.
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{grandchild.ID}, &later.ID, AtEnd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
+	}
+	for _, ws := range []WorkspaceID{parent.ID, child.ID, grandchild.ID, sibling.ID} {
+		if got := subsectionOf(t, s, ws); !sameSubsection(got, &later.ID) {
+			t.Fatalf("workspace %s sits in %v, want %q", ws, got, later.ID)
+		}
+	}
+	if got := subsectionOf(t, s, bystander.ID); got != nil {
+		t.Fatalf("the bystander moved into %q", *got)
+	}
+}
+
+func TestPlacingTwoMembersOfOneFamilyPlacesItOnce(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
 	child := registerChild(t, s, repoDir, "child", parent.ID)
 	later := mustSubsection(t, s, parent.Repo, "later")
-	order := orderedNames(t, s)
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID, parent.ID}, &later.ID, AtEnd{})
 
 	// Assert
-	if !errors.Is(err, ErrHasParent) {
-		t.Fatalf("PlaceWorkspace = %v, want ErrHasParent", err)
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
 	}
-	if got := subsectionOf(t, s, child.ID); got != nil {
-		t.Fatalf("the refused child moved into %q", *got)
-	}
-	if got := orderedNames(t, s); !slices.Equal(got, order) {
-		t.Fatalf("place order after a refusal = %v, want %v", got, order)
-	}
-	if !hasOperation(log, "daemon.wsm.place_workspaces") {
-		t.Fatalf("no daemon.wsm.place_workspace record: %v", log.Records())
+	if got, want := walkShape(t, s, parent.Repo), []string{"[later: parent]"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
 	}
 }
 
@@ -1081,19 +1102,18 @@ func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
 }
 
 func TestPlaceWorkspacesIsAppliedWholeOrNotAtAll(t *testing.T) {
-	// Arrange -- the second of two workspaces is a child.
+	// Arrange -- the second of two workspaces is unknown.
 	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	root := registerIn(t, s, repoDir, "root", nil)
-	child := registerChild(t, s, repoDir, "child", root.ID)
 	later := mustSubsection(t, s, root.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, child.ID}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, "absent"}, &later.ID, AtEnd{})
 
 	// Assert
-	if !errors.Is(err, ErrHasParent) {
-		t.Fatalf("PlaceWorkspaces = %v, want ErrHasParent", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("PlaceWorkspaces = %v, want ErrNotFound", err)
 	}
 	if got := subsectionOf(t, s, root.ID); got != nil {
 		t.Fatalf("the first workspace moved into %q although the placement was refused", *got)
