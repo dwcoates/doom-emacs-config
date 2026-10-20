@@ -4533,6 +4533,98 @@ describe("the question option's alignment", () => {
     // Assert
     expect(align).toBe("start");
   });
+
+  /**
+   * An option drawn as `drawFeedQuestionOption` draws it, mounted in a list:
+   * the numeral, the label and the description, in that order.
+   */
+  function optionRow(): { list: HTMLElement; option: HTMLElement; parts: Record<string, HTMLElement> } {
+    const list = document.createElement("div");
+    list.className = "q-opts";
+    const option = createControl();
+    option.className = "q-opt";
+    const parts: Record<string, HTMLElement> = {};
+    for (const name of ["q-opt-number", "q-opt-label", "q-opt-description"]) {
+      const part = document.createElement("span");
+      part.className = name;
+      option.append(part);
+      parts[name] = part;
+    }
+    list.append(option);
+    return { list, option, parts };
+  }
+
+  it("lays an option's numeral, label and description out as one flex row", () => {
+    // Arrange
+    const { list, option } = optionRow();
+
+    // Act
+    const display = inDocument(list, () => cascadedValue(option, "display"));
+
+    // Assert
+    expect(display).toBe("flex");
+  });
+
+  it("lines the row's parts up on their shared baseline", () => {
+    // Arrange
+    const { list, option } = optionRow();
+
+    // Act
+    const align = inDocument(list, () => cascadedValue(option, "align-items"));
+
+    // Assert
+    expect(align).toBe("baseline");
+  });
+
+  it("keeps the numeral from shrinking, so the description's column never reaches under it", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const shrink = inDocument(list, () => cascadedValue(parts["q-opt-number"], "flex-shrink"));
+
+    // Assert
+    expect(shrink).toBe("0");
+  });
+
+  it("lets the description shrink below its content width, so its text wraps inside its own column", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const got = inDocument(list, () => [
+      cascadedValue(parts["q-opt-description"], "flex-shrink"),
+      cascadedValue(parts["q-opt-description"], "min-width"),
+    ]);
+
+    // Assert
+    expect(got).toEqual(["1", "0px"]);
+  });
+
+  it("lets the label shrink below its content width, so a long label wraps beside the description", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const got = inDocument(list, () => [
+      cascadedValue(parts["q-opt-label"], "flex-shrink"),
+      cascadedValue(parts["q-opt-label"], "min-width"),
+    ]);
+
+    // Assert
+    expect(got).toEqual(["1", "0px"]);
+  });
+
+  it("draws the description in italics", () => {
+    // Arrange
+    const { list, parts } = optionRow();
+
+    // Act
+    const style = inDocument(list, () => cascadedValue(parts["q-opt-description"], "font-style"));
+
+    // Assert
+    expect(style).toBe("italic");
+  });
 });
 
 /**

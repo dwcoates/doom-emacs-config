@@ -3872,6 +3872,12 @@ html[data-page-unshown] *::after {
   /* AN OPTION READS FLUSH LEFT, NEVER INDENTED: the base control centers its
      text, so an option long enough to wrap drew its first line pushed in. */
   text-align: start;
+  /* THE DESCRIPTION WRAPS IN ITS OWN COLUMN: numeral, label and description
+     sit on one baseline-aligned row, so a description long enough to wrap
+     carries its later lines under its own first character rather than back
+     under the numeral. */
+  display: flex;
+  align-items: baseline;
 }
 .q-opt:hover { border-color: var(--accent); }
 .q-opt.selected {
@@ -7318,9 +7324,16 @@ bubble-body.bubble-body { display: block; }
   margin-right: 0.35em;
 }
 .q-opt.selected .q-opt-number { color: inherit; }
+.q-opt-number { flex: none; }
+/* Label and description each shrink to wrap inside their own column of the
+   `.q-opt` row, the longer giving up more width. */
+.q-opt-label { flex: 0 1 auto; min-width: 0; }
 .q-opt-description {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--muted);
   font-size: 0.85em;
+  font-style: italic;
   margin-left: 0.4em;
 }
 /* What was typed in the editor for the shown question. */
