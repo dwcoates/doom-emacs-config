@@ -1555,6 +1555,73 @@ export function createFakeQuery(
   };
 
   /**
+   * A PEER MESSAGE ON STDIN (an agent's prompt the shim delivers as another
+   * session's message, engine/peer-send.ts): its origin, or absence for an
+   * ordinary send.
+   */
+  const peerOriginOf = (message: SdkUserMessage): { from: string; fromMode?: string } | undefined => {
+    const origin = message.origin as { kind?: string; from?: string; fromMode?: string } | undefined;
+    if (origin?.kind !== "peer" || typeof origin.from !== "string") return undefined;
+    return { from: origin.from, ...(origin.fromMode === undefined ? {} : { fromMode: origin.fromMode }) };
+  };
+
+  /** The body of a peer message's cross-session envelope, the way the CLI strips it. */
+  const peerBodyOf = (text: string): string => {
+    const opened = text.indexOf(">\n");
+    const closing = text.lastIndexOf("\n</cross-session-message>");
+    return text.startsWith("<cross-session-message") && opened !== -1 && closing > opened ? text.slice(opened + 2, closing) : text;
+  };
+
+  /**
+   * THE CLI'S RECEIVE-SIDE POLICY FOR A PEER MESSAGE ON STDIN, as it parks or
+   * queues one: a sender whose declared class is not this session's is HELD
+   * (mode-mismatch), and so is an undeclared one while this session bypasses
+   * (no-mode-asserted); every other is queued. Only `bypassPermissions`
+   * bypasses. Answers the hold cause, or absence when the message is queued.
+   */
+  const peerHoldCause = (peer: { fromMode?: string }): string | undefined => {
+    const ours = permissionMode === "bypassPermissions" ? "bypass" : "prompting";
+    if (peer.fromMode === undefined) return ours === "bypass" ? "no-mode-asserted" : undefined;
+    return peer.fromMode === ours ? undefined : "mode-mismatch";
+  };
+
+  /** The CLI's `command_lifecycle` frame for a stamped command. */
+  const commandLifecycle = (commandUuid: string, state: string): void =>
+    emit({ type: "command_lifecycle", command_uuid: commandUuid, state });
+
+  /**
+   * THE CLI READS ITS INPUT AS IT ARRIVES, and decides a peer message's fate
+   * at once: queued (`command_lifecycle` "queued") or held
+   * (`peer_message_hold`, and never run). Turns still run one at a time, in
+   * the order their messages arrived.
+   */
+  const inbox = new AsyncQueue<SdkUserMessage>();
+  void (async (): Promise<void> => {
+    try {
+      for await (const userMessage of prompt) {
+        const peer = peerOriginOf(userMessage);
+        if (peer !== undefined && userMessage.uuid !== undefined) {
+          const cause = peerHoldCause(peer);
+          if (cause !== undefined) {
+            LOGGER.info(
+              { claude_session_id: sessionUuid, client_uuid: userMessage.uuid, from: peer.from, cause, permission_mode: permissionMode },
+              "fake vendor HELD a peer message instead of queuing it",
+            );
+            systemMessage("peer_message_hold", { state: "held", message_uuid: userMessage.uuid, lane: "stdin", from: peer.from, cause });
+            continue;
+          }
+          commandLifecycle(userMessage.uuid, "queued");
+        }
+        if (inbox.isEnded) return;
+        inbox.push(userMessage);
+      }
+      inbox.end();
+    } catch (err) {
+      inbox.fail(err);
+    }
+  })();
+
+  /**
    * The vendor's interrupt terminal: no assistant content, an error result, and
    * the abort spelled out in `terminal_reason`.
    *
@@ -1654,7 +1721,7 @@ export function createFakeQuery(
         : "fake vendor session RESUMED; init reports the resumed id and re-emits NO history",
     );
     let initOwed = initAfterFirstTurn;
-    for await (const userMessage of prompt) {
+    for await (const userMessage of inbox) {
       // THE FIRST TURN IS WHAT BRINGS THE INIT, and it arrives BEFORE the turn
       // it rode in on produces anything — which is the order the real vendor
       // emits them in, and the order that makes the init facts land on a
@@ -1679,10 +1746,13 @@ export function createFakeQuery(
       interrupted = false;
       resultEmitted = false;
       promptId = opts.newUuid();
-      answering = userMessage.uuid;
+      // A PEER MESSAGE'S TURN ECHOES NO CLIENT UUID: its lifecycle names it.
+      const peer = peerOriginOf(userMessage);
+      answering = peer === undefined ? userMessage.uuid : undefined;
       streamStamped = false;
       assistantStamped = false;
-      const text = promptTextOf(userMessage);
+      const text = peer === undefined ? promptTextOf(userMessage) : peerBodyOf(promptTextOf(userMessage));
+      if (peer !== undefined && userMessage.uuid !== undefined) commandLifecycle(userMessage.uuid, "started");
       await awaitTurnGate(text, awaitInterrupt);
       if (out.isEnded) return;
       // A TURN KILLED ON ITS GATE STILL TERMINATES. The scenario never ran, so
@@ -1708,14 +1778,18 @@ export function createFakeQuery(
       // THE SEND'S CLIENT UUID IS THE RECORD'S UUID, as the CLI files a
       // streaming-input message: a sender that names its message finds it in
       // the transcript under that name (RollBackSession stands on this).
+      // A PEER MESSAGE IS FILED AS THE CLI FILES AN INJECTED ONE: its whole
+      // envelope as the record's text, marked meta, carrying the peer origin
+      // the host stated and `hostInjected`.
       files.transcript.append({
         promptId,
         type: "user",
-        message: { role: "user", content: [{ type: "text", text }] },
+        message: { role: "user", content: [{ type: "text", text: peer === undefined ? text : promptTextOf(userMessage) }] },
         uuid: userMessage.uuid ?? opts.newUuid(),
         timestamp: nowIso(),
         permissionMode,
         promptSource: "sdk",
+        ...(peer === undefined ? {} : { isMeta: true, origin: { kind: "peer", ...peer, hostInjected: true, body: text } }),
       });
       LOGGER.debug(
         { claude_session_id: sessionUuid, turn, scenario: scenario.name === "" ? "prose" : scenario.name },
@@ -1723,7 +1797,10 @@ export function createFakeQuery(
       );
       await scenario.run(context);
       if (out.isEnded) return;
-      if (resultEmitted) continue;
+      if (resultEmitted) {
+        if (peer !== undefined && userMessage.uuid !== undefined) commandLifecycle(userMessage.uuid, "completed");
+        continue;
+      }
       if (interrupted) {
         emitInterruptTerminal();
         continue;

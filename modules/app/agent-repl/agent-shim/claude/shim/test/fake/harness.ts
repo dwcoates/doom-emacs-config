@@ -98,6 +98,12 @@ export interface DriveOptions {
    * on its keep-alive send. A prompt with none (or past the list) carries none.
    */
   readonly clientUuids?: readonly (string | undefined)[];
+  /**
+   * The peer origin each send carries, by prompt index — what the shim puts
+   * on an agent's prompt (engine/peer-send.ts). A prompt with one is sent in
+   * the cross-session envelope; one with none is an ordinary send.
+   */
+  readonly peerOrigins?: readonly ({ readonly from: string; readonly fromMode?: string } | undefined)[];
 }
 
 /** A prompt iterable a test can push into while the query runs. */
@@ -170,12 +176,17 @@ export async function driveScenario(
       let index = 0;
       for await (const { text } of feeder.messages()) {
         const uuid = options.clientUuids?.[index];
+        const peer = options.peerOrigins?.[index];
         index++;
         yield {
           type: "user",
-          message: { role: "user", content: text },
+          message: {
+            role: "user",
+            content: peer === undefined ? text : `<cross-session-message from="${peer.from}">\n${text}\n</cross-session-message>`,
+          },
           parent_tool_use_id: null,
           ...(uuid === undefined ? {} : { uuid }),
+          ...(peer === undefined ? {} : { origin: { kind: "peer", ...peer } }),
         } as never;
       }
     })(),
