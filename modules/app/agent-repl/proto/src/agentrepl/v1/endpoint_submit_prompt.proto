@@ -81,6 +81,15 @@ message SubmitPromptRequest {
   // mutually compatible with every existing field. Set to UNSPECIFIED, the
   // request is refused as InvalidArgument.
   optional SubmitPromptDelivery delivery = 7;
+  // OPTIONAL: when the person submitted this prompt, in the host's wall-clock
+  // Unix milliseconds. Set by the editor on a send the person made, ABSENT on
+  // a retry or a re-drive (the wait before it is not the prompt's echo). Set,
+  // the daemon hands it back to the workspace's page as a prompt echo
+  // (WatchWebWorkspaceResponse.prompt_echo) once the prompt's row is drawn at
+  // submit, so the page that draws the row measures the echo
+  // (ReportedLatencyKind PROMPT_ECHO). It is metrics only: it never changes how
+  // the prompt is handled. Not positive is InvalidArgument.
+  optional int64 submitted_at_unix_ms = 8;
 }
 
 // THE ARM IS THE OUTCOME.

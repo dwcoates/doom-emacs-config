@@ -17,6 +17,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { TurnId } from "../../conversation/v1/turn_pb";
+import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
 import type { FeedId } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
@@ -27,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_web_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_web_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIl8KGFdhdGNoV2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHdlYmFwcF9idWlsZBgCIAEoCSLjAQoZV2F0Y2hXZWJXb3Jrc3BhY2VSZXNwb25zZRI8Cgt0cmFuc2ZlcnJlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkUKEHNlc3Npb25faWRlbnRpdHkYAiABKAsyKS5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlU2Vzc2lvbklkZW50aXR5SAASOQoKcmV2ZWFsX3JvdxgDIAEoCzIjLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VSZXZlYWxSb3dIAEIGCgRwdXNoIjkKFVdlYldvcmtzcGFjZVJldmVhbFJvdxIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiKgoXV2ViV29ya3NwYWNlVHJhbnNmZXJyZWQSDwoHYWRkcmVzcxgBIAEoCSJXChtXZWJXb3Jrc3BhY2VTZXNzaW9uSWRlbnRpdHkSHQoVYWdlbnRfcmVwbF9zZXNzaW9uX2lkGAEgASgJEhkKEWNsYXVkZV9zZXNzaW9uX2lkGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIl8KGFdhdGNoV2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHdlYmFwcF9idWlsZBgCIAEoCSKgAgoZV2F0Y2hXZWJXb3Jrc3BhY2VSZXNwb25zZRI8Cgt0cmFuc2ZlcnJlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkUKEHNlc3Npb25faWRlbnRpdHkYAiABKAsyKS5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlU2Vzc2lvbklkZW50aXR5SAASOQoKcmV2ZWFsX3JvdxgDIAEoCzIjLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VSZXZlYWxSb3dIABI7Cgtwcm9tcHRfZWNobxgEIAEoCzIkLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQcm9tcHRFY2hvSABCBgoEcHVzaCI5ChVXZWJXb3Jrc3BhY2VSZXZlYWxSb3cSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIl0KFldlYldvcmtzcGFjZVByb21wdEVjaG8SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSHAoUc3VibWl0dGVkX2F0X3VuaXhfbXMYAiABKAMiKgoXV2ViV29ya3NwYWNlVHJhbnNmZXJyZWQSDwoHYWRkcmVzcxgBIAEoCSJXChtXZWJXb3Jrc3BhY2VTZXNzaW9uSWRlbnRpdHkSHQoVYWdlbnRfcmVwbF9zZXNzaW9uX2lkGAEgASgJEhkKEWNsYXVkZV9zZXNzaW9uX2lkGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_conversation_v1_turn, file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.WatchWebWorkspaceRequest
@@ -115,6 +117,22 @@ export type WatchWebWorkspaceResponse = Message<"agentrepl.v1.WatchWebWorkspaceR
      */
     value: WebWorkspaceRevealRow;
     case: "revealRow";
+  } | {
+    /**
+     * A PROMPT'S ECHO TO TIME: a SubmitPrompt that carried its submit instant
+     * (`submitted_at_unix_ms`) was accepted and its prompt row drawn at once
+     * (delivered, or folded into the running turn; a held prompt draws later
+     * and is not timed). The page times the echo from that instant to its
+     * first draw of the user-prompt row stamped with the turn, whichever of
+     * the push and the row arrives first, and reports it as PROMPT_ECHO.
+     *
+     * AN EVENT, NEVER REPLAYED: a page that attaches later did not see the
+     * echo happen, so it times nothing.
+     *
+     * @generated from field: agentrepl.v1.WebWorkspacePromptEcho prompt_echo = 4;
+     */
+    value: WebWorkspacePromptEcho;
+    case: "promptEcho";
   } | { case: undefined; value?: undefined };
 };
 
@@ -145,6 +163,35 @@ export const WebWorkspaceRevealRowSchema: GenMessage<WebWorkspaceRevealRow> = /*
   messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 2);
 
 /**
+ * A submitted prompt whose row was drawn at submit, and when it was submitted.
+ *
+ * @generated from message agentrepl.v1.WebWorkspacePromptEcho
+ */
+export type WebWorkspacePromptEcho = Message<"agentrepl.v1.WebWorkspacePromptEcho"> & {
+  /**
+   * The turn the prompt minted: the `FeedRow.turn` its user-prompt row is
+   * stamped with.
+   *
+   * @generated from field: conversation.v1.TurnId turn = 1;
+   */
+  turn?: TurnId | undefined;
+
+  /**
+   * The submit instant, verbatim from SubmitPromptRequest.submitted_at_unix_ms.
+   *
+   * @generated from field: int64 submitted_at_unix_ms = 2;
+   */
+  submittedAtUnixMs: bigint;
+};
+
+/**
+ * Describes the message agentrepl.v1.WebWorkspacePromptEcho.
+ * Use `create(WebWorkspacePromptEchoSchema)` to create a new message.
+ */
+export const WebWorkspacePromptEchoSchema: GenMessage<WebWorkspacePromptEcho> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 3);
+
+/**
  * @generated from message agentrepl.v1.WebWorkspaceTransferred
  */
 export type WebWorkspaceTransferred = Message<"agentrepl.v1.WebWorkspaceTransferred"> & {
@@ -161,7 +208,7 @@ export type WebWorkspaceTransferred = Message<"agentrepl.v1.WebWorkspaceTransfer
  * Use `create(WebWorkspaceTransferredSchema)` to create a new message.
  */
 export const WebWorkspaceTransferredSchema: GenMessage<WebWorkspaceTransferred> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 4);
 
 /**
  * The identities the page stamps on the diagnostic records it forwards
@@ -195,5 +242,5 @@ export type WebWorkspaceSessionIdentity = Message<"agentrepl.v1.WebWorkspaceSess
  * Use `create(WebWorkspaceSessionIdentitySchema)` to create a new message.
  */
 export const WebWorkspaceSessionIdentitySchema: GenMessage<WebWorkspaceSessionIdentity> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_watch_web_workspace, 5);
 

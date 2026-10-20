@@ -15,6 +15,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "conversation/v1/turn.proto";
 import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
@@ -64,12 +65,31 @@ message WatchWebWorkspaceResponse {
     // was not loaded) is sent it first, so the reveal is never lost to the
     // load; it is sent once.
     WebWorkspaceRevealRow reveal_row = 3;
+    // A PROMPT'S ECHO TO TIME: a SubmitPrompt that carried its submit instant
+    // (`submitted_at_unix_ms`) was accepted and its prompt row drawn at once
+    // (delivered, or folded into the running turn; a held prompt draws later
+    // and is not timed). The page times the echo from that instant to its
+    // first draw of the user-prompt row stamped with the turn, whichever of
+    // the push and the row arrives first, and reports it as PROMPT_ECHO.
+    //
+    // AN EVENT, NEVER REPLAYED: a page that attaches later did not see the
+    // echo happen, so it times nothing.
+    WebWorkspacePromptEcho prompt_echo = 4;
   }
 }
 
 // The row a selection asked this workspace's page to reveal.
 message WebWorkspaceRevealRow {
   frontend.v1.FeedId row = 1;
+}
+
+// A submitted prompt whose row was drawn at submit, and when it was submitted.
+message WebWorkspacePromptEcho {
+  // The turn the prompt minted: the `FeedRow.turn` its user-prompt row is
+  // stamped with.
+  conversation.v1.TurnId turn = 1;
+  // The submit instant, verbatim from SubmitPromptRequest.submitted_at_unix_ms.
+  int64 submitted_at_unix_ms = 2;
 }
 
 message WebWorkspaceTransferred {

@@ -29,11 +29,11 @@
       "description": "prompt echo (submit to the prompt drawn)",
       "start": "Emacs submits a prompt (elisp.input.submit)",
       "end": "the webapp draws the user prompt (feed.draw-user-prompt)",
-      "measured_by": "profile",
+      "measured_by": "webapp",
       "threshold_ms": 100,
       "reason": "a keystroke's echo; anything past ~100ms reads as lag",
-      "reported_as": null,
-      "buckets_seconds": null
+      "reported_as": "REPORTED_LATENCY_KIND_PROMPT_ECHO",
+      "buckets_seconds": [0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5]
     },
     {
       "name": "switch_repeat",
