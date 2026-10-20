@@ -119,8 +119,32 @@ interface LogLevelMessage {
   readonly untilMs: number | null;
 }
 
+/**
+ * One of the editor's held-prompt ingress entries, as the editor wrote it:
+ * its idempotency key, when it was written (an RFC 3339 instant), and the
+ * `conversation.v1.UserSaid` in protojson. The page decodes `said` itself
+ * (host/embed.ts), so the host relays it untouched.
+ */
+export interface HeldIngressWireEntry {
+  readonly key: string;
+  readonly queuedAt: string;
+  readonly said: Record<string, unknown>;
+}
+
+/**
+ * host -> page: the editor's prompts waiting in the held-prompt ingress for
+ * this workspace, the whole list every time it changes, and replayed on hello.
+ * The held section draws them while the page cannot reach the daemon.
+ */
+interface HeldIngressMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "heldIngress";
+  readonly entries: readonly HeldIngressWireEntry[];
+}
+
 /** Every message the host sends a page. */
 export type HostToPage =
+  | HeldIngressMessage
   | LogLevelMessage
   | PresenceMessage
   | InputBackgroundMessage
@@ -215,6 +239,13 @@ export function parseHostToPage(data: unknown): HostToPage | null {
     }
     case "sidebarDock":
       return typeof data.docked === "boolean" ? { channel: HOST_CHANNEL, kind: "sidebarDock", docked: data.docked } : null;
+    case "heldIngress": {
+      if (!Array.isArray(data.entries)) return null;
+      const entries = data.entries.map(parseHeldIngressEntry);
+      return entries.every((e): e is HeldIngressWireEntry => e !== null)
+        ? { channel: HOST_CHANNEL, kind: "heldIngress", entries }
+        : null;
+    }
     case "webhostFailures": {
       if (!Array.isArray(data.failures)) return null;
       const failures = data.failures.map(parseWebhostFailure);
@@ -230,6 +261,14 @@ export function parseHostToPage(data: unknown): HostToPage | null {
 /** Whether VALUE names a log level of the shared vocabulary. */
 function isWindowLevel(value: unknown): value is WindowLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error";
+}
+
+/** DATA as one held-prompt ingress entry, or null when it is not one. */
+export function parseHeldIngressEntry(data: unknown): HeldIngressWireEntry | null {
+  if (!isRecord(data) || typeof data.key !== "string" || data.key === "") return null;
+  if (typeof data.queuedAt !== "string" || !Number.isFinite(Date.parse(data.queuedAt))) return null;
+  if (!isRecord(data.said) || Array.isArray(data.said)) return null;
+  return { key: data.key, queuedAt: data.queuedAt, said: data.said };
 }
 
 /** DATA as one webhost failure, or null when it is not one. */

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { createEditorIngressView } from "../../src/held/editor-ingress.js";
+import { EDITOR_INGRESS_ID_PREFIX, HELD_ITEM_ATTRIBUTE } from "../../src/held/section.js";
 import { pagePresence } from "../../src/presence.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { createControl } from "../../src/control.js";
@@ -30,6 +32,7 @@ import {
   SELECTED_ROW_ATTRIBUTE,
 } from "../../src/feed/selected-entry.js";
 import {
+  editorIngressEntry,
   Channel,
   feedId,
   harness,
@@ -625,7 +628,7 @@ describe("mountFeed: a held prompt's first draw", () => {
     document.body.replaceChildren(scroll);
     scriptFeedBox(scroll);
     const capture = captureLogRecords("debug");
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, heldHost });
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, held: { host: heldHost, editorIngress: createEditorIngressView() } });
     await settle();
     return { feed, scroll, heldHost, capture };
   }
@@ -664,7 +667,7 @@ describe("mountFeed: a held prompt's first draw", () => {
     });
     const capture = captureLogRecords("debug");
     // Act
-    mountFeed(host, h.ctx, { renderers: stubRenderers(), heldHost });
+    mountFeed(host, h.ctx, { renderers: stubRenderers(), held: { host: heldHost, editorIngress: createEditorIngressView() } });
     await settle();
     // Assert
     const record = await forwardedRecord(capture, "feed.held-prompt-unparked");
@@ -679,17 +682,43 @@ describe("mountFeed: a held prompt's first draw", () => {
  */
 describe("mountFeed: the held section", () => {
   /** A root feed with a held host, tailing a channel the test drives. */
-  async function mountedSection(held = heldSection([])) {
+  async function mountedSection(held = heldSection([]), editorIngress = createEditorIngressView()) {
     const { h, channel } = liveRootHarness({ openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req), held) });
     const scroll = document.createElement("div");
     const host = document.createElement("div");
     const heldHost = document.createElement("section");
     scroll.append(host, heldHost);
     document.body.replaceChildren(scroll);
-    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, heldHost });
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, held: { host: heldHost, editorIngress } });
     await settle();
     return { feed, host, heldHost, channel, h };
   }
+
+  /** An editor ingress view already holding an entry under KEY. */
+  const editorHolding = (key: string) => {
+    const view = createEditorIngressView();
+    view.set([editorIngressEntry(key)]);
+    return view;
+  };
+  const editorCard = (heldHost: HTMLElement, key: string) =>
+    heldHost.querySelector(`[${HELD_ITEM_ATTRIBUTE}="${EDITOR_INGRESS_ID_PREFIX}${key}"]`);
+
+  it("draws no editor ingress entry while the root feed is live", async () => {
+    // Act
+    const m = await mountedSection(heldSection([]), editorHolding("k-1"));
+    // Assert
+    expect(editorCard(m.heldHost, "k-1")).toBeNull();
+  });
+
+  it("draws the editor's ingress entries once the root feed's tail ends", async () => {
+    // Arrange
+    const m = await mountedSection(heldSection([]), editorHolding("k-1"));
+    // Act
+    m.channel.close();
+    await settle();
+    // Assert
+    expect(editorCard(m.heldHost, "k-1")).not.toBeNull();
+  });
 
   it("draws the section the root feed's open states", async () => {
     const m = await mountedSection(heldSection([heldPromptItem("prompt:t1", "t1")]));

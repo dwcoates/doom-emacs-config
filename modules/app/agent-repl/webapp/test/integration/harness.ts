@@ -20,6 +20,7 @@
  * otherwise never complete; `settle()` is how a test waits for the DOM instead
  * of sleeping.
  */
+import { createEditorIngressView } from "../../src/held/editor-ingress.js";
 import { createPromptEcho, installPromptEcho } from "../../src/prompt-echo.js";
 import { createRevealRelay } from "../../src/lifecycle/reveal-relay.js";
 import { clientLogSink } from "../../src/rpc/client-log-sink.js";
@@ -657,7 +658,7 @@ async function mountApp(
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
-    heldHost: shell.holdTray,
+    held: { host: shell.holdTray, editorIngress: createEditorIngressView() },
     composerFactory: composerEnabled
       ? (host, bubble) => mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
       : undefined,

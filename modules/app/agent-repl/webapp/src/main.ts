@@ -62,6 +62,7 @@ import { installForwardingLogger, installTextAffordances } from "./document-runt
 import { mintConnectionId } from "./connection-id.js";
 import { watchShownEdge } from "./host/shown-edge.js";
 import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
+import { createEditorIngressView } from "./held/editor-ingress.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
@@ -152,7 +153,10 @@ export async function boot(): Promise<void> {
     // Joined before anything draws, so the host's first word (shown or not)
     // reaches the page before the rail decides what it can skip.
     const webhostFailures = createWebhostFailureView();
-    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures, levelWindow });
+    // The editor's own held-prompt ingress entries, which the held section
+    // draws while this page cannot reach the daemon (held/section.ts).
+    const editorIngress = createEditorIngressView();
+    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures, levelWindow, editorIngress });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
@@ -289,7 +293,7 @@ export async function boot(): Promise<void> {
     const feed = mountFeed(shell.feed, ctx, {
       renderers: createRowRenderers(ctx),
       // The root feed's held section draws in the tail region after the rows.
-      heldHost: shell.holdTray,
+      held: { host: shell.holdTray, editorIngress },
       // The docked gate is drawn outside the scroll box; a choice clicked in
       // it holds the feed's view as a click in the feed does.
       clickZones: [shell.gateDock],

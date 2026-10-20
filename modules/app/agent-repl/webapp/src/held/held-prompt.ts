@@ -357,7 +357,14 @@ export function drawHeldPromptQueuedAt(
   tc: HeldContext,
   path: string,
 ): HTMLElement {
-  const atMs = msOf(u.atMs, `${path}.at_ms`);
+  return drawQueuedAge(msOf(u.atMs, `${path}.at_ms`), tc, path);
+}
+
+/**
+ * The ticking "queued 12s ago" age of a card queued at ATMS (epoch ms): every
+ * held card's, whichever message carried the instant.
+ */
+export function drawQueuedAge(atMs: number, tc: HeldContext, path: string): HTMLElement {
   log.debug("drawing a held prompt's queued age", {
     operation: "held.held-prompt.queued-at",
     context: { path, at_ms: atMs },

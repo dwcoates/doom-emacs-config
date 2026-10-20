@@ -16,6 +16,15 @@ describe("parseHostToPage", () => {
     ["logLevel opening a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 }],
     ["logLevel closing a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
     ["webhostFailures with none", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] }],
+    ["heldIngress with none", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [] }],
+    [
+      "heldIngress with an entry",
+      {
+        channel: HOST_CHANNEL,
+        kind: "heldIngress",
+        entries: [{ key: "k-1", queuedAt: "2026-10-20T15:18:02.227Z", said: { content: {} } }],
+      },
+    ],
     [
       "webhostFailures with a row",
       {
@@ -56,6 +65,11 @@ describe("parseHostToPage", () => {
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [{ arm: "bootFailed", headline: "h", evidence: [["only"]] }] },
     ],
     ["a gateDock with a numeric background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 10, background: 4 }],
+    ["heldIngress without a list", { channel: HOST_CHANNEL, kind: "heldIngress", entries: {} }],
+    ["heldIngress with an entry with no key", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "", queuedAt: "2026-10-20T15:18:02Z", said: {} }] }],
+    ["heldIngress with an entry whose queuedAt is no instant", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "k", queuedAt: "yesterday", said: {} }] }],
+    ["heldIngress with an entry whose said is no object", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "k", queuedAt: "2026-10-20T15:18:02Z", said: "hi" }] }],
+    ["heldIngress with an entry whose said is a list", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "k", queuedAt: "2026-10-20T15:18:02Z", said: [] }] }],
   ])("refuses %s", (_name, data) => {
     // Arrange / Act
     const message = parseHostToPage(data);

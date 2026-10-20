@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // A workspace page's side of the host protocol. See src/host/embed.ts.
+import { createEditorIngressView, type EditorIngressView } from "../../src/held/editor-ingress.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -20,6 +21,7 @@ let presence: PresenceSource;
 let levelWindow: LevelWindow;
 let clock: number;
 let webhostFailures: WebhostFailureView;
+let editorIngress: EditorIngressView;
 let link: HostLink | null;
 let received: PageToHost[];
 let capture: LogCapture;
@@ -73,9 +75,10 @@ beforeEach(() => {
   pageDoc = document;
   presence = createPresence(pageDoc, true);
   webhostFailures = createWebhostFailureView();
+  editorIngress = createEditorIngressView();
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress });
 });
 
 afterEach(() => {
@@ -93,7 +96,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress });
 
 
     // Assert
@@ -270,7 +273,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress });
 
     // Assert
     await delivered();
@@ -400,6 +403,43 @@ describe("the webhost's sidebar", () => {
   });
 });
 
+describe("the editor's held-prompt ingress", () => {
+  const said = { content: { blocks: [{ text: { text: "sent offline" } }] } };
+
+  it("hands the editor's entries to the held section, decoded", () => {
+    // Act
+    fromHost({
+      channel: HOST_CHANNEL,
+      kind: "heldIngress",
+      entries: [{ key: "k-1", queuedAt: "2026-10-20T15:18:02.227Z", said }],
+    });
+
+    // Assert
+    const [entry] = editorIngress.entries();
+    expect([entry?.key, entry?.queuedAtMs, entry?.said.content?.blocks[0]?.block.value]).toEqual([
+      "k-1",
+      Date.parse("2026-10-20T15:18:02.227Z"),
+      expect.objectContaining({ text: "sent offline" }),
+    ]);
+  });
+
+  it("leaves out an entry whose said is no UserSaid, as an error naming its key", async () => {
+    // Act
+    fromHost({
+      channel: HOST_CHANNEL,
+      kind: "heldIngress",
+      entries: [
+        { key: "k-bad", queuedAt: "2026-10-20T15:18:02Z", said: { words: "hi" } },
+        { key: "k-1", queuedAt: "2026-10-20T15:18:03Z", said },
+      ],
+    });
+
+    // Assert
+    expect(editorIngress.entries().map((e) => e.key)).toEqual(["k-1"]);
+    expect(await operations()).toContain("page.held-ingress-undecodable");
+  });
+});
+
 describe("the gate band", () => {
   /** A page whose shell carries a gate dock BAND pixels tall, joined to its host afresh. */
   function joinWithDock(band: number): HTMLElement {
@@ -409,7 +449,7 @@ describe("the gate band", () => {
     dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
     pageDoc.body.append(dock);
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress });
     return dock;
   }
 

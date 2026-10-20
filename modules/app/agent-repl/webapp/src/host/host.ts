@@ -33,9 +33,11 @@ import {
 } from "../../../agent-shim/logging/ts/level-window.js";
 import { selectedText } from "../selection.js";
 import {
+  type HeldIngressWireEntry,
   type WebhostFailure,
   HOST_CHANNEL,
   onHostChannel,
+  parseHeldIngressEntry,
   parsePageToHost,
   type DrawnWhat,
   type HostToPage,
@@ -76,6 +78,8 @@ interface Frame {
   /** Desired state Emacs gave, replayed to the page on every hello. */
   inputBackground: string | null;
   gateDock: GateDockState | null;
+  /** The editor's held-prompt ingress entries for the workspace; null until stated. */
+  heldIngress: readonly HeldIngressWireEntry[] | null;
   /** Facts the page pushed, which Emacs reads back. Reset when it reloads. */
   drawn: DrawnWhat | null;
   selection: { text: string | null; focused: boolean };
@@ -120,6 +124,12 @@ export interface Host {
   setInputBackground(id: string, background: string): string;
   /** Tell ID's page the slot its docked gate takes. */
   setGateDock(id: string, pixels: number, background: string | null): string;
+  /**
+   * Tell ID's page the editor's held-prompt ingress entries for its
+   * workspace, the whole list. An entry that is not one (host/protocol.ts
+   * `parseHeldIngressEntry`) refuses the call whole, answered `refused`.
+   */
+  setHeldIngress(id: string, entries: unknown): string;
   /** Ask ID's page to close its standing news digest. */
   dismissDigest(id: string): string;
   /** Whether ID's page has drawn its conversation. */
@@ -267,6 +277,9 @@ export function createHost(env: HostEnv): Host {
     }
     if (logLevel !== null && logLevel.untilMs > now()) {
       post(frame, { channel: HOST_CHANNEL, kind: "logLevel", level: logLevel.level, untilMs: logLevel.untilMs });
+    }
+    if (frame.heldIngress !== null) {
+      post(frame, { channel: HOST_CHANNEL, kind: "heldIngress", entries: frame.heldIngress });
     }
   };
 
@@ -434,6 +447,7 @@ export function createHost(env: HostEnv): Host {
       iframe,
       inputBackground: null,
       gateDock: null,
+      heldIngress: null,
       drawn: null,
       selection: { text: "", focused: false },
       editing: false,
@@ -542,6 +556,18 @@ export function createHost(env: HostEnv): Host {
       return withFrame("setGateDock", id, (frame) => {
         frame.gateDock = { pixels, background };
         post(frame, { channel: HOST_CHANNEL, kind: "gateDock", pixels, background });
+        return "sent";
+      });
+    },
+    setHeldIngress(id, entries) {
+      return withFrame("setHeldIngress", id, (frame) => {
+        const parsed = Array.isArray(entries) ? entries.map(parseHeldIngressEntry) : null;
+        if (parsed === null || !parsed.every((e): e is HeldIngressWireEntry => e !== null)) {
+          note("warn", `setHeldIngress was handed entries that are not ingress entries: ${JSON.stringify(entries)}`);
+          return "refused";
+        }
+        frame.heldIngress = parsed;
+        post(frame, { channel: HOST_CHANNEL, kind: "heldIngress", entries: parsed });
         return "sent";
       });
     },
