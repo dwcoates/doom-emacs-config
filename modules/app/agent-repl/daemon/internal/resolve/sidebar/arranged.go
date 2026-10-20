@@ -6,12 +6,17 @@ import (
 )
 
 // ArrangedRepository is one repository of the arrangement as an agent reads
-// it (agentrepl.v1.GetSidebarArrangement): its unsectioned families, then
-// each subsection's.
+// it (agentrepl.v1.GetSidebarArrangement): its entries in walk order.
 type ArrangedRepository struct {
-	Repository  wsm.Repository
-	Workspaces  []ArrangedWorkspace
-	Subsections []ArrangedSubsection
+	Repository wsm.Repository
+	Entries    []ArrangedEntry
+}
+
+// ArrangedEntry is one entry of a repository: a family in no subsection
+// (Subsection nil), or a subsection and its families.
+type ArrangedEntry struct {
+	Workspace  ArrangedWorkspace
+	Subsection *ArrangedSubsection
 }
 
 // ArrangedSubsection is one subsection and its families.
@@ -42,9 +47,15 @@ func Arranged(reg Registry, log dlog.Logger) []ArrangedRepository {
 	arranged, _ := arrange(reg, listed)
 	out := make([]ArrangedRepository, 0, len(arranged))
 	for _, placed := range arranged {
-		repo := ArrangedRepository{Repository: placed.repo, Workspaces: families(placed.buckets[0].workspaces, log)}
-		for _, b := range placed.buckets[1:] {
-			repo.Subsections = append(repo.Subsections, ArrangedSubsection{Subsection: *b.subsection, Workspaces: families(b.workspaces, log)})
+		repo := ArrangedRepository{Repository: placed.repo}
+		for _, b := range placed.buckets {
+			if b.subsection != nil {
+				repo.Entries = append(repo.Entries, ArrangedEntry{Subsection: &ArrangedSubsection{Subsection: *b.subsection, Workspaces: families(b.workspaces, log)}})
+				continue
+			}
+			for _, family := range families(b.workspaces, log) {
+				repo.Entries = append(repo.Entries, ArrangedEntry{Workspace: family})
+			}
 		}
 		out = append(out, repo)
 	}

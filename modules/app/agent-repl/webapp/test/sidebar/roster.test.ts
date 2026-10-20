@@ -42,6 +42,7 @@ import { cascadedValue, inRail } from "../stylesheet.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
   appContext,
+  drawnEntries,
   fakeTicker,
   hiddenSection,
   manualReveal,
@@ -388,7 +389,7 @@ describe("drawHeadedSection", () => {
   const SHAPE = { foldKey: "k:1", className: "kind-section", target: { case: "recentlyMerged", value: {} } } as const;
   /** Draw SECTION as a headed section of its own open rows. */
   const draw = (section: ReturnType<typeof wire>, sc: Parameters<typeof drawHeadedSection>[1], path: string, shape: Parameters<typeof drawHeadedSection>[3]) =>
-    drawHeadedSection(section, sc, path, shape, section.openRows ?? { rows: [] }, `${path}.open_rows`);
+    drawHeadedSection(section, sc, path, shape, { rows: section.entries.flatMap((e) => (e.entry.case === "row" ? [e.entry.value] : [])) }, `${path}.entries`);
 
   it("draws the box with its kind's class and fold key", () => {
     const section = draw(wire(), sidebarContext(), "p", SHAPE);
@@ -703,7 +704,6 @@ describe("a malformed roster", () => {
   it("refuses a repository section with no key", () => {
     const malformed = create(RosterRepoSectionSchema, {
       header: { label: { text: "doom" } },
-      openRows: { rows: [] },
       fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
@@ -715,7 +715,6 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: { label: { text: "doom" } },
-      openRows: { rows: [] },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -725,7 +724,6 @@ describe("a malformed roster", () => {
   it("refuses a repository section with no header", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
-      openRows: { rows: [] },
       fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
@@ -733,11 +731,13 @@ describe("a malformed roster", () => {
     ).toThrow(MalformedView);
   });
 
-  it("refuses a repository section with no rows box", () => {
+  it("refuses a repository section entry with no arm", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
-      header: { label: { text: "doom" } },
+      header: { label: { text: "doom" }, count: { workspaces: 0 } },
       fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
+      divergence: { state: { case: "pending", value: {} } },
+      entries: [{}],
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -748,7 +748,6 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: {},
-      openRows: { rows: [] },
       fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
@@ -1369,7 +1368,6 @@ describe("the repository label's divergence hover", () => {
     const section = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo/repo-1" } },
       header: { label: { text: "repo-1" }, count: { workspaces: 0 } },
-      openRows: { rows: [] },
       fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     const wire = roster({ repos: [] });
@@ -1643,6 +1641,52 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     // Assert
     const marks = [...second.querySelectorAll(".sb-subsection")].map((el) => el.hasAttribute(HOLDS_CURRENT_ATTRIBUTE));
     expect([second.querySelector(".repo-section") === section, marks]).toEqual([true, [false, true]]);
+  });
+
+  it("redraws a section whose subsection moved past a row, though no list's rows changed order", () => {
+    // Arrange -- a, [foo: x], b, then [foo: x], a, b: every list holds the
+    // same rows in the same order, only where foo stands changed.
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (before: string) =>
+      roster({
+        repos: [repoSection({ id: "s", rows: [row({ id: "a" }), row({ id: "b" })], subsections: [{ id: "foo", rows: [row({ id: "x" })], before }] })],
+      });
+    const section = drawer.draw(at("b")).querySelector(".repo-section");
+
+    // Act
+    const after = drawer.draw(at("a")).querySelector(".repo-section");
+
+    // Assert
+    const order = drawnEntries(after!.querySelector(":scope > .rows") as Element);
+    expect([after === section, order]).toEqual([false, ["[foo]", "a", "b"]]);
+  });
+
+  it("patches a row in place beside a subsection standing between rows", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (current: string) =>
+      roster({
+        repos: [
+          repoSection({
+            id: "s",
+            holdsCurrent: true,
+            rows: [row({ id: "a", current: current === "a" }), row({ id: "b", current: current === "b" })],
+            subsections: [{ id: "foo", rows: [row({ id: "x" })], before: "b" }],
+          }),
+        ],
+      });
+    const section = drawer.draw(at("a")).querySelector(".repo-section");
+
+    // Act
+    const after = drawer.draw(at("b"));
+
+    // Assert
+    const order = drawnEntries(after.querySelector(".repo-section > .rows") as Element);
+    expect([after.querySelector(".repo-section") === section, order, after.querySelector("[data-current]")?.getAttribute("data-roster-row")]).toEqual([
+      true,
+      ["a", "[foo]", "b"],
+      "b",
+    ]);
   });
 
   it("redraws a section whose rows changed order", () => {
@@ -2011,7 +2055,8 @@ describe("the open rows' tab numbers", () => {
   it("refuses an open row with no tab as a malformed view", () => {
     // Arrange
     const u = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })] });
-    const open = u.repository?.sections[0]?.openRows?.rows[0];
+    const first = u.repository?.sections[0]?.entries[0]?.entry;
+    const open = first?.case === "row" ? first.value : undefined;
     if (open === undefined) throw new Error("the fixture has its open row");
     open.tab = undefined;
 
@@ -2019,7 +2064,7 @@ describe("the open rows' tab numbers", () => {
     const draw = (): unknown => createRosterDrawer(sidebarContext()).draw(u);
 
     // Assert
-    expect(draw).toThrow(/open_rows\.rows\[0\]\.tab/);
+    expect(draw).toThrow(/entries\[0\]\.row\.tab/);
   });
 });
 

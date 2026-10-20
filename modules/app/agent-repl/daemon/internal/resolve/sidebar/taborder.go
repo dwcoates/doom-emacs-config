@@ -26,8 +26,9 @@ import (
 //     tree's depth-first walk, numbered tabs only, so tab N is always the row
 //     drawn immediately before tab N+1, in the sidebar and on the bar.
 //   - THE ORDER RUNS UNBROKEN across repositories (repository by repository),
-//     subsections (a repository's own rows, then each subsection's: one
-//     subsection never spans repositories, arrange) and families (a subtree is
+//     subsections (a repository's walk, its unsectioned runs and its
+//     subsections interleaved: one subsection never spans repositories,
+//     arrange) and families (a subtree is
 //     one run at every depth: a child follows its parent, its siblings in their
 //     order, and a family never splits across subsections, because a child sits
 //     in its root's subsection).
@@ -42,8 +43,8 @@ type openNode struct {
 	children []openNode
 }
 
-// openRegion is one rows region of a repository's Open section: its own rows
-// (subsection nil) or one subsection's.
+// openRegion is one rows region of a repository's Open section: a run of its
+// rows in no subsection (subsection nil) or one subsection's.
 type openRegion struct {
 	subsection *wsm.Subsection
 	rows       []openNode
@@ -56,7 +57,7 @@ func (r openRegion) folded(repo wsm.Repository) bool {
 	return repo.Folded || (r.subsection != nil && r.subsection.Folded)
 }
 
-// openRepo is one repository's Open section, its own region first.
+// openRepo is one repository's Open section, its regions in its walk's order.
 type openRepo struct {
 	repo    wsm.Repository
 	regions []openRegion

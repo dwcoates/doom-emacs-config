@@ -275,7 +275,45 @@ func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *t
 	// Assert.
 	awaitRoster(t, d, roster, "the first tab now last", func(r *frontendv1.WorkspaceRoster) bool {
 		ids := tabBarIDs(r)
-		return len(ids) == 3 && ids[2] == head && len(r.GetRepository().GetSections()[0].GetSubsections()) == 1
+		return len(ids) == 3 && ids[2] == head && len(rosterwalk.Subsections(r.GetRepository().GetSections()[0])) == 1
+	})
+}
+
+func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
+	t.Parallel()
+	// Arrange: the owner's example, a, b, c, then [foo: d] at the bottom.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	for _, name := range []string{"a", "b", "c", "d"} {
+		harness.Register(t, d, worktreeOf(t, repo, name))
+	}
+	first := awaitRoster(t, d, roster, "four tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 4 })
+	order := tabBarIDs(first)
+	refs := map[string]*workspacev1.WorkspaceRef{}
+	for _, open := range rosterwalk.OpenRows(first) {
+		refs[open.GetRow().GetWorkspace().GetWorkspace().GetId()] = open.GetRow().GetWorkspace().GetWorkspace()
+	}
+	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "foo"}}}).GetCreated()
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace: refs[order[3]],
+			Into:      &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: created},
+			At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		}}})
+
+	// Act: the subsection, dragged onto the second workspace's line.
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveSubsection{
+		MoveSubsection: &agentreplv1.ArrangeMoveSubsection{Subsection: created,
+			To: &agentreplv1.ArrangeMoveSubsection_BeforeWorkspace{BeforeWorkspace: refs[order[1]]}}}})
+
+	// Assert: the sidebar draws it between the first two rows, and the tab
+	// bar walks its workspace there.
+	awaitRoster(t, d, roster, "the subsection between the first two rows", func(r *frontendv1.WorkspaceRoster) bool {
+		entries := r.GetRepository().GetSections()[0].GetEntries()
+		return len(entries) == 4 && entries[1].GetSubsection().GetKey().GetSubsectionId() == created.GetId() &&
+			sameOrder(tabBarIDs(r), []string{order[0], order[3], order[1], order[2]})
 	})
 }
 
@@ -309,7 +347,7 @@ func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 		t.Fatalf("UpdateSidebarView = (%v, %v), want success", resp, err)
 	}
 	awaitRoster(t, d, roster, "the subsection collapsed and b's tab folded", func(r *frontendv1.WorkspaceRoster) bool {
-		subs := r.GetRepository().GetSections()[0].GetSubsections()
+		subs := rosterwalk.Subsections(r.GetRepository().GetSections()[0])
 		if len(subs) != 1 || subs[0].GetCollapsed() == nil {
 			return false
 		}
@@ -363,7 +401,7 @@ func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.
 		t.Fatalf("GetSidebarArrangement: %v", err)
 	}
 	repos := resp.Msg.GetRepositories()
-	if len(repos) != 1 || len(repos[0].GetWorkspaces()) != 1 || repos[0].GetWorkspaces()[0].GetWorkspace().GetId() != ws.GetId() {
+	if len(repos) != 1 || len(repos[0].GetEntries()) != 1 || repos[0].GetEntries()[0].GetWorkspace().GetWorkspace().GetId() != ws.GetId() {
 		t.Fatalf("arrangement = %v, want the one workspace in its repository", resp.Msg)
 	}
 }

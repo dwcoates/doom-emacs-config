@@ -563,7 +563,7 @@ func markViewed(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 func repoRowIDs(r *frontendv1.WorkspaceRoster) []string {
 	var out []string
 	for _, s := range r.GetRepository().GetSections() {
-		for _, open := range s.GetOpenRows().GetRows() {
+		for _, open := range rosterwalk.UnsectionedRows(s) {
 			out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId())
 		}
 	}

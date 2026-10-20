@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -1025,11 +1026,11 @@ func watchStatusWalk(t *testing.T, r sidebar.Resolver) *statusWalk {
 	go func() {
 		for roster := range rosters {
 			sections := roster.GetRepository().GetSections()
-			if len(sections) == 0 || len(innerRows(sections[0].GetOpenRows().GetRows())) == 0 {
+			if len(sections) == 0 || len(innerRows(rosterwalk.UnsectionedRows(sections[0]))) == 0 {
 				continue
 			}
 			w.mu.Lock()
-			w.seen = append(w.seen, statusName(innerRows(sections[0].GetOpenRows().GetRows())[0]))
+			w.seen = append(w.seen, statusName(innerRows(rosterwalk.UnsectionedRows(sections[0]))[0]))
 			w.mu.Unlock()
 			select {
 			case w.woke <- struct{}{}:

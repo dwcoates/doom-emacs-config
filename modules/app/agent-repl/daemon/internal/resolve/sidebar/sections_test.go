@@ -42,7 +42,7 @@ func TestRepoSectionDrawsEvenWithNoRows(t *testing.T) {
 
 	// Assert: a section that vanished would make the grouping flicker.
 	sections := latest(t, r).GetRepository().GetSections()
-	if len(sections) != 1 || len(innerRows(sections[0].GetOpenRows().GetRows())) != 0 {
+	if len(sections) != 1 || len(innerRows(rosterwalk.UnsectionedRows(sections[0]))) != 0 {
 		t.Fatal("a repository section with no rows did not draw")
 	}
 }
@@ -67,7 +67,7 @@ func TestRepoSectionDrawsForARepositoryWithNoWorkspaceAtAll(t *testing.T) {
 	if got := sections[0].GetKey().GetRepository().GetId(); got != string(repo.ID) {
 		t.Fatalf("section key = %q, want the registered repository %q", got, repo.ID)
 	}
-	if rows := innerRows(sections[0].GetOpenRows().GetRows()); len(rows) != 0 {
+	if rows := innerRows(rosterwalk.UnsectionedRows(sections[0])); len(rows) != 0 {
 		t.Fatalf("the section drew %d rows, want none", len(rows))
 	}
 }
@@ -332,7 +332,7 @@ func TestRepoSectionCountIncludesANestedFamilyRow(t *testing.T) {
 
 	// Assert: one top-level row, two workspaces.
 	section := latest(t, r).GetRepository().GetSections()[0]
-	if top := len(section.GetOpenRows().GetRows()); top != 1 {
+	if top := len(rosterwalk.UnsectionedRows(section)); top != 1 {
 		t.Fatalf("top-level rows = %d, want the child nested under its parent", top)
 	}
 	got := section.GetHeader().GetCount().GetWorkspaces()
@@ -951,7 +951,7 @@ func collapseArms(section *frontendv1.RosterRepoSection) []string {
 	default:
 		out = append(out, "unset")
 	}
-	for _, sub := range section.GetSubsections() {
+	for _, sub := range rosterwalk.Subsections(section) {
 		switch {
 		case sub.GetCollapsed() != nil:
 			out = append(out, "collapsed")

@@ -244,7 +244,8 @@ describe("unset-field injection", () => {
     // Act
     const [push] = await take(client.watchWorkspaceRoster({}), 1);
     // Assert
-    const row = (push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.openRows?.rows[0]?.row;
+    const first = (push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.entries[0]?.entry;
+    const row = first?.case === "row" ? first.value.row : undefined;
     expect(row?.status.case).toBeUndefined();
   });
 
@@ -333,7 +334,8 @@ describe("view streams", () => {
     // Act
     const [push] = await take(client.watchWorkspaceRoster({}), 1);
     // Assert
-    expect((push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.openRows?.rows[0]?.row?.name?.text).toBe("ported");
+    const first = (push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.entries[0]?.entry;
+    expect((first?.case === "row" ? first.value.row : undefined)?.name?.text).toBe("ported");
   });
 
   it("states the scripted held section in the root feed's open", async () => {

@@ -29,7 +29,14 @@ function open(id: string, n: number | null, ...children: RosterOpenRow[]): Roste
 /** An Open section of one repository: OWN rows, then one subsection per SUBS. */
 function view(own: RosterOpenRow[], ...subs: RosterOpenRow[][]): RosterRepositoryView {
   return create(RosterRepositoryViewSchema, {
-    sections: [{ openRows: { rows: own }, subsections: subs.map((rows) => ({ openRows: { rows } })) }],
+    sections: [
+      {
+        entries: [
+          ...own.map((row) => ({ entry: { case: "row" as const, value: row } })),
+          ...subs.map((rows) => ({ entry: { case: "subsection" as const, value: { openRows: { rows } } } })),
+        ],
+      },
+    ],
   });
 }
 
@@ -60,6 +67,42 @@ describe("tabNumbers", () => {
     expect([...numbers]).toEqual(want);
   });
 
+  it("reads a subsection's rows where it stands between two rows", () => {
+    // Arrange
+    const v = create(RosterRepositoryViewSchema, {
+      sections: [
+        {
+          entries: [
+            { entry: { case: "row", value: open("a", 1) } },
+            { entry: { case: "subsection", value: { openRows: { rows: [open("x", 2)] } } } },
+            { entry: { case: "row", value: open("b", 3) } },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const numbers = tabNumbers(v, "WorkspaceRoster.repository");
+
+    // Assert
+    expect([...numbers.entries()]).toEqual([
+      ["a", 1],
+      ["x", 2],
+      ["b", 3],
+    ]);
+  });
+
+  it("refuses a section entry with no arm as a malformed view", () => {
+    // Arrange
+    const v = create(RosterRepositoryViewSchema, { sections: [{ entries: [{}] }] });
+
+    // Act
+    const read = (): unknown => tabNumbers(v, "WorkspaceRoster.repository");
+
+    // Assert
+    expect(read).toThrow(/entries\[0\]\.entry/);
+  });
+
   it("refuses an open row with no tab as a malformed view", () => {
     // Arrange
     const v = view([create(RosterOpenRowSchema, { row: { workspace: { workspace: { id: "a", dir: "/w/a" } } } })]);
@@ -69,7 +112,7 @@ describe("tabNumbers", () => {
 
     // Assert
     expect(read).toThrow(MalformedView);
-    expect(read).toThrow(/open_rows\.rows\[0\]\.tab/);
+    expect(read).toThrow(/entries\[0\]\.row\.tab/);
   });
 
   it("refuses an open row with no tab arm as a malformed view", () => {
@@ -80,7 +123,7 @@ describe("tabNumbers", () => {
     const read = (): unknown => tabNumbers(v, "WorkspaceRoster.repository");
 
     // Assert
-    expect(read).toThrow(/open_rows\.rows\[0\]\.tab\.tab/);
+    expect(read).toThrow(/entries\[0\]\.row\.tab\.tab/);
   });
 
   it("refuses a workspace with two open rows as a malformed view", () => {

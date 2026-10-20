@@ -5882,8 +5882,18 @@ describe("the interim corner's shared tokens", () => {
  * (src/sidebar/subsections.ts, src/sidebar/drag.ts).
  */
 describe("the repository's subsections and the drag", () => {
-  it("folds a repository's subsections away with it", () => {
-    expect(declarationsOf("#ws-sidebar .repo.folded > .sb-subsections")).toMatch(/display:\s*none/);
+  it("folds a repository's subsections away with it, their list being its rows", () => {
+    expect(declarationsOf("#ws-sidebar .repo.folded .rows")).toMatch(/display:\s*none/);
+  });
+
+  it("indents a subsection's rows under its header", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection > .rows")).toMatch(/margin-left:\s*0\.9rem/);
+  });
+
+  it("lights the subsection a dragged row would join, subtly", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection.sb-drop-target")).toMatch(
+      /background-color:\s*color-mix\(in srgb, var\(--card\) 50%, transparent\)/,
+    );
   });
 
   it("draws a subsection's name in the one purple", () => {

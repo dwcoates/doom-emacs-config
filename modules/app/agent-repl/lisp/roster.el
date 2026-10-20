@@ -386,13 +386,18 @@ answer is the `RosterRow's they carry, each before its family."
 
 (defun agent-repl-roster-section-rows (section)
   "Return repository SECTION's top-level open rows in drawn order.
-Its own unsectioned rows, then each subsection's in turn
-\(`frontend.v1.RosterRepoSection.subsections').  A reader that took only
-the section's own `open_rows' would miss every workspace in a subsection."
-  (apply #'append
-         (plist-get (plist-get section :open-rows) :rows)
-         (mapcar (lambda (sub) (plist-get (plist-get sub :open-rows) :rows))
-                 (plist-get section :subsections))))
+Entry by entry (`frontend.v1.RosterRepoSection.entries'): a row in no
+subsection where it stands, a subsection's rows where the subsection
+stands.  A reader that took only the rows in no subsection would miss
+every workspace in a subsection."
+  (mapcan (lambda (entry)
+            (let ((arm (plist-get entry :entry)))
+              (pcase (plist-get arm :arm)
+                (:row (list (plist-get arm :value)))
+                (:subsection (copy-sequence
+                              (plist-get (plist-get (plist-get arm :value) :open-rows) :rows)))
+                (other (error "agent-repl: a repository section entry has no known arm: %S" other)))))
+          (plist-get section :entries)))
 
 (defun agent-repl-roster-tab-number (tab)
   "Return the number open row TAB is drawn at, or nil for a folded tab."

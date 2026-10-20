@@ -62,7 +62,7 @@ default `:available')."
 COLLAPSED non-nil makes the daemon hold the section collapsed."
   (list :key (list :repository (list :id (concat "repo-" label) :dir (concat "/r/" label)))
         :header (list :label (list :text label))
-        :open-rows (agent-repl-test--open-rows rows)
+        :entries (agent-repl-test--row-entries rows)
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
 (defun agent-repl-test-roster--merged-group (label rows &optional collapsed)
@@ -232,15 +232,16 @@ whose calls are the observation."
       (should (equal ids '("b" "a"))))))
 
 (defun agent-repl-test-roster--with-subsections (section &rest subsection-rows)
-  "Return SECTION carrying one subsection per list of SUBSECTION-ROWS."
-  (append section
-          (list :subsections
-                (seq-map-indexed (lambda (rows i)
-                                   (list :key (list :subsection-id (format "sub-%d" i))
-                                         :header (list :label (list :text (format "sub %d" i)))
-                                         :open-rows (agent-repl-test--open-rows rows)
-                                         :fold (list :arm :expanded :value nil)))
-                                 subsection-rows))))
+  "Return SECTION with one subsection per list of SUBSECTION-ROWS after its rows."
+  (plist-put (copy-sequence section) :entries
+             (append (plist-get section :entries)
+                     (seq-map-indexed (lambda (rows i)
+                                        (agent-repl-test--subsection-entry
+                                         (list :key (list :subsection-id (format "sub-%d" i))
+                                               :header (list :label (list :text (format "sub %d" i)))
+                                               :open-rows (agent-repl-test--open-rows rows)
+                                               :fold (list :arm :expanded :value nil))))
+                                      subsection-rows))))
 
 (ert-deftest agent-repl-test-roster-section-rows-follow-the-sections-own-with-its-subsections ()
   "A section's rows are its unsectioned rows, then each subsection's in turn."
@@ -256,6 +257,30 @@ whose calls are the observation."
                        (agent-repl-roster-flatten (agent-repl-roster-section-rows section)))))
       ;; Assert
       (should (equal ids '("a" "s" "t"))))))
+
+(ert-deftest agent-repl-test-roster-section-rows-walk-a-subsection-where-it-stands ()
+  "A subsection between two rows has its rows read between them."
+  ;; Arrange
+  (let ((section (list :entries
+                       (append (agent-repl-test--row-entries
+                                (list (agent-repl-test-roster--row "a" "a-row" :ready)))
+                               (list (agent-repl-test--subsection-entry
+                                      (list :open-rows (agent-repl-test--open-rows
+                                                        (list (agent-repl-test-roster--row "s" "s-row" :ready))))))
+                               (agent-repl-test--row-entries
+                                (list (agent-repl-test-roster--row "b" "b-row" :ready)))))))
+    ;; Act
+    (let ((ids (mapcar #'agent-repl-roster-row-id
+                       (agent-repl-roster-flatten (agent-repl-roster-section-rows section)))))
+      ;; Assert
+      (should (equal ids '("a" "s" "b"))))))
+
+(ert-deftest agent-repl-test-roster-section-rows-refuse-an-entry-of-no-known-arm ()
+  "An entry on no arm the contract names is an error, never a skipped row."
+  ;; Arrange
+  (let ((section (list :entries (list (list :entry (list :arm :elsewhere :value nil))))))
+    ;; Act / Assert
+    (should-error (agent-repl-roster-section-rows section))))
 
 (ert-deftest agent-repl-test-roster-flatten-answers-each-row-before-its-family ()
   "Flattening list rows answers the shared rows, each before its children."
@@ -2947,7 +2972,7 @@ saying the roster had been asked for one and declined."
                      (agent-repl-test-roster--section
                       "repo" (list (agent-repl-test-roster--row "a" "a" :ready)))
                      (list (agent-repl-test-roster--row "s" "s" :ready))))
-           (_ (plist-put (car (plist-get section :subsections)) :fold (list :arm :collapsed :value nil)))
+           (_ (plist-put (car (agent-repl-test--section-subsections section)) :fold (list :arm :collapsed :value nil)))
            (roster (agent-repl-test-roster--roster :sections (list section))))
       ;; Act
       (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
@@ -2963,9 +2988,8 @@ saying the roster had been asked for one and declined."
                     :sections (list (agent-repl-test-roster--section
                                      "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
                                                   (agent-repl-test-roster--row "b" "b" :ready))))))
-           (second (cadr (plist-get (plist-get (car (plist-get (plist-get roster :repository) :sections))
-                                               :open-rows)
-                                    :rows)))
+           (second (cadr (agent-repl-roster-section-rows
+                          (car (plist-get (plist-get roster :repository) :sections)))))
            errors)
       (plist-put second :tab (list :tab (list :arm :numbered :value (list :number 5))))
       (cl-letf (((symbol-function 'agent-repl--error)

@@ -720,7 +720,7 @@ describe("pathedFamilies", () => {
 
   it.each([
     ["roster.ts", "drawRosterRows"],
-    ["keyed-rows.ts", "visible"],
+    ["entries.ts", "pathedOpenRows"],
     ["row.ts", "appendRowKids"],
   ])("is how %s walks a list's rows", (file, fn) => {
     // Arrange

@@ -1343,7 +1343,8 @@ NAME is the canonical spelling, e.g. \"Content-Type\"."
 (defun agent-repl-itest--listed (roster)
   "Return the protojson ROSTER as the daemon lists it on the wire.
 A fixture states its rows the way a test reads them: plain `RosterRow's in
-each section's (and subsection's) `rows', in the hidden section's and each
+each section's (and subsection's) `rows', a section's subsections after
+its own rows, in the hidden section's and each
 merged group's `rows', a row's family under its own `children'.  The wire
 lists them as the daemon does (`frontend.v1.WorkspaceRoster'): each list's
 own row type -- an open row with its tab, numbered in the Open section's
@@ -1388,8 +1389,12 @@ is."
                                                        (unless (or (assq 'expanded sub) (assq 'collapsed sub))
                                                          '((expanded . ((collapsible . ()))))))))
                                            (or (alist-get 'subsections section) [])))))
-                      (cons (cons 'subsections subs)
-                            (assq-delete-all 'subsections (relist section 'openRows own)))))
+                      ;; The body is one list of entries in drawn order: the
+                      ;; section's own rows, then each subsection.
+                      (cons (cons 'entries
+                                  (vconcat (seq-map (lambda (open) `((row . ,open))) (alist-get 'rows own))
+                                           (seq-map (lambda (sub) `((subsection . ,sub))) subs)))
+                            (assq-delete-all 'subsections (assq-delete-all 'rows (copy-alist section))))))
                   (or (alist-get 'sections repository) []))))
                (hidden (alist-get 'hidden roster))
                (merged (alist-get 'recentlyMerged roster)))

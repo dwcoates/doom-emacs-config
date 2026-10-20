@@ -24,8 +24,9 @@ const HiddenSectionLabel = "Hidden"
 const OpenSectionLabel = "Open"
 
 // repositoryView resolves the Open section from the Open tree (openTree):
-// ONE SECTION PER REPOSITORY in the arrangement's order, its own rows first
-// and then one subsection per subsection, each open row carrying its tab
+// ONE SECTION PER REPOSITORY in the arrangement's order, its body its walk's
+// entries (its rows in no subsection and its subsections, interleaved as
+// arranged), each open row carrying its tab
 // numbered in this very walk (tabNumberer), so the sidebar's numbers and the
 // tab bar's are one fact.
 //
@@ -55,7 +56,7 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 			regionCount := len(rosterwalk.FlattenOpen(rows.GetRows()))
 			count += regionCount
 			if region.subsection == nil {
-				section.OpenRows = rows
+				section.Entries = append(section.Entries, rosterwalk.RowEntries(rows.GetRows())...)
 				continue
 			}
 			sub := &frontendv1.RosterSubsection{
@@ -64,7 +65,7 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 				OpenRows: rows,
 			}
 			setSubsectionFold(sub, region.subsection.Folded, wsm.SubsectionMembers(region.subsection.ID).HoldsCurrent(current))
-			section.Subsections = append(section.Subsections, sub)
+			section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{Subsection: sub}})
 		}
 		section.Header = sectionHeader(placed.repo.Name, count)
 		shown += count

@@ -35,20 +35,7 @@ type forest struct {
 func nest(in []wsm.Workspace, log dlog.Logger) forest {
 	ordered := sortWorkspaces(in)
 
-	present := map[ids.WorkspaceID]struct{}{}
-	for _, ws := range ordered {
-		present[ws.ID] = struct{}{}
-	}
-
-	parent := map[ids.WorkspaceID]ids.WorkspaceID{}
-	for _, ws := range ordered {
-		if ws.Parent == nil {
-			continue
-		}
-		if _, drawn := present[*ws.Parent]; drawn && *ws.Parent != ws.ID {
-			parent[ws.ID] = *ws.Parent
-		}
-	}
+	parent := parentsIn(ordered)
 
 	out := forest{children: map[ids.WorkspaceID][]wsm.Workspace{}}
 	for _, ws := range ordered {
@@ -68,6 +55,46 @@ func nest(in []wsm.Workspace, log dlog.Logger) forest {
 				dlog.Context{"workspace_id": string(ws.ID), "parent_id": string(p)})
 			out.children[p] = append(out.children[p], ws)
 		}
+	}
+	return out
+}
+
+// parentsIn answers each workspace of IN's recorded parent, for those whose
+// parent is among IN too (and is not itself): the only parents a row can
+// nest under.
+func parentsIn(in []wsm.Workspace) map[ids.WorkspaceID]ids.WorkspaceID {
+	present := map[ids.WorkspaceID]struct{}{}
+	for _, ws := range in {
+		present[ws.ID] = struct{}{}
+	}
+	parent := map[ids.WorkspaceID]ids.WorkspaceID{}
+	for _, ws := range in {
+		if ws.Parent == nil {
+			continue
+		}
+		if _, drawn := present[*ws.Parent]; drawn && *ws.Parent != ws.ID {
+			parent[ws.ID] = *ws.Parent
+		}
+	}
+	return parent
+}
+
+// familyRoots answers, for every workspace of IN, the top-level row nest
+// draws its row under: itself when it renders at the top level (no parent
+// among IN, or a parent chain that cycles), else its parent's family root.
+func familyRoots(in []wsm.Workspace) map[ids.WorkspaceID]ids.WorkspaceID {
+	parent := parentsIn(in)
+	out := map[ids.WorkspaceID]ids.WorkspaceID{}
+	for _, ws := range in {
+		at := ws.ID
+		for {
+			p, nested := parent[at]
+			if !nested || cycles(at, parent) {
+				break
+			}
+			at = p
+		}
+		out[ws.ID] = at
 	}
 	return out
 }

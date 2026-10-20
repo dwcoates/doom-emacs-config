@@ -41,13 +41,20 @@ func openIDs(rows []*frontendv1.RosterOpenRow) []string {
 	return out
 }
 
-// section is a repository section with its own rows and subsections' rows.
-func section(own []*frontendv1.RosterOpenRow, subs ...[]*frontendv1.RosterOpenRow) *frontendv1.RosterRepoSection {
-	s := &frontendv1.RosterRepoSection{OpenRows: &frontendv1.RosterOpenRows{Rows: own}}
-	for _, rows := range subs {
-		s.Subsections = append(s.Subsections, &frontendv1.RosterSubsection{OpenRows: &frontendv1.RosterOpenRows{Rows: rows}})
-	}
-	return s
+// entry is one section entry: a row in no subsection.
+func entry(row *frontendv1.RosterOpenRow) *frontendv1.RosterRepoEntry {
+	return RowEntries([]*frontendv1.RosterOpenRow{row})[0]
+}
+
+// sub is one section entry: a subsection holding rows.
+func sub(rows ...*frontendv1.RosterOpenRow) *frontendv1.RosterRepoEntry {
+	return &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{
+		Subsection: &frontendv1.RosterSubsection{OpenRows: &frontendv1.RosterOpenRows{Rows: rows}}}}
+}
+
+// section is a repository section of entries, in drawn order.
+func section(entries ...*frontendv1.RosterRepoEntry) *frontendv1.RosterRepoSection {
+	return &frontendv1.RosterRepoSection{Entries: entries}
 }
 
 func TestFlattenOpen(t *testing.T) {
@@ -90,21 +97,96 @@ func TestFlattenHiddenListsAChildAfterItsParent(t *testing.T) {
 	}
 }
 
-func TestSectionOpenRowsListsTheOwnRowsThenEachSubsections(t *testing.T) {
+func TestSectionOpenRows(t *testing.T) {
+	cases := []struct {
+		name    string
+		section *frontendv1.RosterRepoSection
+		want    []string
+	}{
+		{name: "an empty section lists nothing", section: section(), want: nil},
+		{name: "a row's family follows it", section: section(entry(open("a", open("a1")))), want: []string{"a", "a1"}},
+		{name: "a subsection's rows are listed where it stands, between two rows",
+			section: section(entry(open("a")), sub(open("s", open("s1"))), entry(open("b"))), want: []string{"a", "s", "s1", "b"}},
+		{name: "an empty subsection lists nothing", section: section(entry(open("a")), sub(), entry(open("b"))), want: []string{"a", "b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := openIDs(SectionOpenRows(tc.section))
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("SectionOpenRows = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRowEntriesWrapsEachRowInOrder(t *testing.T) {
 	// Arrange.
-	s := section([]*frontendv1.RosterOpenRow{open("a", open("a1"))}, []*frontendv1.RosterOpenRow{open("s")}, nil)
+	a, b := open("a"), open("b")
+
+	// Act.
+	got := RowEntries([]*frontendv1.RosterOpenRow{a, b})
+
+	// Assert.
+	if len(got) != 2 || got[0].GetRow() != a || got[1].GetRow() != b {
+		t.Fatalf("RowEntries = %v, want a then b, each on the row arm", got)
+	}
+}
+
+func TestRowEntriesOfNoRowsIsEmpty(t *testing.T) {
+	// Act.
+	got := RowEntries(nil)
+
+	// Assert.
+	if len(got) != 0 {
+		t.Fatalf("RowEntries(nil) = %v, want none", got)
+	}
+}
+
+func TestUnsectionedRowsListsTheRowEntriesInOrder(t *testing.T) {
+	// Arrange.
+	s := section(entry(open("a", open("a1"))), sub(open("s")), entry(open("b")))
 
 	// Act / Assert.
-	if got, want := openIDs(SectionOpenRows(s)), []string{"a", "a1", "s"}; !slices.Equal(got, want) {
-		t.Fatalf("SectionOpenRows = %v, want %v", got, want)
+	if got, want := openIDs(UnsectionedRows(s)), []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Fatalf("UnsectionedRows = %v, want %v", got, want)
 	}
+}
+
+func TestSubsectionsListsTheSubsectionEntriesInOrder(t *testing.T) {
+	// Arrange.
+	first, second := sub(open("s")), sub()
+	s := section(entry(open("a")), first, entry(open("b")), second)
+
+	// Act.
+	got := Subsections(s)
+
+	// Assert.
+	if len(got) != 2 || got[0] != first.GetSubsection() || got[1] != second.GetSubsection() {
+		t.Fatalf("Subsections = %v, want the two subsections in order", got)
+	}
+}
+
+func TestSectionOpenRowsRefusesAnEntryWithNoArm(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatalf("SectionOpenRows walked an entry with no arm")
+		}
+	}()
+
+	// Act.
+	SectionOpenRows(section(&frontendv1.RosterRepoEntry{}))
 }
 
 func TestOpenRowsWalksTheSectionsInOrder(t *testing.T) {
 	// Arrange.
 	roster := &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-		section([]*frontendv1.RosterOpenRow{open("a")}, []*frontendv1.RosterOpenRow{open("b")}),
-		section([]*frontendv1.RosterOpenRow{open("c")}),
+		section(entry(open("a")), sub(open("b"))),
+		section(entry(open("c"))),
 	}}}
 
 	// Act / Assert.
@@ -116,7 +198,7 @@ func TestOpenRowsWalksTheSectionsInOrder(t *testing.T) {
 func TestAllRowsListsOpenThenHiddenThenMergedThenClosed(t *testing.T) {
 	// Arrange.
 	roster := &frontendv1.WorkspaceRoster{
-		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section([]*frontendv1.RosterOpenRow{open("o", open("o1"))})}},
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o", open("o1"))))}},
 		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: []*frontendv1.RosterHiddenRow{hidden("h", hidden("h1"))}}},
 		RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{
 			{MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: row("m")}}}},

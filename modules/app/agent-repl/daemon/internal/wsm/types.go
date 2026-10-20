@@ -245,6 +245,10 @@ type Subsection struct {
 	// Place is the subsection's position among its repository's
 	// subsections. Unique within the repository, and at least 1.
 	Place int64
+	// Slot is where the subsection stands among its repository's roots in no
+	// subsection (walk.go): just before the first whose registry place is at
+	// least Slot, or after every one when nil.
+	Slot *int64
 	// Folded is whether the subsection is collapsed: its rows hidden in the
 	// sidebar and its workspaces' tabs folded off the tab bar
 	// (SetSubsectionFolded).

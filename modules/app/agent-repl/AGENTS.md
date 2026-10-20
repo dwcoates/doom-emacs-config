@@ -1088,14 +1088,24 @@ feature branch.
 ## The sidebar's arrangement is the tab bar's order
 
 The repository grouping's ARRANGEMENT is daemon state (`agentrepl.v1.ArrangeSidebar`,
-`wsm/arrange.go`): the repositories' order, each repository's named subsections,
-and which subsection a ROOT workspace sits in. A child sits wherever its root
+`wsm/arrange.go`): the repositories' order, each repository's WALK (its
+unsectioned roots and its named subsections interleaved, `wsm/walk.go`), and
+which subsection a ROOT workspace sits in. A child sits wherever its root
 does, at every depth (owner ruling, 2026-10-14), and SQLite refuses a child
 that stores a subsection of its own.
 
 - The sidebar and the Emacs tab bar walk ONE order (`resolve/sidebar/arrangement.go`):
-  repository by repository, its unsectioned families, then each subsection's,
-  each family depth-first, so a child always sits right of its parent.
+  repository by repository, its walk's entries in order (a subsection's
+  families where the subsection stands), each family depth-first, so a child
+  always sits right of its parent. The roster carries the walk as
+  `frontend.v1.RosterRepoSection.entries`; every reader walks it through one
+  helper per language (`rosterwalk`, `webapp/src/sidebar/entries.ts`,
+  `agent-repl-roster-section-rows`).
+- A subsection's point in the walk is its `slot` in the workspaces' place
+  space, never a workspace it is pinned to, so a row leaving moves no
+  subsection. Every arrangement write goes through `readWalk`/`writeWalk`,
+  which permute only the repository's own roots' places, and `shiftFrom`
+  bumps the slots past a freed place, so no landing crosses a subsection.
 - `SwapWorkspaces` exchanges two workspaces' places within one repository
   (`other_repository` otherwise); two roots also exchange their subsections,
   so each lands on the other's tab.

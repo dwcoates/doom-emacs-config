@@ -1,8 +1,8 @@
 import { create } from "@bufbuild/protobuf";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { RosterOpenRowsSchema, RosterRowSchema, type RosterRow } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { hiddenRow, numberTabs, openRow, withFamily } from "./roster-families.js";
+import { RosterOpenRowsSchema, RosterRepoSectionSchema, RosterRowSchema, type RosterRow } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { hiddenRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "./roster-families.js";
 
 function row(id: string, children: RosterRow[] = []): RosterRow {
   return withFamily(create(RosterRowSchema, { workspace: { workspace: { id, dir: `/w/${id}` } } }), children);
@@ -85,6 +85,52 @@ describe("numberTabs", () => {
   });
 });
 
+describe("rowEntries", () => {
+  it("wraps each row as an open row entry, in order, its family nested", () => {
+    // Act
+    const entries = rowEntries([row("a", [row("a1")]), row("b")]);
+
+    // Assert
+    expect(
+      entries.map((entry) =>
+        entry.entry.case === "row" ? [entry.entry.value.row?.workspace?.workspace?.id, entry.entry.value.children.length] : null,
+      ),
+    ).toEqual([
+      ["a", 1],
+      ["b", 0],
+    ]);
+  });
+});
+
+describe("sectionTabRegions", () => {
+  it("numbers a subsection's rows where it stands between two rows", () => {
+    // Arrange
+    const [a, b] = rowEntries([row("a"), row("b")]);
+    const sub = [openRow(row("x"))];
+    const section = create(RosterRepoSectionSchema, {
+      entries: [a, { entry: { case: "subsection", value: { openRows: { rows: sub } } } }, b],
+      fold: { case: "expanded", value: {} },
+    });
+
+    // Act
+    numberTabs([sectionTabRegions(section)]);
+
+    // Assert
+    const numberOf = (entry: (typeof section.entries)[number]): unknown =>
+      entry.entry.case === "row" && entry.entry.value.tab?.tab.case === "numbered" ? entry.entry.value.tab.tab.value.number : null;
+    const x = section.entries[1].entry.case === "subsection" ? section.entries[1].entry.value.openRows?.rows[0]?.tab?.tab : undefined;
+    expect([numberOf(section.entries[0]), x?.case === "numbered" ? x.value.number : null, numberOf(section.entries[2])]).toEqual([1, 2, 3]);
+  });
+
+  it("says a collapsed section's regions are folded", () => {
+    // Arrange
+    const section = create(RosterRepoSectionSchema, { entries: rowEntries([row("a")]), fold: { case: "collapsed", value: {} } });
+
+    // Act / Assert
+    expect(sectionTabRegions(section).folded).toBe(true);
+  });
+});
+
 describe("the test rosters that build families", () => {
   it.each(["sidebar/harness.ts", "integration/fixtures.ts"])("%s takes them from roster-families", (file) => {
     // A hand-rolled family or numbering would let the two kinds of test roster disagree.
@@ -92,5 +138,11 @@ describe("the test rosters that build families", () => {
     expect(source).toMatch(/from "\.\.\/roster-families\.js"/);
     expect(source).not.toMatch(/new WeakMap<RosterRow/);
     expect(source).not.toMatch(/RosterOpenRowTabSchema/);
+  });
+
+  it.each(["sidebar/harness.ts", "integration/fixtures.ts"])("%s numbers a section's tabs through sectionTabRegions", (file) => {
+    // A hand-rolled walk of a section's entries could number them out of drawn order.
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    expect(source).toMatch(/\.map\(sectionTabRegions\)/);
   });
 });

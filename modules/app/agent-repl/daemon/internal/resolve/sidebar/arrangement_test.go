@@ -1,9 +1,11 @@
 package sidebar_test
 
 import (
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -41,7 +43,7 @@ func arrangedRegistry() sidebar.Registry {
 // subsectionNamesOf is SECTION's subsections' labels and row names.
 func subsectionNamesOf(section *frontendv1.RosterRepoSection) []string {
 	var out []string
-	for _, sub := range section.GetSubsections() {
+	for _, sub := range rosterwalk.Subsections(section) {
 		out = append(out, sub.GetHeader().GetLabel().GetText()+"="+joinNames(rowNames(innerRows(sub.GetOpenRows().GetRows()))))
 	}
 	return out
@@ -58,7 +60,7 @@ func joinNames(names []string) string {
 	return out
 }
 
-func TestTheRepositorySectionDrawsItsUnsectionedRowsAboveItsSubsections(t *testing.T) {
+func TestTheRepositorySectionDrawsSubsectionsWithNoSlotBelowItsRows(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)
 
@@ -67,7 +69,7 @@ func TestTheRepositorySectionDrawsItsUnsectionedRowsAboveItsSubsections(t *testi
 
 	// Assert
 	section := latest(t, r).GetRepository().GetSections()[0]
-	if got := rowNames(innerRows(section.GetOpenRows().GetRows())); !equal(got, []string{"second", "third"}) {
+	if got := rowNames(innerRows(rosterwalk.UnsectionedRows(section))); !equal(got, []string{"second", "third"}) {
 		t.Fatalf("unsectioned rows = %v, want [second third]", got)
 	}
 	if got := subsectionNamesOf(section); !equal(got, []string{"empty=", "later=first"}) {
@@ -83,7 +85,7 @@ func TestASubsectionCarriesItsKeyAndCount(t *testing.T) {
 	r.SetRegistry(arrangedRegistry())
 
 	// Assert
-	later := latest(t, r).GetRepository().GetSections()[0].GetSubsections()[1]
+	later := rosterwalk.Subsections(latest(t, r).GetRepository().GetSections()[0])[1]
 	if got := later.GetKey().GetSubsectionId(); got != "sub-later" {
 		t.Fatalf("key = %q, want sub-later", got)
 	}
@@ -109,7 +111,7 @@ func TestTheRepositorySectionsCountsCoverItsSubsections(t *testing.T) {
 	}
 }
 
-func TestTheTabBarPutsASubsectionsWorkspacesAfterTheUnsectionedOnes(t *testing.T) {
+func TestTheTabBarPutsASubsectionWithNoSlotsWorkspacesAfterTheUnsectionedOnes(t *testing.T) {
 	// Arrange -- the owner's example: the first workspace, dragged into a
 	// subsection at the bottom of its repository, becomes the last tab.
 	reg := arrangedRegistry()
@@ -156,7 +158,7 @@ func TestASubsectionNestsAChildUnderItsParent(t *testing.T) {
 	r.SetRegistry(reg)
 
 	// Assert
-	rows := latest(t, r).GetRepository().GetSections()[0].GetSubsections()[0].GetOpenRows().GetRows()
+	rows := rosterwalk.Subsections(latest(t, r).GetRepository().GetSections()[0])[0].GetOpenRows().GetRows()
 	if len(rows) != 1 || rowNames(innerRows(rows[0].GetChildren())) == nil || rowNames(innerRows(rows[0].GetChildren()))[0] != "child" {
 		t.Fatalf("subsection rows = %v, want parent with child nested", rowNames(innerRows(rows)))
 	}
@@ -293,13 +295,57 @@ func TestArrangedListsEachRunsFamiliesInDrawnOrder(t *testing.T) {
 	got := sidebar.Arranged(reg, dlog.NewTestLogger())
 
 	// Assert
-	if len(got) != 1 || len(got[0].Workspaces) != 1 || got[0].Workspaces[0].Workspace.ID != "w-p" ||
-		len(got[0].Workspaces[0].Children) != 1 || got[0].Workspaces[0].Children[0].Workspace.ID != "w-k" {
-		t.Fatalf("unsectioned = %+v, want parent with its child", got)
+	if len(got) != 1 {
+		t.Fatalf("repositories = %+v, want one", got)
 	}
-	if len(got[0].Subsections) != 1 || got[0].Subsections[0].Subsection.ID != "sub-later" ||
-		len(got[0].Subsections[0].Workspaces) != 1 || got[0].Subsections[0].Workspaces[0].Workspace.ID != "w-m" {
-		t.Fatalf("subsections = %+v, want later holding moved", got[0].Subsections)
+	if shape, want := arrangedShape(got[0]), []string{"w-p(w-k)", "[sub-later: w-m]"}; !equal(shape, want) {
+		t.Fatalf("entries = %v, want %v", shape, want)
+	}
+}
+
+// arrangedShape spells an arranged repository's entries: a family as
+// root(child child), a subsection as [id: family family].
+func arrangedShape(repo sidebar.ArrangedRepository) []string {
+	var family func(ws sidebar.ArrangedWorkspace) string
+	family = func(ws sidebar.ArrangedWorkspace) string {
+		out := string(ws.Workspace.ID)
+		if len(ws.Children) == 0 {
+			return out
+		}
+		var kids []string
+		for _, child := range ws.Children {
+			kids = append(kids, family(child))
+		}
+		return out + "(" + strings.Join(kids, " ") + ")"
+	}
+	var out []string
+	for _, entry := range repo.Entries {
+		if entry.Subsection == nil {
+			out = append(out, family(entry.Workspace))
+			continue
+		}
+		parts := []string{string(entry.Subsection.Subsection.ID) + ":"}
+		for _, ws := range entry.Subsection.Workspaces {
+			parts = append(parts, family(ws))
+		}
+		out = append(out, "["+strings.Join(parts, " ")+"]")
+	}
+	return out
+}
+
+func TestArrangedListsASubsectionWhereItStands(t *testing.T) {
+	// Arrange -- w1, [later: w-m], w3: the subsection stands at w3's place.
+	later := subsection("sub-later", "later", 1)
+	later.Slot = slotAt(3)
+	reg := registry(placed(workspace("w1", "one"), 1), in(placed(workspace("w-m", "moved"), 2), later), placed(workspace("w3", "three"), 3))
+	reg.Subsections = []wsm.Subsection{later}
+
+	// Act
+	got := sidebar.Arranged(reg, dlog.NewTestLogger())
+
+	// Assert
+	if shape, want := arrangedShape(got[0]), []string{"w1", "[sub-later: w-m]", "w3"}; !equal(shape, want) {
+		t.Fatalf("entries = %v, want %v", shape, want)
 	}
 }
 
@@ -312,7 +358,7 @@ func TestArrangedListsAnEmptySubsection(t *testing.T) {
 	got := sidebar.Arranged(reg, dlog.NewTestLogger())
 
 	// Assert
-	if len(got) != 1 || len(got[0].Subsections) != 1 || len(got[0].Subsections[0].Workspaces) != 0 {
+	if len(got) != 1 || !equal(arrangedShape(got[0]), []string{"[sub-empty:]"}) {
 		t.Fatalf("got %+v, want one empty subsection", got)
 	}
 }
@@ -332,11 +378,94 @@ func TestArrangedLeavesOutClosedAndMergedWorkspacesAndHoistsAClosedParentsChildr
 	got := sidebar.Arranged(registry(parent, child, merged, hidden), dlog.NewTestLogger())
 
 	// Assert
-	var ids []string
-	for _, ws := range got[0].Workspaces {
-		ids = append(ids, string(ws.Workspace.ID))
-	}
-	if !equal(ids, []string{"w-k", "w-h"}) {
+	if ids := arrangedShape(got[0]); !equal(ids, []string{"w-k", "w-h"}) {
 		t.Fatalf("listed = %v, want the hoisted child and the hidden one", ids)
+	}
+}
+
+// slotAt is a subsection slot value.
+func slotAt(v int64) *int64 { return &v }
+
+// interleavedRegistry is the owner's example: a, [foo: d e], b, c -- the
+// subsection dragged onto b's line.
+func interleavedRegistry() sidebar.Registry {
+	foo := subsection("sub-foo", "foo", 1)
+	foo.Slot = slotAt(2)
+	reg := registry(
+		placed(workspace("w-a", "a"), 1),
+		placed(workspace("w-b", "b"), 2),
+		placed(workspace("w-c", "c"), 3),
+		in(placed(workspace("w-d", "d"), 4), foo),
+		in(placed(workspace("w-e", "e"), 5), foo),
+	)
+	reg.Subsections = []wsm.Subsection{foo}
+	return reg
+}
+
+func TestTheRepositorySectionDrawsASubsectionBetweenTwoRows(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(interleavedRegistry())
+
+	// Assert
+	section := latest(t, r).GetRepository().GetSections()[0]
+	if got, want := entryShape(section), []string{"a", "[foo: d e]", "b", "c"}; !equal(got, want) {
+		t.Fatalf("entries = %v, want %v", got, want)
+	}
+}
+
+func TestTheTabBarWalksASubsectionWhereItStands(t *testing.T) {
+	// Arrange
+	reg := interleavedRegistry()
+
+	// Act
+	got := sidebar.Tabs(reg, dlog.NewTestLogger())
+
+	// Assert
+	var ids []string
+	for _, tab := range got {
+		ids = append(ids, string(tab.Workspace.ID))
+	}
+	if !equal(ids, []string{"w-a", "w-d", "w-e", "w-b", "w-c"}) {
+		t.Fatalf("tabs = %v, want [w-a w-d w-e w-b w-c]", ids)
+	}
+}
+
+func TestTheSidebarNumbersASubsectionsRowsWhereItStands(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(interleavedRegistry())
+
+	// Assert
+	rows, numbers := openRowsAndNumbers(latest(t, r))
+	if want := []string{"w-a", "w-d", "w-e", "w-b", "w-c"}; !equal(rows, want) || !equal(numbers, []string{"1", "2", "3", "4", "5"}) {
+		t.Fatalf("open rows %v numbered %v, want %v numbered 1..5", rows, numbers, want)
+	}
+}
+
+func TestAClosedRowsHoistedChildrenStandWhereItStood(t *testing.T) {
+	// Arrange -- a closed root before the subsection keeps its point: its
+	// open child is drawn there, above the subsection.
+	foo := subsection("sub-foo", "foo", 1)
+	foo.Slot = slotAt(3)
+	parent := placed(workspace("w-p", "parent"), 1)
+	parent.Closed = true
+	child := placed(workspace("w-k", "child"), 4)
+	child.Parent = &parent.ID
+	reg := registry(parent, child, in(placed(workspace("w-d", "d"), 2), foo), placed(workspace("w-b", "b"), 3))
+	reg.Subsections = []wsm.Subsection{foo}
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	section := latest(t, r).GetRepository().GetSections()[0]
+	if got, want := entryShape(section), []string{"child", "[foo: d]", "b"}; !equal(got, want) {
+		t.Fatalf("entries = %v, want %v", got, want)
 	}
 }

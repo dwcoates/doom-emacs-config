@@ -66,11 +66,18 @@ func (v *verbs) DeleteSubsection(ctx context.Context, id ids.SubsectionID) error
 	})
 }
 
-// MoveSubsection moves subsection ID before BEFORE (nil: last).
-func (v *verbs) MoveSubsection(ctx context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
-	log := v.deps.Log.Global().With(dlog.Context{"subsection": string(id), "before": ids.Optional(before)})
+// MoveSubsection moves subsection ID among its repository's entries, to TO.
+// A workspace anchor must be this daemon's to serve, as every per-workspace
+// verb's is.
+func (v *verbs) MoveSubsection(ctx context.Context, id ids.SubsectionID, to wsm.Anchor) error {
+	if before, ok := to.(wsm.BeforeWorkspace); ok {
+		if _, _, err := v.owned(ctx, arrangeRPC, before.ID); err != nil {
+			return err
+		}
+	}
+	log := v.deps.Log.Global().With(dlog.Context{"subsection": string(id), "to": wsm.AnchorField(to)})
 	return v.arrange(ctx, log, opMoveSubsection, "move the subsection", func() error {
-		return v.deps.DB.MoveSubsection(ctx, id, before)
+		return v.deps.DB.MoveSubsection(ctx, id, to)
 	})
 }
 
@@ -83,22 +90,22 @@ func (v *verbs) MoveRepository(ctx context.Context, id ids.RepoID, before *ids.R
 }
 
 // PlaceWorkspaces puts root workspaces WS, in that order and with their
-// families, into subsection INTO (nil: none) as one block before root BEFORE
-// (nil: last). Every workspace named must be this daemon's to serve, as every
-// per-workspace verb's are.
-func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+// families, into subsection INTO (nil: none) as one block at AT. Every
+// workspace named must be this daemon's to serve, as every per-workspace
+// verb's are.
+func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
 	named := slices.Clone(ws)
-	if before != nil {
-		named = append(named, *before)
+	if before, ok := at.(wsm.BeforeWorkspace); ok {
+		named = append(named, before.ID)
 	}
 	for _, id := range named {
 		if _, _, err := v.owned(ctx, arrangeRPC, id); err != nil {
 			return err
 		}
 	}
-	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "before": ids.Optional(before)})
+	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": wsm.AnchorField(at)})
 	return v.arrange(ctx, log, opPlaceWorkspace, "place the workspaces", func() error {
-		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, before)
+		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, at)
 	})
 }
 

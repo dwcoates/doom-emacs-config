@@ -48,12 +48,28 @@ func mustSubsection(t *testing.T, s *store, repo RepoID, name string) Subsection
 	return sub
 }
 
-// mustPlace puts WS into INTO before BEFORE.
-func mustPlace(t *testing.T, s *store, ws WorkspaceID, into *SubsectionID, before *WorkspaceID) {
+// mustPlace puts WS into INTO at AT.
+func mustPlace(t *testing.T, s *store, ws WorkspaceID, into *SubsectionID, at Anchor) {
 	t.Helper()
-	if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws}, into, before); err != nil {
+	if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws}, into, at); err != nil {
 		t.Fatalf("PlaceWorkspace(%s): %v", ws, err)
 	}
+}
+
+// wsAnchor is the anchor before workspace BEFORE, the end when nil.
+func wsAnchor(before *WorkspaceID) Anchor {
+	if before == nil {
+		return AtEnd{}
+	}
+	return BeforeWorkspace{ID: *before}
+}
+
+// subAnchor is the anchor before subsection BEFORE, the end when nil.
+func subAnchor(before *SubsectionID) Anchor {
+	if before == nil {
+		return AtEnd{}
+	}
+	return BeforeSubsection{ID: *before}
 }
 
 // repositoryNames answers the repositories' names in their stored order.
@@ -303,18 +319,20 @@ func TestRenameSubsectionRefusals(t *testing.T) {
 	}
 }
 
-func TestDeleteSubsectionReturnsItsWorkspacesAfterTheUnsectionedOnes(t *testing.T) {
-	// Arrange -- a, b unsectioned; c, d moved into "later" in that order.
+func TestDeleteSubsectionPutsItsWorkspacesWhereItStood(t *testing.T) {
+	// Arrange -- a, later [c, d], b: the subsection between two unsectioned
+	// workspaces.
 	s, _ := testStore(t)
 	repoDir := arrangeRepo(t, "repo")
 	a := registerIn(t, s, repoDir, "a", nil)
-	registerIn(t, s, repoDir, "b", nil)
+	b := registerIn(t, s, repoDir, "b", nil)
 	c := registerIn(t, s, repoDir, "c", nil)
 	d := registerIn(t, s, repoDir, "d", nil)
 	later := mustSubsection(t, s, a.Repo, "later")
-	mustPlace(t, s, c.ID, &later.ID, nil)
-	mustPlace(t, s, d.ID, &later.ID, nil)
-	mustPlace(t, s, a.ID, nil, nil)
+	mustPlace(t, s, c.ID, &later.ID, AtEnd{})
+	mustPlace(t, s, d.ID, &later.ID, AtEnd{})
+	mustPlace(t, s, a.ID, nil, BeforeSubsection{ID: later.ID})
+	mustPlace(t, s, b.ID, nil, AtEnd{})
 
 	// Act
 	err := s.DeleteSubsection(context.Background(), later.ID)
@@ -323,8 +341,8 @@ func TestDeleteSubsectionReturnsItsWorkspacesAfterTheUnsectionedOnes(t *testing.
 	if err != nil {
 		t.Fatalf("DeleteSubsection: %v", err)
 	}
-	if got, want := orderedNames(t, s), []string{"b", "a", "c", "d"}; !slices.Equal(got, want) {
-		t.Fatalf("place order = %v, want %v", got, want)
+	if got, want := walkNames(t, s, a.Repo), []string{"a", "c", "d", "b"}; !slices.Equal(got, want) {
+		t.Fatalf("walk = %v, want %v", got, want)
 	}
 	for _, ws := range []WorkspaceID{c.ID, d.ID} {
 		if got := subsectionOf(t, s, ws); got != nil {
@@ -392,7 +410,7 @@ func TestMoveSubsection(t *testing.T) {
 			}
 
 			// Act
-			err := s.MoveSubsection(context.Background(), byName[tt.move], before)
+			err := s.MoveSubsection(context.Background(), byName[tt.move], subAnchor(before))
 
 			// Assert
 			if err != nil {
@@ -442,7 +460,7 @@ func TestMoveSubsectionRefusals(t *testing.T) {
 			other := mustSubsection(t, s, theirs.Repo, "other")
 
 			// Act
-			err := s.MoveSubsection(context.Background(), tt.id(own, other), tt.before(own, other))
+			err := s.MoveSubsection(context.Background(), tt.id(own, other), subAnchor(tt.before(own, other)))
 
 			// Assert
 			if !errors.Is(err, tt.want) {
@@ -462,7 +480,7 @@ func TestMoveSubsectionRefusesMovingBeforeItself(t *testing.T) {
 	sub := mustSubsection(t, s, ws.Repo, "a")
 
 	// Act
-	err := s.MoveSubsection(context.Background(), sub.ID, &sub.ID)
+	err := s.MoveSubsection(context.Background(), sub.ID, subAnchor(&sub.ID))
 
 	// Assert
 	if err == nil {
@@ -552,7 +570,7 @@ func TestPlaceWorkspaceIntoAnEmptySubsectionPutsItLast(t *testing.T) {
 	later := mustSubsection(t, s, first.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{first.ID}, &later.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{first.ID}, &later.ID, AtEnd{})
 
 	// Assert
 	if err != nil {
@@ -587,8 +605,8 @@ func TestPlaceWorkspaceBeforeAnAnchor(t *testing.T) {
 				byName[name] = registerIn(t, s, repoDir, name, nil).ID
 			}
 			// Registration lands second-to-last; line them up a, b, c.
-			mustPlace(t, s, byName["b"], nil, nil)
-			mustPlace(t, s, byName["c"], nil, nil)
+			mustPlace(t, s, byName["b"], nil, AtEnd{})
+			mustPlace(t, s, byName["c"], nil, AtEnd{})
 			var before *WorkspaceID
 			if tt.before != "" {
 				id := byName[tt.before]
@@ -596,7 +614,7 @@ func TestPlaceWorkspaceBeforeAnAnchor(t *testing.T) {
 			}
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName[tt.move]}, nil, before)
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName[tt.move]}, nil, wsAnchor(before))
 
 			// Assert
 			if err != nil {
@@ -620,7 +638,7 @@ func TestPlaceWorkspaceMovesItsNestedFamilyWithIt(t *testing.T) {
 	later := mustSubsection(t, s, parent.Repo, "later")
 
 	// Act
-	mustPlace(t, s, parent.ID, &later.ID, nil)
+	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
 
 	// Assert
 	for _, ws := range []WorkspaceID{parent.ID, child.ID, grandchild.ID} {
@@ -643,7 +661,7 @@ func TestPlaceWorkspaceRefusesAChild(t *testing.T) {
 	order := orderedNames(t, s)
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID}, &later.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID}, &later.ID, AtEnd{})
 
 	// Assert
 	if !errors.Is(err, ErrHasParent) {
@@ -685,8 +703,8 @@ func TestSetParentPutsTheWorkspaceWhereItsNewParentSits(t *testing.T) {
 	ws := registerInRepo(t, s, repoDir, "ws", true)
 	later := mustSubsection(t, s, parent.Repo, "later")
 	aside := mustSubsection(t, s, parent.Repo, "aside")
-	mustPlace(t, s, parent.ID, &later.ID, nil)
-	mustPlace(t, s, ws.ID, &aside.ID, nil)
+	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
+	mustPlace(t, s, ws.ID, &aside.ID, AtEnd{})
 
 	// Act
 	if _, err := s.SetParent(context.Background(), ws.ID, &parent.ID); err != nil {
@@ -706,7 +724,7 @@ func TestSetParentToNoneLeavesTheWorkspaceWhereItSat(t *testing.T) {
 	parent := registerInRepo(t, s, repoDir, "parent", true)
 	ws := registerInRepo(t, s, repoDir, "ws", true)
 	later := mustSubsection(t, s, parent.Repo, "later")
-	mustPlace(t, s, parent.ID, &later.ID, nil)
+	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
 	if _, err := s.SetParent(context.Background(), ws.ID, &parent.ID); err != nil {
 		t.Fatalf("SetParent: %v", err)
 	}
@@ -782,7 +800,7 @@ func TestPlaceWorkspaceRefusals(t *testing.T) {
 			order := orderedNames(t, s)
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{tt.ws(w)}, tt.into(w), tt.before(w))
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{tt.ws(w)}, tt.into(w), wsAnchor(tt.before(w)))
 
 			// Assert
 			if !errors.Is(err, tt.want) {
@@ -806,7 +824,7 @@ func TestPlaceWorkspaceRecordsARefusal(t *testing.T) {
 	foreign := mustSubsection(t, s, other.Repo, "foreign")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &foreign.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &foreign.ID, AtEnd{})
 
 	// Assert
 	if !errors.Is(err, ErrOtherRepository) {
@@ -844,7 +862,7 @@ func TestSwapPlacesRefusesTwoRepositoriesWritingNothing(t *testing.T) {
 	ws := registerIn(t, s, arrangeRepo(t, "repo"), "w", nil)
 	other := registerIn(t, s, arrangeRepo(t, "other"), "o", nil)
 	later := mustSubsection(t, s, ws.Repo, "later")
-	mustPlace(t, s, ws.ID, &later.ID, nil)
+	mustPlace(t, s, ws.ID, &later.ID, AtEnd{})
 	before := placesByName(t, s)
 
 	// Act
@@ -869,7 +887,7 @@ func TestSwapPlacesExchangesTheSubsectionsOfTwoRoots(t *testing.T) {
 	ws := registerIn(t, s, repoDir, "w", nil)
 	target := registerIn(t, s, repoDir, "target", nil)
 	later := mustSubsection(t, s, ws.Repo, "later")
-	mustPlace(t, s, target.ID, &later.ID, nil)
+	mustPlace(t, s, target.ID, &later.ID, AtEnd{})
 
 	// Act
 	err := s.SwapPlaces(context.Background(), ws.ID, target.ID)
@@ -892,7 +910,7 @@ func TestAChildLandsInItsParentsSubsection(t *testing.T) {
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
 	later := mustSubsection(t, s, parent.Repo, "later")
-	mustPlace(t, s, parent.ID, &later.ID, nil)
+	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
 
 	// Act
 	child := registerChild(t, s, repoDir, "child", parent.ID)
@@ -914,7 +932,7 @@ func TestListSubsectionsOrdersEachRepositorysByPlace(t *testing.T) {
 	mustSubsection(t, s, ws.Repo, "b")
 
 	// Act
-	if err := s.MoveSubsection(context.Background(), a.ID, nil); err != nil {
+	if err := s.MoveSubsection(context.Background(), a.ID, subAnchor(nil)); err != nil {
 		t.Fatalf("MoveSubsection: %v", err)
 	}
 
@@ -929,7 +947,7 @@ func TestReadArrangementReadsTheWorkspacesRepositoriesAndSubsections(t *testing.
 	s, _ := testStore(t)
 	ws := registerIn(t, s, arrangeRepo(t, "repo"), "w", nil)
 	later := mustSubsection(t, s, ws.Repo, "later")
-	mustPlace(t, s, ws.ID, &later.ID, nil)
+	mustPlace(t, s, ws.ID, &later.ID, AtEnd{})
 
 	// Act
 	got, err := s.ReadArrangement(context.Background())
@@ -1007,7 +1025,7 @@ func TestSwapPlacesOfTwoChildrenOfOneParentExchangesPlacesAlone(t *testing.T) {
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
 	later := mustSubsection(t, s, parent.Repo, "later")
-	mustPlace(t, s, parent.ID, &later.ID, nil)
+	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
 	a := registerChild(t, s, repoDir, "a", parent.ID)
 	b := registerChild(t, s, repoDir, "b", parent.ID)
 	before := placesByName(t, s)
@@ -1041,7 +1059,7 @@ func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
 	later := mustSubsection(t, s, a.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{c.ID, a.ID, b.ID}, &later.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{c.ID, a.ID, b.ID}, &later.ID, AtEnd{})
 
 	// Assert
 	if err != nil {
@@ -1071,7 +1089,7 @@ func TestPlaceWorkspacesIsAppliedWholeOrNotAtAll(t *testing.T) {
 	later := mustSubsection(t, s, root.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, child.ID}, &later.ID, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, child.ID}, &later.ID, AtEnd{})
 
 	// Assert
 	if !errors.Is(err, ErrHasParent) {
@@ -1089,7 +1107,7 @@ func TestPlaceWorkspacesRefusesWorkspacesOfTwoRepositories(t *testing.T) {
 	b := registerIn(t, s, arrangeRepo(t, "two"), "b", nil)
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, nil)
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, AtEnd{})
 
 	// Assert
 	if !errors.Is(err, ErrOtherRepository) {
@@ -1113,7 +1131,7 @@ func TestPlaceWorkspacesRefusesAMalformedPlacement(t *testing.T) {
 			s, log := testStore(t)
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), tt.ws, nil, tt.before)
+			err := s.PlaceWorkspaces(context.Background(), tt.ws, nil, wsAnchor(tt.before))
 
 			// Assert
 			if err == nil {
@@ -1150,7 +1168,7 @@ func TestMoveWorkspaceShiftsTheTabsBetween(t *testing.T) {
 			for _, name := range []string{"a", "b", "c", "d"} {
 				byName[name] = registerIn(t, s, repoDir, name, nil).ID
 			}
-			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName["a"], byName["b"], byName["c"], byName["d"]}, nil, nil); err != nil {
+			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName["a"], byName["b"], byName["c"], byName["d"]}, nil, AtEnd{}); err != nil {
 				t.Fatalf("PlaceWorkspaces: %v", err)
 			}
 
@@ -1176,8 +1194,8 @@ func TestMoveWorkspaceFromAnEarlierListJoinsTheTargetsSubsectionAfterIt(t *testi
 	target := registerIn(t, s, repoDir, "target", nil)
 	after := registerIn(t, s, repoDir, "after", nil)
 	later := mustSubsection(t, s, ws.Repo, "later")
-	mustPlace(t, s, target.ID, &later.ID, nil)
-	mustPlace(t, s, after.ID, &later.ID, nil)
+	mustPlace(t, s, target.ID, &later.ID, AtEnd{})
+	mustPlace(t, s, after.ID, &later.ID, AtEnd{})
 
 	// Act
 	err := s.MoveWorkspace(context.Background(), ws.ID, target.ID)
@@ -1201,7 +1219,7 @@ func TestMoveWorkspaceFromALaterListLeavesItsSubsectionBeforeTheTarget(t *testin
 	target := registerIn(t, s, repoDir, "target", nil)
 	ws := registerIn(t, s, repoDir, "w", nil)
 	later := mustSubsection(t, s, ws.Repo, "later")
-	mustPlace(t, s, ws.ID, &later.ID, nil)
+	mustPlace(t, s, ws.ID, &later.ID, AtEnd{})
 
 	// Act
 	err := s.MoveWorkspace(context.Background(), ws.ID, target.ID)
@@ -1225,7 +1243,7 @@ func TestMoveWorkspaceMovesAChildAmongItsSiblings(t *testing.T) {
 	repoDir := arrangeRepo(t, "repo")
 	parent := registerIn(t, s, repoDir, "parent", nil)
 	later := mustSubsection(t, s, parent.Repo, "later")
-	mustPlace(t, s, parent.ID, &later.ID, nil)
+	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
 	byName := map[string]WorkspaceID{}
 	for _, name := range []string{"one", "two", "three"} {
 		byName[name] = registerChild(t, s, repoDir, name, parent.ID).ID

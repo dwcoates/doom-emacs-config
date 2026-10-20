@@ -6,7 +6,7 @@ import {
   type ArrangeSidebarRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
-import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
+import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, DROP_TARGET_CLASS, REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
 import { queryAll } from "../../src/dom.js";
@@ -19,6 +19,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import {
   appContext,
+  drawnEntries,
   hiddenSection,
   primaryPointer,
   repoSection,
@@ -52,21 +53,47 @@ function mount(made: ReturnType<typeof roster>, sc: RailContext & SidebarContext
 const ROW_HEIGHT = 20;
 
 /**
- * Lay LIST out at TOP: each item a ROW_HEIGHT band in its current place, so
- * a slot that travels moves the bands under it, as a browser lays them out.
+ * Lay LIST out at TOP, as a browser would: each row a ROW_HEIGHT band, a
+ * subsection its header band over its rows, every item stacked in its
+ * CURRENT place. Each box is measured when asked, so a slot that travels
+ * (into a subsection, or out of one) moves and resizes the boxes around it.
  */
 function layOut(list: HTMLElement, top: number): void {
-  const box = (y: number, height: number): DOMRect => ({ top: y, bottom: y + height, height, left: 0, right: 200, width: 200, x: 0, y, toJSON: () => ({}) });
-  Object.defineProperty(list, "getBoundingClientRect", {
-    configurable: true,
-    value: () => box(top, Math.max(ROW_HEIGHT, list.children.length * ROW_HEIGHT)),
-  });
-  for (const item of [...list.children] as HTMLElement[]) {
-    Object.defineProperty(item, "getBoundingClientRect", {
+  const isItem = (el: Element): boolean =>
+    el.hasAttribute("data-roster-row") || el.classList.contains("sb-subsection") || el.hasAttribute("data-repository");
+  const height = (el: Element): number => {
+    if (el.classList.contains("sb-subsection")) {
+      const rows = el.querySelector(":scope > .rows");
+      return ROW_HEIGHT + (rows === null || el.classList.contains("folded") ? 0 : height(rows));
+    }
+    if (el.classList.contains("rows") || el === list) return [...el.children].filter(isItem).reduce((sum, item) => sum + height(item), 0);
+    return ROW_HEIGHT;
+  };
+  const topOf = (el: Element): number => {
+    if (el === list) return top;
+    const parent = el.parentElement;
+    if (parent === null) return top;
+    // A subsection's rows sit under its header; its header at its top.
+    if (parent.classList.contains("sb-subsection")) return topOf(parent) + (el.classList.contains("rows") ? ROW_HEIGHT : 0);
+    let y = topOf(parent);
+    for (const sibling of parent.children) {
+      if (sibling === el) break;
+      if (isItem(sibling)) y += height(sibling);
+    }
+    return y;
+  };
+  const box = (y: number, h: number): DOMRect => ({ top: y, bottom: y + h, height: h, left: 0, right: 200, width: 200, x: 0, y, toJSON: () => ({}) });
+  for (const el of [list, ...queryAll<HTMLElement>(list, ".rows, [data-roster-row], [data-repository], .sb-subsection, .sb-subsection-head")]) {
+    Object.defineProperty(el, "getBoundingClientRect", {
       configurable: true,
-      value: () => box(top + [...list.children].indexOf(item) * ROW_HEIGHT, ROW_HEIGHT),
+      value: () => box(topOf(el), el === list ? Math.max(ROW_HEIGHT, height(el)) : el.classList.contains("sb-subsection-head") ? ROW_HEIGHT : height(el)),
     });
   }
+}
+
+/** The repository section's list: its rows and its subsections, in drawn order. */
+function sectionList(pane: HTMLElement, repo = "repo-1"): HTMLElement {
+  return pane.querySelector(`[data-repository='${repo}'] > .rows`) as HTMLElement;
 }
 
 const pointer = primaryPointer;
@@ -95,23 +122,42 @@ afterEach(() => {
 });
 
 describe("a repository's subsections", () => {
-  it("draw no box for a repository with none", () => {
-    const pane = mount(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
-    expect(pane.querySelector(".sb-subsections")).toBeNull();
+  it("draw none for a repository with none", () => {
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" })] })] }), sidebarContext());
+    expect(drawnEntries(sectionList(pane))).toEqual(["a"]);
   });
 
-  it("draw below the section's own rows, each with its name, count and rows", () => {
+  it("draw in the section's list, each with its name, count and rows", () => {
     const pane = mount(
       roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1", label: "later", rows: [row({ id: "ws-1" })] }] })] }),
       sidebarContext(),
     );
-    const sub = pane.querySelector(".repo-section > .sb-subsections > .sb-subsection") as HTMLElement;
+    const sub = pane.querySelector(".repo-section > .rows > .sb-subsection") as HTMLElement;
     expect([
       sub.getAttribute("data-subsection"),
       sub.querySelector(".sb-subsection-label")?.textContent,
       sub.querySelector(".sb-count")?.textContent,
       sub.querySelector(":scope > .rows > [data-roster-row='ws-1']") !== null,
     ]).toEqual(["sub-1", "later", "(1)", true]);
+  });
+
+  it("draw where the wire stands them, between two rows", () => {
+    const pane = mount(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "a" }), row({ id: "b" }), row({ id: "c" })],
+            subsections: [{ id: "foo", rows: [row({ id: "d" }), row({ id: "e" })], before: "b" }],
+          }),
+        ],
+      }),
+      sidebarContext(),
+    );
+    expect([
+      drawnEntries(sectionList(pane)),
+      drawnEntries(pane.querySelector("[data-subsection='foo'] > .rows") as HTMLElement),
+    ]).toEqual([["a", "[foo]", "b", "c"], ["d", "e"]]);
   });
 
   it("draw an empty one as its header alone, marked empty, with no drop hint", () => {
@@ -258,15 +304,123 @@ describe("dragging a workspace row", () => {
       roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })], subsections: [{ id: "sub-1" }] })] }),
       sc,
     );
-    layOut(pane.querySelector(".repo-section > .rows") as HTMLElement, 0);
-    layOut(pane.querySelector(".sb-subsection > .rows") as HTMLElement, 100);
+    layOut(sectionList(pane), 0);
 
-    await drag(rowLine(pane, "a"), 10, 110);
+    await drag(rowLine(pane, "a"), 10, 50);
 
     const change = sent[0]?.change;
     expect(
       change?.case === "placeWorkspace" ? [change.value.workspace?.id, change.value.into.case === "subsection" ? change.value.into.value.id : null, change.value.at.case] : null,
     ).toEqual(["a", "sub-1", "end"]);
+  });
+
+  it("places it just above a subsection when dropped between the rows and the subsection", async () => {
+    // Arrange -- a, b, [foo: x]: foo's header at 40, x at 60.
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })], subsections: [{ id: "foo", rows: [row({ id: "x" })] }] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(rowLine(pane, "a"), 10, 35);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect(
+      change?.case === "placeWorkspace"
+        ? [change.value.into.case, change.value.at.case, change.value.at.case === "beforeSubsection" ? change.value.at.value.id : null]
+        : null,
+    ).toEqual(["noSubsection", "beforeSubsection", "foo"]);
+  });
+
+  it("places it into a subsection over its rows, before the row it was dropped above", async () => {
+    // Arrange -- a, [foo: x y]: x at 40, y at 60.
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" })], subsections: [{ id: "foo", rows: [row({ id: "x" }), row({ id: "y" })] }] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(rowLine(pane, "a"), 10, 55);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect(
+      change?.case === "placeWorkspace"
+        ? [change.value.into.case === "subsection" ? change.value.into.value.id : null, change.value.at.case === "before" ? change.value.at.value.id : null]
+        : null,
+    ).toEqual(["foo", "y"]);
+  });
+
+  it("places a subsection's row out of it, at the bottom of the repository, when dropped below everything", async () => {
+    // Arrange -- a, [foo: x].
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" })], subsections: [{ id: "foo", rows: [row({ id: "x" })] }] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act -- far below the section, where only its own list is nearest.
+    await drag(rowLine(pane, "x"), 45, 200);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect(change?.case === "placeWorkspace" ? [change.value.workspace?.id, change.value.into.case, change.value.at.case] : null).toEqual([
+      "x",
+      "noSubsection",
+      "end",
+    ]);
+  });
+
+  it("lights the subsection it is over, and only while it is", () => {
+    // Arrange -- a, b, [foo: x]: foo spans 40 to 80.
+    const { sc } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })], subsections: [{ id: "foo", rows: [row({ id: "x" })] }] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+    const foo = pane.querySelector("[data-subsection='foo']") as HTMLElement;
+    const lit = (): boolean => foo.classList.contains(DROP_TARGET_CLASS);
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "a"), 10);
+    pointer("pointermove", window, 15);
+    const overTheRows = lit();
+    pointer("pointermove", window, 45);
+    const overTheHeader = lit();
+    pointer("pointermove", window, 5);
+    const backOverTheRows = lit();
+    pointer("pointermove", window, 70);
+    const overItsRows = lit();
+    pointer("pointerup", window, 70);
+
+    // Assert
+    expect([overTheRows, overTheHeader, backOverTheRows, overItsRows, lit()]).toEqual([false, true, false, true, false]);
+  });
+
+  it("indents the slot under the subsection it would join", () => {
+    // Arrange
+    const { sc } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" })], subsections: [{ id: "foo", rows: [row({ id: "x" })] }] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "a"), 10);
+    pointer("pointermove", window, 50);
+    const parent = pane.querySelector("[data-roster-row='a']")?.parentElement;
+    pointer("pointerup", window, 50);
+
+    // Assert -- the slot stands in foo's rows, which the stylesheet indents.
+    expect(parent?.matches("[data-subsection='foo'] > .rows")).toBe(true);
   });
 
   it("sends nothing when dropped where it started, and lets the hold go", async () => {
@@ -376,7 +530,7 @@ describe("dragging a subsection or a repository", () => {
   it("moves a subsection before the one it was dropped above", async () => {
     const { sc, sent } = arranged();
     const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-a" }, { id: "sub-b" }] })] }), sc);
-    layOut(pane.querySelector(".sb-subsections") as HTMLElement, 0);
+    layOut(sectionList(pane), 0);
 
     await drag(pane.querySelector("[data-subsection='sub-b'] > .sb-subsection-head") as Element, 30, 2);
 
@@ -384,6 +538,55 @@ describe("dragging a subsection or a repository", () => {
     expect(
       change?.case === "moveSubsection" ? [change.value.subsection?.id, change.value.to.case === "before" ? change.value.to.value.id : null] : null,
     ).toEqual(["sub-b", "sub-a"]);
+  });
+
+  it("stands a subsection before the row whose line it was dropped on", async () => {
+    // Arrange -- the owner's example: a, b, c, then [foo: d e].
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "a" }), row({ id: "b" }), row({ id: "c" })],
+            subsections: [{ id: "foo", rows: [row({ id: "d" }), row({ id: "e" })] }],
+          }),
+        ],
+      }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act -- foo's header (at 60) onto b's line (20 to 40), above its middle.
+    await drag(pane.querySelector("[data-subsection='foo'] > .sb-subsection-head") as Element, 65, 25);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect([
+      change?.case === "moveSubsection"
+        ? [change.value.subsection?.id, change.value.to.case, change.value.to.case === "beforeWorkspace" ? change.value.to.value.id : null]
+        : null,
+      drawnEntries(sectionList(pane)),
+    ]).toEqual([["foo", "beforeWorkspace", "b"], ["a", "[foo]", "b", "c"]]);
+  });
+
+  it("moves a subsection to the bottom when dropped below every row", async () => {
+    // Arrange -- a, [foo: d], b.
+    const { sc, sent } = arranged();
+    const pane = mount(
+      roster({
+        repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })], subsections: [{ id: "foo", rows: [row({ id: "d" })], before: "b" }] })],
+      }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(pane.querySelector("[data-subsection='foo'] > .sb-subsection-head") as Element, 25, 79);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect(change?.case === "moveSubsection" ? [change.value.subsection?.id, change.value.to.case] : null).toEqual(["foo", "end"]);
   });
 
   it("moves a repository after every other when dropped below them", async () => {
@@ -559,7 +762,8 @@ describe("a drag stays inside its repository", () => {
       }),
       sc,
     );
-    const [own, other] = queryAll<HTMLElement>(pane, ".sb-subsections");
+    const own = sectionList(pane, "repo-1");
+    const other = sectionList(pane, "repo-2");
     layOut(own, 0);
     layOut(other, 100);
 
@@ -649,7 +853,9 @@ describe("a subsection's fold", () => {
   it("refuses a subsection with no fold as a malformed view", () => {
     // Arrange
     const made = subsectionOf(false);
-    made.repository!.sections[0].subsections[0].fold = { case: undefined };
+    const entry = made.repository!.sections[0].entries.find((e) => e.entry.case === "subsection")!.entry;
+    if (entry.case !== "subsection") throw new Error("the fixture has its subsection");
+    entry.value.fold = { case: undefined };
 
     // Act / Assert
     expect(() => drawWorkspaceRoster(made, sidebarContext())).toThrow(MalformedView);

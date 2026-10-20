@@ -29,16 +29,30 @@ message GetSidebarArrangementResponse {
   repeated ArrangedRepository repositories = 1;
 }
 
-// One repository: its unsectioned families, then each subsection's.
+// One repository: its families in no subsection and its subsections, in
+// drawn order.
 message ArrangedRepository {
   workspace.v1.RepositoryRef repository = 1;
   // The repository's drawn name.
   string name = 2;
-  // The families in no subsection, root by root in drawn order.
-  repeated ArrangedWorkspace workspaces = 3;
-  // The repository's subsections, in their stored order, empty ones
-  // included.
-  repeated ArrangedSubsection subsections = 4;
+  // `workspaces` (field 3) and `subsections` (field 4) are RETIRED and
+  // reserved: two lists could only say "the families, then the
+  // subsections". The repository's body is `entries`.
+  reserved 3, 4;
+  reserved "workspaces", "subsections";
+  // The repository's families in no subsection and its subsections, empty
+  // ones included, INTERLEAVED in drawn order.
+  repeated ArrangedEntry entries = 5;
+}
+
+// One entry of a repository's arrangement: a family in no subsection, or a
+// subsection.
+message ArrangedEntry {
+  // THE ARM IS WHAT STANDS AT THIS POINT OF THE REPOSITORY. Never unset.
+  oneof entry {
+    ArrangedWorkspace workspace = 1;
+    ArrangedSubsection subsection = 2;
+  }
 }
 
 // One subsection: its name and its families.

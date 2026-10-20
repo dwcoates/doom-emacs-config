@@ -12,6 +12,14 @@
  * region the item scrolls in (`DragSpec.scroller`) the region follows the
  * pointer.
  *
+ * LISTS NEST. A list may stand inside another's items (a subsection's rows
+ * inside its repository's list), so each list answers the ZONE it claims
+ * (`DragSpec.zoneOf`: a subsection's rows claim the whole subsection, its
+ * header included), and the pointer lands in the innermost zone it is over.
+ * A list may name a TARGET (`DragSpec.targetOf`) that wears
+ * `DROP_TARGET_CLASS` while the slot stands in it, so a row dragged over a
+ * subsection lights the subsection it would join.
+ *
  * THE PAGE'S DRAWING IS HELD FROM THE MOMENT THE ITEM LIFTS
  * (`arrange.ts`'s `ArrangeHold`), because a roster push redraws a section whose
  * wire changed, and the slot with it. A drop that changes nothing, or a
@@ -52,6 +60,9 @@ export const DRAG_GHOST_CLASS = "sb-drag-ghost";
 /** The class the page's root wears while a drag is in progress. */
 export const DRAGGING_CLASS = "sb-dragging";
 
+/** The class a list's target wears while the slot stands in that list; see the file comment. */
+export const DROP_TARGET_CLASS = "sb-drop-target";
+
 /** The attribute a drawn box wears once a drag has rearranged it; see the file comment. */
 export const REARRANGED_ATTRIBUTE = "data-rearranged";
 
@@ -69,6 +80,10 @@ export interface DragSpec {
   lists: () => HTMLElement[];
   /** LIST's items, in order: the elements the slot moves among. */
   itemsOf: (list: HTMLElement) => HTMLElement[];
+  /** The box LIST claims the pointer over; LIST itself when unsaid. */
+  zoneOf?: (list: HTMLElement) => HTMLElement;
+  /** What lights up while the slot stands in LIST; nothing when unsaid or null. */
+  targetOf?: (list: HTMLElement) => HTMLElement | null;
   /**
    * The item was dropped into LIST just before BEFORE (null: after every
    * item there), somewhere other than where it started.
@@ -204,8 +219,19 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
     nextFrame(scroll);
   };
 
+  const zoneOf = spec.zoneOf ?? ((list: HTMLElement) => list);
+  let lit: HTMLElement | null = null;
+  const light = (list: HTMLElement): void => {
+    const target = spec.targetOf?.(list) ?? null;
+    if (target === lit) return;
+    lit?.classList.remove(DROP_TARGET_CLASS);
+    target?.classList.add(DROP_TARGET_CLASS);
+    lit = target;
+  };
+
   const place = (y: number): void => {
-    const list = nearestList(lists, y);
+    const list = listAt(lists, y, zoneOf);
+    light(list);
     const items = spec.itemsOf(list).filter((other) => other !== item);
     const before = items.find((other) => {
       const box = other.getBoundingClientRect();
@@ -218,6 +244,8 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
 
   const finish = (): void => {
     lifting = false;
+    lit?.classList.remove(DROP_TARGET_CLASS);
+    lit = null;
     ghost.remove();
     item.classList.remove(DRAG_SLOT_CLASS);
     arrange.layer.ownerDocument.documentElement.classList.remove(DRAGGING_CLASS);
@@ -263,16 +291,24 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
   };
 }
 
-/** The list whose box holds Y, or else the one nearest it. */
-function nearestList(lists: HTMLElement[], y: number): HTMLElement {
+/**
+ * The list the pointer at Y lands in: of the lists whose zone holds Y, the
+ * innermost (the smallest zone), so a subsection inside its repository's
+ * list wins over it; else the one whose zone is nearest, the earlier list on
+ * a tie.
+ */
+export function listAt(lists: HTMLElement[], y: number, zoneOf: (list: HTMLElement) => HTMLElement): HTMLElement {
   let best = lists[0];
   let bestDistance = Infinity;
+  let bestHeight = Infinity;
   for (const list of lists) {
-    const box = list.getBoundingClientRect();
+    const box = zoneOf(list).getBoundingClientRect();
     const distance = y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0;
-    if (distance < bestDistance) {
+    const inner = distance === 0 && bestDistance === 0 && box.height < bestHeight;
+    if (distance < bestDistance || inner) {
       best = list;
       bestDistance = distance;
+      bestHeight = box.height;
     }
   }
   if (best === undefined) throw new Error("invariant: a drag has at least its own list to land in");

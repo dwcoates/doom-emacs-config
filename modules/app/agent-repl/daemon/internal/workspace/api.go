@@ -425,16 +425,18 @@ type Verbs interface {
 	// DeleteSubsection removes one subsection, its workspaces returning to
 	// none, and republishes the roster.
 	DeleteSubsection(ctx context.Context, id ids.SubsectionID) error
-	// MoveSubsection moves one subsection before another of its
-	// repository's (nil: last) and republishes the roster.
-	MoveSubsection(ctx context.Context, id ids.SubsectionID, before *ids.SubsectionID) error
+	// MoveSubsection moves one subsection among its repository's entries
+	// (before a subsection, before a root in no subsection, or last) and
+	// republishes the roster.
+	MoveSubsection(ctx context.Context, id ids.SubsectionID, to wsm.Anchor) error
 	// MoveRepository moves one repository before another (nil: last) and
 	// republishes the roster.
 	MoveRepository(ctx context.Context, id ids.RepoID, before *ids.RepoID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
-	// subsection of their repository (nil: none) as one block before a root
-	// there (nil: last), and republishes the roster.
-	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error
+	// subsection of their repository (nil: none) as one block at an anchor
+	// (before a root there, before a subsection when into none, or last), and
+	// republishes the roster.
+	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error
 	// SidebarArrangement reads the repository grouping's arrangement, for an
 	// agent organizing it (GetSidebarArrangement).
 	SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error)

@@ -128,15 +128,15 @@ type DB interface {
 	// DeleteSubsection removes one subsection, its workspaces returning to
 	// none.
 	DeleteSubsection(ctx context.Context, id SubsectionID) error
-	// MoveSubsection moves one subsection before another of its repository's
-	// (nil: last).
-	MoveSubsection(ctx context.Context, id SubsectionID, before *SubsectionID) error
+	// MoveSubsection moves one subsection among its repository's entries:
+	// before another subsection, before a root in no subsection, or last.
+	MoveSubsection(ctx context.Context, id SubsectionID, to Anchor) error
 	// MoveRepository moves one repository before another (nil: last).
 	MoveRepository(ctx context.Context, id RepoID, before *RepoID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
-	// subsection of their repository (nil: none) as one block before a root
-	// there (nil: last).
-	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, before *WorkspaceID) error
+	// subsection of their repository (nil: none) as one block at an anchor
+	// there: before a root, before a subsection (into none only), or last.
+	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

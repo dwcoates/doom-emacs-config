@@ -615,7 +615,7 @@ band's, in one group."
           (list :sections (agent-repl-test--number-tabs
                            (list (list :key (list :repository (list :id "r" :dir "/tmp"))
                                        :header (list :label (list :text "repo"))
-                                       :open-rows (agent-repl-test--open-rows open)))))
+                                       :entries (agent-repl-test--row-entries open)))))
           :hidden (list :header (list :label (list :text "Hidden"))
                         :hidden-rows (agent-repl-test--hidden-rows hidden))
           :recently-merged (list :header (list :label (list :text "m"))

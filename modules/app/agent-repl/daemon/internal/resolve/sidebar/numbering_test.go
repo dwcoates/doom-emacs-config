@@ -174,7 +174,7 @@ func TestASubsectionStatesItsOwnFold(t *testing.T) {
 			// Assert.
 			var got []string
 			for _, section := range latest(t, r).GetRepository().GetSections() {
-				for _, sub := range section.GetSubsections() {
+				for _, sub := range rosterwalk.Subsections(section) {
 					switch {
 					case sub.GetExpanded() != nil:
 						got = append(got, "expanded")

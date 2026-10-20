@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { swallowTheNextClick } from "../../src/sidebar/drag.js";
 import { codeOf } from "../source-text.js";
-import { primaryPointer, settleOwedDragClick } from "./harness.js";
+import { drawnEntries, primaryPointer, settleOwedDragClick } from "./harness.js";
 
 describe("primaryPointer", () => {
   it("dispatches a bubbling primary left-button pointer event at the height asked", () => {
@@ -65,5 +65,35 @@ describe("settleOwedDragClick", () => {
         return /"pointermove"/.test(code) && !code.includes("settleOwedDragClick");
       });
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("drawnEntries", () => {
+  it("spells a section list's children, a row by its id and a subsection as [id]", () => {
+    // Arrange
+    const list = document.createElement("div");
+    const rowEl = document.createElement("div");
+    rowEl.setAttribute("data-roster-row", "a");
+    const sub = document.createElement("div");
+    sub.className = "sb-subsection";
+    sub.setAttribute("data-subsection", "foo");
+    list.append(rowEl, sub);
+
+    // Act / Assert
+    expect(drawnEntries(list)).toEqual(["a", "[foo]"]);
+  });
+
+  it("is the one spelling the sidebar tests read a section's list by", () => {
+    // Arrange
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- see "is the one primary pointer the sidebar tests build".
+    const sources = import.meta.glob("./*.test.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+
+    // Act
+    const handRolled = Object.entries(sources)
+      .filter(([, source]) => /getAttribute\("data-roster-row"\) \?\? `\[\$\{el\.getAttribute\("data-subsection"\)/.test(source))
+      .map(([file]) => file);
+
+    // Assert
+    expect(handRolled).toEqual([]);
   });
 });

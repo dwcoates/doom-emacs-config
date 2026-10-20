@@ -15,24 +15,26 @@ import (
 // lists the open workspaces in it:
 //
 //   - repository by repository, in the repositories' stored place;
-//   - inside one, its workspaces in NO subsection first, then each subsection
-//     in its stored place;
-//   - inside each of those, roster order (sortWorkspaces).
+//   - inside one, its WALK (wsm.Walk): its families in no subsection and its
+//     subsections, interleaved as arranged;
+//   - inside each run, roster order (sortWorkspaces).
 //
 // So every workspace of an earlier repository precedes every one of a later
-// repository on the tab bar, and a workspace dragged into an empty subsection
-// at the bottom of its repository becomes that repository's last tab. Both
-// surfaces read the order from arrange, so they cannot disagree about it.
+// repository on the tab bar, and a workspace dragged into a subsection takes
+// its tab where the subsection stands. Both surfaces read the order from
+// arrange, so they cannot disagree about it.
 
 // repoArrangement is one repository's place in the arrangement: the
-// repository and its buckets, unsectioned first.
+// repository and its buckets, in its walk's order.
 type repoArrangement struct {
 	repo    wsm.Repository
 	buckets []bucket
 }
 
-// bucket is one run of a repository's workspaces: those in no subsection
-// (subsection nil) or those in one subsection, in roster order.
+// bucket is one run of a repository's workspaces: consecutive families in no
+// subsection (subsection nil), or one subsection's workspaces, in roster
+// order. Two unsectioned runs are never adjacent: a run ends only where a
+// subsection stands.
 type bucket struct {
 	subsection *wsm.Subsection
 	workspaces []wsm.Workspace
@@ -59,14 +61,40 @@ func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[i
 	}
 	var out []repoArrangement
 	for _, repo := range sortRepositories(reg.Repositories) {
-		placed := repoArrangement{repo: repo, buckets: []bucket{{workspaces: sortWorkspaces(unsectioned[repo.ID])}}}
+		placed := repoArrangement{repo: repo, buckets: walkBuckets(unsectioned[repo.ID], subsections[repo.ID], bySubsection)}
 		delete(unsectioned, repo.ID)
-		for _, sub := range subsections[repo.ID] {
-			placed.buckets = append(placed.buckets, bucket{subsection: &sub, workspaces: sortWorkspaces(bySubsection[sub.ID])})
-		}
 		out = append(out, placed)
 	}
 	return out, unsectioned
+}
+
+// walkBuckets files one repository's UNSECTIONED workspaces and its SUBS'
+// workspaces (BY_SUBSECTION) into its walk: each family of the unsectioned
+// ones stands where its top-level row's place puts it among the subsections
+// (wsm.Walk), consecutive families sharing one run.
+func walkBuckets(unsectioned []wsm.Workspace, subs []wsm.Subsection, bySubsection map[ids.SubsectionID][]wsm.Workspace) []bucket {
+	root := familyRoots(unsectioned)
+	family := map[ids.WorkspaceID][]wsm.Workspace{}
+	var tops []wsm.Workspace
+	for _, ws := range unsectioned {
+		family[root[ws.ID]] = append(family[root[ws.ID]], ws)
+		if root[ws.ID] == ws.ID {
+			tops = append(tops, ws)
+		}
+	}
+	var out []bucket
+	for _, entry := range wsm.Walk(tops, func(ws wsm.Workspace) int64 { return ws.Place }, subs) {
+		if entry.Subsection != nil {
+			out = append(out, bucket{subsection: entry.Subsection, workspaces: sortWorkspaces(bySubsection[entry.Subsection.ID])})
+			continue
+		}
+		if len(out) == 0 || out[len(out)-1].subsection != nil {
+			out = append(out, bucket{})
+		}
+		last := &out[len(out)-1]
+		last.workspaces = sortWorkspaces(append(last.workspaces, family[entry.Root.ID]...))
+	}
+	return out
 }
 
 // sortRepositories is THE repository order every per-repository list in the

@@ -11,6 +11,7 @@ import {
   type KeyedRows,
 } from "../../src/sidebar/keyed-rows.js";
 import { appContext, fakeTicker, NOW, openRow, row, sidebarContext } from "./harness.js";
+import { pathedOpenRows } from "../../src/sidebar/entries.js";
 
 const rows = (...r: RosterRow[]) => create(RosterOpenRowsSchema, { rows: r.map(openRow) });
 const ticking = (id: string, current = false): RosterRow =>
@@ -118,8 +119,8 @@ describe("keyed regions", () => {
     // Act
     const patched = patchKeyedRegions(
       [
-        { kept: own, rows: rows(row({ id: "a" })), path: "own" },
-        { kept: sub, rows: rows(row({ id: "b", current: true })), path: "sub" },
+        { kept: own, rows: pathedOpenRows(rows(row({ id: "a" })), "own") },
+        { kept: sub, rows: pathedOpenRows(rows(row({ id: "b", current: true })), "sub") },
       ],
       rail,
       "grouping",
@@ -146,8 +147,8 @@ describe("keyed regions", () => {
     // Act
     const patched = patchKeyedRegions(
       [
-        { kept: own, rows: rows(row({ id: "a" })), path: "own" },
-        { kept: sub, rows: rows(), path: "sub" },
+        { kept: own, rows: pathedOpenRows(rows(row({ id: "a" })), "own") },
+        { kept: sub, rows: pathedOpenRows(rows(), "sub") },
       ],
       rail,
       "grouping",

@@ -18,6 +18,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -429,9 +430,9 @@ func TestForwardTakesTransportPathWhenRosterStreamErrors(t *testing.T) {
 func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
 	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			OpenRows: &frontendv1.RosterOpenRows{Rows: []*frontendv1.RosterOpenRow{{Row: &frontendv1.RosterRow{
+			Entries: rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: &frontendv1.RosterRow{
 				Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
-			}}}},
+			}}}),
 		}}},
 	}}}
 }
@@ -951,7 +952,7 @@ func rosterResponseFor(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorks
 	}
 	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			OpenRows: &frontendv1.RosterOpenRows{Rows: rows},
+			Entries: rosterwalk.RowEntries(rows),
 		}}},
 	}}}
 }

@@ -913,13 +913,12 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-roster-repo-section
                   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-                          "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}"))
+                          "\"expanded\":{\"collapsible\":{}}}"))
                  '(:key (:repository (:id "r1" :dir "/src"))
                    :header (:label (:text "doom") :count (:workspaces 2))
-                   :open-rows (:rows nil)
                    :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil)))
                    :divergence (:state (:arm :pending :value nil))
-                   :subsections nil))))
+                   :entries nil))))
 
 (defconst agent-repl-test-wire-roster--subsection
   (concat "{\"key\":{\"subsectionId\":\"s1\"},"
@@ -927,20 +926,65 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}")
   "One empty subsection named later, expanded.")
 
-(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-its-subsections ()
-  "A repo section's subsections decode in order, each with key, header and rows."
-  (should (equal (plist-get
+(defun agent-repl-test-wire-roster--section-with-entries (&rest entries)
+  "Return a repository section JSON whose body is ENTRIES, each a JSON object."
+  (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
+          "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":0}},"
+          "\"expanded\":{\"collapsible\":{}},"
+          (format "\"entries\":[%s]}" (mapconcat #'identity entries ","))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-its-entries-in-order ()
+  "A section's entries decode in drawn order, each on its own arm."
+  (let ((entries (plist-get
                   (agent-repl-test-wire-roster--decode
                    #'agent-repl-wire-decode-roster-repo-section
-                   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
-                           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":0}},"
-                           "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}},"
-                           (format "\"subsections\":[%s]}" agent-repl-test-wire-roster--subsection)))
-                  :subsections)
-                 '((:key (:subsection-id "s1")
-                    :header (:label (:text "later") :count (:workspaces 0))
-                    :open-rows (:rows nil)
-                    :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil))))))))
+                   (agent-repl-test-wire-roster--section-with-entries
+                    (format "{\"row\":%s}" (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":1}"))
+                    (format "{\"subsection\":%s}" agent-repl-test-wire-roster--subsection)
+                    (format "{\"row\":%s}" (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":2}"))))
+                  :entries)))
+    (should (equal (mapcar (lambda (entry) (plist-get (plist-get entry :entry) :arm)) entries)
+                   '(:row :subsection :row)))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-a-subsection-entry ()
+  "A subsection entry carries the subsection's key, header, rows and fold."
+  (should (equal (plist-get
+                  (car (plist-get
+                        (agent-repl-test-wire-roster--decode
+                         #'agent-repl-wire-decode-roster-repo-section
+                         (agent-repl-test-wire-roster--section-with-entries
+                          (format "{\"subsection\":%s}" agent-repl-test-wire-roster--subsection)))
+                        :entries))
+                  :entry)
+                 '(:arm :subsection
+                   :value (:key (:subsection-id "s1")
+                           :header (:label (:text "later") :count (:workspaces 0))
+                           :open-rows (:rows nil)
+                           :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-repo-entry-with-no-arm-is-a-breach ()
+  "Every entry stands for something; an unset arm is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-entry "{}")
+                 '("RosterRepoEntry" entry "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-repo-entry-with-two-arms-is-a-breach ()
+  "An entry is a row or a subsection, never both."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-entry
+                  (format "{\"row\":%s,\"subsection\":%s}"
+                          (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":1}")
+                          agent-repl-test-wire-roster--subsection))
+                 '("RosterRepoEntry" entry "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-repo-section-with-retired-open-rows-is-a-breach ()
+  "The retired `openRows' body is refused as an unknown field, never read."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-section
+                  (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
+                          "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":0}},"
+                          "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}"))
+                 '("RosterRepoSection" openRows "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-subsection-decodes-a-collapsed-fold ()
   "A collapsed subsection decodes its fold arm as `:collapsed'."
@@ -977,7 +1021,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                            #'agent-repl-wire-decode-roster-repo-section
                            (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                                    "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-                                   "\"openRows\":{\"rows\":[]},\"collapsed\":{}}"))
+                                   "\"entries\":[],\"collapsed\":{}}"))
                           :fold)
                :arm)
               :collapsed)))
@@ -988,7 +1032,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
            #'agent-repl-wire-decode-roster-repo-section
            (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                    "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-                   "\"openRows\":{\"rows\":[]}}"))))
+                   "\"entries\":[]}"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-with-both-folds-is-a-breach ()
   "Expanded and collapsed at once is a malformed frame."
@@ -996,13 +1040,13 @@ A hand-rolled list decoder would skip the shared helper and fail here."
            #'agent-repl-wire-decode-roster-repo-section
            (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                    "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-                   "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}},\"collapsed\":{}}"))))
+                   "\"entries\":[],\"expanded\":{\"collapsible\":{}},\"collapsed\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-without-a-key-is-a-breach ()
   "The section's fold and join key is required."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-repo-section
-                  "{\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},\"openRows\":{\"rows\":[]}}")
+                  "{\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},\"entries\":[]}")
                  '("RosterRepoSection" key "required message field is absent"))))
 
 ;;;; ---- Whether an expanded section may collapse ----
@@ -1082,7 +1126,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 (defconst agent-repl-test-wire-roster--section-without-divergence
   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-          "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}")
+          "\"expanded\":{\"collapsible\":{}}}")
   "A repository section with every field but its divergence.")
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-without-a-divergence-is-a-breach ()
@@ -1162,7 +1206,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (concat "{\"repository\":{\"sections\":[{"
           "\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
-          "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}],\"openCount\":{\"workspaces\":2}},"
+          "\"expanded\":{\"collapsible\":{}}}],\"openCount\":{\"workspaces\":2}},"
           "\"open\":{\"label\":{\"text\":\"Open\"},\"collapsed\":{}},"
           "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden\"},\"count\":{\"workspaces\":0}},"
           "\"hiddenRows\":{\"rows\":[]},\"expanded\":{}},"
@@ -1178,10 +1222,9 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   agent-repl-test-wire-roster--roster-json)
                  '(:repository (:sections ((:key (:repository (:id "r1" :dir "/src"))
                                             :header (:label (:text "doom") :count (:workspaces 2))
-                                            :open-rows (:rows nil)
                                             :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil)))
                                             :divergence (:state (:arm :pending :value nil))
-                                            :subsections nil))
+                                            :entries nil))
                                :open-count (:workspaces 2))
                    :open (:label (:text "Open") :fold (:arm :collapsed :value nil))
                    :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))

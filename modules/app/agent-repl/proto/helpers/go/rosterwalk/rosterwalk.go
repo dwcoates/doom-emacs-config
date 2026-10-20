@@ -7,6 +7,8 @@
 package rosterwalk
 
 import (
+	"fmt"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
@@ -33,30 +35,63 @@ func FlattenHidden(rows []*frontendv1.RosterHiddenRow) []*frontendv1.RosterHidde
 	return out
 }
 
-// RepoSectionRegions lists a repository section's open rows regions in drawn
-// order: its unsectioned rows, then each subsection's. A reader that walks
-// only the section's own `open_rows` misses every workspace in a subsection.
-func RepoSectionRegions(section *frontendv1.RosterRepoSection) []*frontendv1.RosterOpenRows {
-	out := []*frontendv1.RosterOpenRows{section.GetOpenRows()}
-	for _, sub := range section.GetSubsections() {
-		out = append(out, sub.GetOpenRows())
+// RowEntries wraps ROWS, top-level open rows in no subsection, as repository
+// section entries, one each, in order: the one spelling of a row standing in
+// a section's body (frontend.v1.RosterRepoEntry.row).
+func RowEntries(rows []*frontendv1.RosterOpenRow) []*frontendv1.RosterRepoEntry {
+	out := make([]*frontendv1.RosterRepoEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: row}})
 	}
 	return out
 }
 
-// SectionOpenRows lists every open row of one repository section, its own
-// rows and then each subsection's, each flattened.
+// UnsectionedRows lists a repository section's top-level open rows in no
+// subsection, in drawn order, each with its family nested under it.
+func UnsectionedRows(section *frontendv1.RosterRepoSection) []*frontendv1.RosterOpenRow {
+	var out []*frontendv1.RosterOpenRow
+	for _, entry := range section.GetEntries() {
+		if row := entry.GetRow(); row != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// Subsections lists a repository section's subsections in drawn order.
+func Subsections(section *frontendv1.RosterRepoSection) []*frontendv1.RosterSubsection {
+	var out []*frontendv1.RosterSubsection
+	for _, entry := range section.GetEntries() {
+		if sub := entry.GetSubsection(); sub != nil {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// SectionOpenRows lists every open row of one repository section in drawn
+// order: entry by entry (frontend.v1.RosterRepoSection.entries), a row in no
+// subsection with its family, a subsection's rows where the subsection
+// stands, each flattened. A reader that walks only the rows in no subsection
+// misses every workspace in a subsection.
 func SectionOpenRows(section *frontendv1.RosterRepoSection) []*frontendv1.RosterOpenRow {
 	var out []*frontendv1.RosterOpenRow
-	for _, region := range RepoSectionRegions(section) {
-		out = append(out, FlattenOpen(region.GetRows())...)
+	for _, entry := range section.GetEntries() {
+		switch e := entry.GetEntry().(type) {
+		case *frontendv1.RosterRepoEntry_Row:
+			out = append(out, FlattenOpen([]*frontendv1.RosterOpenRow{e.Row})...)
+		case *frontendv1.RosterRepoEntry_Subsection:
+			out = append(out, FlattenOpen(e.Subsection.GetOpenRows().GetRows())...)
+		default:
+			panic(fmt.Sprintf("rosterwalk: a repository section entry has no arm (%T)", e))
+		}
 	}
 	return out
 }
 
 // OpenRows lists every open row of the roster in the Open section's walk --
-// repository by repository, each one's own rows then each subsection's,
-// every family under its parent. It is the tab bar's order, folded tabs
+// repository by repository, each one's entries in drawn order, every
+// family under its parent. It is the tab bar's order, folded tabs
 // included.
 func OpenRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterOpenRow {
 	var out []*frontendv1.RosterOpenRow

@@ -469,18 +469,19 @@ const FIELD_STRIPPERS: Partial<Record<RpcName, { path: string; strip(message: ob
             repository: {
               ...repository,
               sections: sections.map((section) => {
-                const held = section as { openRows?: { rows?: readonly { row?: object }[] } };
-                const openRows = required(held.openRows, "RosterRepoSection.open_rows");
-                const list = required(openRows.rows, "RosterOpenRows.rows");
+                const held = section as { entries?: readonly { entry?: { case?: string; value?: { row?: object } } }[] };
+                const entries = required(held.entries, "RosterRepoSection.entries");
                 return {
                   ...held,
-                  openRows: {
-                    ...openRows,
-                    rows: list.map((open) => ({
-                      ...open,
-                      row: { ...required(open.row, "RosterOpenRow.row"), status: { case: undefined } },
-                    })),
-                  },
+                  entries: entries.map((entry) => {
+                    const arm = required(entry.entry, "RosterRepoEntry.entry");
+                    if (arm.case !== "row") return entry;
+                    const open = required(arm.value, "RosterRepoEntry.row");
+                    return {
+                      ...entry,
+                      entry: { ...arm, value: { ...open, row: { ...required(open.row, "RosterOpenRow.row"), status: { case: undefined } } } },
+                    };
+                  }),
                 };
               }),
             },
