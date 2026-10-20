@@ -649,7 +649,7 @@ describe("a subsection's fold", () => {
   it("refuses a subsection with no fold as a malformed view", () => {
     // Arrange
     const made = subsectionOf(false);
-    made.repository!.sections[0]!.subsections[0]!.fold = { case: undefined };
+    made.repository!.sections[0].subsections[0].fold = { case: undefined };
 
     // Act / Assert
     expect(() => drawWorkspaceRoster(made, sidebarContext())).toThrow(MalformedView);
