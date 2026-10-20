@@ -27,7 +27,9 @@
  * aimed at a focused input or textarea (whose selection is not the document's)
  * keeps the browser's behaviour untouched.
  *
- * It adds no visible element. There is no copy button anywhere in this app.
+ * It adds no visible element. The one copy control in this app, a code block's
+ * (code-block.ts), copies its block's code through `writeClipboardText` below,
+ * never through the selection.
  *
  * THE COPY CHORDS. `C-c` and Cmd-c never reach that `keyDown:`: a key with
  * Control or Command held is a key equivalent, which WKWebView's
@@ -107,4 +109,35 @@ export function installCopyChords(
 
   doc.addEventListener("keydown", onKeyDown);
   return () => doc.removeEventListener("keydown", onKeyDown);
+}
+
+/**
+ * Write TEXT to the clipboard through the browser's copy command, and answer
+ * whether it was written. COPY runs the command (`document.execCommand("copy")`
+ * by default), which must run inside a user gesture; the `copy` event it fires
+ * is answered here, in the capture phase and ahead of `installCopyFallback`,
+ * with TEXT instead of the reader's selection. A copy whose event never came,
+ * or came with no writable `clipboardData`, wrote nothing.
+ */
+export function writeClipboardText(
+  doc: Document,
+  text: string,
+  copy: () => boolean = () => doc.execCommand("copy"),
+): boolean {
+  let written = false;
+  const onCopy = (event: Event): void => {
+    const clipboardData = (event as ClipboardEvent).clipboardData;
+    if (clipboardData === null || clipboardData === undefined) return;
+    clipboardData.setData("text/plain", text);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    written = true;
+  };
+  doc.addEventListener("copy", onCopy, true);
+  try {
+    copy();
+  } finally {
+    doc.removeEventListener("copy", onCopy, true);
+  }
+  return written;
 }

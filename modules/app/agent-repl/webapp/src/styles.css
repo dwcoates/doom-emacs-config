@@ -2459,6 +2459,37 @@ html[data-page-unshown] *::after {
 .md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: var(--code-block-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
 .md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
+/* A CODE BLOCK'S COPY CONTROL (src/code-block.ts, owner request 2026-10-20):
+   a small muted icon at the block's top right that copies the block's code.
+   It floats right ahead of the code, so the code's first lines wrap around it
+   rather than running under it. Once it copied, the check mark replaces the
+   copy icon for a moment (`data-copied`). */
+.md pre.md-code > .md-code-copy {
+  float: right;
+  display: inline-flex;
+  margin: -0.3em -0.5em 0.2em 0.6em;
+  padding: 3px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: calc(0.85rem * var(--feed-text-scale));
+  opacity: 0.7;
+  cursor: pointer;
+}
+.md pre.md-code > .md-code-copy:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.md pre.md-code > .md-code-copy[data-copied] { opacity: 1; color: var(--ok); }
+.md-code-copy svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.md-code-copy .md-code-copied-icon, .md-code-copy[data-copied] .md-code-copy-icon { display: none; }
+.md-code-copy[data-copied] .md-code-copied-icon { display: inline; }
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. A held
    prompt keeps --accent, since its fill is grey, not blue. */

@@ -458,7 +458,7 @@ describe("renderTreeHtml", () => {
     const html = renderTreeHtml(tree, identity, 100);
     // Assert — one code block holding the body without its rail, no delimiter
     // leaking as a tree line, and the branch after it still a tree line.
-    expect(html).toContain('<pre class="md-code"><code class="hljs lang-json">');
+    expect(html).toMatch(/<pre class="md-code">(?:(?!<\/pre>).)*<code class="hljs lang-json">/);
     expect(html).not.toContain("```");
     expect(html).not.toMatch(/<code[^>]*>│/);
     expect(html).toContain(`<span class="mp-prefix">└── 2.4 </span>`);

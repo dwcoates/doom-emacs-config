@@ -130,8 +130,8 @@ describe("renderMarkdown fenced code", () => {
     // Arrange
     const src = "```klingon\n<qapla> & stuff\n```";
     // Act + Assert — escaped, no hljs token spans.
-    expect(renderMarkdown(src)).toBe(
-      `<pre class="md-code"><code class="hljs lang-klingon">&lt;qapla&gt; &amp; stuff</code></pre>`,
+    expect(renderMarkdown(src)).toContain(
+      `<code class="hljs lang-klingon">&lt;qapla&gt; &amp; stuff</code></pre>`,
     );
   });
 
@@ -152,9 +152,7 @@ describe("renderMarkdown fenced code", () => {
     // Arrange
     const src = "```\n<b>raw</b>\n```";
     // Act + Assert
-    expect(renderMarkdown(src)).toBe(
-      `<pre class="md-code"><code class="hljs">&lt;b&gt;raw&lt;/b&gt;</code></pre>`,
-    );
+    expect(renderMarkdown(src)).toContain(`<code class="hljs">&lt;b&gt;raw&lt;/b&gt;</code></pre>`);
   });
 
   it("escapes HTML inside highlighted code (hljs escape guarantee)", () => {
