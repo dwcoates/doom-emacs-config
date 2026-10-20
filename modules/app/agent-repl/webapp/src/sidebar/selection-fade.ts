@@ -2,8 +2,9 @@
  * selection-fade — the tab number of the rail's highlighted row is white.
  *
  * THE NUMBER RISES AND STAYS (owner request, 2026-10-18): when the highlight
- * moves to a row, its tab number fades from its own grey into white over a
- * second and stays white for as long as the row stays highlighted. The row
+ * moves to a row, its tab number fades from its own grey into white over half
+ * a second (owner request, 2026-10-20: twice as fast as the second it first
+ * took) and stays white for as long as the row stays highlighted. The row
  * the highlight left turns back to its grey AT ONCE, with no fade (owner
  * request, 2026-10-18), a rise still running on it included. The row itself
  * stays still: the wash it once swelled in on a click is gone.
@@ -34,7 +35,7 @@ import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 
 /** How long the highlighted row's number takes to rise into white, in milliseconds. */
-export const SELECTION_NUMBER_RISE_MS = 1000;
+export const SELECTION_NUMBER_RISE_MS = 500;
 
 /** One animation the number runs when the highlight moves, seeked by the rail's clock. */
 export interface SelectionAnimation {

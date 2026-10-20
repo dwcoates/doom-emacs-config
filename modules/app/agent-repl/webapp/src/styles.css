@@ -1324,8 +1324,9 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
 /* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
-   rises from its own grey into white over a second when the highlight moves
-   to the row, and stays white while the row stays highlighted. The row the
+   rises from its own grey into white over half a second (owner request,
+   2026-10-20: twice as fast as the second it first took) when the highlight
+   moves to the row, and stays white while the row stays highlighted. The row the
    highlight left is back on its grey at once, with no fade (owner request,
    2026-10-18). The row itself stays still (no wash). The classes and lengths are set by
    src/sidebar/selection-fade.ts, which also seeks a redrawn row into the
