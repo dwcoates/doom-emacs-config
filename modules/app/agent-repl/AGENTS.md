@@ -237,7 +237,9 @@ dependency chain first. Parallelism belongs to this scheduler:
 
 - every Go package is compiled once and split by top-level test; the go
   command carries `GOFLAGS=-p=1`, every process carries `GOMAXPROCS=2`, and
-  chunks carry `-test.parallel=1`;
+  chunks carry `-test.parallel=1`, except the wait-bound packages the roster
+  names in `TestParallel`, whose chunks overlap their tests and hold the
+  measured cores that takes (`roster.Parallel`'s `Tests` and `Slots`);
 - ERT is split by authored test file;
 - vitest is split by test file and pinned to one worker;
 - e2e and integration packages build their shared binaries once in a prebuild

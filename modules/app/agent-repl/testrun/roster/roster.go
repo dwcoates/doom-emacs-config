@@ -73,8 +73,9 @@ type Suite struct {
 	// driver and failed tests that had nothing to do with the rebuild.
 	NeedsWebappDist bool
 	// TestParallel names the Go packages (by path relative to Path, "." for
-	// the root) whose chunks overlap that many of their top-level tests
-	// (-test.parallel). A package not named runs its tests one at a time.
+	// the root) whose chunks overlap Tests of their top-level tests
+	// (-test.parallel) on Slots cores. A package not named runs its tests one
+	// at a time on one core.
 	//
 	// ONLY WAIT-BOUND PACKAGES ARE NAMED: tests that spend most of their wall
 	// waiting on the processes they boot (a daemon, a store, a shim). MEASURED
@@ -82,7 +83,18 @@ type Suite struct {
 	// test at a time; four at a time cut their wall 1.5-2.6x at ~0.9 cores
 	// each, and eight at a time (2026-10-12) cut the full run's slot-seconds a
 	// further 13% (2,056 -> 1,798) with every suite green.
-	TestParallel map[string]int
+	//
+	// A CHUNK HOLDS THE CORES ITS OVERLAPPED TESTS USE TOGETHER. Every run on
+	// the host shares one core budget (package cores) counted in widths, so a
+	// chunk one slot wide that uses four spends three cores the budget never
+	// gave it. MEASURED over the 100 runs before 2026-10-20 (each chunk's
+	// reaped CPU over its wall): the chunks the run summary named as "not
+	// pinned to its width" averaged 2.5 cores for daemon integration, 1.9
+	// for e2e and 1.9 for sidecar integration, and daemon integration's
+	// long chunks 1.0; store integration was never named. A chunk's short
+	// bursts past its width are named by the summary still, and a package
+	// whose chunks are named run after run needs its width raised.
+	TestParallel map[string]Parallel
 	// Programs names, per Go package (by path relative to Path, "." for the
 	// root), the shared programs (by Program.Name) that package's tests run.
 	// The run builds each program ONCE (Programs) and every chunk of a package
@@ -94,6 +106,15 @@ type Suite struct {
 	// end-to-end suites run every system for real, and a shell harness's
 	// inputs are a call graph no tool derives.
 	Reuse *Reuse
+}
+
+// Parallel is how a wait-bound Go package's chunks overlap their tests.
+type Parallel struct {
+	// Tests is how many top-level tests a chunk overlaps (-test.parallel).
+	Tests int
+	// Slots is the core slots a chunk holds: the cores its overlapped tests
+	// use together on average, as measured. At least one.
+	Slots int
 }
 
 // Reuse is what a keyed suite reads beyond its build graph. Its units run
@@ -227,7 +248,7 @@ var Suites = []Suite{
 	// host slot too.
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
 		IntegrationTags: "integration", IntegrationPackages: "./integration",
-		TestParallel: map[string]int{"integration": 8},
+		TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git"}},
 		Reuse: &Reuse{Inputs: []string{
 			// Source scans walk the daemon's own tree; the briefs and the
@@ -246,7 +267,7 @@ var Suites = []Suite{
 			// and keeps its own feed.json beside them.
 			"testdata/scenario-goldens/",
 		}}},
-	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]int{"integration": 8},
+	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
 		Reuse: &Reuse{Inputs: []string{
 			"proto/vocab/agent-repl-tools.json", "testdata/corpus/", "testdata/projects/", "logging-contract.md",
@@ -258,7 +279,7 @@ var Suites = []Suite{
 			// tooling's own vectors and script.
 			"agent-shim/claude/shim/scripts/capture/",
 		}}},
-	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 8},
+	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 1}},
 		Programs: map[string][]string{"integration": {"shim-store"}},
 		// internal/testclose's scan walks the store's own tree.
 		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/"}}},
@@ -300,7 +321,7 @@ var Suites = []Suite{
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
-	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}, VetTags: []string{"perf", "realtest"},
+	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock"}}},
 	// Two slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen

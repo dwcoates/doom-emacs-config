@@ -101,13 +101,16 @@ func TestTheSandboxSuiteHoldsTheCoresItsContainerUses(t *testing.T) {
 
 func TestTestParallelNamesOnlyGoSuitesAtMoreThanOne(t *testing.T) {
 	for _, s := range Suites {
-		for pkg, n := range s.TestParallel {
+		for pkg, par := range s.TestParallel {
 			// Assert
 			if s.Kind != GoModule && s.Kind != E2E {
 				t.Errorf("%s names package %q in TestParallel, but only Go suites run -test.parallel", s.Name, pkg)
 			}
-			if n < 2 {
-				t.Errorf("%s TestParallel[%q] = %d; a package overlaps at least two tests or is not named", s.Name, pkg, n)
+			if par.Tests < 2 {
+				t.Errorf("%s TestParallel[%q].Tests = %d; a package overlaps at least two tests or is not named", s.Name, pkg, par.Tests)
+			}
+			if par.Slots < 1 {
+				t.Errorf("%s TestParallel[%q].Slots = %d; a chunk holds at least one core", s.Name, pkg, par.Slots)
 			}
 		}
 	}
@@ -121,8 +124,28 @@ func TestTheWaitBoundPackagesOverlapTheirTests(t *testing.T) {
 			continue
 		}
 		// Assert
-		if s.TestParallel[pkg] < 2 {
-			t.Errorf("%s TestParallel[%q] = %d, want its wait-bound tests overlapped", s.Name, pkg, s.TestParallel[pkg])
+		if s.TestParallel[pkg].Tests < 2 {
+			t.Errorf("%s TestParallel[%q].Tests = %d, want its wait-bound tests overlapped", s.Name, pkg, s.TestParallel[pkg].Tests)
+		}
+	}
+}
+
+// The widths the chunks hold, as measured (Suite.TestParallel's comment):
+// the host's core budget counts them, so a chunk narrower than what it uses
+// spends cores the budget never gave it.
+func TestTheOverlappedPackagesHoldTheirMeasuredWidths(t *testing.T) {
+	want := map[string]map[string]int{
+		"daemon":  {"integration": 2},
+		"sidecar": {"integration": 2},
+		"store":   {"integration": 1},
+		"e2e":     {".": 2},
+	}
+	for _, s := range Suites {
+		for pkg, slots := range want[s.Name] {
+			// Assert
+			if got := s.TestParallel[pkg].Slots; got != slots {
+				t.Errorf("%s TestParallel[%q].Slots = %d, want %d", s.Name, pkg, got, slots)
+			}
 		}
 	}
 }

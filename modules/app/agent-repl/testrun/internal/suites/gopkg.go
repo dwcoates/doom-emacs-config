@@ -79,9 +79,10 @@ type goPkg struct {
 	Timeout string
 	// Tags are the build tags the package's tests compile under; "" is none.
 	Tags string
-	// Parallel is how many of its top-level tests a chunk overlaps
-	// (roster.Suite.TestParallel); zero is one at a time.
-	Parallel int
+	// Parallel is how a chunk overlaps its top-level tests and the cores it
+	// holds doing so (roster.Suite.TestParallel); the zero value is one test
+	// at a time on one core.
+	Parallel roster.Parallel
 	// Programs are the shared programs this package's tests run
 	// (roster.Suite.Programs): every chunk waits for their builds and is told
 	// the run's programs directory.
@@ -173,13 +174,14 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		p.ChunkEnv = append(p.ChunkEnv, testenv.Programs+"="+p.ProgramsDir)
 	}
 	chunk := func(id string, items []string) run.Spec {
-		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel, 1)),
+		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel.Tests, 1)),
 			"-test.timeout=" + timeout, "-test.run=" + gotest.TopPattern(items)}
 		if p.CovDir != "" {
 			argv = append(argv, "-test.gocoverdir="+p.CovDir)
 		}
 		// A test binary runs in its package's directory, as `go test` runs it.
 		sp := spec(id, p.Suite, dir, argv, p.ChunkEnv...)
+		sp.Slots = p.Parallel.Slots
 		sp.Items = func(out []byte) (map[string]float64, error) { return ParseGoTestItems(out, items) }
 		sp.Display = QuietGoTestOutput
 		return sp
