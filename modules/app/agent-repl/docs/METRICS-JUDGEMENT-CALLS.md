@@ -275,3 +275,17 @@ Each entry says what was decided, why, and what it departs from.
   records no total, since it is neither up nor failed, and a step cut short
   by a stand-down this daemon ordered is not timed.
 
+## 17. Emacs's own startup is timed, milestone by milestone
+
+- Asked (2026-10-20): very solid visibility into every area of startup.
+- Supersedes the part of call 9 that left Emacs's launch untimed.
+- Built: `editor_start`, four milestones each timed by Emacs from its own
+  process start (`before-init-time`): its init files loaded, the first
+  daemon link, the startup's first tab open, and every tab open. The cause
+  says whether this Emacs spawned the daemon or linked to one running.
+- Reported once the startup's open ends, as one batch in
+  `ReportLatencies`, kept and resent on the next link-up until a daemon
+  acknowledges it (`docs/protobuf-design/runtime-metrics.md`, entry 9).
+- Not timed: an elisp reload, which is no new startup, so the milestones
+  survive it.
+

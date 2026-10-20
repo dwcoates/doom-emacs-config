@@ -4622,6 +4622,88 @@ encoder reads: the common codec owns the real encoding.")
                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"lockedOut\":{}}}"))
                   :type 'agent-repl-wire-error)))
 
+
+;;;; ---- ReportLatencies ----------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-request-shape ()
+  "The editor's startup milestones ride `editorStartup', each fully spelled."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-report-latencies-request
+                    (list :editor-startup
+                          (list (list :milestone :daemon-linked :daemon :spawned :seconds 2)
+                                (list :milestone :all-tabs :daemon :running :seconds 6.5))))
+                   '((editorStartup . [((milestone . "EDITOR_STARTUP_MILESTONE_DAEMON_LINKED")
+                                        (spawned)
+                                        (secondsSinceProcessStart . 2.0))
+                                       ((milestone . "EDITOR_STARTUP_MILESTONE_ALL_TABS")
+                                        (running)
+                                        (secondsSinceProcessStart . 6.5))]))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-request-serializes-empty-arms ()
+  "An empty daemon arm serializes as an empty object, as protojson expects."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-report-latencies-request
+                     (list :editor-startup (list (list :milestone :init :daemon :spawned :seconds 1)))))
+                   "{\"editorStartup\":[{\"milestone\":\"EDITOR_STARTUP_MILESTONE_INIT\",\"spawned\":{},\"secondsSinceProcessStart\":1.0}]}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-milestone ()
+  "An unknown milestone or daemon arm, or a bad time, never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (milestone (list (list :milestone :unspecified :daemon :spawned :seconds 1)
+                             (list :milestone :init :daemon :unknown :seconds 1)
+                             (list :milestone :init :daemon :spawned :seconds -1)
+                             (list :milestone :init :daemon :spawned :seconds 0.0e+NaN)
+                             (list :milestone :init :daemon :spawned :seconds 1.0e+INF)
+                             (list :milestone :init :daemon :spawned)))
+      (should-error (agent-repl-wire-encode-report-latencies-request
+                     (list :editor-startup (list milestone)))
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-startup-milestones-pinned ()
+  "The milestone vocabulary is every generated enum name except UNSPECIFIED."
+  (should (equal
+           (sort (mapcar #'cdr agent-repl-wire-editor-startup-milestones) #'string<)
+           (sort (remove "EDITOR_STARTUP_MILESTONE_UNSPECIFIED"
+                         (agent-repl-test--generated-enum-names
+                          "agentrepl/v1/endpoint_report_latencies.pb.go"
+                          "EDITOR_STARTUP_MILESTONE_"))
+                 #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-startup-daemon-arms-pinned ()
+  "The daemon arms are exactly the generated oneof's."
+  (should (equal (sort (mapcar (lambda (c) (symbol-name (cdr c))) agent-repl-wire-editor-startup-daemons) #'string<)
+                 (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_report_latencies.pb.go" "ReportedEditorStartup")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-response-arms ()
+  "Every success arm decodes, and the refusal names its mismatch."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-report-latencies-response
+                    '((success . ((recorded . ((recorded . 3)))))))
+                   '(:arm :success :value (:arm :recorded :value (:recorded 3)))))
+    (should (equal (agent-repl-wire-decode-report-latencies-response
+                    '((success . ((recorded . nil)))))
+                   '(:arm :success :value (:arm :recorded :value (:recorded 0)))))
+    (should (equal (agent-repl-wire-decode-report-latencies-response
+                    '((success . ((partlyRecorded . ((recorded . 1) (droppedUnknownWorkspace . 2)))))))
+                   '(:arm :success :value (:arm :partly-recorded :value (:recorded 1 :dropped 2)))))
+    (should (equal (agent-repl-wire-decode-report-latencies-response
+                    '((success . ((metricsOff . nil)))))
+                   '(:arm :success :value (:arm :metrics-off :value nil))))
+    (should (equal (agent-repl-wire-decode-report-latencies-response
+                    '((error . ((workspaceRefMismatch . ((workspaceId . "w") (reportedDir . "/a") (registryDir . "/b")))))))
+                   '(:arm :error :value (:arm :workspace-ref-mismatch
+                                         :value (:workspace-id "w" :reported-dir "/a" :registry-dir "/b")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-response-refuses-unknown-fields ()
+  "A field the codec does not know is loud rather than dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-report-latencies-response
+                   '((success . ((recorded . ((recorded . 1) (extra . 2)))))))
+                  :type 'agent-repl-wire-error)))
+
 (provide 'test-wire-verbs)
 
 ;;; test-wire-verbs.el ends here

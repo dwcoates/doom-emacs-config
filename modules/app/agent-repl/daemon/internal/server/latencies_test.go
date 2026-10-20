@@ -141,3 +141,127 @@ func TestReportLatenciesRefusesAMalformedLatency(t *testing.T) {
 		})
 	}
 }
+
+// startup is one editor startup milestone, reached from a spawned daemon.
+func startup(milestone agentreplv1.EditorStartupMilestone, seconds float64) *agentreplv1.ReportedEditorStartup {
+	return &agentreplv1.ReportedEditorStartup{
+		Milestone:                milestone,
+		Daemon:                   &agentreplv1.ReportedEditorStartup_Spawned{Spawned: &agentreplv1.EditorStartupDaemonSpawned{}},
+		SecondsSinceProcessStart: seconds,
+	}
+}
+
+func reportBatch(t *testing.T, h *harness, req *agentreplv1.ReportLatenciesRequest) (*agentreplv1.ReportLatenciesResponse, error) {
+	t.Helper()
+	resp, err := h.Client.ReportLatencies(context.Background(), connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+func TestReportLatenciesRecordsTheEditorsStartupMilestonesAsRestarts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		Latencies: []*agentreplv1.ReportedLatency{latency(pageBoot, ref(), 0.4)},
+		EditorStartup: []*agentreplv1.ReportedEditorStartup{
+			startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_DAEMON_LINKED, 2.5),
+			startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_ALL_TABS, 6),
+		},
+	})
+
+	// Assert
+	if err != nil || resp.GetSuccess().GetRecorded().GetRecorded() != 1 {
+		t.Fatalf("ReportLatencies = %v, %v; want the one latency counted", resp, err)
+	}
+	if got := h.Latencies.startups(); len(got) != 2 || got[0] != "editor_start:daemon_linked/spawned/2.5" || got[1] != "editor_start:all_tabs/spawned/6" {
+		t.Fatalf("restarts = %v, want both milestones as editor_start", got)
+	}
+}
+
+func TestReportLatenciesRecordsTheEditorsMilestonesWhenEveryLatencyIsDropped(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	gone := &workspacev1.WorkspaceRef{Id: "closed-and-forgotten"}
+
+	// Act
+	_, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		Latencies:     []*agentreplv1.ReportedLatency{latency(pageBoot, gone, 0.4)},
+		EditorStartup: []*agentreplv1.ReportedEditorStartup{startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT, 1)},
+	})
+
+	// Assert
+	if err != nil || len(h.Latencies.startups()) != 1 {
+		t.Fatalf("err = %v, restarts = %v; want the milestone recorded", err, h.Latencies.startups())
+	}
+}
+
+func TestReportLatenciesRecordsNoMilestoneOfARefusedBatch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	wrong := &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: "/elsewhere"}
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		Latencies:     []*agentreplv1.ReportedLatency{latency(pageBoot, wrong, 0.4)},
+		EditorStartup: []*agentreplv1.ReportedEditorStartup{startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT, 1)},
+	})
+
+	// Assert
+	if err != nil || resp.GetError().GetWorkspaceRefMismatch() == nil || len(h.Latencies.startups()) != 0 {
+		t.Fatalf("ReportLatencies = %v, %v, restarts = %v; want the refusal and nothing recorded", resp, err, h.Latencies.startups())
+	}
+}
+
+func TestReportLatenciesRecordsNoMilestoneWhenTheMetricsSurfaceIsOff(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Latencies.enabled = false
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		EditorStartup: []*agentreplv1.ReportedEditorStartup{startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT, 1)},
+	})
+
+	// Assert
+	if err != nil || resp.GetSuccess().GetMetricsOff() == nil || len(h.Latencies.startups()) != 0 {
+		t.Fatalf("ReportLatencies = %v, %v; want metrics_off and nothing recorded", resp, err)
+	}
+}
+
+func TestReportLatenciesRefusesAMalformedStartupMilestone(t *testing.T) {
+	unset := startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT, 1)
+	unset.Daemon = nil
+	cases := []struct {
+		name      string
+		milestone *agentreplv1.ReportedEditorStartup
+	}{
+		{name: "an unspecified milestone", milestone: startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_UNSPECIFIED, 1)},
+		{name: "no daemon arm", milestone: unset},
+		{name: "a negative time", milestone: startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT, -1)},
+		{name: "a non-finite time", milestone: startup(agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT, math.NaN())},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+				Latencies:     []*agentreplv1.ReportedLatency{latency(pageBoot, ref(), 0.2)},
+				EditorStartup: []*agentreplv1.ReportedEditorStartup{tc.milestone},
+			})
+
+			// Assert
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+			if len(h.Latencies.all()) != 0 || len(h.Latencies.startups()) != 0 {
+				t.Fatalf("a malformed batch recorded %+v and %v", h.Latencies.all(), h.Latencies.startups())
+			}
+		})
+	}
+}

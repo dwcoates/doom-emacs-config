@@ -161,6 +161,12 @@ func (h hasher) entry(p string, info fs.FileInfo) error {
 	return nil
 }
 
+// listing hashes the names in directory p, each with its kind.
+//
+// A GENERATED ENTRY IS NOT LISTED: the run itself creates and deletes those
+// trees (an install, a build, a tool's cache), so whether one exists says
+// nothing about the suite's inputs, and listing it would move the key the
+// moment a run first creates it.
 func (h hasher) listing(p string) error {
 	entries, err := os.ReadDir(h.abs(p))
 	if err != nil {
@@ -168,6 +174,9 @@ func (h hasher) listing(p string) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
+		if h.isGenerated(path.Join(p, e.Name())) {
+			continue
+		}
 		kind := "f"
 		switch {
 		case e.Type()&fs.ModeSymlink != 0:
@@ -180,6 +189,17 @@ func (h hasher) listing(p string) error {
 	sort.Strings(names)
 	h.m[p+"/"] = "dir " + strings.Join(names, " ")
 	return nil
+}
+
+// isGenerated reports whether the repository-relative path rel lies in one of
+// the set's generated subtrees.
+func (h hasher) isGenerated(rel string) bool {
+	for _, g := range h.generated {
+		if under(rel, g) {
+			return true
+		}
+	}
+	return false
 }
 
 // flat hashes a directory's listing and every non-directory entry in it.
@@ -224,13 +244,11 @@ func (h hasher) tree(p string) error {
 			return fmt.Errorf("reuse: place %s under %s: %w", abs, h.repo, err)
 		}
 		rel = filepath.ToSlash(rel)
-		for _, g := range h.generated {
-			if under(rel, g) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
+		if h.isGenerated(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
 			}
+			return nil
 		}
 		if d.IsDir() {
 			return h.listing(rel)

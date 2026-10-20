@@ -37,11 +37,12 @@ func mustKey(t *testing.T, repo string, set *InputSet, facts Facts) Key {
 	return k
 }
 
-// baseSet places pkg flat, prompts/ as a tree and gen/ as generated.
+// baseSet places pkg flat, prompts/ as a tree, and pkg/gen/ and
+// prompts/cache/ as generated.
 func baseSet(t *testing.T) *InputSet {
 	t.Helper()
 	s := NewInputSet()
-	for _, err := range []error{s.AddFlatDir("pkg"), s.AddTree("prompts"), s.AddGenerated("pkg/gen"), s.AddFile("go.mod")} {
+	for _, err := range []error{s.AddFlatDir("pkg"), s.AddTree("prompts"), s.AddGenerated("pkg/gen"), s.AddGenerated("prompts/cache"), s.AddFile("go.mod")} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,6 +85,12 @@ func TestTheKeyMovesWithWhatTheSuiteReads(t *testing.T) {
 			edit: func(t *testing.T, root string) { write(t, root, "pkg/sub/deep.go", "package sub // edited") }},
 		{name: "a generated file changed", moves: false,
 			edit: func(t *testing.T, root string) { write(t, root, "pkg/gen/out.js", "rebuilt") }},
+		{name: "a generated directory vanished from a flat directory", moves: false,
+			edit: func(t *testing.T, root string) { removeAll(t, root, "pkg/gen") }},
+		{name: "a generated directory appeared in a tree", moves: false,
+			edit: func(t *testing.T, root string) { write(t, root, "prompts/cache/c.bin", "cached") }},
+		{name: "a directory appeared in a tree", moves: true,
+			edit: func(t *testing.T, root string) { write(t, root, "prompts/more/q.md", "brief") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,5 +234,35 @@ func chmod(t *testing.T, root, p string, mode os.FileMode) {
 	t.Helper()
 	if err := os.Chmod(filepath.Join(root, filepath.FromSlash(p)), mode); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// removeAll deletes the repository-relative path rel under root.
+func removeAll(t *testing.T, root, rel string) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(root, rel)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIsGeneratedNamesEveryPathInAGeneratedSubtree(t *testing.T) {
+	h := hasher{generated: []string{"webapp/node_modules", "webapp/.vite-cache"}}
+	tests := []struct {
+		rel  string
+		want bool
+	}{
+		{"webapp/.vite-cache", true},
+		{"webapp/.vite-cache/deps/x.js", true},
+		{"webapp/node_modules", true},
+		{"webapp/.vite-cache-old", false},
+		{"webapp/src/main.ts", false},
+		{"webapp", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rel, func(t *testing.T) {
+			if got := h.isGenerated(tt.rel); got != tt.want {
+				t.Fatalf("isGenerated(%q) = %v, want %v", tt.rel, got, tt.want)
+			}
+		})
 	}
 }

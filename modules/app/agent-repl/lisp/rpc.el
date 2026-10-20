@@ -67,6 +67,8 @@
 (declare-function agent-repl-wire-decode-watch-host-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-daemon-request "wire-host" (request))
 (declare-function agent-repl-wire-encode-report-editor-focus-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-report-latencies-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-report-latencies-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-report-editor-focus-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-claim-live-notification-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-claim-live-notification-response "wire-host" (alist))
@@ -291,6 +293,14 @@ The daemon decides every desktop banner on the latest focus: a focused
 Emacs gets none.  The focus belongs to this Emacs's WatchDaemon stream, so
 a report with no stream standing is refused (`no_emacs_stream') and the
 next stream states its focus itself.  Idempotent.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-latencies
+  "ReportLatencies"
+  agent-repl-wire-encode-report-latencies-request
+  agent-repl-wire-decode-report-latencies-response
+  "Report the editor's startup milestones to the daemon's metrics.
+Every success arm acknowledges the batch; a refusal is a defect the same
+batch would only repeat.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-claim-live-notification
   "ClaimLiveNotification"

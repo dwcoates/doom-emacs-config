@@ -1,9 +1,10 @@
 // endpoint_report_latencies.proto — ReportLatencies. DIAGNOSTICS section.
 //
-// A CLIENT REPORTS HOW LONG ITS INTERACTIONS TOOK. Emacs and the webapp each
-// see the end of some user-facing interaction (a workspace switch shown, a
-// page booted) and measure its duration themselves, from a start instant
-// handed to them through the channel that already carried the interaction.
+// A CLIENT REPORTS HOW LONG ITS INTERACTIONS TOOK, AND EMACS HOW LONG ITS
+// STARTUP TOOK. Emacs and the webapp each see the end of some user-facing
+// interaction (a workspace switch shown, a page booted) and measure its
+// duration themselves, from a start instant handed to them through the
+// channel that already carried the interaction.
 // They send finished durations here in batches; the daemon records them in
 // the always-on metrics it exposes for VictoriaMetrics to scrape.
 //
@@ -110,6 +111,73 @@ func (ReportedLatencyKind) EnumDescriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{0}
 }
 
+// Which milestone of the editor's startup was reached. A closed set of
+// moments in one startup, not a state of anything: each is reached at most
+// once per editor process, in this order, though a startup that fails before
+// one never reaches it.
+type EditorStartupMilestone int32
+
+const (
+	// Never sent: a request carrying it is refused as InvalidArgument.
+	EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_UNSPECIFIED EditorStartupMilestone = 0
+	// The editor's own initialization finished (Emacs's init files loaded).
+	EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT EditorStartupMilestone = 1
+	// The editor is linked to a serving daemon: its first connection answered.
+	EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_DAEMON_LINKED EditorStartupMilestone = 2
+	// The editor's first workspace tab opened. A startup that opens no tab
+	// never reaches it.
+	EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_FIRST_TAB EditorStartupMilestone = 3
+	// Every workspace tab the startup opens has opened or failed: the startup
+	// is over and the editor is ready. Reached at once by a startup with no
+	// tabs to open.
+	EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_ALL_TABS EditorStartupMilestone = 4
+)
+
+// Enum value maps for EditorStartupMilestone.
+var (
+	EditorStartupMilestone_name = map[int32]string{
+		0: "EDITOR_STARTUP_MILESTONE_UNSPECIFIED",
+		1: "EDITOR_STARTUP_MILESTONE_INIT",
+		2: "EDITOR_STARTUP_MILESTONE_DAEMON_LINKED",
+		3: "EDITOR_STARTUP_MILESTONE_FIRST_TAB",
+		4: "EDITOR_STARTUP_MILESTONE_ALL_TABS",
+	}
+	EditorStartupMilestone_value = map[string]int32{
+		"EDITOR_STARTUP_MILESTONE_UNSPECIFIED":   0,
+		"EDITOR_STARTUP_MILESTONE_INIT":          1,
+		"EDITOR_STARTUP_MILESTONE_DAEMON_LINKED": 2,
+		"EDITOR_STARTUP_MILESTONE_FIRST_TAB":     3,
+		"EDITOR_STARTUP_MILESTONE_ALL_TABS":      4,
+	}
+)
+
+func (x EditorStartupMilestone) Enum() *EditorStartupMilestone {
+	p := new(EditorStartupMilestone)
+	*p = x
+	return p
+}
+
+func (x EditorStartupMilestone) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EditorStartupMilestone) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentrepl_v1_endpoint_report_latencies_proto_enumTypes[1].Descriptor()
+}
+
+func (EditorStartupMilestone) Type() protoreflect.EnumType {
+	return &file_agentrepl_v1_endpoint_report_latencies_proto_enumTypes[1]
+}
+
+func (x EditorStartupMilestone) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EditorStartupMilestone.Descriptor instead.
+func (EditorStartupMilestone) EnumDescriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{1}
+}
+
 // One finished interaction.
 type ReportedLatency struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -181,7 +249,13 @@ type ReportLatenciesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The finished interactions since the client's last acknowledged report,
 	// oldest first. An empty batch is valid and records nothing.
-	Latencies     []*ReportedLatency `protobuf:"bytes,1,rep,name=latencies,proto3" json:"latencies,omitempty"`
+	Latencies []*ReportedLatency `protobuf:"bytes,1,rep,name=latencies,proto3" json:"latencies,omitempty"`
+	// The milestones of the reporting editor's own startup reached since its
+	// last acknowledged report, oldest first. Sent by Emacs only; each
+	// milestone is reported once per editor process, and kept and sent again
+	// with the next batch until a report is acknowledged, so a daemon handover
+	// during the startup does not lose it.
+	EditorStartup []*ReportedEditorStartup `protobuf:"bytes,2,rep,name=editor_startup,json=editorStartup,proto3" json:"editor_startup,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -223,6 +297,201 @@ func (x *ReportLatenciesRequest) GetLatencies() []*ReportedLatency {
 	return nil
 }
 
+func (x *ReportLatenciesRequest) GetEditorStartup() []*ReportedEditorStartup {
+	if x != nil {
+		return x.EditorStartup
+	}
+	return nil
+}
+
+// One milestone of the editor's startup, timed by the editor from its own
+// process start, so each milestone is a cumulative time since launch rather
+// than the length of a step. The daemon records it in its restart metrics as
+// the `editor_start` restart, the milestone its phase and the daemon arm its
+// cause.
+type ReportedEditorStartup struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which milestone was reached. Required; UNSPECIFIED is InvalidArgument.
+	Milestone EditorStartupMilestone `protobuf:"varint,1,opt,name=milestone,proto3,enum=agentrepl.v1.EditorStartupMilestone" json:"milestone,omitempty"`
+	// How this editor came to a daemon, which separates a startup that paid for
+	// a daemon's boot from one that linked to a daemon already serving. Every
+	// milestone of one startup carries the same arm. Required: an unset arm is
+	// InvalidArgument.
+	//
+	// Types that are valid to be assigned to Daemon:
+	//
+	//	*ReportedEditorStartup_Spawned
+	//	*ReportedEditorStartup_Running
+	Daemon isReportedEditorStartup_Daemon `protobuf_oneof:"daemon"`
+	// Seconds from the editor process's start to the milestone, on the
+	// editor's own clock. Finite and not negative; anything else is
+	// InvalidArgument.
+	SecondsSinceProcessStart float64 `protobuf:"fixed64,4,opt,name=seconds_since_process_start,json=secondsSinceProcessStart,proto3" json:"seconds_since_process_start,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *ReportedEditorStartup) Reset() {
+	*x = ReportedEditorStartup{}
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportedEditorStartup) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportedEditorStartup) ProtoMessage() {}
+
+func (x *ReportedEditorStartup) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportedEditorStartup.ProtoReflect.Descriptor instead.
+func (*ReportedEditorStartup) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReportedEditorStartup) GetMilestone() EditorStartupMilestone {
+	if x != nil {
+		return x.Milestone
+	}
+	return EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_UNSPECIFIED
+}
+
+func (x *ReportedEditorStartup) GetDaemon() isReportedEditorStartup_Daemon {
+	if x != nil {
+		return x.Daemon
+	}
+	return nil
+}
+
+func (x *ReportedEditorStartup) GetSpawned() *EditorStartupDaemonSpawned {
+	if x != nil {
+		if x, ok := x.Daemon.(*ReportedEditorStartup_Spawned); ok {
+			return x.Spawned
+		}
+	}
+	return nil
+}
+
+func (x *ReportedEditorStartup) GetRunning() *EditorStartupDaemonRunning {
+	if x != nil {
+		if x, ok := x.Daemon.(*ReportedEditorStartup_Running); ok {
+			return x.Running
+		}
+	}
+	return nil
+}
+
+func (x *ReportedEditorStartup) GetSecondsSinceProcessStart() float64 {
+	if x != nil {
+		return x.SecondsSinceProcessStart
+	}
+	return 0
+}
+
+type isReportedEditorStartup_Daemon interface {
+	isReportedEditorStartup_Daemon()
+}
+
+type ReportedEditorStartup_Spawned struct {
+	Spawned *EditorStartupDaemonSpawned `protobuf:"bytes,2,opt,name=spawned,proto3,oneof"`
+}
+
+type ReportedEditorStartup_Running struct {
+	Running *EditorStartupDaemonRunning `protobuf:"bytes,3,opt,name=running,proto3,oneof"`
+}
+
+func (*ReportedEditorStartup_Spawned) isReportedEditorStartup_Daemon() {}
+
+func (*ReportedEditorStartup_Running) isReportedEditorStartup_Daemon() {}
+
+// The editor found no daemon serving and started one, so its startup
+// includes the daemon's boot. DELIBERATELY EMPTY: the arm is the fact.
+type EditorStartupDaemonSpawned struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditorStartupDaemonSpawned) Reset() {
+	*x = EditorStartupDaemonSpawned{}
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditorStartupDaemonSpawned) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditorStartupDaemonSpawned) ProtoMessage() {}
+
+func (x *EditorStartupDaemonSpawned) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditorStartupDaemonSpawned.ProtoReflect.Descriptor instead.
+func (*EditorStartupDaemonSpawned) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{3}
+}
+
+// The editor linked to a daemon that was already serving. DELIBERATELY
+// EMPTY: the arm is the fact.
+type EditorStartupDaemonRunning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditorStartupDaemonRunning) Reset() {
+	*x = EditorStartupDaemonRunning{}
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditorStartupDaemonRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditorStartupDaemonRunning) ProtoMessage() {}
+
+func (x *EditorStartupDaemonRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditorStartupDaemonRunning.ProtoReflect.Descriptor instead.
+func (*EditorStartupDaemonRunning) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{4}
+}
+
 // THE ARM IS THE OUTCOME.
 type ReportLatenciesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -237,7 +506,7 @@ type ReportLatenciesResponse struct {
 
 func (x *ReportLatenciesResponse) Reset() {
 	*x = ReportLatenciesResponse{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -249,7 +518,7 @@ func (x *ReportLatenciesResponse) String() string {
 func (*ReportLatenciesResponse) ProtoMessage() {}
 
 func (x *ReportLatenciesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -262,7 +531,7 @@ func (x *ReportLatenciesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportLatenciesResponse.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ReportLatenciesResponse) GetResult() isReportLatenciesResponse_Result {
@@ -325,7 +594,7 @@ type ReportLatenciesSuccess struct {
 
 func (x *ReportLatenciesSuccess) Reset() {
 	*x = ReportLatenciesSuccess{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -337,7 +606,7 @@ func (x *ReportLatenciesSuccess) String() string {
 func (*ReportLatenciesSuccess) ProtoMessage() {}
 
 func (x *ReportLatenciesSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -350,7 +619,7 @@ func (x *ReportLatenciesSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportLatenciesSuccess.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ReportLatenciesSuccess) GetOutcome() isReportLatenciesSuccess_Outcome {
@@ -416,7 +685,10 @@ func (*ReportLatenciesSuccess_MetricsOff) isReportLatenciesSuccess_Outcome() {}
 // Every latency in the batch was recorded.
 type ReportLatenciesRecorded struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many were recorded: the batch's length.
+	// How many latencies were recorded: the length of the batch's
+	// `latencies`. Every editor startup milestone in the batch is recorded too
+	// and is not counted here, since a milestone names no workspace and is
+	// never dropped.
 	Recorded      uint32 `protobuf:"varint,1,opt,name=recorded,proto3" json:"recorded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -424,7 +696,7 @@ type ReportLatenciesRecorded struct {
 
 func (x *ReportLatenciesRecorded) Reset() {
 	*x = ReportLatenciesRecorded{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +708,7 @@ func (x *ReportLatenciesRecorded) String() string {
 func (*ReportLatenciesRecorded) ProtoMessage() {}
 
 func (x *ReportLatenciesRecorded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,7 +721,7 @@ func (x *ReportLatenciesRecorded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportLatenciesRecorded.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesRecorded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReportLatenciesRecorded) GetRecorded() uint32 {
@@ -475,7 +747,7 @@ type ReportLatenciesPartlyRecorded struct {
 
 func (x *ReportLatenciesPartlyRecorded) Reset() {
 	*x = ReportLatenciesPartlyRecorded{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +759,7 @@ func (x *ReportLatenciesPartlyRecorded) String() string {
 func (*ReportLatenciesPartlyRecorded) ProtoMessage() {}
 
 func (x *ReportLatenciesPartlyRecorded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +772,7 @@ func (x *ReportLatenciesPartlyRecorded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportLatenciesPartlyRecorded.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesPartlyRecorded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ReportLatenciesPartlyRecorded) GetRecorded() uint32 {
@@ -528,7 +800,7 @@ type ReportLatenciesMetricsOff struct {
 
 func (x *ReportLatenciesMetricsOff) Reset() {
 	*x = ReportLatenciesMetricsOff{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -540,7 +812,7 @@ func (x *ReportLatenciesMetricsOff) String() string {
 func (*ReportLatenciesMetricsOff) ProtoMessage() {}
 
 func (x *ReportLatenciesMetricsOff) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -553,7 +825,7 @@ func (x *ReportLatenciesMetricsOff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportLatenciesMetricsOff.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesMetricsOff) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{9}
 }
 
 // The daemon's refusals. Validation failures (an unspecified kind, an unset
@@ -574,7 +846,7 @@ type ReportLatenciesError struct {
 
 func (x *ReportLatenciesError) Reset() {
 	*x = ReportLatenciesError{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -586,7 +858,7 @@ func (x *ReportLatenciesError) String() string {
 func (*ReportLatenciesError) ProtoMessage() {}
 
 func (x *ReportLatenciesError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -599,7 +871,7 @@ func (x *ReportLatenciesError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportLatenciesError.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ReportLatenciesError) GetCause() isReportLatenciesError_Cause {
@@ -645,7 +917,7 @@ type ReportLatenciesWorkspaceRefMismatch struct {
 
 func (x *ReportLatenciesWorkspaceRefMismatch) Reset() {
 	*x = ReportLatenciesWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -657,7 +929,7 @@ func (x *ReportLatenciesWorkspaceRefMismatch) String() string {
 func (*ReportLatenciesWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *ReportLatenciesWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -670,7 +942,7 @@ func (x *ReportLatenciesWorkspaceRefMismatch) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ReportLatenciesWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*ReportLatenciesWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ReportLatenciesWorkspaceRefMismatch) GetWorkspaceId() string {
@@ -702,9 +974,18 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	"\x0fReportedLatency\x125\n" +
 	"\x04kind\x18\x01 \x01(\x0e2!.agentrepl.v1.ReportedLatencyKindR\x04kind\x128\n" +
 	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x18\n" +
-	"\aseconds\x18\x03 \x01(\x01R\aseconds\"U\n" +
+	"\aseconds\x18\x03 \x01(\x01R\aseconds\"\xa1\x01\n" +
 	"\x16ReportLatenciesRequest\x12;\n" +
-	"\tlatencies\x18\x01 \x03(\v2\x1d.agentrepl.v1.ReportedLatencyR\tlatencies\"\xa1\x01\n" +
+	"\tlatencies\x18\x01 \x03(\v2\x1d.agentrepl.v1.ReportedLatencyR\tlatencies\x12J\n" +
+	"\x0eeditor_startup\x18\x02 \x03(\v2#.agentrepl.v1.ReportedEditorStartupR\reditorStartup\"\xb0\x02\n" +
+	"\x15ReportedEditorStartup\x12B\n" +
+	"\tmilestone\x18\x01 \x01(\x0e2$.agentrepl.v1.EditorStartupMilestoneR\tmilestone\x12D\n" +
+	"\aspawned\x18\x02 \x01(\v2(.agentrepl.v1.EditorStartupDaemonSpawnedH\x00R\aspawned\x12D\n" +
+	"\arunning\x18\x03 \x01(\v2(.agentrepl.v1.EditorStartupDaemonRunningH\x00R\arunning\x12=\n" +
+	"\x1bseconds_since_process_start\x18\x04 \x01(\x01R\x18secondsSinceProcessStartB\b\n" +
+	"\x06daemon\"\x1c\n" +
+	"\x1aEditorStartupDaemonSpawned\"\x1c\n" +
+	"\x1aEditorStartupDaemonRunning\"\xa1\x01\n" +
 	"\x17ReportLatenciesResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.ReportLatenciesSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.ReportLatenciesErrorH\x00R\x05errorB\b\n" +
@@ -733,7 +1014,13 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	"#REPORTED_LATENCY_KIND_SWITCH_REPEAT\x10\x01\x12&\n" +
 	"\"REPORTED_LATENCY_KIND_SWITCH_FIRST\x10\x02\x12#\n" +
 	"\x1fREPORTED_LATENCY_KIND_PAGE_BOOT\x10\x03\x12%\n" +
-	"!REPORTED_LATENCY_KIND_PROMPT_ECHO\x10\x04B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"!REPORTED_LATENCY_KIND_PROMPT_ECHO\x10\x04*\xe0\x01\n" +
+	"\x16EditorStartupMilestone\x12(\n" +
+	"$EDITOR_STARTUP_MILESTONE_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dEDITOR_STARTUP_MILESTONE_INIT\x10\x01\x12*\n" +
+	"&EDITOR_STARTUP_MILESTONE_DAEMON_LINKED\x10\x02\x12&\n" +
+	"\"EDITOR_STARTUP_MILESTONE_FIRST_TAB\x10\x03\x12%\n" +
+	"!EDITOR_STARTUP_MILESTONE_ALL_TABS\x10\x04B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_report_latencies_proto_rawDescOnce sync.Once
@@ -747,36 +1034,44 @@ func file_agentrepl_v1_endpoint_report_latencies_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_report_latencies_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_report_latencies_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_endpoint_report_latencies_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_report_latencies_proto_goTypes = []any{
 	(ReportedLatencyKind)(0),                    // 0: agentrepl.v1.ReportedLatencyKind
-	(*ReportedLatency)(nil),                     // 1: agentrepl.v1.ReportedLatency
-	(*ReportLatenciesRequest)(nil),              // 2: agentrepl.v1.ReportLatenciesRequest
-	(*ReportLatenciesResponse)(nil),             // 3: agentrepl.v1.ReportLatenciesResponse
-	(*ReportLatenciesSuccess)(nil),              // 4: agentrepl.v1.ReportLatenciesSuccess
-	(*ReportLatenciesRecorded)(nil),             // 5: agentrepl.v1.ReportLatenciesRecorded
-	(*ReportLatenciesPartlyRecorded)(nil),       // 6: agentrepl.v1.ReportLatenciesPartlyRecorded
-	(*ReportLatenciesMetricsOff)(nil),           // 7: agentrepl.v1.ReportLatenciesMetricsOff
-	(*ReportLatenciesError)(nil),                // 8: agentrepl.v1.ReportLatenciesError
-	(*ReportLatenciesWorkspaceRefMismatch)(nil), // 9: agentrepl.v1.ReportLatenciesWorkspaceRefMismatch
-	(*v1.WorkspaceRef)(nil),                     // 10: workspace.v1.WorkspaceRef
+	(EditorStartupMilestone)(0),                 // 1: agentrepl.v1.EditorStartupMilestone
+	(*ReportedLatency)(nil),                     // 2: agentrepl.v1.ReportedLatency
+	(*ReportLatenciesRequest)(nil),              // 3: agentrepl.v1.ReportLatenciesRequest
+	(*ReportedEditorStartup)(nil),               // 4: agentrepl.v1.ReportedEditorStartup
+	(*EditorStartupDaemonSpawned)(nil),          // 5: agentrepl.v1.EditorStartupDaemonSpawned
+	(*EditorStartupDaemonRunning)(nil),          // 6: agentrepl.v1.EditorStartupDaemonRunning
+	(*ReportLatenciesResponse)(nil),             // 7: agentrepl.v1.ReportLatenciesResponse
+	(*ReportLatenciesSuccess)(nil),              // 8: agentrepl.v1.ReportLatenciesSuccess
+	(*ReportLatenciesRecorded)(nil),             // 9: agentrepl.v1.ReportLatenciesRecorded
+	(*ReportLatenciesPartlyRecorded)(nil),       // 10: agentrepl.v1.ReportLatenciesPartlyRecorded
+	(*ReportLatenciesMetricsOff)(nil),           // 11: agentrepl.v1.ReportLatenciesMetricsOff
+	(*ReportLatenciesError)(nil),                // 12: agentrepl.v1.ReportLatenciesError
+	(*ReportLatenciesWorkspaceRefMismatch)(nil), // 13: agentrepl.v1.ReportLatenciesWorkspaceRefMismatch
+	(*v1.WorkspaceRef)(nil),                     // 14: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_report_latencies_proto_depIdxs = []int32{
 	0,  // 0: agentrepl.v1.ReportedLatency.kind:type_name -> agentrepl.v1.ReportedLatencyKind
-	10, // 1: agentrepl.v1.ReportedLatency.workspace:type_name -> workspace.v1.WorkspaceRef
-	1,  // 2: agentrepl.v1.ReportLatenciesRequest.latencies:type_name -> agentrepl.v1.ReportedLatency
-	4,  // 3: agentrepl.v1.ReportLatenciesResponse.success:type_name -> agentrepl.v1.ReportLatenciesSuccess
-	8,  // 4: agentrepl.v1.ReportLatenciesResponse.error:type_name -> agentrepl.v1.ReportLatenciesError
-	5,  // 5: agentrepl.v1.ReportLatenciesSuccess.recorded:type_name -> agentrepl.v1.ReportLatenciesRecorded
-	6,  // 6: agentrepl.v1.ReportLatenciesSuccess.partly_recorded:type_name -> agentrepl.v1.ReportLatenciesPartlyRecorded
-	7,  // 7: agentrepl.v1.ReportLatenciesSuccess.metrics_off:type_name -> agentrepl.v1.ReportLatenciesMetricsOff
-	9,  // 8: agentrepl.v1.ReportLatenciesError.workspace_ref_mismatch:type_name -> agentrepl.v1.ReportLatenciesWorkspaceRefMismatch
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	14, // 1: agentrepl.v1.ReportedLatency.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 2: agentrepl.v1.ReportLatenciesRequest.latencies:type_name -> agentrepl.v1.ReportedLatency
+	4,  // 3: agentrepl.v1.ReportLatenciesRequest.editor_startup:type_name -> agentrepl.v1.ReportedEditorStartup
+	1,  // 4: agentrepl.v1.ReportedEditorStartup.milestone:type_name -> agentrepl.v1.EditorStartupMilestone
+	5,  // 5: agentrepl.v1.ReportedEditorStartup.spawned:type_name -> agentrepl.v1.EditorStartupDaemonSpawned
+	6,  // 6: agentrepl.v1.ReportedEditorStartup.running:type_name -> agentrepl.v1.EditorStartupDaemonRunning
+	8,  // 7: agentrepl.v1.ReportLatenciesResponse.success:type_name -> agentrepl.v1.ReportLatenciesSuccess
+	12, // 8: agentrepl.v1.ReportLatenciesResponse.error:type_name -> agentrepl.v1.ReportLatenciesError
+	9,  // 9: agentrepl.v1.ReportLatenciesSuccess.recorded:type_name -> agentrepl.v1.ReportLatenciesRecorded
+	10, // 10: agentrepl.v1.ReportLatenciesSuccess.partly_recorded:type_name -> agentrepl.v1.ReportLatenciesPartlyRecorded
+	11, // 11: agentrepl.v1.ReportLatenciesSuccess.metrics_off:type_name -> agentrepl.v1.ReportLatenciesMetricsOff
+	13, // 12: agentrepl.v1.ReportLatenciesError.workspace_ref_mismatch:type_name -> agentrepl.v1.ReportLatenciesWorkspaceRefMismatch
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_report_latencies_proto_init() }
@@ -785,15 +1080,19 @@ func file_agentrepl_v1_endpoint_report_latencies_proto_init() {
 		return
 	}
 	file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[2].OneofWrappers = []any{
+		(*ReportedEditorStartup_Spawned)(nil),
+		(*ReportedEditorStartup_Running)(nil),
+	}
+	file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[5].OneofWrappers = []any{
 		(*ReportLatenciesResponse_Success)(nil),
 		(*ReportLatenciesResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[6].OneofWrappers = []any{
 		(*ReportLatenciesSuccess_Recorded)(nil),
 		(*ReportLatenciesSuccess_PartlyRecorded)(nil),
 		(*ReportLatenciesSuccess_MetricsOff)(nil),
 	}
-	file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_report_latencies_proto_msgTypes[10].OneofWrappers = []any{
 		(*ReportLatenciesError_WorkspaceRefMismatch)(nil),
 	}
 	type x struct{}
@@ -801,8 +1100,8 @@ func file_agentrepl_v1_endpoint_report_latencies_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc), len(file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

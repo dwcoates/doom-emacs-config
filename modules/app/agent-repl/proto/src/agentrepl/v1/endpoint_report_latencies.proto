@@ -1,9 +1,10 @@
 // endpoint_report_latencies.proto — ReportLatencies. DIAGNOSTICS section.
 //
-// A CLIENT REPORTS HOW LONG ITS INTERACTIONS TOOK. Emacs and the webapp each
-// see the end of some user-facing interaction (a workspace switch shown, a
-// page booted) and measure its duration themselves, from a start instant
-// handed to them through the channel that already carried the interaction.
+// A CLIENT REPORTS HOW LONG ITS INTERACTIONS TOOK, AND EMACS HOW LONG ITS
+// STARTUP TOOK. Emacs and the webapp each see the end of some user-facing
+// interaction (a workspace switch shown, a page booted) and measure its
+// duration themselves, from a start instant handed to them through the
+// channel that already carried the interaction.
 // They send finished durations here in batches; the daemon records them in
 // the always-on metrics it exposes for VictoriaMetrics to scrape.
 //
@@ -63,7 +64,65 @@ message ReportLatenciesRequest {
   // The finished interactions since the client's last acknowledged report,
   // oldest first. An empty batch is valid and records nothing.
   repeated ReportedLatency latencies = 1;
+  // The milestones of the reporting editor's own startup reached since its
+  // last acknowledged report, oldest first. Sent by Emacs only; each
+  // milestone is reported once per editor process, and kept and sent again
+  // with the next batch until a report is acknowledged, so a daemon handover
+  // during the startup does not lose it.
+  repeated ReportedEditorStartup editor_startup = 2;
 }
+
+// ---- Editor startup: how long the editor took to come up ----
+
+// Which milestone of the editor's startup was reached. A closed set of
+// moments in one startup, not a state of anything: each is reached at most
+// once per editor process, in this order, though a startup that fails before
+// one never reaches it.
+enum EditorStartupMilestone {
+  // Never sent: a request carrying it is refused as InvalidArgument.
+  EDITOR_STARTUP_MILESTONE_UNSPECIFIED = 0;
+  // The editor's own initialization finished (Emacs's init files loaded).
+  EDITOR_STARTUP_MILESTONE_INIT = 1;
+  // The editor is linked to a serving daemon: its first connection answered.
+  EDITOR_STARTUP_MILESTONE_DAEMON_LINKED = 2;
+  // The editor's first workspace tab opened. A startup that opens no tab
+  // never reaches it.
+  EDITOR_STARTUP_MILESTONE_FIRST_TAB = 3;
+  // Every workspace tab the startup opens has opened or failed: the startup
+  // is over and the editor is ready. Reached at once by a startup with no
+  // tabs to open.
+  EDITOR_STARTUP_MILESTONE_ALL_TABS = 4;
+}
+
+// One milestone of the editor's startup, timed by the editor from its own
+// process start, so each milestone is a cumulative time since launch rather
+// than the length of a step. The daemon records it in its restart metrics as
+// the `editor_start` restart, the milestone its phase and the daemon arm its
+// cause.
+message ReportedEditorStartup {
+  // Which milestone was reached. Required; UNSPECIFIED is InvalidArgument.
+  EditorStartupMilestone milestone = 1;
+  // How this editor came to a daemon, which separates a startup that paid for
+  // a daemon's boot from one that linked to a daemon already serving. Every
+  // milestone of one startup carries the same arm. Required: an unset arm is
+  // InvalidArgument.
+  oneof daemon {
+    EditorStartupDaemonSpawned spawned = 2;
+    EditorStartupDaemonRunning running = 3;
+  }
+  // Seconds from the editor process's start to the milestone, on the
+  // editor's own clock. Finite and not negative; anything else is
+  // InvalidArgument.
+  double seconds_since_process_start = 4;
+}
+
+// The editor found no daemon serving and started one, so its startup
+// includes the daemon's boot. DELIBERATELY EMPTY: the arm is the fact.
+message EditorStartupDaemonSpawned {}
+
+// The editor linked to a daemon that was already serving. DELIBERATELY
+// EMPTY: the arm is the fact.
+message EditorStartupDaemonRunning {}
 
 // THE ARM IS THE OUTCOME.
 message ReportLatenciesResponse {
@@ -91,7 +150,10 @@ message ReportLatenciesSuccess {
 
 // Every latency in the batch was recorded.
 message ReportLatenciesRecorded {
-  // How many were recorded: the batch's length.
+  // How many latencies were recorded: the length of the batch's
+  // `latencies`. Every editor startup milestone in the batch is recorded too
+  // and is not counted here, since a milestone names no workspace and is
+  // never dropped.
   uint32 recorded = 1;
 }
 

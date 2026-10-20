@@ -35,6 +35,9 @@
 (defvar agent-repl-test-open-tabs--rows-noted nil "Every roster row an answer indexed, oldest first.")
 (defvar agent-repl-test-open-tabs--noted-at-show nil "The rows indexed when each tab was drawn.")
 
+(defvar agent-repl-test-open-tabs--milestones nil
+  "Every startup milestone the open reached, and `:ended' for the startup's end, in order.")
+
 (defmacro agent-repl-test-open-tabs--with (&rest body)
   "Run BODY with fresh opens in their process-start state, boundaries stubbed.
 A ref id names the workspace of the same name."
@@ -58,6 +61,7 @@ A ref id names the workspace of the same name."
            (agent-repl-test-open-tabs--undrawn nil)
            (agent-repl-test-open-tabs--armed 0)
            (agent-repl-test-open-tabs--noted nil)
+           (agent-repl-test-open-tabs--milestones nil)
            (agent-repl-test-open-tabs--rows-noted nil)
            (agent-repl-test-open-tabs--noted-at-show nil)
            (agent-repl-test-open-tabs--buffer (generate-new-buffer " *open-tabs-page*")))
@@ -108,6 +112,14 @@ A ref id names the workspace of the same name."
                         t))
                      ((symbol-function 'agent-repl-startup-first-hooks-arm)
                       (lambda () (cl-incf agent-repl-test-open-tabs--armed)))
+                     ((symbol-function 'agent-repl-startup-reach)
+                      (lambda (milestone)
+                        (setq agent-repl-test-open-tabs--milestones
+                              (append agent-repl-test-open-tabs--milestones (list milestone)))))
+                     ((symbol-function 'agent-repl-startup-ended)
+                      (lambda ()
+                        (setq agent-repl-test-open-tabs--milestones
+                              (append agent-repl-test-open-tabs--milestones (list :ended)))))
                      ((symbol-function 'agent-repl-open-progress-note-loaded)
                       (lambda (ws) (push ws agent-repl-test-open-tabs--noted)))
                      ;; No host unless a test stages one.
@@ -644,6 +656,28 @@ leaves the tab open."
     ;; Assert
     (should-not (agent-repl-open-tabs-choosing-p))))
 
+(ert-deftest agent-repl-test-open-tabs-a-tab-opened-in-the-startup-reaches-the-first-tab ()
+  "Every tab the startup opens reaches the first-tab milestone, which keeps only the first."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "b" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--milestones '(:first-tab)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-later-open-reaches-no-milestone ()
+  "A tab opened after the startup is no startup milestone."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (setq agent-repl-open-tabs--startup 'done)
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should-not agent-repl-test-open-tabs--milestones)))
+
 (ert-deftest agent-repl-test-open-tabs-a-later-open-selects-nothing ()
   "A tab opened after the startup is not selected by the open."
   (agent-repl-test-open-tabs--with
@@ -728,6 +762,21 @@ leaves the tab open."
     (agent-repl-test-open-tabs--close '(:error "connection reset"))
     ;; Assert
     (should-not (agent-repl-open-tabs-starting-p))))
+
+(ert-deftest agent-repl-test-open-tabs-every-end-of-the-startup-tells-the-milestones ()
+  "However the startup ends, its end is the all-tabs milestone."
+  (dolist (end (list (lambda () (agent-repl-test-open-tabs--walk))
+                     (lambda ()
+                       (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+                       (agent-repl-test-open-tabs--close '(:error "connection reset")))
+                     (lambda ()
+                       (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+                       (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--finished 0 1)))))
+    (agent-repl-test-open-tabs--with
+      ;; Act
+      (funcall end)
+      ;; Assert
+      (should (equal agent-repl-test-open-tabs--milestones '(:ended))))))
 
 (ert-deftest agent-repl-test-open-tabs-an-empty-roster-ends-the-startup ()
   "A registry with no workspaces still ends the startup."

@@ -53,6 +53,8 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-connect-stream-conn "connect" (stream))
 (declare-function agent-repl-startup-first-hooks-arm "startup" ())
+(declare-function agent-repl-startup-reach "startup" (milestone))
+(declare-function agent-repl-startup-ended "startup" ())
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl--frontend-make-slot-buffer "frontend" (name xw))
 (declare-function agent-repl--pseudo-workspace-name-p "core" (ws))
@@ -399,6 +401,8 @@ daemon like every other switch."
                      (member ws (agent-repl-roster-drawn-tab-order))
                      t)))
     (agent-repl--info ws "elisp.open-tabs.tab-opened ws=%s id=%s selects=%s" ws id select)
+    (when (agent-repl-open-tabs-starting-p)
+      (agent-repl-startup-reach :first-tab))
     (agent-repl-open-tabs--say "%s: ready." ws)
     (when select
       (setq agent-repl-open-tabs--startup-selected ws)
@@ -441,6 +445,7 @@ dialed in a loop."
   (agent-repl--info agent-repl-open-tabs--central "elisp.open-tabs.startup-ended why=%s" why)
   (agent-repl-open-tabs--drop-startup-view)
   (agent-repl-roster-apply-current)
+  (agent-repl-startup-ended)
   (agent-repl-startup-first-hooks-arm))
 
 (provide 'agent-repl-open-tabs)

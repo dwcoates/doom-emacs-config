@@ -5,9 +5,10 @@
 // A restart is anything that takes what serves the user down and brings it
 // back: a deploy, a daemon's boot, a store or sidecar restart, a workspace's
 // session start during a boot or a takeover, each step of a session's start,
-// a shim replacement, and a workspace's transfer to a successor daemon. Each
-// one is timed by the code that sees it START and END, in the one process
-// that runs it, and stated here as one Observation.
+// a shim replacement, a workspace's transfer to a successor daemon, and the
+// editor's own startup. Each one is timed by the code that sees it START and
+// END, in the one process that runs it (the editor's startup by the editor,
+// which reports it), and stated here as one Observation.
 //
 // AN OBSERVATION CAN ONLY BE BUILT RIGHT. Its fields are unexported and each
 // kind of restart has its own constructor taking that kind's own phase type,
@@ -51,6 +52,9 @@ const (
 	// step by step, whoever asked for it: a bring-up, an editor's open, a
 	// revival, a shim relaunch's resume, an answered cold gate.
 	SessionStart Restart = "session_start"
+	// EditorStart is one editor process's startup, each milestone timed by
+	// the editor from its own process start and reported to the daemon.
+	EditorStart Restart = "editor_start"
 )
 
 // Outcome is how the timed restart or phase ended, the `outcome` label.
@@ -231,6 +235,33 @@ const (
 	SessionColdAnswer SessionKind = "cold_answer"
 )
 
+// EditorMilestone is one milestone of an editor's startup, its `phase`.
+type EditorMilestone string
+
+// The editor startup milestones, in the order a startup reaches them.
+const (
+	// EditorInit is the editor's own initialization finished.
+	EditorInit EditorMilestone = "init"
+	// EditorDaemonLinked is the editor linked to a serving daemon.
+	EditorDaemonLinked EditorMilestone = "daemon_linked"
+	// EditorFirstTab is the editor's first workspace tab opened.
+	EditorFirstTab EditorMilestone = "first_tab"
+	// EditorAllTabs is every tab the startup opens opened or failed.
+	EditorAllTabs EditorMilestone = "all_tabs"
+)
+
+// EditorDaemon is how an editor came to a daemon, an editor startup's
+// `cause`.
+type EditorDaemon string
+
+// The ways an editor comes to a daemon.
+const (
+	// EditorSpawned is a startup that started the daemon itself.
+	EditorSpawned EditorDaemon = "spawned"
+	// EditorRunning is a startup that linked to a daemon already serving.
+	EditorRunning EditorDaemon = "running"
+)
+
 // Observation is one timed restart or phase. Build one with the constructor
 // of its restart; the zero value is not an observation.
 type Observation struct {
@@ -306,6 +337,12 @@ func OfTransfer(ws ids.WorkspaceID, p TransferPhase, outcome Outcome, d time.Dur
 // OfSessionStart is one step of one workspace's session start.
 func OfSessionStart(ws ids.WorkspaceID, p SessionPhase, kind SessionKind, outcome Outcome, d time.Duration) Observation {
 	return observation(SessionStart, string(p), string(kind), outcome, ws, d)
+}
+
+// OfEditorStart is one milestone of an editor's startup, measured from the
+// editor's process start.
+func OfEditorStart(m EditorMilestone, daemon EditorDaemon, d time.Duration) Observation {
+	return observation(EditorStart, string(m), string(daemon), OK, "", d)
 }
 
 // Recorder records restart observations. runtimemetrics.Surface is the

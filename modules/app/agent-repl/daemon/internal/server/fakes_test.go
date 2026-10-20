@@ -2054,9 +2054,16 @@ type fakeLatencies struct {
 	mu       sync.Mutex
 	enabled  bool
 	observed []observedLatency
+	restarts []restarttiming.Observation
 }
 
 func (f *fakeLatencies) Enabled() bool { return f.enabled }
+
+func (f *fakeLatencies) ObserveRestart(o restarttiming.Observation) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restarts = append(f.restarts, o)
+}
 
 func (f *fakeLatencies) ObserveLatency(ws ids.WorkspaceID, kind runtimemetrics.LatencyKind, seconds float64) {
 	f.mu.Lock()
@@ -2089,6 +2096,17 @@ func (f *fakeLatencies) all() []observedLatency {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]observedLatency(nil), f.observed...)
+}
+
+// startups answers every restart recorded, as phase/cause/seconds.
+func (f *fakeLatencies) startups() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, o := range f.restarts {
+		out = append(out, fmt.Sprintf("%s:%s/%s/%v", o.Restart(), o.Phase(), o.Cause(), o.Seconds()))
+	}
+	return out
 }
 
 // FoldSubsection records the subsection fold as an arrangement call and
