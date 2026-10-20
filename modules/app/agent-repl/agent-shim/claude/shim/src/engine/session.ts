@@ -5128,19 +5128,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       // A RESUME RESTORES THE CONVERSATION'S OWN POSTURE. The SDK records the
       // model and permission mode in the transcript but does not restore them,
-      // so the shim reads the last of each back and passes them.
+      // so the shim passes them itself.
+      // THE WORKSPACE'S MODEL OUTRANKS THE TRANSCRIPT'S. A switch nobody has
+      // prompted on yet is in no response, so the transcript would bring the
+      // session back on the model the user had left; the daemon names the
+      // user's choice (StartSessionResume.model) and only a workspace it holds
+      // none for reads the transcript's last response model back.
       // NEVER THE `<synthetic>` MARKER: the facts reader already skips the
       // records the CLI wrote itself, and the normalize here is the same rule
       // at the one assignment every launch reads, so no other source of a
       // marker can reach the SDK option either.
-      requestedModel = normalizeModel(facts.lastModel ?? "");
+      requestedModel = normalizeModel(source.value.model?.name ?? facts.lastModel ?? "");
       if (facts.lastPermissionMode !== undefined) {
         permissionMode = fromVendorPermissionMode(
           facts.lastPermissionMode as PermissionModeLike,
         );
       }
       const remediation = source.value.coldRemediation;
-      const cold = judgeCold(facts, coldNowMs(), requestedModel);
+      // NEVER A MODEL SWITCH AT A RESUME. The model a resume names is the
+      // user's own choice, whose switch was judged when it was made
+      // (setSessionModel), and a model recovered from the transcript is the one
+      // it last ran on. Only a lapse is judged here.
+      const cold = judgeCold(facts, coldNowMs(), undefined);
       if (cold !== undefined && remediation === undefined) {
         LOGGER.debug(
           { vendor_session_id: vendorSessionId, reason: cold, context_tokens: facts.contextTokens },

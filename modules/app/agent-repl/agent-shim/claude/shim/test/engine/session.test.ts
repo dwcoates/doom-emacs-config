@@ -443,7 +443,7 @@ function freshRequestNoModel(): shimv1.StartSessionRequest {
 function resumeRequest(
   vendorSessionId: string,
   remediation?: conversationv1.SessionColdRemediation,
-  options: { rebind?: boolean; rolledBackTurns?: readonly string[] } = {},
+  options: { rebind?: boolean; rolledBackTurns?: readonly string[]; model?: string } = {},
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
@@ -456,6 +456,7 @@ function resumeRequest(
         ...(options.rebind === true
           ? { rebind: create(shimv1.StartSessionRebindSchema, {}) }
           : {}),
+        ...(options.model === undefined ? {} : { model: create(conversationv1.AgentModelSchema, { name: options.model }) }),
       }),
     },
   });
@@ -1343,6 +1344,47 @@ describe("StartSession, resume", () => {
     await pending;
 
     expect(h.queries[0]?.spec.model).toBe("claude-opus-5");
+  });
+
+  it("RESUMES on the model the workspace names, over the transcript's last", async () => {
+    // Arrange: the conversation last answered on claude-opus-5, and the user
+    // has since switched the workspace to haiku without prompting on it.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    const pending = h.engine.startSession(resumeRequest("resume-1", undefined, { model: "haiku" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    const response = await pending;
+
+    // Assert
+    expect([
+      h.queries[0]?.spec.model,
+      response.result.case === "success" ? response.result.value.session?.effectiveModel?.name : undefined,
+    ]).toEqual(["haiku", "haiku"]);
+  });
+
+  it("never judges the workspace's named model a cold model switch", async () => {
+    // Arrange: a warm transcript above the cold-gate floor, last answered on
+    // another model than the one the resume names.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    const pending = h.engine.startSession(resumeRequest("resume-1", undefined, { model: "haiku" }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    // Assert
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("still REFUSES a lapsed resume that names the workspace's model", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1", undefined, { model: "haiku" })))).toBe(
+      "cold",
+    );
   });
 
   it("never resumes on the synthetic marker the CLI wrote for a refused request", async () => {
