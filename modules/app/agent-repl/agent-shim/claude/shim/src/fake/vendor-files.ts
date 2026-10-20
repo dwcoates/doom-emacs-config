@@ -42,9 +42,21 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 
 import { cwdSlug, projectDir, transcriptPath } from "../engine/vendor-paths.js";
-import { bindLog } from "../log.js";
+import { bindLog, noteSlowWrite } from "../log.js";
 
 const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.vendor-files" });
+
+/**
+ * Append TEXT to the vendor file at PATH: the ONE write every fake vendor file
+ * goes through. The append is synchronous, as the CLI's own is, so it holds
+ * the shim's event loop; one that holds it past `SLOW_SYNC_WRITE_MS` is
+ * recorded with the file and how long it held (`noteSlowWrite`).
+ */
+export function appendVendorFile(path: string, text: string): void {
+  const started = performance.now();
+  appendFileSync(path, text);
+  noteSlowWrite("vendor-file", Buffer.byteLength(text), performance.now() - started, { path });
+}
 
 /**
  * The `version` every record reports.
@@ -214,7 +226,7 @@ export class TranscriptWriter {
       version: FAKE_CLI_VERSION,
       gitBranch: this.envelope.gitBranch,
     };
-    appendFileSync(this.path, `${JSON.stringify(line)}\n`);
+    appendVendorFile(this.path, `${JSON.stringify(line)}\n`);
     this.head = record.uuid;
   }
 
@@ -227,7 +239,7 @@ export class TranscriptWriter {
    * both invent fields and break the next record's parent.
    */
   appendUnchained(record: TranscriptRecord): void {
-    appendFileSync(this.path, `${JSON.stringify({ ...record, sessionId: this.envelope.sessionId })}\n`);
+    appendVendorFile(this.path, `${JSON.stringify({ ...record, sessionId: this.envelope.sessionId })}\n`);
   }
 }
 
@@ -281,7 +293,7 @@ export class SubagentWriter {
       version: FAKE_CLI_VERSION,
       gitBranch: this.envelope.gitBranch,
     };
-    appendFileSync(this.path, `${JSON.stringify(line)}\n`);
+    appendVendorFile(this.path, `${JSON.stringify(line)}\n`);
     this.head = record.uuid;
   }
 
@@ -319,7 +331,7 @@ export class SpoolWriter {
     if (this.finished) {
       throw new Error(`fake spool ${this.path} was appended to after its EXIT line`);
     }
-    appendFileSync(this.path, chunk);
+    appendVendorFile(this.path, chunk);
   }
 
   /** Append one whole line. */
@@ -333,7 +345,7 @@ export class SpoolWriter {
       throw new Error(`fake spool ${this.path} was finished twice`);
     }
     this.finished = true;
-    appendFileSync(this.path, `EXIT=${exitCode}\n`);
+    appendVendorFile(this.path, `EXIT=${exitCode}\n`);
     LOGGER.debug({ spool_path: this.path, exit_code: exitCode }, "terminated a fake task spool");
   }
 

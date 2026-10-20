@@ -7,9 +7,10 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  appendVendorFile,
   FAKE_CLI_VERSION,
   lastChainedUuid,
   SpoolWriter,
@@ -20,6 +21,9 @@ import {
   TranscriptWriter,
   VendorFiles,
 } from "../../src/fake/vendor-files.js";
+
+import { logRecordsDuring } from "../log-records.js";
+import { SLOW_SYNC_WRITE_MS } from "../../src/log.js";
 
 const temp = (): string => mkdtempSync(join(tmpdir(), "fake-vendor-files-"));
 
@@ -388,4 +392,59 @@ describe("VendorFiles", () => {
     expect(files.vendorSessionId).toBe("sess-2");
   });
 
+});
+
+describe("appendVendorFile", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("appends the text to the file", () => {
+    // Arrange.
+    const path = join(temp(), "a.jsonl");
+
+    // Act.
+    appendVendorFile(path, "one\n");
+    appendVendorFile(path, "two\n");
+
+    // Assert.
+    expect(readFileSync(path, "utf8")).toBe("one\ntwo\n");
+  });
+
+  it("records an append that held the event loop past the bound, naming the file", () => {
+    // Arrange.
+    const path = join(temp(), "a.jsonl");
+    const clock = [0, SLOW_SYNC_WRITE_MS + 20];
+    vi.spyOn(performance, "now").mockImplementation(() => clock.shift() ?? SLOW_SYNC_WRITE_MS + 20);
+
+    // Act.
+    const records = logRecordsDuring(() => appendVendorFile(path, "one\n"));
+
+    // Assert.
+    const slow = records.filter((r) => r.operation === "shim.logging.slow-write");
+    expect(slow).toHaveLength(1);
+    expect(slow[0]?.context).toMatchObject({ sink: "vendor-file", path, bytes: 4, blocked_ms: SLOW_SYNC_WRITE_MS + 20 });
+  });
+
+  it("records nothing for a fast append", () => {
+    // Arrange.
+    const path = join(temp(), "a.jsonl");
+
+    // Act.
+    const records = logRecordsDuring(() => appendVendorFile(path, "one\n"));
+
+    // Assert.
+    expect(records.filter((r) => r.operation === "shim.logging.slow-write")).toEqual([]);
+  });
+});
+
+it("routes every vendor-file append through appendVendorFile", () => {
+  // Arrange.
+  const source = readFileSync(join(__dirname, "../../src/fake/vendor-files.ts"), "utf8");
+
+  // Act.
+  const direct = source.split("\n").filter((line) => /appendFileSync\(/.test(line) && !line.trim().startsWith("*"));
+
+  // Assert: the one direct call is the helper's own.
+  expect(direct).toEqual(["  appendFileSync(path, text);"]);
 });

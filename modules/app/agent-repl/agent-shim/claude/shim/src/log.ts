@@ -398,6 +398,37 @@ function poisonSink(runtime: RuntimeContext, failure: Error): void {
   for (const listener of poisonListeners) listener(failure);
 }
 
+/**
+ * How long, in ms, a synchronous write may hold the event loop before it is
+ * recorded. Healthy writes take well under a millisecond; a write past this
+ * bound stalls every stream the shim serves, so it is named with its sink,
+ * size and duration (`noteSlowWrite`) rather than left as an unexplained gap.
+ */
+export const SLOW_SYNC_WRITE_MS = 100;
+
+/** True while a slow-write record is itself being written, so it never reports itself. */
+let reportingSlowWrite = false;
+
+/**
+ * Record that a synchronous write to SINK held the event loop BLOCKED_MS.
+ * The one place every slow synchronous write is reported, whichever module
+ * made it; a write under `SLOW_SYNC_WRITE_MS` records nothing.
+ */
+export function noteSlowWrite(sink: string, bytes: number, blockedMs: number, fields: LogFields = {}): void {
+  if (blockedMs < SLOW_SYNC_WRITE_MS || reportingSlowWrite) return;
+  reportingSlowWrite = true;
+  try {
+    emit(
+      "info",
+      "normal",
+      { component: "shim-logging", operation: "shim.logging.slow-write", ...fields, sink, bytes, blocked_ms: Math.round(blockedMs) },
+      "a synchronous write held the shim's event loop",
+    );
+  } finally {
+    reportingSlowWrite = false;
+  }
+}
+
 function emit(level: LogLevel, verbosity: ShimLogRecord["verbosity"], fields: LogFields, message: string): void {
   // Construct and serialize completely before either sink is touched: invalid records emit nowhere.
   const record = buildRecord(level, verbosity, fields, message);
@@ -408,22 +439,27 @@ function emit(level: LogLevel, verbosity: ShimLogRecord["verbosity"], fields: Lo
   // announced once, and is standing as a degraded window on WatchSession, so
   // repeating it per record would only bury the announcement.
   if (runtime.poisoned !== undefined) return;
+  const durableStarted = performance.now();
   try {
     writeDurable(runtime, bytes);
   } catch (err) {
     poisonSink(runtime, err instanceof Error ? err : new Error(String(err)));
     return;
   }
+  noteSlowWrite("log-durable", bytes.length, performance.now() - durableStarted);
   if (stderrMirror === "retired") return;
   if (verbosity === "normal" || process.env.AGENT_REPL_LOG_VERBOSE === "1") {
     // A synchronous EPIPE from a dead daemon's pipe retires the mirror. It
     // must not reach the caller: the record IS written, and killing a shim
     // over a lost convenience copy is the incident this guard exists for.
+    const mirrorStarted = performance.now();
     try {
       process.stderr.write(bytes);
     } catch (err) {
       retireStderrMirror(err instanceof Error ? err : new Error(String(err)));
+      return;
     }
+    noteSlowWrite("log-stderr", bytes.length, performance.now() - mirrorStarted);
   }
 }
 

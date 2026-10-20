@@ -117,6 +117,60 @@ describe("shim runtime logging", () => {
     expect(terminal).toHaveLength(1);
   });
 
+  describe("a slow synchronous write", () => {
+    it("is recorded with its sink, size and how long it held the loop", async () => {
+      // Arrange.
+      const log = await configured();
+      stderr();
+      const before = logSinkMark();
+
+      // Act.
+      log.noteSlowWrite("vendor-file", 42, log.SLOW_SYNC_WRITE_MS + 4.4, { path: "/t/x.jsonl" });
+
+      // Assert.
+      const slow = logRecordsSince(before).filter((r) => r.operation === "shim.logging.slow-write");
+      expect(slow).toHaveLength(1);
+      expect(slow[0]?.level).toBe("info");
+      expect(slow[0]?.context).toEqual(
+        containing({ sink: "vendor-file", bytes: 42, blocked_ms: log.SLOW_SYNC_WRITE_MS + 4, path: "/t/x.jsonl" }),
+      );
+    });
+
+    it("records nothing under the bound", async () => {
+      // Arrange.
+      const log = await configured();
+      const before = logSinkMark();
+
+      // Act.
+      log.noteSlowWrite("vendor-file", 42, log.SLOW_SYNC_WRITE_MS - 1);
+
+      // Assert.
+      expect(logRecordsSince(before)).toEqual([]);
+    });
+
+    it("records a log write to the durable sink that held the loop, once", async () => {
+      // Arrange: the clock jumps across the durable write of one record only.
+      const log = await configured();
+      stderr();
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      mockedWriteSync.mockImplementation(((...args: unknown[]) => {
+        now += log.SLOW_SYNC_WRITE_MS + 50;
+        return args[3] as number;
+      }) as typeof writeSync);
+      const before = logSinkMark();
+
+      // Act.
+      log.bindLog({ operation: "shim.test.slow" }).info({}, "slow");
+
+      // Assert: the record, then one report of its write; the report's own
+      // write is never reported in turn.
+      const records = logRecordsSince(before);
+      expect(records.map((r) => r.operation)).toEqual(["shim.test.slow", "shim.logging.slow-write"]);
+      expect(records[1]?.context).toEqual(containing({ sink: "log-durable", blocked_ms: log.SLOW_SYNC_WRITE_MS + 50 }));
+    });
+  });
+
   describe("the level window", () => {
     const configureAt = async (clock: { at: number }) => {
       const log = await freshLog();
