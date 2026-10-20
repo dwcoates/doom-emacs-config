@@ -666,7 +666,7 @@ describe("the salient kinds", () => {
     );
   });
 
-  it("says a next attempt that has passed is overdue, counting up", () => {
+  it("holds a next attempt that has already passed at zero", () => {
     const cell = salientCell(
       "retrying",
       {
@@ -677,11 +677,11 @@ describe("the salient kinds", () => {
       "working",
     );
     expect(cell.querySelector("[data-countdown]")?.textContent).toBe(
-      "next try overdue by 2m",
+      "next try in 0s",
     );
   });
 
-  it("turns the countdown overdue when the promised instant passes", () => {
+  it("keeps counting down, never up, once the promised instant passes", () => {
     const cell = salientCell(
       "retrying",
       {
@@ -692,24 +692,9 @@ describe("the salient kinds", () => {
       "working",
     );
     vi.advanceTimersByTime(3000);
-    const countdown = cell.querySelector("[data-countdown]");
-    expect(countdown?.textContent).toBe("next try overdue by 2s");
-    expect(countdown?.hasAttribute("data-overdue")).toBe(true);
-  });
-
-  it("does not mark a pending next attempt overdue", () => {
-    const cell = salientCell(
-      "retrying",
-      {
-        attempt: 9,
-        status: "overloaded",
-        nextAttempt: { atMs: BigInt(NOW + 1000) },
-      },
-      "working",
+    expect(cell.querySelector("[data-countdown]")?.textContent).toBe(
+      "next try in 0s",
     );
-    expect(
-      cell.querySelector("[data-countdown]")?.hasAttribute("data-overdue"),
-    ).toBe(false);
   });
 
   it("draws a merge's step line as the salient line under merging", () => {

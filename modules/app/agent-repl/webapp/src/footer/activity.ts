@@ -1206,9 +1206,9 @@ export function drawFooterStatusActivityAuthenticating(
  * drawn only when it stated them.
  *
  * THE NEXT ATTEMPT IS SHIPPED AS AN INSTANT and counts down here on the shared
- * ticker. Once it passes with no newer attempt pushed, the line says so,
- * "next try overdue by 2m", rather than floor at zero: a vendor that promised
- * a retry and never made one reads as the stall it is.
+ * ticker. The line is always a countdown (owner ruling, 2026-10-20): once the
+ * instant passes with no newer attempt pushed, it holds at "next try in 0s"
+ * rather than counting up how late the vendor is.
  */
 export function drawFooterStatusActivityRetrying(
   u: FooterStatusActivityRetrying,
@@ -1238,7 +1238,7 @@ export function drawFooterStatusActivityRetrying(
 
 /**
  * "next try in 12s" ticking down to the vendor's promised instant at second
- * resolution, then "next try overdue by 2m" counting up once it has passed.
+ * resolution, holding at "next try in 0s" once it has passed.
  */
 function drawNextAttempt(
   u: FooterStatusActivityAt,
@@ -1251,11 +1251,7 @@ function drawNextAttempt(
     "countdown",
     "footer-next-attempt",
     (span, nowMs) => {
-      const overdue = nowMs >= atMs;
-      span.toggleAttribute("data-overdue", overdue);
-      span.textContent = overdue
-        ? `next try overdue by ${formatAge(nowMs - atMs)}`
-        : `next try in ${remainingLabel(atMs - nowMs)}`;
+      span.textContent = `next try in ${remainingLabel(atMs - nowMs)}`;
     },
   );
 }
