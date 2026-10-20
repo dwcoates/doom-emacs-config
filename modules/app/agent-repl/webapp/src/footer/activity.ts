@@ -103,6 +103,7 @@ import type {
   FooterMoney,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { formatAge, formatCountdown, formatTickedAge } from "../duration.js";
+import type { Ticker } from "../clock.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -1245,14 +1246,11 @@ function drawNextAttempt(
   deps: AllowanceDeps,
   path: string,
 ): HTMLElement {
-  const atMs = msOf(u.atMs, `${path}.at_ms`);
-  return footerClockSpan(
+  return footerCountdownSpan(
     deps.ctx.ticker,
-    "countdown",
     "footer-next-attempt",
-    (span, nowMs) => {
-      span.textContent = `next try in ${remainingLabel(atMs - nowMs)}`;
-    },
+    "next try in ",
+    msOf(u.atMs, `${path}.at_ms`),
   );
 }
 
@@ -1268,11 +1266,13 @@ export function drawFooterStatusActivityWakeup(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-wakeup";
-  const wakeAtMs = msOf(u.wakeAtMs, `${path}.wake_at_ms`);
   line.appendChild(
-    footerClockSpan(deps.ctx.ticker, "countdown", undefined, (span, nowMs) => {
-      span.textContent = `wakes in ${remainingLabel(wakeAtMs - nowMs)}`;
-    }),
+    footerCountdownSpan(
+      deps.ctx.ticker,
+      undefined,
+      "wakes in ",
+      msOf(u.wakeAtMs, `${path}.wake_at_ms`),
+    ),
   );
   if (u.reason !== undefined) {
     line.appendChild(document.createTextNode(` · ${u.reason.text}`));
@@ -1425,4 +1425,21 @@ export function drawFooterStatusActivityAt(
  */
 export function remainingLabel(ms: number): string {
   return formatAge(Math.max(0, ms));
+}
+
+/**
+ * A countdown to ATMS reading LABEL then the time remaining ("next try in
+ * 12s"), ticking down on the shared clock and holding at `0s` once the instant
+ * passes. Every footer countdown at second resolution is built here, so none
+ * of them counts up past its instant.
+ */
+export function footerCountdownSpan(
+  ticker: Ticker,
+  className: string | undefined,
+  label: string,
+  atMs: number,
+): HTMLElement {
+  return footerClockSpan(ticker, "countdown", className, (span, nowMs) => {
+    span.textContent = `${label}${remainingLabel(atMs - nowMs)}`;
+  });
 }

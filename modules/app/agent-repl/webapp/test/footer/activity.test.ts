@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createTicker } from "../../src/clock.js";
 import { create } from "@bufbuild/protobuf";
 import {
   FooterAllowanceSchema,
@@ -12,6 +16,7 @@ import {
   drawFooterRateDivider,
   drawFooterStatusActivity,
   enduringUsage,
+  footerCountdownSpan,
   orderedAllowances,
   salientKind,
   type FooterActivity,
@@ -1751,5 +1756,52 @@ describe("the compaction line's summarizer spend", () => {
 
     // Assert
     expect([spend?.tagName, spend?.style.color]).toEqual([gate?.tagName, gate?.style.color]);
+  });
+});
+
+describe("footerCountdownSpan", () => {
+  it.each([
+    ["reads its label then the time remaining", NOW + 12_000, 0, "next try in 12s"],
+    ["ticks down on the shared clock", NOW + 12_000, 1000, "next try in 11s"],
+    ["holds at 0s once its instant passes", NOW + 1000, 3000, "next try in 0s"],
+    ["reads 0s for an instant already past", NOW - 120_000, 0, "next try in 0s"],
+  ])("%s", (_name, atMs, advanceMs, expected) => {
+    // Arrange
+    const span = footerCountdownSpan(createTicker(1000), undefined, "next try in ", atMs);
+
+    // Act
+    vi.advanceTimersByTime(advanceMs);
+
+    // Assert
+    expect(span.textContent).toBe(expected);
+  });
+
+  it("marks itself a countdown", () => {
+    expect(footerCountdownSpan(createTicker(1000), undefined, "", NOW).hasAttribute("data-countdown")).toBe(true);
+  });
+
+  it("wears the class it is given", () => {
+    expect(footerCountdownSpan(createTicker(1000), "footer-next-attempt", "", NOW).className).toBe("footer-next-attempt");
+  });
+
+  it("draws the bare remaining time under an empty label", () => {
+    expect(footerCountdownSpan(createTicker(1000), undefined, "", NOW + 12_000).textContent).toBe("12s");
+  });
+});
+
+// EVERY LABELED FOOTER COUNTDOWN IS BUILT BY footerCountdownSpan: a countdown
+// painting `label + remainingLabel(...)` by hand is a second spelling of the
+// same shape, which drifts (one once counted up past its instant).
+describe("the footer's countdowns share one builder", () => {
+  it("paints label-plus-remaining only inside footerCountdownSpan", () => {
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "footer");
+    const handPainted = readdirSync(dir)
+      .filter((file) => file.endsWith(".ts"))
+      .flatMap((file) =>
+        (readFileSync(path.join(dir, file), "utf8").match(/textContent = (`[^`]*\$\{)?remainingLabel\(/g) ?? []).map(
+          (site) => `${file}: ${site}`,
+        ),
+      );
+    expect(handPainted).toEqual(["activity.ts: textContent = `${label}${remainingLabel("]);
   });
 });
