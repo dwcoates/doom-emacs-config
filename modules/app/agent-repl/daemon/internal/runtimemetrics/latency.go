@@ -50,6 +50,7 @@ var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_REPEAT: {Name: "switch_repeat", Buckets: navigationBuckets},
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:  {Name: "switch_first", Buckets: navigationBuckets},
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:     {Name: "page_boot", Buckets: pageBootBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:   {Name: "prompt_echo", Buckets: navigationBuckets},
 }
 
 // WorkspaceOpen is the daemon-measured latency from an OpenWorkspace's

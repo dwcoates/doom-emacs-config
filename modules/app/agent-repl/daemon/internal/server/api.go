@@ -278,6 +278,10 @@ type server struct {
 	// its latest value: sharing one would hand a late subscriber whichever
 	// event happened last instead of the state it subscribed for.
 	hostStateTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]
+	// webEvents carries the web stream's EVENTS (prompt_echo), on Events for
+	// the reason hostEvents is: a Topic would hand a late page an echo it did
+	// not see happen.
+	webEvents map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchWebWorkspaceResponse]
 	// webTopics is one EVENT topic per workspace's WatchWebWorkspace stream.
 	webTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]
 	// webStateTopics is one STATE topic per workspace, carrying the
@@ -495,6 +499,7 @@ func New(deps Deps) (Server, error) {
 		hostStateTopics:     make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
 		webStateTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
 		webTopics:           make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
+		webEvents:           make(map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchWebWorkspaceResponse]),
 		webReveals:          make(map[ids.WorkspaceID]*webReveal),
 		daemonWatchers:      make(map[*daemonWatcher]struct{}),
 		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
@@ -578,6 +583,12 @@ func (s *server) hostEventStream(ws ids.WorkspaceID) *publish.Events[*agentreplv
 // webTopic answers a workspace's web push topic, creating it on first use.
 func (s *server) webTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchWebWorkspaceResponse] {
 	return perWorkspace(s, s.webTopics, ws)
+}
+
+// webEventStream answers a workspace's web events, creating them on first
+// use.
+func (s *server) webEventStream(ws ids.WorkspaceID) *publish.Events[*agentreplv1.WatchWebWorkspaceResponse] {
+	return perWorkspace(s, s.webEvents, ws)
 }
 
 // webStateTopic answers a workspace's web STATE topic, minting it on first use

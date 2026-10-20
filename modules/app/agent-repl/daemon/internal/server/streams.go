@@ -455,8 +455,9 @@ func (s *server) watchWebWorkspace(
 	return s.serveWeb(ctx, rpc, subject.Log, subject.Record.ID, out)
 }
 
-// serveWeb serves the web stream's TWO topics onto one wire: the
-// `session_identity` state and the `transferred` event. They are separate
+// serveWeb serves the web stream's topics onto one wire: the
+// `session_identity` state, the `transferred` notice, and the `prompt_echo`
+// and `reveal_row` events. They are separate
 // topics (see webidentity.go) and this is the one place they are merged, in
 // publication order per topic.
 func (s *server) serveWeb(
@@ -471,6 +472,7 @@ func (s *server) serveWeb(
 
 	states := s.webStateTopic(ws).Subscribe(streamCtx)
 	events := s.webTopic(ws).Subscribe(streamCtx)
+	echoes := s.webEventStream(ws).Subscribe(streamCtx)
 	reveals, pending := s.subscribeReveals(streamCtx, ws)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
@@ -514,6 +516,12 @@ func (s *server) serveWeb(
 				continue
 			}
 			push = event
+		case echo, ok := <-echoes:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			push = echo
 		case row, ok := <-reveals:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
