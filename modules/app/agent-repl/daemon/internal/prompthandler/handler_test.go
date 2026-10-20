@@ -265,7 +265,7 @@ func TestARedriveClaimsItsIngressEntryForItsTurn(t *testing.T) {
 
 			// Act
 			_, err := h.h.Submit(tc.ctx(context.Background()), theWorkspace, userSaid("hello"), tc.key,
-				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 
 			// Assert
 			if err != nil {
@@ -288,7 +288,7 @@ func TestARedriveClaimsItsIngressEntryBeforeTheQueueSeesIt(t *testing.T) {
 	// Act
 	go func() {
 		_, err := h.h.Submit(WithRedrive(context.Background()), theWorkspace, userSaid("hello"), "key-1",
-			conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+			conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 		done <- err
 	}()
 	<-h.queue.entered
@@ -318,7 +318,7 @@ func TestARedriveOfAnUnacceptedClaimClaimsTheEarlierTurn(t *testing.T) {
 
 	// Act
 	_, err := h.h.Submit(WithRedrive(context.Background()), theWorkspace, userSaid("hello"), "key-1",
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)
 
 	// Assert
 	if err != nil {

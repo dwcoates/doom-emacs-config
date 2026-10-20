@@ -96,10 +96,14 @@ func TestAnAsyncMergeLandsWithItsBubblePlacedInTheRequestersFeed(t *testing.T) {
 	}
 }
 
-func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testing.T) {
+func TestAnAsyncMergeWorkspaceStaysHiddenEvenAfterItsMergeFails(t *testing.T) {
 	t.Parallel()
+	// Owner ruling, 2026-10-20: a merge workspace is never auto-revealed on
+	// any outcome; the bubble's own "open merge workspace" button is the one
+	// way in.
 	// Arrange: replaying the merge workspace's branch conflicts.
 	s := newSourcedRepo(t)
+	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
 	s.repo.ScriptRebaseConflict("async-fix", 1, "branch.txt")
@@ -122,8 +126,8 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 		pushConcludedTurn(shim, mainAgent, "gave-up")
 	}
 
-	// Assert: hidden while the agent worked, revealed once the merge failed,
-	// with a row and a tab.
+	// Assert: hidden while the agent worked, and still hidden once the
+	// requester's bubble has settled on the merge's failure.
 	if row := liveRow(hidden, mergeWS.GetId()); row != nil {
 		t.Fatalf("the merge workspace had a row %v while hidden, want none", row)
 	}
@@ -132,15 +136,18 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 			t.Fatalf("the merge workspace had a tab %v while hidden, want none", open.GetTab())
 		}
 	}
-	revealed := awaitRoster(t, s.d, s.d.WatchRoster(), "the merge workspace revealed", func(r *frontendv1.WorkspaceRoster) bool {
-		return liveRow(r, mergeWS.GetId()) != nil
+	awaitRow(t, s.f, root, "the requester's bubble settled on the merge's failure", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetError().GetFailed() != nil
 	})
-	for _, open := range rosterwalk.OpenRows(revealed) {
+	settled := rosterNow(t, s.d)
+	if row := liveRow(settled, mergeWS.GetId()); row != nil {
+		t.Fatalf("the failed merge workspace has a row %v, want it left hidden", row)
+	}
+	for _, open := range rosterwalk.OpenRows(settled) {
 		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == mergeWS.GetId() {
-			return
+			t.Fatalf("the failed merge workspace has a tab %v, want it left hidden", open.GetTab())
 		}
 	}
-	t.Fatal("the revealed merge workspace has no tab")
 }
 
 func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *testing.T) {
