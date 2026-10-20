@@ -3628,14 +3628,45 @@ describe("the uncapped bubble", () => {
  * a lone `var()`.
  */
 function themeRgbOf(block: string, token: string): [number, number, number] {
-  const valueIn = (css: string): string | undefined =>
-    new RegExp(`(?:^|[\\s;{])${token}:\\s*([^;]+);`).exec(withoutBlockComments(css))?.[1]?.trim();
-  const value = valueIn(block) ?? valueIn(declarationsOf(":root") ?? "");
+  const value = themeValueOf(block, token) ?? themeValueOf(declarationsOf(":root") ?? "", token);
   if (value === undefined) throw new Error(`no ${token} in either theme`);
   const ref = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
   if (ref !== undefined) return themeRgbOf(block, ref);
   return rgbOf(`${token}: ${value};`, token);
 }
+
+/**
+ * TOKEN's own declared value in BLOCK, trimmed, or undefined when BLOCK does not
+ * declare it. Comments are stripped first, so a note quoting the declaration
+ * never stands in for it. No `var()` is followed: the value is the text written.
+ */
+function themeValueOf(block: string, token: string): string | undefined {
+  return new RegExp(`(?:^|[\\s;{])${token}:\\s*([^;]+);`).exec(withoutBlockComments(block))?.[1]?.trim();
+}
+
+describe("themeValueOf", () => {
+  it.each([
+    ["a value the block declares", "--a: #010203;", "--a", "#010203"],
+    ["a var() left unfollowed", "--a: var(--b); --b: #000000;", "--a", "var(--b)"],
+    ["a color-mix kept whole", "--a: color-mix(in srgb, var(--b), var(--c));", "--a", "color-mix(in srgb, var(--b), var(--c))"],
+    ["a token only a comment names", "/* --a: #ffffff; */ --b: #000000;", "--a", undefined],
+    ["a token whose name only ends another's", "--xa: #ffffff;", "--a", undefined],
+  ] as const)("reads %s", (_case, block, token, expected) => {
+    // Arrange / Act
+    const value = themeValueOf(block, token);
+
+    // Assert
+    expect(value).toBe(expected);
+  });
+
+  it("is the one value reader themeRgbOf resolves through", () => {
+    // Arrange / Act — the source of themeRgbOf, read back from this module.
+    const source = themeRgbOf.toString();
+
+    // Assert — no hand-rolled declaration regex beside the shared reader.
+    expect([source.includes("themeValueOf"), source.includes("RegExp")]).toEqual([true, false]);
+  });
+});
 
 describe("themeRgbOf", () => {
   it.each([
