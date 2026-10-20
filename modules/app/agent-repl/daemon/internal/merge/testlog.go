@@ -113,7 +113,10 @@ func tildePath(path, home string) string {
 // TestLogPath resolves a token the tests tab served to the log's path, for
 // one workspace. A token that is malformed, names a merge that is not the
 // workspace's own, or names a log that is no longer there is REFUSED
-// (unknown_merge_test_log) and recorded at WARN.
+// (unknown_merge_test_log). The first two are recorded at WARN. A log of the
+// workspace's own merge that is gone is recorded at INFO: the log retention
+// pass removes every test log three days after its last write, so a link the
+// feed drew before then outliving its file is the ordinary course.
 func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, token string) (string, error) {
 	const op = "daemon.merge.test_log"
 	log := o.log(ctx, ws)
@@ -145,7 +148,10 @@ func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, toke
 	path := o.testLog(ids.LeaseID(lease), round).path
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", refusal(fmt.Sprintf("the log %s is no longer there", path))
+			why := fmt.Sprintf("the log %s is no longer there", path)
+			log.Info(op, "refused a test log token whose log aged out of the log retention", dlog.Context{
+				"workspace": string(ws), "token": token, "why": why, "retention": logging.DefaultRetention.String()})
+			return "", &RefusalError{Arm: ArmUnknownMergeTestLog, Workspace: ws, Reason: why}
 		}
 		log.Error(op, "could not read a test log's file", dlog.Context{"workspace": string(ws), "path": path, "error": err.Error()})
 		return "", err

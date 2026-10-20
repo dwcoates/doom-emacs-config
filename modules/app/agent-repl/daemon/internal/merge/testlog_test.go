@@ -53,13 +53,6 @@ func TestATokenIsRefusedWhenItNamesNoLogOfTheWorkspace(t *testing.T) {
 		{name: "a malformed token", token: func(*testing.T, *harness) string { return "nonsense" }},
 		{name: "a round that is no number", token: func(*testing.T, *harness) string { return "lease-1/x" }},
 		{name: "another workspace's merge", token: func(t *testing.T, h *harness) string { return "lease-other/1" }},
-		{name: "a log no longer there", token: func(t *testing.T, h *harness) string {
-			token, path := servedLog(t, h, "lease-1", 1)
-			if err := os.Remove(path); err != nil {
-				t.Fatalf("remove: %v", err)
-			}
-			return token
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,6 +71,29 @@ func TestATokenIsRefusedWhenItNamesNoLogOfTheWorkspace(t *testing.T) {
 				t.Fatalf("the refusal was not recorded at WARN: %+v", h.logs.Records())
 			}
 		})
+	}
+}
+
+func TestATokenWhoseLogAgedOutIsRefusedAtInfo(t *testing.T) {
+	// Arrange: the workspace's own merge, its log since removed by retention.
+	h := newHarness(t)
+	token, path := servedLog(t, h, "lease-1", 1)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act.
+	_, err := h.o.TestLogPath(context.Background(), theWorkspace, token)
+
+	// Assert.
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmUnknownMergeTestLog {
+		t.Fatalf("TestLogPath = %v, want unknown_merge_test_log", err)
+	}
+	if _, logged := h.recordFor("info", "daemon.merge.test_log"); !logged {
+		t.Fatalf("the refusal was not recorded at INFO: %+v", h.logs.Records())
+	}
+	if _, warned := h.recordFor("warn", "daemon.merge.test_log"); warned {
+		t.Fatalf("an aged-out log was recorded at WARN: %+v", h.logs.Records())
 	}
 }
 
