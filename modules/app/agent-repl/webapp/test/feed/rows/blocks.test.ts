@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import stylesheet from "../../../src/styles.css?raw";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -304,8 +307,8 @@ describe("drawPromptCopyControl", () => {
   it("copies every block in order, a blank line apart", () => {
     // Arrange
     const blocks = [
-      { case: "quote" as const, value: create(FeedQuoteBlockSchema, { heading: "H", quoted: "Q", closing: "C" }) },
-      { case: "text" as const, value: create(FeedTextBlockSchema, { text: "my words" }) },
+      { block: { case: "quote" as const, value: create(FeedQuoteBlockSchema, { heading: "H", quoted: "Q", closing: "C" }) } },
+      { block: { case: "text" as const, value: create(FeedTextBlockSchema, { text: "my words" }) } },
     ];
     // Act
     const control = drawPromptCopyControl(blocks, "p");
@@ -315,8 +318,22 @@ describe("drawPromptCopyControl", () => {
 
   it("refuses an unset block, naming its index under the field", () => {
     // Act / Assert
-    expect(() => drawPromptCopyControl([{ case: undefined }], "FeedUserPrompt.body.blocks")).toThrow(
+    expect(() => drawPromptCopyControl([{ block: { case: undefined } }], "FeedUserPrompt.body.blocks")).toThrow(
       "FeedUserPrompt.body.blocks[0].block",
     );
+  });
+});
+
+describe("the prompt kinds' copy controls", () => {
+  it("both hand their body's blocks to drawPromptCopyControl unwrapped by nothing", () => {
+    // Arrange
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const sources = ["user-prompt.ts", "agent-prompt.ts"].map((file) =>
+      readFileSync(path.join(here, "../../../src/feed/rows", file), "utf8"),
+    );
+    // Act
+    const calls = sources.map((code) => /drawPromptCopyControl\(body\.blocks,/.test(code));
+    // Assert
+    expect(calls).toEqual([true, true]);
   });
 });

@@ -62,10 +62,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           variant: "user",
           hooks: ["user"],
           waving: promptWaves(msg),
-          corner: drawPromptCopyControl(
-            body.blocks.map((block) => block.block),
-            `${PATH}.success.body.blocks`,
-          ),
+          corner: drawPromptCopyControl(body.blocks, `${PATH}.success.body.blocks`),
           content: drawFeedUserPromptBody(body, `${PATH}.success.body`, knownCommandsMark(msg)),
           capLines: USER_PROMPT_CAP_LINES,
         },

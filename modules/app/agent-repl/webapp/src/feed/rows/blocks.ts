@@ -176,9 +176,10 @@ export const PROMPT_COPY_CLASS = "prompt-copy";
  * control (copy-control.ts), of kind `prompt`, copying the whole prompt, its
  * BLOCKS' copy text in order, a blank line apart. The bubble floats it at its
  * top right (the spec's `corner`), and the stylesheet shows it only while the
- * bubble is the selected entry. PATH names the blocks' field.
+ * bubble is the selected entry. BLOCKS are either prompt kind's body blocks,
+ * and PATH names their field.
  */
-export function drawPromptCopyControl(blocks: readonly PromptBlockArm[], path: string): HTMLElement {
-  const text = blocks.map((arm, index) => promptBlockCopyText(arm, `${path}[${index}].block`)).join("\n\n");
+export function drawPromptCopyControl(blocks: readonly { block: PromptBlockArm }[], path: string): HTMLElement {
+  const text = blocks.map(({ block }, index) => promptBlockCopyText(block, `${path}[${index}].block`)).join("\n\n");
   return boundCopyControl("prompt", PROMPT_COPY_CLASS, "Copy prompt", text);
 }
