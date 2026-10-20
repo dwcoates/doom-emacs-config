@@ -26,6 +26,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/fakegit"
+	"agent-repld/integration/grantedclock"
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
@@ -59,6 +60,10 @@ import (
 // the time every earlier call spent. Every wait the harness makes takes a
 // fresh child of this size off that budget (Daemon.waitCtx), so a wait
 // bounded by it never means the whole test.
+//
+// EVERY BOUND HERE IS GRANTED TIME, NEVER WALL TIME (granted.go): a wait is
+// charged only the time this binary's processes were not starved of CPU, so
+// the measured basis above holds on a saturated host too.
 const DefaultTimeout = 5 * time.Second
 
 // runBudgetWaits is how many DefaultTimeout-sized waits a Daemon's own context
@@ -739,8 +744,11 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	d.waitBound = timeout
 	// THE RUN BUDGET, NOT ONE WAIT'S BOUND. See runBudgetWaits: every wait the
 	// harness makes carves its own `timeout`-sized child off this, so the two
-	// promises stay separate.
-	ctx, cancel := context.WithTimeout(context.Background(), timeout*runBudgetWaits)
+	// promises stay separate. Both are kept on the granted clock
+	// (grantedBound), so a host with no CPU to give this daemon never reads
+	// as the daemon's failure.
+	requireGrantedClock(t)
+	ctx, cancel := grantedclock.WithBound(context.Background(), timeout*runBudgetWaits)
 	t.Cleanup(cancel)
 	d.ctx = ctx
 
@@ -1081,7 +1089,7 @@ func (d *Daemon) awaitFile(path string) string {
 			// a full-suite run), where a quiet boot measures 50-160ms; only a
 			// stack names a stall like that.
 			dump := d.dumpOnStall(reapGrace)
-			d.t.Fatalf("waiting for %s: %v (%s)\nstderr:\n%s", path, wait.Err(), dump, d.Stderr())
+			d.t.Fatalf("waiting for %s: %v (%s)\nstderr:\n%s", path, grantedclock.Explain(wait), dump, d.Stderr())
 		}
 	}
 }
@@ -1105,10 +1113,10 @@ func (d *Daemon) dumpOnStall(bound time.Duration) string {
 	if err != nil {
 		return fmt.Sprintf("could not ask the daemon for a goroutine dump: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
 	defer cancel()
 	if err := WaitProcessExit(ctx, pid); err != nil {
-		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the daemon did not exit within %s: %v", bound, err)
+		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the daemon did not exit within %s granted: %v", bound, grantedclock.Explain(ctx))
 	}
 	return "SIGQUIT sent; the daemon.cmd.sigquit record below holds its goroutine dump"
 }
@@ -1127,7 +1135,7 @@ func (d *Daemon) AwaitFileGone(path string) {
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s to be removed: %v", path, wait.Err())
+			d.t.Fatalf("waiting for %s to be removed: %v", path, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -1146,7 +1154,7 @@ func (d *Daemon) AwaitFileExists(path string) {
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s to appear: %v", path, wait.Err())
+			d.t.Fatalf("waiting for %s to appear: %v", path, grantedclock.Explain(wait))
 		}
 	}
 }
@@ -1216,7 +1224,7 @@ func (d *Daemon) Ctx() context.Context { return d.ctx }
 // budget down to nothing, depending only on what ran before it — so a slow
 // early step would surface as a timeout on a later, blameless one.
 func (d *Daemon) waitCtx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(d.ctx, d.waitBound)
+	return grantedclock.WithBound(d.ctx, d.waitBound)
 }
 
 // WaitCtx is waitCtx for the TESTS' own waits, which need the same bound for
@@ -1251,7 +1259,7 @@ func (d *Daemon) Stop() {
 	if d.awaitReapWithin(DefaultTimeout) {
 		return
 	}
-	d.t.Errorf("harness: the daemon did not exit within %s of SIGTERM; killing it", DefaultTimeout)
+	d.t.Errorf("harness: the daemon did not exit within %s granted of SIGTERM; killing it", DefaultTimeout)
 	d.Kill()
 }
 
@@ -1571,7 +1579,7 @@ const leaderExitReportAfter = 15 * reapGrace
 // reportAfter. It answers whether the exit itself was seen (awaitExitEvent),
 // and the wait's own failure, never the stall.
 func awaitKilledLeader(pid int, reportAfter time.Duration, wait func(context.Context, int) (bool, error), stalled func(pid int, waited time.Duration)) (seen bool, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), reportAfter)
+	ctx, cancel := grantedclock.WithBound(context.Background(), reportAfter)
 	seen, err = wait(ctx, pid)
 	cancel()
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -1697,19 +1705,22 @@ func (d *Daemon) reaped() bool {
 }
 
 // awaitReapWithin drives the process's one cmd.Wait to completion on a
-// background goroutine and reports whether it finished within budget. The
-// waitOnce still guarantees exactly one Wait per process; moving the blocking
-// call off the caller's goroutine is what makes the caller's wait bounded.
+// background goroutine and reports whether it finished within budget, granted
+// (grantedclock.WithBound). The waitOnce still guarantees exactly one Wait per
+// process; moving the blocking call off the caller's goroutine is what makes
+// the caller's wait bounded.
 func (d *Daemon) awaitReapWithin(budget time.Duration) bool {
 	reaped := make(chan struct{})
 	go func() {
 		d.waitOnce.Do(d.wait)
 		close(reaped)
 	}()
+	ctx, cancel := grantedclock.WithBound(context.Background(), budget)
+	defer cancel()
 	select {
 	case <-reaped:
 		return true
-	case <-time.After(budget):
+	case <-ctx.Done():
 		return false
 	}
 }

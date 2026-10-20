@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
@@ -18,6 +19,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/integration/grantedclock"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -337,7 +340,7 @@ func (s *ShimControl) connectOrDeparted(pid int) {
 		select {
 		case <-ticker.C:
 		case <-s.d.Ctx().Done():
-			s.t.Fatalf("waiting for the fake shim's control socket %s (pid %d, alive): %v\ndaemon stderr:\n%s", s.Socket, pid, s.d.Ctx().Err(), s.d.Stderr())
+			s.t.Fatalf("waiting for the fake shim's control socket %s (pid %d, alive): %v\ndaemon stderr:\n%s", s.Socket, pid, grantedclock.Explain(s.d.Ctx()), s.d.Stderr())
 		}
 	}
 }
@@ -364,7 +367,7 @@ func (s *ShimControl) connect() {
 		select {
 		case <-ticker.C:
 		case <-s.d.Ctx().Done():
-			s.t.Fatalf("waiting for the fake shim's control socket %s: %v\ndaemon stderr:\n%s", s.Socket, s.d.Ctx().Err(), s.d.Stderr())
+			s.t.Fatalf("waiting for the fake shim's control socket %s: %v\ndaemon stderr:\n%s", s.Socket, grantedclock.Explain(s.d.Ctx()), s.d.Stderr())
 		}
 	}
 }
@@ -428,13 +431,13 @@ func (s *ShimControl) close() {
 }
 
 // send runs one command and answers its reply, failing the test on a refusal.
+//
+// THE REPLY IS AWAITED WITHIN THE RUN BUDGET, ON THE HARNESS'S SIDE. The
+// budget is kept on the granted clock and has no wall deadline to hand the
+// fake as a timeout, so a reply still unread when the budget ends has its read
+// cut off here; a command with its own TimeoutMS still hands the fake that.
 func (s *ShimControl) send(cmd controlCommand) controlReply {
 	s.t.Helper()
-	if cmd.TimeoutMS == 0 {
-		if deadline, ok := s.d.Ctx().Deadline(); ok {
-			cmd.TimeoutMS = int(time.Until(deadline).Milliseconds())
-		}
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.c == nil && s.departed {
@@ -446,7 +449,13 @@ func (s *ShimControl) send(cmd controlCommand) controlReply {
 	if err := s.enc.Encode(cmd); err != nil {
 		s.t.Fatalf("fake shim control %s: send %s: %v", s.Socket, cmd.Op, err)
 	}
+	conn := s.c
+	stop := context.AfterFunc(s.d.Ctx(), func() { _ = conn.SetReadDeadline(time.Now()) })
+	defer stop()
 	if !s.dec.Scan() {
+		if budget := s.d.Ctx(); budget.Err() != nil {
+			s.t.Fatalf("fake shim control %s: no reply to %s within the run budget: %v", s.Socket, cmd.Op, grantedclock.Explain(budget))
+		}
 		s.t.Fatalf("fake shim control %s: no reply to %s: %v", s.Socket, cmd.Op, s.dec.Err())
 	}
 	var reply controlReply

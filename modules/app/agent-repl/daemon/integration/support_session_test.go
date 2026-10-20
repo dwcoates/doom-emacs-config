@@ -14,6 +14,7 @@ import (
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
@@ -95,7 +96,7 @@ func writeManifestFile(t *testing.T, path string, m rollout.Manifest) {
 // test's deadline.
 func shortTimeout(t *testing.T, parent context.Context, d time.Duration) context.Context {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(parent, d)
+	ctx, cancel := grantedclock.WithBound(parent, d)
 	t.Cleanup(cancel)
 	return ctx
 }

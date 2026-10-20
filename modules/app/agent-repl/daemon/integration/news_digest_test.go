@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +16,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -71,7 +71,7 @@ func writeTestFile(t *testing.T, path, content string) {
 // on stream.
 func refreshDigest(t *testing.T, d *harness.Daemon, stream *harness.Stream[*agentreplv1.WatchDaemonResponse]) *frontendv1.NewsDigestOverlay {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(d.Ctx(), harness.DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(d.Ctx(), harness.DefaultTimeout)
 	defer cancel()
 	resp, err := d.Client().RefreshNewsDigest(ctx, connect.NewRequest(&agentreplv1.RefreshNewsDigestRequest{}))
 	if err != nil {

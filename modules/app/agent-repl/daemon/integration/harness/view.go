@@ -9,6 +9,8 @@ import (
 	"time"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/integration/grantedclock"
 )
 
 // A VIEW IS ONE TEST'S DAEMON OVER A PROCESS THE TEST DOES NOT OWN.
@@ -66,7 +68,8 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	// The repositories this test mints must be ones the shared daemon's git
 	// can see, so the test's git world is the daemon's.
 	bindWorld(t, d.Git)
-	ctx, cancel := context.WithTimeout(context.Background(), v.waitBound*runBudgetWaits)
+	requireGrantedClock(t)
+	ctx, cancel := grantedclock.WithBound(context.Background(), v.waitBound*runBudgetWaits)
 	v.ctx = ctx
 	// Registered first so it runs last: the sweeps below read the logs, and
 	// the budget must outlive them.

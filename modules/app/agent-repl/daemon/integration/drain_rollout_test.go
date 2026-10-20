@@ -19,6 +19,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 	"agent-repld/internal/rollout"
 
@@ -1394,7 +1395,7 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 	// Assert: the contract — the standing banner reappears. Bounded to a short
 	// probe rather than the harness's full DefaultTimeout, since this is
 	// expected to time out rather than succeed.
-	probeCtx, cancel := context.WithTimeout(d2.Ctx(), 2*time.Second)
+	probeCtx, cancel := grantedclock.WithBound(d2.Ctx(), 2*time.Second)
 	defer cancel()
 	harness.AwaitView(t, probeCtx, stream2, "drain_scheduled reappearing after a restart", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetDrainScheduled() != nil

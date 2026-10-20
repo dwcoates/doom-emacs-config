@@ -14,3 +14,7 @@ The daemon's integration suite. Two module-wide rules govern every test here (`m
 - Vendor: never reached. The fake shim speaks for it.
 
 A test that needs a real shim, store or sidecar belongs in `e2e/`.
+
+## Every bound is granted time
+
+Every failure bound the harness and the suite put on a wait is a `grantedclock.WithBound` context: it is charged only the time this binary's processes were not starved of CPU (on darwin, the process tree's `ri_runnable_time`; on linux, the container's `cpu.pressure`), so a saturated host never reads as the daemon's failure. See `harness/granted.go`. `harness.TestEveryWallBoundIsAllowedByName` fails a hand-rolled wall-clock bound unless it is allowed by name with its reason, as negative probe windows are.
