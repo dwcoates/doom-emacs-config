@@ -28,6 +28,8 @@ import (
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
@@ -574,6 +576,8 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// restarts records every restart observation the fleet makes.
+	restarts restarttimingtest.Recorder
 	// deliveries is the fleet's delivery exclusion, recording each hold.
 	deliveries fakeDeliveries
 	// probeSequence, when set, is answered by the lock probe in order before
@@ -815,6 +819,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return f.watcher, nil
 		},
 		Now:        func() time.Time { return f.now },
+		Restarts:   &f.restarts,
 		AdoptBound: f.adoptBound,
 		Clock:      &fleetStepClock{now: fixedNow},
 		RetryAfter: func(d time.Duration) <-chan time.Time {
@@ -906,6 +911,16 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+			},
+		},
+		{
+			name: "no restart recorder",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {},
 			},
 		},
 		{
@@ -3732,5 +3747,105 @@ func TestARaisedGateOffersHaikuFirstThenSonnetAsTheSummarizer(t *testing.T) {
 				t.Fatalf("summarizers = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+func TestStartTimesEachStepOfTheSessionsStart(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fleetFixture, ws wsm.Workspace)
+		wantErr bool
+		want    []string
+	}{
+		{
+			name:    "a fresh start",
+			arrange: func(*fleetFixture, wsm.Workspace) {},
+			want:    []string{"shim/fresh/ok", "slot_wait/fresh/ok", "vendor/fresh/ok", "watch/fresh/ok", "total/fresh/ok"},
+		},
+		{
+			name: "a resumed conversation",
+			arrange: func(f *fleetFixture, ws wsm.Workspace) {
+				f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			},
+			want: []string{"shim/resume/ok", "slot_wait/resume/ok", "vendor/resume/ok", "watch/resume/ok", "total/resume/ok"},
+		},
+		{
+			name: "a hibernated conversation woken",
+			arrange: func(f *fleetFixture, ws wsm.Workspace) {
+				f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1",
+					Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+			},
+			want: []string{"shim/wake/ok", "slot_wait/wake/ok", "vendor/wake/ok", "watch/wake/ok", "total/wake/ok"},
+		},
+		{
+			name: "a surviving shim adopted",
+			arrange: func(f *fleetFixture, ws wsm.Workspace) {
+				f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+				f.probeState = sessionlock.StateHeld
+				f.socketState = shimsocket.StateLive
+				f.client.response = alreadyStartedResponse()
+			},
+			want: []string{"shim/adopted/ok", "total/adopted/ok"},
+		},
+		{
+			name: "a vendor start refused",
+			arrange: func(f *fleetFixture, _ wsm.Workspace) {
+				f.client.response = &shimv1.StartSessionResponse{
+					Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+						Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
+						Detail: "the vendor binary is missing",
+					}},
+				}
+			},
+			wantErr: true,
+			want:    []string{"shim/fresh/ok", "slot_wait/fresh/ok", "vendor/fresh/failed", "total/fresh/failed"},
+		},
+		{
+			name: "a start parked at its cold gate",
+			arrange: func(f *fleetFixture, ws wsm.Workspace) {
+				f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+				f.client.response = coldResponse()
+			},
+			want: []string{"shim/resume/ok", "slot_wait/resume/ok", "vendor/resume/ok"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			tt.arrange(f, ws)
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Start() error = %v, want error %v", err, tt.wantErr)
+			}
+			if got := sessionSteps(&f.restarts); fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Fatalf("steps = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	before := len(f.restarts.Of(restarttiming.SessionStart))
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	got := sessionSteps(&f.restarts)[before:]
+	if fmt.Sprint(got) != fmt.Sprint([]string{"slot_wait/cold_answer/ok", "vendor/cold_answer/ok"}) {
+		t.Fatalf("steps = %v, want the cold answer's slot wait and vendor start", got)
 	}
 }

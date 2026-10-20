@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
@@ -737,7 +738,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	f.markSessionAbsent(ws, c)
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
 	src.HoldKeepalive = record.KeepaliveHeld()
-	started, err := f.startSession(runCtx, log, ws, c, src, session, configDir)
+	started, err := f.startSession(runCtx, log, ws, c, src, session, configDir, f.timing(ws, restarttiming.SessionRelaunch))
 	finishRun()
 	if err != nil {
 		return rollout.Resumed{}, err

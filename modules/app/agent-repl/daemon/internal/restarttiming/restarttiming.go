@@ -4,10 +4,10 @@
 //
 // A restart is anything that takes what serves the user down and brings it
 // back: a deploy, a daemon's boot, a store or sidecar restart, a workspace's
-// session start during a boot or a takeover, a shim replacement, and a
-// workspace's transfer to a successor daemon. Each one is timed by the code
-// that sees it START and END, in the one process that runs it, and stated
-// here as one Observation.
+// session start during a boot or a takeover, each step of a session's start,
+// a shim replacement, and a workspace's transfer to a successor daemon. Each
+// one is timed by the code that sees it START and END, in the one process
+// that runs it, and stated here as one Observation.
 //
 // AN OBSERVATION CAN ONLY BE BUILT RIGHT. Its fields are unexported and each
 // kind of restart has its own constructor taking that kind's own phase type,
@@ -47,6 +47,10 @@ const (
 	ShimRestart Restart = "shim_restart"
 	// Transfer is ONE workspace moved from this daemon to its successor.
 	Transfer Restart = "handover_transfer"
+	// SessionStart is ONE workspace's session start inside the session fleet,
+	// step by step, whoever asked for it: a bring-up, an editor's open, a
+	// revival, a shim relaunch's resume, an answered cold gate.
+	SessionStart Restart = "session_start"
 )
 
 // Outcome is how the timed restart or phase ended, the `outcome` label.
@@ -185,6 +189,48 @@ const (
 	TransferRun TransferPhase = "run"
 )
 
+// SessionPhase is one step of a workspace's session start.
+type SessionPhase string
+
+// The session start steps, in the order they run. Each is its own duration,
+// not a time since the start began, so a slow step is read off directly.
+const (
+	// SessionShim is the shim spawned, adopted or reused, until its first
+	// healthy diagnostics: the workspace's own services serve it from here.
+	SessionShim SessionPhase = "shim"
+	// SessionSlotWait is one wait for a slot among the vendor starts in
+	// flight, before a StartSession attempt.
+	SessionSlotWait SessionPhase = "slot_wait"
+	// SessionVendor is one StartSession attempt: the vendor's session started
+	// or resumed, or the attempt refused.
+	SessionVendor SessionPhase = "vendor"
+	// SessionWatch is the started session's watches opened and its facts
+	// recorded.
+	SessionWatch SessionPhase = "watch"
+	// SessionTotal is the whole start, until the session is up.
+	SessionTotal SessionPhase = "total"
+)
+
+// SessionKind is what kind of start a session start was, its `cause`.
+type SessionKind string
+
+// The session start kinds.
+const (
+	// SessionFresh is a new conversation.
+	SessionFresh SessionKind = "fresh"
+	// SessionResume is a conversation resumed.
+	SessionResume SessionKind = "resume"
+	// SessionWake is a hibernated conversation woken.
+	SessionWake SessionKind = "wake"
+	// SessionAdopted is a surviving shim attached to: it already runs its
+	// session, so the start has no vendor step.
+	SessionAdopted SessionKind = "adopted"
+	// SessionRelaunch is a shim relaunch's resume onto its fresh shim.
+	SessionRelaunch SessionKind = "relaunch"
+	// SessionColdAnswer is the resume an answered cold gate re-opens.
+	SessionColdAnswer SessionKind = "cold_answer"
+)
+
 // Observation is one timed restart or phase. Build one with the constructor
 // of its restart; the zero value is not an observation.
 type Observation struct {
@@ -255,6 +301,11 @@ func OfShimRestart(ws ids.WorkspaceID, p ShimPhase, reason string, outcome Outco
 // OfTransfer is one part of one workspace's transfer.
 func OfTransfer(ws ids.WorkspaceID, p TransferPhase, outcome Outcome, d time.Duration) Observation {
 	return observation(Transfer, string(p), "", outcome, ws, d)
+}
+
+// OfSessionStart is one step of one workspace's session start.
+func OfSessionStart(ws ids.WorkspaceID, p SessionPhase, kind SessionKind, outcome Outcome, d time.Duration) Observation {
+	return observation(SessionStart, string(p), string(kind), outcome, ws, d)
 }
 
 // Recorder records restart observations. runtimemetrics.Surface is the

@@ -30,6 +30,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
@@ -188,6 +189,9 @@ type FleetDeps struct {
 	StartWatcher WatcherStarter
 	// Log is the fleet's logger.
 	Log dlog.Surfaces
+	// Restarts records how long each step of a session's start took
+	// (restarttiming.SessionStart). Required.
+	Restarts restarttiming.Recorder
 	// Now supplies the instants the fleet stamps; nil means time.Now.
 	Now func() time.Time
 	// AdoptBound bounds ONE adoption of an already-running shim. Zero means
@@ -502,6 +506,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a vendor-start marker; the roster draws a retried or failed vendor start by it")
 	case deps.Steps == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up step sink; the editor's startup is told each step by it")
+	case deps.Restarts == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs a restart recorder; each step of a session's start is timed into it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -1251,6 +1257,7 @@ func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
 // startUp is start's body, under the start gate, with the bring-up marker
 // raised.
 func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) error {
+	began := f.now()
 	// A SELECTED TRANSCRIPT IS A DIFFERENT CONVERSATION: the watcher this
 	// start opens replays its first page, and the previous watcher's pointers,
 	// which name another book, are forgotten. See opening.go.
@@ -1304,6 +1311,33 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	log.Debug(opBringUp, "decided how the session comes up", dlog.Context{
 		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID, "rebind": src.Rebind,
 	})
+	// THE START IS TIMED FROM HERE ON, now that its kind is known; a record
+	// that cannot be read began no start to time.
+	timing := f.timing(ws, startKind(src.Fresh, exists && session.Hibernated()))
+	return f.timedStart(ctx, log, ws, record, session, src, timing, began)
+}
+
+// timedStart is startUp past its decision of how the session comes up: the
+// shim, the vendor start and the watches, each step timed into TIMING, and the
+// whole start from BEGAN.
+func (f *Fleet) timedStart(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	record wsm.Workspace,
+	session wsm.Session,
+	src source,
+	timing sessionTiming,
+	began time.Time,
+) (err error) {
+	parked := false
+	defer func() {
+		// A START PARKED AT ITS COLD GATE IS NOT UP, and not failed either:
+		// its total is not a session start's.
+		if !parked {
+			timing.since(restarttiming.SessionTotal, began, err)
+		}
+	}()
 
 	// THE ACCOUNT ROUTING IS DECIDED AT EVERY START (daemon.md 10a), never
 	// inherited from the record: $MULTI_REPO_ROOT can move between boots, and
@@ -1344,14 +1378,19 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	// A HELD SHIM WITH NO SESSION IS REUSED, never spawned over and never
 	// adopted a second time: a failed start left it held exactly so a retry,
 	// a revival or the next prompt starts the session on it.
+	shimFrom := f.now()
 	client, path, err := f.reuseOrBringUp(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
+	adopted := path == pathAdopted
+	if adopted {
+		timing = timing.as(restarttiming.SessionAdopted)
+	}
+	timing.since(restarttiming.SessionShim, shimFrom, err)
 	if err != nil {
 		return err
 	}
 	if path == pathHeld {
 		hostSessionID = f.heldHostSessionID(ws, hostSessionID)
 	}
-	adopted := path == pathAdopted
 	// THE HEALTHY ATTACH IS A RECOVERY EDGE. Bring-up gates on the shim's
 	// first healthy diagnostics, so reaching here IS the repair of every
 	// standing fault whose lifetime ends at a healthy attach: a lost link, a
@@ -1418,7 +1457,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepResuming})
 	}
 	src.HoldKeepalive = record.KeepaliveHeld()
-	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
+	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir, timing)
 	if errors.Is(err, errSessionAlreadyRunning) {
 		finishRun()
 		return f.takeRunningSession(ctx, log, ws, client)
@@ -1471,10 +1510,14 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 			"shim_pid": client.PID(), "host_session_id": hostSessionID,
 		})
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepColdGate})
+		parked = true
 		return nil
 	}
 
-	if err := f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID); err != nil {
+	watchFrom := f.now()
+	err = f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID)
+	timing.since(restarttiming.SessionWatch, watchFrom, err)
+	if err != nil {
 		return err
 	}
 	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepUp})
@@ -1631,7 +1674,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
 		HoldKeepalive:   record.KeepaliveHeld(),
-	}, previous, configDir)
+	}, previous, configDir, f.timing(ws, restarttiming.SessionColdAnswer))
 	finishRun()
 	stopPhases()
 	if err != nil {
