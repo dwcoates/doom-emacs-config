@@ -25,6 +25,9 @@ const LatencyName = "agentrepl_latency_seconds"
 const (
 	VendorBytesSentName     = "agentrepl_vendor_bytes_sent_total"
 	VendorBytesReceivedName = "agentrepl_vendor_bytes_received_total"
+	// ShimHeapName is each workspace's shim's JavaScript heap at its last
+	// measurements frame, by kind (used, total, external).
+	ShimHeapName = "agentrepl_shim_heap_bytes"
 )
 
 // LatencyKind is one live-reported latency: its vocabulary name and its
@@ -39,6 +42,7 @@ var (
 	navigationBuckets = []float64{0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5}
 	pageBootBuckets   = []float64{0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30}
 	vendorBuckets     = []float64{0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60}
+	eventLoopBuckets  = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5}
 )
 
 // ReportedKinds are the latencies Emacs and the webapp report.
@@ -50,7 +54,8 @@ var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
 
 // ShimKinds are the latencies the shim measures.
 var ShimKinds = map[shimv1.ShimLatencyKind]LatencyKind{
-	shimv1.ShimLatencyKind_SHIM_LATENCY_KIND_FIRST_OUTPUT: {Name: "vendor_first_output", Buckets: vendorBuckets},
+	shimv1.ShimLatencyKind_SHIM_LATENCY_KIND_FIRST_OUTPUT:     {Name: "vendor_first_output", Buckets: vendorBuckets},
+	shimv1.ShimLatencyKind_SHIM_LATENCY_KIND_EVENT_LOOP_DELAY: {Name: "shim_event_loop_delay", Buckets: eventLoopBuckets},
 }
 
 // histogram is one series' running distribution.
@@ -116,8 +121,11 @@ type latencies struct {
 	series  map[seriesKey]*histogram
 	traffic map[ids.WorkspaceID]*traffic
 	runs    map[ids.WorkspaceID]*shimRun
+	// heaps is each workspace's shim's heap at its last frame that carried
+	// one, within its current counting run.
+	heaps map[ids.WorkspaceID]*shimv1.ShimHeap
 
-	latencyDesc, sentDesc, receivedDesc *prometheus.Desc
+	latencyDesc, sentDesc, receivedDesc, heapDesc *prometheus.Desc
 }
 
 func newLatencies(log dlog.Logger) *latencies {
@@ -126,6 +134,8 @@ func newLatencies(log dlog.Logger) *latencies {
 		series:       map[seriesKey]*histogram{},
 		traffic:      map[ids.WorkspaceID]*traffic{},
 		runs:         map[ids.WorkspaceID]*shimRun{},
+		heaps:        map[ids.WorkspaceID]*shimv1.ShimHeap{},
+		heapDesc:     prometheus.NewDesc(ShimHeapName, "A workspace's shim's JavaScript heap at its last measurements frame, by kind (used, total, external).", []string{"workspace", "kind"}, nil),
 		latencyDesc:  prometheus.NewDesc(LatencyName, "How long a user-facing interaction took, by latency (proto/vocab/latencies.json) and workspace.", []string{"latency", "workspace"}, nil),
 		sentDesc:     prometheus.NewDesc(VendorBytesSentName, "Bytes a workspace's shim sent to the vendor API since the daemon started.", []string{"workspace"}, nil),
 		receivedDesc: prometheus.NewDesc(VendorBytesReceivedName, "Bytes a workspace's shim received from the vendor API since the daemon started.", []string{"workspace"}, nil),
@@ -211,6 +221,14 @@ func (l *latencies) foldShim(ws ids.WorkspaceID, m *shimv1.ShimMeasurements) {
 		run.traffic = vt
 	} else if sameRun {
 		run.traffic = prev.traffic
+	}
+	// THE HEAP IS A SNAPSHOT: the frame's own replaces the last, and a new
+	// counting run with none yet drops the old process's.
+	switch {
+	case m.GetHeap() != nil:
+		l.heaps[ws] = m.GetHeap()
+	case !sameRun:
+		delete(l.heaps, ws)
 	}
 	for _, sh := range m.GetLatencies() {
 		kind := ShimKinds[sh.GetKind()]
@@ -321,6 +339,7 @@ func (l *latencies) forget(ws ids.WorkspaceID) {
 	}
 	delete(l.traffic, ws)
 	delete(l.runs, ws)
+	delete(l.heaps, ws)
 }
 
 // Describe implements prometheus.Collector.
@@ -328,6 +347,7 @@ func (l *latencies) Describe(ch chan<- *prometheus.Desc) {
 	ch <- l.latencyDesc
 	ch <- l.sentDesc
 	ch <- l.receivedDesc
+	ch <- l.heapDesc
 }
 
 // Collect implements prometheus.Collector.
@@ -356,5 +376,10 @@ func (l *latencies) Collect(ch chan<- prometheus.Metric) {
 		t := l.traffic[ws]
 		ch <- prometheus.MustNewConstMetric(l.sentDesc, prometheus.CounterValue, t.sent, string(ws))
 		ch <- prometheus.MustNewConstMetric(l.receivedDesc, prometheus.CounterValue, t.received, string(ws))
+	}
+	for ws, h := range l.heaps {
+		ch <- prometheus.MustNewConstMetric(l.heapDesc, prometheus.GaugeValue, float64(h.GetUsedBytes()), string(ws), "used")
+		ch <- prometheus.MustNewConstMetric(l.heapDesc, prometheus.GaugeValue, float64(h.GetTotalBytes()), string(ws), "total")
+		ch <- prometheus.MustNewConstMetric(l.heapDesc, prometheus.GaugeValue, float64(h.GetExternalBytes()), string(ws), "external")
 	}
 }

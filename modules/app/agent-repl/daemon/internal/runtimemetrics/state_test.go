@@ -19,7 +19,9 @@ type fakeLister struct {
 	err        error
 }
 
-func (f *fakeLister) ListWorkspaces(context.Context) ([]wsm.Workspace, error) { return f.workspaces, f.err }
+func (f *fakeLister) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	return f.workspaces, f.err
+}
 func (f *fakeLister) ListRepositories(context.Context) ([]wsm.Repository, error) {
 	return f.repos, f.err
 }
