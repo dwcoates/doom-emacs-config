@@ -1282,6 +1282,19 @@ func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool
 // of the shell bubble). The tail's already-delivered upserts of the row are
 // history; the removal is a new publication that supersedes them.
 func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
+	return r.retireAs(s, addr, id, &frontendv1.FeedRowRemoved{})
+}
+
+// retireRolledBack is retire for a row whose turn is being rolled back: its
+// removal says so (frontend.v1.FeedRowRemoved.rolled_back), and the client
+// lands the reader at the feed's tail.
+func (r *resolver) retireRolledBack(s *wsState, addr feedid.Feed, id string) bool {
+	return r.retireAs(s, addr, id, &frontendv1.FeedRowRemoved{RolledBack: &frontendv1.FeedRowRolledBack{}})
+}
+
+// retireAs is THE ONE RETIREMENT behind retire and retireRolledBack: REMOVED
+// is the removal the tail is told.
+func (r *resolver) retireAs(s *wsState, addr feedid.Feed, id string, removed *frontendv1.FeedRowRemoved) bool {
 	f := r.feed(s, addr)
 	if _, ok := f.rows[id]; !ok {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
@@ -1327,20 +1340,21 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	// updates NOW. The removal row carries ONLY its id — the arm's presence is
 	// the instruction, and the client drops the row that id keys. It carries
 	// the removed row's order key, as every row does.
-	removal := removalRow(id, key)
+	removal := removalRow(id, key, removed)
 	r.logger(s.id).Info("daemon.feed.row_retired",
 		"a row was retired and its removal published on the feed tail",
-		dlog.Context{"feed": f.key, "row": id, "key": key, "seq": f.seq + 1})
+		dlog.Context{"feed": f.key, "row": id, "key": key, "seq": f.seq + 1, "rolled_back": removed.GetRolledBack() != nil})
 	r.emitRow(s, f, removal)
 	return true
 }
 
-// removalRow is the publication that retracts row ID, whose order key was KEY.
-func removalRow(id, key string) *frontendv1.FeedRow {
+// removalRow is the publication REMOVED that retracts row ID, whose order key
+// was KEY.
+func removalRow(id, key string, removed *frontendv1.FeedRowRemoved) *frontendv1.FeedRow {
 	return &frontendv1.FeedRow{
 		Id:    &frontendv1.FeedId{Value: id},
 		Order: &frontendv1.FeedRowOrder{Key: key},
-		Row:   &frontendv1.FeedRow_Removed{Removed: &frontendv1.FeedRowRemoved{}},
+		Row:   &frontendv1.FeedRow_Removed{Removed: removed},
 	}
 }
 

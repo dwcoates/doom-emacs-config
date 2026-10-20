@@ -225,7 +225,7 @@ func (r *resolver) rollBackTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []i
 	s.withheld = slices.DeleteFunc(s.withheld, func(w withheldRow) bool { return s.rolledBack[w.turn] })
 	retired := 0
 	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, id string, row *frontendv1.FeedRow) {
-		if s.rolledBack[ids.TurnID(row.GetTurn().GetValue())] && r.retire(s, addr, id) {
+		if s.rolledBack[ids.TurnID(row.GetTurn().GetValue())] && r.retireRolledBack(s, addr, id) {
 			retired++
 		}
 	})
@@ -333,7 +333,7 @@ func (r *resolver) WithholdDrawnTurns(ws ids.WorkspaceID, turns []ids.TurnID) {
 		}
 		rank := f.rank[id]
 		durable := !f.nonDurable[id]
-		if !r.retire(s, addr, id) {
+		if !r.retireRolledBack(s, addr, id) {
 			return
 		}
 		s.withheld = append(s.withheld, withheldRow{turn: turn, at: placement{feed: addr, inherit: &rank}, row: snapshot, durable: durable})

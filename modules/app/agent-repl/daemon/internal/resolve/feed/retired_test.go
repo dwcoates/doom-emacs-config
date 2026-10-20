@@ -59,6 +59,22 @@ func TestARetiredPromptPublishesTheRemovalOfItsRow(t *testing.T) {
 	}
 }
 
+func TestARemovalNoRollbackMadeCarriesNoRolledBack(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	rows := h.openRootTail()
+	h.deliverPrompt("turn-1", "<task-notification>")
+	<-rows
+
+	// Act.
+	h.resolver.OnPromptRetired(testWorkspace, retiredPrompt("turn-1", mainAgent()))
+
+	// Assert.
+	if removal := <-rows; removal.GetRemoved().GetRolledBack() != nil {
+		t.Fatalf("removal = %v, want no rolled_back on a retirement no rollback made", removal)
+	}
+}
+
 func TestARetiredPromptLeavesTheFeedWithoutItsRow(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

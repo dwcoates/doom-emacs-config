@@ -144,7 +144,7 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 func (r *resolver) emptyFeed(f *feedState) int {
 	dropped := len(f.order)
 	for _, id := range f.order {
-		removal := Publication{Row: removalRow(id, f.rank[id].key)}
+		removal := Publication{Row: removalRow(id, f.rank[id].key, &frontendv1.FeedRowRemoved{})}
 		appendLog(f, removal)
 		for sub := range f.subs {
 			sub.enqueue(removal)
