@@ -607,6 +607,59 @@ describe("the detail panel", () => {
     expect(drawn.querySelector(".detail dl")).toBeNull();
   });
 
+  it("draws no children block when the workspace has no children", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }), sidebarContext(), "R");
+    expect(drawn.querySelector(".detail .children")).toBeNull();
+  });
+
+  it("lists every child by name, in the wire's order", () => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        detail: {
+          children: [
+            { workspace: { id: "ws-a", dir: "/d/a" }, name: "alpha" },
+            { workspace: { id: "ws-b", dir: "/d/b" }, name: "beta" },
+          ],
+        },
+      }),
+      sidebarContext(),
+      "R",
+    );
+    const items = [...drawn.querySelectorAll(".detail .children li")];
+    expect([
+      drawn.querySelector(".detail .children-head")?.textContent,
+      items.map((li) => [li.getAttribute("data-child"), li.textContent]),
+    ]).toEqual(["children", [["ws-a", "alpha"], ["ws-b", "beta"]]]);
+  });
+
+  it.each([
+    { name: "a receded child recedes", receded: true },
+    { name: "a live child does not recede", receded: false },
+  ])("draws a child's receded marker: $name", ({ receded }) => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        detail: { children: [{ workspace: { id: "ws-a", dir: "/d/a" }, name: "alpha", ...(receded ? { receded: {} } : {}) }] },
+      }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".detail .children li")?.classList.contains("receded")).toBe(receded);
+  });
+
+  it("draws the children block after the summary", () => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        detail: { summary: { text: "porting the rail" }, children: [{ workspace: { id: "ws-a", dir: "/d/a" }, name: "alpha" }] },
+      }),
+      sidebarContext(),
+      "R",
+    );
+    expect([...panelOf(drawn).children].map((el) => el.className)).toEqual(["summary", "children"]);
+  });
+
   it("is closed until the row is expanded", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     expect(drawn.classList.contains("open")).toBe(false);
@@ -1320,6 +1373,11 @@ describe("a malformed row", () => {
       closed: { closed: false },
       when: {},
     });
+    expect(() => drawRosterRow(malformed, sidebarContext(), "R")).toThrow(MalformedView);
+  });
+
+  it("refuses a detail panel child with no workspace", () => {
+    const malformed = row({ id: "ws-1", detail: { children: [{ name: "alpha" }] } });
     expect(() => drawRosterRow(malformed, sidebarContext(), "R")).toThrow(MalformedView);
   });
 

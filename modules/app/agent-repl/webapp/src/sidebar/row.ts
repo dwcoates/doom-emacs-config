@@ -33,6 +33,8 @@ import type {
   RosterRowIdleAsyncUnread,
   RosterRowDetail,
   RosterRowDetailBranch,
+  RosterRowDetailChild,
+  RosterRowDetailChildReceded,
   RosterRowDetailCommits,
   RosterRowDetailParentBranch,
   RosterRowDetailSummary,
@@ -693,6 +695,22 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
     summary.textContent = drawRosterRowDetailSummary(u.summary, `${path}.summary`);
     detail.appendChild(summary);
   }
+  // THE CHILDREN BLOCK IS DRAWN IF AND ONLY IF THERE ARE CHILDREN (owner
+  // request, 2026-10-20): every workspace whose recorded parent is this one,
+  // wherever the rail draws it, so a child that is closed, merged or hidden
+  // is still named here.
+  if (u.children.length > 0) {
+    const block = document.createElement("div");
+    block.className = "children";
+    const head = document.createElement("div");
+    head.className = "children-head";
+    head.textContent = "children";
+    block.appendChild(head);
+    const items = document.createElement("ul");
+    u.children.forEach((child, i) => items.appendChild(drawRosterRowDetailChild(child, `${path}.children[${i}]`)));
+    block.appendChild(items);
+    detail.appendChild(block);
+  }
   log.debug("drawing a row's detail panel", {
     operation: "sidebar.row.detail",
     context: {
@@ -701,9 +719,33 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
       parent_branch: u.parentBranch !== undefined,
       commits: u.commits !== undefined,
       summary: u.summary !== undefined,
+      children: u.children.length,
     },
   });
   return detail;
+}
+
+/**
+ * One child in the detail panel's children block: its name, receded exactly
+ * when its own row recedes.
+ */
+export function drawRosterRowDetailChild(u: RosterRowDetailChild, path: string): HTMLElement {
+  const workspace = requireMessage(u.workspace, `${path}.workspace`);
+  const item = document.createElement("li");
+  item.className = "child";
+  item.setAttribute("data-child", workspace.id);
+  item.textContent = u.name;
+  if (u.receded !== undefined && drawRosterRowDetailChildReceded(u.receded, `${path}.receded`)) {
+    item.classList.add("receded");
+  }
+  return item;
+}
+
+/** The receded marker of a detail panel child. EMPTY: presence is the fact. */
+export function drawRosterRowDetailChildReceded(u: RosterRowDetailChildReceded, path: string): boolean {
+  void u;
+  void path;
+  return true;
 }
 
 /** The workspace's own git branch. Display only. */
