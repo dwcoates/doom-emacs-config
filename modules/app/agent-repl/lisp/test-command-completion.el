@@ -157,19 +157,32 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
 
 ;;;; ---- The completion table's own category ----
 
-(defun agent-repl-test-command-completion--all (query candidates)
-  "Return QUERY's unpropertized matches against CANDIDATES, under the table's
-own category and styles (via `completion-all-completions'), as plain strings."
-  (let* ((table (agent-repl--command-completion-table candidates))
-         (metadata (completion-metadata query table nil))
+(defun agent-repl-test-command-completion--answer (query table)
+  "Return TABLE's `completion-all-completions' answer for QUERY, under the
+table's own category and styles, as (BASE-SIZE . COMPLETIONS).
+COMPLETIONS are unpropertized strings, relative to BASE-SIZE as the table
+answered them."
+  (let* ((metadata (completion-metadata query table nil))
          (all (completion-all-completions query table nil (length query) metadata))
-         (strings nil))
-    ;; `completion-all-completions' may tack a base-size onto the last cons,
-    ;; making ALL an improper list; walk only its proper (string) cells.
-    (while (consp all)
-      (push (substring-no-properties (car all)) strings)
-      (setq all (and (consp (cdr all)) (cdr all))))
-    (nreverse strings)))
+         (last (last all))
+         (base-size (or (cdr last) 0)))
+    ;; `completion-all-completions' tacks the base-size onto the last cons,
+    ;; making ALL an improper list; read it there, then drop it.
+    (when last (setcdr last nil))
+    (cons base-size (mapcar #'substring-no-properties all))))
+
+(defun agent-repl-test-command-completion--words (query table)
+  "Return the whole words a completion UI would leave for QUERY over TABLE.
+A UI keeps QUERY's first BASE-SIZE characters and replaces the rest with
+a completion, as company and `completion-at-point' both do."
+  (let ((answer (agent-repl-test-command-completion--answer query table)))
+    (mapcar (lambda (completion) (concat (substring query 0 (car answer)) completion))
+            (cdr answer))))
+
+(defun agent-repl-test-command-completion--all (query candidates)
+  "Return the whole words QUERY completes to against CANDIDATES' table."
+  (agent-repl-test-command-completion--words
+   query (agent-repl--command-completion-table candidates)))
 
 (ert-deftest agent-repl-test-command-completion-table-states-its-category ()
   "The table answers `metadata' with this capf's own category."
@@ -209,6 +222,38 @@ in `completion-category-overrides', with the `substring' style."
   (should (equal (agent-repl-test-command-completion--all
                   "/sta" '("/usage" "/cost" "/stats"))
                  '("/stats"))))
+
+;; A completion UI keeps the field's typed `/' -- outside the boundary --
+;; and replaces only what follows it, so the table answers bare names.
+
+(ert-deftest agent-repl-test-command-completion-table-answers-names-past-the-slash ()
+  "All-completions of a slashed word answer bare names, past a one-character base."
+  (should (equal (agent-repl-test-command-completion--answer
+                  "/prof" (agent-repl--command-completion-table '("/agent-repl-profile")))
+                 '(1 "agent-repl-profile"))))
+
+(ert-deftest agent-repl-test-command-completion-table-answers-every-name-for-a-bare-slash ()
+  "A bare `/' answers every name, bare, past a one-character base."
+  (should (equal (agent-repl-test-command-completion--answer
+                  "/" (agent-repl--command-completion-table '("/merge-queue" "/clear")))
+                 '(1 "merge-queue" "clear"))))
+
+(ert-deftest agent-repl-test-command-completion-table-tries-the-whole-slashed-word ()
+  "Try-completion of a unique prefix answers the whole slashed word."
+  (should (equal (try-completion
+                  "/merge-q" (agent-repl--command-completion-table '("/merge-queue" "/clear")))
+                 "/merge-queue")))
+
+(ert-deftest agent-repl-test-command-completion-table-tests-the-whole-slashed-word ()
+  "Test-completion accepts a whole slashed command."
+  (should (test-completion
+           "/clear" (agent-repl--command-completion-table '("/merge-queue" "/clear")))))
+
+(ert-deftest agent-repl-test-command-completion-table-boundary-follows-the-slash ()
+  "A slashed word's field starts after its `/'."
+  (should (equal (completion-boundaries
+                  "/me" (agent-repl--command-completion-table '("/merge-queue")) nil "")
+                 '(1 . 0))))
 
 (ert-deftest agent-repl-test-command-completion-table-no-match-is-empty ()
   "A string naming no candidate, by substring or prefix, completes to nothing."
@@ -449,7 +494,8 @@ in `completion-category-overrides', with the `substring' style."
     (let ((capf (agent-repl-command-completion-at-point)))
       ;; Assert
       (should (equal (list (nth 0 capf) (nth 1 capf)) '(1 4)))
-      (should (equal (all-completions "/me" (nth 2 capf)) '("/merge-queue")))
+      (should (equal (agent-repl-test-command-completion--words "/me" (nth 2 capf))
+                     '("/merge-queue")))
       (should (eq (plist-get (nthcdr 3 capf) :exclusive) 'no)))))
 
 (ert-deftest agent-repl-test-command-completion-capf-completes-inside-parens ()
@@ -466,7 +512,42 @@ in `completion-category-overrides', with the `substring' style."
     (let ((capf (agent-repl-command-completion-at-point)))
       ;; Assert
       (should (equal (list (nth 0 capf) (nth 1 capf)) '(2 5)))
-      (should (equal (all-completions "/me" (nth 2 capf)) '("/merge-queue"))))))
+      (should (equal (agent-repl-test-command-completion--words "/me" (nth 2 capf))
+                     '("/merge-queue"))))))
+
+(ert-deftest agent-repl-test-command-completion-capf-inserts-one-slash ()
+  "Completing a typed slash word, as a UI inserts past the base, leaves one `/'."
+  (agent-repl-test-command-completion--with
+      (list :response (agent-repl-test-command-completion--stated
+                       agent-repl-test-command-completion--catalog))
+    ;; Arrange
+    (agent-repl-test-command-completion--type "/")
+    (agent-repl-command-completion-at-point)
+    (agent-repl-test-command-completion--type "erge")
+    (let* ((capf (agent-repl-command-completion-at-point))
+           (answer (agent-repl-test-command-completion--answer
+                    (buffer-substring-no-properties (nth 0 capf) (nth 1 capf)) (nth 2 capf))))
+      ;; Act
+      (delete-region (+ (nth 0 capf) (car answer)) (nth 1 capf))
+      (goto-char (+ (nth 0 capf) (car answer)))
+      (insert (cadr answer))
+      ;; Assert
+      (should (equal (buffer-string) "/merge-queue")))))
+
+(ert-deftest agent-repl-test-command-completion-at-point-inserts-one-slash ()
+  "`completion-at-point' on a unique slash word completes it with one `/'."
+  (agent-repl-test-command-completion--with
+      (list :response (agent-repl-test-command-completion--stated
+                       agent-repl-test-command-completion--catalog))
+    ;; Arrange
+    (setq-local completion-at-point-functions '(agent-repl-command-completion-at-point))
+    (agent-repl-test-command-completion--type "/")
+    (agent-repl-command-completion-at-point)
+    (agent-repl-test-command-completion--type "merge-q")
+    ;; Act
+    (completion-at-point)
+    ;; Assert
+    (should (equal (buffer-string) "/merge-queue"))))
 
 (ert-deftest agent-repl-test-command-completion-capf-is-nil-outside-a-slash-word ()
   "Outside a slash word the capf declines and asks nothing."

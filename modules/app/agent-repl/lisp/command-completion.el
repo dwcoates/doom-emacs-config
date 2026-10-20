@@ -158,15 +158,26 @@ outside the completed field, so the `substring' style's pattern is built
 from the command's NAME alone -- `/profile' is then a substring of
 `/agent-repl-profile' because `profile' is a substring of
 `agent-repl-profile', even though `/profile' the literal eight characters
-never occurs in it.  Candidates themselves keep their `/', unaffected."
-  (lambda (string predicate action)
-    (cond
-     ((eq action 'metadata)
-      `(metadata (category . ,agent-repl--command-completion-category)))
-     ((eq (car-safe action) 'boundaries)
-      (cons 'boundaries (cons (if (string-prefix-p "/" string) 1 0)
-                              (length (cdr action)))))
-     (t (complete-with-action action candidates string predicate)))))
+never occurs in it.
+
+THE ANSWERS AGREE WITH THAT BOUNDARY.  For a STRING past its leading `/',
+every ACTION completes the NAME after the slash, through
+`completion-table-with-context': all-completions answers bare names, as
+a completion UI expects of a field that starts after the `/' -- it keeps
+the typed `/' and replaces only what follows, so a slashed answer would
+insert a second `/' -- while try-completion answers the whole slashed
+word."
+  (let ((names (mapcar (lambda (candidate) (string-remove-prefix "/" candidate))
+                       candidates)))
+    (lambda (string predicate action)
+      (cond
+       ((eq action 'metadata)
+        `(metadata (category . ,agent-repl--command-completion-category)))
+       ((string-prefix-p "/" string)
+        (completion-table-with-context "/" names (substring string 1) predicate action))
+       ((eq (car-safe action) 'boundaries)
+        (cons 'boundaries (cons 0 (length (cdr action)))))
+       (t (complete-with-action action candidates string predicate))))))
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."
