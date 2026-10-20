@@ -56,6 +56,7 @@
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
 (declare-function agent-repl--repo-key-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -2804,7 +2805,7 @@ arm that owns it.")
 The reason is REQUIRED: the drain_scheduled push carries it verbatim and
 every client's standing banner names it."
   (interactive "nDrain in how many minutes: ")
-  (let ((at-ms (+ (truncate (* 1000 (float-time))) (* minutes 60 1000)))
+  (let ((at-ms (+ (agent-repl--now-unix-ms) (* minutes 60 1000)))
         (reason (agent-repl-verbs--read-drain-reason)))
     (agent-repl-verb-shutdown-schedule
      (list :arm :schedule :at-ms at-ms :reason reason))))

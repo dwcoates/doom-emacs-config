@@ -1109,7 +1109,7 @@ ring (owner ruling overrides the old keep-the-text contract)."
   "A person's send carries the instant it was submitted, for the echo timing."
   (agent-repl-test-input--with
     ;; Arrange
-    (cl-letf (((symbol-function 'agent-repl--input-now-unix-ms) (lambda () 1700000000123)))
+    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000123)))
       ;; Act
       (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
                                 :user-sent "hello"))
