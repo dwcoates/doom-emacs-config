@@ -23,6 +23,12 @@ type fakeHost struct {
 	fail  map[string]bool
 	info  string
 	mount string
+	// volumes is the fake /Volumes: `diskutil eraseDisk` makes its volume's
+	// root there, as the real one mounts it there.
+	volumes string
+	// noLogAtMount says whether the volume's .fseventsd/no_log existed when
+	// it was mounted under the mount parent.
+	noLogAtMount bool
 	// lsof is what `lsof` answers; lsofErr is its failure, if any.
 	lsof    string
 	lsofErr error
@@ -58,6 +64,13 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 		}
 	}
 	switch {
+	case strings.HasPrefix(call, "diskutil eraseDisk"):
+		if err := os.MkdirAll(filepath.Join(h.volumes, args[2]), 0o755); err != nil {
+			return "", err
+		}
+	case strings.HasPrefix(call, "diskutil mount nobrowse"):
+		_, err := os.Stat(filepath.Join(h.volumes, "artr-4242", ".fseventsd", "no_log"))
+		h.noLogAtMount = err == nil
 	case strings.HasPrefix(call, "hdiutil attach"):
 		h.attached = true
 		if h.attachOut != "" {
@@ -176,8 +189,9 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 	t.Helper()
 	parent := t.TempDir()
 	h.mount = filepath.Join(parent, "artr-4242")
+	h.volumes = t.TempDir()
 	return Manager{
-		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, Pid: 4242,
+		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, VolumesParent: h.volumes, Pid: 4242,
 		Reap:      func(reap.Members) (reap.Result, error) { return reap.Result{}, nil },
 		Probe:     h.probe,
 		Watch:     h.watch,
@@ -207,7 +221,7 @@ func TestAcquireAttachesFormatsAndMountsUnderTheMountParent(t *testing.T) {
 		"hdiutil info",
 		"hdiutil attach -nomount ram://32768",
 		"diskutil eraseDisk APFS artr-4242 /dev/disk9",
-		"diskutil info /Volumes/artr-4242",
+		"diskutil info " + filepath.Join(h.volumes, "artr-4242"),
 		"diskutil unmount disk10s1",
 		"diskutil mount nobrowse -mountPoint " + h.mount + " disk10s1",
 	}
@@ -216,6 +230,59 @@ func TestAcquireAttachesFormatsAndMountsUnderTheMountParent(t *testing.T) {
 	}
 	if v.Device != "/dev/disk9" || v.Mount != h.mount {
 		t.Fatalf("volume = %s at %s, want /dev/disk9 at %s", v.Device, v.Mount, h.mount)
+	}
+}
+
+func TestAcquireKeepsFSEventsLogOffTheVolumeBeforeMountingIt(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+
+	// Act
+	v, err := m.Acquire(16)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(func() { v.Release() })
+	if !h.noLogAtMount {
+		t.Fatal(".fseventsd/no_log did not exist on the volume when it was mounted under the mount parent")
+	}
+}
+
+func TestAcquireThatCannotKeepFSEventsLogOffTheVolumeDetachesItUnmounted(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	// A file where .fseventsd must be a directory refuses the no_log write.
+	m.Run = func(name string, args ...string) (string, error) {
+		out, err := h.run(name, args...)
+		if name == "diskutil" && len(args) > 0 && args[0] == "eraseDisk" {
+			if werr := os.WriteFile(filepath.Join(h.volumes, "artr-4242", ".fseventsd"), nil, 0o600); werr != nil {
+				t.Fatalf("arrange: %v", werr)
+			}
+		}
+		return out, err
+	}
+
+	// Act
+	_, err := m.Acquire(16)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "to keep fseventsd's log off it") {
+		t.Fatalf("Acquire err = %v, want the refused no_log write named", err)
+	}
+	for _, call := range h.calls {
+		if strings.HasPrefix(call, "diskutil mount") || strings.HasPrefix(call, "diskutil unmount") {
+			t.Fatalf("calls = %q, want no move of the volume after a refused no_log write", h.calls)
+		}
+	}
+	if last := h.calls[len(h.calls)-1]; last != "hdiutil detach /dev/disk9" {
+		t.Fatalf("last call = %q, want the device detached", last)
+	}
+	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); !os.IsNotExist(statErr) {
+		t.Fatalf("the record survives a failed acquire (stat err = %v)", statErr)
 	}
 }
 
@@ -430,7 +497,7 @@ func TestReleaseSaysSoWhenLsofSeesNoHolder(t *testing.T) {
 	err = v.Release()
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "held by: no process lsof could see") {
+	if err == nil || !strings.Contains(err.Error(), "held by: no process of this user lsof could see, and it sees no root process") {
 		t.Fatalf("Release = %v, want lsof's empty answer stated", err)
 	}
 }
