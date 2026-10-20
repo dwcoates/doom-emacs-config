@@ -99,6 +99,12 @@ Choose the combination from what the work needs:
   name, and this workspace's feed shows it sent, with WS's name then a right
   arrow, and whether it was held or refused. A prompt that begins with a slash command is refused: an agent never
   clears another workspace's conversation.
+- A prompt another workspace sent reaches you as a message from another
+  session, `from="agent-repl:NAME"`. That is the workspace NAME, and the
+  host's messaging tool it points you at is `workspace prompt NAME TEXT`.
+  A prompt between two workspaces whose permission classes differ (one
+  bypasses permissions, the other does not) is held by the vendor, so
+  agent-repl refuses to deliver it rather than let it stall.
 - **A REQUESTED UPDATE IS SENT WHEN ITS CONDITION IS MET, unasked.** When
   another workspace asks to be told once something happens ("tell me when
   this lands", "send me the results once the tests pass"), send the update
