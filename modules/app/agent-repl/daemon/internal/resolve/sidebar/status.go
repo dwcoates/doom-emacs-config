@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"fmt"
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -277,6 +278,38 @@ func asyncMergingMarker(asyncMerging bool, arm string, log dlog.Logger) *fronten
 		"the workspace's own branch merges async, so the row carries the async_merging marker beside its status",
 		dlog.Context{"status": arm})
 	return &frontendv1.RosterRowAsyncMerging{}
+}
+
+// idleAsyncUnreadMarker answers the row's `idle_async_unread` marker: present
+// exactly while the row is `idle_async` over a turn end whose result is unread
+// (`frontend.v1.RosterRowIdleAsyncUnread`), naming that turn end by the arm it
+// draws once the background ends (`turnEndArm`). The arm stays `idle_async`;
+// the marker is the one extra fact the surfaces draw, inking the name in the
+// turn end's color while the dot or `[N]` keeps the background's yellow.
+func idleAsyncUnreadMarker(s *wsState, arm string, log dlog.Logger) *frontendv1.RosterRowIdleAsyncUnread {
+	if arm != "idle_async" || !s.resultUnreadNow() {
+		return nil
+	}
+	end := s.turnEndArm()
+	marker := &frontendv1.RosterRowIdleAsyncUnread{}
+	switch end {
+	case armDone:
+		marker.TurnEnd = &frontendv1.RosterRowIdleAsyncUnread_Done{Done: &frontendv1.RosterRowStatusDone{}}
+	case armInterrupted:
+		marker.TurnEnd = &frontendv1.RosterRowIdleAsyncUnread_Interrupted{Interrupted: &frontendv1.RosterRowStatusInterrupted{}}
+	case armTurnFailed:
+		marker.TurnEnd = &frontendv1.RosterRowIdleAsyncUnread_TurnFailed{TurnFailed: &frontendv1.RosterRowStatusTurnFailed{}}
+	default:
+		// turnEndArm answers one of the three turn-end arms by construction.
+		log.Error("daemon.sidebar.idle_async_unread_marker",
+			"the unread result under the idle_async row names no turn-end arm, which turnEndArm guarantees",
+			dlog.Context{"turn_end": end})
+		panic(fmt.Sprintf("sidebar: turnEndArm answered %q, which is not a turn-end arm", end))
+	}
+	log.Debug("daemon.sidebar.idle_async_unread_marker",
+		"the row is idle_async over an unread turn end, so it carries the idle_async_unread marker naming it",
+		dlog.Context{"turn_end": end})
+	return marker
 }
 
 // mergePausedMarker answers the row's `merge_paused` marker: present exactly

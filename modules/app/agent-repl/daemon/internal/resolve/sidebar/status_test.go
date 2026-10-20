@@ -6,6 +6,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -1258,6 +1259,127 @@ func TestLiveDetachedWorkDrawsIdleAsyncOverAnUnreadTurnEnd(t *testing.T) {
 			}
 		})
 	}
+}
+
+// unreadTurnEnd names the turn end an idle_async_unread marker carries, or ""
+// when the row carries no marker.
+func unreadTurnEnd(t *testing.T, row *frontendv1.RosterRow) string {
+	t.Helper()
+	marker := row.GetIdleAsyncUnread()
+	if marker == nil {
+		return ""
+	}
+	switch marker.GetTurnEnd().(type) {
+	case *frontendv1.RosterRowIdleAsyncUnread_Done:
+		return "done"
+	case *frontendv1.RosterRowIdleAsyncUnread_Interrupted:
+		return "interrupted"
+	case *frontendv1.RosterRowIdleAsyncUnread_TurnFailed:
+		return "turn_failed"
+	default:
+		t.Fatalf("idle_async_unread = %v, want a turn_end arm set", marker)
+		return ""
+	}
+}
+
+func TestAnIdleAsyncRowOverAnUnreadTurnEndNamesIt(t *testing.T) {
+	cases := []struct {
+		name       string
+		how        sidebar.TurnClose
+		act        func(r sidebarResolver)
+		wantStatus string
+		wantEnd    string
+	}{
+		{
+			name:       "completed with async live names done",
+			how:        wsm.CloseCompleted,
+			act:        func(sidebarResolver) {},
+			wantStatus: "idle_async",
+			wantEnd:    "done",
+		},
+		{
+			name:       "completed, viewed while async live carries no marker",
+			how:        wsm.CloseCompleted,
+			act:        func(r sidebarResolver) { r.SetViewed(theWS) },
+			wantStatus: "idle_async",
+		},
+		{
+			name:       "completed, async ends while unread carries no marker on done",
+			how:        wsm.CloseCompleted,
+			act:        func(r sidebarResolver) { r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{}) },
+			wantStatus: "done",
+		},
+		{
+			name: "completed, a new prompt clears the unread result and the marker",
+			how:  wsm.CloseCompleted,
+			act: func(r sidebarResolver) {
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetTurn(theWS, nil)
+			},
+			wantStatus: "idle_async",
+		},
+		{
+			name:       "interrupted with async live carries no marker: an interrupt is read at once",
+			how:        wsm.CloseKilled,
+			act:        func(sidebarResolver) {},
+			wantStatus: "idle_async",
+		},
+		{
+			name:       "failed with async live is its turn fault and carries no marker",
+			how:        wsm.CloseFailed,
+			act:        func(sidebarResolver) {},
+			wantStatus: "vendor_blocked",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := endedWithAsync(t, tc.how)
+
+			// Act.
+			tc.act(r)
+
+			// Assert.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := unreadTurnEnd(t, row); got != tc.wantEnd {
+				t.Fatalf("idle_async_unread turn end = %q, want %q", got, tc.wantEnd)
+			}
+		})
+	}
+}
+
+func TestAnIdleAsyncRowOverARestoredUnreadFailedTurnNamesTurnFailed(t *testing.T) {
+	// Arrange: a daemon that did not see the failed turn, with detached work live.
+	r, _ := resultResolver(t, &wsm.TurnResult{End: wsm.TurnResultFailed})
+
+	// Act.
+	r.OnLiveWorkChanged(theWS, liveShell())
+
+	// Assert.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "idle_async" {
+		t.Fatalf("status = %q, want idle_async", got)
+	}
+	if got := unreadTurnEnd(t, row); got != "turn_failed" {
+		t.Fatalf("idle_async_unread turn end = %q, want turn_failed", got)
+	}
+}
+
+func TestTheIdleAsyncUnreadMarkerIsRecorded(t *testing.T) {
+	// Arrange, Act.
+	r := endedWithAsync(t, wsm.CloseCompleted)
+	_ = onlyRow(t, r)
+
+	// Assert: the marker's decision is visible in the log with its turn end.
+	for _, rec := range r.surfaces.Records() {
+		if rec.Operation == "daemon.sidebar.idle_async_unread_marker" && rec.Context["turn_end"] == "done" {
+			return
+		}
+	}
+	t.Fatal("no daemon.sidebar.idle_async_unread_marker record naming turn_end=done")
 }
 
 func TestATurnEndWithNoAsyncShowsItsTurnEndArm(t *testing.T) {
