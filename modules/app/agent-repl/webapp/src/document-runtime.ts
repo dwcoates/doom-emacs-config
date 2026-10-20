@@ -6,7 +6,8 @@
  * their own source (`ClientLogRequest.source`), and both make their text
  * copyable and selectable. Done here once, so the two cannot drift.
  */
-import { installCodeCopy } from "./code-block.js";
+import { codeOfCopyControl } from "./code-block.js";
+import { installCopyControls } from "./copy-control.js";
 import { installCopyChords, installCopyFallback } from "./copy.js";
 import type { LevelWindow } from "../../agent-shim/logging/ts/level-window.js";
 import { ForwardingLogger, setLogger, type ClientLogLevel } from "./log.js";
@@ -32,13 +33,13 @@ export function installForwardingLogger(
 
 /**
  * Make every surface of DOC copyable (copy.ts's fallback and copy chords, and
- * code-block.ts's code block copy control) and every drag-select activate
+ * copy-control.ts's copy controls) and every drag-select activate
  * nothing (selection.ts's click guard). Answers the uninstall.
  */
 export function installTextAffordances(doc: Document): () => void {
   const removeCopy = installCopyFallback(doc);
   const removeChords = installCopyChords(doc);
-  const removeCodeCopy = installCodeCopy(doc);
+  const removeCodeCopy = installCopyControls(doc, { code: codeOfCopyControl });
   const removeGuard = installSelectionClickGuard(doc);
   return () => {
     removeCopy();
