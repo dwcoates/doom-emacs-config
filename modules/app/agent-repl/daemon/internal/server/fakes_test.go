@@ -1848,14 +1848,12 @@ func receiveWebEvent(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse],
 ) *agentreplv1.WatchWebWorkspaceResponse {
 	t.Helper()
-	for stream.Receive() {
-		if stream.Msg().GetSessionIdentity() != nil {
-			continue
+	return receivePush(t, stream, "an event", func(r *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.WatchWebWorkspaceResponse {
+		if r.GetSessionIdentity() != nil {
+			return nil
 		}
-		return stream.Msg()
-	}
-	t.Fatalf("the web stream ended before an event arrived: %v", stream.Err())
-	return nil
+		return r
+	})
 }
 
 func receiveHostEvent(
@@ -1863,14 +1861,12 @@ func receiveHostEvent(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
 ) *agentreplv1.WatchHostWorkspaceResponse {
 	t.Helper()
-	for stream.Receive() {
-		if stream.Msg().GetHost() != nil {
-			continue
+	return receivePush(t, stream, "an event", func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
+		if r.GetHost() != nil {
+			return nil
 		}
-		return stream.Msg()
-	}
-	t.Fatalf("the host stream ended before an event arrived: %v", stream.Err())
-	return nil
+		return r
+	})
 }
 
 // repositoryFold is one FoldRepository the verb received.

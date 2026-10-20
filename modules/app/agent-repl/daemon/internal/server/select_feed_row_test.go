@@ -868,13 +868,7 @@ func receiveHostSelection(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
 ) *agentreplv1.HostWorkspaceSelection {
 	t.Helper()
-	for stream.Receive() {
-		if sel := stream.Msg().GetSelection(); sel != nil {
-			return sel
-		}
-	}
-	t.Fatalf("the host stream ended before a selection arrived: %v", stream.Err())
-	return nil
+	return receivePush(t, stream, "a selection", (*agentreplv1.WatchHostWorkspaceResponse).GetSelection)
 }
 
 // TestHostSelectionCarriesTheSelectedText pins what Emacs is handed for each
@@ -1195,14 +1189,12 @@ func receiveHostEventPastSelection(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
 ) *agentreplv1.WatchHostWorkspaceResponse {
 	t.Helper()
-	for stream.Receive() {
-		if stream.Msg().GetHost() != nil || stream.Msg().GetSelection() != nil {
-			continue
+	return receivePush(t, stream, "an event", func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
+		if r.GetHost() != nil || r.GetSelection() != nil {
+			return nil
 		}
-		return stream.Msg()
-	}
-	t.Fatalf("the host stream ended before an event arrived: %v", stream.Err())
-	return nil
+		return r
+	})
 }
 
 // TestSelectFeedRowClickOnAFinalResponseAsksTheHostToFocusTheComposer pins

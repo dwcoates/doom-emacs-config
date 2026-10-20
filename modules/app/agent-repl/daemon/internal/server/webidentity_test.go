@@ -20,13 +20,7 @@ func receiveWebIdentity(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse],
 ) *agentreplv1.WebWorkspaceSessionIdentity {
 	t.Helper()
-	for stream.Receive() {
-		if identity := stream.Msg().GetSessionIdentity(); identity != nil {
-			return identity
-		}
-	}
-	t.Fatalf("the web stream ended before an identity arrived: %v", stream.Err())
-	return nil
+	return receivePush(t, stream, "an identity", (*agentreplv1.WatchWebWorkspaceResponse).GetSessionIdentity)
 }
 
 // openWebStream opens the workspace's web link stream.
