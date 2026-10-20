@@ -31,7 +31,7 @@
  * the WINDOW the drag happens in and stands only until it has done its one
  * job (`swallowTheNextClick`).
  */
-import { queryAll } from "../dom.js";
+import { queryAll, windowOf } from "../dom.js";
 import { nextFrame } from "../frame.js";
 import { log } from "../log.js";
 import { dragEdgeScroll } from "../scroll.js";
@@ -80,13 +80,6 @@ export interface DragSpec {
 interface Spot {
   list: HTMLElement;
   next: Node | null;
-}
-
-/** The window ITEM is drawn in. A drawn item always has one. */
-function windowOf(item: HTMLElement): Window {
-  const win = item.ownerDocument.defaultView;
-  if (win === null) throw new Error("invariant: a dragged item is drawn in a window");
-  return win;
 }
 
 /**
