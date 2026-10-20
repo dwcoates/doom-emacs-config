@@ -95,6 +95,15 @@ export interface TranscriptChain {
   readonly byUuid: ReadonlyMap<string, ChainRecord>;
   /** The live conversation, oldest first: the head and its ancestry. */
   readonly chain: readonly ChainRecord[];
+  /**
+   * The whole chain the read walked, oldest first. It is `chain` unless
+   * {@link readLiveChain} ended the conversation before a rolled-back prompt:
+   * then it still runs on to the file's newest record, through the branch an
+   * earlier rollback dropped. That is the chain the VENDOR loads, so a
+   * truncating resume discards every entry on it past the fork point, and its
+   * guard judges them all ({@link planCut}).
+   */
+  readonly walked: readonly ChainRecord[];
 }
 
 /** The outcome of reading a transcript's chain. THE ARM IS WHY. */
@@ -327,7 +336,7 @@ function walkChain(file: string, byUuid: ReadonlyMap<string, ChainRecord>, start
       "the conversation starts at its newest compaction",
     );
   }
-  return { kind: "ok", transcript: { byUuid, chain } };
+  return { kind: "ok", transcript: { byUuid, chain, walked: chain } };
 }
 
 /**
@@ -415,7 +424,8 @@ export type GuardArming =
   | { readonly kind: "severalTurns" }
   /**
    * An entry past the fork point the guard would refuse though the shim knows
-   * it (a keep-alive; a dropped turn's task notification): arming it would
+   * it (a keep-alive; a dropped turn's task notification; a prompt an earlier
+   * rollback dropped, still on the chain the vendor loads): arming it would
    * only have the vendor refuse a cut the shim's own check allowed.
    */
   | { readonly kind: "unattributable"; readonly recordUuid: string };
@@ -455,7 +465,11 @@ export type RollbackFiles = "keep" | "restore";
  *     vendor judges the cut, so a refusal must be found here, up front.
  *
  * The guard is armed only for one dropped turn whose entries past the fork
- * point the guard would all let go.
+ * point the guard would all let go. Those are the entries of the chain the
+ * vendor loads (`TranscriptChain.walked`), not only the live ones: right after
+ * an earlier rollback the file's newest record is still on the branch it
+ * dropped, so a resume at the fork point discards that branch too, and the
+ * guard refuses its prompt as another turn's.
  */
 export function planCut(
   transcript: TranscriptChain,
@@ -484,14 +498,15 @@ export function planCut(
     const refused = later.find((entry) => !guardAttributes(entry, named) && !isKeepaliveRecord(entry));
     if (refused !== undefined) return { kind: "unseenPrompt", vendorPromptUuid: refused.uuid, why: "guardWouldRefuse" };
   }
-  return { kind: "cut", promptUuid, forkPoint, guard: guardArming(later, promptUuid, droppedPromptUuids.length) };
+  const discarded = transcript.walked.slice(transcript.walked.indexOf(record) + 1);
+  return { kind: "cut", promptUuid, forkPoint, guard: guardArming(discarded, promptUuid, droppedPromptUuids.length) };
 }
 
-/** Whether to arm the guard for a cut whose later entries are `later`. */
-function guardArming(later: readonly ChainRecord[], promptUuid: string, droppedTurns: number): GuardArming {
+/** Whether to arm the guard for a cut whose resume discards `discarded`. */
+function guardArming(discarded: readonly ChainRecord[], promptUuid: string, droppedTurns: number): GuardArming {
   if (droppedTurns !== 1) return { kind: "severalTurns" };
   const own = new Set([promptUuid]);
-  const foreign = later.find((entry) => !guardAttributes(entry, own));
+  const foreign = discarded.find((entry) => !guardAttributes(entry, own));
   if (foreign !== undefined) return { kind: "unattributable", recordUuid: foreign.uuid };
   return { kind: "armed", resumeDropsTurn: promptUuid };
 }
@@ -553,7 +568,7 @@ export function readLiveChain(index: TranscriptIndex, rolledBackPromptUuids: Rea
         { file, prompt_uuid: end.promptUuid, fork_point: end.forkPoint },
         "the conversation ends before a rolled-back prompt still at the transcript's tail",
       );
-      return { kind: "ok", transcript: { byUuid: read.transcript.byUuid, chain: chain.slice(0, at + 1) }, end };
+      return { kind: "ok", transcript: { ...read.transcript, chain: chain.slice(0, at + 1) }, end };
     }
   }
 }

@@ -22,6 +22,7 @@ import {
   type TranscriptChain,
 } from "../../src/engine/rollback.js";
 import { KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
+import { judgeTruncatingResume } from "../../src/fake/rollback.js";
 import { logRecordsDuring } from "../log-records.js";
 
 /** A transcript file holding `lines`, one JSON record (or raw text) per line. */
@@ -389,6 +390,47 @@ describe("planCut, the vendor's guard and the files", () => {
     expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "armed", resumeDropsTurn: "p1" } });
   });
 
+  /** p0, p1 and p2 answered, then p2 rolled back: the file's newest record is still p2's answer. */
+  const afterEarlierRollback = (): string =>
+    transcript([
+      user("p0", null),
+      assistant("a0", "p0"),
+      user("p1", "a0"),
+      assistant("a1", "p1"),
+      user("p2", "a1"),
+      assistant("a2", "p2"),
+    ]);
+  const liveAfterEarlierRollback = (file: string): TranscriptChain => {
+    const read = readLiveChain(createTranscriptIndex(file), new Set(["p2"]));
+    if (read.kind !== "ok") throw new Error(`no live chain: ${read.kind}`);
+    return read.transcript;
+  };
+
+  it("does not arm the guard when an earlier rollback's dropped prompt is still on the chain the vendor loads", () => {
+    // Arrange.
+    const live = liveAfterEarlierRollback(afterEarlierRollback());
+
+    // Act.
+    const plan = planCut(live, "p1", ["p1"], "keep");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "p2" } });
+  });
+
+  it("plans a cut past an earlier rollback that the mocked vendor boots", () => {
+    // Arrange.
+    const file = afterEarlierRollback();
+    const plan = planCut(liveAfterEarlierRollback(file), "p1", ["p1"], "keep");
+    if (plan.kind !== "cut") throw new Error(`no cut: ${plan.kind}`);
+    const guard = plan.guard.kind === "armed" ? plan.guard.resumeDropsTurn : undefined;
+
+    // Act.
+    const boot = judgeTruncatingResume(file, plan.forkPoint, guard);
+
+    // Assert.
+    expect(boot).toEqual({ kind: "booted" });
+  });
+
   it("does not arm the guard, and does not refuse, when a keep-alive sits past the fork point", () => {
     // Arrange, Act.
     const plan = planCut(withAfter(keepalive), "p1", ["p1"], "keep");
@@ -487,6 +529,17 @@ describe("readLiveChain", () => {
 
     // Assert.
     expect(read.kind === "ok" ? uuids(read.transcript) : read.kind).toEqual(["p0", "a0"]);
+  });
+
+  it("keeps the whole walked chain past a cut live end, through the dropped branch", () => {
+    // Arrange.
+    const file = transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1")]);
+
+    // Act.
+    const read = readLiveChain(createTranscriptIndex(file), new Set(["p1"]));
+
+    // Assert.
+    expect(read.kind === "ok" ? read.transcript.walked.map((record) => record.uuid) : read.kind).toEqual(["p0", "a0", "p1", "a1"]);
   });
 
   it("answers the newest record's whole chain when nothing on it was rolled back", () => {
