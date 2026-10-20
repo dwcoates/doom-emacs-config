@@ -7,7 +7,7 @@
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
 ;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden,
 ;; SwapWorkspaces, MoveWorkspace, SubmitPrompt, UpdateShutdownSchedule, Deploy,
-;; UpdateMergeQueue, DaemonHealth and SessionHealth.
+;; UpdateMergeQueue, DaemonHealth, SessionHealth and ReportLatencies.
 ;;
 ;; SCOPE.  This file owns exactly the messages declared in those endpoint
 ;; protos.  The shared leaf vocabularies — WorkspaceRef, RepositoryRef,
@@ -5558,6 +5558,101 @@ The success is EMPTY: the card's new state is the feed's push."
    "AnswerPermissionResponse" json
    (agent-repl-wire-verbs--empty-arm "AnswerPermissionSuccess")
    #'agent-repl-wire-decode-answer-permission-error))
+
+;;;; ---- ReportLatencies: the editor's startup milestones ------------------
+
+(defconst agent-repl-wire-editor-startup-milestones
+  '((:init . "EDITOR_STARTUP_MILESTONE_INIT")
+    (:daemon-linked . "EDITOR_STARTUP_MILESTONE_DAEMON_LINKED")
+    (:first-tab . "EDITOR_STARTUP_MILESTONE_FIRST_TAB")
+    (:all-tabs . "EDITOR_STARTUP_MILESTONE_ALL_TABS"))
+  "The EditorStartupMilestone vocabulary Emacs sends, keyword to wire name.
+UNSPECIFIED is deliberately ABSENT: the daemon refuses it, so it has no
+elisp spelling to reach for by accident.")
+
+(defconst agent-repl-wire-editor-startup-daemons
+  '((:spawned . spawned) (:running . running))
+  "How the editor came to a daemon, keyword to the `daemon' oneof's arm.")
+
+(defun agent-repl-wire-encode-reported-editor-startup (milestone)
+  "Encode one ReportedEditorStartup from plist MILESTONE.
+MILESTONE is (:milestone KEYWORD :daemon KEYWORD :seconds NUMBER), each
+required: the milestone and the daemon arm from their closed vocabularies,
+the seconds a finite, non-negative number since the process start."
+  (let* ((message "ReportedEditorStartup")
+         (name (cdr (assq (plist-get milestone :milestone) agent-repl-wire-editor-startup-milestones)))
+         (arm (cdr (assq (plist-get milestone :daemon) agent-repl-wire-editor-startup-daemons)))
+         (seconds (plist-get milestone :seconds)))
+    (unless name
+      (agent-repl-wire-verbs--fail message "milestone" "unknown milestone"))
+    (unless arm
+      (agent-repl-wire-verbs--fail message "daemon" "unknown daemon arm"))
+    (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
+      (agent-repl-wire-verbs--fail message "seconds_since_process_start" "not a finite, non-negative number"))
+    (list (cons 'milestone name)
+          (cons arm nil)
+          (cons 'secondsSinceProcessStart (float seconds)))))
+
+(defun agent-repl-wire-encode-report-latencies-request (request)
+  "Encode ReportLatenciesRequest from plist REQUEST.
+REQUEST is (:editor-startup MILESTONES), each milestone a plist for
+`agent-repl-wire-encode-reported-editor-startup'.  Emacs reports no
+interaction latency of its own, so `latencies' is never spelled."
+  (list (cons 'editorStartup
+              (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-startup
+                               (plist-get request :editor-startup))))))
+
+(defun agent-repl-wire-decode-report-latencies-recorded (json)
+  "Decode ReportLatenciesRecorded from JSON into (:recorded N)."
+  (let ((message "ReportLatenciesRecorded"))
+    (agent-repl-wire-verbs--check-keys message json '(recorded))
+    (list :recorded (agent-repl-wire--decode-uint32 message 'recorded json))))
+
+(defun agent-repl-wire-decode-report-latencies-partly-recorded (json)
+  "Decode ReportLatenciesPartlyRecorded from JSON into (:recorded N :dropped N)."
+  (let ((message "ReportLatenciesPartlyRecorded"))
+    (agent-repl-wire-verbs--check-keys message json '(recorded droppedUnknownWorkspace))
+    (list :recorded (agent-repl-wire--decode-uint32 message 'recorded json)
+          :dropped (agent-repl-wire--decode-uint32 message 'droppedUnknownWorkspace json))))
+
+(defun agent-repl-wire-decode-report-latencies-metrics-off (json)
+  "Decode the empty ReportLatenciesMetricsOff from JSON."
+  (agent-repl-wire-verbs--decode-empty "ReportLatenciesMetricsOff" json))
+
+(defun agent-repl-wire-decode-report-latencies-success (json)
+  "Decode ReportLatenciesSuccess from JSON into (:arm ARM :value V).
+Every arm is an answer to a valid report, so every arm ends the batch."
+  (let ((message "ReportLatenciesSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(recorded partlyRecorded metricsOff))
+    (agent-repl-wire-verbs--decode-oneof
+     message "outcome" json
+     (list (list 'recorded :recorded #'agent-repl-wire-decode-report-latencies-recorded)
+           (list 'partlyRecorded :partly-recorded #'agent-repl-wire-decode-report-latencies-partly-recorded)
+           (list 'metricsOff :metrics-off #'agent-repl-wire-decode-report-latencies-metrics-off)))))
+
+(defun agent-repl-wire-decode-report-latencies-workspace-ref-mismatch (json)
+  "Decode ReportLatenciesWorkspaceRefMismatch from JSON."
+  (let ((message "ReportLatenciesWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(workspaceId reportedDir registryDir))
+    (list :workspace-id (agent-repl-wire-verbs--decode-string message 'workspaceId json)
+          :reported-dir (agent-repl-wire-verbs--decode-string message 'reportedDir json)
+          :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-report-latencies-error (json)
+  "Decode ReportLatenciesError from JSON into (:arm ARM :value V)."
+  (let ((message "ReportLatenciesError"))
+    (agent-repl-wire-verbs--check-keys message json '(workspaceRefMismatch))
+    (agent-repl-wire-verbs--decode-oneof
+     message "cause" json
+     (list (list 'workspaceRefMismatch :workspace-ref-mismatch
+                 #'agent-repl-wire-decode-report-latencies-workspace-ref-mismatch)))))
+
+(defun agent-repl-wire-decode-report-latencies-response (json)
+  "Decode ReportLatenciesResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "ReportLatenciesResponse" json
+   #'agent-repl-wire-decode-report-latencies-success
+   #'agent-repl-wire-decode-report-latencies-error))
 
 (provide 'agent-repl-wire-verbs)
 
