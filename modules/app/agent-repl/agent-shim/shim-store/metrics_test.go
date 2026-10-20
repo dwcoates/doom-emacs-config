@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +41,7 @@ func TestOpenMetricsSurface(t *testing.T) {
 			root := tt.root(t)
 
 			// Act
-			surface, err := openMetricsSurface(root, log)
+			surface, err := openMetricsSurface(root, filepath.Join(t.TempDir(), "events.db"), log)
 			t.Cleanup(func() { closeMetricsSurface(surface, log) })
 
 			// Assert
@@ -64,5 +66,32 @@ func TestOpenMetricsSurface(t *testing.T) {
 				t.Fatalf("records = %+v, want a store.metrics %s record containing %q", decodeStoreRecords(t, durable), tt.wantLevel, tt.wantText)
 			}
 		})
+	}
+}
+
+func TestTheStoreSurfaceServesItsDatabaseSize(t *testing.T) {
+	// Arrange
+	log, _ := storePprofLogger()
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	if err := os.WriteFile(dbPath, make([]byte, 2048), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	surface, err := openMetricsSurface(t.TempDir(), dbPath, log)
+	if err != nil {
+		t.Fatalf("openMetricsSurface: %v", err)
+	}
+	t.Cleanup(func() { closeMetricsSurface(surface, log) })
+
+	// Act
+	resp, err := http.Get("http://" + surface.Addr() + metrics.Path)
+	if err != nil {
+		t.Fatalf("scrape: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Assert
+	if !strings.Contains(string(body), `agentrepl_db_bytes{db="events",file="db"} 2048`) {
+		t.Fatalf("scrape lacks the database size:\n%s", body)
 	}
 }
