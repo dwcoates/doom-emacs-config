@@ -22,11 +22,8 @@ func servedLog(t *testing.T, h *harness, lease wsm.LeaseID, round int) (string, 
 		t.Fatalf("OpenMergeLedger: %v", err)
 	}
 	log := h.o.testLog(lease, round)
-	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(log.path, []byte("run\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+	if err := writeTestLog(log, "run\n"); err != nil {
+		t.Fatalf("writeTestLog: %v", err)
 	}
 	return log.token, log.path
 }
