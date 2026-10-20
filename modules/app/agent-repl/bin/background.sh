@@ -9,8 +9,9 @@
 # the machine reached a load average of 281. The OWNER'S live runtime paid for
 # it: the shim fell four minutes behind reading Claude's output, and one store
 # write took 163s. This bounds what any test may take from the processes the
-# owner is using; nothing bounds how many test runs overlap (owner ruling,
-# 2026-10-14).
+# owner is using. How many cores overlapping runs hold together is bounded
+# by testrun's host core budget (testrun/internal/cores, owner ruling
+# 2026-10-20), which ranks runs by the niceness this sets.
 # Owner ruling: tests run at background priority, for sure.
 #
 # WHAT IT DOES, per platform. There is no silent path: every platform either

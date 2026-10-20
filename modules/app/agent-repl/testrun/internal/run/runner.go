@@ -95,12 +95,29 @@ type SuiteResult struct {
 // depends on how the scheduler interleaved every suite in the run.
 func (s SuiteResult) Seconds() float64 { return s.End.Sub(s.Start).Seconds() }
 
+// Cores hands out the host's core seats, shared by every run on the host
+// (cores.Host). Hold blocks while the host's budget is spent.
+type Cores interface {
+	Hold(id string, width int) (release func() error, err error)
+}
+
 // Runner runs units.
 type Runner struct {
 	Slots int
+	// Cores is the host's core budget: a unit starts only once it holds as
+	// many of the host's core seats as it is wide, and gives them back when
+	// it exits.
+	Cores Cores
 	Exec  Executor
 	Clock Clock
 	Log   *Log
+}
+
+// grant is a unit's answer from the host's core pool.
+type grant struct {
+	id      string
+	release func() error
+	err     error
 }
 
 type completion struct {
@@ -120,6 +137,9 @@ type completion struct {
 func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult, error) {
 	if r.Slots < 1 {
 		return nil, nil, fmt.Errorf("run: need at least one slot, got %d", r.Slots)
+	}
+	if r.Cores == nil {
+		return nil, nil, fmt.Errorf("run: no host core pool to hold the units' cores")
 	}
 	units := make([]sched.Unit, len(specs))
 	byID := map[string]Spec{}
@@ -144,7 +164,11 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		remaining = maps.Clone(suiteUnits)
 		running   = map[string]Process{}
 		starts    = map[string]time.Time{}
+		releases  = map[string]func() error{}
 		done      = make(chan completion)
+		// granted is buffered so the one hold in flight can always deliver
+		// its answer, even after a cancelled run stopped reading.
+		granted = make(chan grant, 1)
 	)
 
 	suiteOf := func(name string, at time.Time) *SuiteResult {
@@ -181,15 +205,23 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 	}
 
-	start := func(s Spec) {
+	// unstarted ends a unit that never ran, as a failed unit reported like
+	// any other.
+	unstarted := func(s Spec, err error, out *bytes.Buffer) {
+		r.Log.Errorf("unit %s (%s) could not start: %v", s.ID, s.Suite, err)
+		go func() { done <- completion{id: s.ID, exit: -1, err: err, output: out} }()
+	}
+	begin := func(s Spec) {
 		now := r.Clock.Now()
 		suiteOf(s.Suite, now)
 		starts[s.ID] = now
+	}
+	start := func(s Spec) {
+		begin(s)
 		out := &bytes.Buffer{}
 		p, err := r.Exec.Start(s, out)
 		if err != nil {
-			r.Log.Errorf("unit %s (%s) could not start: %v", s.ID, s.Suite, err)
-			go func() { done <- completion{id: s.ID, exit: -1, err: err, output: out} }()
+			unstarted(s, err, out)
 			return
 		}
 		running[s.ID] = p
@@ -199,35 +231,66 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}()
 	}
 
-	inFlight, used := 0, 0
+	// ONE HOLD AT A TIME, IN THE QUEUE'S ORDER. The next unit the queue
+	// picks waits for its host cores while the run keeps reaping the units
+	// already going; nothing behind it is asked for cores until it has them,
+	// so the run's own priority order survives the wait.
+	inFlight, used, holding := 0, 0, false
 	for {
-		for ctx.Err() == nil {
+		for ctx.Err() == nil && !holding {
 			u, ok := q.Next(r.Slots - used)
 			if !ok {
 				break
 			}
-			start(byID[u.ID])
 			inFlight++
 			used += u.Width()
+			holding = true
+			go func() {
+				release, err := r.Cores.Hold(u.ID, u.Width())
+				granted <- grant{id: u.ID, release: release, err: err}
+			}()
 		}
 		if inFlight == 0 {
 			break
 		}
 		var c completion
 		select {
+		case g := <-granted:
+			holding = false
+			if g.err != nil {
+				begin(byID[g.id])
+				unstarted(byID[g.id], g.err, &bytes.Buffer{})
+				continue
+			}
+			releases[g.id] = g.release
+			start(byID[g.id])
+			continue
 		case c = <-done:
 		case <-ctx.Done():
 			for _, p := range running {
 				p.Kill()
 			}
+			// A unit still waiting for host cores never started: it is not
+			// waited for, and whatever seats its hold later takes go back
+			// when this process exits, the kernel dropping their locks.
+			if holding {
+				inFlight--
+			}
 			for inFlight > 0 {
 				<-done
 				inFlight--
+			}
+			for id, release := range releases {
+				r.releaseCores(id, release)
 			}
 			return results, r.suiteList(suites, order), ctx.Err()
 		}
 		inFlight--
 		delete(running, c.id)
+		if release, ok := releases[c.id]; ok {
+			delete(releases, c.id)
+			r.releaseCores(c.id, release)
+		}
 		spec := byID[c.id]
 		used -= spec.Width()
 		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), CPU: c.cpu}
@@ -279,6 +342,15 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		panic(fmt.Sprintf("run: %d units never became ready, which NewQueue's validation rules out", p))
 	}
 	return results, r.suiteList(suites, order), nil
+}
+
+// releaseCores gives unit id's host core seats back. Closing a seat's file
+// drops its lock whatever close answers, so a failure is logged and the seat
+// is free regardless.
+func (r *Runner) releaseCores(id string, release func() error) {
+	if err := release(); err != nil {
+		r.Log.Errorf("unit %s gave back its host cores, but closing a seat failed: %v", id, err)
+	}
 }
 
 func (r *Runner) suiteList(suites map[string]*SuiteResult, order []string) []SuiteResult {

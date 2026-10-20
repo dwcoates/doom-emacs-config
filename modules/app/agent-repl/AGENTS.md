@@ -224,10 +224,11 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 ### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across `runtime.NumCPU() - 3` slots: every core but three
-(`cli.HostReserve`, owner ruling 2026-10-14), and the whole run is at nice 19,
-so it always yields the CPU to the owner's live runtime, input handling and
-apps. A host with no core left past the reserve is refused. The planner chooses each suite's chunk count by simulating
+and schedules it across the host's core budget: 70% of `runtime.NumCPU()`,
+rounded down (`cores.Budget`, `cores.Share`, owner ruling 2026-10-20), a
+budget every test run on the host shares (below), and the whole run is at
+nice 19, so it always yields the CPU to the owner's live runtime, input
+handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
 `~/.cache/agent-repl/test-history.<conditions>.json` (one history per set of
 run conditions, e.g. `ramdisk-io-default`, so timings taken at another I/O
@@ -309,22 +310,33 @@ Code: `testrun/internal/reuse`; the declarations: `testrun/roster` (`Suite.Reuse
   `~/.cache/agent-repl/test-passes/<suite>/<key>.json` (`AGENT_REPL_TEST_PASSES`
   overrides it).
 
-OVERLAPPING RUNS SHARE THE HOST BY PRIORITY, AND RATION ONLY MEMORY (owner
-ruling, 2026-10-14, the hybrid):
+OVERLAPPING RUNS SHARE ONE CORE BUDGET, IN PRIORITY ORDER, AND RATION MEMORY
+(owner ruling, 2026-10-20, replacing the 2026-10-14 hybrid that rationed only
+memory; under it the merge queue's overlapping runs, 13 slots each on a
+16-core host, drove the host past 100%):
 
-- NO PROCESSOR IS RESERVED AND NO RUN WAITS FOR ANOTHER'S CORES. Each run
-  sizes itself to the host (`cli.Slots`), and contention between overlapping
-  runs is accepted: it slows them, and it never reaches the owner's processes.
-  The host suite gate (`bin/suite-slot.sh`, with its run limit and processor
-  tokens) and the daemon-suite host flock were removed for that reason;
-  inside one run the flock had serialized the run's own integration and e2e
-  processes.
+- THE HOST'S CORES ARE SEATED. `testrun/internal/cores` keeps one pool of
+  core seats, one per budgeted core, in `/tmp/agent-repl-test-cores`
+  (`cores.DefaultDir`), and every run on the host shares it. A unit takes as
+  many seats as it is wide before it starts and gives them back when it exits,
+  so however many runs overlap, the widths of every running unit on the host
+  sum to at most the budget. A unit that finds the budget spent waits, on the
+  kernel's lock, and the run log says so (`core seats: unit ... waits`). A
+  run that dies drops its seats with its locks. A run started inside another
+  run's unit is refused (`cores.NestedEnv`), since it would wait on seats its
+  own ancestor holds.
 - PRIORITY ORDERS THEM. `bin/background.sh` demotes every test run to the
   niceness `AGENT_REPL_TEST_NICENESS` names, 19 by default; the merge queue's
   head gate names 10 and the merge behind it 15 (`merge.HeadNice`,
-  `merge.SpeculativeNice`). So the head's tests run first, then the merge
-  behind it, then every ad-hoc run, and all of them yield to the owner's
-  processes at 0.
+  `merge.SpeculativeNice`). That niceness is also the run's rank for core
+  seats (`cores.Rank`): a run never gathers seats while a run that outranks it
+  is waiting for some (`seats.Pool.TakeN`'s lanes). So the head's units get
+  cores first, then the merge behind it, then every ad-hoc run, and all of
+  them yield the CPU to the owner's processes at 0.
+- A UNIT'S WIDTH MUST BE THE CORES IT USES. The budget counts widths, so a unit
+  that uses more cores than it holds spends cores the budget never gave it.
+  The run's summary names every such unit (`it is not pinned to its width`);
+  the fix is pinning it or declaring its true width in the roster.
 - MEMORY IS SEATED, because `nice` does nothing for it and a RAM disk's memory
   is wired. A run's RAM disk holds one of `ramdisk.MemorySeats` seats (half
   the host's memory over the disk's size, at least one) from before it is

@@ -25,8 +25,10 @@ type Deps struct {
 	Log   *run.Log
 	Exec  run.Executor
 	Clock run.Clock
-	// Slots is how many units run at once.
+	// Slots is how many units run at once: the host's core budget.
 	Slots int
+	// Cores is the host's core pool every run on the host shares.
+	Cores run.Cores
 	// HistoryPath is the host's timing history.
 	HistoryPath string
 	// Build turns a suite into units.
@@ -61,12 +63,6 @@ type Reuser interface {
 	Record(mode reuse.Mode, verdicts []reuse.Verdict, results []run.SuiteResult, units map[string]int) error
 }
 
-// HostReserve is how many of the host's cores a run leaves unclaimed for the
-// owner's live runtime, input handling and apps (owner ruling, 2026-10-14).
-// The run itself is at nice 19 (bin/background.sh), so it always yields the
-// CPU to them as well.
-const HostReserve = 3
-
 // RunConditions names what a run's units measure under, for the timing
 // history they plan from (history.DefaultPath): the RAM disk at
 // ramdisk.UnitIOTier when the run has its unit prefix, else the disk at the
@@ -76,26 +72,6 @@ func RunConditions(unitPrefix []string) string {
 		return "disk-io-inherited"
 	}
 	return "ramdisk-io-" + ramdisk.UnitIOTier
-}
-
-// SlotsForHost is the core budget: every core but HostReserve. A host with no
-// core left over is answered with a non-positive count, which Slots refuses.
-func SlotsForHost(numCPU int) int {
-	return numCPU - HostReserve
-}
-
-// Slots is the run's core count, SlotsForHost. NO PROCESSOR IS HANDED OUT
-// BETWEEN RUNS (owner ruling, 2026-10-14): a run sizes itself to the host,
-// overlapping runs contend, nice orders them (the merge queue's head first),
-// and the one thing rationed between them is the memory their RAM disks wire
-// (ramdisk seats). A host too small to leave HostReserve cores free is
-// refused, never adjusted.
-func Slots(numCPU int) (int, error) {
-	n := SlotsForHost(numCPU)
-	if n < 1 {
-		return 0, fmt.Errorf("this host has %d cores; a run reserves %d for the live runtime and needs at least one more", numCPU, HostReserve)
-	}
-	return n, nil
 }
 
 // Run executes `testrun run` and returns the process exit status.
@@ -226,7 +202,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 	}
 
-	runner := &run.Runner{Slots: d.Slots, Exec: d.Exec, Clock: d.Clock, Log: log}
+	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, Log: log}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
 	end := d.Clock.Now()

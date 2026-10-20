@@ -108,3 +108,149 @@ func (p Pool) Take(waiting func(held int)) (*os.File, int, error) {
 	}
 	return w.f, w.i, nil
 }
+
+// Held is the seats one TakeN holds; Release gives every one of them back.
+type Held []*os.File
+
+// Release closes every held seat's lock file, which drops its lock. Every
+// file is closed whatever the others answer, so a failed close never keeps a
+// later seat held.
+func (h Held) Release() error {
+	var errs []error
+	for _, f := range h {
+		if err := f.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close the seat %s: %w", f.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// turnstilePath is the lock every TakeN of the pool holds while it gathers
+// its seats.
+func (p Pool) turnstilePath() string {
+	return filepath.Join(p.Dir, p.Prefix+".turnstile")
+}
+
+// lanePath is the lock every TakeN of rank holds, shared, while it waits.
+func (p Pool) lanePath(rank int) string {
+	return filepath.Join(p.Dir, fmt.Sprintf("%s.lane-%d", p.Prefix, rank))
+}
+
+// lock opens path and flocks it with how, answering the open file, whose
+// close drops the lock. With LOCK_NB, a lock held elsewhere answers
+// syscall.EWOULDBLOCK and no file.
+func (p Pool) lock(path string, how int) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open the %s seats' lock %s: %w", p.What, path, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), how); err != nil {
+		closeErr := f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) && closeErr == nil {
+			return nil, err
+		}
+		return nil, errors.Join(fmt.Errorf("lock the %s seats' lock %s: %w", p.What, path, err), closeErr)
+	}
+	return f, nil
+}
+
+// waiterAbove answers the first rank below rank (a higher priority) that has
+// a taker waiting, or -1 when none has.
+func (p Pool) waiterAbove(rank int) (int, error) {
+	for q := range rank {
+		f, err := p.lock(p.lanePath(q), syscall.LOCK_EX|syscall.LOCK_NB)
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return q, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		if err := f.Close(); err != nil {
+			return 0, fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(q), err)
+		}
+	}
+	return -1, nil
+}
+
+// TakeN holds n of the pool's seats at once for a taker of rank (zero is the
+// highest priority), calling waiting the first time (and only the first time)
+// it has to wait for them.
+//
+// ONE GATHERER AT A TIME, SO NO TWO TAKERS CAN DEADLOCK. A taker gathers its
+// seats one by one while holding the pool's turnstile, so at most one taker
+// ever holds part of what it needs; every other held seat belongs to a taker
+// that has all of its seats, which gives them back when its work ends. Two
+// takers each holding half of a pool and each waiting for the other's half is
+// therefore unrepresentable, however many runs overlap.
+//
+// A HIGHER RANK NEVER GATHERS WHILE A LOWER ONE WAITS. Every taker holds its
+// rank's lane, shared, from the moment it asks until it has its seats. A
+// taker that wins the turnstile first tries every lane above its own; finding
+// one held, it lets the turnstile go and waits, on the kernel's lock, until
+// that lane is empty. So the merge queue's head never queues behind another
+// run's units for a seat; at most it waits for the one gather already under
+// way when it asked. Lanes are only ever probed upward in priority, so no two
+// takers ever wait on each other's lanes.
+func (p Pool) TakeN(n, rank int, waiting func()) (Held, error) {
+	if n < 1 || n > p.N {
+		return nil, fmt.Errorf("take %d of the %s pool %s's %d seats: a taker needs from one to all of them", n, p.What, p.Dir, p.N)
+	}
+	if rank < 0 {
+		return nil, fmt.Errorf("take %s seats at rank %d: a rank is zero or more", p.What, rank)
+	}
+	var once sync.Once
+	wait := func() { once.Do(waiting) }
+	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
+		return nil, fmt.Errorf("make the %s seats directory: %w", p.What, err)
+	}
+	lane, err := p.lock(p.lanePath(rank), syscall.LOCK_SH)
+	if err != nil {
+		return nil, err
+	}
+	// Closing the lane's file drops the taker's share of it: the deferred
+	// close is the one release, on every path.
+	defer lane.Close()
+	for {
+		turnstile, err := p.lock(p.turnstilePath(), syscall.LOCK_EX|syscall.LOCK_NB)
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			wait()
+			turnstile, err = p.lock(p.turnstilePath(), syscall.LOCK_EX)
+		}
+		if err != nil {
+			return nil, err
+		}
+		above, err := p.waiterAbove(rank)
+		if err != nil {
+			return nil, errors.Join(err, turnstile.Close())
+		}
+		if above < 0 {
+			held, err := p.gather(n, wait)
+			return held, errors.Join(err, turnstile.Close())
+		}
+		if err := turnstile.Close(); err != nil {
+			return nil, fmt.Errorf("let the %s seats' turnstile go: %w", p.What, err)
+		}
+		wait()
+		empty, err := p.lock(p.lanePath(above), syscall.LOCK_EX)
+		if err != nil {
+			return nil, err
+		}
+		if err := empty.Close(); err != nil {
+			return nil, fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(above), err)
+		}
+	}
+}
+
+// gather takes n seats one at a time; on any failure it gives back what it
+// already took.
+func (p Pool) gather(n int, wait func()) (Held, error) {
+	held := make(Held, 0, n)
+	for range n {
+		f, _, err := p.Take(func(int) { wait() })
+		if err != nil {
+			return nil, errors.Join(err, held.Release())
+		}
+		held = append(held, f)
+	}
+	return held, nil
+}

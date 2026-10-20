@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"agentrepl/testrun/internal/cores"
 )
 
 // SandboxExec is the seatbelt launcher every keyed unit starts under.
@@ -34,8 +36,10 @@ var runScopedEnvNames = map[string]bool{
 	"AGENT_REPL_INTEGRATION_ARTIFACTS": true,
 	"AGENT_REPL_E2E_ARTIFACTS":         true,
 	"AGENT_REPL_PROFILE_ROOT":          true,
-	"AGENT_REPL_BACKGROUND_PRIORITY":   true,
+	cores.EnvBackground:                true,
 	"AGENT_REPL_TEST_NICENESS":         true,
+	// The run's mark on its units, so a run nested in one is refused.
+	cores.NestedEnv: true,
 }
 
 // keyedEnv reports whether an inherited variable's value is part of the key.

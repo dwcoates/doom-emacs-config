@@ -12,6 +12,7 @@ func TestConfinedEnvKeepsOnlyWhatTheKeyCoversOrTheRunOwns(t *testing.T) {
 	environ := []string{
 		"HOME=/h", "PATH=/bin", "GOFLAGS=-p=1", "CGO_ENABLED=0", // keyed
 		"TMPDIR=/t", "AGENT_REPL_TEST_SHORT_BASE=/s", "AGENT_REPL_BACKGROUND_PRIORITY=nice-19", // run-scoped
+		"AGENT_REPL_TEST_CORE_SEATS_HELD=42",                                      // run-scoped
 		"AGENT_REPL_TEST_PROGRAMS=/p",                                             // the unit's own
 		"CLAUDE_CONFIG_DIR=/c", "AGENT_REPL_LOG_LEVEL=debug", "TERM_SESSION_ID=x", // dropped
 	}
@@ -21,7 +22,7 @@ func TestConfinedEnvKeepsOnlyWhatTheKeyCoversOrTheRunOwns(t *testing.T) {
 
 	// Assert
 	want := []string{"HOME=/h", "PATH=/bin", "GOFLAGS=-p=1", "CGO_ENABLED=0", "TMPDIR=/t",
-		"AGENT_REPL_TEST_SHORT_BASE=/s", "AGENT_REPL_BACKGROUND_PRIORITY=nice-19", "AGENT_REPL_TEST_PROGRAMS=/p"}
+		"AGENT_REPL_TEST_SHORT_BASE=/s", "AGENT_REPL_BACKGROUND_PRIORITY=nice-19", "AGENT_REPL_TEST_CORE_SEATS_HELD=42", "AGENT_REPL_TEST_PROGRAMS=/p"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("ConfinedEnv = %v, want %v", got, want)
 	}
