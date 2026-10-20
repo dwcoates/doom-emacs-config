@@ -60,6 +60,8 @@ src/
     network-resume.ts  classifyAgentFailure: THE one network classifier, plus the resume of cut-off agents
     vendor-error-retry.ts  the retry of a main turn the vendor gave up on, or a usage limit stopped
     shim-prompt.ts     the delivery shape every prompt the shim authors shares (deliverShimPrompt)
+    peer-send.ts       an agent's prompt as another session's message: the envelope, the
+                       sender's class, and the admission a vendor hold refuses
     network-reach.ts   what each SDK message says about the network: raises and resolves
                        the `network_unreachable` session fault (component "network")
   convert/
