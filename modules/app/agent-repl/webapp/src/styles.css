@@ -997,6 +997,18 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo.repo-section > .repo-head { font-size: 0.7rem; }
 #ws-sidebar .repo.repo-section > .repo-head .tri { font-size: 0.98rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
+/* A HEADER THAT FOLDS FROM ITS TRIANGLE ALONE (owner request, 2026-10-20;
+   src/sidebar/roster.ts FoldHitArea) takes the click in the area around the
+   triangle, not only on the glyph: padding widens the box the click lands
+   in, and the matching negative margin keeps the triangle where it was. The
+   rest of the line is no button, so only the triangle shows the pointer. */
+#ws-sidebar .repo-head[data-fold-hit="triangle"] { cursor: default; }
+#ws-sidebar .repo-head[data-fold-hit="triangle"] > .tri,
+#ws-sidebar .sb-subsection-head > .tri {
+  cursor: pointer;
+  padding: 0.3rem 0.35rem;
+  margin: -0.3rem -0.35rem;
+}
 
 /* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
    rows wherever they were arranged, each a small header over its rows, and

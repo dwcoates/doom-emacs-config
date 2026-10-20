@@ -25,6 +25,8 @@ import {
   createRosterDrawer,
   disposeWorkspaceRoster,
   drawFoldHeader,
+  FOLD_HIT_ATTRIBUTE,
+  type FoldHitArea,
   drawHeadedSection,
   drawRosterRepoDivergence,
   drawSectionLabel,
@@ -172,6 +174,24 @@ describe("the sections", () => {
     expect(sizes).toEqual(["0.98rem", "1.05rem"]);
   });
 
+  it("widens a repository's fold triangle's hit box without moving it, the pointer on the triangle alone", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
+    // Act
+    const values = inRail(drawn, (rail) => {
+      const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
+      const triangle = header.querySelector(".tri") as HTMLElement;
+      return [
+        cascadedValue(header, "cursor"),
+        cascadedValue(triangle, "cursor"),
+        cascadedValue(triangle, "padding"),
+        cascadedValue(triangle, "margin"),
+      ];
+    });
+    // Assert
+    expect(values).toEqual(["default", "pointer", "0.3rem 0.35rem", "-0.3rem -0.35rem"]);
+  });
+
   it("sets a repository's name a step smaller than the band headers, its count scaling with it", () => {
     // Arrange
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", collapsed: true })] }), sidebarContext());
@@ -248,13 +268,13 @@ const FOLDING_SECTIONS = [
 ] as const;
 
 describe("a section holding the current workspace never collapses", () => {
-  it("asks nothing when the repository's header is clicked", async () => {
+  it("asks nothing when the repository's triangle is clicked", async () => {
     // Arrange
     const { asked, sc } = viewDaemon();
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", holdsCurrent: true })] }), sc);
 
     // Act
-    await click(drawn.querySelector(".repo-section > .repo-head") as Element);
+    await click(drawn.querySelector(".repo-section [data-section-fold]") as Element);
 
     // Assert
     expect([asked.length, drawn.querySelector(".repo-section")?.classList.contains("folded")]).toEqual([0, false]);
@@ -321,6 +341,22 @@ describe("folding a section is the daemon's view, shared by every page", () => {
     expect(asked.map(foldAsked)).toEqual([{ section: kind, id, fold: want }]);
   });
 
+  it.each(FOLDING_SECTIONS.map((s) => ({ ...s, want: s.kind === "repository" ? [] : [s.kind] })))(
+    "asks for the other fold of a $kind section from a click on its label only if it folds from its whole header",
+    async ({ roster: make, selector, want }) => {
+      // Arrange
+      const { asked, sc } = viewDaemon();
+      const drawn = drawWorkspaceRoster(make(false), sc);
+      const section = drawn.querySelector(selector) as HTMLElement;
+
+      // Act
+      await click(section.querySelector(`:scope > .repo-head > .${SECTION_LABEL_CLASS}`) as Element);
+
+      // Assert
+      expect([asked.map((a) => foldAsked(a).section), section.classList.contains("folded")]).toEqual([want, want.length > 0]);
+    },
+  );
+
   it.each(FOLDING_SECTIONS)("folds a $kind section on this page at once, before any push", async ({ roster: make, selector }) => {
     const { sc } = viewDaemon();
     const drawn = drawWorkspaceRoster(make(false), sc);
@@ -386,7 +422,7 @@ describe("drawHeadedSection", () => {
   function wire(init: { collapsed?: boolean; rows?: ReturnType<typeof row>[] } = {}) {
     return repoSection({ id: "repo-1", label: "Head", rows: init.rows, collapsed: init.collapsed });
   }
-  const SHAPE = { foldKey: "k:1", className: "kind-section", target: { case: "recentlyMerged", value: {} } } as const;
+  const SHAPE = { foldKey: "k:1", className: "kind-section", target: { case: "recentlyMerged", value: {} }, foldBy: "header" } as const;
   /** Draw SECTION as a headed section of its own open rows. */
   const draw = (section: ReturnType<typeof wire>, sc: Parameters<typeof drawHeadedSection>[1], path: string, shape: Parameters<typeof drawHeadedSection>[3]) =>
     drawHeadedSection(section, sc, path, shape, { rows: section.entries.flatMap((e) => (e.entry.case === "row" ? [e.entry.value] : [])) }, `${path}.entries`);
@@ -1377,12 +1413,12 @@ describe("the repository label's divergence hover", () => {
 });
 
 describe("drawFoldHeader", () => {
-  const draw = (): { header: HTMLElement; section: HTMLElement; calls: HTMLElement[] } => {
+  const draw = (hit: FoldHitArea = "header"): { header: HTMLElement; section: HTMLElement; calls: HTMLElement[] } => {
     const section = document.createElement("div");
     const label = document.createElement("span");
     label.textContent = "alpha";
     const calls: HTMLElement[] = [];
-    const header = drawFoldHeader(label, section, (_section, control) => calls.push(control));
+    const header = drawFoldHeader(label, section, (_section, control) => calls.push(control), hit);
     return { header, section, calls };
   };
 
@@ -1404,6 +1440,33 @@ describe("drawFoldHeader", () => {
     header.click();
     // Assert
     expect(calls).toEqual([header]);
+  });
+
+  it("asks nothing from a click on the header off the triangle when it folds from the triangle", () => {
+    // Arrange
+    const { header, calls } = draw("triangle");
+    // Act
+    header.click();
+    (header.children[1] as HTMLElement).click();
+    // Assert
+    expect(calls).toEqual([]);
+  });
+
+  it("asks once, from the triangle, when the triangle of a triangle-folding header is clicked", () => {
+    // Arrange
+    const { header, calls } = draw("triangle");
+    const triangle = header.querySelector<HTMLElement>("[data-section-fold]")!;
+    // Act
+    triangle.click();
+    // Assert
+    expect(calls).toEqual([triangle]);
+  });
+
+  it.each(["header", "triangle"] as const)("names its %s fold hit area on the header", (hit) => {
+    // Arrange, Act
+    const { header } = draw(hit);
+    // Assert
+    expect(header.getAttribute(FOLD_HIT_ATTRIBUTE)).toBe(hit);
   });
 
   it("asks once, from the triangle, when the triangle is clicked", () => {
