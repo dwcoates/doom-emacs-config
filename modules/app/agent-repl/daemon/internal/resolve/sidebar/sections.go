@@ -35,6 +35,7 @@ const OpenSectionLabel = "Open"
 // subsection nowhere to drag a workspace into).
 func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
 	repos, orphans := openTree(r.state.reg, log)
+	current := r.selectedWorkspace()
 	out := &frontendv1.RosterRepositoryView{}
 	numbers := &tabNumberer{}
 	shown := 0
@@ -62,12 +63,12 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 				Header:   sectionHeader(region.subsection.Name, regionCount),
 				OpenRows: rows,
 			}
-			setSubsectionFold(sub, region.subsection.Folded)
+			setSubsectionFold(sub, region.subsection.Folded, wsm.SubsectionMembers(region.subsection.ID).HoldsCurrent(current))
 			section.Subsections = append(section.Subsections, sub)
 		}
 		section.Header = sectionHeader(placed.repo.Name, count)
 		shown += count
-		setRepoFold(section, placed.repo.Folded)
+		setRepoFold(section, placed.repo.Folded, wsm.RepositoryMembers(placed.repo.ID).HoldsCurrent(current))
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
@@ -103,24 +104,38 @@ func repoKey(repo wsm.Repository) *frontendv1.RosterRepoKey {
 }
 
 // setRepoFold states the repository's fold on its section: the ONE arm the
-// sidebar and the Emacs tab bar both draw from.
-func setRepoFold(section *frontendv1.RosterRepoSection, folded bool) {
+// sidebar and the Emacs tab bar both draw from. An expanded section says
+// whether a collapse may be asked: never while it HOLDS_CURRENT, which the
+// daemon's fold verb refuses by the same membership (wsm.FoldMembers).
+func setRepoFold(section *frontendv1.RosterRepoSection, folded, holdsCurrent bool) {
 	if folded {
 		section.Fold = &frontendv1.RosterRepoSection_Collapsed{Collapsed: &frontendv1.RosterRepoSectionCollapsed{}}
 		return
 	}
-	section.Fold = &frontendv1.RosterRepoSection_Expanded{Expanded: &frontendv1.RosterRepoSectionExpanded{}}
+	expanded := &frontendv1.RosterRepoSectionExpanded{
+		Collapse: &frontendv1.RosterRepoSectionExpanded_Collapsible{Collapsible: &frontendv1.RosterRepoSectionCollapsible{}}}
+	if holdsCurrent {
+		expanded.Collapse = &frontendv1.RosterRepoSectionExpanded_HoldsCurrent{HoldsCurrent: &frontendv1.RosterRepoSectionHoldsCurrent{}}
+	}
+	section.Fold = &frontendv1.RosterRepoSection_Expanded{Expanded: expanded}
 }
 
 // setSubsectionFold sets a subsection's fold arm: its OWN fold, which the
 // sidebar draws. Its tabs are folded by its repository's collapse as well
 // (openRegion.folded).
-func setSubsectionFold(sub *frontendv1.RosterSubsection, folded bool) {
+// An expanded subsection says whether a collapse may be asked, as a
+// repository's section does (setRepoFold).
+func setSubsectionFold(sub *frontendv1.RosterSubsection, folded, holdsCurrent bool) {
 	if folded {
 		sub.Fold = &frontendv1.RosterSubsection_Collapsed{Collapsed: &frontendv1.RosterSubsectionCollapsed{}}
 		return
 	}
-	sub.Fold = &frontendv1.RosterSubsection_Expanded{Expanded: &frontendv1.RosterSubsectionExpanded{}}
+	expanded := &frontendv1.RosterSubsectionExpanded{
+		Collapse: &frontendv1.RosterSubsectionExpanded_Collapsible{Collapsible: &frontendv1.RosterSubsectionCollapsible{}}}
+	if holdsCurrent {
+		expanded.Collapse = &frontendv1.RosterSubsectionExpanded_HoldsCurrent{HoldsCurrent: &frontendv1.RosterSubsectionHoldsCurrent{}}
+	}
+	sub.Fold = &frontendv1.RosterSubsection_Expanded{Expanded: expanded}
 }
 
 // repoDivergence projects a repository's measure onto its section's label
