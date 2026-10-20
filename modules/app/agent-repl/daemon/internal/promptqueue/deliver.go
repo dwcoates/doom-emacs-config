@@ -336,11 +336,15 @@ const interruptionNote = "The work you were doing was interrupted to deliver thi
 // startTurn opens SUB's turn: with the interruption note when the prompt
 // interrupted the running turn, as an ordinary start otherwise.
 func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, log dlog.Logger) (*shimv1.StartTurnSuccess, error) {
+	sentBy, err := q.sentByOf(ctx, sub, log)
+	if err != nil {
+		return nil, err
+	}
 	if !sub.interjected {
-		return sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+		return sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin, sentBy)
 	}
 	log.Info(opDeliver, "the prompt interrupted the running turn; it is delivered with a note telling the agent why", nil)
-	return sender.StartInterjection(ctx, sub.Turn, sub.Said, sub.Origin, interruptionNote)
+	return sender.StartInterjection(ctx, sub.Turn, sub.Said, sub.Origin, sentBy, interruptionNote)
 }
 
 // holdForReconnect parks a delivery the SHIM refused because it holds no

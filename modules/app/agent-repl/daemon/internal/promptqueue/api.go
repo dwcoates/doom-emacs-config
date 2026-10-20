@@ -572,6 +572,21 @@ type ClientFunc func(ws ids.WorkspaceID) (Sender, bool)
 // satisfies it, and it is idempotent for a session that is already live.
 type ReviveFunc func(ctx context.Context, ws ids.WorkspaceID) error
 
+// SentBy is the workspace whose agent sent a prompt, as the shim declares it
+// to the vendor (shim.v1 StartTurnSentBy): the prompt reaches the recipient's
+// agent as that workspace's message, declaring the SENDER's own permission
+// mode, never the recipient's.
+type SentBy struct {
+	// Workspace is the sending workspace. Never empty.
+	Workspace ids.WorkspaceID
+	// Name is the sending workspace's name, "" when the daemon can no longer
+	// name it (a sender forgotten since it sent).
+	Name string
+	// PermissionMode is the sending workspace's recorded permission mode, ""
+	// when the daemon holds no session record for it.
+	PermissionMode string
+}
+
 // Sender is the slice of the shim client the queue uses. Keeping it narrow is
 // what lets the queue be tested against a fake without a whole shim.
 type Sender interface {
@@ -583,15 +598,18 @@ type Sender interface {
 	// must hand StartTurnSuccess.prompt.agent to the watcher's SetMainAgent
 	// and the pair to OnTurnOpened — ARCHITECTURE names the queue as the
 	// authoritative source of both — so the success has to come back here.
-	StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error)
+	//
+	// SENTBY names the workspace whose agent sent the prompt, set exactly
+	// when origin is PROMPT_ORIGIN_AGENT_SENT (StartTurnRequest.sent_by).
+	StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy) (*shimv1.StartTurnSuccess, error)
 	// JoinRunningTurn sends the prompt to join the daemon's turn in flight
 	// after its current tool call, with nothing interrupted
 	// (StartTurnRequest.join_running_turn). Answered as StartTurn is.
-	JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error)
+	JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy) (*shimv1.StartTurnSuccess, error)
 	// StartInterjection opens the turn of a prompt that interrupted the
 	// running one, with NOTE for the agent alone (StartTurnRequest.vendor_note).
 	// Answered as StartTurn is.
-	StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error)
+	StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy, note string) (*shimv1.StartTurnSuccess, error)
 	// PromptAgent delivers a bubble-composer prompt to one agent.
 	PromptAgent(ctx context.Context, agent *conversationv1.AgentId, said *conversationv1.UserSaid) error
 	// KillTurn interrupts the open turn for an interjection. commandedBy is

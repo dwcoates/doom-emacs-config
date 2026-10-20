@@ -1916,6 +1916,48 @@ func TestAnAgentSentPromptIsDrawnUnderTheSendingWorkspace(t *testing.T) {
 	}
 }
 
+// TestAnAgentSentPromptsStartTurnNamesItsSender: the shim is told which
+// workspace sent the prompt (StartTurnRequest.sent_by), by id and name, so it
+// can deliver the prompt as that workspace's message. A sender that never
+// started a session has no recorded mode, so none is declared.
+func TestAnAgentSentPromptsStartTurnNamesItsSender(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
+
+	// Act
+	f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-agent-sender",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender,
+	})
+
+	// Assert
+	sentBy := f.shim.ExpectStartTurn().GetSentBy()
+	if sentBy.GetWorkspaceId() != sender.GetId() || !strings.Contains(sentBy.GetWorkspaceName(), "parser-fix") {
+		t.Fatalf("StartTurn.sent_by = %v, want workspace %s named parser-fix", sentBy, sender.GetId())
+	}
+	if sentBy.PermissionMode != nil {
+		t.Fatalf("StartTurn.sent_by.permission_mode = %v, want none for a sender with no session", sentBy.GetPermissionMode())
+	}
+}
+
+// TestAUsersPromptsStartTurnNamesNoSender: a prompt no agent sent carries no
+// sender, so the shim delivers it as words the user typed.
+func TestAUsersPromptsStartTurnNamesNoSender(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	f.submit("please review the parser", "k-user-no-sender", origin)
+
+	// Assert
+	if sentBy := f.shim.ExpectStartTurn().GetSentBy(); sentBy != nil {
+		t.Fatalf("StartTurn.sent_by = %v, want none for a user's prompt", sentBy)
+	}
+}
+
 func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange

@@ -286,7 +286,8 @@ func (q *queue) runContextCut(ctx context.Context, d *delivery, act Act, sender 
 	var success *shimv1.StartTurnSuccess
 	var err error
 	d.outside(shimCall{what: "context_cut", turn: turn, opensTurn: true, holds: claims}, log, func() {
-		success, err = sender.StartTurn(ctx, turn, said, origin)
+		// A CONTEXT CUT IS THE SESSION'S OWN ACT: no agent sent it.
+		success, err = sender.StartTurn(ctx, turn, said, origin, nil)
 	})
 	if err != nil {
 		if watching {

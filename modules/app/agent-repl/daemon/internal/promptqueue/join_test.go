@@ -567,3 +567,27 @@ func TestAResubmittedFoldedPromptKeepsItsSender(t *testing.T) {
 		t.Fatalf("resubmitted turn = %+v, want the folded prompt's own sender %s", turn, theSender)
 	}
 }
+
+func TestAnAgentsPromptJoiningTheRunningTurnDeclaresItsSender(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	registerSender(h, "parser-fix", "auto")
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = afterToolCall
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "also cover the edge case")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if joins := h.sender.joins; len(joins) != 1 || joins[0] != "t1" {
+		t.Fatalf("joins = %v, want t1 sent to join", joins)
+	}
+	handed := h.sender.handedSentBys()
+	want := SentBy{Workspace: theSender, Name: "parser-fix", PermissionMode: "auto"}
+	if last := handed[len(handed)-1]; last == nil || *last != want {
+		t.Fatalf("the join's sender = %+v, want %+v", last, want)
+	}
+}

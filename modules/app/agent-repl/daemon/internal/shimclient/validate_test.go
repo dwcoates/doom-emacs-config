@@ -153,6 +153,27 @@ func TestValidateStartTurnRequest(t *testing.T) {
 		{name: "empty known-through", mut: func(r *shimv1.StartTurnRequest) {
 			r.Opening = &shimv1.StartTurnRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{}}
 		}, field: "StartTurnRequest.known_through.value"},
+		{name: "a sender on a prompt no agent sent", mut: func(r *shimv1.StartTurnRequest) {
+			r.SentBy = validSentBy()
+		}, field: "StartTurnRequest.sent_by"},
+		{name: "an agent's prompt naming no sender", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+		}, field: "StartTurnRequest.sent_by"},
+		{name: "a sender with no workspace id", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			r.SentBy = validSentBy()
+			r.SentBy.WorkspaceId = ""
+		}, field: "StartTurnRequest.sent_by.workspace_id"},
+		{name: "a sender's name set but empty", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			r.SentBy = validSentBy()
+			r.SentBy.WorkspaceName = new(string)
+		}, field: "StartTurnRequest.sent_by.workspace_name"},
+		{name: "a sender's mode naming no mode", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			r.SentBy = validSentBy()
+			r.SentBy.PermissionMode = &conversationv1.AgentPermissionMode{}
+		}, field: "StartTurnRequest.sent_by.permission_mode.mode"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,6 +186,48 @@ func TestValidateStartTurnRequest(t *testing.T) {
 
 			// Assert.
 			assertInvalidField(t, err, tc.field)
+		})
+	}
+}
+
+// validSentBy is the fullest legal sender: named, with its mode.
+func validSentBy() *shimv1.StartTurnSentBy {
+	name := "sender"
+	return &shimv1.StartTurnSentBy{
+		WorkspaceId:   "ws-sender",
+		WorkspaceName: &name,
+		PermissionMode: &conversationv1.AgentPermissionMode{
+			Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}},
+		},
+	}
+}
+
+// TestValidateStartTurnRequestAcceptsASender: an agent's prompt naming its
+// sender is legal, named or not, with its mode or without one.
+func TestValidateStartTurnRequestAcceptsASender(t *testing.T) {
+	tests := []struct {
+		name string
+		mut  func(*shimv1.StartTurnSentBy)
+	}{
+		{name: "named, with its mode", mut: func(*shimv1.StartTurnSentBy) {}},
+		{name: "a sender the daemon cannot name", mut: func(s *shimv1.StartTurnSentBy) { s.WorkspaceName = nil }},
+		{name: "a sender whose mode the daemon does not hold", mut: func(s *shimv1.StartTurnSentBy) { s.PermissionMode = nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			req := validStartTurnRequest()
+			req.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			req.SentBy = validSentBy()
+			tc.mut(req.SentBy)
+
+			// Act.
+			err := validateStartTurnRequest(req)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateStartTurnRequest = %v, want nil", err)
+			}
 		})
 	}
 }

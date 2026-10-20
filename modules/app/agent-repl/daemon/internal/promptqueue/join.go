@@ -197,7 +197,10 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	q.addJoin(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin, sentBy: sub.SentBy})
 	var success *shimv1.StartTurnSuccess
 	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
-		success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+		var sentBy *SentBy
+		if sentBy, err = q.sentByOf(ctx, sub, log); err == nil {
+			success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin, sentBy)
+		}
 	})
 	if err != nil {
 		q.withdrawJoining(sub.WS, sub.Turn)

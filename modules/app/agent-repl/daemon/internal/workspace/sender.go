@@ -126,22 +126,22 @@ type shimclientSender interface {
 // StartTurn opens the turn and hands back the shim's success WHOLE: the queue
 // needs the prompt's agent for SetMainAgent and the opening page for the
 // watcher's turn handover, and neither is recoverable from an error.
-func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
-	return s.startTurn(ctx, turn, said, origin, turnStart{})
+func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *promptqueue.SentBy) (*shimv1.StartTurnSuccess, error) {
+	return s.startTurn(ctx, turn, said, origin, turnStart{sentBy: sentBy})
 }
 
 // JoinRunningTurn sends the prompt to join the daemon's turn in flight after
 // its current tool call (StartTurnRequest.join_running_turn), answered exactly
 // as StartTurn is.
-func (s *sender) JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
-	return s.startTurn(ctx, turn, said, origin, turnStart{join: true})
+func (s *sender) JoinRunningTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *promptqueue.SentBy) (*shimv1.StartTurnSuccess, error) {
+	return s.startTurn(ctx, turn, said, origin, turnStart{join: true, sentBy: sentBy})
 }
 
 // StartInterjection opens the turn of a prompt that interrupted the running
 // one, with NOTE for the agent alone (StartTurnRequest.vendor_note), answered
 // exactly as StartTurn is.
-func (s *sender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error) {
-	return s.startTurn(ctx, turn, said, origin, turnStart{note: note})
+func (s *sender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *promptqueue.SentBy, note string) (*shimv1.StartTurnSuccess, error) {
+	return s.startTurn(ctx, turn, said, origin, turnStart{note: note, sentBy: sentBy})
 }
 
 // turnStart is how a StartTurn differs between the verbs that make one.
@@ -150,6 +150,8 @@ type turnStart struct {
 	join bool
 	// note is the vendor note, empty for none.
 	note string
+	// sentBy is the workspace whose agent sent the prompt, nil for none.
+	sentBy *promptqueue.SentBy
 }
 
 // startTurn is the one StartTurn call every verb makes.
@@ -172,6 +174,7 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 	if how.note != "" {
 		req.VendorNote = &how.note
 	}
+	req.SentBy = startTurnSentBy(how.sentBy)
 	response, err := s.client.StartTurn(ctx, req)
 	if err != nil {
 		// A SHIM THAT DIED UNDER THE CALL is the queue's to hold, not to
@@ -192,6 +195,23 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		return nil, fmt.Errorf("shim StartTurn answered neither success nor failure for turn %q", turn)
 	}
 	return success, nil
+}
+
+// startTurnSentBy is the wire form of SENTBY, nil for a prompt no agent sent.
+// A name or mode the daemon does not hold is left UNSET, never filled in.
+func startTurnSentBy(sentBy *promptqueue.SentBy) *shimv1.StartTurnSentBy {
+	if sentBy == nil {
+		return nil
+	}
+	wire := &shimv1.StartTurnSentBy{WorkspaceId: string(sentBy.Workspace)}
+	if sentBy.Name != "" {
+		name := sentBy.Name
+		wire.WorkspaceName = &name
+	}
+	if sentBy.PermissionMode != "" {
+		wire.PermissionMode = permissionMode(sentBy.PermissionMode)
+	}
+	return wire
 }
 
 // opening waits for the session's main watch to stand, and answers the

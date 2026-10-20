@@ -5,6 +5,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+
+	"agent-repld/internal/promptorigin"
 )
 
 // The base-function convention, applied to the shim's request messages: one
@@ -223,7 +225,31 @@ func validateStartTurnRequest(req *shimv1.StartTurnRequest) error {
 	if req.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		return invalid(m, m+".origin", "is unspecified")
 	}
+	if err := promptorigin.CheckSender(req.GetOrigin(), req.SentBy != nil); err != nil {
+		return invalid(m, m+".sent_by", err.Error())
+	}
+	if req.SentBy != nil {
+		if err := validateStartTurnSentBy(m+".sent_by", req.GetSentBy()); err != nil {
+			return err
+		}
+	}
 	return validateStartTurnOpening(m, req)
+}
+
+// validateStartTurnSentBy is StartTurnSentBy's base function. The name and the
+// mode are each UNSET when the daemon holds none, never empty when set.
+func validateStartTurnSentBy(field string, sentBy *shimv1.StartTurnSentBy) error {
+	const m = "StartTurnSentBy"
+	if sentBy.GetWorkspaceId() == "" {
+		return invalid(m, field+".workspace_id", "is empty")
+	}
+	if sentBy.WorkspaceName != nil && sentBy.GetWorkspaceName() == "" {
+		return invalid(m, field+".workspace_name", "is set but empty")
+	}
+	if sentBy.PermissionMode != nil {
+		return validateAgentPermissionMode(field+".permission_mode", sentBy.GetPermissionMode())
+	}
+	return nil
 }
 
 // validateStartTurnOpening is StartTurnRequest.opening's dedicated function.

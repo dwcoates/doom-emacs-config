@@ -91,8 +91,14 @@ type fakeDB struct {
 	// coalesceErr fails a coalescence whole; coalescences counts attempts.
 	coalesceErr  error
 	coalescences int
-	// workspaceErr fails the workspace read when set.
-	workspaceErr error
+	// workspaceErr fails the workspace read when set, and workspaceErrFor
+	// fails the read of one workspace only.
+	workspaceErr    error
+	workspaceErrFor map[ids.WorkspaceID]error
+	// sessions is each workspace's recorded session, and sessionErr fails
+	// every session read when set.
+	sessions   map[ids.WorkspaceID]wsm.Session
+	sessionErr error
 	// holdErr fails every hold restamp (UpdateHeldPromptHold).
 	holdErr error
 	// beforeHoldWrite, when set, runs under the fake's lock as a held prompt
@@ -120,6 +126,7 @@ func newFakeDB() *fakeDB {
 		held:        map[ids.TurnID]*wsm.HeldPrompt{},
 		turns:       map[ids.TurnID]*wsm.Turn{},
 		closedTurns: map[ids.TurnID]wsm.TurnClose{},
+		sessions:    map[ids.WorkspaceID]wsm.Session{},
 	}
 }
 
@@ -138,11 +145,25 @@ func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	if d.workspaceErr != nil {
 		return wsm.Workspace{}, d.workspaceErr
 	}
+	if err := d.workspaceErrFor[id]; err != nil {
+		return wsm.Workspace{}, err
+	}
 	record, ok := d.workspaces[id]
 	if !ok {
-		return wsm.Workspace{}, errors.New("no such workspace")
+		return wsm.Workspace{}, fmt.Errorf("wsm: workspace %s: %w", id, wsm.ErrNotFound)
 	}
 	return record, nil
+}
+
+// Session answers a workspace's recorded session, as wsm does.
+func (d *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.sessionErr != nil {
+		return wsm.Session{}, false, d.sessionErr
+	}
+	session, ok := d.sessions[id]
+	return session, ok, nil
 }
 
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
@@ -561,6 +582,9 @@ type fakeSender struct {
 	notes []string
 	// joinErr, when set, refuses every JoinRunningTurn.
 	joinErr error
+	// sentBys is the sender every StartTurn, StartInterjection and
+	// JoinRunningTurn was handed, nil for none, in call order.
+	sentBys []*SentBy
 	// rollBacks is every turn RollBackTurn was asked to cut, in order.
 	rollBacks []ids.TurnID
 	// rollBackErr, when set, is every RollBackTurn's answer.
@@ -587,6 +611,13 @@ func (s *fakeSender) rolledBack() []ids.TurnID {
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
 
+// handedSentBys answers the sender every turn-opening call was handed.
+func (s *fakeSender) handedSentBys() []*SentBy {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*SentBy(nil), s.sentBys...)
+}
+
 // hookFor reads the call hook under the sender's lock, for the calls that run
 // their hook before taking it.
 func (s *fakeSender) hookFor() func(string) {
@@ -595,22 +626,23 @@ func (s *fakeSender) hookFor() func(string) {
 	return s.callHook
 }
 
-func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error) {
+func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy, note string) (*shimv1.StartTurnSuccess, error) {
 	if hook := s.hookFor(); hook != nil {
 		hook("StartInterjection")
 	}
 	s.mu.Lock()
 	s.notes = append(s.notes, note)
 	s.mu.Unlock()
-	return s.StartTurn(ctx, turn, said, origin)
+	return s.StartTurn(ctx, turn, said, origin, sentBy)
 }
 
-func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin, sentBy *SentBy) (*shimv1.StartTurnSuccess, error) {
 	if hook := s.hookFor(); hook != nil {
 		hook("JoinRunningTurn")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sentBys = append(s.sentBys, sentBy)
 	if s.joinErr != nil {
 		return nil, s.joinErr
 	}
@@ -626,10 +658,11 @@ func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *c
 	}, nil
 }
 
-func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy) (*shimv1.StartTurnSuccess, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.attempts++
+	s.sentBys = append(s.sentBys, sentBy)
 	if s.startHook != nil {
 		s.startHook()
 	}
