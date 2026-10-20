@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/prototext"
 
@@ -401,5 +402,85 @@ func TestARunNoSuspensionTookIsNotSuspended(t *testing.T) {
 	// Assert.
 	if suspended {
 		t.Fatal("suspendedFor reports a suspension no one made")
+	}
+}
+
+func TestASuspensionLeavesAnAbandonedRunToItsEnd(t *testing.T) {
+	// Arrange: the run was abandoned before the pause reached it, and has
+	// ended.
+	h := newHarness(t)
+	r := liveRun(t, h, theWorkspace)
+	h.o.mu.Lock()
+	r.abandonedBy = CauseUserDrop
+	h.o.mu.Unlock()
+	close(r.finished)
+
+	// Act.
+	err := h.o.suspendFor(context.Background(), theWorkspace, suspendPause)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("suspendFor = %v, want the abandoned run left to its end", err)
+	}
+	if _, suspended := r.suspendedFor(); suspended {
+		t.Fatal("the pause took a run that was already abandoned")
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.pause", text: "the merge was abandoned before the suspension took it",
+		context: map[string]string{"workspace": string(theWorkspace), "cause": string(CauseUserDrop)}}) {
+		t.Fatalf("no record of the abandoned run left alone: %v", h.logs.Records())
+	}
+}
+
+func TestASuspensionRefusesAnAbandonedRunThatDoesNotEndWithinItsBound(t *testing.T) {
+	// Arrange: the abandoned run never ends.
+	h := newHarness(t)
+	h.o.drainBound = time.Millisecond
+	r := liveRun(t, h, theWorkspace)
+	h.o.mu.Lock()
+	r.abandonedBy = CauseUserDrop
+	h.o.mu.Unlock()
+
+	// Act.
+	err := h.o.suspendFor(context.Background(), theWorkspace, suspendPause)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("suspendFor answered nil for an abandoned run that never ended")
+	}
+	if _, suspended := r.suspendedFor(); suspended {
+		t.Fatal("the refused pause still took the run")
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.pause", text: "an abandoned merge did not end before the suspension's bound",
+		context: map[string]string{"workspace": string(theWorkspace), "error": err.Error()}}) {
+		t.Fatalf("no error record of the refusal: %v", h.logs.Records())
+	}
+}
+
+func TestATakeBackWhoseHeldAbandonmentFailsAnswersTheFailure(t *testing.T) {
+	// Arrange: a pause took the workspace, an abandonment is left for its
+	// take-back, and the merge has no queue entry left to drop.
+	h := newHarness(t)
+	h.o.mu.Lock()
+	h.o.takenAway[theWorkspace] = suspendPause
+	h.o.abandonsAtTakeBack[theWorkspace] = CauseUserDrop
+	h.o.mu.Unlock()
+
+	// Act.
+	err := h.o.AdoptWorkspace(context.Background(), theWorkspace)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("AdoptWorkspace answered nil though the abandonment it held could not end the merge")
+	}
+	h.o.mu.Lock()
+	_, away := h.o.takenAway[theWorkspace]
+	_, held := h.o.abandonsAtTakeBack[theWorkspace]
+	h.o.mu.Unlock()
+	if away || held {
+		t.Fatalf("the take-back left the mark (%v) or the abandonment (%v) behind", away, held)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.adopt", text: "an abandonment that reached the merge while a suspension held it",
+		context: map[string]string{"workspace": string(theWorkspace), "cause": string(CauseUserDrop)}}) {
+		t.Fatalf("no record of the abandonment applied: %v", h.logs.Records())
 	}
 }

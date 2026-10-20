@@ -364,3 +364,85 @@ func TestAHeadAlreadyInItsTerminalIsNotOvertaken(t *testing.T) {
 		t.Fatal("the merge behind did not record why it claimed no race")
 	}
 }
+
+func TestAnAbandonmentAfterTheRaceSuspendedTheHeadEndsItAtItsTakeBack(t *testing.T) {
+	// Arrange: the merge behind the head wins the race, and the head's
+	// take-back fails, so the head stands suspended when it is evicted.
+	c := newChain(t)
+	releaseHeadTurn := c.parkTurn(theWorkspace)
+	defer releaseHeadTurn()
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
+	done := admitAsync(c.h, context.Background())
+	<-behindGate
+	c.h.db.mu.Lock()
+	c.h.db.allQueuesErr = errors.New("the store is closed")
+	c.h.db.mu.Unlock()
+	close(releaseBehind)
+	if err := <-done; err != nil {
+		t.Fatalf("the overtaken head's admission ended on: %v", err)
+	}
+	c.awaitIdle(t, "ws-b", func() bool {
+		return c.recorded("error", "daemon.merge.race", "could not take back the head that lost the race to land")
+	})
+
+	// Act: the head is evicted while suspended, then taken back.
+	if err := c.h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("evicting the suspended head: %v", err)
+	}
+	c.h.db.mu.Lock()
+	c.h.db.allQueuesErr = nil
+	c.h.db.mu.Unlock()
+	if err := c.h.o.AdoptWorkspace(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("taking the head back: %v", err)
+	}
+	c.drain(t)
+
+	// Assert.
+	if !c.recorded("info", "daemon.merge.adopt", "an abandonment that reached the merge while a suspension held it ends the merge at its take-back") {
+		t.Fatal("the take-back did not apply the abandonment it held")
+	}
+	if got := c.git.landedOwn(); len(got) != 1 || !slices.Equal(got[0], []string{"b1"}) {
+		t.Fatalf("landings brought %v, want [b1] alone: the evicted head never lands", got)
+	}
+	c.h.o.mu.Lock()
+	_, resumes := c.h.o.resumes[theWorkspace]
+	_, away := c.h.o.takenAway[theWorkspace]
+	c.h.o.mu.Unlock()
+	if resumes || away {
+		t.Fatalf("the evicted head still resumes (%v) or stands taken away (%v)", resumes, away)
+	}
+}
+
+func TestAnAbandonedHeadIsNotOvertaken(t *testing.T) {
+	// Arrange: the head is being abandoned when the merge behind it claims
+	// the race.
+	c := newChain(t)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	head := liveRun(t, c.h, theWorkspace)
+	behind := &run{o: c.h.o, ws: "ws-b", repo: c.h.repoKey(), git: newGatedGit(c.git, c.h.o.deps.Now)}
+	c.h.o.mu.Lock()
+	c.h.o.running[head.repo] = head
+	head.abandonedBy = CauseUserDrop
+	c.h.o.mu.Unlock()
+	t.Cleanup(func() {
+		c.h.o.mu.Lock()
+		delete(c.h.o.running, head.repo)
+		c.h.o.mu.Unlock()
+	})
+	claimed := 0
+	c.h.o.onRaceClaimed = func(ids.WorkspaceID) { claimed++ }
+
+	// Act
+	c.h.o.claimRace(context.Background(), behind, c.git.ref("master"))
+
+	// Assert.
+	if claimed != 0 {
+		t.Fatalf("the race was claimed %d times against an abandoned head, want none", claimed)
+	}
+	if !c.recorded("debug", "daemon.merge.race", "the head is already ending") {
+		t.Fatal("the merge behind did not record why it claimed no race")
+	}
+}

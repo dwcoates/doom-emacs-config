@@ -224,7 +224,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.mu.Unlock()
 		return false
 	case resuming:
-	case o.runsByWorkspace[next.Workspace] != nil, o.transferred[next.Workspace], o.inChainLocked(repo, next.Workspace):
+	case o.runsByWorkspace[next.Workspace] != nil, o.isTakenAwayLocked(next.Workspace), o.inChainLocked(repo, next.Workspace):
 		o.mu.Unlock()
 		return false
 	case paused || !racable(next):

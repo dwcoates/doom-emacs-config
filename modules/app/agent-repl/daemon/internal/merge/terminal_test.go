@@ -2324,3 +2324,43 @@ func TestAFailedMergeTimesItsSpansAsFailed(t *testing.T) {
 		t.Fatalf("timings = %v, want the total span as failed", h.timings.all())
 	}
 }
+
+func TestAnAbandonmentTheDaemonsExitOvertookIsRefused(t *testing.T) {
+	// Arrange: the exit suspended the run after its abandonment, and it let
+	// go to the next boot.
+	h := newHarness(t)
+	r := liveRun(t, h, theWorkspace)
+	h.o.mu.Lock()
+	r.abandonedBy = CauseUserDrop
+	r.suspendLocked(suspendExit)
+	h.o.mu.Unlock()
+	close(r.finished)
+
+	// Act.
+	err := h.o.abandonRunning(context.Background(), r, CauseUserDrop)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), suspendExit.by) {
+		t.Fatalf("abandonRunning = %v, want the exit named as what took the merge", err)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.abandon", text: "the abandoned merge was suspended before it ended",
+		context: map[string]string{"workspace": string(theWorkspace), "by": suspendExit.by, "error": err.Error()}}) {
+		t.Fatalf("no record of the refused abandonment: %v", h.logs.Records())
+	}
+}
+
+func TestAnAbandonmentWhoseCallerLeftAnswersTheCallersEnd(t *testing.T) {
+	// Arrange: the run does not end, and the caller has gone.
+	h := newHarness(t)
+	r := liveRun(t, h, theWorkspace)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := h.o.abandonRunning(ctx, r, CauseUserDrop)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("abandonRunning = %v, want the caller's cancellation", err)
+	}
+}

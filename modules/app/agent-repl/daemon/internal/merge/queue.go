@@ -320,14 +320,55 @@ func (o *orchestrator) reorder(ctx context.Context, ws ids.WorkspaceID, r reorde
 // row, so a running merge's lease, queue entry and repository lock outlived
 // it and blocked its repository's queue until the daemon restarted
 // (2026-09-28, lease c8a3a664006f46c1).
+//
+// AN ABANDONMENT AND A SUSPENSION ARE DECIDED UNDER ONE LOCK, the one every
+// suspension marks its run under (suspendLocked, suspendFor): whichever is
+// decided first stands. An abandonment decided first is the run's end, and no
+// later suspension but the daemon's exit takes the run (suspendFor,
+// stopAtStepBoundary, claimRace). A suspension decided first stands too, and
+// the abandonment is left for its take-back (AdoptWorkspace), which drops the
+// merge instead of resuming it -- unless the suspension hands the merge to
+// another daemon or the next boot, which owns it from then on, so the
+// abandonment is refused.
 func (o *orchestrator) dequeue(ctx context.Context, ws ids.WorkspaceID, cause AbandonCause) error {
-	if r, running := o.runFor(ws); running {
+	const op = "daemon.merge.abandon"
+	o.mu.Lock()
+	r, running := o.runsByWorkspace[ws]
+	away, takenAway := o.takenAway[ws]
+	switch {
+	case running && !r.suspending:
+		if r.abandonedBy == "" {
+			r.abandonedBy = cause
+		}
+		o.mu.Unlock()
 		return o.abandonRunning(ctx, r, cause)
+	case running || takenAway:
+		why := away
+		if running {
+			why = r.suspendedBy
+		}
+		if !why.takenBack() {
+			o.mu.Unlock()
+			err := fmt.Errorf("merge: the merge of %s was taken by %s, which owns it from here; it is abandoned there", ws, why.by)
+			o.log(ctx, ws).Info(op, "refused to abandon a merge a suspension handed on; it is abandoned where it went", dlog.Context{
+				"workspace": string(ws), "cause": string(cause), "by": why.by, "error": err.Error()})
+			return err
+		}
+		if !takenAway {
+			o.mu.Unlock()
+			panic(fmt.Sprintf("merge: the run of %s is suspended by %s with no take-back recorded", ws, why.by))
+		}
+		if _, recorded := o.abandonsAtTakeBack[ws]; !recorded {
+			o.abandonsAtTakeBack[ws] = cause
+		}
+		o.mu.Unlock()
+		o.log(ctx, ws).Info(op, "a suspension took the merge first; the abandonment ends it at its take-back", dlog.Context{
+			"workspace": string(ws), "cause": string(cause), "by": why.by})
+		return nil
 	}
 	// A MERGE A RESTART TOOK BACK BUT HAS NOT RESUMED is admitted, holds its
 	// merge lease and has no run: it ends as an admitted merge, never as a
 	// waiting one, or its lease would outlive its entry (dropPendingResume).
-	o.mu.Lock()
 	doc, pending := o.resumes[ws]
 	delete(o.resumes, ws)
 	o.mu.Unlock()
@@ -396,10 +437,10 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 // a run in flight ends on its own terminal, not on this one.
 func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.merge.workspace_closed"
-	if r, running := o.runFor(ws); running {
+	if _, running := o.runFor(ws); running {
 		// A RUNNING MERGE ENDS WITH ITS WORKSPACE TOO. Left alone, a merge
 		// running on a workspace that is gone would hold its lease for ever.
-		if err := o.abandonRunning(ctx, r, CauseWorkspaceClosed); err != nil {
+		if err := o.dequeue(ctx, ws, CauseWorkspaceClosed); err != nil {
 			o.log(ctx, ws).Error(op, "could not abandon the running merge of a torn-down workspace",
 				dlog.Context{"workspace": string(ws), "error": err.Error()})
 		}

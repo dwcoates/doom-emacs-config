@@ -166,6 +166,10 @@ type run struct {
 	// the orchestrator's mutex, and only through suspendLocked.
 	suspending  bool
 	suspendedBy suspension
+	// abandonedBy is the cause an abandonment ended this run with (dequeue),
+	// empty while none did. It is decided under the orchestrator's mutex
+	// against suspending: the first of the two stands.
+	abandonedBy AbandonCause
 	// executing reports that the run left its queue and began its steps
 	// (execute). Until then nothing a restart could lose is in flight: its
 	// wait for the workspace to fall free is simply let go. Guarded by the
@@ -863,7 +867,7 @@ func (r *run) end(ctx context.Context, err error) {
 		r.suspend(settle, err)
 		return
 	}
-	if cause, abandoned := abandonCauseOf(ctx); abandoned {
+	if cause := r.abandonedFor(); cause != "" {
 		r.abandonTerminal(settle, cause)
 		return
 	}

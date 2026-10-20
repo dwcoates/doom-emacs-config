@@ -83,3 +83,25 @@ func TestTheQueueRecordCarriesTheAwaitingFreeStep(t *testing.T) {
 		t.Fatalf("record = step %q facts %q, want the queue step with its footer step", doc.Step, doc.Facts.Step)
 	}
 }
+
+func TestAnAbandonedRunTakesNoStopAtItsStepBoundary(t *testing.T) {
+	// Arrange: a restart asked the run to stop at its boundary, and the run
+	// was abandoned since.
+	h := newHarness(t)
+	r := liveRun(t, h, theWorkspace)
+	h.o.mu.Lock()
+	r.stopAtBoundary = true
+	r.abandonedBy = CauseUserDrop
+	h.o.mu.Unlock()
+
+	// Act.
+	stopped := r.stopAtStepBoundary()
+
+	// Assert.
+	if stopped {
+		t.Fatal("an abandoned run stopped for the restart instead of ending")
+	}
+	if _, suspended := r.suspendedFor(); suspended {
+		t.Fatal("the restart took an abandoned run")
+	}
+}
