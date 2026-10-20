@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/sourcescan"
 )
 
 // mintedIDWidth is wsm.IDLength. It is spelled out rather than imported: wsm
@@ -2305,5 +2307,42 @@ func TestTheRecordCounterCountsEveryWarnAndErrorRecord(t *testing.T) {
 	want := []string{"daemon/error/daemon.pkg.stall", "daemon/warn/daemon.pkg.slow", "webapp/error/rpc.stream-transport-failure"}
 	if strings.Join(counter.got, ",") != strings.Join(want, ",") {
 		t.Fatalf("counted %v, want %v", counter.got, want)
+	}
+}
+
+func TestOpenSinksSnapshotsEveryOpenSink(t *testing.T) {
+	// Arrange: two workspaces, one with two sinks open.
+	s, _ := testSurfaces(t)
+	first, second := t.TempDir(), t.TempDir()
+	for _, open := range []struct{ dir, name string }{{first, "daemon"}, {first, "webapp"}, {second, "daemon"}} {
+		if _, _, err := s.resolve(open.dir, open.name); err != nil {
+			t.Fatalf("resolve %s %s: %v", open.dir, open.name, err)
+		}
+	}
+
+	// Act.
+	entries := s.openSinks()
+
+	// Assert.
+	got := map[string]bool{}
+	for _, e := range entries {
+		got[e.ws.dir+"|"+e.name] = e.sk == e.ws.sinks[e.name]
+	}
+	want := map[string]bool{
+		sinkKey(t, first) + "|daemon": true, sinkKey(t, first) + "|webapp": true, sinkKey(t, second) + "|daemon": true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("openSinks = %v, want %v", got, want)
+	}
+}
+
+func TestEveryPeriodicSinkPassSnapshotsThroughOpenSinks(t *testing.T) {
+	// Act: the production call sites of the helper, and of the hand-rolled loop.
+	viaHelper := sourcescan.Count(t, "range s.openSinks()")
+	byHand := sourcescan.Count(t, "for name, sk := range ws.sinks {")
+
+	// Assert: the scan and the retention pass, and the helper's own loop alone.
+	if viaHelper != 2 || byHand != 1 {
+		t.Fatalf("range s.openSinks() appears %d times and a hand-rolled sink loop %d times; want 2 and 1 (the helper's own)", viaHelper, byHand)
 	}
 }

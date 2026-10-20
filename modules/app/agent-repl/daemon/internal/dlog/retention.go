@@ -123,20 +123,7 @@ func (s *surfaces) retainOnce(now time.Time) {
 
 // retainSinks ages every sink the daemon holds open.
 func (s *surfaces) retainSinks(now time.Time, pass *retentionPass) {
-	type entry struct {
-		ws   *workspaceSinks
-		name string
-		sk   *sink
-	}
-	s.mu.Lock()
-	var entries []entry
-	for _, ws := range s.workspaces {
-		for name, sk := range ws.sinks {
-			entries = append(entries, entry{ws: ws, name: name, sk: sk})
-		}
-	}
-	s.mu.Unlock()
-	for _, e := range entries {
+	for _, e := range s.openSinks() {
 		out, err := e.sk.expire(now)
 		pass.noteRemoved(out.removed)
 		if out.rolled {

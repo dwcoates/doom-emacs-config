@@ -936,23 +936,31 @@ func (s *surfaces) scanLoop() {
 	}
 }
 
+// sinkEntry is one open sink with the workspace and name it is held under.
+type sinkEntry struct {
+	ws   *workspaceSinks
+	name string
+	sk   *sink
+}
+
+// openSinks snapshots every open sink under mu, so a periodic pass can work
+// through them without holding mu while it touches files.
+func (s *surfaces) openSinks() []sinkEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := make([]sinkEntry, 0, len(s.workspaces)*len(SinkNames))
+	for _, ws := range s.workspaces {
+		for name, sk := range ws.sinks {
+			entries = append(entries, sinkEntry{ws: ws, name: name, sk: sk})
+		}
+	}
+	return entries
+}
+
 // scanOnce enforces the cap on every open sink from the file's real size,
 // which is the only way the shim's fd-3 writes are ever counted.
 func (s *surfaces) scanOnce() {
-	type entry struct {
-		ws   *workspaceSinks
-		name string
-		sk   *sink
-	}
-	s.mu.Lock()
-	entries := make([]entry, 0, len(s.workspaces)*len(SinkNames))
-	for _, ws := range s.workspaces {
-		for name, sk := range ws.sinks {
-			entries = append(entries, entry{ws: ws, name: name, sk: sk})
-		}
-	}
-	s.mu.Unlock()
-	for _, e := range entries {
+	for _, e := range s.openSinks() {
 		result, err := e.sk.scan()
 		if err != nil {
 			s.reportSinkFailure(e.ws, e.name, err)
