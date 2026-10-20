@@ -751,6 +751,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// queue built below (forward.go).
 		Deliveries: deliveries,
 		Log:        p.Surfaces,
+		Restarts:   p.Metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the session fleet: %w", err)

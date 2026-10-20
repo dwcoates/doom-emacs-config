@@ -1745,3 +1745,20 @@ func TestStartUnderWayAnswersTheStartsInFlight(t *testing.T) {
 		})
 	}
 }
+
+func TestResumeTimesItsVendorStartAsARelaunch(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+
+	// Act.
+	if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// Assert.
+	if got := sessionSteps(&f.restarts); fmt.Sprint(got) != fmt.Sprint([]string{"slot_wait/relaunch/ok", "vendor/relaunch/ok"}) {
+		t.Fatalf("steps = %v, want the relaunch's slot wait and vendor start", got)
+	}
+}

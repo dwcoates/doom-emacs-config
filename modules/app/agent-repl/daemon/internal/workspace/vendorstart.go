@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -193,10 +194,13 @@ func (f *Fleet) CancelVendorStart(ctx context.Context, ws ids.WorkspaceID) bool 
 // gate, which is a designed product state the user answers, and a stand-down
 // this daemon ordered -- pass through unfiled. A transport error (the shim
 // died under the call) is not retried here: the shim's death is its own edge.
-func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
+//
+// EACH ATTEMPT IS TIMED INTO TIMING: its wait for a slot and its StartSession.
+func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string, timing sessionTiming) (*conversationv1.SessionStarted, error) {
 	for {
 		waitedFrom := f.now()
 		release, err := f.startSlots.Acquire(ctx, ws)
+		timing.since(restarttiming.SessionSlotWait, waitedFrom, err)
 		if err != nil {
 			f.closeRetrying(ctx, log, ws)
 			log.Info(opBringUp, "the vendor-start run ended with its context while it waited for a vendor-start slot", dlog.Context{"cause": err.Error()})
@@ -208,8 +212,10 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		if waited := f.now().Sub(waitedFrom); waited >= vendorSlotWaitReported {
 			log.Info(opBringUp, "the vendor start waited for a slot among the starts in flight", dlog.Context{"waited_ms": waited.Milliseconds(), "slots": f.startSlots.Size()})
 		}
+		askedFrom := f.now()
 		started, err := f.askToStartSession(ctx, log, ws, client, src, session, configDir)
 		release()
+		timing.since(restarttiming.SessionVendor, askedFrom, err)
 		if err == nil {
 			// A SESSION THAT IS SERVING is the repair of every fault whose
 			// lifetime ends at a started session -- the vendor-start faults
