@@ -724,3 +724,37 @@ func TestRecoverRefusesTheBootWhenTheQueuesPauseCannotBeRead(t *testing.T) {
 		t.Fatalf("adopted = %v, want no lease taken", h.db.adopted)
 	}
 }
+
+// TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff is the
+// 2026-10-20 boot loop: an async request with an instruction was recorded on
+// its requester's row, and the daemon died before the fork handed it to its
+// merge workspace. The row still names the requester and its detach, so the
+// pick is not the requester's to begin: the request is re-armed, and its
+// wait's end makes the hand-off that then begins the pick.
+func TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	source := asyncSource
+	source.Detach, source.DetachName, source.Pick = "req-1", "reconnect-fix", "the reconnect fix"
+	if err := h.db.RequestMerge(context.Background(), h.repoKey(), theWorkspace, source, h.clock()); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Act
+	err := h.o.Recover(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Recover = %v, want the unhanded request re-armed", err)
+	}
+	if forks := h.detached.forks; len(forks) != 0 {
+		t.Fatalf("forks before the wait = %v, want none", forks)
+	}
+	h.runWait(t)
+	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:"+asyncBranch {
+		t.Fatalf("forks after the wait = %v, want the request handed off once", forks)
+	}
+	if entry, ok := h.entryOf(theMergeWorkspace); !ok || entry.Source.PickStartedAt == nil {
+		t.Fatalf("merge workspace entry = %+v, %v; want its pick begun", entry, ok)
+	}
+}

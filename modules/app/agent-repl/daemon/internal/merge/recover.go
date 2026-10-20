@@ -97,8 +97,12 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		o.repoOf[entry.Workspace] = repo
 		o.mu.Unlock()
 		// A MERGE WORKSPACE'S PICK is begun, or taken back where the restart
-		// left it, before its merge joins the queue.
-		if entry.Source.Pick != "" {
+		// left it, before its merge joins the queue. A row that still carries
+		// its detach was never handed off (HandOffDetachedMerge rewrites the
+		// row onto the merge workspace without one): it names the requester,
+		// whose pick it is not, so it is re-armed below like any request, and
+		// its wait's end makes the hand-off that begins the pick.
+		if entry.Source.Pick != "" && entry.Source.Detach == "" {
 			if entry.Source.PickStartedAt == nil {
 				o.deps.Log.Global().Info(op, "begins an async merge's pick the restart cut short before it began", dlog.Context{
 					"workspace": string(entry.Workspace), "repo": string(repo)})
