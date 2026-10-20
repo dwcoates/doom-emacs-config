@@ -288,16 +288,11 @@ func (c *Collector) collectPower(ch chan<- prometheus.Metric) {
 // note records a step's failure once per cause and its recovery once,
 // answering whether the step succeeded.
 func (c *Collector) note(step string, err error) bool {
-	if err != nil {
-		if c.causes.Failed(step, err.Error()) {
-			c.deps.Log.Error(Operation, "a process metrics read failed; what it measures is omitted until it succeeds", dlog.Context{"step": step, "error": err.Error()})
-		}
-		return false
-	}
-	if c.causes.Succeeded(step) {
+	return c.causes.Note(step, err, func(cause string) {
+		c.deps.Log.Error(Operation, "a process metrics read failed; what it measures is omitted until it succeeds", dlog.Context{"step": step, "error": cause})
+	}, func() {
 		c.deps.Log.Info(Operation, "a process metrics read succeeds again", dlog.Context{"step": step})
-	}
-	return true
+	})
 }
 
 // noteUnknownWebKit records, once per set of names, Emacs's WebKit processes

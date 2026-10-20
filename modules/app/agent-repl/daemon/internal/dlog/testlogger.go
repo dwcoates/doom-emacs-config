@@ -260,6 +260,9 @@ func (s *TestSurfaces) BindRecordTee(tee RecordTee) {
 	s.tee = tee
 }
 
+// BindRecordCounter implements Surfaces: the double counts nothing.
+func (s *TestSurfaces) BindRecordCounter(RecordCounter) {}
+
 // WorkspaceOrCentral implements Surfaces with the production semantics: the
 // workspace's logger when it resolves, and otherwise the global logger with
 // the workspace named on every record.

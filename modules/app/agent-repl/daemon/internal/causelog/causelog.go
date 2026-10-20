@@ -43,3 +43,19 @@ func (t *Tracker) Succeeded(step string) bool {
 	delete(t.last, step)
 	return true
 }
+
+// Note settles one repetition of step: err records through failed once per
+// new cause, and a nil err records through recovered once when a standing
+// cause clears. It answers whether the step succeeded.
+func (t *Tracker) Note(step string, err error, failed func(cause string), recovered func()) bool {
+	if err != nil {
+		if t.Failed(step, err.Error()) {
+			failed(err.Error())
+		}
+		return false
+	}
+	if t.Succeeded(step) {
+		recovered()
+	}
+	return true
+}

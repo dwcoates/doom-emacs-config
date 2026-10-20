@@ -478,6 +478,8 @@ func (s *testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return n
 // BindRecordTee implements dlog.Surfaces; this double tees nothing.
 func (s *testSurfaces) BindRecordTee(dlog.RecordTee) {}
 
+func (s *testSurfaces) BindRecordCounter(dlog.RecordCounter) {}
+
 func (s *testSurfaces) DetachDir(dir string) error {
 	s.dirEvents = append(s.dirEvents, "detach "+dir)
 	return s.dirFailure

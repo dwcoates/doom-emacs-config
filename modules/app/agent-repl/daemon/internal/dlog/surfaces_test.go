@@ -2271,3 +2271,39 @@ func TestSurfacesOffATerminalMirrorErrorsAndPersistEverything(t *testing.T) {
 		t.Fatalf("run log = %q, mirror = %q; want both persisted and only the error mirrored", data, mirrored)
 	}
 }
+
+// captureCounter records every record the counter is handed, as
+// runtime/level/operation.
+type captureCounter struct{ got []string }
+
+func (c *captureCounter) CountRecord(runtime, level, operation string) {
+	c.got = append(c.got, runtime+"/"+level+"/"+operation)
+}
+
+func TestTheRecordCounterCountsEveryWarnAndErrorRecord(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	counter := &captureCounter{}
+	s.BindRecordCounter(counter)
+	dir := t.TempDir()
+	ws, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	s.Global().Error("daemon.pkg.stall", "m", nil)
+	ws.Warn("daemon.pkg.slow", "m", nil)
+	ws.Info("daemon.pkg.fine", "m", nil)
+	for _, level := range []string{LevelError, LevelInfo} {
+		if err := s.ClientLog(dir, ClientRecord{ClientKind: RuntimeWebapp, Level: level, Operation: "rpc.stream-transport-failure", Message: "m"}); err != nil {
+			t.Fatalf("ClientLog: %v", err)
+		}
+	}
+
+	// Assert.
+	want := []string{"daemon/error/daemon.pkg.stall", "daemon/warn/daemon.pkg.slow", "webapp/error/rpc.stream-transport-failure"}
+	if strings.Join(counter.got, ",") != strings.Join(want, ",") {
+		t.Fatalf("counted %v, want %v", counter.got, want)
+	}
+}

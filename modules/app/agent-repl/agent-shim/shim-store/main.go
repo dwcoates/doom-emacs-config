@@ -120,7 +120,7 @@ func runWithLogger(socketPath, dbPath, pprofAddr, metricsRoot string, watchBuffe
 	}()
 	// THE METRICS SURFACE opens beside it and advertises at once: launchd
 	// never runs two stores, so this process owns the role from boot.
-	metricsSurface, err := openMetricsSurface(metricsRoot, log)
+	metricsSurface, err := openMetricsSurface(metricsRoot, dbPath, log)
 	if err != nil {
 		return err
 	}

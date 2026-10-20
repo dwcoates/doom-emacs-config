@@ -1,6 +1,10 @@
 package metrics
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // Record is a launchd service's canonical logger, as its metrics surface
 // records its decisions through it: LEVEL is "debug", "info" or "error", and
@@ -11,15 +15,16 @@ type Record func(level, message string)
 // (OpenSelf) and records the decision either way through record: off (no
 // root) at debug, listening at info, and a surface that cannot open at error,
 // returned as the boot error it is. Every later failure (a scrape, the
-// listener ending) is recorded at error too.
-func OpenService(program, root string, record Record) (*Server, error) {
-	return openService(program, root, record, OpenSelf)
+// listener ending) is recorded at error too. Its registry carries every extra
+// collector the service owns.
+func OpenService(program, root string, record Record, extra ...prometheus.Collector) (*Server, error) {
+	return openService(program, root, record, OpenSelf, extra...)
 }
 
-func openService(program, root string, record Record, open func(program, root string, onError func(op string, err error)) (*Server, error)) (*Server, error) {
+func openService(program, root string, record Record, open func(program, root string, onError func(op string, err error), extra ...prometheus.Collector) (*Server, error), extra ...prometheus.Collector) (*Server, error) {
 	surface, err := open(program, root, func(op string, err error) {
 		record("error", fmt.Sprintf("the metrics surface failed step=%s: %v", op, err))
-	})
+	}, extra...)
 	if err != nil {
 		record("error", fmt.Sprintf("the metrics surface could not open root=%s: %v", root, err))
 		return nil, err

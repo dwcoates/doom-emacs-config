@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"github.com/prometheus/client_golang/prometheus"
+
 	"errors"
 	"os"
 	"path/filepath"
@@ -79,7 +81,7 @@ func TestOpenServiceRecordsALaterFailureAtError(t *testing.T) {
 	// Arrange
 	rec := &recorded{}
 	var sink func(op string, err error)
-	open := func(program, root string, onError func(op string, err error)) (*Server, error) {
+	open := func(program, root string, onError func(op string, err error), _ ...prometheus.Collector) (*Server, error) {
 		sink = onError
 		return nil, nil
 	}
@@ -106,5 +108,26 @@ func TestCloseServiceOfAnOffSurfaceRecordsNothing(t *testing.T) {
 	// Assert
 	if len(rec.recs) != 0 {
 		t.Fatalf("an off surface's close recorded %v", rec.recs)
+	}
+}
+
+func TestOpenServiceHandsItsExtraCollectorsToTheSurface(t *testing.T) {
+	// Arrange
+	rec := &recorded{}
+	extra := NewDBFiles("events", "/nowhere/events.db")
+	var got []prometheus.Collector
+	open := func(program, root string, onError func(op string, err error), collectors ...prometheus.Collector) (*Server, error) {
+		got = collectors
+		return nil, nil
+	}
+
+	// Act
+	if _, err := openService(ProgramStore, "", rec.record, open, extra); err != nil {
+		t.Fatalf("openService: %v", err)
+	}
+
+	// Assert
+	if len(got) != 1 || got[0] != extra {
+		t.Fatalf("collectors handed to the surface = %v, want the one extra", got)
 	}
 }

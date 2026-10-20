@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -287,5 +288,50 @@ func TestAnUnrecordedRPCsBoundaryRecordsNothing(t *testing.T) {
 	// Assert.
 	if len(log.records) != 0 {
 		t.Fatalf("records = %+v, want none", log.records)
+	}
+}
+
+func TestEveryUnaryRPCIsTimedByMethodAndOutcome(t *testing.T) {
+	tests := []struct {
+		name string
+		lat  *agentreplv1.ReportedLatency
+		want string
+	}{
+		{name: "an answered rpc is ok", lat: latency(switchRepeat, ref(), 0.08), want: "ReportLatencies:ok"},
+		{name: "a refused rpc is its code", lat: latency(switchRepeat, ref(), -1), want: "ReportLatencies:invalid_argument"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, _ = reportLatencies(t, h, tt.lat)
+
+			// Assert
+			if got := h.RPCs.all(); len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("rpc timings = %v, want [%s]", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRPCOutcome(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "no error", want: "ok"},
+		{name: "a connect error", err: connect.NewError(connect.CodeNotFound, errors.New("gone")), want: "not_found"},
+		{name: "a wrapped connect error", err: fmt.Errorf("outer: %w", connect.NewError(connect.CodeAborted, errors.New("x"))), want: "aborted"},
+		{name: "a plain error", err: errors.New("boom"), want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rpcOutcome(tt.err); got != tt.want {
+				t.Fatalf("rpcOutcome(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
 	}
 }

@@ -247,6 +247,11 @@ run, judgement call 12).
 | `agentrepl_vendor_bytes_sent_total`, `..._received_total` | counter | `workspace` | daemon, folded from shims; published by no shim yet (judgement call 6) |
 | `agentrepl_restart_seconds` | histogram | `restart`, `phase`, `cause`, `outcome` | daemon (`restarttiming`), timed where each restart starts and ends (below) |
 | `agentrepl_workspace_restart_last_seconds` | gauge | `restart`, `phase`, `workspace` | daemon: each workspace's latest duration of a per-workspace restart phase |
+| `agentrepl_rpc_seconds` | histogram | `rpc`, `outcome` | daemon: every unary rpc from its arrival to its handler's return; `outcome` is `ok` or the Connect code |
+| `agentrepl_log_records_total` | counter | `runtime`, `level`, `operation` | daemon: every Warn and Error record it writes, its own and Emacs's and the webapp's (`dlog.Surfaces.BindRecordCounter`) |
+| `agentrepl_db_bytes` | gauge | `db`, `file` | daemon (`wsm`) and store (`events`): each SQLite file (`db`, `wal`, `shm`) |
+| `agentrepl_log_bytes`, `agentrepl_log_files` | gauge | `runtime` | daemon: the state root's logs directory, by the runtime each file's name carries |
+| `agentrepl_workspaces` | gauge | `repository`, `state` | daemon: the registry's workspaces, `open`, `hidden` or `closed`; live sessions are `agentrepl_process_count{process="shim"}` |
 
 Process groups (`process`): `daemon`, `daemon_tools`, `store`, `sidecar`,
 `shim` and `shim_tools` (by `workspace`), `emacs`, `webkit_webcontent`,

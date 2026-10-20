@@ -31,6 +31,8 @@ type Surface struct {
 	version   *deployedVersion
 	latencies *latencies
 	restarts  *restarts
+	rpcs      *prometheus.HistogramVec
+	records   *prometheus.CounterVec
 }
 
 // Open opens, without advertising, the daemon's metrics surface under root.
@@ -44,9 +46,11 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	version := newDeployedVersion()
 	lat := newLatencies(log)
 	rst := newRestarts()
+	rpcs := newRPCs()
+	records := newRecords()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-	}, version, lat, rst)
+	}, version, lat, rst, rpcs, records)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
 	}
@@ -54,7 +58,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{srv: srv, log: log, version: version, latencies: lat, restarts: rst}, nil
+	return &Surface{srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records}, nil
 }
 
 // Registry answers the registry every daemon collector registers on, nil

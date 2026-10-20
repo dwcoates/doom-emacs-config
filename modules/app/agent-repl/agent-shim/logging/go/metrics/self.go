@@ -18,9 +18,10 @@ func OpenRunning(program, root string, onError func(op string, err error), extra
 
 // OpenSelf opens AND advertises the metrics surface of a runtime that owns
 // its role from boot: the launchd services (store, sidecar), which launchd
-// never runs twice at once.
-func OpenSelf(program, root string, onError func(op string, err error)) (*Server, error) {
-	return openSelf(program, root, onError, buildreport.Self)
+// never runs twice at once. Its registry carries every extra collector the
+// runtime owns.
+func OpenSelf(program, root string, onError func(op string, err error), extra ...prometheus.Collector) (*Server, error) {
+	return openSelf(program, root, onError, buildreport.Self, extra...)
 }
 
 func openRunning(program, root string, onError func(op string, err error), self func() (buildreport.Report, error), extra ...prometheus.Collector) (*Server, error) {
@@ -43,8 +44,8 @@ func openRunning(program, root string, onError func(op string, err error), self 
 	return Open(Config{Program: program, Root: root, Registry: reg, OnError: onError})
 }
 
-func openSelf(program, root string, onError func(op string, err error), self func() (buildreport.Report, error)) (*Server, error) {
-	s, err := openRunning(program, root, onError, self)
+func openSelf(program, root string, onError func(op string, err error), self func() (buildreport.Report, error), extra ...prometheus.Collector) (*Server, error) {
+	s, err := openRunning(program, root, onError, self, extra...)
 	if err != nil || s == nil {
 		return nil, err
 	}
