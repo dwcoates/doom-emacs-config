@@ -770,6 +770,29 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 	})
 }
 
+// StartMergeWorkspace brings up merge workspace WS's session when none is
+// live (Sessions.Start is a no-op on a live one), making the fork it still
+// owes (forking.go). A restart that cut the create short after registration
+// leaves the merge workspace with its fork owed and no session, and the boot
+// brings no hidden workspace up, so the hand-off that finds it starts it here
+// rather than submitting its pick to a session that does not exist.
+func (v *verbs) StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "StartMergeWorkspace", ws)
+	if err != nil {
+		return err
+	}
+	if record.MergeOf == nil {
+		err := fmt.Errorf("start merge workspace %q: it is no merge workspace", ws)
+		log.Error(opCreate, "a merge workspace start named a workspace that is none", dlog.Context{"cause": err.Error()})
+		return err
+	}
+	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+		log.Error(opCreate, "the merge workspace's session did not come up", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("start merge workspace %q: %w", ws, err)
+	}
+	return nil
+}
+
 // BriefForkIntoPrimary is the note a fork into the primary branch opens with:
 // the conversation came from another workspace, the worktree did not.
 const BriefForkIntoPrimary = "workspace-fork-into-primary-preamble"

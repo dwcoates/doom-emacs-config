@@ -43,6 +43,17 @@ type fakeWorkspaces struct {
 	retireErr  error
 	onRetire   func()
 	retired    []ids.WorkspaceID
+	// startErr fails every merge workspace start; started records each one.
+	startErr error
+	started  []ids.WorkspaceID
+}
+
+func (f *fakeWorkspaces) StartMergeWorkspace(_ context.Context, ws ids.WorkspaceID) error {
+	if f.startErr != nil {
+		return f.startErr
+	}
+	f.started = append(f.started, ws)
+	return nil
 }
 
 func (f *fakeWorkspaces) RetireLanded(_ context.Context, ws ids.WorkspaceID) (string, error) {
@@ -267,6 +278,55 @@ func TestForkFindsTheWorkspaceARestartLeftForked(t *testing.T) {
 	// Assert
 	if err != nil || ws.ID != forked.ID || len(f.workspaces.created) != 0 {
 		t.Fatalf("Fork = %v, %v with %v created; want the existing workspace and no new one", ws.ID, err, f.workspaces.created)
+	}
+}
+
+// TestForkStartsTheSessionOfTheWorkspaceARestartLeftForked: the restart may
+// have cut the create after registration and before its session came up, and
+// the boot brings no hidden workspace up, so the pick that follows the
+// hand-off would otherwise be submitted to no session.
+func TestForkStartsTheSessionOfTheWorkspaceARestartLeftForked(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	forked := register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
+
+	// Act
+	_, err := f.svc.Fork(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "sample")
+
+	// Assert
+	if err != nil || len(f.workspaces.started) != 1 || f.workspaces.started[0] != forked.ID {
+		t.Fatalf("Fork = %v with %v started; want the found workspace's session started", err, f.workspaces.started)
+	}
+}
+
+func TestForkAnswersTheFoundWorkspacesStartFailure(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
+	f.workspaces.startErr = errors.New("the shim would not spawn")
+
+	// Act
+	_, err := f.svc.Fork(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "sample")
+
+	// Assert
+	if !errors.Is(err, f.workspaces.startErr) {
+		t.Fatalf("Fork = %v, want the start's failure", err)
+	}
+}
+
+func TestForkStartsNoSessionOfAWorkspaceItCreates(t *testing.T) {
+	// Arrange: the create starts the session itself.
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+
+	// Act
+	_, err := f.svc.Fork(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "sample")
+
+	// Assert
+	if err != nil || len(f.workspaces.started) != 0 {
+		t.Fatalf("Fork = %v with %v started; want the create alone to start it", err, f.workspaces.started)
 	}
 }
 

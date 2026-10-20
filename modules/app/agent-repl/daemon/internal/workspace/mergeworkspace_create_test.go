@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/account"
@@ -357,5 +358,47 @@ func TestCreateMergeWorkspaceFailsLoudlyForARequesterWithNoRepository(t *testing
 	}
 	if !loggedAtError(f, opCreate) {
 		t.Fatal("the unresolved repository was not recorded at ERROR")
+	}
+}
+
+func TestStartMergeWorkspace(t *testing.T) {
+	tests := []struct {
+		name string
+		// merge makes the workspace a merge workspace.
+		merge    bool
+		startErr error
+		// wantStarted says the fleet must have been asked to start it.
+		wantStarted bool
+		wantErr     bool
+	}{
+		{name: "a merge workspace's session is started", merge: true, wantStarted: true},
+		{name: "a start failure is answered", merge: true, startErr: errors.New("the shim would not spawn"), wantStarted: true, wantErr: true},
+		{name: "a workspace that is no merge workspace is refused", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := f.workspace("merge-ws", t.TempDir())
+			if tt.merge {
+				ws.MergeOf = &wsm.MergeOrigin{Requester: "requester", Request: "request-1"}
+				f.db.with(ws)
+			}
+			f.fleet.startErr = tt.startErr
+
+			// Act
+			err := f.verbs.StartMergeWorkspace(context.Background(), ws.ID)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("StartMergeWorkspace = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.startErr != nil && !errors.Is(err, tt.startErr) {
+				t.Fatalf("StartMergeWorkspace = %v, want the start's failure", err)
+			}
+			if asked := slices.Contains(f.fleet.startCalls, ws.ID); asked != tt.wantStarted {
+				t.Fatalf("start calls = %v, want started %v", f.fleet.startCalls, tt.wantStarted)
+			}
+		})
 	}
 }

@@ -48,6 +48,9 @@ type Workspaces interface {
 	// CreateMergeWorkspace creates an async merge's hidden merge workspace,
 	// named NAME (the name its request reserved) and checked out on BASE.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
+	// StartMergeWorkspace brings up a merge workspace's session when none is
+	// live, making the fork it still owes.
+	StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) error
 	// RevealMergeWorkspace draws a hidden merge workspace in the tab bar and
 	// the sidebar from now on, answering whether this call revealed it.
 	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error)
@@ -106,8 +109,11 @@ func New(deps Deps) *Service {
 
 // Fork answers the merge workspace forked for ORIGIN's request, creating it
 // when none is registered: a restart that cut a hand-off short finds the one
-// it forked. ORIGIN names REQUESTER as its requester; one that names another
-// is a defect in the caller, and refused.
+// it forked, and brings its session up, since the cut may have come before
+// the create started it (2026-10-20: the create panicked making the owed
+// fork, and the recovered pick was submitted to no session). ORIGIN names
+// REQUESTER as its requester; one that names another is a defect in the
+// caller, and refused.
 func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"requester": string(requester.ID), "request": string(origin.Request), "name": name, "base": base, "compact_after": origin.CompactAfter,
@@ -125,6 +131,10 @@ func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.
 	if found {
 		fields["merge_workspace"] = string(existing.ID)
 		log.Info(op, "found the merge workspace already forked for this detached merge", fields)
+		// The workspace verb records its own failures at their site.
+		if err := s.deps.Workspaces.StartMergeWorkspace(ctx, existing.ID); err != nil {
+			return wsm.Workspace{}, err
+		}
 		return existing, nil
 	}
 	// Create records its own failures at their site.
