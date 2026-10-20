@@ -313,6 +313,16 @@ the daemon detects itself.  There is no companion verb to undo it, and no
 notification on the restore: the daemon originated the status change that
 restores FULL, so it already knows.  Idempotent.")
 
+(agent-repl-rpc--defverb agent-repl-rpc-report-page-unloading
+  "ReportPageUnloading"
+  agent-repl-wire-encode-report-page-unloading-request
+  agent-repl-wire-decode-report-page-unloading-response
+  "Tell the daemon Emacs is about to unload this workspace's page on purpose.
+The daemon then awaits the page's web hop instead of drawing its closing
+stream as a broken link, so an unloaded page never changes the
+workspace's status.  Emacs unloads only once this answers success.
+Idempotent.")
+
 (agent-repl-rpc--defverb agent-repl-rpc-adopt-host-workspace
   "AdoptHostWorkspace"
   agent-repl-wire-encode-adopt-host-workspace-request

@@ -62,6 +62,7 @@
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-link-dial-successor "daemon-link" (address))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
@@ -854,6 +855,46 @@ decision is recorded at INFO, as the roster's follow records its own."
         (when page (agent-repl-webhost-show ws))
         (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s"
                           ws shown (if page "shown" "none")))))))
+
+(defun agent-repl-host-report-page-unloading (ws on-reported on-not-reported)
+  "Tell the daemon Emacs is about to unload workspace WS\='s page on purpose.
+ON-REPORTED is called with no argument once the daemon has answered
+success: only then may the page be unloaded, so the daemon knows the end
+of the page\='s web stream is deliberate before it can end
+\(endpoint_report_page_unloading.proto).  Any other outcome calls
+ON-NOT-REPORTED with no argument and the page stays loaded: unloading is a
+performance measure, and a page kept loaded costs nothing the user sees.
+
+A refusal is recorded by `agent-repl-host--on-refused', a transport
+failure at ERROR.  WS with no ref or no connection yet is not reported and
+calls ON-NOT-REPORTED at once."
+  (let ((ref (agent-repl-host-ref ws))
+        (conn (agent-repl-host-conn-or-primary ws)))
+    (cond
+     ((or (null ref) (null conn))
+      (agent-repl--log ws "elisp.host.page-unloading-skipped ws=%s reason=%s"
+                       ws (if ref "no-connection" "no-ref"))
+      (funcall on-not-reported))
+     (t
+      (agent-repl--log ws "elisp.host.page-unloading ws=%s id=%S" ws (plist-get ref :id))
+      (agent-repl-rpc-report-page-unloading
+       conn (list :workspace ref)
+       :on-response
+       (lambda (response)
+         (pcase (plist-get response :arm)
+           (:success
+            (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
+            (funcall on-reported))
+           (:error
+            (agent-repl-host--on-refused ws "page-unloading" (plist-get response :value))
+            (funcall on-not-reported))
+           (arm
+            (agent-repl--error ws "elisp.host.page-unloading-unknown-arm ws=%s arm=%S" ws arm)
+            (funcall on-not-reported))))
+       :on-failure
+       (lambda (detail)
+         (agent-repl--error ws "elisp.host.page-unloading-failed ws=%s detail=%S" ws detail)
+         (funcall on-not-reported)))))))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.

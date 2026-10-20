@@ -508,6 +508,13 @@ func (s *requestLoggingServer) SelectWorkspace(
 	return serveUnary(s, ctx, "SelectWorkspace", req, s.server.SelectWorkspace)
 }
 
+func (s *requestLoggingServer) ReportPageUnloading(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportPageUnloadingRequest],
+) (*connect.Response[agentreplv1.ReportPageUnloadingResponse], error) {
+	return serveUnary(s, ctx, "ReportPageUnloading", req, s.server.ReportPageUnloading)
+}
+
 func (s *requestLoggingServer) MarkWorkspaceViewed(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],

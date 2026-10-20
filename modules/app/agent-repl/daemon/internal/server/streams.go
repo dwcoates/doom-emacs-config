@@ -754,7 +754,16 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	} else {
 		s.webHeld[ws] += delta
 	}
-	hostLive, webLive := s.hostHeld[ws] > 0, s.webHeld[ws] > 0
+	switch {
+	case !host && delta > 0:
+		s.webSeen[ws] = true
+	case host && s.hostHeld[ws] <= 0:
+		// THE AWAITING IS THE HOST STREAM'S. An editor that reconnects --
+		// a restarted Emacs, a handover's re-subscribe -- awaits its pages
+		// afresh, so a page not yet connected is never read as one gone.
+		delete(s.webSeen, ws)
+	}
+	hostLive, webLive, webHop := s.participantHopsLocked(ws)
 	s.mu.Unlock()
 
 	// THE EDITOR'S HOST STREAM IS THE HELD-PROMPT EDIT'S SCOPE. The last one
@@ -775,7 +784,58 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	}
 	s.log.Info("daemon.server.participants", "a per-workspace stream edge moved the participant set",
 		dlog.Context{"workspace": string(ws), "stream": stream, "delta": delta,
-			"host_stream": hostLive, "web_stream": webLive})
-	s.deps.Footer.SetParticipants(ws, hostLive, webLive)
-	s.deps.Topbar.SetParticipants(ws, hostLive, webLive)
+			"host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
+	s.publishParticipants(ws, hostLive, webHop)
+}
+
+// ReportPageUnloading records that Emacs is about to unload a workspace's page
+// on purpose, so the web stream ending with it leaves the web hop AWAITED
+// rather than broken until a page connects again (participantHopsLocked).
+// Emacs unloads only once this has answered success, which is what makes the
+// record precede the stream's end. Idempotent.
+func (s *server) ReportPageUnloading(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportPageUnloadingRequest],
+) (*connect.Response[agentreplv1.ReportPageUnloadingResponse], error) {
+	const rpc = "ReportPageUnloading"
+	resp := &agentreplv1.ReportPageUnloadingResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	ws := subject.Record.ID
+	s.mu.Lock()
+	delete(s.webSeen, ws)
+	hostLive, webLive, webHop := s.participantHopsLocked(ws)
+	s.mu.Unlock()
+	subject.Log.Info("daemon.server.participants", "Emacs is unloading the workspace's page; its web hop is awaited until a page connects again",
+		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
+	s.publishParticipants(ws, hostLive, webHop)
+	resp.Result = &agentreplv1.ReportPageUnloadingResponse_Success{
+		Success: &agentreplv1.ReportPageUnloadingSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// participantHopsLocked answers a workspace's host stream, its web stream, and
+// whether its WEB HOP stands: a web stream is held, or the page is AWAITED --
+// it has not connected since the host stream opened or since Emacs reported
+// unloading it (ReportPageUnloading). Only a page that connected and went
+// away unannounced breaks the hop.
+//
+// AN UNLOADED PAGE IS A PERFORMANCE MEASURE, NEVER A STATE THE USER SEES
+// (owner ruling, 2026-10-20): a working workspace whose page Emacs unloaded
+// was drawn severed, blue, until the user switched back to it. The caller
+// holds s.mu.
+func (s *server) participantHopsLocked(ws ids.WorkspaceID) (host, web, webHop bool) {
+	host, web = s.hostHeld[ws] > 0, s.webHeld[ws] > 0
+	return host, web, web || !s.webSeen[ws]
+}
+
+// publishParticipants states the participant hops to the two resolvers that
+// draw connectivity (daemon.md invariant 11). Every edge that moves them
+// publishes through here.
+func (s *server) publishParticipants(ws ids.WorkspaceID, host, webHop bool) {
+	s.deps.Footer.SetParticipants(ws, host, webHop)
+	s.deps.Topbar.SetParticipants(ws, host, webHop)
 }

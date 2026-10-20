@@ -635,6 +635,14 @@ unmarked is DISCRETIONARY by default.
    agentrepl.v1 WatchHostWorkspace for Emacs↔daemon — the workspace is
    CONNECTED iff all are live, and any one down means not connected.
    Silence on a live stream is never evidence of anything.
+   - THE WEB HOP IS DOWN ONLY FOR A PAGE THAT WENT AWAY (owner ruling,
+     2026-10-20: an unloaded page is a performance measure, never a state
+     the user sees). A page that has not yet connected since its host
+     stream opened, or that Emacs reported unloading on purpose
+     (agentrepl.v1 ReportPageUnloading, sent before the unload), is
+     AWAITED, and an awaited hop counts as live. Only a page that
+     connected and whose WatchWebWorkspace then ended unannounced breaks
+     the hop (server.participantHopsLocked).
 
 10c. PRESCRIBED — THE FIVE RESOLVERS, existence and purpose only:
    exactly these five exist — the FEED resolver, the FOOTER resolver,

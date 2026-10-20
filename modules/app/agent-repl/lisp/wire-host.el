@@ -953,6 +953,83 @@ arm this codec does not know is refused as an unknown field."
      "SelectWorkspaceResponse"
      (agent-repl-wire-decode-select-workspace-response-result object))))
 
+;;;; ---- The workspace-subject verbs' one shape ----
+
+;; A WORKSPACE-SUBJECT VERB names one workspace and answers success or the
+;; four refusals the daemon's subject guard raises (`subjectFor'): unknown
+;; workspace, ref mismatch, transferring away, not yet adopted.  Every such
+;; verb whose success is empty shares the codec below, named by its rpc
+;; NAME, so no two copies of the same refusal decoding can drift.
+
+(defun agent-repl-wire--encode-subject-request (name value)
+  "Encode the NAME request plist VALUE `(:workspace REF)'.
+NAME is the rpc's name, e.g. \"ReportPageUnloading\"."
+  (let ((message (concat name "Request")))
+    (unless (plist-member value :workspace)
+      (agent-repl-wire--fail message 'workspace "required message field is absent"))
+    (agent-repl-wire--encoded
+     message
+     (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))))))
+
+(defun agent-repl-wire--decode-subject-string-refusal (message key field value)
+  "Decode VALUE as MESSAGE, whose one string FIELD (wire KEY) is its fact."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object (list key))
+    (agent-repl-wire--decoded
+     message (list field (agent-repl-wire--decode-string message key object)))))
+
+(defun agent-repl-wire--decode-subject-error (name value)
+  "Decode VALUE as the NAME rpc's Error, a plist (:cause ONEOF).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let* ((message (concat name "Error"))
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys
+     message object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire--decoded
+     message
+     (list :cause
+           (agent-repl-wire--decode-oneof
+            message 'cause object
+            `((unknownWorkspace
+               :unknown-workspace
+               ,(lambda (v) (agent-repl-wire--decode-empty (concat name "UnknownWorkspace") v)))
+              (workspaceRefMismatch
+               :workspace-ref-mismatch
+               ,(lambda (v) (agent-repl-wire--decode-subject-string-refusal
+                             (concat name "WorkspaceRefMismatch") 'registryDir :registry-dir v)))
+              (transferringAway
+               :transferring-away
+               ,(lambda (v) (agent-repl-wire--decode-subject-string-refusal
+                             (concat name "TransferringAway") 'address :address v)))
+              (notYetAdopted
+               :not-yet-adopted
+               ,(lambda (v) (agent-repl-wire--decode-empty (concat name "NotYetAdopted") v)))))))))
+
+(defun agent-repl-wire--decode-subject-response (name value)
+  "Decode VALUE as the NAME rpc's Response.  THE ARM IS THE OUTCOME.
+The success arm is the empty NAME Success message."
+  (let* ((message (concat name "Response"))
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(success error))
+    (agent-repl-wire--decoded
+     message
+     (agent-repl-wire--decode-oneof
+      message 'result object
+      `((success :success ,(lambda (v) (agent-repl-wire--decode-empty (concat name "Success") v)))
+        (error :error ,(lambda (v) (agent-repl-wire--decode-subject-error name v))))))))
+
+;;;; ---- ReportPageUnloading ----
+
+(defun agent-repl-wire-encode-report-page-unloading-request (value)
+  "Encode the ReportPageUnloadingRequest plist VALUE `(:workspace REF)'.
+Emacs's report that it is about to unload the workspace's page on purpose."
+  (agent-repl-wire--encode-subject-request "ReportPageUnloading" value))
+
+(defun agent-repl-wire-decode-report-page-unloading-response (value)
+  "Decode VALUE as `ReportPageUnloadingResponse'.  THE ARM IS THE OUTCOME."
+  (agent-repl-wire--decode-subject-response "ReportPageUnloading" value))
+
 ;;;; ---- MarkWorkspaceViewed ----
 
 (defun agent-repl-wire-encode-mark-workspace-viewed-request-workspace (value)

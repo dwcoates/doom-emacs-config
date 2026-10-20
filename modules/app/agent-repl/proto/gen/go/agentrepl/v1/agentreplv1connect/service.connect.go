@@ -214,6 +214,9 @@ const (
 	// AgentReplMarkWorkspaceViewedProcedure is the fully-qualified name of the AgentRepl's
 	// MarkWorkspaceViewed RPC.
 	AgentReplMarkWorkspaceViewedProcedure = "/agentrepl.v1.AgentRepl/MarkWorkspaceViewed"
+	// AgentReplReportPageUnloadingProcedure is the fully-qualified name of the AgentRepl's
+	// ReportPageUnloading RPC.
+	AgentReplReportPageUnloadingProcedure = "/agentrepl.v1.AgentRepl/ReportPageUnloading"
 	// AgentReplReportEditorFocusProcedure is the fully-qualified name of the AgentRepl's
 	// ReportEditorFocus RPC.
 	AgentReplReportEditorFocusProcedure = "/agentrepl.v1.AgentRepl/ReportEditorFocus"
@@ -339,6 +342,7 @@ var (
 	agentReplRegisterWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplSelectWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplMarkWorkspaceViewedMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
+	agentReplReportPageUnloadingMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
 	agentReplReportEditorFocusMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
 	agentReplClaimLiveNotificationMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("ClaimLiveNotification")
 	agentReplWatchHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
@@ -567,6 +571,10 @@ type AgentReplClient interface {
 	// The user has now SEEN this workspace: its row goes PARTIAL until its
 	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
 	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
+	// Emacs is about to unload this workspace's page on purpose; the daemon
+	// awaits its web hop rather than drawing it broken. Idempotent. See
+	// endpoint_report_page_unloading.proto.
+	ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error)
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it. Idempotent. See endpoint_report_editor_focus.proto.
 	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
@@ -1038,6 +1046,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportPageUnloading: connect.NewClient[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse](
+			httpClient,
+			baseURL+AgentReplReportPageUnloadingProcedure,
+			connect.WithSchema(agentReplReportPageUnloadingMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		reportEditorFocus: connect.NewClient[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse](
 			httpClient,
 			baseURL+AgentReplReportEditorFocusProcedure,
@@ -1234,6 +1248,7 @@ type agentReplClient struct {
 	registerWorkspace        *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	selectWorkspace          *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	markWorkspaceViewed      *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
+	reportPageUnloading      *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
 	reportEditorFocus        *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
 	claimLiveNotification    *connect.Client[v1.ClaimLiveNotificationRequest, v1.ClaimLiveNotificationResponse]
 	watchHostWorkspace       *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
@@ -1582,6 +1597,11 @@ func (c *agentReplClient) MarkWorkspaceViewed(ctx context.Context, req *connect.
 	return c.markWorkspaceViewed.CallUnary(ctx, req)
 }
 
+// ReportPageUnloading calls agentrepl.v1.AgentRepl.ReportPageUnloading.
+func (c *agentReplClient) ReportPageUnloading(ctx context.Context, req *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error) {
+	return c.reportPageUnloading.CallUnary(ctx, req)
+}
+
 // ReportEditorFocus calls agentrepl.v1.AgentRepl.ReportEditorFocus.
 func (c *agentReplClient) ReportEditorFocus(ctx context.Context, req *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
 	return c.reportEditorFocus.CallUnary(ctx, req)
@@ -1892,6 +1912,10 @@ type AgentReplHandler interface {
 	// The user has now SEEN this workspace: its row goes PARTIAL until its
 	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
 	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
+	// Emacs is about to unload this workspace's page on purpose; the daemon
+	// awaits its web hop rather than drawing it broken. Idempotent. See
+	// endpoint_report_page_unloading.proto.
+	ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error)
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it. Idempotent. See endpoint_report_editor_focus.proto.
 	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
@@ -2359,6 +2383,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportPageUnloadingHandler := connect.NewUnaryHandler(
+		AgentReplReportPageUnloadingProcedure,
+		svc.ReportPageUnloading,
+		connect.WithSchema(agentReplReportPageUnloadingMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplReportEditorFocusHandler := connect.NewUnaryHandler(
 		AgentReplReportEditorFocusProcedure,
 		svc.ReportEditorFocus,
@@ -2617,6 +2647,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSelectWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplMarkWorkspaceViewedProcedure:
 			agentReplMarkWorkspaceViewedHandler.ServeHTTP(w, r)
+		case AgentReplReportPageUnloadingProcedure:
+			agentReplReportPageUnloadingHandler.ServeHTTP(w, r)
 		case AgentReplReportEditorFocusProcedure:
 			agentReplReportEditorFocusHandler.ServeHTTP(w, r)
 		case AgentReplClaimLiveNotificationProcedure:
@@ -2926,6 +2958,10 @@ func (UnimplementedAgentReplHandler) SelectWorkspace(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MarkWorkspaceViewed is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportPageUnloading is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
