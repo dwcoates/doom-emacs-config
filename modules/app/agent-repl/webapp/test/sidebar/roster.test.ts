@@ -1267,10 +1267,23 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
   });
 
-  it("fades the foot of the stretched section's viewport only while rows lie below it", () => {
-    expect(css).toContain(
-      "#ws-sidebar .repo[data-band-stretched][data-band-more] > .rows {\n  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);",
-    );
+  it.each([
+    { name: "fades a capped Hidden Workspaces viewport while rows lie below it", cls: "hidden-section", attrs: ["data-band-more"], want: true },
+    { name: "leaves a Hidden Workspaces viewport with nothing below unfaded", cls: "hidden-section", attrs: [], want: false },
+    { name: "leaves a capped Recently Merged viewport unfaded", cls: "merged-section", attrs: ["data-band-more"], want: false },
+    { name: "fades a stretched Recently Merged viewport while rows lie below it", cls: "merged-section", attrs: ["data-band-stretched", "data-band-more"], want: true },
+  ])("$name", ({ cls, attrs, want }) => {
+    // Arrange
+    const section = document.createElement("div");
+    section.className = `repo ${cls}`;
+    for (const attr of attrs) section.setAttribute(attr, "");
+    const rows = document.createElement("div");
+    rows.className = "rows";
+    section.appendChild(rows);
+    // Act
+    const mask = inRail(section, () => cascadedValue(rows, "mask-image"));
+    // Assert
+    expect(mask.includes("var(--band-foot-fade)")).toBe(want);
   });
 
   it("fades the Open section's viewport foot when it is the stretched one", () => {

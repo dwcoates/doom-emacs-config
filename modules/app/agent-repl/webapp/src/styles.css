@@ -1162,10 +1162,14 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    lowest section's viewport reaches the rail's bottom edge and may cut its
    last line through (band-fit.ts). While rows lie below that edge, its last
    strip, about one row tall, fades to nothing. Pure paint: a mask takes no
-   part in layout or hit testing, so a faded row is still clickable. */
+   part in layout or hit testing, so a faded row is still clickable.
+   HIDDEN WORKSPACES FADES THE SAME WAY WHENEVER IT SCROLLS (owner request,
+   2026-10-20): stretched or capped at whole lines, while rows lie below its
+   viewport's edge its last strip fades as Recently Merged's does. */
 #ws-sidebar { --band-foot-fade: 1.4rem; }
 #ws-sidebar .repo[data-band-stretched][data-band-more] > .sb-sections,
-#ws-sidebar .repo[data-band-stretched][data-band-more] > .rows {
+#ws-sidebar .repo[data-band-stretched][data-band-more] > .rows,
+#ws-sidebar .repo.hidden-section[data-band-more] > .rows {
   mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);
 }
 #ws-sidebar .repo.merged-section {
