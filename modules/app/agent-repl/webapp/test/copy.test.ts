@@ -4,7 +4,11 @@
  * own copy would have handed the reader nothing.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { installCopyChords, installCopyFallback, isCopyChord } from "../src/copy.js";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { installCopyChords, installCopyFallback, isCopyChord, writeClipboardText, writeCopyEvent } from "../src/copy.js";
+import { codeOf } from "./source-text.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
 let teardown: (() => void) | undefined;
@@ -293,5 +297,134 @@ describe("the copy chords", () => {
       "the browser refused to copy the selection",
       { chord: "C-c", characters: 16, outcome: "refused" },
     ]);
+  });
+});
+
+describe("writeClipboardText", () => {
+  it("writes the text it was handed onto the copy event's clipboard", () => {
+    // Arrange
+    const clipboard = fakeClipboard();
+
+    // Act
+    const written = writeClipboardText(document, "go test ./...", () => {
+      dispatchCopy(clipboard.api);
+      return true;
+    });
+
+    // Assert
+    expect([written, clipboard.written.get("text/plain")]).toEqual([true, "go test ./..."]);
+  });
+
+  it("writes its text over a standing selection, ahead of the copy fallback", () => {
+    // Arrange
+    teardown = installCopyFallback(document);
+    selectText("the reader's highlight");
+    const clipboard = fakeClipboard();
+
+    // Act
+    writeClipboardText(document, "the code", () => {
+      dispatchCopy(clipboard.api);
+      return true;
+    });
+
+    // Assert
+    expect(clipboard.written.get("text/plain")).toBe("the code");
+  });
+
+  it("cancels the copy event's own default", () => {
+    // Arrange
+    let event: Event | undefined;
+
+    // Act
+    writeClipboardText(document, "x", () => {
+      event = dispatchCopy(fakeClipboard().api);
+      return true;
+    });
+
+    // Assert
+    expect(event?.defaultPrevented).toBe(true);
+  });
+
+  it("answers false when the browser fired no copy event", () => {
+    // Act / Assert
+    expect(writeClipboardText(document, "x", () => false)).toBe(false);
+  });
+
+  it("answers false when the copy event carried no clipboard", () => {
+    // Act
+    const written = writeClipboardText(document, "x", () => {
+      dispatchCopy(null);
+      return true;
+    });
+
+    // Assert
+    expect(written).toBe(false);
+  });
+
+  it("stops answering copy events once it returns", () => {
+    // Arrange
+    writeClipboardText(document, "stale", () => true);
+    const clipboard = fakeClipboard();
+
+    // Act
+    dispatchCopy(clipboard.api);
+
+    // Assert
+    expect(clipboard.written.has("text/plain")).toBe(false);
+  });
+
+  it("stops answering copy events when the copy command throws", () => {
+    // Arrange
+    expect(() =>
+      writeClipboardText(document, "stale", () => {
+        throw new Error("no copy command");
+      }),
+    ).toThrow("no copy command");
+    const clipboard = fakeClipboard();
+
+    // Act
+    dispatchCopy(clipboard.api);
+
+    // Assert
+    expect(clipboard.written.has("text/plain")).toBe(false);
+  });
+});
+
+describe("writeCopyEvent", () => {
+  /** A cancelable `copy` event carrying CLIPBOARD, never dispatched. */
+  function copyEvent(clipboard: DataTransfer | null): Event {
+    const event = new Event("copy", { cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: clipboard });
+    return event;
+  }
+
+  it("writes the text as plain text and cancels the event's default", () => {
+    // Arrange
+    const clipboard = fakeClipboard();
+    const event = copyEvent(clipboard.api);
+    // Act
+    const written = writeCopyEvent(event, "abc");
+    // Assert
+    expect([written, clipboard.written.get("text/plain"), event.defaultPrevented]).toEqual([true, "abc", true]);
+  });
+
+  it("leaves an event with no clipboard untouched", () => {
+    // Arrange
+    const event = copyEvent(null);
+    // Act
+    const written = writeCopyEvent(event, "abc");
+    // Assert
+    expect([written, event.defaultPrevented]).toEqual([false, false]);
+  });
+
+  it("is the one place copy.ts writes onto a copy event's clipboard", () => {
+    // Arrange
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const code = codeOf(readFileSync(path.join(here, "../src/copy.ts"), "utf8"));
+    // Act
+    const writes = code.match(/\.setData\(/g) ?? [];
+    const callers = code.match(/writeCopyEvent\(event,/g) ?? [];
+    // Assert
+    expect([writes.length, callers.length]).toEqual([1, 2]);
   });
 });

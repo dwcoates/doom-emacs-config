@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import type { ClientLogRequest } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import { codeBlockHtml } from "../src/code-block.js";
 import { installForwardingLogger, installTextAffordances } from "../src/document-runtime.js";
 import { clientLogRecorder } from "./rpc/client-log-recorder.js";
 import { setLogger, log, type ForwardingLogger } from "../src/log.js";
@@ -107,6 +108,26 @@ describe("installTextAffordances", () => {
     paragraph.remove();
   });
 
+  it("copies a code block's code on a click of its copy control", () => {
+    // Arrange
+    const uninstall = installTextAffordances(document);
+    let copied = 0;
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: (command: string) => command === "copy" && ++copied > 0,
+    });
+    document.body.innerHTML = codeBlockHtml("make test", "");
+
+    // Act
+    document.querySelector<HTMLElement>(".md-code-copy")?.click();
+
+    // Assert
+    expect(copied).toBe(1);
+    uninstall();
+    Reflect.deleteProperty(document, "execCommand");
+    document.body.innerHTML = "";
+  });
+
   it("is what both documents set themselves up with", () => {
     // Arrange
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -124,10 +145,11 @@ describe("installTextAffordances", () => {
         s.includes("new ForwardingLogger("),
         s.includes("installCopyFallback("),
         s.includes("installCopyChords("),
+        s.includes("installCodeCopy("),
       ]),
     ).toEqual([
-      [true, true, false, false, false],
-      [true, true, false, false, false],
+      [true, true, false, false, false, false],
+      [true, true, false, false, false, false],
     ]);
   });
 });

@@ -48,7 +48,8 @@
  * replaced by a guess.
  */
 
-import { escapeHtml, highlightCode } from "./highlight.js";
+import { codeBlockHtml } from "./code-block.js";
+import { escapeHtml } from "./highlight.js";
 import { log } from "./log.js";
 
 /**
@@ -1290,13 +1291,10 @@ function dedent(line: string, width: number): string {
  * Render an interior fenced block as an opaque code block: the body escaped (or
  * syntax-highlighted for a known language, which also escapes), never run
  * through the markdown/inline pass, so tokens like `__name__` and `->` stay
- * literal. It carries the same `md-code` shape a markdown fence renders as.
+ * literal. It is the one code block (code-block.ts) a markdown fence renders as.
  */
 function renderFenceBlock(segment: FenceSegment): string {
-  const body = segment.code.join("\n");
-  const html = highlightCode(body, segment.lang);
-  const langClass = segment.lang === "" ? "" : ` lang-${escapeHtml(segment.lang)}`;
-  return `<pre class="md-code"><code class="hljs${langClass}">${html}</code></pre>`;
+  return codeBlockHtml(segment.code.join("\n"), segment.lang);
 }
 
 function renderLine(l: RenderLine): string {
