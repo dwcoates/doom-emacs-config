@@ -1105,6 +1105,27 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (should (stringp (plist-get (car agent-repl-test-input--submitted)
                                 :idempotency-key)))))
 
+(ert-deftest agent-repl-input-a-first-send-carries-its-submit-instant ()
+  "A person's send carries the instant it was submitted, for the echo timing."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl--input-now-unix-ms) (lambda () 1700000000123)))
+      ;; Act
+      (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
+                                :user-sent "hello"))
+    ;; Assert
+    (should (equal (plist-get (car agent-repl-test-input--submitted) :submitted-at-unix-ms)
+                   1700000000123))))
+
+(ert-deftest agent-repl-input-a-retry-carries-no-submit-instant ()
+  "A retry's wait is not the prompt's echo, so it carries no submit instant."
+  (agent-repl-test-input--with
+    ;; Act
+    (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
+                              :deferred-prompt "hello" "key-failed")
+    ;; Assert
+    (should-not (plist-member (car agent-repl-test-input--submitted) :submitted-at-unix-ms))))
+
 (ert-deftest agent-repl-input-a-first-send-closes-the-news-digest ()
   "Sending a prompt closes a standing news digest on the workspace's page."
   (agent-repl-test-input--with

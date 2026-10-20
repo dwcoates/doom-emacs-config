@@ -1946,6 +1946,10 @@ still holds, so the words are never lost silently."
               (error-message-string err) raw)
      nil)))
 
+(defun agent-repl--input-now-unix-ms ()
+  "The host\='s wall clock now, in Unix milliseconds: the clock the page reads."
+  (truncate (* 1000 (float-time))))
+
 (cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer snapshot delivery)
   "Submit SAID to WS with ORIGIN; RAW is the user's own text for the record.
 Resolves the workspace ref and the connection, mints the idempotency key,
@@ -1994,7 +1998,11 @@ value Emacs constructs from a path."
         ;; selection to the prompt and ends it, pushing the result.
         (append (list :said said :idempotency-key key
                       :origin origin :workspace ref)
-                (when delivery (list :delivery delivery)))
+                (when delivery (list :delivery delivery))
+                ;; THE PERSON'S SEND IS TIMED TO ITS ECHO on the page
+                ;; (webapp/src/prompt-echo.ts); a retry's wait is not.
+                (when first-attempt
+                  (list :submitted-at-unix-ms (agent-repl--input-now-unix-ms))))
         :on-response
         (lambda (response)
           (agent-repl--with-log-context
