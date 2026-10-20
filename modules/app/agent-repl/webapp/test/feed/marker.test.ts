@@ -10,7 +10,9 @@ import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/e
 import renderColors from "../../../proto/vocab/render-colors.json";
 import {
   MARKER_GLYPH_CHARS,
+  OUTCOME_CARD_CLASS,
   OUTCOME_MARKER_CLASS,
+  drawOutcomeCard,
   drawOutcomeMarker,
   formatMarkerTime,
 } from "../../src/feed/marker.js";
@@ -22,7 +24,7 @@ import {
   type LoginRequestedDetail,
 } from "../../src/login/request.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { CONTROL_TAG } from "../../src/control.js";
+import { CAPPED_CLASSES } from "../../src/expand.js";
 import { countingTicker, harness, settle, type FeedScript } from "./harness.js";
 
 beforeEach(() => {
@@ -78,15 +80,30 @@ function agentRepl(extra: { restarted?: { atMs: bigint }; resend?: { said: typeo
 const AGENT_REPL: MarkerInit = agentRepl();
 
 
-function draw(init: MarkerInit, script: FeedScript = {}, previous?: Element) {
+function draw(init: MarkerInit, script: FeedScript = {}) {
   const h = harness(script);
-  const el = drawOutcomeMarker(marker(init), { ctx: h.ctx, previous }, "FeedOutcomeMarker");
+  const el = drawOutcomeMarker(marker(init), { ctx: h.ctx }, "FeedOutcomeMarker");
   document.body.append(el);
   return { el, h };
 }
 
+function drawCard(init: MarkerInit, face: string[] = []) {
+  const h = harness({});
+  const el = drawOutcomeCard(marker(init), { ctx: h.ctx }, "FeedOutcomeMarker", face);
+  document.body.append(el);
+  return el;
+}
+
 function pill(el: HTMLElement): HTMLElement {
   return el.querySelector(".outcome-marker-pill") as HTMLElement;
+}
+
+function head(el: HTMLElement): HTMLElement {
+  return el.querySelector(".outcome-card-head") as HTMLElement;
+}
+
+function said(el: HTMLElement): (string | null)[] {
+  return [...el.querySelectorAll(".outcome-card-said")].map((line) => line.textContent);
 }
 
 function lineValue(el: HTMLElement, name: string): string | null | undefined {
@@ -94,12 +111,12 @@ function lineValue(el: HTMLElement, name: string): string | null | undefined {
 }
 
 describe("drawOutcomeMarker: the anatomy", () => {
-  it("draws the glyph, the label and the detail, in that order", () => {
+  it("draws a fault's glyph, label and detail, in that order, as the card's head", () => {
     const { el } = draw(VENDOR);
-    expect(pill(el).textContent).toBe("◆vendor error · rate limited›");
+    expect(head(el).textContent).toBe("◆vendor error · rate limited");
   });
 
-  it("draws the label alone when no detail is sent", () => {
+  it("draws a neutral marker's label alone when no detail is sent", () => {
     const { el } = draw(NEUTRAL);
     expect(pill(el).textContent).toBe("◼interrupted");
   });
@@ -144,16 +161,16 @@ describe("drawOutcomeMarker: the anatomy", () => {
     expect(() => draw({ label: { text: "x" }, family: { case: "vendorFault", value: {} } })).toThrow(MalformedView);
   });
 
-  it("builds no <button>: its controls are the one control", () => {
+  it("builds no <button>: its actions are the one control", () => {
     const { el } = draw(vendor({ errorType: { text: "x" }, signIn: {}, resend: { said: SAID } }));
-    expect([el.querySelector("button"), pill(el).localName]).toEqual([null, CONTROL_TAG]);
+    expect(el.querySelector("button")).toBeNull();
   });
 });
 
-describe("drawOutcomeMarker: only a fault expands", () => {
-  it("draws no chevron on a neutral marker", () => {
+describe("drawOutcomeMarker: a neutral marker is a pill, a fault is a card", () => {
+  it("draws a neutral marker as a plain-text pill, no card", () => {
     const { el } = draw(NEUTRAL);
-    expect(el.querySelector(".outcome-marker-chevron")).toBeNull();
+    expect([pill(el).localName, el.classList.contains(OUTCOME_CARD_CLASS)]).toEqual(["span", false]);
   });
 
   it("draws nothing to open on a neutral marker", () => {
@@ -161,44 +178,79 @@ describe("drawOutcomeMarker: only a fault expands", () => {
     expect(el.querySelector(".outcome-marker-expansion")).toBeNull();
   });
 
-  it("makes a neutral marker's pill plain text, no control", () => {
-    const { el } = draw(NEUTRAL);
-    expect(pill(el).localName).toBe("span");
+  it.each([
+    ["vendorFault", VENDOR],
+    ["agentReplFault", AGENT_REPL],
+  ])("draws a %s marker as a tool card, with no pill", (_name, init) => {
+    const { el } = draw(init);
+    expect([el.classList.contains(OUTCOME_CARD_CLASS), el.classList.contains("tool-card"), pill(el)]).toEqual([true, true, null]);
   });
 
   it.each([
     ["vendorFault", VENDOR],
     ["agentReplFault", AGENT_REPL],
-  ])("draws a %s marker collapsed, with its closed chevron", (_name, init) => {
+  ])("makes a %s card the tool card's fold, its expansion the fold's hidden section", (_name, init) => {
     const { el } = draw(init);
     const expansion = el.querySelector(".outcome-marker-expansion") as HTMLElement;
-    expect([expansion.hidden, el.querySelector(".outcome-marker-chevron")?.textContent]).toEqual([true, "›"]);
+    expect([el.classList.contains("tool-fold"), expansion.parentElement === el, expansion.classList.contains("tool-output")])
+      .toEqual([true, true, true]);
   });
 
-  it("opens the expansion in place on a click", () => {
+  it("is a fold the feed's click handler opens, like a tool card", () => {
     const { el } = draw(VENDOR);
-    pill(el).click();
-    const expansion = el.querySelector(".outcome-marker-expansion") as HTMLElement;
-    expect([expansion.hidden, pill(el).getAttribute("aria-expanded"), el.querySelector(".outcome-marker-chevron")?.textContent]).toEqual([false, "true", "⌄"]);
+    expect(CAPPED_CLASSES.some((c) => el.classList.contains(c))).toBe(true);
+  });
+});
+
+describe("the pill and the card share one head", () => {
+  it("draws the same glyph, label and detail markup in a pill and in a card", () => {
+    const init: MarkerInit = { label: { text: "vendor notice" }, detail: { text: "allowance exhausted" }, family: { case: "neutral", value: {} } };
+    const { el: asPill } = draw(init);
+    const asCard = drawCard(init);
+    expect(head(asCard).innerHTML).toBe(pill(asPill).innerHTML);
   });
 
-  it("closes it again on a second click", () => {
-    const { el } = draw(VENDOR);
-    pill(el).click();
-    pill(el).click();
-    expect((el.querySelector(".outcome-marker-expansion") as HTMLElement).hidden).toBe(true);
+  it("gives both drawings the same root tone and family attribute", () => {
+    const { el: asPill } = draw(NEUTRAL);
+    const asCard = drawCard(NEUTRAL);
+    expect([asCard.getAttribute("data-family"), asCard.classList.contains("tone-none")])
+      .toEqual([asPill.getAttribute("data-family"), asPill.classList.contains("tone-none")]);
+  });
+});
+
+describe("drawOutcomeCard: the closed face", () => {
+  it("shows the vendor's message under the head, outside the expansion", () => {
+    const el = drawCard(vendor({ errorType: { text: "overloaded" }, message: { text: "The API is overloaded." } }));
+    expect([said(el), el.querySelector(".outcome-marker-expansion [data-line='message']")]).toEqual([["The API is overloaded."], null]);
   });
 
-  it("keeps a reader's open expansion across a re-push", () => {
-    const { el: first } = draw(VENDOR);
-    pill(first).click();
-    const { el: again } = draw(VENDOR, {}, first);
-    expect((again.querySelector(".outcome-marker-expansion") as HTMLElement).hidden).toBe(false);
+  it("shows no message line when the vendor recorded none", () => {
+    const el = drawCard(VENDOR);
+    expect(said(el)).toEqual([]);
   });
 
-  it("draws the expansion inside the marker, never outside it", () => {
-    const { el } = draw(VENDOR);
-    expect(el.contains(el.querySelector(".outcome-marker-expansion"))).toBe(true);
+  it("shows the folded notices after the message, oldest first", () => {
+    const el = drawCard({
+      ...vendor({ errorType: { text: "internal" }, message: { text: "Internal server error" } }),
+      notices: [{ text: "API Error: 500" }, { text: "API Error: 500 again" }],
+    } as MarkerInit);
+    expect(said(el)).toEqual(["Internal server error", "API Error: 500", "API Error: 500 again"]);
+  });
+
+  it("shows an agent-repl fault's notices, which has no vendor message", () => {
+    const el = drawCard({ ...AGENT_REPL, notices: [{ text: "Claude's response was interrupted" }] } as MarkerInit);
+    expect(said(el)).toEqual(["Claude's response was interrupted"]);
+  });
+
+  it("draws a standalone notice as a neutral card whose face is the notice's words", () => {
+    const el = drawCard({ label: { text: "vendor notice" }, family: { case: "neutral", value: {} } }, ["You're approaching your limit"]);
+    expect([el.classList.contains(OUTCOME_CARD_CLASS), el.classList.contains("tool-fold"), head(el).textContent, said(el)])
+      .toEqual([true, false, "◼vendor notice", ["You're approaching your limit"]]);
+  });
+
+  it("draws the vendor's words as plain text, never as markup", () => {
+    const el = drawCard(NEUTRAL, ["<b>API Error</b>"]);
+    expect([said(el), el.querySelector(".outcome-card-said b")]).toEqual([["<b>API Error</b>"], null]);
   });
 });
 
@@ -218,9 +270,9 @@ describe("drawOutcomeMarker: a vendor fault's expansion", () => {
     expect(lineValue(el, "error-type")).toBe("rate_limited");
   });
 
-  it("draws the vendor's message verbatim when sent", () => {
+  it("draws the vendor's message verbatim in the face when sent", () => {
     const { el } = draw(vendor({ errorType: { text: "x" }, message: { text: "Rate limit reached" } }));
-    expect(lineValue(el, "message")).toBe("Rate limit reached");
+    expect(said(el)).toEqual(["Rate limit reached"]);
   });
 
   it.each(["message", "retries", "retry", "model", "account"])("draws no %s line when none is sent", (name) => {

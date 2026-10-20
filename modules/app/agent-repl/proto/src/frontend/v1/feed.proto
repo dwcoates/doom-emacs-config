@@ -927,10 +927,15 @@ message FeedResponse {
     FeedResponseError error = 4;
   }
   // SET when the prose is a VENDOR-SYNTHESIZED NOTICE rather than the
-  // agent's own words (an interruption note, a system-inserted remark): the
-  // client draws the bubble in the notice register with `heading` above the
-  // prose. UNSET = ordinary agent prose. Daemon-composed; the client holds
-  // no notice vocabulary.
+  // agent's own words (an "API Error: …" line, an allowance notice, an
+  // interruption note): the client draws the row as the notice's outcome
+  // card, never as a prose bubble. UNSET = ordinary agent prose.
+  // Daemon-composed; the client holds no notice vocabulary.
+  //
+  // A notice of a turn that ENDED ON A FAULT is never drawn as its own row:
+  // the daemon folds its words into that ending's marker
+  // (FeedOutcomeMarker.notices) and retires the notice row, so one fault is
+  // one card whichever of the two the daemon received first.
   optional FeedResponseNotice notice = 5;
 
   // SET when this bubble is the agent's intermediate THINKING (its
@@ -994,9 +999,19 @@ message FeedResponse {
   bool interim = 9;
 }
 
-// The notice register's heading, daemon-composed.
+// A vendor notice drawn on its own: the prose is the vendor's words, and the
+// marker is the card's head. Drawn only for a notice whose turn did not end
+// on a fault (an allowance warning on a turn that went on, a notice of a turn
+// still running); a fault's notices ride its ending's marker instead.
 message FeedResponseNotice {
-  string heading = 1;
+  reserved 1;
+  reserved "heading";
+  // The card's head: always the NEUTRAL family, because a notice on its own
+  // changes no workspace status, and the card's border is the color of the
+  // status its event raises. The label names the register ("vendor notice");
+  // the detail names the subject when the producer classified one
+  // ("allowance exhausted"), and is unset when it did not.
+  FeedOutcomeMarker marker = 2;
 }
 
 // The arriving state's prose.
@@ -1727,34 +1742,43 @@ message FeedTurnEndedInterruptedInterjection {}
 // A FAILED MERGE NEVER DRAWS ONE (owner ruling, 2026-10-06): its merge bubble,
 // continually updated, is its whole account in the feed.
 //
-// A small inline pill, about the height of the feed's badges, LEFT-ALIGNED in
-// the feed stream column, no wider than its text, and TRUNCATING rather than
-// overflowing the column. No bubble and no background fill:
+// TWO DRAWINGS, chosen by the family. A NEUTRAL marker is a small inline
+// pill, LEFT-ALIGNED in the feed stream column, no wider than its text and
+// TRUNCATING rather than overflowing. A FAULT marker, and a vendor notice
+// drawn on its own (FeedResponseNotice.marker), is a CARD as wide as a tool
+// card, framed by a hairline border in the family's color, whose closed face
+// is the head, the vendor message and the notices, and which opens in place
+// on a click, the way a tool card does:
 //
-//   ▏◆ vendor error · rate limited ›     a fault, collapsed
-//   ▏◆ vendor error · rate limited ⌄     a fault, expanded:
-//    ┌ FeedOutcomeVendorFaultExpansion ───────────────┐
-//    │ time · error type · message · retries · retry  │
-//    │ model · account · [sign in] · [resend]         │
-//    └────────────────────────────────────────────────┘
-//   ▏◼ interrupted                       neutral: no chevron, never expands
+//   ▏◼ interrupted                       neutral: a pill, never expands
 //
-// ANATOMY, left to right: the family's GLYPH, the LABEL, then the optional
-// DETAIL after a separator. COLOR IS ONLY ON THE GLYPH AND A THIN LEFT EDGE;
-// the text stays the normal foreground.
+//   ┌───────────────────────────────────────────────┐  a fault, closed
+//   │ ◆ vendor error · internal                     │
+//   │ API Error: 500 {"type":"error",…}             │  message, notices
+//   └───────────────────────────────────────────────┘
+//   ┌───────────────────────────────────────────────┐  a fault, open
+//   │ ◆ vendor error · internal                     │
+//   │ API Error: 500 {"type":"error",…}             │
+//   │ time · error type · retries · retry           │  the expansion
+//   │ model · account · [sign in] · [resend]        │
+//   └───────────────────────────────────────────────┘
+//
+// ANATOMY of the head, left to right: the family's GLYPH, the LABEL, then the
+// optional DETAIL after a separator. COLOR IS ON THE GLYPH AND THE EDGE (the
+// pill's left edge, the card's border); the text stays the normal foreground.
 //
 // THE ARM IS THE FAMILY, and the family decides the glyph and the color from
 // the SHARED vocabulary (proto/vocab/render-colors.json
 // `feed_outcome_marker` and `feed_outcome_marker_glyphs`): neutral grey for
-// the user's own acts and hooks, turquoise for a vendor fault, blue for an
-// agent-repl fault. The client holds no table of its own.
+// the user's own acts, hooks and a notice on its own, turquoise for a vendor
+// fault, blue for an agent-repl fault. Those are the colors the workspace
+// status takes for the same event, so a card's border always matches the
+// status its event raised. The client holds no table of its own.
 //
 // ONLY A FAULT ARM CARRIES AN EXPANSION, so a neutral marker structurally
-// cannot expand and draws no chevron. A fault marker expands in place (a
-// click on the pill or its chevron), inside the column, to its expansion's
-// lines. Every line is assembled by the daemon; the client draws each
-// verbatim and derives nothing. AN EXPANSION FIELD IS SET ONLY WHEN ITS SOURCE
-// EXISTS: absent is "the daemon has no such fact", never a default.
+// cannot expand. Every line is assembled by the daemon; the client draws
+// each verbatim and derives nothing. AN EXPANSION FIELD IS SET ONLY WHEN ITS
+// SOURCE EXISTS: absent is "the daemon has no such fact", never a default.
 message FeedOutcomeMarker {
   // The short label ("interrupted", "vendor error", "agent-repl", "Stop hook
   // ended the run"), drawn verbatim.
@@ -1776,6 +1800,21 @@ message FeedOutcomeMarker {
     // expands.
     FeedOutcomeMarkerAgentReplFault agent_repl_fault = 5;
   }
+  // The VENDOR'S OWN NOTICES about this event, verbatim, oldest first: the
+  // prose the vendor's tooling wrote into the conversation as if the agent
+  // had said it ("API Error: 500 …"). A fault card draws them in its closed
+  // face, under the head, so the reader sees what the vendor said without
+  // opening the card. A notice whose words are the expansion's vendor message
+  // is not repeated here. Empty when the event's turn carried no notice, and
+  // always empty on a neutral marker of a turn ending (only a fault ending
+  // folds the turn's notices in).
+  repeated FeedOutcomeNotice notices = 6;
+}
+// One vendor notice, folded into a marker.
+message FeedOutcomeNotice {
+  // The notice's words, verbatim as the vendor wrote them. Drawn as plain
+  // text: the vendor's notice is not the agent's markdown.
+  string text = 1;
 }
 // The label element.
 message FeedOutcomeMarkerLabel {
@@ -1815,7 +1854,9 @@ message FeedOutcomeVendorFaultExpansion {
   // ("rate_limited", "overloaded", an unmodeled class by the vendor's own
   // name) or the run's own stop word ("max_turns", "prompt_too_long").
   FeedOutcomeVendorErrorType error_type = 2;
-  // The vendor's own message, verbatim. UNSET when it recorded none.
+  // The vendor's own message, verbatim. UNSET when it recorded none. Drawn in
+  // the card's CLOSED face, under the head, not behind the click: it is the
+  // one line that says what went wrong in the vendor's words.
   optional FeedOutcomeVendorMessage message = 3;
   // How many retries the vendor made before it gave up, as its retry
   // schedule counted them. UNSET when the vendor reported no retry for the

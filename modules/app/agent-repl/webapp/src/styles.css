@@ -5824,15 +5824,15 @@ bubble-body.bubble-body { display: block; }
 
 /* ---- the outcome marker (src/feed/marker.ts; owner ruling, 2026-10-06) ----
 
-   ONE inline pill for every event that is not a message: a turn's ending, a
-   denial, a broken plan, a failed compaction. About a badge's height, left-
-   aligned in the feed column, no wider than its text, and TRUNCATING with an
-   ellipsis rather than overflowing the column. No bubble and no fill.
+   A NEUTRAL marker (an interrupt, a denial, a broken plan) is an inline pill
+   about a badge's height, left-aligned in the feed column, no wider than its
+   text, and TRUNCATING with an ellipsis rather than overflowing the column. A
+   FAULT marker is the outcome card (`.outcome-card`, below the prompt rules).
 
-   COLOR IS ONLY ON THE GLYPH AND THE THIN LEFT EDGE: the root carries the
-   family's `.tone-<color>` (src/vocab.ts, from render-colors.json), the glyph
-   and the edge take it as currentColor, and the words are reset to the
-   normal foreground. The neutral family's `none` is drawn grey. */
+   COLOR IS ONLY ON THE GLYPH AND THE EDGE: the root carries the family's
+   `.tone-<color>` (src/vocab.ts, from render-colors.json), the glyph and the
+   edge take it as currentColor, and the words are reset to the normal
+   foreground. The neutral family's `none` is drawn grey. */
 .outcome-marker {
   display: block;
   max-width: 100%;
@@ -5853,12 +5853,6 @@ bubble-body.bubble-body { display: block; }
   font: inherit;
   line-height: 1.4;
 }
-ar-button.outcome-marker-pill {
-  cursor: pointer;
-  background: none;
-  box-shadow: none;
-  min-height: 0;
-}
 .outcome-marker-glyph { flex: none; }
 .outcome-marker-text {
   min-width: 0;
@@ -5867,13 +5861,9 @@ ar-button.outcome-marker-pill {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.outcome-marker-chevron { flex: none; color: var(--muted); }
-/* THE EXPANSION opens in place, inside the column, under the same edge. Long
-   vendor text wraps rather than widening the column. */
+/* A fault card's expansion: long vendor text wraps rather than widening the
+   card. */
 .outcome-marker-expansion {
-  margin-top: 0.15rem;
-  padding: 0.1rem 0.4rem 0.15rem 0.6rem;
-  border-left: 2px solid currentColor;
   max-width: 100%;
   box-sizing: border-box;
   overflow-wrap: anywhere;
@@ -5886,6 +5876,35 @@ ar-button.outcome-marker-pill {
   gap: 0.4rem;
   margin-top: 0.2rem;
 }
+
+/* THE OUTCOME CARD (src/feed/marker.ts `drawOutcomeCard`; owner request,
+   2026-10-20): a fault marker, and a vendor notice drawn on its own. A tool
+   card's shell, width and type, framed by the response bubble's 0.3px
+   hairline in the family's color, which is the color of the workspace status
+   the event raised: turquoise for a vendor fault, blue for an agent-repl
+   fault, grey for a notice that raised none. A fault card is a `.tool-fold`
+   whose expansion is its `.tool-output`, so it opens and closes on a click
+   exactly as a tool card does (the `.tool-fold` rules above). The root's tone
+   colors only the glyph and the frame; every word is reset to the foreground. */
+.tool-card.outcome-card {
+  border: 0.3px solid currentColor;
+  font-size: calc(var(--small-prose-font-rem) * 1rem * var(--feed-text-scale));
+}
+.outcome-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35em;
+  min-width: 0;
+}
+/* The vendor's own words, verbatim: plain text, wrapped, never widening the
+   card. */
+.outcome-card-said {
+  color: var(--fg);
+  margin-top: 0.2rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.outcome-card > .outcome-marker-expansion { margin-top: 0.3rem; }
 
 /* The prompt's author line, above its body inside the existing bubble. */
 .prompt-author {
@@ -7384,23 +7403,6 @@ ar-button.outcome-marker-pill {
    monospace line WITHOUT the shell chrome, held back a touch so a search
    pattern does not read as a command that ran. */
 .tool-query { opacity: 0.9; }
-
-/* ---- response notice register (src/feed/cards/response.ts) ---- */
-/* A response whose prose is a vendor-synthesized remark rather than the agent's
-   own words. Deliberately the QUIETEST change that still reads as a different
-   register: the bubble keeps its shape, its background and its width so the
-   feed's rhythm is untouched, and gains a muted left accent plus the daemon's
-   heading in the same small muted type `.system-note` has always used for a
-   system remark. No new colour is introduced — a notice is not a warning. */
-.bubble.response-notice {
-  border-left: 2px solid var(--muted);
-}
-.response-notice-heading {
-  width: 100%;
-  color: var(--muted);
-  font-size: 0.75rem;
-  margin-bottom: 0.35em;
-}
 
 /* ---- lifecycle banners (src/lifecycle) --------------------------------- */
 

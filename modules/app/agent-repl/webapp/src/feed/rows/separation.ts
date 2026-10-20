@@ -254,7 +254,7 @@ export function drawFeedContextCutCompactionFailed(
   el.append(
     drawOutcomeMarker(
       requireMessage(failed.marker, `${PATH}.compaction_failed.marker`),
-      { ctx: rc.ctx, previous: rc.previous },
+      { ctx: rc.ctx },
       `${PATH}.compaction_failed.marker`,
     ),
   );

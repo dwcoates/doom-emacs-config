@@ -142,15 +142,15 @@ describe("drawFeedSessionSeparation: the compaction that did not happen", () => 
   it("draws its vendor-fault outcome marker", () => {
     const el = drawFeedSessionSeparation(separation(failed), ctxFor());
     const marker = el.querySelector(".sep-compaction-failed .outcome-marker");
-    expect([marker?.getAttribute("data-family"), marker?.querySelector(".outcome-marker-pill")?.textContent]).toEqual([
+    expect([marker?.getAttribute("data-family"), marker?.querySelector(".outcome-card-head")?.textContent]).toEqual([
       "vendorFault",
-      "◆compaction failed›",
+      "◆compaction failed",
     ]);
   });
 
-  it("carries the producer's own account of the failure in the marker's expansion, verbatim", () => {
+  it("carries the producer's own account of the failure in the card's face, verbatim", () => {
     const el = drawFeedSessionSeparation(separation(failed), ctxFor());
-    expect(el.querySelector('.outcome-marker-line[data-line="message"] .outcome-marker-value')?.textContent).toBe(
+    expect(el.querySelector(".outcome-card-said")?.textContent).toBe(
       "the summarizing request was refused",
     );
   });

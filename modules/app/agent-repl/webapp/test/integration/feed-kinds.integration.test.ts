@@ -111,7 +111,7 @@ import {
   permissionRow,
   planUnit,
   questionRow,
-  RESPONSE_NOTICE_HEADING,
+  RESPONSE_NOTICE_LABEL,
   responseNoticeUnit,
   responseUnit,
   separationRow,
@@ -366,49 +366,42 @@ describe.each(RESPONSE_STATES)("a %s response", (state) => {
 // Tool calls
 // ---------------------------------------------------------------------------
 
-describe("a response in the notice register", () => {
-  it("marks the bubble as a notice", async () => {
+describe("a vendor notice", () => {
+  it("draws as its outcome card, not as a bubble", async () => {
     // Arrange / Act: vendor-synthesized prose, not the agent's own words.
     const row = await drawRow(activityRow(responseNoticeUnit()));
     // Assert
-    expect(row.querySelector("[data-notice]")).not.toBeNull();
+    expect([row.querySelector(".outcome-card"), row.querySelector(".bubble")]).toEqual([expect.anything(), null]);
   });
 
-  it("draws the daemon-composed heading verbatim", async () => {
+  it("heads the card with the daemon-composed label verbatim", async () => {
     // Arrange / Act
     const row = await drawRow(activityRow(responseNoticeUnit()));
     // Assert: the client holds no notice vocabulary of its own.
-    expect(row.textContent).toContain(RESPONSE_NOTICE_HEADING);
+    expect(row.querySelector(".outcome-card-head")?.textContent).toContain(RESPONSE_NOTICE_LABEL);
   });
 
-  it("still draws the prose beneath the heading", async () => {
+  it("draws the vendor's words as the card's face", async () => {
     // Arrange / Act
     const row = await drawRow(activityRow(responseNoticeUnit()));
     // Assert
-    expect(row.textContent).toContain("the vendor's remark");
+    expect(row.querySelector(".outcome-card-said")?.textContent).toBe("the vendor's remark");
   });
 
-  it("draws whatever heading the daemon serves", async () => {
-    // Arrange / Act
-    const row = await drawRow(activityRow(responseNoticeUnit("success", "a system remark")));
-    // Assert
-    expect(row.textContent).toContain("a system remark");
-  });
-
-  it.each(RESPONSE_STATES)("carries the notice register on a %s response too", async (state) => {
+  it.each(RESPONSE_STATES)("draws the card on a %s response too", async (state) => {
     // Arrange / Act: the notice rides every result arm.
     const row = await drawRow(activityRow(responseNoticeUnit(state)));
     // Assert
-    expect(row.querySelector("[data-notice]")).not.toBeNull();
+    expect(row.querySelector(".outcome-card")).not.toBeNull();
   });
 });
 
 describe("an ordinary response", () => {
-  it("carries no notice register", async () => {
-    // Arrange / Act: `notice` is optional — absent means draw nothing.
+  it("draws a bubble, no notice card", async () => {
+    // Arrange / Act: `notice` is optional, and absent means an ordinary bubble.
     const row = await drawRow(activityRow(responseUnit("success")));
     // Assert
-    expect(row.querySelector("[data-notice]")).toBeNull();
+    expect(row.querySelector(".outcome-card")).toBeNull();
   });
 });
 

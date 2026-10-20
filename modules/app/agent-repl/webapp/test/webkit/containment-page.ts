@@ -236,7 +236,7 @@ window.containment = {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     // Every outcome marker OPEN: its expansion must stay inside the column too.
-    for (const pill of host.querySelectorAll<HTMLElement>('.outcome-marker-pill[aria-expanded="false"]')) pill.click();
+    for (const card of host.querySelectorAll<HTMLElement>(".outcome-card.tool-fold:not(.expanded)")) card.click();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     return host.querySelectorAll("[data-feed-row]").length;
   },

@@ -158,13 +158,14 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			// THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT PROSE. Drawing
 			// one as the agent's answer would present an outage as something
 			// the agent said, so the daemon states the authorship in the
-			// bubble's OWN NOTICE FIELD, which puts the row in the notice
-			// register. The PROSE STAYS VERBATIM: a heading spliced into the
+			// bubble's OWN NOTICE FIELD, which draws the row as the notice's
+			// card. The PROSE STAYS VERBATIM: a heading spliced into the
 			// markdown would be indistinguishable from words the vendor
 			// actually wrote, and nothing downstream could pull them apart
-			// again.
+			// again. A notice of a turn that ended on a fault is folded into
+			// that ending's card at the upsert door (notice.go).
 			bubble.Notice = &frontendv1.FeedResponseNotice{
-				Heading: noticeHeading(notice.SynthesizedNotice),
+				Marker: noticeMarker(notice.SynthesizedNotice),
 			}
 			log.Debug("daemon.feed.response_synthesized_notice",
 				"a vendor-synthesized notice was drawn as a notice rather than as the agent's answer",
@@ -388,32 +389,4 @@ func (r *resolver) stampSettled(fold *proseState, carriedAtMs int64) {
 		return
 	}
 	fold.settledAtMs = r.deps.Now().UnixMilli()
-}
-
-// noticeHeading composes the notice register's heading. It is a HEADING, not
-// markdown prose: the client draws it above the bubble in its own treatment,
-// so it carries no emphasis markup of its own.
-func noticeHeading(notice *conversationv1.AgentResponseSynthesizedNotice) string {
-	switch notice.GetSubject().(type) {
-	case *conversationv1.AgentResponseSynthesizedNotice_UsageLimit:
-		return "Notice — your allowance is exhausted. This is the vendor's own message, not the agent's."
-	case *conversationv1.AgentResponseSynthesizedNotice_UsageTransition:
-		return "Notice — your allowance window changed. This is the vendor's own message, not the agent's."
-	case *conversationv1.AgentResponseSynthesizedNotice_UsageWarning:
-		return "Notice — you are approaching an allowance limit. This is the vendor's own message, not the agent's."
-	}
-	return "Notice from the vendor's tooling, not the agent's answer."
-}
-
-// noticeSubject names the notice's subject for a log record.
-func noticeSubject(notice *conversationv1.AgentResponseSynthesizedNotice) string {
-	switch notice.GetSubject().(type) {
-	case *conversationv1.AgentResponseSynthesizedNotice_UsageLimit:
-		return "usage_limit"
-	case *conversationv1.AgentResponseSynthesizedNotice_UsageTransition:
-		return "usage_transition"
-	case *conversationv1.AgentResponseSynthesizedNotice_UsageWarning:
-		return "usage_warning"
-	}
-	return "unclassified"
 }

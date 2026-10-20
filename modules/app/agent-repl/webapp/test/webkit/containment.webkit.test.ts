@@ -52,7 +52,7 @@ describe("the feed stays inside its stream area, in WebKit", () => {
     kinds = await page.evaluate(() => window.containment.kinds());
     records = await page.evaluate(() => window.containment.records());
     openMarkers = await page.evaluate(
-      () => document.querySelectorAll('.outcome-marker-pill[aria-expanded="true"]').length,
+      () => document.querySelectorAll(".outcome-card.tool-fold.expanded").length,
     );
   }, 60_000);
 

@@ -149,7 +149,7 @@ describe("turn error arms", () => {
   });
 
   it.each(TURN_ERROR_ARMS.filter((arm) => turnErrorMarker(arm).family?.case === "vendorFault"))(
-    "carries the %s arm's vendor message verbatim in the marker's expansion",
+    "carries the %s arm's vendor message verbatim in the card's face",
     async (arm) => {
       // Arrange
       harness = await startHarness();
@@ -158,7 +158,7 @@ describe("turn error arms", () => {
       harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm, { message: `it broke: ${arm}` }));
       await harness.settle();
       // Assert
-      expect(harness.row("row-1")?.querySelector('[data-line="message"] .outcome-marker-value')?.textContent).toBe(
+      expect(harness.row("row-1")?.querySelector(".outcome-card-said")?.textContent).toBe(
         `it broke: ${arm}`,
       );
     },
@@ -222,12 +222,12 @@ describe("the outcome marker replaces the ended-turn bubble (owner ruling 2026-1
     await harness.fake.awaitStream("watchFeed");
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow("internal"));
     await harness.settle();
-    const pill = harness.row("row-1")?.querySelector<HTMLElement>(".outcome-marker-pill");
+    const card = harness.row("row-1")?.querySelector<HTMLElement>(".outcome-card");
     // Act
-    pill?.click();
+    card?.click();
     await harness.settle();
-    // Assert
-    expect((harness.row("row-1")?.querySelector(".outcome-marker-expansion") as HTMLElement | null)?.hidden).toBe(false);
+    // Assert: the card is the tool card's fold, opened by the feed's own handler.
+    expect(card?.classList.contains("expanded")).toBe(true);
   });
 });
 
