@@ -234,7 +234,8 @@ run, judgement call 12).
 | `agentrepl_build_info` | gauge, 1 | `program`, `build` | every Go runtime (`agentrepl/logging/metrics`) |
 | `go_*`, `process_*` (Go runtime) | various | `instance` | every Go runtime |
 | `agentrepl_deployed_version_info` | gauge, 1 | `version` | daemon (`runtimemetrics`), at start and after each deploy |
-| `agentrepl_latency_seconds` | histogram | `latency`, `workspace` | daemon: `switch_repeat`, `switch_first`, `page_boot` reported by pages; `vendor_first_output` folded from shims |
+| `agentrepl_latency_seconds` | histogram | `latency`, `workspace` | daemon: `switch_repeat`, `switch_first`, `page_boot` reported by pages; `vendor_first_output` and `shim_event_loop_delay` folded from shims |
+| `agentrepl_shim_heap_bytes` | gauge | `workspace`, `kind` | daemon, from each shim's last measurements frame: `used`, `total`, `external` |
 | `agentrepl_process_cpu_seconds_total` | counter | `process`, `workspace` | daemon (`procmetrics`), per group, monotonic across churn |
 | `agentrepl_process_disk_read_bytes_total`, `..._written_bytes_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
 | `agentrepl_process_energy_joules_total` | counter | `process`, `workspace` | daemon (`procmetrics`) |
