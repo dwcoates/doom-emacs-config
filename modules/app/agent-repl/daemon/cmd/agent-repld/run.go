@@ -204,6 +204,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// THE METRICS SURFACE LISTENS FROM BOOT and advertises only when this
 	// daemon owns its role: with daemon.addr below for an incumbent, through
 	// the rollout's WriteDaemonAddr hook for a joining successor.
+	if err := contracts.RequireTestMetricsRoot(opts.metricsRoot, os.TempDir()); err != nil {
+		log.Error(runtimemetrics.Operation, "refused a test run's metrics root", dlog.Context{"metrics_root": opts.metricsRoot, "error": err.Error()})
+		return fmt.Errorf("agent-repld: %w", err)
+	}
 	metricsSurface, err := runtimemetrics.Open(log, opts.metricsRoot)
 	if err != nil {
 		log.Error(runtimemetrics.Operation, "the metrics surface was refused", dlog.Context{

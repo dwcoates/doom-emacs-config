@@ -860,11 +860,14 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 ;; and the state root is already what dumpArtifacts copies on a failure.
 (setq agent-repl-log-file-name %q)
 
+;; A SCENARIO'S DAEMON HAS NO METRICS SURFACE: the default root is the live
+;; metrics store's, and a test daemon is refused it at boot.
 (setq agent-repl-daemon-command (list %s)
       agent-repl-daemon-build-script %q
       agent-repl-daemon-default-config-dir %q
       agent-repl-daemon-multi-repo-config-dir %q
-      agent-repl-daemon-multi-repo-root %q)
+      agent-repl-daemon-multi-repo-root %q
+      agent-repl-daemon-metrics-root nil)
 
 (provide 'agent-repl-e2e-settings)
 ;;; e2e-settings.el ends here

@@ -20,9 +20,24 @@ func processTable() ([]procEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the process table: %w", err)
 	}
+	parents := make(map[int]int, len(procs))
+	for _, p := range procs {
+		parents[int(p.Proc.P_pid)] = int(p.Eproc.Ppid)
+	}
+	self := os.Getpid()
 	entries := make([]procEntry, 0, len(procs))
 	for _, p := range procs {
 		pid := int(p.Proc.P_pid)
+		if !mayBeThisRunsStray(pid, parents, self) {
+			// ANOTHER RUN'S LIVE PROCESS IS READ ONCE, NEVER WAITED ON. Its argv
+			// is listed when it reads, so nothing a listing could name is
+			// lost, and one caught between its fork and its exec is passed
+			// over: it cannot be this run's.
+			if args, ok := readArgsOnce(pid); ok {
+				entries = append(entries, procEntry{pid: pid, args: args})
+			}
+			continue
+		}
 		args, live, err := procArgs(pid, readProcArgs2, readProcessState)
 		if err != nil {
 			return nil, fmt.Errorf("%w (%s)", err, kinfoIdentity(p))
@@ -33,6 +48,55 @@ func processTable() ([]procEntry, error) {
 		entries = append(entries, procEntry{pid: pid, args: args})
 	}
 	return entries, nil
+}
+
+// launchdPID is the parent of every orphan.
+const launchdPID = 1
+
+// mayBeThisRunsStray reports whether pid can be a process this test binary
+// left behind, and so is worth waiting on while its argv is unreadable: a
+// descendant of this binary (self), or one whose parent is launchd, gone or
+// unknown, which is what a stray is once the daemon that spawned it has exited
+// (its parent can read as the exited pid for a moment before launchd adopts
+// it). A process whose parent chain is live and never reaches self belongs to
+// another test run.
+//
+// WAITING ON ANOTHER RUN'S PROCESS HELD THIS RUN'S LISTING HOSTAGE TO THAT
+// RUN'S LOAD: another run's test binary sat between fork and exec past the
+// wait's bound, and every listing here failed (2026-10-20, `008.test`, its
+// parent alive).
+func mayBeThisRunsStray(pid int, parents map[int]int, self int) bool {
+	for at, hops := pid, 0; hops <= len(parents); hops++ {
+		if at == self {
+			return true
+		}
+		parent, known := parents[at]
+		if !known {
+			// Only pid itself can be missing: every later step is a parent
+			// the check below found in the table.
+			return false
+		}
+		if _, live := parents[parent]; !live || parent == launchdPID || parent == 0 || parent == at {
+			// The chain ends here: at pid itself, it is an orphan or a
+			// process whose parent just exited (or is another user's), so it
+			// may be a stray of this run; above it, at a live process that is
+			// not this binary.
+			return at == pid
+		}
+		at = parent
+	}
+	return false
+}
+
+// readArgsOnce reads pid's argv once, answering ok=false when it cannot be
+// read or decoded now.
+func readArgsOnce(pid int) (string, bool) {
+	buf, err := readProcArgs2(pid)
+	if err != nil {
+		return "", false
+	}
+	args, err := parseProcArgs2(buf)
+	return args, err == nil
 }
 
 // readProcArgs2 reads pid's raw kern.procargs2 buffer.

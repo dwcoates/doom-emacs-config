@@ -231,6 +231,17 @@ test_a_version_is_joined_on_the_series_own_run() {
   else fail "version join" "$(cat "$CASE/requests")"; fi
 }
 
+test_process_trend_sums_the_group_before_averaging_the_day() {
+  new_case
+  answer api_v1_query_range_cpu '{"status":"success","data":{"result":[]}}'
+  answer api_v1_query_range_mem '{"status":"success","data":{"result":[]}}'
+  run --process-trend daemon 1
+  if grep -qF 'avg_over_time(sum(agentrepl_process_footprint_bytes{process="daemon"})[1d:5m])' "$CASE/requests" \
+     && grep -qF 'avg_over_time((sum(increase_pure(agentrepl_process_cpu_seconds_total{process="daemon"}[5m])) / 300)[1d:5m])' "$CASE/requests"; then
+    pass "process-trend sums the group at each instant before averaging the day"
+  else fail "trend queries" "$(cat "$CASE/requests")"; fi
+}
+
 test_an_unknown_verb_prints_usage() {
   new_case
   run --teleport
