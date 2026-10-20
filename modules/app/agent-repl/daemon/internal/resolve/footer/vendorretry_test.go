@@ -1,9 +1,6 @@
 package footer
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 // vendorRetryScheduled is the shim stating its ATTEMPT-th retry at AT,
@@ -217,29 +215,11 @@ func TestAttemptOfRetryCountsTheFirstRetryAsTheSecondAttempt(t *testing.T) {
 // a site adding one to a schedule's attempt by hand is a second spelling of
 // the convention, which drifts.
 func TestNoFooterSourceConvertsARetryCountByHand(t *testing.T) {
-	// Arrange.
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-
-	// Act.
-	var offenders []string
-	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(source)
-		if err != nil {
-			t.Fatalf("read %s: %v", source, err)
-		}
-		if strings.Contains(string(body), "GetAttempt()) + 1") {
-			offenders = append(offenders, source)
-		}
-	}
+	// Arrange, Act.
+	n := sourcescan.Count(t, "GetAttempt()) + 1")
 
 	// Assert.
-	if len(offenders) != 0 {
-		t.Fatalf("hand-converted retry counts in %v, want every site through attemptOfRetry", offenders)
+	if n != 0 {
+		t.Fatalf("hand-converted retry counts = %d, want every site through attemptOfRetry", n)
 	}
 }

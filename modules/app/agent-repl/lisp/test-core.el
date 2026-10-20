@@ -523,6 +523,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's priority command")
     ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"
      "confirms the user's hide or show of a workspace")
+    ("verbs.el" agent-repl-verb-retry-vendor-error "%s"
+     "reports what the user's RET in an empty composer did to the scheduled retry")
     ("verbs.el" agent-repl-send-hidden-keepalives "agent-repl: %s"
      "reports how the user's keep-alive to the hidden workspaces went")
     ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"
