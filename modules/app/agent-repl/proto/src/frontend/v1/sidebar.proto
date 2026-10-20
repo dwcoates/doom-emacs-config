@@ -1448,7 +1448,29 @@ message RosterRowDetail {
   // brought into that branch, fixed when the merge landed. UNSET when the
   // daemon has no count to state.
   optional RosterRowDetailCommits commits = 4;
+
+  // Every workspace whose recorded parent is this one, in roster order,
+  // whichever section draws it (or none, for a merge past the band). A hidden
+  // merge workspace is drawn nowhere and is not listed here either. EMPTY when
+  // the workspace has no children: the panel then draws no children block at
+  // all.
+  repeated RosterRowDetailChild children = 5;
 }
+
+// One child workspace in the detail panel's children block.
+message RosterRowDetailChild {
+  workspace.v1.WorkspaceRef workspace = 1;
+  string name = 2;
+
+  // PRESENCE IS THE FACT: set exactly when the child's own row recedes (it is
+  // closed, merged, or its session was killed), as frontend.v1.RosterRowClosed
+  // states it for the row; the panel recedes the child's name the same way.
+  RosterRowDetailChildReceded receded = 3;
+}
+
+// The receded marker of a detail panel child. DELIBERATELY EMPTY: presence is
+// the fact.
+message RosterRowDetailChildReceded {}
 
 // The workspace's own git branch. Display only — the join key is the dir.
 message RosterRowDetailBranch {
