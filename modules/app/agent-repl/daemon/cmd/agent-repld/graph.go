@@ -1450,6 +1450,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StallBeat:         stallBeat,
 			Pages:             supersededPages,
 			Latencies:         p.Metrics,
+			RPCs:              p.Metrics,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,

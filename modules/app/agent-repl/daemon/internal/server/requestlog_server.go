@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -23,6 +25,11 @@ type requestLoggingServer struct {
 // request's identity and log routing, records entry and completion under the
 // rpc's operation, and answers a boundary that could not be opened through
 // boundaryFailure.
+//
+// EVERY UNARY RPC IS TIMED, from before its boundary opens (the boundary's
+// workspace read is the daemon's time too) to its handler's return, by
+// method and outcome (Deps.RPCs). A stream is not: a watch lasts as long as
+// its client does.
 func serveUnary[Req, Resp any](
 	s *requestLoggingServer,
 	ctx context.Context,
@@ -30,12 +37,33 @@ func serveUnary[Req, Resp any](
 	req *connect.Request[Req],
 	handle func(context.Context, *connect.Request[Req]) (*connect.Response[Resp], error),
 ) (resp *connect.Response[Resp], err error) {
+	began := time.Now()
+	defer func() { s.server.deps.RPCs.ObserveRPC(rpc, rpcOutcome(err), time.Since(began)) }()
 	boundary, err := s.server.beginRequest(ctx, rpc, req.Header().Get(requestIDHeader), requestMessage(req))
 	if err != nil {
 		return nil, boundaryFailure(err)
 	}
 	defer boundary.enter()(&err)
 	return handle(ctx, req)
+}
+
+// RPCRecorder times the unary rpcs the daemon answers
+// (runtimemetrics.Surface).
+type RPCRecorder interface {
+	ObserveRPC(rpc, outcome string, took time.Duration)
+}
+
+// rpcOutcome names how a unary rpc ended for its timing: "ok", or the
+// Connect code it answered, a closed set.
+func rpcOutcome(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	var cerr *connect.Error
+	if errors.As(err, &cerr) {
+		return cerr.Code().String()
+	}
+	return connect.CodeUnknown.String()
 }
 
 // serveStream is serveUnary for a server-streaming rpc.

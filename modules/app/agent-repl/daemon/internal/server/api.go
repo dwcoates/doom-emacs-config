@@ -168,6 +168,10 @@ type Deps struct {
 	// Latencies records what ReportLatencies accepts: the daemon's metrics
 	// surface, whose off value records nothing.
 	Latencies LatencyRecorder
+	// RPCs times every unary rpc the daemon answers, from its arrival to its
+	// handler's return: the daemon's metrics surface, whose off value records
+	// nothing. REQUIRED.
+	RPCs RPCRecorder
 	// ChessBoards answers a feed chess board's square clicks
 	// (chessboard.Boards). REQUIRED, like every dependency.
 	ChessBoards ChessSquares
@@ -435,6 +439,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("Emacs's focus")
 	case deps.Latencies == nil:
 		return nil, missing("a latency recorder")
+	case deps.RPCs == nil:
+		return nil, missing("an rpc recorder")
 	case deps.Banners == nil:
 		return nil, missing("the desktop banners")
 	case deps.PersistentWifi == nil:

@@ -1490,6 +1490,7 @@ type harness struct {
 	ChessBoards *fakeChessSquares
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
+	RPCs      *fakeRPCs
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
 	Surfaces      *fakeSurfaces
@@ -1568,6 +1569,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		PersistentWifi:   &fakePersistentWifi{},
 		HiddenKeepalives: &fakeHiddenKeepalives{},
 		Latencies:        &fakeLatencies{enabled: true},
+		RPCs:             &fakeRPCs{},
 		NewsDigest:       &fakeNewsDigest{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
@@ -1619,6 +1621,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ImageOrigin:       http.NotFoundHandler(),
 		ChessBoards:       h.ChessBoards,
 		Latencies:         h.Latencies,
+		RPCs:              h.RPCs,
 		ChessWidgetBundle: http.NotFoundHandler(),
 		Log:               h.Surfaces,
 	}
@@ -2051,6 +2054,27 @@ func (f *fakeLatencies) ObserveLatency(ws ids.WorkspaceID, kind runtimemetrics.L
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.observed = append(f.observed, observedLatency{workspace: ws, kind: kind.Name, seconds: seconds})
+}
+
+// fakeRPCs records every rpc timing, as rpc:outcome.
+type fakeRPCs struct {
+	mu       sync.Mutex
+	observed []string
+}
+
+func (f *fakeRPCs) ObserveRPC(rpc, outcome string, took time.Duration) {
+	if took < 0 {
+		panic("a negative rpc duration")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.observed = append(f.observed, rpc+":"+outcome)
+}
+
+func (f *fakeRPCs) all() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.observed...)
 }
 
 func (f *fakeLatencies) all() []observedLatency {
