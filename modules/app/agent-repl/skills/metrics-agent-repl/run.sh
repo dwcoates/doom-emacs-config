@@ -23,8 +23,10 @@
 #                                    threshold) within [days] (default 30).
 #   --process-trend <process> [days] One line per day: the process group's
 #                                    mean CPU (cores) and mean footprint.
-#   --restarts [days]                One line per restart and phase over the
-#                                    last [days] (default 7): how many ended
+#   --restarts [window]              One line per restart, phase and cause
+#                                    over the last [window] (whole days, or a
+#                                    duration such as 30m, 6h or 7d; default
+#                                    7 days): how many ended
 #                                    ok and failed, and the mean, p50, p90 and
 #                                    p99 of those that ended ok.
 #   --restart-by-version <restart> <phase> [days]
@@ -237,19 +239,24 @@ case "${1:-}" in
     printf 'day\tcpu_cores\tfootprint_mb\n%s\n' "$lines"
     ;;
   --restarts)
-    days="${2:-7}"
-    [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
-    window="${days}d"
-    counts="$(promql_data query "sum by (restart, phase, outcome) (increase_pure(agentrepl_restart_seconds_count[$window]))")" || exit 2
-    sums="$(promql_data query "sum by (restart, phase) (increase_pure(agentrepl_restart_seconds_sum{outcome=\"ok\"}[$window]))")" || exit 2
+    # THE WINDOW IS WHOLE DAYS OR A DURATION: a bare number is days, as every
+    # other mode reads it; 30m, 6h and 7d read the last half hour, six hours
+    # and week, so a check right after a landing reads only its own restarts.
+    window="${2:-7}"
+    if [[ "$window" =~ ^[0-9]+$ ]]; then
+      window="${window}d"
+    fi
+    [[ "$window" =~ ^[1-9][0-9]*[mhd]$ ]] || die "the window must be whole days or a duration such as 30m, 6h or 7d, not ${2}"
+    counts="$(promql_data query "sum by (restart, phase, cause, outcome) (increase_pure(agentrepl_restart_seconds_count[$window]))")" || exit 2
+    sums="$(promql_data query "sum by (restart, phase, cause) (increase_pure(agentrepl_restart_seconds_sum{outcome=\"ok\"}[$window]))")" || exit 2
     quantile() {
-      promql_data query "histogram_quantile($1, sum by (restart, phase, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))"
+      promql_data query "histogram_quantile($1, sum by (restart, phase, cause, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))"
     }
     p50="$(quantile 0.5)" || exit 2
     p90="$(quantile 0.9)" || exit 2
     p99="$(quantile 0.99)" || exit 2
     lines="$(jq -rn --argjson c "$counts" --argjson s "$sums" --argjson p50 "$p50" --argjson p90 "$p90" --argjson p99 "$p99" '
-      def key: "\(.metric.restart)|\(.metric.phase)";
+      def key: "\(.metric.restart)|\(.metric.phase)|\(.metric.cause // "" | if . == "" then "-" else . end)";
       def round2: tonumber * 100 | round / 100 | tostring;
       def num: (.value[1] | if . == "NaN" then "-" else round2 end);
       def table($r): [$r[] | {key: key, value: num}] | from_entries;
@@ -265,7 +272,7 @@ case "${1:-}" in
          ($q50[$k] // "-"), ($q90[$k] // "-"), ($q99[$k] // "-")]
       | @tsv')" || die "could not read the restarts"
     [ -n "$lines" ] || exit 1
-    printf 'restart\tphase\tok\tfailed\tmean_seconds\tp50_seconds\tp90_seconds\tp99_seconds\n%s\n' "$lines"
+    printf 'restart\tphase\tcause\tok\tfailed\tmean_seconds\tp50_seconds\tp90_seconds\tp99_seconds\n%s\n' "$lines"
     ;;
   --restart-by-version)
     [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "--restart-by-version needs a restart and a phase (see --restarts)"
@@ -275,7 +282,7 @@ case "${1:-}" in
     print_per_version "$result"
     ;;
   *)
-    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [days] | --restart-by-version <restart> <phase> [days]\n' >&2
+    printf 'usage: run.sh --status | --catalog | --query <promql> | --range <promql> <hours> <step> | --latency-by-version <latency> [days] | --first-version-over <latency> [seconds] [days] | --process-trend <process> [days] | --restarts [window] | --restart-by-version <restart> <phase> [days]\n' >&2
     exit 1
     ;;
 esac

@@ -17,7 +17,7 @@ Answers performance questions about agent-repl from stored history: what a laten
 | `latency <name> [days]` | The latency's p95 per deployed version over the last `days` (default 30). |
 | `regression <name> [seconds] [days]` | The first deployed version whose p95 of the latency went over `seconds` (default: the latency's own threshold). |
 | `trend <process> [days]` | A process group's daily mean CPU and memory. |
-| `restarts [days]` | Every restart phase's ok and failed counts, mean, p50, p90 and p99 over the last `days` (default 7). |
+| `restarts [window]` | Every restart phase's ok and failed counts, mean, p50, p90 and p99 by cause, over the last `window`: whole days, or a duration such as `30m`, `6h` or `7d` (default 7 days). |
 | `restart <restart> <phase> [days]` | The restart phase's p95 per deployed version over the last `days` (default 30). |
 | `query <promql>` | Evaluate PromQL now. |
 | `add <what>` | Add a metric for `what`, per step 4. |
@@ -37,7 +37,7 @@ Answers performance questions about agent-repl from stored history: what a laten
   - a. A latency, by name, per version: call `<skill_base_dir>/run.sh --latency-by-version <latency> [days]`.
   - b. "When did it get slow", "which change made it slow": call `<skill_base_dir>/run.sh --first-version-over <latency> [seconds] [days]`.
   - c. A process group's CPU or memory over time: call `<skill_base_dir>/run.sh --process-trend <process> [days]`.
-  - d. How long restarts take, or which phase of a restart is slow: call `<skill_base_dir>/run.sh --restarts [days]`.
+  - d. How long restarts take, or which phase of a restart is slow: call `<skill_base_dir>/run.sh --restarts [window]`; right after a landing, a window such as `30m` reads only its own restarts.
   - e. When a restart phase got slow: call `<skill_base_dir>/run.sh --restart-by-version <restart> <phase> [days]`.
   - f. Anything else: call `<skill_base_dir>/run.sh --catalog` to find the metric, then `--query <promql>`, or `--range <promql> <hours> <step>` for a series over time.
   - React to every verb above:

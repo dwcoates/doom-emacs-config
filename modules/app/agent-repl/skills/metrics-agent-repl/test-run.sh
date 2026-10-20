@@ -174,15 +174,37 @@ test_catalog_says_when_nothing_advertises() {
 
 test_restarts_summarizes_each_restart_phase() {
   new_case
-  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total","outcome":"ok"},"value":[1,"4"]},{"metric":{"restart":"deploy","phase":"total","outcome":"failed"},"value":[1,"1"]},{"metric":{"restart":"workspace_reconnect","phase":"web","outcome":"ok"},"value":[1,"12.0001"]}]}}'
-  answer api_v1_query_sums '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"120"]}]}}'
-  answer api_v1_query_p50 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"28.123"]},{"metric":{"restart":"workspace_reconnect","phase":"web"},"value":[1,"NaN"]}]}}'
+  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total","outcome":"ok"},"value":[1,"4"]},{"metric":{"restart":"deploy","phase":"total","outcome":"failed"},"value":[1,"1"]},{"metric":{"restart":"workspace_reconnect","phase":"web","cause":"successor","outcome":"ok"},"value":[1,"12.0001"]},{"metric":{"restart":"workspace_reconnect","phase":"web","cause":"cold","outcome":"ok"},"value":[1,"3"]}]}}'
+  answer api_v1_query_sums '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"120"]},{"metric":{"restart":"workspace_reconnect","phase":"web","cause":"cold"},"value":[1,"6"]}]}}'
+  answer api_v1_query_p50 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"28.123"]},{"metric":{"restart":"workspace_reconnect","phase":"web","cause":"successor"},"value":[1,"NaN"]}]}}'
   answer api_v1_query_p90 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"40"]}]}}'
   answer api_v1_query_p99 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"52.5"]}]}}'
   run --restarts 7
-  if [ "$RC" -eq 0 ] && has $'deploy\ttotal\t4\t1\t30\t28.12\t40\t52.5' && has $'workspace_reconnect\tweb\t12\t0\t-\t-\t-\t-'; then
-    pass "restarts prints each restart phase's ok and failed counts, mean, p50, p90 and p99"
+  if [ "$RC" -eq 0 ] && has $'restart\tphase\tcause\tok' && has $'deploy\ttotal\t-\t4\t1\t30\t28.12\t40\t52.5' \
+     && has $'workspace_reconnect\tweb\tsuccessor\t12\t0\t-\t-\t-\t-' && has $'workspace_reconnect\tweb\tcold\t3\t0\t2\t-\t-\t-'; then
+    pass "restarts prints each restart phase's ok and failed counts, mean, p50, p90 and p99, by cause"
   else fail "restarts" "rc=$RC" "$OUT"; fi
+}
+
+test_restarts_reads_a_window_of_days_or_a_duration() {
+  for window in "7:7d" "30m:30m" "6h:6h" "2d:2d"; do
+    new_case
+    for k in counts sums p50 p90 p99; do answer "api_v1_query_$k" '{"status":"success","data":{"result":[]}}'; done
+    run --restarts "${window%%:*}"
+    if grep -qF "agentrepl_restart_seconds_count[${window##*:}]" "$CASE/requests"; then
+      pass "restarts ${window%%:*} reads the last ${window##*:}"
+    else fail "restarts window ${window%%:*}" "rc=$RC" "$OUT" "$(cat "$CASE/requests" 2>/dev/null)"; fi
+  done
+}
+
+test_restarts_refuses_a_window_it_cannot_read() {
+  for window in 0.5 30s 0m abc; do
+    new_case
+    run --restarts "$window"
+    if [ "$RC" -eq 2 ] && has "whole days or a duration" && [ ! -s "$CASE/requests" ]; then
+      pass "restarts refuses the window $window before querying"
+    else fail "restarts bad window $window" "rc=$RC" "$OUT"; fi
+  done
 }
 
 test_restarts_with_none_recorded_says_so() {
