@@ -2005,6 +2005,14 @@ func networkResumeWaitsUpdate() *conversationv1.SessionUpdate {
 	}}
 }
 
+func vendorErrorRetryUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
+		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
+			Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: 1, NextAttemptAtMs: 1700000030000, Status: "Overloaded"},
+		},
+	}}
+}
+
 func networkResumeOutcomeUpdate() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeOutcome{
 		NetworkResumeOutcome: &conversationv1.SessionNetworkResumeOutcome{

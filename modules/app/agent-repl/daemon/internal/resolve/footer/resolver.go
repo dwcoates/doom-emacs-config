@@ -1004,6 +1004,8 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.sessionStarted = true
 			s.blocked = nil
+			// THE SCHEDULE IS THE SESSION'S: a (re)started one states its own.
+			s.vendorRetry = nil
 			// A STARTED SESSION HAS A LIVE QUERY: the restart the death asked
 			// for has landed, so its line comes down. An adopted shim whose
 			// query had died re-announces the death after its start, which
@@ -1141,6 +1143,11 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "network_resume_waits", func(s *wsState) {
 			r.logSessionArm(ws, s, "network_resume_waits")
 			r.observeResumeWaits(ws, s, u.NetworkResumeWaits)
+		}
+	case *conversationv1.SessionUpdate_VendorErrorRetry:
+		return "vendor_error_retry", func(s *wsState) {
+			r.logSessionArm(ws, s, "vendor_error_retry")
+			r.observeVendorRetry(ws, s, u.VendorErrorRetry)
 		}
 	case *conversationv1.SessionUpdate_NetworkResumeOutcome:
 		return "network_resume_outcome", func(s *wsState) {

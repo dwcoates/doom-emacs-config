@@ -18,8 +18,9 @@ import (
 // accumulation, in the one mutation that clears it, so every fact that lifts
 // the strip's vendor fault lifts the hold with it: a session (re)start, a
 // rate-limit verdict that is not rejected, a new turn opening (the daemon's
-// own or one the vendor started), the retried call answered, and the retried
-// turn ending.
+// own or one the vendor started), the retried call answered, the retried
+// turn ending, and agent-repl scheduling its own retry of a failed turn (a
+// prompt sent while that retry is due IS the retry, vendorretry.go).
 
 // Vendor-block names, as VendorBlock answers them and the records carry them.
 const (
@@ -57,6 +58,11 @@ func (r *resolver) VendorBlock(ws ids.WorkspaceID) (string, bool) {
 // vendorBlock names the standing mid-session vendor block, empty when none
 // stands. A standing block outranks a retry, as the strip draws them.
 func (s *wsState) vendorBlock() string {
+	// A RETRY AGENT-REPL HAS SCHEDULED HOLDS NOTHING (owner ruling,
+	// 2026-10-20): a prompt sent now is the retry, sent at once.
+	if s.vendorRetry != nil {
+		return ""
+	}
 	if s.blocked != nil {
 		return s.blocked.kind.name()
 	}

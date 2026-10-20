@@ -88,6 +88,22 @@ func TestVendorBlockIsFalseWithNoBlockStanding(t *testing.T) {
 	}
 }
 
+func TestVendorBlockIsFalseWhileAgentReplsRetryIsScheduled(t *testing.T) {
+	// Arrange: a usage limit stands, and agent-repl will retry at its reset.
+	h := newHarness(t)
+	connected(h)
+	usageLimited(h)
+	h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, instant.Add(time.Hour), "usage limit reached"))
+
+	// Act
+	got, ok := h.r.VendorBlock(testWS)
+
+	// Assert: a prompt sent now is the retry, so nothing holds it.
+	if ok {
+		t.Fatalf("VendorBlock = (%q, true) while agent-repl's retry is scheduled", got)
+	}
+}
+
 func TestVendorBlockIsFalseForAnUnseenWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -135,6 +151,14 @@ func TestTheVendorServesEdgeIsToldOnEveryFactThatLiftsTheBlock(t *testing.T) {
 			stand: apiRetrying,
 			lift:  func(h *harness) { h.r.OnActivity(testWS, mainAgent, thinkingActivity("th-1")) },
 			want:  string(testWS) + ":" + VendorBlockAPIRetrying,
+		},
+		{
+			name:  "agent-repl scheduling its own retry lifts a usage limit",
+			stand: usageLimited,
+			lift: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, instant.Add(time.Hour), "usage limit reached"))
+			},
+			want: string(testWS) + ":" + VendorBlockUsageLimit,
 		},
 		{
 			name:  "the retried turn ending lifts an api retry",

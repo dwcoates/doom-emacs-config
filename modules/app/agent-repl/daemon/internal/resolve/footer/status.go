@@ -379,7 +379,7 @@ func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_VendorFault{VendorFault: arm}}
 	}
 	if s.blocked == nil {
-		if !s.retryBlocks() {
+		if !s.retryBlocks() && s.vendorRetry == nil {
 			if !s.vendorTurnFault() {
 				return nil
 			}
@@ -394,8 +394,10 @@ func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 			}}}
 		}
 		// A TURN WHOSE CALL THE VENDOR IS RETRYING CANNOT ADVANCE, so it is a
-		// vendor fault until the retried agent is answered (ladder/retry.go).
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "the vendor is retrying the turn's call"})
+		// vendor fault until the retried agent is answered (ladder/retry.go);
+		// a turn agent-repl will retry is one too, until its retry runs
+		// (vendorretry.go).
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "the turn's call is being retried", "agent_repl_retry": s.vendorRetry != nil})
 		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_VendorFault{VendorFault: &frontendv1.FooterStatusVendorFault{
 			Substatus: &frontendv1.FooterStatusVendorFault_ApiRetrying{ApiRetrying: &frontendv1.FooterSubStatusVendorFaultApiRetrying{}},
 			Activity:  r.vendorFaultActivity(s),
