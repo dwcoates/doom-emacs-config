@@ -63,6 +63,16 @@ var DaemonKinds = map[string]LatencyKind{
 	"DAEMON_WORKSPACE_OPEN": WorkspaceOpen,
 }
 
+// WorkspaceOpen is the daemon-measured latency from an OpenWorkspace's
+// arrival to its success, when the workspace's session is up.
+var WorkspaceOpen = LatencyKind{Name: "workspace_open", Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 13, 30}}
+
+// DaemonKinds are the latencies the daemon measures itself, keyed by the
+// vocabulary's reported_as spelling.
+var DaemonKinds = map[string]LatencyKind{
+	"DAEMON_WORKSPACE_OPEN": WorkspaceOpen,
+}
+
 // ShimKinds are the latencies the shim measures.
 var ShimKinds = map[shimv1.ShimLatencyKind]LatencyKind{
 	shimv1.ShimLatencyKind_SHIM_LATENCY_KIND_FIRST_OUTPUT:     {Name: "vendor_first_output", Buckets: vendorBuckets},
