@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
@@ -606,6 +607,7 @@ func newHarness(t *testing.T) *harness {
 		RunningLayout: runningLayout,
 		Deployed:      func() { h.deployed++ },
 		Restarts:      h.restarts,
+		Reconnects:    restarttiming.NewReconnects(h.restarts, time.Now),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
@@ -60,18 +61,19 @@ func TestTheDeployPathsHonorTheOperatorOverrides(t *testing.T) {
 func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 	t.Helper()
 	return deployerParams{
-		Surfaces:  dlog.NewTestSurfaces(),
-		Checkout:  t.TempDir(),
-		StateDir:  t.TempDir(),
-		SelfExe:   selfExe,
-		Bundle:    buildid.NewShimBundle(filepath.Join(t.TempDir(), "main.js"), "fake-build"),
-		Rollout:   nil,
-		Clients:   &deployClientsForwarder{},
-		Runner:    nil,
-		Store:     "/sock/store.sock",
-		Workspace: func() []ids.WorkspaceID { return nil },
-		Getenv:    envOf(map[string]string{"AGENT_REPL_LOCK_DIR": t.TempDir()}),
-		Restarts:  &restarttimingtest.Recorder{},
+		Surfaces:   dlog.NewTestSurfaces(),
+		Checkout:   t.TempDir(),
+		StateDir:   t.TempDir(),
+		SelfExe:    selfExe,
+		Bundle:     buildid.NewShimBundle(filepath.Join(t.TempDir(), "main.js"), "fake-build"),
+		Rollout:    nil,
+		Clients:    &deployClientsForwarder{},
+		Runner:     nil,
+		Store:      "/sock/store.sock",
+		Workspace:  func() []ids.WorkspaceID { return nil },
+		Getenv:     envOf(map[string]string{"AGENT_REPL_LOCK_DIR": t.TempDir()}),
+		Restarts:   &restarttimingtest.Recorder{},
+		Reconnects: restarttiming.NewReconnects(&restarttimingtest.Recorder{}, time.Now),
 	}
 }
 

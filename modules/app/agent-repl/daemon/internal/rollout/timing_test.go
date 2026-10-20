@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -147,5 +148,23 @@ func TestATakeoversSessionStartsAreTimedAsATakeovers(t *testing.T) {
 	got := h.restarts.Of(restarttiming.WorkspaceStart)
 	if len(got) != 1 || got[0].Workspace() != ws || got[0].Cause() != string(restarttiming.StartTakeover) {
 		t.Fatalf("workspace starts = %+v, want one takeover start of %s", got, ws)
+	}
+}
+
+func TestAHandoversParticipantsAreTimedBackFromItsManifest(t *testing.T) {
+	// Arrange: the manifest was written 4s before the harness's instant, and
+	// names this workspace's host stream but not its web stream.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.c.armSessions(ids.InstanceID("daemon-outgoing"), instant.Add(-4*time.Second), []ManifestSession{{Workspace: ws, ExpectedHost: true}})
+
+	// Act
+	h.c.deps.Reconnects.Connected(ws, restarttiming.ReconnectHost)
+	h.c.deps.Reconnects.Connected(ws, restarttiming.ReconnectWeb)
+
+	// Assert
+	got := h.restarts.Of(restarttiming.WorkspaceReconnect)
+	if len(got) != 1 || got[0].Phase() != "host" || got[0].Cause() != "successor" || got[0].Seconds() != 4 {
+		t.Fatalf("reconnects = %+v, want the host stream only, successor, 4s", got)
 	}
 }

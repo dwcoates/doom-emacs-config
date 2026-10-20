@@ -72,6 +72,8 @@ type deployerParams struct {
 	Deployed func()
 	// Restarts records how long each deploy phase and service restart took.
 	Restarts restarttiming.Recorder
+	// Reconnects times each reloaded webview's return.
+	Reconnects *restarttiming.Reconnects
 }
 
 // deployPaths are the host locations a deploy works against.
@@ -140,7 +142,8 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Restarts:    p.Restarts,
 	}
 	deployer, err := deploy.New(deploy.Deps{
-		Restarts: p.Restarts,
+		Restarts:   p.Restarts,
+		Reconnects: p.Reconnects,
 		Live: deploy.Live{
 			ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
 			Shim: p.ShimMain, Webapp: p.WebappDist,

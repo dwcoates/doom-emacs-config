@@ -371,6 +371,9 @@ type Deps struct {
 	// takeover and its sessions' starts took (internal/restarttiming).
 	// runtimemetrics.Surface is the production one.
 	Restarts restarttiming.Recorder
+	// Reconnects is told which workspaces' streams a handover being joined
+	// expects back, so each one's return is timed. REQUIRED.
+	Reconnects *restarttiming.Reconnects
 	// Lifetime is the daemon's serving lifetime. Work the controller runs past
 	// the rpc that started it ends with it. Nil leaves such work bounded by the
 	// process alone.
@@ -681,6 +684,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.BringingUp == nil {
 		return nil, errors.New("rollout: the bring-up marker is required; a workspace whose session is starting must not read as usable")
+	}
+	if deps.Reconnects == nil {
+		return nil, errors.New("rollout: a reconnect tracker is required; a handover's returning streams are timed")
 	}
 	if deps.Restarts == nil {
 		return nil, errors.New("rollout: a restart recorder is required; every shim replacement and transfer is timed")

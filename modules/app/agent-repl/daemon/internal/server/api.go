@@ -41,6 +41,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/retarget"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
@@ -172,6 +173,9 @@ type Deps struct {
 	// handler's return: the daemon's metrics surface, whose off value records
 	// nothing. REQUIRED.
 	RPCs RPCRecorder
+	// Reconnects is told each host and webview stream that opens, so a
+	// restart that expected it times its return. REQUIRED.
+	Reconnects *restarttiming.Reconnects
 	// ChessBoards answers a feed chess board's square clicks
 	// (chessboard.Boards). REQUIRED, like every dependency.
 	ChessBoards ChessSquares
@@ -441,6 +445,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a latency recorder")
 	case deps.RPCs == nil:
 		return nil, missing("an rpc recorder")
+	case deps.Reconnects == nil:
+		return nil, missing("a reconnect tracker")
 	case deps.Banners == nil:
 		return nil, missing("the desktop banners")
 	case deps.PersistentWifi == nil:

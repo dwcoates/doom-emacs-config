@@ -200,3 +200,17 @@ func TestNewRefusesWithoutARestartRecorder(t *testing.T) {
 		t.Fatalf("New = %v, want the missing restart recorder refused", err)
 	}
 }
+
+func TestNewRefusesWithoutAReconnectTracker(t *testing.T) {
+	// Arrange
+	deps := newHarness(t).c.deps
+	deps.Reconnects = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "reconnect tracker is required") {
+		t.Fatalf("New = %v, want the missing reconnect tracker refused", err)
+	}
+}

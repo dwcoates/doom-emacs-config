@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/restarttiming"
 )
 
 // THE SUBSCRIPTION INVARIANT, served once here for every standing stream:
@@ -312,6 +313,7 @@ func (s *server) WatchHostWorkspace(
 	}
 	s.holdParticipant(subject.Record.ID, true, +1)
 	defer s.holdParticipant(subject.Record.ID, true, -1)
+	s.deps.Reconnects.Connected(subject.Record.ID, restarttiming.ReconnectHost)
 
 	// COMPOSE BEFORE SUBSCRIBING. The state topic replays its latest value to
 	// a new subscriber, so publishing here is what gives every fresh
@@ -437,6 +439,7 @@ func (s *server) watchWebWorkspace(
 	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
+	s.deps.Reconnects.Connected(subject.Record.ID, restarttiming.ReconnectWeb)
 	// THE PAGE'S BUILD STANDS FOR AS LONG AS ITS STREAM DOES: a deploy tells
 	// exactly the webviews on an older webapp to reload.
 	defer s.holdWebBuild(subject.Record.ID, msg.GetWebappBuild())()

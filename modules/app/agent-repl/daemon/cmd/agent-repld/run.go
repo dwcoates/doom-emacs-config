@@ -52,6 +52,9 @@ type process struct {
 	// Metrics is the always-on metrics surface, nil when it is off. Its
 	// target is advertised exactly when daemon.addr is published.
 	Metrics *runtimemetrics.Surface
+	// Reconnects times each workspace's client streams coming back after a
+	// restart (restarttiming.Reconnects), recording onto the metrics surface.
+	Reconnects *restarttiming.Reconnects
 	// Instance identifies this daemon process for serving ownership. It is
 	// minted once per process: an instance id that changed mid-run would let a
 	// daemon fail to recognize the workspaces it claimed itself.
@@ -223,6 +226,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		timedAs = restarttiming.BootSuccessor
 	}
 	bootTimer := restarttiming.NewBootTimer(bootRestarts, timedAs, h.Started, h.Now)
+	reconnects := restarttiming.NewReconnects(bootRestarts, h.Now)
 	if err := metricsSurface.RegisterProcesses(procmetrics.Kernel{}, layout.SockDir(), layout.Dir(), hostOnBattery); err != nil {
 		log.Error(runtimemetrics.Operation, "the process collector was refused", dlog.Context{"error": err.Error()})
 		return fmt.Errorf("agent-repld: %w", err)
@@ -446,6 +450,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// last push read a closed database and recorded the failure at every
 	// exit (2026-10-20). Deferred after state_close, so it runs first.
 	defer teardown.step("metrics_close", closeMetrics)
+	// AN ORDINARY BOOT EXPECTS EVERY OPEN WORKSPACE'S STREAMS BACK, timed from
+	// the process's start. A successor expects what its handover's manifest
+	// names instead (the rollout arms those).
+	if !joining {
+		if err := expectBootReconnects(ctx, db, reconnects, h.Started); err != nil {
+			log.Error(runtimemetrics.Operation, "the boot could not read the workspaces whose reconnects it times; none is timed", dlog.Context{"error": err.Error()})
+		}
+	}
 
 	// THE LOG SURFACES LEARN THE MINTED WORKSPACE IDS HERE, the moment the
 	// roster is readable and before any workspace-owned record can be
@@ -469,14 +481,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 	var ended standDownRecord
 
 	built, err := h.Graph(serving, process{
-		Opts:      opts,
-		Contracts: contracts,
-		Layout:    layout,
-		Surfaces:  surfaces,
-		DB:        db,
-		Claim:     claim,
-		Metrics:   metricsSurface,
-		Instance:  wsm.NewInstanceID(),
+		Opts:       opts,
+		Contracts:  contracts,
+		Layout:     layout,
+		Surfaces:   surfaces,
+		DB:         db,
+		Claim:      claim,
+		Metrics:    metricsSurface,
+		Reconnects: reconnects,
+		Instance:   wsm.NewInstanceID(),
 		Exit: func(reason standDownReason) {
 			ended.record(reason, nil)
 			stopServing()
@@ -1081,6 +1094,27 @@ func hostOnBattery() (bool, error) {
 // its workspaces, daemon.addr and then the metrics target, always together and
 // in that order: an incumbent at boot, a successor through the rollout's
 // WriteDaemonAddr hook once it owns every workspace.
+// expectBootReconnects expects the host and webview streams of every open,
+// unhidden workspace back, timed from started: the workspaces Emacs reopens
+// after an ordinary boot.
+func expectBootReconnects(ctx context.Context, db interface {
+	ListWorkspaces(context.Context) ([]wsm.Workspace, error)
+}, reconnects *restarttiming.Reconnects, started time.Time) error {
+	workspaces, err := db.ListWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("list the workspaces a boot expects back: %w", err)
+	}
+	var open []ids.WorkspaceID
+	for _, w := range workspaces {
+		if !w.Closed && !w.Hidden {
+			open = append(open, w.ID)
+		}
+	}
+	reconnects.Expect(restarttiming.ReconnectCold, started, restarttiming.ReconnectHost, open...)
+	reconnects.Expect(restarttiming.ReconnectCold, started, restarttiming.ReconnectWeb, open...)
+	return nil
+}
+
 func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface) error {
 	if err := claim.Publish(); err != nil {
 		return fmt.Errorf("publish daemon.addr: %w", err)
