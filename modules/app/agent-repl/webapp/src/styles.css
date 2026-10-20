@@ -743,16 +743,6 @@ body::after {
      any of them wraps at it (src/bubble/body.ts measures it). 77% is the
      response's and the prompt's former cap. */
   --bubble-max-width: 77%;
-  /* Every bubble's unshrunk horizontal padding, the gap between a bubble's
-     left edge and its text (see `.bubble`). It lives on the column, not the
-     bubble, because the feed's tool cards read it too: a tool card is inset
-     by it on each side (see `--tool-card-cap`). */
-  --bubble-pad-x-base: 0.9rem;
-  /* THE TOOL CARD'S NARROWER CAP (owner request, 2026-10-19): a tool card
-     starts where a response-rail bubble's TEXT starts, one base padding in
-     from the left rail, and stops the same distance in from the prompt's
-     right rail. Asks, folds and every bubble keep `--agent-bubble-cap`. */
-  --tool-card-cap: calc(var(--agent-bubble-cap) - 2 * var(--bubble-pad-x-base));
 }
 
 /* ---- The workspaces rail (sidebar.ts) ----------------------------------
@@ -1792,10 +1782,9 @@ pre {
      its text. The left padding is it outright; the right is split between the
      bubble's own `--bubble-scroll-gap` and `--bubble-content-inset`. A prompt
      bubble scales `--bubble-pad-x` down from its base (see the ladder below).
-     The base itself is the column's (`#main-col`), because the feed's tool
-     cards are inset by it too. The inset is declared HERE, on the bubble, not
-     on the column, so it re-derives from whichever `--bubble-pad-x` the
-     bubble's variant set. */
+     The inset is declared HERE, on the bubble, not on the column, so it
+     re-derives from whichever `--bubble-pad-x` the bubble's variant set. */
+  --bubble-pad-x-base: 0.9rem;
   --bubble-pad-x: var(--bubble-pad-x-base);
   /* The right inset the content keeps from the bar: the bubble's horizontal
      padding less the gap the bubble's own right padding keeps. The body and
@@ -2276,19 +2265,6 @@ html[data-page-unshown] *::after {
   max-width: var(--agent-bubble-cap);
   margin-left: auto;
   margin-right: auto;
-}
-/* THE TOOL CARDS STOP SHORT OF THE RAILS (owner request, 2026-10-19): a tool
-   card (a tool call, skill, hook, subagent or detached shell) and a group of
-   them take `--tool-card-cap`, so the centered card's edges sit one base
-   bubble padding inside each rail, under the response text's left edge. An
-   ask (`.ask-card`: a permission or a question) and the merge bubble wear the
-   tool card's chrome but are not tool cards, so they keep the full cap. The
-   exclusions sit in `:where()` so the rule weighs no more than the one above
-   it, and the grouped member's lifted cap (`.feed-group-panel > .feed-item >
-   .tool-card`) still outranks it. */
-.feed-item > .tool-card:where(:not(.ask-card, [data-merge-bubble])),
-.feed-item > .feed-group {
-  max-width: var(--tool-card-cap);
 }
 /* SHRINK-TO-FIT, CAPPED AT THE MAX (owner ruling, 2026-09-15, reversing the
    fill-cap pin of the same date). Every bubble sizes to its widest RENDERED
@@ -8452,8 +8428,8 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    placed at the card's border-plus-padding inset, and the card's top padding
    grows by the tabline's measured height (`--feed-group-tabline-h`). The
    shown member's clock rides the tabline, so its head's own clock is hidden
-   while it sits in the panel. The tool card cap keys on
-   `.feed-item > .feed-group` (see the feed-card rules above), and the
+   while it sits in the panel. The shared width cap still
+   keys on `.feed-item > .feed-group` (see the feed-card rule above), and the
    member card inside the panel has its own cap lifted so it fills the group.
    ──────────────────────────────────────────────────────────────────────── */
 .feed-group {
