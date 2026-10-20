@@ -13,6 +13,8 @@ type scriptedTree struct {
 	usage map[int]processUsage
 	// failUsage and failKids fail that pid's read.
 	failUsage, failKids map[int]error
+	// forbidden pids are live but may not be read.
+	forbidden map[int]bool
 }
 
 func (s *scriptedTree) tree(root int) *processTree {
@@ -24,12 +26,18 @@ func (s *scriptedTree) tree(root int) *processTree {
 			}
 			return s.kids[pid], nil
 		},
-		usage: func(pid int) (processUsage, bool, error) {
+		usage: func(pid int) (processUsage, usageState, error) {
 			if err := s.failUsage[pid]; err != nil {
-				return processUsage{}, false, err
+				return processUsage{}, usageRead, err
+			}
+			if s.forbidden[pid] {
+				return processUsage{}, usageForbidden, nil
 			}
 			u, ok := s.usage[pid]
-			return u, !ok, nil
+			if !ok {
+				return processUsage{}, usageGone, nil
+			}
+			return u, usageRead, nil
 		},
 	}
 }
@@ -55,6 +63,11 @@ func TestProcessTreeSumsEveryDescendantsStallSinceItsFirstReading(t *testing.T) 
 			later: func(s *scriptedTree) { s.usage[3] = processUsage{start: 31, runnable: 200 * time.Millisecond} }, want: 200 * time.Millisecond},
 		{name: "a process that exited takes nothing back",
 			later: func(s *scriptedTree) { delete(s.usage, 3) }, want: 0},
+		{name: "a process that may not be read is passed over, its children still counted",
+			later: func(s *scriptedTree) {
+				s.forbidden = map[int]bool{2: true}
+				s.usage[3] = processUsage{start: 30, runnable: 4 * time.Second}
+			}, want: time.Second},
 		{name: "a process outside the tree is never counted",
 			later: func(s *scriptedTree) { s.usage[99] = processUsage{start: 990, runnable: time.Hour} }, want: 0},
 	}
@@ -114,15 +127,39 @@ func TestProcessTreeAccumulatesAcrossReadings(t *testing.T) {
 	}
 }
 
+func TestProcessTreeCountsOnlyARunnableTimesGrowth(t *testing.T) {
+	// Arrange: a child whose runnable time shrinks, then grows again.
+	s := &scriptedTree{
+		kids:  map[int][]int{1: {2}},
+		usage: map[int]processUsage{1: {start: 10}, 2: {start: 20, runnable: 2 * time.Second}},
+	}
+	tree := s.tree(1)
+	if _, err := tree.read(); err != nil {
+		t.Fatalf("first read() = %v", err)
+	}
+	s.usage[2] = processUsage{start: 20, runnable: time.Second}
+	shrunk, err := tree.read()
+	if err != nil {
+		t.Fatalf("read() after the shrink = %v", err)
+	}
+	s.usage[2] = processUsage{start: 20, runnable: 1500 * time.Millisecond}
+
+	// Act
+	grown, err := tree.read()
+
+	// Assert: the shrink counts nothing, and the growth counts from the lower
+	// reading.
+	if err != nil || shrunk != 0 || grown != 500*time.Millisecond {
+		t.Fatalf("read() = %s after the shrink, then %s, %v, want 0 then 500ms", shrunk, grown, err)
+	}
+}
+
 func TestProcessTreeRefusesAReadingItCannotTrust(t *testing.T) {
 	tests := []struct {
 		name    string
 		later   func(s *scriptedTree)
 		wantErr string
 	}{
-		{name: "a runnable time that went backwards is refused",
-			later:   func(s *scriptedTree) { s.usage[2] = processUsage{start: 20, runnable: time.Second} },
-			wantErr: "process 2's runnable time went backwards, from 2s to 1s"},
 		{name: "a usage the kernel refuses is refused",
 			later:   func(s *scriptedTree) { s.failUsage = map[int]error{2: errors.New("EPERM")} },
 			wantErr: "read process 2's runnable time: EPERM"},
@@ -131,7 +168,10 @@ func TestProcessTreeRefusesAReadingItCannotTrust(t *testing.T) {
 			wantErr: "list process 1's children: EINVAL"},
 		{name: "a tree whose root is gone is refused",
 			later:   func(s *scriptedTree) { delete(s.usage, 1) },
-			wantErr: "the tree's root, process 1, is gone"},
+			wantErr: "the tree's root, process 1, could not be read"},
+		{name: "a tree whose root may not be read is refused",
+			later:   func(s *scriptedTree) { s.forbidden = map[int]bool{1: true} },
+			wantErr: "the tree's root, process 1, could not be read"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

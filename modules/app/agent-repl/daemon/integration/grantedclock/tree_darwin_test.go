@@ -64,19 +64,35 @@ func TestChildPIDsListsAStartedChild(t *testing.T) {
 	}
 }
 
-func TestPIDRusageAnswersGoneForAReapedProcess(t *testing.T) {
-	// Arrange
-	cmd := exec.Command("/usr/bin/true")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("run a child: %v", err)
+func TestPIDRusageAnswersWhatItCouldRead(t *testing.T) {
+	tests := []struct {
+		name string
+		pid  func(t *testing.T) int
+		want usageState
+	}{
+		{name: "this process is read", pid: func(*testing.T) int { return os.Getpid() }, want: usageRead},
+		{name: "a reaped process is gone", pid: func(t *testing.T) int {
+			cmd := exec.Command("/usr/bin/true")
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("run a child: %v", err)
+			}
+			return cmd.Process.Pid
+		}, want: usageGone},
+		{name: "a process running as root is forbidden", pid: func(*testing.T) int { return 1 }, want: usageForbidden},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			pid := tt.pid(t)
 
-	// Act
-	_, gone, err := pidRusage(cmd.Process.Pid)
+			// Act
+			_, state, err := pidRusage(pid)
 
-	// Assert
-	if err != nil || !gone {
-		t.Fatalf("pidRusage(reaped) = gone %v, %v, want gone", gone, err)
+			// Assert
+			if err != nil || state != tt.want {
+				t.Fatalf("pidRusage(%d) = %v, %v, want %v", pid, state, err, tt.want)
+			}
+		})
 	}
 }
 

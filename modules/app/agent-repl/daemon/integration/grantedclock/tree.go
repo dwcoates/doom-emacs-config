@@ -17,6 +17,10 @@ import (
 // MEASURED, merge gate 2026-10-20: four scenario goldens failed their
 // daemon.addr wait while the daemon sat runnable in package init.
 //
+// A PROCESS'S COUNTER ONLY EVER ADDS TO THE TREE'S TOTAL: what it accrued
+// is counted once, and the total never shrinks, even where the kernel's own
+// counter does (read).
+//
 // THE SUM COUNTS OVERLAP TWICE, which only ever reads as more stall, never
 // less: two processes starved at once are both counted, and the clock grants
 // a reading whose stall passes its wall time nothing, never less than nothing
@@ -33,9 +37,9 @@ type processTree struct {
 	// children answers pid's direct children; a pid that has exited answers
 	// none.
 	children func(pid int) ([]int, error)
-	// usage answers pid's identity and its runnable time; gone is true for a
-	// pid that has exited.
-	usage func(pid int) (u processUsage, gone bool, err error)
+	// usage answers pid's identity and its runnable time, or that it could
+	// not be read (usageState).
+	usage func(pid int) (u processUsage, state usageState, err error)
 
 	mu   sync.Mutex
 	last map[processKey]time.Duration
@@ -56,6 +60,22 @@ type processUsage struct {
 	start    uint64
 	runnable time.Duration
 }
+
+// usageState is what a usage read found.
+type usageState int
+
+const (
+	// usageRead is a process whose runnable time was read.
+	usageRead usageState = iota
+	// usageGone is a pid that has exited and been reaped.
+	usageGone
+	// usageForbidden is a live process this user may not read: one running a
+	// setuid binary, as the harness's own `ps` does. Its stall is not
+	// counted, which only ever reads as less stall; it is a diagnostic the
+	// harness runs, never a process a bounded wait depends on. Its children
+	// are still walked.
+	usageForbidden
+)
 
 // read answers the tree's cumulative stall: every process's runnable time
 // accrued since the tree was first read, the root's and its descendants'.
@@ -78,7 +98,12 @@ func (t *processTree) read() (time.Duration, error) {
 			// runnable time inside the interval.
 			t.total += runnable
 		case runnable < prev:
-			return 0, fmt.Errorf("process %d's runnable time went backwards, from %s to %s", key.pid, prev, runnable)
+			// A PROCESS'S RUNNABLE TIME CAN SHRINK. MEASURED, full integration
+			// run 2026-10-20: a daemon read 1.0841s then 1.0784s, another
+			// 2.16068s then 2.16067s -- the kernel's total for a task drops
+			// part of a thread's share when the thread ends. Only growth is
+			// stall, so the shrink counts nothing and the lower reading is
+			// the next origin.
 		default:
 			t.total += runnable - prev
 		}
@@ -94,22 +119,35 @@ func (t *processTree) walk() (map[processKey]time.Duration, error) {
 	for len(queue) > 0 {
 		pid := queue[0]
 		queue = queue[1:]
-		u, gone, err := t.usage(pid)
+		u, state, err := t.usage(pid)
 		if err != nil {
 			return nil, fmt.Errorf("read process %d's runnable time: %w", pid, err)
 		}
-		if gone {
+		switch state {
+		case usageGone:
 			continue
+		case usageRead:
+			now[processKey{pid: pid, start: u.start}] = u.runnable
+		case usageForbidden:
 		}
-		now[processKey{pid: pid, start: u.start}] = u.runnable
 		kids, err := t.children(pid)
 		if err != nil {
 			return nil, fmt.Errorf("list process %d's children: %w", pid, err)
 		}
 		queue = append(queue, kids...)
 	}
-	if len(now) == 0 {
-		return nil, fmt.Errorf("the tree's root, process %d, is gone", t.root)
+	if _, ok := rootOf(now, t.root); !ok {
+		return nil, fmt.Errorf("the tree's root, process %d, could not be read", t.root)
 	}
 	return now, nil
+}
+
+// rootOf answers the root's reading among NOW.
+func rootOf(now map[processKey]time.Duration, root int) (time.Duration, bool) {
+	for key, runnable := range now {
+		if key.pid == root {
+			return runnable, true
+		}
+	}
+	return 0, false
 }

@@ -42,28 +42,32 @@ func processTreeStall(root int) (Stall, error) {
 	tree := &processTree{
 		root:     root,
 		children: childPIDs,
-		usage: func(pid int) (processUsage, bool, error) {
-			ri, gone, err := pidRusage(pid)
-			if err != nil || gone {
-				return processUsage{}, gone, err
+		usage: func(pid int) (processUsage, usageState, error) {
+			ri, state, err := pidRusage(pid)
+			if err != nil || state != usageRead {
+				return processUsage{}, state, err
 			}
-			return processUsage{start: ri.ProcStartAbstime, runnable: machDuration(ri.RunnableTime, freq)}, false, nil
+			return processUsage{start: ri.ProcStartAbstime, runnable: machDuration(ri.RunnableTime, freq)}, usageRead, nil
 		},
 	}
 	return tree.read, nil
 }
 
-// pidRusage is proc_pid_rusage(3) for RUSAGE_INFO_V4. gone is true for a pid
-// that has exited and been reaped.
-func pidRusage(pid int) (ri rusageInfo, gone bool, err error) {
+// pidRusage is proc_pid_rusage(3) for RUSAGE_INFO_V4: ESRCH is a pid that has
+// exited and been reaped, EPERM a process running as another user (a setuid
+// binary).
+func pidRusage(pid int) (ri rusageInfo, state usageState, err error) {
 	_, _, errno := unix.Syscall6(sysProcInfo, procInfoCallPIDRusage, uintptr(pid), rusageInfoV4, 0, uintptr(unsafe.Pointer(&ri)), 0)
-	if errno == unix.ESRCH {
-		return ri, true, nil
+	switch errno {
+	case 0:
+		return ri, usageRead, nil
+	case unix.ESRCH:
+		return ri, usageGone, nil
+	case unix.EPERM:
+		return ri, usageForbidden, nil
+	default:
+		return ri, usageRead, errno
 	}
-	if errno != 0 {
-		return ri, false, errno
-	}
-	return ri, false, nil
 }
 
 // childPIDs is proc_listchildpids(3): pid's direct children.
