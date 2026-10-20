@@ -293,6 +293,113 @@ and its line -- and only the files remain."
   "The clearing edge is wired at load time."
   (should (memq #'agent-repl-held-ingress--on-host-update agent-repl-host-update-functions)))
 
+;;;; ---- The page's list ----
+
+(defmacro agent-repl-test-hi--with-page (&rest body)
+  "Run BODY in `agent-repl-test-hi--with', the page's pushes recorded in PUSHED.
+PUSHED holds (WS . ENTRIES) per push, newest first."
+  (declare (indent 0))
+  `(agent-repl-test-hi--with
+     (let ((pushed nil))
+       (cl-letf (((symbol-function 'agent-repl-webhost-set-held-ingress)
+                  (lambda (ws entries) (push (cons ws entries) pushed))))
+         ,@body))))
+
+(defun agent-repl-test-hi--keys (entries)
+  "Return the `key' of each view in ENTRIES."
+  (mapcar (lambda (view) (gethash "key" view)) entries))
+
+(ert-deftest agent-repl-held-ingress-write-hands-the-page-the-entry ()
+  "A written entry reaches the page as its key, its instant and its said."
+  (agent-repl-test-hi--with-page
+    ;; Act
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "sent offline") :user-sent "k-1")
+    ;; Assert
+    (let ((view (aref (cdar pushed) 0)))
+      (should (equal (caar pushed) "ws-one"))
+      (should (equal (gethash "key" view) "k-1"))
+      (should (stringp (gethash "queuedAt" view)))
+      (should (equal (gethash "text" (gethash "text" (aref (gethash "blocks" (gethash "content" (gethash "said" view))) 0)))
+                     "sent offline")))))
+
+(ert-deftest agent-repl-held-ingress-the-page-is-handed-every-entry-in-write-order ()
+  "A second entry hands the page both, oldest first."
+  (agent-repl-test-hi--with-page
+    ;; Arrange
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")
+    ;; Act
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "b") :user-sent "k-2")
+    ;; Assert
+    (should (equal (agent-repl-test-hi--keys (cdar pushed)) '("k-1" "k-2")))))
+
+(ert-deftest agent-repl-held-ingress-an-unchanged-list-is-not-handed-again ()
+  "A re-count that finds the same keys hands the page nothing."
+  (agent-repl-test-hi--with-page
+    ;; Arrange
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")
+    ;; Act
+    (agent-repl-held-ingress-refresh "ws-one")
+    ;; Assert
+    (should (= (length pushed) 1))))
+
+(ert-deftest agent-repl-held-ingress-host-push-hands-the-page-the-empty-list ()
+  "The daemon removes the entry, then pushes; the page is handed none."
+  (agent-repl-test-hi--with-page
+    ;; Arrange
+    (let ((path (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")))
+      (delete-file path)
+      ;; Act
+      (run-hook-with-args 'agent-repl-host-update-functions "ws-one" nil)
+      ;; Assert
+      (should (equal (cdar pushed) [])))))
+
+(ert-deftest agent-repl-held-ingress-host-push-clears-a-page-with-no-composer ()
+  "A workspace whose page was handed entries is re-counted with no composer."
+  (agent-repl-test-hi--with-page
+    ;; Arrange
+    (let ((path (agent-repl-held-ingress-write "ws-two" (agent-repl-test-hi--said "a") :user-sent "k-1")))
+      (delete-file path)
+      ;; Act
+      (run-hook-with-args 'agent-repl-host-update-functions "ws-two" nil)
+      ;; Assert
+      (should (equal (car pushed) (cons "ws-two" []))))))
+
+(ert-deftest agent-repl-held-ingress-an-unreadable-entry-is-an-error-and-left-out ()
+  "An entry that is not JSON is recorded as an ERROR naming it, and not handed."
+  (agent-repl-test-hi--with-page
+    ;; Arrange
+    (let ((path (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1"))
+          (errors nil))
+      (with-temp-file path (insert "not json"))
+      (clrhash agent-repl--held-ingress-pushed)
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl-held-ingress-refresh "ws-one"))
+      ;; Assert
+      (should (equal (cdar pushed) []))
+      (should (string-match-p "elisp.held-ingress.entry-unreadable ws=ws-one file=.*k-1" (car errors))))))
+
+(ert-deftest agent-repl-held-ingress-an-entry-gone-before-it-is-read-is-no-error ()
+  "An entry the daemon took between the listing and the read is skipped quietly."
+  (agent-repl-test-hi--with
+    ;; Arrange
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (let ((view (agent-repl-held-ingress--entry-view
+                     "ws-one" (expand-file-name "held_20261020T151802.1_abc_k-9.json" (agent-repl-held-ingress-dir)))))
+          ;; Assert
+          (should-not view)
+          (should-not errors))))))
+
+(ert-deftest agent-repl-held-ingress-entry-key-reads-the-name ()
+  "The key is the last part of an entry's name."
+  (should (equal (agent-repl-held-ingress--entry-key "/d/held_20261020T151802.227_738017fe_bfe304a8-ef.json")
+                 "bfe304a8-ef"))
+  (should-error (agent-repl-held-ingress--entry-key "/d/notes.txt")))
+
 (ert-deftest agent-repl-held-ingress-fixture-removes-its-project-directories ()
   "The fixture's two project directories are gone once it exits."
   ;; Arrange

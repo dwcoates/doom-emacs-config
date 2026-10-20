@@ -35,6 +35,14 @@
 ;; the composer is created, and on every host push while it stands: the
 ;; daemon re-pushes a workspace's host state right AFTER it removes an
 ;; ingested entry, so that push is the edge the line goes away on.
+;;
+;; THE PAGE DRAWS THEM TOO.  On the same edges the whole list of entries is
+;; handed to the workspace's page through the web view host
+;; (`agent-repl-webhost-set-held-ingress'), whenever its keys changed.  The
+;; page draws them while it cannot reach the daemon, so a prompt sent during
+;; an outage shows in the feed as taken instead of nowhere, and nobody sends
+;; it twice; while the page's feed is live the daemon lists them itself
+;; (webapp/src/held/section.ts).
 
 ;;; Code:
 
@@ -54,8 +62,12 @@
 (declare-function agent-repl-wire-encode-prompt-origin "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-call "agent-repl-wire-common" (direction codec value))
 (declare-function agent-repl-wire-encode-submit-prompt-delivery "agent-repl-wire-verbs" (value))
+(declare-function agent-repl-webhost-set-held-ingress "webhost" (ws entries))
 
 (defvar agent-repl-host-update-functions)
+
+(defvar agent-repl--held-ingress-pushed (make-hash-table :test #'equal)
+  "Workspace name -> the keys of the entries last handed to its page, in order.")
 
 (defconst agent-repl-held-ingress-format-version 1
   "The entry format the daemon's held-prompt ingress reads.")
@@ -101,16 +113,60 @@ Resolved on every call, never baked at load: the state root follows
    ((= count 1) "1 prompt waiting for the daemon")
    (t (format "%d prompts waiting for the daemon" count))))
 
+(defun agent-repl-held-ingress--entry-key (path)
+  "Return the idempotency key the entry file PATH is named by."
+  (unless (string-match "_\\([A-Za-z0-9-]+\\)\\.json\\'" path)
+    (error "agent-repl held-ingress: %s is not an entry name" path))
+  (match-string 1 path))
+
+(defun agent-repl-held-ingress--entry-view (ws path)
+  "Return WS's entry PATH as its page draws it, or nil when it cannot be read.
+The view is a hash table of the entry's `key', `queuedAt' and `said'
+\(webapp/src/host/protocol.ts `HeldIngressWireEntry').  An entry that cannot
+be read is an ERROR naming it, and is left out: the daemon quarantines what
+it cannot read, and the page must not draw a guess at it."
+  (condition-case err
+      (let* ((body (with-temp-buffer
+                     (insert-file-contents path)
+                     (json-parse-buffer :object-type 'hash-table
+                                        :null-object nil :false-object :json-false)))
+             (view (make-hash-table :test #'equal)))
+        (puthash "key" (gethash "idempotency_key" body) view)
+        (puthash "queuedAt" (gethash "queued_at" body) view)
+        (puthash "said" (gethash "said" body) view)
+        view)
+    (file-missing
+     ;; The daemon ingested it between the listing and the read; its host
+     ;; push after the removal hands the page the list without it.
+     (agent-repl--log ws "elisp.held-ingress.entry-gone ws=%s file=%s" ws path)
+     nil)
+    (error
+     (agent-repl--error ws "elisp.held-ingress.entry-unreadable ws=%s file=%s cause=%S" ws path err)
+     nil)))
+
+(defun agent-repl-held-ingress--push (ws paths)
+  "Hand WS's page its entries at PATHS when their keys changed since the last."
+  (let ((keys (mapcar #'agent-repl-held-ingress--entry-key paths)))
+    (if (equal keys (gethash ws agent-repl--held-ingress-pushed 'unpushed))
+        (agent-repl--log ws "elisp.held-ingress.page-unchanged ws=%s count=%d" ws (length keys))
+      (puthash ws keys agent-repl--held-ingress-pushed)
+      (agent-repl--info ws "elisp.held-ingress.page-pushed ws=%s keys=%S" ws keys)
+      (agent-repl-webhost-set-held-ingress
+       ws (vconcat (delq nil (mapcar (lambda (path) (agent-repl-held-ingress--entry-view ws path))
+                                     paths)))))))
+
 (defun agent-repl-held-ingress-refresh (ws)
-  "Re-count WS's waiting prompts and redraw its composer's waiting line.
-Returns the count."
-  (let* ((count (agent-repl-held-ingress-waiting ws))
+  "Re-count WS's waiting prompts, redraw its composer's waiting line, and hand
+its page the entries when they changed.  Returns the count."
+  (let* ((paths (agent-repl-held-ingress-entries ws))
+         (count (length paths))
          (text (agent-repl-held-ingress--waiting-text count))
          (shown (agent-repl--input-waiting ws)))
     (if (equal text shown)
         (agent-repl--log ws "elisp.held-ingress.waiting ws=%s count=%d unchanged" ws count)
       (agent-repl--info ws "elisp.held-ingress.waiting ws=%s count=%d was=%S" ws count shown)
       (agent-repl--input-set-waiting ws text))
+    (agent-repl-held-ingress--push ws paths)
     count))
 
 (defun agent-repl-held-ingress--body (ws said origin key &optional delivery)
@@ -169,14 +225,18 @@ owns telling the user their words were not saved."
 (defun agent-repl-held-ingress--on-host-update (ws _host)
   "Re-count WS's waiting prompts on a host push, while any are shown.
 The daemon re-pushes a workspace's host state right after it removes an
-ingested entry, so this is the edge the line clears on.
+ingested entry, so this is the edge the line clears on, and the edge the
+page is handed the shorter list on.
 
-AN OPTIMIZATION: a composer showing nothing has nothing to clear, and only
-this file writes entries (re-counting as it does), so such a push is
-skipped without listing the directory.  Host pushes are frequent; the
-listing is only paid while a line stands."
-  (when (agent-repl--input-waiting ws)
+AN OPTIMIZATION: a composer showing nothing, beside a page handed no
+entries, has nothing to clear, and only this file writes entries
+\(re-counting as it does), so such a push is skipped without listing the
+directory.  Host pushes are frequent; the listing is only paid while a line
+or a page's entries stand."
+  (when (or (agent-repl--input-waiting ws)
+            (gethash ws agent-repl--held-ingress-pushed))
     (agent-repl-held-ingress-refresh ws)))
+
 
 (add-hook 'agent-repl-host-update-functions #'agent-repl-held-ingress--on-host-update)
 

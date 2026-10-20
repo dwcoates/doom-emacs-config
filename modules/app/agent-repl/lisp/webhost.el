@@ -86,6 +86,10 @@ workspace's own.")
 (defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
   "Workspace id -> (PIXELS . BACKGROUND), the slot its docked gate takes.")
 
+(defvar agent-repl--webhost-held-ingress (make-hash-table :test #'equal)
+  "Workspace id -> the vector of its held-prompt ingress entries the page draws
+while it cannot reach the daemon (`agent-repl-webhost-set-held-ingress').")
+
 (defvar agent-repl--webhost-log-level nil
   "The log level window the host and every page record at, or nil: a cons
 \(LEVEL . UNTIL-MS), LEVEL a symbol and UNTIL-MS the window's end in epoch
@@ -372,6 +376,7 @@ show, so the page can measure it."
     (remhash id agent-repl--webhost-pages)
     (remhash id agent-repl--webhost-input-backgrounds)
     (remhash id agent-repl--webhost-gate-docks)
+    (remhash id agent-repl--webhost-held-ingress)
     (when (equal id agent-repl--webhost-shown)
       (setq agent-repl--webhost-shown nil))
     (agent-repl--info ws "elisp.webhost.page-removed ws=%s id=%s" ws id)
@@ -422,6 +427,16 @@ BACKGROUND is the input window's, or nil when it has none."
   (when-let ((id (agent-repl--webhost-id ws)))
     (puthash id (cons pixels background) agent-repl--webhost-gate-docks)
     (agent-repl--webhost-call "setGateDock" id pixels background)))
+
+(defun agent-repl-webhost-set-held-ingress (ws entries)
+  "Tell WS's page the held-prompt ingress ENTRIES for WS; kept for its reloads.
+ENTRIES is a vector of hash tables, each an entry's `key', `queuedAt' and
+`said' (webapp/src/host/protocol.ts `HeldIngressWireEntry'), the whole list.
+The page draws them while it cannot reach the daemon, so a prompt sent
+during an outage is seen as taken."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (puthash id entries agent-repl--webhost-held-ingress)
+    (agent-repl--webhost-call "setHeldIngress" id entries)))
 
 (defun agent-repl-webhost-set-log-level (level until-ms)
   "Raise the host and every page to LEVEL until UNTIL-MS (epoch ms).
@@ -483,7 +498,9 @@ Given a LANE, the host loads it once the pages before it in LANE have drawn."
     (when-let ((background (gethash id agent-repl--webhost-input-backgrounds)))
       (agent-repl--webhost-call "setInputBackground" id background))
     (when-let ((dock (gethash id agent-repl--webhost-gate-docks)))
-      (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))))
+      (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))
+    (when-let ((entries (gethash id agent-repl--webhost-held-ingress)))
+      (agent-repl--webhost-call "setHeldIngress" id entries))))
 
 (defun agent-repl--webhost-replay ()
   "Hand the host everything it should hold, after a load: the host starts empty.

@@ -1051,6 +1051,8 @@ signals."
                 (agent-repl--webhost-shown nil)
                 (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
                 (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
+                (agent-repl--webhost-held-ingress (make-hash-table :test 'equal))
+                (agent-repl--held-ingress-pushed (make-hash-table :test 'equal))
                 (agent-repl--webhost-reload-timer nil)
                 (agent-repl--webhost-build nil)
                 ;; The opens are process-wide (open-tabs.el): each scenario
