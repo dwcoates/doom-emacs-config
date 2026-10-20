@@ -1,6 +1,9 @@
 package footer
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,5 +188,58 @@ func TestAScheduledRetryIsRecordedAtInfo(t *testing.T) {
 	// Assert
 	if got := countOf(h.log.Records(), dlog.LevelInfo, "daemon.footer.vendor_retry"); got != 1 {
 		t.Fatalf("vendor_retry INFO records = %d, want 1", got)
+	}
+}
+
+func TestAttemptOfRetryCountsTheFirstRetryAsTheSecondAttempt(t *testing.T) {
+	tests := []struct {
+		name  string
+		retry uint32
+		want  int32
+	}{
+		{"the first retry", 1, 2},
+		{"the tenth retry", 10, 11},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the table. Act.
+			got := attemptOfRetry(tt.retry)
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("attemptOfRetry(%d) = %d, want %d", tt.retry, got, tt.want)
+			}
+		})
+	}
+}
+
+// EVERY RETRY SCHEDULE THE FOOTER DRAWS CONVERTS ITS COUNT THROUGH ONE HELPER:
+// a site adding one to a schedule's attempt by hand is a second spelling of
+// the convention, which drifts.
+func TestNoFooterSourceConvertsARetryCountByHand(t *testing.T) {
+	// Arrange.
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act.
+	var offenders []string
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatalf("read %s: %v", source, err)
+		}
+		if strings.Contains(string(body), "GetAttempt()) + 1") {
+			offenders = append(offenders, source)
+		}
+	}
+
+	// Assert.
+	if len(offenders) != 0 {
+		t.Fatalf("hand-converted retry counts in %v, want every site through attemptOfRetry", offenders)
 	}
 }

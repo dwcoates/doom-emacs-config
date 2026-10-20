@@ -52,13 +52,21 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 	}
 	nextAt := time.UnixMilli(scheduled.GetNextAttemptAtMs())
 	s.vendorRetry = &retryState{
-		// THE FOOTER COUNTS ATTEMPTS, the shim counts retries: the first
-		// retry is the second attempt, as the vendor's own schedule is drawn.
-		attempt: int32(scheduled.GetAttempt()) + 1,
+		attempt: attemptOfRetry(scheduled.GetAttempt()),
 		status:  truncate(scheduled.GetStatus(), DefaultWarningRowWidth),
 		at:      r.opts.clock.Now(),
 		nextAt:  &nextAt,
 	}
 	r.logOf(ws, s).Info("daemon.footer.vendor_retry", "the footer counts down to agent-repl's scheduled vendor-error retry",
 		dlog.Context{"attempt": scheduled.GetAttempt(), "next_attempt_at_ms": scheduled.GetNextAttemptAtMs()})
+}
+
+// attemptOfRetry is the footer's attempt number for the RETRY-th retry
+// (1-based). THE FOOTER COUNTS ATTEMPTS, a retry schedule counts retries: the
+// first retry is the second attempt. Both schedules the retrying line draws,
+// the vendor's (`conversation.v1.ApiRetry.attempt`) and agent-repl's
+// (`conversation.v1.SessionVendorErrorRetryScheduled.attempt`), count this
+// way, so both convert here.
+func attemptOfRetry(retry uint32) int32 {
+	return int32(retry) + 1
 }

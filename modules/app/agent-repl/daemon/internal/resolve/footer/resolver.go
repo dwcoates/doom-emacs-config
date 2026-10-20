@@ -1531,7 +1531,7 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			// here instead ran one ahead of the vendor's own count (2026-09-30).
 			if retry := failed.GetRetry(); retry != nil {
 				nextAt := time.UnixMilli(retry.GetNextAttemptAtMs())
-				next.attempt = int32(retry.GetAttempt()) + 1
+				next.attempt = attemptOfRetry(retry.GetAttempt())
 				next.maxAttempt = int32(retry.GetMaxRetries()) + 1
 				next.nextAt = &nextAt
 			} else {
