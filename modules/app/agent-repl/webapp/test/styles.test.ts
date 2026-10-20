@@ -41,7 +41,6 @@ import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/respons
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
-import { MERGE_BUBBLE_ATTRIBUTE } from "../src/feed/merge-bubble.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
@@ -274,88 +273,6 @@ describe("the bubble geometry: the two caps", () => {
   });
 });
 
-/**
- * THE TOOL CARD INSET (owner request, 2026-10-19): a top-level tool card, and a
- * group of them, is capped one base bubble padding inside each rail, so its
- * left edge sits under a response's text rather than the response's own edge.
- * An ask, the merge bubble and the thinking fold keep the full agent cap, and a
- * member inside a group fills the group.
- */
-describe("the bubble geometry: the tool card inset", () => {
-  /** The max-width the cascade hands an element of CLASSES, ATTRS set, as a `.feed-item`'s child. */
-  function capOf(classes: string, attrs: Readonly<Record<string, string>> = {}): string {
-    const item = document.createElement("div");
-    item.className = "feed-item";
-    const card = document.createElement("div");
-    card.className = classes;
-    for (const [name, value] of Object.entries(attrs)) card.setAttribute(name, value);
-    item.append(card);
-    return inDocument(item, () => cascadedValue(card, "max-width"));
-  }
-
-  it("derives the tool card cap from the agent cap less one base padding per side", () => {
-    // Arrange / Act
-    const column = declarationsOf("#main-col");
-
-    // Assert
-    expect(column).toMatch(/--tool-card-cap:\s*calc\(var\(--agent-bubble-cap\) - 2 \* var\(--bubble-pad-x-base\)\)/);
-  });
-
-  const narrowed: readonly { name: string; classes: string }[] = [
-    { name: "a tool call", classes: "tool-card tool-fold" },
-    { name: "a skill", classes: "tool-card tool-skill" },
-    { name: "a hook", classes: "tool-card tool-hook" },
-    { name: "a blocked hook", classes: "tool-card tool-hook tool-hook-blocked" },
-    { name: "a subagent or detached shell bubble", classes: "tool-card bubble-fold" },
-    { name: "a group of tool cards", classes: "feed-group" },
-  ];
-  for (const { name, classes } of narrowed) {
-    it(`caps ${name} at the tool card cap`, () => {
-      // Arrange / Act
-      const cap = capOf(classes);
-
-      // Assert
-      expect(cap).toBe("var(--tool-card-cap)");
-    });
-  }
-
-  const full: readonly { name: string; classes: string; attrs?: Record<string, string> }[] = [
-    { name: "a pending permission", classes: "tool-card ask-card permission pending" },
-    { name: "a resolved permission", classes: "tool-card ask-card permission resolved" },
-    { name: "a pending question", classes: "tool-card ask-card question pending" },
-    { name: "a resolved question", classes: "tool-card ask-card question resolved" },
-    { name: "the merge bubble", classes: "tool-card bubble-fold", attrs: { [MERGE_BUBBLE_ATTRIBUTE]: "" } },
-    { name: "the thinking fold", classes: "thinking" },
-  ];
-  for (const { name, classes, attrs } of full) {
-    it(`keeps ${name} at the full agent cap`, () => {
-      // Arrange / Act
-      const cap = capOf(classes, attrs);
-
-      // Assert
-      expect(cap).toBe("var(--agent-bubble-cap)");
-    });
-  }
-
-  it("lets a grouped member fill its group rather than narrowing a second time", () => {
-    // Arrange
-    const panel = document.createElement("div");
-    panel.className = "feed-group-panel";
-    const item = document.createElement("div");
-    item.className = "feed-item";
-    const card = document.createElement("div");
-    card.className = "tool-card tool-fold";
-    item.append(card);
-    panel.append(item);
-
-    // Act
-    const cap = inDocument(panel, () => cascadedValue(card, "max-width"));
-
-    // Assert
-    expect(cap).toBe("none");
-  });
-});
-
 describe("the bubble geometry: the scrollbar on the inner edge", () => {
   it("drops the bubble's own right inset to the shared gap, so the box reaches the edge", () => {
     // Arrange / Act
@@ -376,17 +293,15 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     ]).toEqual([true, true]);
   });
 
-  it("states every bubble's unshrunk horizontal padding once, on the column, as the base the padding reads", () => {
+  it("states every bubble's unshrunk horizontal padding once, as the base the padding reads", () => {
     // Arrange / Act
-    const column = declarationsOf("#main-col");
     const bubble = declarationsOf(".bubble");
 
-    // Assert — the base moved to the column (2026-10-19) because the tool card inset reads it too.
+    // Assert
     expect([
-      /--bubble-pad-x-base:\s*0\.9rem/.test(column ?? ""),
-      /--bubble-pad-x-base:/.test(bubble ?? ""),
+      /--bubble-pad-x-base:\s*0\.9rem/.test(bubble ?? ""),
       /--bubble-pad-x:\s*var\(--bubble-pad-x-base\)/.test(bubble ?? ""),
-    ]).toEqual([true, false, true]);
+    ]).toEqual([true, true]);
   });
 
   it("keeps the gap itself hairline, so 'abuts' is a promise the token can keep", () => {
