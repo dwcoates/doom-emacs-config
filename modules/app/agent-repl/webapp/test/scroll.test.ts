@@ -11,6 +11,7 @@ import {
   armedWheelAction,
   collapseClicked,
   dragEdgeScroll,
+  selectionRowScroll,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
@@ -1559,7 +1560,8 @@ describe("collapseClicked", () => {
  * shift -- and a hit fails here, so an implicit mover cannot come back quietly.
  * Inside scroll.ts, the writes are held to the named list: the tail owner's
  * two primitives, the reader's own wheel redirect, the reader's own
- * collapse click, and the reader's own drag at the rail's edge. A bubble's
+ * collapse click, the reader's own drag at the rail's edge, and the
+ * reader's own switch to a workspace whose rail row is out of view. A bubble's
  * scroll box has no other writer.
  */
 describe("no scroll write outside scroll.ts", () => {
@@ -1624,6 +1626,7 @@ describe("no scroll write outside scroll.ts", () => {
       "feed.scrollTop += delta;",
       "section.scrollTop = 0;",
       "scroller.scrollTop += step;",
+      "region.scrollTop += delta;",
     ]);
   });
 
@@ -4059,5 +4062,16 @@ describe("dragEdgeScroll", () => {
     dragEdgeScroll(scroller, -8);
     // Assert
     expect(scroller.scrollTop).toBe(32);
+  });
+});
+
+describe("selectionRowScroll", () => {
+  it("moves the section by the delta the selection asks for", () => {
+    // Arrange
+    const region = { scrollTop: 40 };
+    // Act
+    selectionRowScroll(region, 60);
+    // Assert
+    expect(region.scrollTop).toBe(100);
   });
 });

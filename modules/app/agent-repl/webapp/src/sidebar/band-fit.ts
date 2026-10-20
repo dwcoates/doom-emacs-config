@@ -330,7 +330,7 @@ export function paintBandMore(region: HTMLElement): void {
 }
 
 /** The selector every section's rows region matches. */
-const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => `.${className} > .${regionClass}`).join(", ");
+export const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => `.${className} > .${regionClass}`).join(", ");
 
 /** One open section's band, its lines, and its stops. */
 interface Measured {
