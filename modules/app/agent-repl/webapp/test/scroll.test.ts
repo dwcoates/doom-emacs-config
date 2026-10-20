@@ -401,7 +401,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the twelve causes the owner rules allow", () => {
+  it("names exactly the thirteen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -411,6 +411,7 @@ describe("SCROLL_CAUSES", () => {
       "entryJumped",
       "initialPlacement",
       "replaceRestore",
+      "rolledBack",
       "workspaceSelected",
       "lastBubbleExpanded",
       "lastBubbleCollapsed",
@@ -426,6 +427,7 @@ describe("TailFollow's parking causes", () => {
     ["a newly held prompt", (tail) => tail.promptHeld(), "promptHeld"],
     ["a first placement", (tail) => tail.initialPlacement(), "initialPlacement"],
     ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
+    ["a rolled-back row's removal", (tail) => tail.rolledBack(), "rolledBack"],
     ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
     ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
   ];

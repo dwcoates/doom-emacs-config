@@ -584,7 +584,9 @@ hand any more:
   re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`,
   `entryJumped` (every other jump: a breadcrumb, a hook's gated-call link,
   centered by the same `revealCenterDelta`), `initialPlacement`,
-  `replaceRestore`, `workspaceSelected` (the roster's `current` moved to this
+  `replaceRestore`, `rolledBack` (a row removal the daemon marks
+  `frontend.v1.FeedRowRemoved.rolled_back` parks the feed at its tail and
+  follows), `workspaceSelected` (the roster's `current` moved to this
   page's workspace, by any switch path: `src/sidebar/selection-edge.ts` parks
   the feed at its tail and follows; returning to Emacs from another
   application is not a switch), `prependCompensation`, `latestVisible`

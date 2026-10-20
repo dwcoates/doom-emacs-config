@@ -90,6 +90,10 @@ export interface ScrollPosition {
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
  *   lands at the tail, by the earlier owner ruling of 2026-09-23.
+ * - `rolledBack`: the daemon removed a row because its turn is being rolled
+ *   back (`frontend.v1.FeedRowRemoved.rolled_back`); the feed parks at its
+ *   tail and follows, so the reader lands where the conversation now ends
+ *   (owner request, 2026-10-20).
  * - `workspaceSelected`: the user switched TO this page's workspace, by any
  *   path (`sidebar/selection-edge.ts`); the feed parks at its tail and
  *   follows (owner ruling, 2026-10-02). Returning to Emacs from another
@@ -130,6 +134,7 @@ export const SCROLL_CAUSES = [
   "entryJumped",
   "initialPlacement",
   "replaceRestore",
+  "rolledBack",
   "workspaceSelected",
   "lastBubbleExpanded",
   "lastBubbleCollapsed",
@@ -150,6 +155,7 @@ type ParkCause =
   | "selectionMoved"
   | "initialPlacement"
   | "replaceRestore"
+  | "rolledBack"
   | "workspaceSelected"
   | "lastBubbleExpanded"
   | "lastBubbleCollapsed"
@@ -520,6 +526,12 @@ export class TailFollow {
   replaceRestore(): void {
     this.supersedeClick("replaceRestore");
     this.park("replaceRestore");
+  }
+
+  /** A row was removed because its turn is being rolled back: land at the tail and follow. */
+  rolledBack(): void {
+    this.supersedeClick("rolledBack");
+    this.park("rolledBack");
   }
 
   /** The user switched to this page's workspace: land at the tail and follow. */

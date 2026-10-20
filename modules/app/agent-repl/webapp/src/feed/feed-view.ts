@@ -621,6 +621,7 @@ export function createFeedController(
       if (held !== undefined) keepKey(held, id, key);
       remove(id);
       announce();
+      if (row.row.value.rolledBack !== undefined) parkOnRollback(id);
       return;
     }
     // A RE-PUSH OF THE ROW EXACTLY AS DRAWN CHANGES NOTHING, so it draws
@@ -937,6 +938,26 @@ export function createFeedController(
     );
     if (first) opts.scroll.tail.initialPlacement();
     else opts.scroll.tail.replaceRestore();
+  }
+
+  /**
+   * A ROLLBACK PUTS THE READER AT THE TAIL (owner request, 2026-10-20).
+   *
+   * Called after a removal the daemon marked as a rollback's
+   * (`frontend.v1.FeedRowRemoved.rolled_back`) has been applied, so the feed
+   * lands where the conversation now ends, whatever the reader was looking at
+   * (the rollback's own prompt picker centers the prompt it picks). One
+   * rollback removes several rows; each parks, and a park at the tail already
+   * standing moves nothing. Root feed only, like every other move of the
+   * scroll box.
+   */
+  function parkOnRollback(id: string): void {
+    if (opts.scroll === undefined) return;
+    log.debug(`a rolled-back row ${id} was removed; the feed parks at its tail`, {
+      operation: "feed.rollback-parked",
+      context: { feed: feedName(), row: id },
+    });
+    opts.scroll.tail.rolledBack();
   }
 
   /**
