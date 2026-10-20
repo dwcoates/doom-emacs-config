@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -115,37 +114,22 @@ func (h *fakeHost) watch(bound time.Duration, name string, args ...string) (stri
 	return out, nil, err
 }
 
-// fakeLog records every line the Manager logs, "INFO " or "ERROR " first. A
-// late probe logs from its own goroutine, so the lines are guarded, and every
-// line wakes a waiter.
+// fakeLog records every line the Manager logs, "INFO " or "ERROR " first.
 type fakeLog struct {
-	mu     sync.Mutex
-	lines  []string
-	logged chan struct{}
+	lines []string
 }
 
-func (l *fakeLog) add(line string) {
-	l.mu.Lock()
-	l.lines = append(l.lines, line)
-	logged := l.logged
-	l.mu.Unlock()
-	if logged != nil {
-		select {
-		case logged <- struct{}{}:
-		default:
-		}
-	}
+func (l *fakeLog) Infof(format string, args ...any) {
+	l.lines = append(l.lines, "INFO "+fmt.Sprintf(format, args...))
 }
 
-func (l *fakeLog) Infof(format string, args ...any) { l.add("INFO " + fmt.Sprintf(format, args...)) }
-
-func (l *fakeLog) Errorf(format string, args ...any) { l.add("ERROR " + fmt.Sprintf(format, args...)) }
+func (l *fakeLog) Errorf(format string, args ...any) {
+	l.lines = append(l.lines, "ERROR "+fmt.Sprintf(format, args...))
+}
 
 func (l *fakeLog) has(prefix string) bool { return l.count(prefix) > 0 }
 
 func (l *fakeLog) count(prefix string) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	n := 0
 	for _, line := range l.lines {
 		if strings.HasPrefix(line, prefix) {
@@ -155,26 +139,7 @@ func (l *fakeLog) count(prefix string) int {
 	return n
 }
 
-func (l *fakeLog) snapshot() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return slices.Clone(l.lines)
-}
-
-// waitFor waits, at most 5s, for a line starting with prefix. A late probe's
-// line comes from its own goroutine within microseconds of its outcome.
-func (l *fakeLog) waitFor(t *testing.T, prefix string) {
-	t.Helper()
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	for !l.has(prefix) {
-		select {
-		case <-l.logged:
-		case <-timer.C:
-			t.Fatalf("log = %q, want a line starting %q", l.snapshot(), prefix)
-		}
-	}
-}
+func (l *fakeLog) snapshot() []string { return slices.Clone(l.lines) }
 
 // tickingClock answers a time one second later on every call.
 func tickingClock() func() time.Time {
@@ -197,7 +162,7 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Watch:     h.watch,
 		Alive:     func(int) bool { return false },
 		Mounted:   func(string) (bool, error) { return false, nil },
-		Log:       &fakeLog{logged: make(chan struct{}, 1)},
+		Log:       &fakeLog{},
 		Now:       tickingClock(),
 		LockBound: 10 * time.Second,
 		Memory:    func() (uint64, error) { return 64 << 30, nil },
@@ -1410,6 +1375,21 @@ func TestRunWatchedAnswersAtItsBoundAndWatchesTheLateAnswer(t *testing.T) {
 	case outcome := <-late:
 		if outcome.Err != nil || outcome.Took < 300*time.Millisecond {
 			t.Fatalf("late = %+v, want the answer after at least 300ms", outcome)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the late answer never came")
+	}
+}
+
+func TestRunWatchedCarriesTheLateAnswersOutput(t *testing.T) {
+	// Act: the command cannot finish within 20ms.
+	_, late, _ := runWatched(20*time.Millisecond, 20*time.Second, "sh", "-c", "sleep 0.3; echo listed")
+
+	// Assert
+	select {
+	case outcome := <-late:
+		if outcome.Err != nil || strings.TrimSpace(outcome.Out) != "listed" {
+			t.Fatalf("late = %+v, want the command's own output", outcome)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the late answer never came")

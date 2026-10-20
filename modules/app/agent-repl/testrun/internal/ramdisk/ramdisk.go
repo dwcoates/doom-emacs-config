@@ -21,12 +21,14 @@
 //
 // A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
 // 2026-10-12). Before anything is attached, Setup asks the disk manager for
-// `diskutil list` and `hdiutil info` within short bounds, reclaims the dead
-// runs' disks, and then, under the registry lock, looks for a RAM disk this
-// runner made that no live run's record names. Either finding answers a
-// Trouble instead of a volume: the run's root goes on the disk, the run says
-// why at ERROR, and EnsureInvestigation opens ONE agent-repl workspace to find
-// and fix the cause. A run that went on attaching while one stood leaked an
+// `diskutil list` and `hdiutil info`, waiting for each one's own answer up to
+// CommandBound (a starved run's answer comes late; only a wedged disk
+// manager's never comes), reclaims the dead runs' disks, and then, under the
+// registry lock, looks for a RAM disk this runner made that no live run's
+// record names. Either finding answers a Trouble instead of a volume: the
+// run's root goes on the disk, the run says why at ERROR, and
+// EnsureInvestigation opens ONE agent-repl workspace to find and fix the
+// cause. A run that went on attaching while one stood leaked an
 // 8 GiB disk per run, 13 at once, each of its disk commands running out its
 // bound first.
 package ramdisk
@@ -118,8 +120,9 @@ type Logger interface {
 	Errorf(format string, args ...any)
 }
 
-// InfoBound is how long `hdiutil info` may run before the disk manager is
-// taken not to answer.
+// InfoBound is how long `hdiutil info` may run: the acquire's and the
+// reclaim's listing fail past it, and Setup's probe reads the host's state
+// past it while it waits for the probe's own answer (Manager.probe).
 //
 // A PROBE'S BOUND COVERS THE RUN'S OWN STARVATION, not only the disk
 // manager's answer. A run is at nice 19 (bin/background.sh), so on a loaded
@@ -135,13 +138,14 @@ type Logger interface {
 // priority is `diskutil info` in the acquire: 79-471ms across 40 runs
 // (2026-10-12 and 13), which carries the same process start and the same
 // question to diskarbitrationd as both probes. Both bounds are just over
-// twice its 471ms. A probe that misses its bound is still watched to its own
-// answer (RunWatched), so every refusal records how long the disk manager
-// really took, and the bounds can be set again from that.
+// twice its 471ms. No bound tells that starvation from a wedged disk manager
+// (probes answered 1.09s to 3.54s at load 15, 2026-10-20), so a probe that
+// misses it is not a refusal: Setup refuses only on the probe's own failure.
 const InfoBound = 1000 * time.Millisecond
 
-// ListBound is how long the `diskutil list` probe may run before the disk
-// manager is taken not to answer: the same measurement as InfoBound.
+// ListBound is how long the `diskutil list` probe may run before Setup reads
+// the host's state and waits for its own answer: the same measurement as
+// InfoBound.
 const ListBound = 1000 * time.Millisecond
 
 // CommandBound is how long one hdiutil, diskutil or lsof call may run.
@@ -189,6 +193,8 @@ func unansweredError(bound time.Duration, name string, args []string, cause erro
 // Late is the own outcome of a probe that missed its bound: its answer, or
 // its failure, at the latest when CommandBound passed.
 type Late struct {
+	// Out is the command's combined output.
+	Out string
 	// Took is how long the command ran, from its start.
 	Took time.Duration
 	Err  error
@@ -234,8 +240,8 @@ func runWatched(bound, limit time.Duration, name string, args ...string) (string
 	go func() {
 		defer cancel()
 		r := <-done
-		_, err := commandOutcome(ctx, limit, name, args, r.out, r.err)
-		late <- Late{Took: time.Since(start), Err: err}
+		out, err := commandOutcome(ctx, limit, name, args, r.out, r.err)
+		late <- Late{Out: out, Took: time.Since(start), Err: err}
 	}()
 	return "", late, unansweredError(bound, name, args, context.DeadlineExceeded)
 }

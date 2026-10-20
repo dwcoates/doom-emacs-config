@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -179,60 +178,54 @@ type Trouble struct {
 	// At is when the probes began, on the wall clock, so the check lines up
 	// against every other run's acquire and release edges.
 	At time.Time
-	// Host is what the host was doing when a probe did not answer
-	// (hostSnapshot); empty when both answered.
+	// Host is what the host was doing when a probe missed its bound or
+	// failed (hostSnapshot); empty when both answered within their bounds.
 	Host string
-
-	// late are the probes that missed their bounds, still watched.
-	late []*lateProbe
 }
 
-// lateProbe is one probe that missed its bound, watched to its own outcome.
-// Its outcome is logged exactly once: when it arrives, or, when the run ends
-// first, as still unanswered (SettleProbes).
-type lateProbe struct {
-	call  string
-	asked time.Time
-	once  sync.Once
-}
-
-// watchProbe is the probe of call within bound, asked at asked, as timeProbe
-// runs it. A probe that misses its bound is recorded in t and watched to its
-// own outcome, which goes to the run's log.
-func (m Manager) watchProbe(t *Trouble, asked time.Time, bound time.Duration, name string, args ...string) func() (string, error) {
-	return func() (string, error) {
-		out, late, err := m.Watch(bound, name, args...)
-		if late != nil {
-			p := &lateProbe{call: name + " " + strings.Join(args, " "), asked: asked}
-			t.late = append(t.late, p)
-			go func() {
-				outcome := <-late
-				p.once.Do(func() { m.logLate(t, p, outcome) })
-			}()
-		}
-		return out, err
+// probe asks the disk manager name ARGS within bound, timed by the Manager's
+// clock from when it is asked, and answers the probe's own outcome.
+//
+// A PROBE THAT MISSES ITS BOUND IS WAITED FOR TO ITS OWN OUTCOME, at the
+// latest CommandBound, the bound every other disk command has. A run is at
+// nice 19, so on a loaded host its probe waits for a CPU before it asks at
+// all, and no short bound tells that wait from a wedged disk manager: healthy
+// answers reached 985ms against the 1s bound, and every refusal of the last
+// 100 runs (2026-10-20, load averages around 15) was a probe that answered
+// 1.09s to 3.54s after it was asked. Only a probe that fails, or still has
+// not answered at CommandBound, is a disk manager that does not answer.
+//
+// The bound is when the host's state is read (hostSnapshot), while the probe
+// still runs, so a slow answer says what the host was doing meanwhile.
+func (m Manager) probe(t *Trouble, bound time.Duration, name string, args ...string) (string, time.Duration, error) {
+	asked := m.Now()
+	out, late, err := m.Watch(bound, name, args...)
+	if late == nil {
+		return out, m.Now().Sub(asked), err
 	}
+	call := name + " " + strings.Join(args, " ")
+	m.readHost(t, fmt.Sprintf("the disk manager had not answered %s within %s, so it is waited for to its own answer", call, bound))
+	outcome := <-late
+	if outcome.Err != nil {
+		m.Log.Infof("RAM disk check at %s: the disk manager never answered %s, which failed after %s: %v", stamp(t.At), call, outcome.Took, outcome.Err)
+		return "", outcome.Took, outcome.Err
+	}
+	m.Log.Infof("RAM disk check at %s: the disk manager answered %s late, after %s, so it was slow, not wedged", stamp(t.At), call, outcome.Took)
+	return outcome.Out, outcome.Took, nil
 }
 
-// logLate records a late probe's own outcome. An answer says the disk manager
-// was slow, not wedged; a failure at CommandBound says it was wedged.
-func (m Manager) logLate(t *Trouble, p *lateProbe, outcome Late) {
-	if outcome.Err != nil {
-		m.Log.Errorf("RAM disk check at %s: the disk manager never answered %s, which failed after %s: %v", stamp(t.At), p.call, outcome.Took, outcome.Err)
+// readHost reads what the host is doing into t, once per check, and logs it
+// at INFO after why.
+//
+// WHAT THE HOST WAS DOING IS READ AT ONCE, so a probe that is slow or does
+// not answer says whether the host was starved (its load) or the disk manager
+// was busy with another run's disk (its processes).
+func (m Manager) readHost(t *Trouble, why string) {
+	if t.Host != "" {
 		return
 	}
-	m.Log.Infof("RAM disk check at %s: the disk manager answered %s late, after %s, so it was slow, not wedged", stamp(t.At), p.call, outcome.Took)
-}
-
-// SettleProbes ends the watch of t's late probes when the run ends: a probe
-// whose own outcome has not arrived is recorded as still unanswered, and its
-// outcome, should it arrive later, is not.
-func (m Manager) SettleProbes(t *Trouble) {
-	for _, p := range t.late {
-		p.once.Do(func() {
-			m.Log.Infof("RAM disk check at %s: the disk manager had still not answered %s when the run ended, %s after it was asked", stamp(t.At), p.call, m.Now().Sub(p.asked))
-		})
-	}
+	t.Host = m.hostSnapshot()
+	m.Log.Infof("RAM disk check at %s: %s; the host: %s", stamp(t.At), why, hostLine(t.Host))
 }
 
 // Answered says whether the disk manager answered both probes.
@@ -268,20 +261,16 @@ func probeLine(name string, err error, took time.Duration) string {
 // Setup is a run's whole RAM disk start. It probes the disk manager, reclaims
 // the dead runs' disks, and acquires this run's. It answers the volume, or a
 // Trouble when a leak, a disk manager that does not answer or a registry lock
-// whose holder is stuck forbids any attach, or the error of an acquire that failed otherwise. With either of the
-// latter the run's root goes on the disk.
+// whose holder is stuck forbids any attach, or the error of an acquire that
+// failed otherwise. With either of the latter the run's root goes on the
+// disk.
 func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 	t := &Trouble{At: m.Now()}
-	t.List, t.ListTook, t.ListErr = m.timeProbe(t.At, m.watchProbe(t, t.At, ListBound, "diskutil", "list"))
-	infoAsked := m.Now()
-	t.Info, t.InfoTook, t.InfoErr = m.timeProbe(infoAsked, m.watchProbe(t, infoAsked, InfoBound, "hdiutil", "info"))
+	t.List, t.ListTook, t.ListErr = m.probe(t, ListBound, "diskutil", "list")
+	t.Info, t.InfoTook, t.InfoErr = m.probe(t, InfoBound, "hdiutil", "info")
 	m.Log.Infof("RAM disk check at %s: %s; %s", stamp(t.At), probeLine("diskutil list", t.ListErr, t.ListTook), probeLine("hdiutil info", t.InfoErr, t.InfoTook))
 	if !t.Answered() {
-		// WHAT THE HOST WAS DOING IS READ AT ONCE, so the next probe that does
-		// not answer says whether the host was starved (its load) or the disk
-		// manager was busy with another run's disk (its processes).
-		t.Host = m.hostSnapshot()
-		m.Log.Infof("RAM disk check: the host when the disk manager did not answer: %s", hostLine(t.Host))
+		m.readHost(t, "the disk manager did not answer")
 		// A DISK MANAGER THAT DOES NOT ANSWER IS NOT ASKED AGAIN: a reclaim's
 		// or an acquire's every command would run out its own bound in turn.
 		return nil, t, nil
@@ -308,13 +297,6 @@ func (m Manager) Setup(sizeMiB int) (*Volume, *Trouble, error) {
 		return nil, t, nil
 	}
 	return v, nil, err
-}
-
-// timeProbe runs probe and answers its answer with how long it took since
-// start, by the Manager's clock.
-func (m Manager) timeProbe(start time.Time, probe func() (string, error)) (string, time.Duration, error) {
-	out, err := probe()
-	return out, m.Now().Sub(start), err
 }
 
 // HostBound is how long each read of the host's state (`sysctl`, `ps`) may
