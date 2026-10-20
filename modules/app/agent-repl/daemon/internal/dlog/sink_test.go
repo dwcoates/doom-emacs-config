@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"agentrepl/logging"
 )
 
 // newWorkspace makes a temp workspace directory and its daemon-minted id.
@@ -800,5 +803,140 @@ func TestAWriteFailureStillPoisonsAfterTheCloseChange(t *testing.T) {
 	}
 	if poison := s.poisoned(); poison == nil {
 		t.Fatal("the sink did not stay poisoned after a failed write")
+	}
+}
+
+func TestSinkExpire(t *testing.T) {
+	stale := stdioNow.Add(-logging.DefaultRetention - time.Hour)
+	cases := []struct {
+		name        string
+		sink        string
+		age         time.Time
+		pending     bool
+		wantRolled  bool
+		wantMarked  bool
+		wantPending bool
+	}{
+		{name: "a daemon target past the retention is rolled", sink: "daemon", age: stale, wantRolled: true},
+		{name: "a daemon target inside the retention is left alone", sink: "daemon", age: stdioNow},
+		{name: "a shim target past the retention is marked for its next process", sink: "shim", age: stale, wantMarked: true, wantPending: true},
+		{name: "a shim target already marked is not marked again", sink: "shim", age: stale, pending: true, wantPending: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir, id := newWorkspace(t)
+			sk, err := openSink(t.TempDir(), dir, id, tc.sink, "", true)
+			if err != nil {
+				t.Fatalf("openSink: %v", err)
+			}
+			t.Cleanup(func() { sk.close() })
+			if err := os.WriteFile(sk.target, []byte("old\n"), 0o644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			age(t, sk.target, tc.age)
+			sk.rotatePending = tc.pending
+
+			// Act.
+			out, err := sk.expire(stdioNow)
+
+			// Assert.
+			if err != nil || out.rolled != tc.wantRolled || out.marked != tc.wantMarked || sk.rotatePending != tc.wantPending {
+				t.Fatalf("expire = (%+v, %v) pending=%v, want rolled=%v marked=%v pending=%v",
+					out, err, sk.rotatePending, tc.wantRolled, tc.wantMarked, tc.wantPending)
+			}
+			if tc.wantRolled {
+				if len(out.removed) != 1 || sk.size != 0 {
+					t.Errorf("removed %v size %d, want the rolled generation removed and the size reset", out.removed, sk.size)
+				}
+				if err := sk.write([]byte("new\n")); err != nil {
+					t.Fatalf("write after expiry: %v", err)
+				}
+				if got := readText(t, filepath.Join(dir, ".claude", "emacs", tc.sink+".log")); got != "new\n" {
+					t.Errorf("the canonical link reads %q, want only the record after the expiry", got)
+				}
+			}
+		})
+	}
+}
+
+func TestSinkExpireRemovesExpiredGenerations(t *testing.T) {
+	// Arrange: a fresh current target and an expired generation.
+	dir, id := newWorkspace(t)
+	sk, err := openSink(t.TempDir(), dir, id, "sidecar", "", true)
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { sk.close() })
+	if err := os.WriteFile(sk.target+".1", []byte("gen\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	age(t, sk.target+".1", stdioNow.Add(-logging.DefaultRetention-time.Hour))
+
+	// Act.
+	out, err := sk.expire(stdioNow)
+
+	// Assert.
+	if err != nil || out.rolled || len(out.removed) != 1 || out.removed[0] != sk.target+".1" {
+		t.Fatalf("expire = (%+v, %v), want only the expired generation removed", out, err)
+	}
+}
+
+func TestSinkExpireOfAHandleNotInService(t *testing.T) {
+	cases := []struct {
+		name       string
+		arrange    func(sk *sink)
+		wantPoison bool
+	}{
+		{name: "a closed sink is left to the directory prune", arrange: func(sk *sink) { sk.close() }},
+		{name: "a poisoned sink answers its poison", arrange: func(sk *sink) { sk.poisonLocked(errors.New("earlier failure")) }, wantPoison: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir, id := newWorkspace(t)
+			sk, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
+			if err != nil {
+				t.Fatalf("openSink: %v", err)
+			}
+			t.Cleanup(func() { sk.close() })
+			tc.arrange(sk)
+
+			// Act.
+			out, err := sk.expire(stdioNow)
+
+			// Assert.
+			if errors.Is(err, ErrPoisoned) != tc.wantPoison || (!tc.wantPoison && err != nil) || out.rolled || len(out.removed) != 0 {
+				t.Fatalf("expire = (%+v, %v), want poison=%v and nothing done", out, err, tc.wantPoison)
+			}
+		})
+	}
+}
+
+func TestSinkExpireRefusesToRollUnderADisplacedLink(t *testing.T) {
+	// Arrange: an expired target whose canonical link the workspace replaced.
+	dir, id := newWorkspace(t)
+	sk, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
+	if err != nil {
+		t.Fatalf("openSink: %v", err)
+	}
+	t.Cleanup(func() { sk.close() })
+	if err := os.WriteFile(sk.target, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	age(t, sk.target, stdioNow.Add(-logging.DefaultRetention-time.Hour))
+	if err := replaceLink(sk.link, filepath.Join(t.TempDir(), "foreign.log")); err != nil {
+		t.Fatalf("displace: %v", err)
+	}
+
+	// Act.
+	_, err = sk.expire(stdioNow)
+
+	// Assert.
+	if !errors.Is(err, ErrPoisoned) {
+		t.Fatalf("expire = %v, want the sink poisoned rather than rolled under a foreign link", err)
+	}
+	if got := readText(t, sk.target); got != "old\n" {
+		t.Errorf("the target holds %q, want it untouched", got)
 	}
 }
