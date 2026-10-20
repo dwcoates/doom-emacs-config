@@ -134,7 +134,7 @@ func Build(est Estimates, all []suites.Units, slots int) (Planned, error) {
 			overhead = min(overhead, sp.OverheadCap)
 		}
 		chunkables = append(chunkables, sched.Chunkable{
-			Group: sp.Group, Suite: sp.Suite, Items: items, Overhead: overhead, Deps: sp.Deps,
+			Group: sp.Group, Suite: sp.Suite, Items: items, Overhead: overhead, Deps: sp.Deps, Slots: sp.Slots,
 		})
 	}
 

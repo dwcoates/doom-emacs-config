@@ -610,8 +610,8 @@ func TestGoPkgUnits(t *testing.T) {
 			if !reflect.DeepEqual(subst(chunk.Argv), tt.wantChunk) || chunk.Dir != filepath.Join(module, "p") {
 				t.Fatalf("chunk = %v in %s, want %v in the package dir", subst(chunk.Argv), chunk.Dir, tt.wantChunk)
 			}
-			if chunk.Slots != tt.wantSlots {
-				t.Fatalf("chunk holds %d slots, want %d", chunk.Slots, tt.wantSlots)
+			if split.Slots != tt.wantSlots {
+				t.Fatalf("the split's chunks hold %d slots, want %d", split.Slots, tt.wantSlots)
 			}
 			if tt.covDir {
 				if info, err := os.Stat(cov); err != nil || !info.IsDir() {

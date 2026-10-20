@@ -181,7 +181,6 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		}
 		// A test binary runs in its package's directory, as `go test` runs it.
 		sp := spec(id, p.Suite, dir, argv, p.ChunkEnv...)
-		sp.Slots = p.Parallel.Slots
 		sp.Items = func(out []byte) (map[string]float64, error) { return ParseGoTestItems(out, items) }
 		sp.Display = QuietGoTestOutput
 		return sp
@@ -198,6 +197,7 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		// misclassify that queue time as process startup and suppress splitting.
 		OverheadCap: 1,
 		Chunk:       chunk,
+		Slots:       p.Parallel.Slots,
 	}, nil
 }
 

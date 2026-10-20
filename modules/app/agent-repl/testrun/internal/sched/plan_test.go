@@ -93,6 +93,33 @@ func TestPlanRunSplitsASuiteAcrossIdleSlots(t *testing.T) {
 	}
 }
 
+func TestPlanRunGivesEveryChunkItsGroupsWidth(t *testing.T) {
+	// Arrange: 8 one-second items whose chunks are two slots wide, 4 slots.
+	var items []Item
+	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		items = append(items, Item{n, 1})
+	}
+
+	// Act
+	p, err := PlanRun(nil, []Chunkable{{Group: "it", Suite: "it", Items: items, Overhead: 0.1, Slots: 2}}, 4)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(p.Chunks["it"]); got != 2 {
+		t.Fatalf("chunks = %d, want 2: only two two-wide chunks fit in four slots at once", got)
+	}
+	for _, u := range p.Units {
+		if u.Width() != 2 {
+			t.Fatalf("unit %s is %d wide, want its group's 2", u.ID, u.Width())
+		}
+	}
+	if p.Makespan != 4.1 {
+		t.Fatalf("makespan = %v, want 4.1", p.Makespan)
+	}
+}
+
 func TestPlanRunKeepsOneChunkWhenSplittingSavesLessThanTheSlack(t *testing.T) {
 	// Arrange: three chunks would finish 0.2s sooner (0.4%) for 100s more work.
 	items := []Item{{"a", 0.1}, {"b", 0.1}, {"c", 0.1}}
@@ -173,6 +200,8 @@ func TestPlanRunRefusesAnInvalidInput(t *testing.T) {
 		{"duplicate group", nil, []Chunkable{{Group: "g", Items: []Item{{"a", 1}}}, {Group: "g", Items: []Item{{"b", 1}}}}, 2, "duplicate splittable group"},
 		{"hash in an atomic ID", []Unit{{ID: "a#1"}}, nil, 2, "may not contain"},
 		{"a unit wider than the host", []Unit{{ID: "w", Slots: 3}}, nil, 2, `unit "w" needs 3 core slots but this host has only 2`},
+		{"chunks wider than the host", nil, []Chunkable{{Group: "g", Items: []Item{{"a", 1}}, Slots: 3}}, 2, `group "g"'s chunks need 3 core slots but this host has only 2`},
+		{"chunks of a negative width", nil, []Chunkable{{Group: "g", Items: []Item{{"a", 1}}, Slots: -1}}, 2, "negative width"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
