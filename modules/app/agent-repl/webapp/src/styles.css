@@ -996,6 +996,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    name's own step (1.05rem x 0.7/0.75). */
 #ws-sidebar .repo.repo-section > .repo-head { font-size: 0.7rem; }
 #ws-sidebar .repo.repo-section > .repo-head .tri { font-size: 0.98rem; }
+/* A REPOSITORY'S HEADER STANDS 30% CLOSER TO WHAT SURROUNDS IT (owner
+   request, 2026-10-20): the gap above it and the gap below it, whether the
+   neighbour is another repository, a subsection, a workspace or the OPEN
+   header, are the band headers' 0.45rem and 0.25rem cut by 30%. */
+#ws-sidebar .repo.repo-section > .repo-head { padding-top: 0.315rem; padding-bottom: 0.175rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 /* A HEADER THAT FOLDS FROM ITS TRIANGLE ALONE (owner request, 2026-10-20;
    src/sidebar/roster.ts FoldHitArea) takes the click in the area around the
