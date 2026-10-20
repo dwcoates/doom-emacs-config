@@ -241,3 +241,18 @@ owner's delegation.
   they travel different streams; both waits are bounded.
 - Decided under the owner's delegation; additive, so no consumer breaks.
 
+
+### 9. Emacs reports its startup milestones in the latency batch
+
+- What:
+  - `agentrepl.v1.ReportLatenciesRequest` gains `repeated ReportedEditorStartup editor_startup = 2`.
+  - `agentrepl.v1.ReportedEditorStartup` carries a milestone (`EditorStartupMilestone`: init, daemon linked, first tab, all tabs), how the editor came to a daemon (a `oneof` of spawned and running), and the seconds since the editor process started.
+  - The daemon records each milestone as the `editor_start` restart: the milestone is the phase and the daemon arm is the cause.
+- Why: the owner asked for solid visibility into every area of startup (2026-10-20), and Emacs's own launch, from its process start until every tab is open, had no metric (`docs/METRICS-JUDGEMENT-CALLS.md`, call 9 recorded it as not timed).
+- Why milestones from the process start and not step durations: the editor's startup is one timeline from launch, and the user's question is "how long until I can work", which is the cumulative time. The daemon's boot phases take the same shape for the same reason.
+- Why the milestone is an enum and the daemon is a `oneof`: the milestone is a closed set of moments that no sibling field depends on, while how the editor came to a daemon is a condition of the startup, which this project's design principles model as a `oneof`.
+- Why it rides `ReportLatencies` rather than a new RPC: the batch already has the acknowledgment and resend-with-the-next-batch semantics a report needs to survive a daemon handover mid-startup, and a second endpoint would be a second copy of that protocol.
+- Consequences:
+  - `ReportLatenciesRecorded.recorded` keeps counting latencies only, since a milestone names no workspace and is never dropped.
+  - The daemon's `server.LatencyRecorder` gains the restart recorder, and Emacs gains its first `ReportLatencies` client (call 8 said Emacs reports nothing yet; that call is superseded for the startup).
+- Decided under the owner's delegation; additive, so no consumer breaks.
