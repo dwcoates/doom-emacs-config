@@ -1260,7 +1260,7 @@ and logging its own resolution would recurse through the same boundary."
     ("cancel-timer-key:" . "the timer registry is process-wide")
     ("data-dir:" . "the process data directory is shared")
     ("workspace-prefix:" . "workspace naming policy is process-wide")
-    ("async-gh:" . "the generic GitHub subprocess boundary has no workspace")
+    ("async-command:" . "the generic async subprocess boundary has no workspace")
     ("capture-process-output:" . "the generic subprocess boundary has no workspace")
     ("kill-process-safely:" . "generic process cleanup has no workspace")
     ("deferred-quit:" . "generic control-flow diagnostics have no workspace")
@@ -3780,40 +3780,44 @@ Routes through `agent-repl--capture-process-output' for worker-thread
 safety on macOS; see `agent-repl--git-string'."
   (agent-repl--capture-process-output "gh" args t))
 
-(defun agent-repl--async-gh (label dir args callback)
-  "Run `gh ARGS' asynchronously in DIR and call CALLBACK on completion.
-LABEL is used to name the process and its output buffer.
-CALLBACK is called as `(CALLBACK ok output)' where OK is non-nil when
-gh exited with status 0 and OUTPUT is the trimmed stdout string.
+(defun agent-repl--async-command (label dir command callback)
+  "Run COMMAND asynchronously in DIR and call CALLBACK on completion.
+COMMAND is the program followed by its arguments.  LABEL is used to
+name the process and its output buffer.  CALLBACK is called as
+`(CALLBACK ok output)' where OK is non-nil when the program exited with
+status 0 and OUTPUT is its stdout and stderr, merged.
 
-This IS the external-boundary wrapper for async `gh' invocations —
-tests must mock this function via `cl-letf' rather than spawn real
-gh (see AGENTS.md \"No External Processes or External State in Tests\")."
+THE ONE async spawn for a program that is not git (git has
+`agent-repl--async-git', whose callers need its workspace-scoped log).
+This IS the external-boundary wrapper: tests must mock it, or the
+per-program wrapper above it, via `cl-letf' rather than spawn the real
+program (see AGENTS.md \"No External Processes or External State in
+Tests\")."
   (let* ((buf (generate-new-buffer (format " *agent-repl-%s*" label)))
          (default-directory (file-name-as-directory dir))
          (proc (apply #'start-process  ;; ALLOW-EXTERNAL-BOUNDARY
                       (format "agent-repl-%s" label)
                       buf
-                      "gh" args)))
+                      command)))
     (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                      "async-gh: spawned label=%s dir=%s args=%S"
-                      label default-directory args)
+                      "async-command: spawned label=%s dir=%s command=%S"
+                      label default-directory command)
     (set-process-query-on-exit-flag proc nil)
     (set-process-sentinel
      proc
      (lambda (p event)
-       (agent-repl--async-gh-handle-completion label callback p event)))))
+       (agent-repl--async-command-handle-completion label callback p event)))))
 
-(defun agent-repl--async-gh-handle-completion (label callback process event)
-  "Handle one async-gh PROCESS sentinel EVENT for LABEL and CALLBACK.
+(defun agent-repl--async-command-handle-completion (label callback process event)
+  "Handle one async-command PROCESS sentinel EVENT for LABEL and CALLBACK.
 Only terminal events invoke CALLBACK.  Both successful and abnormal exits are
-terminal: callers must receive `ok=nil' for a failed `gh' command rather than
+terminal: callers must receive `ok=nil' for a failed command rather than
 silently waiting forever.  This helper owns the completion branch separately
 from the external spawn boundary, so its pure Elisp behavior is directly
 testable with process fixtures."
   (if (process-live-p process)
       (agent-repl--log-verbose '(:agent-repl-central "process-wide logging and utility state")
-                                "async-gh: nonterminal-sentinel label=%s event=%S"
+                                "async-command: nonterminal-sentinel label=%s event=%S"
                                 label event)
     (let* ((buffer (process-buffer process))
            (output (when (buffer-live-p buffer)
@@ -3826,13 +3830,20 @@ testable with process fixtures."
       (when (buffer-live-p buffer)
         ;; Sentinels may be serviced while a worker is waiting on the same
         ;; command, so teardown must retain worktree.el's thread-safe path.
-        ;; `async-gh' can only run after the full module load, whose order
+        ;; `async-command' can only run after the full module load, whose order
         ;; defines `agent-repl--kill-buffer-safely' before a caller can spawn.
         (agent-repl--kill-buffer-safely buffer))
       (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                        "async-gh: completed label=%s status=%s ok=%s event=%S output-length=%d"
+                        "async-command: completed label=%s status=%s ok=%s event=%S output-length=%d"
                         label status ok event (length safe-output))
       (funcall callback ok safe-output))))
+
+(defun agent-repl--async-gh (label dir args callback)
+  "Run `gh ARGS' asynchronously in DIR and call CALLBACK on completion.
+LABEL, DIR and CALLBACK are those of `agent-repl--async-command', which
+runs it.  Registered as an external boundary of its own, so a test of a
+`gh' caller mocks the `gh' call it means."
+  (agent-repl--async-command label dir (cons "gh" args) callback))
 
 (defun agent-repl--signal-process (pid sig)
   "Send signal SIG to process PID (an external-state mutation).
@@ -3906,6 +3917,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--early-git-string
     agent-repl--make-process-git
     agent-repl--async-gh
+    agent-repl--async-command
     agent-repl--signal-process
     agent-repl--frontend-run-build-script
     agent-repl--frontend-file-mtime

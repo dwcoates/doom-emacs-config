@@ -121,7 +121,7 @@ DETACHES BUF's PROCESS FIRST, and that detachment is the whole point.
 `kill-buffer' runs `kill_buffer_processes', which `delete-process's every
 process owning BUF, which delivers a NEW terminal status to that
 process's SENTINEL — from inside the kill.  A sentinel that reaches this
-helper (every one of ours does: the async-git settle, the async-gh
+helper (every one of ours does: the async-git settle, the async-command
 completion, the prompt-summary settle) therefore re-enters itself, kills
 the same still-live buffer again, and recurses until Emacs is wedged with
 no Lisp error and no log line, because the recursion happens BEFORE the

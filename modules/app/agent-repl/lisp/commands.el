@@ -67,6 +67,10 @@
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--async-git "agent-repl-worktree" (label root args callback))
+(declare-function agent-repl--async-command "agent-repl-core" (label dir command callback))
+;; `agent-repl--config-file' is defined by config.el at the module root,
+;; which is the loader rather than a lisp/ source.
+(defvar agent-repl--config-file)
 (declare-function agent-repl--send "agent-repl-input" (origin &optional prompt ws force))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl-popup-open "agent-repl-popup" (path &optional line))
@@ -461,6 +465,43 @@ thing, which is worse than not rebasing."
      "rebase-fetch" project-dir '("fetch" "origin")
      (lambda (ok output)
        (agent-repl--rebase-onto-origin-master-callback ws ok output)))))
+
+;;;; ---- Release push --------------------------------------------------------
+;;
+;; Every push of master is a release: `bin/push-release.sh' tags master's tip
+;; release-<version> and pushes both in one atomic push, which is the only
+;; push the repository's pre-push hook accepts.  It pushes the repository
+;; this module is loaded from, whichever workspace is shown.
+
+(defconst agent-repl--push-release-log-scope
+  '(:agent-repl-central "a release push is of the module's repository, not a workspace")
+  "The log scope of a release push.")
+
+(defun agent-repl--push-release-callback (ok output)
+  "Report the release push's outcome: OK non-nil on success, OUTPUT its text.
+The last line of OUTPUT is the script's own verdict, so it is what the
+echo area shows either way.  A script killed before it printed has none."
+  (let ((verdict (or (car (last (split-string output "\n" t)))
+                     "the script printed nothing")))
+    (if ok
+        (progn
+          (agent-repl--info agent-repl--push-release-log-scope
+                            "elisp.commands.push-release-complete output=%S" output)
+          (message "agent-repl: %s" verdict))
+      (agent-repl--error agent-repl--push-release-log-scope
+                         "elisp.commands.push-release-failed output=%S" output)
+      (message "agent-repl: release push failed: %s" verdict))))
+
+(defun agent-repl-push-release ()
+  "Push master to origin as a release, with `bin/push-release.sh'."
+  (interactive)
+  (let* ((dir (file-name-directory agent-repl--config-file))
+         (script (expand-file-name "bin/push-release.sh" dir)))
+    (agent-repl--info agent-repl--push-release-log-scope
+                      "elisp.commands.push-release-start script=%s" script)
+    (message "agent-repl: pushing master to origin as a release...")
+    (agent-repl--async-command "push-release" dir (list script)
+                               #'agent-repl--push-release-callback)))
 
 (defun agent-repl--exclusion-symbol-to-flag (sym &optional ws)
   "Convert exclusion SYM to the corresponding flag.
