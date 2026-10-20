@@ -3253,9 +3253,9 @@ frame showing the webview stays hidden.  Returns the applied row count."
   "Install agent-repl's fixed-height tab bar without native auto-resizing.
 Sets the global formatter, disables `auto-resize-tab-bars', and pins
 every current graphical frame to `agent-repl--tabbar-target-rows' and
-`default-frame-alist' to `agent-repl--tabline-row-count'.  Both scopes also receive
-`tab-bar-lines-keep-state', so Emacs's native one-line recalculation
-cannot overwrite the explicit two-line contract.
+`default-frame-alist' to `agent-repl--tabline-row-count'.  Both scopes
+also receive `tab-bar-lines-keep-state', so Emacs's native one-line
+recalculation cannot overwrite the explicit row contract.
 
 `frame-inhibit-implied-resize' is configured before any live frame
 height changes.  The changed tab-bar height therefore comes out of the
