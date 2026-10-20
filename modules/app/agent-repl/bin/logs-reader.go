@@ -397,10 +397,14 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 	current := selectedSink.base
 	var findings []sinkFinding
+	agedOut := false
 	if selectedSink.canonicalSymlink {
 		info, err := os.Lstat(selectedSink.base)
 		if os.IsNotExist(err) {
-			return nil, "", []sinkFinding{canonicalAbsentFinding(selectedSink)}, 0
+			// NO LINK IS NO SINK. A workspace whose runtime never wrote this
+			// log (no shim ever ran, no webapp page ever loaded) has no link,
+			// and reporting it named a sink the workspace never had.
+			return nil, "", nil, 0
 		}
 		if err != nil {
 			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}, 0
@@ -418,6 +422,7 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 			target = filepath.Join(filepath.Dir(selectedSink.base), target)
 		}
 		current = filepath.Clean(target)
+		agedOut = linkAgedOut(info, time.Now())
 	}
 	orphans, orphanFindings := orphanSiblings(selectedSink, current)
 	findings = append(findings, orphanFindings...)
@@ -431,13 +436,29 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 			files = append(files, path)
 		}
 	}
-	if present, finding := regularFilePresent(selectedSink, current, true); finding != nil {
+	if present, finding := regularFilePresent(selectedSink, current, !agedOut); finding != nil {
 		findings = append(findings, *finding)
 	} else if present {
 		files = append(files, current)
 		return files, current, findings, len(orphans)
 	}
 	return files, "", findings, len(orphans)
+}
+
+// sinkRetention is logging.DefaultRetention (agent-shim/logging/go
+// retention.go): every log file is removed three days after its last write.
+// This reader is one standalone file built without the module, so the number
+// is restated here and pinned to the library's by its test there.
+const sinkRetention = 72 * time.Hour
+
+// linkAgedOut answers whether a canonical link is older than the retention, so
+// a target it names that is gone was removed by retention rather than lost. A
+// writer re-points its link when it opens or rolls the target and writes the
+// target only after, so a target written within the retention always has a
+// link younger than the retention: a younger link naming nothing is a defect,
+// and stays a finding.
+func linkAgedOut(link os.FileInfo, now time.Time) bool {
+	return now.Sub(link.ModTime()) >= sinkRetention
 }
 
 // orphanSiblings answers the sibling unique targets an earlier daemon
@@ -511,10 +532,6 @@ func sinkLocation(selectedSink sink, path string) string {
 
 func absentFinding(selectedSink sink, path string) sinkFinding {
 	return sinkFinding{selectedSink, "sink absent: " + sinkLocation(selectedSink, path)}
-}
-
-func canonicalAbsentFinding(selectedSink sink) sinkFinding {
-	return sinkFinding{selectedSink, "sink absent: " + selectedSink.base}
 }
 
 func unreadableFinding(selectedSink sink, path string, cause error) sinkFinding {
