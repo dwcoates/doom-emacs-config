@@ -17,7 +17,7 @@ import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
 import { markdownSlot, type SlotMark } from "../../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
-import { codeBlockHtml } from "../../markdown.js";
+import { codeBlockHtml } from "../../code-block.js";
 import { armName } from "../renderers.js";
 import type {
   FeedImageBlock,
